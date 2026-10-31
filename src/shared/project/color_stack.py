@@ -27,7 +27,11 @@ from src.shared.extra_fields import preserves_extras, split_extras
 # 调色栈序列化 schema 版本：
 # v1 - 仅平铺精简键（grading/curves/hsl/mixer/soft_clip/lut/trackings）
 # v2 - 新增完整 Layer 快照（layers/active_layer_index/raw_params）
-COLOR_STACK_SCHEMA_VERSION = 2
+# v3 - 平铺视图新增曲线面板侧栏键（curves_soft_clip / curves_edit，见
+#      src/features/color/core/curves_soft_clip.py）。权威状态始终是
+#      Layer 快照内的同名字段；平铺键只服务旧格式回退与面板直读。
+#      读端不分支版本号（缺失键 = 默认恒等），写端恒写当前版本。
+COLOR_STACK_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,11 @@ class ColorStackData:
         "toe_strength": 1.0,
         "exposure": 0.0,
     })
+    # Schema v3：曲线面板侧栏的平铺精简键（曲线工具四参数柔化裁切 +
+    # Edit 强度）。{} = 恒等默认（旧工程缺失键视觉不变）；语义模型见
+    # src/features/color/core/curves_soft_clip.py。
+    curves_soft_clip: dict[str, Any] = field(default_factory=dict)
+    curves_edit: dict[str, Any] = field(default_factory=dict)
     lut_path: str | None = None
     lut_intensity: float = 1.0
     created_at: float = 0.0
@@ -118,7 +127,8 @@ class ColorStackData:
     _KNOWN_KEYS: ClassVar[frozenset[str]] = frozenset({
         "schema_version", "stack_id", "asset_id", "name",
         "grading_params", "curves_data", "hsl_curve_data", "mixer_params",
-        "soft_clip_params", "lut_path", "lut_intensity",
+        "soft_clip_params", "curves_soft_clip", "curves_edit",
+        "lut_path", "lut_intensity",
         "created_at", "modified_at", "scope", "source_kind",
         "timeline_id", "clip_id", "trackings",
         "layers", "active_layer_index", "raw_params", "video_denoise",
@@ -242,6 +252,14 @@ class ColorStackData:
         """创建新实例，更新 Soft Clip 参数"""
         return replace(self, soft_clip_params=copy.deepcopy(soft_clip_params), modified_at=time.time())
 
+    def with_curves_soft_clip(self, curves_soft_clip: dict[str, Any]) -> ColorStackData:
+        """创建新实例，更新曲线面板四参数柔化裁切（schema v3 平铺键）"""
+        return replace(self, curves_soft_clip=copy.deepcopy(curves_soft_clip), modified_at=time.time())
+
+    def with_curves_edit(self, curves_edit: dict[str, Any]) -> ColorStackData:
+        """创建新实例，更新曲线面板 Edit 强度（schema v3 平铺键）"""
+        return replace(self, curves_edit=copy.deepcopy(curves_edit), modified_at=time.time())
+
     def with_lut(self, lut_path: str | None, intensity: float = 1.0) -> ColorStackData:
         """创建新实例，更新 LUT"""
         return replace(
@@ -307,6 +325,11 @@ class ColorStackData:
             "clip_id": self.clip_id,
             "trackings": self.trackings,
         }
+        # v3 侧栏键：非空才写（未触碰侧栏的旧工程输出形状保持 v2 稳定）
+        if self.curves_soft_clip:
+            data["curves_soft_clip"] = self.curves_soft_clip
+        if self.curves_edit:
+            data["curves_edit"] = self.curves_edit
         if self.layers:
             data["layers"] = [dict(layer) for layer in self.layers]
             data["active_layer_index"] = self.active_layer_index
@@ -335,6 +358,12 @@ class ColorStackData:
             hsl_curve_data=data.get("hsl_curve_data", {}),
             mixer_params=data.get("mixer_params", {}),
             soft_clip_params=data.get("soft_clip_params", {}),
+            curves_soft_clip=(
+                data.get("curves_soft_clip")
+                if isinstance(data.get("curves_soft_clip"), dict) else {}),
+            curves_edit=(
+                data.get("curves_edit")
+                if isinstance(data.get("curves_edit"), dict) else {}),
             lut_path=data.get("lut_path"),
             lut_intensity=data.get("lut_intensity", 1.0),
             created_at=data.get("created_at", 0.0),

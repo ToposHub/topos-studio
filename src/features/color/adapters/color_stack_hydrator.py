@@ -285,6 +285,14 @@ class ColorStackHydrator:
                     layer.soft_clip_params = dict(stack.soft_clip_params)
                 else:
                     layer.soft_clip_params = {}
+                # v1 栈不携带曲线侧栏状态：重置为恒等默认，防止上一剪辑
+                # 的侧栏值（四参数柔化裁切/强度）泄漏到本剪辑
+                from src.features.color.core.curves_soft_clip import (
+                    default_curves_edit,
+                    default_curves_soft_clip,
+                )
+                layer.curves_soft_clip = default_curves_soft_clip()
+                layer.curves_edit = default_curves_edit()
                 # LUT
                 layer.active_lut_path = stack.lut_path
                 layer.lut_intensity = stack.lut_intensity
@@ -380,6 +388,8 @@ class ColorStackHydrator:
         hsl_curve_data: dict[str, Any] = {}
         mixer_params: dict[str, Any] = {}
         soft_clip_params: dict[str, Any] = {}
+        curves_soft_clip: dict[str, Any] = {}
+        curves_edit: dict[str, Any] = {}
         lut_path: str | None = None
         lut_intensity: float = 1.0
 
@@ -423,6 +433,11 @@ class ColorStackHydrator:
                 soft_clip_params = dict(
                     getattr(src, "soft_clip_params", {}) or {}
                 )
+                # schema v3 平铺键：从活动图层派生侧栏状态（两套视图一致）
+                curves_soft_clip = dict(
+                    getattr(src, "curves_soft_clip", {}) or {}
+                )
+                curves_edit = dict(getattr(src, "curves_edit", {}) or {})
                 lut_path = getattr(src, "active_lut_path", None)
                 lut_intensity = getattr(src, "lut_intensity", 1.0)
 
@@ -486,6 +501,8 @@ class ColorStackHydrator:
             hsl_curve_data=hsl_curve_data,
             mixer_params=mixer_params,
             soft_clip_params=soft_clip_params,
+            curves_soft_clip=curves_soft_clip,
+            curves_edit=curves_edit,
             lut_path=lut_path,
             lut_intensity=lut_intensity,
             trackings=trackings_data,

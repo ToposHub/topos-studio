@@ -28,6 +28,14 @@ try:
 except ModuleNotFoundError:
     HAS_SCIPY = False
 
+from src.features.color.core.curves_soft_clip import (
+    curves_soft_clip_is_identity,
+    default_curves_edit,
+    default_curves_soft_clip,
+    normalize_curves_edit,
+    normalize_curves_soft_clip,
+)
+
 logger = logging.getLogger(__name__)
 
 class MaskShape:
@@ -515,7 +523,13 @@ class Layer:
         
         self.curves_lut = None # np.ndarray (256, 1, 3) or (256, 1)
         self.curves_data = {} # { channel: [(x, y), ...] }
-        
+        # 曲线面板侧栏的正式状态（语义权威参考：移动版 topos_edit_mobile）。
+        # curves_soft_clip：每通道四参数 + 链接（默认恒等映射，保留超白/负值）；
+        # curves_edit：YRGB 曲线强度 + 链接（100 = 曲线全额生效）。
+        # 旧 8 参数 soft_clip_params 是独立的旧工程兼容路径，两者互不转换。
+        self.curves_soft_clip = default_curves_soft_clip()
+        self.curves_edit = default_curves_edit()
+
         # HSL Curve (6 curves: LumSat, HueHue, HueSat, HueLum, SatSat, SatLum)
         self.hsl_curve_lut = None # np.ndarray (6, 256) float32
         self.hsl_curve_data = {} # { 'LumSat': [(x, y), ...], ... }
@@ -609,6 +623,10 @@ class Layer:
         self.grade_keyframes = {}
         self.curves_lut = None
         self.curves_data = {}
+        # 曲线面板侧栏状态按默认重建（同 qualifier：残留会让重置后的
+        # 图层在下次渲染时带着上一状态的柔化裁切/强度）
+        self.curves_soft_clip = default_curves_soft_clip()
+        self.curves_edit = default_curves_edit()
         self.hsl_curve_lut = None
         self.hsl_curve_data = {}
         self.mixer_params = {}
@@ -755,7 +773,12 @@ class Layer:
             self.curves_lut = source_layer.curves_lut.copy()
         else:
             self.curves_lut = None
-        
+        # 复制曲线面板侧栏状态（侧栏强度 + 四参数柔化裁切）
+        self.curves_soft_clip = copy.deepcopy(getattr(source_layer, 'curves_soft_clip', None)) \
+            or default_curves_soft_clip()
+        self.curves_edit = copy.deepcopy(getattr(source_layer, 'curves_edit', None)) \
+            or default_curves_edit()
+
         # 复制 HSL 曲线数据
         self.hsl_curve_data = copy.deepcopy(source_layer.hsl_curve_data)
         if source_layer.hsl_curve_lut is not None:
@@ -857,7 +880,18 @@ class Layer:
 
         if "curves_data" in wanted and "curves_data" in patch:
             self.curves_data = copy.deepcopy(patch["curves_data"])
-            self.curves_lut = build_curves_lut_from_data(self.curves_data)
+            self.curves_lut = build_curves_lut_from_data(
+                self.curves_data, self.curves_edit.get("amounts"))
+
+        if "curves_edit" in wanted and "curves_edit" in patch:
+            self.curves_edit = normalize_curves_edit(patch["curves_edit"])
+            # 强度变化改变曲线 LUT 的合成结果，与 curves_data 同步重建
+            self.curves_lut = build_curves_lut_from_data(
+                self.curves_data, self.curves_edit.get("amounts"))
+
+        if "curves_soft_clip" in wanted and "curves_soft_clip" in patch:
+            self.curves_soft_clip = normalize_curves_soft_clip(
+                patch["curves_soft_clip"])
 
         if "hsl_curve_data" in wanted and "hsl_curve_data" in patch:
             self.hsl_curve_data = copy.deepcopy(patch["hsl_curve_data"])
@@ -987,6 +1021,15 @@ class Layer:
             if self.soft_clip_params.get(key, default_val) != default_val:
                 return True
 
+        # 曲线面板侧栏：四参数柔化裁切非恒等、或任一强度偏离 100 即有调色
+        if not curves_soft_clip_is_identity(
+                getattr(self, "curves_soft_clip", None)):
+            return True
+        amounts = getattr(self, "curves_edit", None) or {}
+        for value in (amounts.get("amounts") or {}).values():
+            if value != 100.0:
+                return True
+
         return False
 
     # Plugin Effect Stack Methods
@@ -1087,11 +1130,16 @@ class Layer:
             "ai_matte_operation": self.ai_matte_operation,
             "ai_matte_enabled": self.ai_matte_enabled
         }
-        
+
         # We only save curves_data (control points).
         # curves_lut is a high-precision generated cache and should be recalculated on load.
         if self.curves_data:
             data["curves_data"] = self.curves_data
+
+        # 曲线面板侧栏状态（四参数柔化裁切 + 侧栏强度）。旧工程缺这两键时
+        # from_dict 回退默认值（恒等），重开/再保存视觉效果不变。
+        data["curves_soft_clip"] = self.curves_soft_clip
+        data["curves_edit"] = self.curves_edit
 
         # HSL Curve data (control points)
         if self.hsl_curve_data:
@@ -1199,11 +1247,16 @@ class Layer:
         # Curves
         # AUD-0701：curves_data 是外部数据，容器/控制点结构非法时局部
         # 降级（不构建 LUT），不让整个 from_dict 崩溃。
+        # 曲线面板侧栏状态先归一化（强度参与 LUT 重建）。
+        layer.curves_soft_clip = normalize_curves_soft_clip(
+            data.get("curves_soft_clip"))
+        layer.curves_edit = normalize_curves_edit(data.get("curves_edit"))
         if "curves_data" in data:
             curves_data = data["curves_data"]
             if isinstance(curves_data, dict):
                 layer.curves_data = curves_data
-                layer.curves_lut = build_curves_lut_from_data(curves_data)
+                layer.curves_lut = build_curves_lut_from_data(
+                    curves_data, layer.curves_edit.get("amounts"))
             else:
                 logger.warning(
                     "Layer.from_dict: curves_data 结构非法（%s），忽略曲线",
@@ -1346,8 +1399,79 @@ def _sanitize_control_points(pts: Any) -> Optional[Tuple[np.ndarray, np.ndarray]
             np.array(ys_list, dtype=np.float32))
 
 
-def build_curves_lut_from_data(curves_data: dict) -> np.ndarray:
+def _interpolate_curve_255(pts: Any) -> Optional[np.ndarray]:
+    """单条 UI 空间曲线的 256 点归一化采样（0.0-1.0）。
+
+    与 ``CurvesWidget._compute_lut`` / ``scripting.api`` 同口径：y 是 UI
+    倒置坐标，先翻转再归一化（AUD-R2-001）。控制点无效（<2 或全坏）时
+    返回 None，调用方按恒等曲线处理。
+    """
+    sanitized = _sanitize_control_points(pts)
+    if sanitized is None:
+        return None
+    xs, ys = sanitized
+    xi = np.arange(256, dtype=np.float32)
+
+    if len(xs) == 2:
+        slope = (ys[1] - ys[0]) / (xs[1] - xs[0])
+        result = (
+            255.0 - (ys[0] + slope * (xi - xs[0]))
+        ) / 255.0
+    elif HAS_SCIPY:
+        pchip = PchipInterpolator(xs, ys)
+        result = (255.0 - pchip(xi)) / 255.0
+    else:
+        result = (255.0 - np.interp(xi, xs, ys)) / 255.0
+    return np.clip(result, 0.0, 1.0)
+
+
+def _sample_curve_at_index(curve: np.ndarray, idx: np.ndarray) -> np.ndarray:
+    """在浮点索引处线性采样 256 点曲线，越界按端点斜率（每索引单位）外推。
+
+    外推斜率取 ``(v1 - v0)``——即每 1 个索引单位的归一化增量。旧
+    CurvesWidget 实现误乘 255（每索引斜率放大 255 倍），GPU 采样对 LUT
+    纹理做 edge clamp，该尾段从不进入画面；此处取正确量纲供重建与
+    widget 共用。
+    """
+    n = curve.shape[0]
+    idx = np.asarray(idx, dtype=np.float64)
+    result = np.empty(idx.shape, dtype=np.float64)
+    low = idx < 0.0
+    high = idx > (n - 1)
+    mid = ~(low | high)
+    slope_low = float(curve[1] - curve[0])
+    slope_high = float(curve[n - 1] - curve[n - 2])
+    result[low] = curve[0] + idx[low] * slope_low
+    result[high] = curve[n - 1] + (idx[high] - (n - 1)) * slope_high
+    if np.any(mid):
+        i0 = np.floor(idx[mid]).astype(np.int32)
+        i0 = np.maximum(0, np.minimum(n - 1, i0))
+        i1 = np.minimum(n - 1, i0 + 1)
+        f = idx[mid] - i0
+        result[mid] = curve[i0] * (1.0 - f) + curve[i1] * f
+    return result
+
+
+def _edit_amount_factor(edit_amounts: Any, channel: str) -> float:
+    """读某通道的 Edit 强度系数（0.0-1.0；缺省/非法 = 1.0 全额生效）。"""
+    if not isinstance(edit_amounts, dict):
+        return 1.0
+    value = edit_amounts.get(channel, 100.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 1.0
+    return min(max(float(value), 0.0), 100.0) / 100.0
+
+
+def build_curves_lut_from_data(
+    curves_data: dict,
+    edit_amounts: Optional[Dict[str, float]] = None,
+) -> np.ndarray:
     """Build a (256, 1, 3) LUT from curves control points data.
+
+    合成顺序与 ``CurvesWidget._compute_lut`` 一致：先 master（M）后通道，
+    通道曲线在 master 映射出的浮点索引处采样。此前实现按"通道覆盖
+    master"逐列写入，与 widget 的实时渲染在 M+通道组合下不一致（工程
+    重开后曲线结果改变）；本实现消除该分叉，导出路径与预览一致。
 
     Args:
         curves_data: Dictionary with keys 'M', 'R', 'G', 'B' containing
@@ -1356,50 +1480,38 @@ def build_curves_lut_from_data(curves_data: dict) -> np.ndarray:
                      axis** (UI screen coordinates): y=0 is the top
                      (maximum output, white), y=255 the bottom (black);
                      the identity curve is ``[(0, 255), (255, 0)]``.
+        edit_amounts: 可选 Edit 强度（0-100）。Y 缩放 master 曲线相对输入
+                      的增量；R/G/B 缩放通道曲线叠加在 master 之上的增量。
+                      100 = 全额生效（与无强度一致），0 = 该级曲线直通。
 
     Returns:
-        LUT array of shape (256, 1, 3) with values normalized to 0.0-1.0,
-        derived as ``(255.0 - y) / 255.0`` exactly like
-        ``CurvesWidget._compute_lut`` (src/shared/ui/widgets/curves_widget.py)
-        and ``scripting.api._interpolate_curve_255`` (AUD-25900).
+        LUT array of shape (256, 1, 3) with values normalized to 0.0-1.0.
+        无任何有效曲线时返回恒等斜坡（``has_active_curves_lut`` 据此判定
+        为非活动，不再触发无谓的曲线 pass）。
     """
-    lut = np.zeros((256, 1, 3), dtype=np.float32)
-    channels = [('M', 0), ('R', 0), ('G', 1), ('B', 2)]
-
     if not isinstance(curves_data, dict):
-        return lut
+        curves_data = {}
 
-    for ch_name, lut_ch in channels:
-        sanitized = _sanitize_control_points(curves_data.get(ch_name))
-        if sanitized is None:
-            continue
-        xs, ys = sanitized
+    base = np.arange(256, dtype=np.float64)
+    master = _interpolate_curve_255(curves_data.get('M'))
+    a_master = _edit_amount_factor(edit_amounts, 'Y')
+    if master is None:
+        master_idx = base
+    else:
+        # master 有效映射 = 输入 + a_Y * (M(x) - x)（索引域，0-255）
+        master_idx = base + a_master * (master.astype(np.float64) * 255.0 - base)
 
-        if len(xs) == 2:
-            slope = (ys[1] - ys[0]) / (xs[1] - xs[0])
-            # AUD-R2-001: y 是 UI 倒置坐标，先翻转再归一化（与
-            # CurvesWidget._compute_lut / _interpolate_curve_255 一致），
-            # 旧实现 y/255 会把工程恢复的曲线整体反相。
-            result = (
-                255.0 - (ys[0] + slope * (np.arange(256, dtype=np.float32) - xs[0]))
-            ) / 255.0
-        elif HAS_SCIPY:
-            pchip = PchipInterpolator(xs, ys)
-            xi = np.arange(256, dtype=np.float32)
-            result = (255.0 - pchip(xi)) / 255.0
+    lut = np.zeros((256, 1, 3), dtype=np.float32)
+    for ch_name, lut_ch in (('R', 0), ('G', 1), ('B', 2)):
+        channel = _interpolate_curve_255(curves_data.get(ch_name))
+        a_channel = _edit_amount_factor(edit_amounts, ch_name)
+        mapped = master_idx / 255.0
+        if channel is None or a_channel == 0.0:
+            result = mapped
         else:
-            xi = np.arange(256, dtype=np.float32)
-            result = (255.0 - np.interp(xi, xs, ys)) / 255.0
-
-        result = np.clip(result, 0.0, 1.0)
-
-        if ch_name == 'M':
-            lut[:, 0, 0] = result
-            lut[:, 0, 1] = result
-            lut[:, 0, 2] = result
-        else:
-            lut[:, 0, lut_ch] = result
-
+            sampled = _sample_curve_at_index(channel.astype(np.float64), master_idx)
+            result = mapped + a_channel * (sampled - mapped)
+        lut[:, 0, lut_ch] = np.clip(result, 0.0, 1.0).astype(np.float32)
     return lut
 
 

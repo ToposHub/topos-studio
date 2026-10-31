@@ -79,8 +79,8 @@
 | 顺序 | 状态 | 工作 | 主要位置与完成标准 |
 |---|---|---|---|
 | 1 | 已完成 | 明确参数语义 | 以移动版 `topos_edit_mobile` 实现为权威参考完成裁决（见上方"参考与数值口径"）：四参数物理值/范围/默认值、指数软膝算法、默认恒等保留 HDR、RGB 链接复制语义、管线位置与处理域均已确认并落入 UI 草稿。 |
-| 2 | 待办 | 新参数模型与 schema | 为 Edit 强度/链接、每通道四参数及其链接状态定义正式模型；核对 `src/features/color/core/layer.py`、`src/shared/project/color_stack.py`。新增字段应有版本策略，保留未知 payload。与 UI 草稿字段建立明确映射。 |
-| 3 | 待办 | 旧工程迁移 | 旧曝光/对比度/白黑点/肩趾参数无法证明等价时，不静默丢弃或硬套四参数。明确旧算法版本保留或显式转换策略，保证旧工程重开/再保存不改效果；未触碰旧效果继续用旧版本。 |
+| 2 | 已完成 | 新参数模型与 schema | 新模块 `src/features/color/core/curves_soft_clip.py`：默认值/归一化（兼容移动版 camelCase 与 red/green/blue 别名）/withControl 约束移植/指数软膝 CPU 参考/恒等判定。`Layer` 新增 `curves_soft_clip`、`curves_edit`（默认/重置/复制/粘贴/序列化全接）；`ColorStackData` 升 v3（平铺键 `curves_soft_clip`/`curves_edit`，非空才写，未知 payload 保留，读端不分支版本号）。 |
+| 3 | 已完成 | 旧工程迁移 | 旧 8 参数 `soft_clip_params` 保留原算法渲染、不转换；v2 工程载入侧栏键缺失即恒等默认，重开/再保存所有旧字段逐键不变（测试 `test_legacy_v2_layer_dict_loads_identity_and_resaves_stable`）；`build_curves_lut_from_data` 重写为与 widget 同构（先 master 后通道），消除重开分叉，空曲线返回恒等斜坡。 |
 | 4 | 待办 | 四参数处理实现 | 在既有 Color 渲染入口实现 RGB 通道四参数及 identity；核对 CPU、GLSL、Metal、视频预览和导出路径。HDR 浮点不过早截断，Soft=0、边界/非有限输入有明确定义。 |
 | 5 | 待办 | Edit 强度与曲线链接 | 确认强度是 LUT 混合还是别的曲线语义；实现 Y 对应 M 的映射、链接编辑及可见/可编辑通道选择。当前画布只支持一个 `active_channel`，不要把 UI 多选直接等同现有 LUT 行为。 |
 | 6 | 待办 | UI 信号与 command 接线 | `CurvesPanel` 增加正式 `params_changed` 和交互生命周期；经既有 command/service 提交和渲染队列更新，不能在 UI 调 GPU。参考 `src/app/controllers/layer_controller.py` 的 `on_curves_changed`、`src/app/main_window.py` 的连接及 `ImageEngine.set_soft_clip_params`。一次连续拖动对应一次 undo。 |
@@ -104,3 +104,5 @@
 - 可视检查：本目录三张截图用于 UI 通道状态与布局；GPU 直方图需在实际 GPU 渲染器下进一步实机验收。
 - Python 编译检查、`git diff --check`；GPU 直方图接线后尚未运行测试或实机 GPU 验收。
 - 当前虚拟环境没有安装 Ruff，未运行 Ruff 检查。
+- **2026-11-01 续批验证**：curves 面板 7 项、模型/水合/历史/剪贴板/delivery 163 项、渲染/CPU/uniform 137 项、project 555 项、layer 全套通过。
+- **预存失败（与本计划无关）**：`tests/color/test_shader_golden_corpus.py::test_bit_identical_to_baseline` 的 `grading_extreme/checker` 用例在 e7ffa56（本计划所有改动之前）即失败，且与当前哈希逐位一致——判定为本机 GL 驱动/环境的数值漂移（golden 基线在别的环境归档），非本计划引入。未重归档（重归档会掩盖漂移），待维护者在其确认基准环境上复核后决定 `TOPOS_UPDATE_SHADER_GOLDEN=1`。
