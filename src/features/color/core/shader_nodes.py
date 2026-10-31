@@ -935,3 +935,47 @@ vec3 apply_soft_clip(vec3 color, float high, float white_point, float shoulder_s
     return res;
 }
 """
+
+# 曲线面板四参数 Soft Clip（指数软膝）——逐式移植移动版
+# topos_edit_mobile/shaders/soft_clip.frag 的 apply_soft_clip_channel。
+# 默认参数（low=0/soft=0/high=1/soft=0）下严格恒等：超白与负 RGB 原样
+# 保留给后续节点。膝内斜率从 1 无缝衔接并渐近衰减到 0，不放大对比度。
+# 修改本段必须同步：shader_nodes_msl.py MSL_CURVES_SOFT_CLIP、
+# advanced_grade_cpu.apply_curves_soft_clip_image、
+# curves_soft_clip.apply_soft_clip_channel（移动端同式）。
+CURVES_SOFT_CLIP_SNIPPET = """
+// Curves-palette Soft Clip (per-channel exponential knee, mobile-aligned)
+float apply_soft_clip_knee(float value, float low_clip, float low_soft, float high_clip, float high_soft) {
+    float gap = max(high_clip - low_clip, 0.0);
+    if (gap == 0.0) return low_clip;
+    float low_knee = clamp(low_soft, 0.0, gap);
+    float high_knee = clamp(high_soft, 0.0, max(gap - low_knee, 0.0));
+
+    if (low_knee > 0.0) {
+        float low_start = low_clip + low_knee;
+        if (value < low_start) {
+            value = low_clip + low_knee * exp((value - low_start) / low_knee);
+        }
+    } else if (low_clip != 0.0 && value < low_clip) {
+        value = low_clip;
+    }
+
+    if (high_knee > 0.0) {
+        float high_start = high_clip - high_knee;
+        if (value > high_start) {
+            value = high_clip - high_knee * exp(-(value - high_start) / high_knee);
+        }
+    } else if (high_clip != 1.0 && value > high_clip) {
+        value = high_clip;
+    }
+    return value;
+}
+
+vec3 apply_curves_soft_clip(vec3 color, vec3 low_clip, vec3 low_soft, vec3 high_clip, vec3 high_soft) {
+    return vec3(
+        apply_soft_clip_knee(color.r, low_clip.r, low_soft.r, high_clip.r, high_soft.r),
+        apply_soft_clip_knee(color.g, low_clip.g, low_soft.g, high_clip.g, high_soft.g),
+        apply_soft_clip_knee(color.b, low_clip.b, low_soft.b, high_clip.b, high_soft.b)
+    );
+}
+"""

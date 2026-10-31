@@ -1462,6 +1462,54 @@ def _edit_amount_factor(edit_amounts: Any, channel: str) -> float:
     return min(max(float(value), 0.0), 100.0) / 100.0
 
 
+def compose_curves_lut(
+    master_vals: Optional[np.ndarray],
+    channel_vals: Dict[str, Optional[np.ndarray]],
+    edit_amounts: Optional[Dict[str, float]] = None,
+) -> np.ndarray:
+    """曲线 LUT 合成（先 master 后通道 + Edit 强度缩放）——权威实现。
+
+    ``CurvesWidget._compute_lut`` 与 ``build_curves_lut_from_data`` 共用
+    本函数，保证实时渲染与工程重开/导出在 M+通道组合、Edit 强度下
+    逐位一致：
+
+    - master 有效映射 = ``x + a_Y * (M(x)*255 - x)``（索引域 0-255）；
+    - 通道曲线在 master 映射出的浮点索引处采样（每索引单位线性外推），
+      其叠加增量按 ``a_C`` 缩放：``out = M_eff/255 + a_C*(C(M_eff) - M_eff/255)``；
+    - a=100% 与无强度完全一致；a=0 该级曲线直通。
+
+    Args:
+        master_vals: master 曲线归一化采样 (256,)；None = 恒等。
+        channel_vals: ``{'R'/'G'/'B': (256,) 或 None}``；None = 恒等。
+        edit_amounts: 0-100 强度 dict（缺通道/None = 100）。
+
+    Returns:
+        (256, 1, 3) float32 LUT（列序 R,G,B）。不做 0-1 裁剪——GPU 采样
+        端对 LUT 纹理 edge clamp；重建路径在外层自行裁剪。
+    """
+    base = np.arange(256, dtype=np.float64)
+    a_master = _edit_amount_factor(edit_amounts, 'Y')
+    if master_vals is None:
+        master_idx = base
+    else:
+        master_idx = base + a_master * (
+            np.asarray(master_vals, dtype=np.float64) * 255.0 - base)
+
+    lut = np.zeros((256, 1, 3), dtype=np.float32)
+    for ch_name, lut_ch in (('R', 0), ('G', 1), ('B', 2)):
+        channel = channel_vals.get(ch_name)
+        a_channel = _edit_amount_factor(edit_amounts, ch_name)
+        mapped = master_idx / 255.0
+        if channel is None or a_channel == 0.0:
+            result = mapped
+        else:
+            sampled = _sample_curve_at_index(
+                np.asarray(channel, dtype=np.float64), master_idx)
+            result = mapped + a_channel * (sampled - mapped)
+        lut[:, 0, lut_ch] = result.astype(np.float32)
+    return lut
+
+
 def build_curves_lut_from_data(
     curves_data: dict,
     edit_amounts: Optional[Dict[str, float]] = None,
@@ -1492,27 +1540,13 @@ def build_curves_lut_from_data(
     if not isinstance(curves_data, dict):
         curves_data = {}
 
-    base = np.arange(256, dtype=np.float64)
     master = _interpolate_curve_255(curves_data.get('M'))
-    a_master = _edit_amount_factor(edit_amounts, 'Y')
-    if master is None:
-        master_idx = base
-    else:
-        # master 有效映射 = 输入 + a_Y * (M(x) - x)（索引域，0-255）
-        master_idx = base + a_master * (master.astype(np.float64) * 255.0 - base)
-
-    lut = np.zeros((256, 1, 3), dtype=np.float32)
-    for ch_name, lut_ch in (('R', 0), ('G', 1), ('B', 2)):
-        channel = _interpolate_curve_255(curves_data.get(ch_name))
-        a_channel = _edit_amount_factor(edit_amounts, ch_name)
-        mapped = master_idx / 255.0
-        if channel is None or a_channel == 0.0:
-            result = mapped
-        else:
-            sampled = _sample_curve_at_index(channel.astype(np.float64), master_idx)
-            result = mapped + a_channel * (sampled - mapped)
-        lut[:, 0, lut_ch] = np.clip(result, 0.0, 1.0).astype(np.float32)
-    return lut
+    channel_vals = {
+        ch_name: _interpolate_curve_255(curves_data.get(ch_name))
+        for ch_name in ('R', 'G', 'B')
+    }
+    lut = compose_curves_lut(master, channel_vals, edit_amounts)
+    return np.clip(lut, 0.0, 1.0)
 
 
 def build_hsl_curve_lut_from_data(hsl_curve_data: dict) -> np.ndarray:

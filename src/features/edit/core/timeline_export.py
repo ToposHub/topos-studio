@@ -64,6 +64,10 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from src.features.edit.core.proxy_policy import export_source_path
+from src.features.color.core.curves_soft_clip import (
+    curves_edit_is_default,
+    curves_soft_clip_is_identity,
+)
 from src.features.shared.effects.effect_tiers import effective_denoise_radius
 from src.features.edit.core.transition_catalog import (
     COMPOSITE_TRANSITION_TYPES,
@@ -9281,6 +9285,9 @@ class TimelineExporter:
             or getattr(stack, "mixer_params", None)
             or getattr(stack, "lut_path", None)
             or bool((getattr(stack, "soft_clip_params", {}) or {}).get("enabled", False))
+            or not curves_soft_clip_is_identity(
+                getattr(stack, "curves_soft_clip", None))
+            or not curves_edit_is_default(getattr(stack, "curves_edit", None))
         )
         # P1-COLOR-03: 提取调色关键帧轨道（活动层或首个含轨道的层）。
         # 帧求值在 _apply_color_grade 按 layer.source_frame 进行，与
@@ -9349,6 +9356,8 @@ class TimelineExporter:
         curves_data = None
         hsl_curve_lut = None
         soft_clip_params = None
+        curves_soft_clip_state = None
+        curves_edit_state = None
         lut_path = str(getattr(stack, "lut_path", None) or "") or None
         lut_intensity = 1.0
         layers_payload: list = []
@@ -9361,6 +9370,14 @@ class TimelineExporter:
             layer_soft = (layer_dict.get("soft_clip_params") or None) \
                 if (layer_dict.get("soft_clip_params") or {}).get(
                     "enabled") else None
+            # 曲线面板侧栏状态：非恒等/非默认才入载荷（与 soft_clip 的
+            # enabled 门控同口径）
+            layer_csc = layer_dict.get("curves_soft_clip")
+            layer_csc = None if curves_soft_clip_is_identity(layer_csc) \
+                else layer_csc
+            layer_cedit = layer_dict.get("curves_edit")
+            layer_cedit = None if curves_edit_is_default(layer_cedit) \
+                else layer_cedit
             layer_lut = layer_dict.get("active_lut_path") or None
             layer_qp = None
             qp = layer_dict.get("qualifier_params") or None
@@ -9370,6 +9387,7 @@ class TimelineExporter:
             layer_plugins = layer_dict.get("plugins") or None
             is_advanced = bool(
                 layer_curves or layer_hsl is not None or layer_soft
+                or layer_csc or layer_cedit
                 or layer_lut or layer_qp or layer_masks or layer_plugins)
             if is_advanced:
                 advanced_layer_count += 1
@@ -9382,6 +9400,8 @@ class TimelineExporter:
                 "curves_data": dict(layer_curves) if layer_curves else None,
                 "hsl_curve_lut": layer_hsl,
                 "soft_clip_params": layer_soft,
+                "curves_soft_clip": layer_csc,
+                "curves_edit": layer_cedit,
                 "lut_path": str(layer_lut) if layer_lut else None,
                 "lut_intensity": float(
                     layer_dict.get("lut_intensity", 1.0) or 1.0),
@@ -9401,6 +9421,10 @@ class TimelineExporter:
                     if not isinstance(hsl, np.ndarray) else hsl
             if soft_clip_params is None and entry["soft_clip_params"]:
                 soft_clip_params = dict(entry["soft_clip_params"])
+            if curves_soft_clip_state is None and entry["curves_soft_clip"]:
+                curves_soft_clip_state = dict(entry["curves_soft_clip"])
+            if curves_edit_state is None and entry["curves_edit"]:
+                curves_edit_state = dict(entry["curves_edit"])
             if lut_path is None and entry["lut_path"]:
                 lut_path = entry["lut_path"]
                 lut_intensity = entry["lut_intensity"]
@@ -9414,6 +9438,8 @@ class TimelineExporter:
             "curves_data": curves_data,
             "hsl_curve_lut": hsl_curve_lut,
             "soft_clip_params": soft_clip_params,
+            "curves_soft_clip": curves_soft_clip_state,
+            "curves_edit": curves_edit_state,
             "lut_path": lut_path,
             "lut_intensity": lut_intensity,
             # N03：逐层全量载荷（原始索引/active/opacity/高级内容/mask/
@@ -9795,9 +9821,12 @@ class TimelineExporter:
                     and not grade.get("qualifier_params")
                     # M05.2b: 曲线同样在 fast-path 覆盖域外
                     and not grade.get("curves_data")
-                    # M05.2c: HSL 曲线/soft-clip 同理
+                    # M05.2c: HSL 曲线/soft-clip 同理；曲线面板四参数
+                    # 柔化裁切与 Edit 强度（恒等/默认时 grade 不携带）
                     and grade.get("hsl_curve_lut") is None
-                    and not grade.get("soft_clip_params")):
+                    and not grade.get("soft_clip_params")
+                    and not grade.get("curves_soft_clip")
+                    and not grade.get("curves_edit")):
                 import cv2
 
                 decomposed = self._get_decomposed_grade_fastpath(
@@ -9858,7 +9887,11 @@ class TimelineExporter:
                     from src.features.color.core.layer import (
                         build_curves_lut_from_data,
                     )
-                    lut = build_curves_lut_from_data(curves_data)  # (256,1,3)
+                    # Edit 强度参与 LUT 合成（与 Color 页 GPU 同一语义）
+                    lut = build_curves_lut_from_data(
+                        curves_data,
+                        (grade.get("curves_edit") or {}).get("amounts"),
+                    )  # (256,1,3)
                     flat = graded.reshape(-1, 3)
                     idx = np.clip(
                         (flat * 255.0).round().astype(np.int64), 0, 255)
@@ -9896,6 +9929,21 @@ class TimelineExporter:
                     logger.warning(
                         "Export color grade: clip %s soft-clip 应用失败"
                         "——该段按无 soft-clip 输出", layer.clip_id,
+                        exc_info=True)
+            # 曲线面板四参数柔化裁切（指数软膝；GPU 合成序中在 legacy
+            # soft-clip 之后、mixer 之前）
+            curves_soft_clip_params = grade.get("curves_soft_clip")
+            if curves_soft_clip_params:
+                try:
+                    from src.features.color.core.advanced_grade_cpu import (
+                        apply_curves_soft_clip_image,
+                    )
+                    graded = apply_curves_soft_clip_image(
+                        graded, curves_soft_clip_params)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Export color grade: clip %s 曲线柔化裁切应用失败"
+                        "——该段按无曲线柔化裁切输出", layer.clip_id,
                         exc_info=True)
             # M05.2：3D LUT 文件 CPU 应用（GPU 合成序中在 soft-clip 之后，
             # lut_exporter 同一数学）。交付语义（AUD-18409/M05.2）：声明的

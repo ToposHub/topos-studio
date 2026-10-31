@@ -24,6 +24,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
+
 DELIVERY_FULL = "full"
 DELIVERY_BAKED = "baked"
 DELIVERY_DROPPED = "dropped"
@@ -72,6 +74,13 @@ _OPERATIONS: Dict[str, Dict[str, str]] = {
     "soft_clip": {
         # M05.2c：同上
         "label_key": "delivery.op_soft_clip", "label": "柔化裁切 (Soft Clip)",
+        TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_FULL, TARGET_LUT: DELIVERY_BAKED,
+    },
+    "curves_soft_clip": {
+        # 曲线面板四参数柔化裁切（指数软膝）：CPU 导出逐像素应用
+        # （advanced_grade_cpu 同源数学），能力与 legacy soft_clip 一致
+        "label_key": "delivery.op_curves_soft_clip",
+        "label": "曲线柔化裁切 (Curves Soft Clip)",
         TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_FULL, TARGET_LUT: DELIVERY_BAKED,
     },
     "lut": {
@@ -235,6 +244,8 @@ def _layer_operations(data: Dict[str, Any]) -> set:
         ops.add("mixer")
     if (data.get("soft_clip_params") or {}).get("enabled"):
         ops.add("soft_clip")
+    if not curves_soft_clip_is_identity(data.get("curves_soft_clip")):
+        ops.add("curves_soft_clip")
     if data.get("active_lut_path") or data.get("lut_path"):
         ops.add("lut")
     if data.get("warper_params") is not None:
@@ -389,6 +400,7 @@ def _stack_layer_dicts(stack: Any) -> List[Dict[str, Any]]:
         "hsl_curve_data": getattr(stack, "hsl_curve_data", None),
         "mixer_params": getattr(stack, "mixer_params", None),
         "soft_clip_params": getattr(stack, "soft_clip_params", None),
+        "curves_soft_clip": getattr(stack, "curves_soft_clip", None),
         "active_lut_path": getattr(stack, "lut_path", None),
         "lut_intensity": getattr(stack, "lut_intensity", 1.0),
     }
@@ -705,6 +717,9 @@ CONSUMER_CAPABILITY_MATRIX: Dict[str, Dict[str, str]] = {
     "soft_clip":      {"color_still": CAP_FULL, "edit_preview_cpu": CAP_DROPPED,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_FULL,
                        "lut_export": CAP_BAKED},
+    "curves_soft_clip": {"color_still": CAP_FULL, "edit_preview_cpu": CAP_DROPPED,
+                         "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_FULL,
+                         "lut_export": CAP_BAKED},
     "lut":            {"color_still": CAP_FULL, "edit_preview_cpu": CAP_DROPPED,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_DROPPED,
                        "lut_export": CAP_BAKED},

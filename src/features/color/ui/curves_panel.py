@@ -1,15 +1,25 @@
-"""Custom curves palette. Sidebar values are UI drafts until model wiring lands."""
+"""Custom curves palette: curve canvas + Resolve-style Edit / Soft Clip sidebar.
+
+Soft Clip 四参数与 Edit 强度经 ``soft_clip_changed`` / ``edit_changed``
+提交正式模型（16ms 节流 + interaction 结束 flush）；画布控制点仍走原
+``CurvesWidget.changed``——两路互不重复提交。回填一律经
+``set_layer_state``（屏蔽信号、不发渲染）。
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QBoxLayout, QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from src.features.color.core.curves_soft_clip import (
+    normalize_curves_edit,
+    normalize_curves_soft_clip,
+)
 from src.shared.assets.icon_manager import icon_link, icon_reset, icon_unlink
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import (
@@ -22,13 +32,23 @@ from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 class CurvesPanel(QWidget):
     """Keep the original curve canvas/API, with a Resolve-style control sidebar.
 
-    Edit amounts, link switches and four-parameter soft clipping are deliberately
-    local UI state. They must not emit the legacy soft-clip render payload.
+    侧栏操作不发原 ``CurvesWidget.changed``：Edit 强度/链接经
+    ``edit_changed``，四参数柔化裁切经 ``soft_clip_changed``（引擎侧
+    ``set_curves_edit_params`` / ``set_curves_soft_clip_params`` 消费）。
     """
+
+    soft_clip_changed = pyqtSignal(dict)
+    edit_changed = pyqtSignal(dict)
+    interaction_started = pyqtSignal()
+    interaction_ended = pyqtSignal()
 
     def __init__(self, curves_widget: CurvesWidget, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("curves_panel")
+        # 接线守卫先于任何控件连接初始化：构造期的 toggle/setValue 噪声
+        # 不得触发节流发射（_wiring_ready 在 __init__ 尾部才放行）。
+        self._syncing = False
+        self._wiring_ready = False
         # Production docks clamp this tool to 780-1680 px, where the canvas
         # and controls stay side by side; narrower embeds fall back to the
         # stacked layout in resizeEvent.
@@ -102,6 +122,9 @@ class CurvesPanel(QWidget):
             line.addWidget(reset)
             controls.addLayout(line)
             self.edit_rows[channel] = row
+            row.valueChanged.connect(
+                lambda value, ch=channel: self._store_edit_amount(ch, value)
+            )
             self.edit_buttons[channel].clicked.connect(
                 lambda _checked=False, ch=channel: self._select_curve_channel(ch)
             )
@@ -141,7 +164,7 @@ class CurvesPanel(QWidget):
             )
             row.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             row.setObjectName(f"soft_clip_{key}")
-            row.valueChanged.connect(lambda value, name=key: self._store_soft_value(name, value))
+            row.valueChanged.connect(lambda value, name=key: self._on_soft_row_changed(name, value))
             line = QHBoxLayout()
             line.setSpacing(2)
             line.addWidget(row, 1)
@@ -160,6 +183,23 @@ class CurvesPanel(QWidget):
         self.soft_clip_link_btn.toggled.connect(self._set_soft_linked)
         self._set_soft_linked(True)
         controls.addStretch(1)
+
+        # —— 正式接线状态（任务 6/7）：16ms 节流 + interaction 结束 flush。
+        self._soft_timer = QTimer(self)
+        self._soft_timer.setSingleShot(True)
+        self._soft_timer.setInterval(16)
+        self._soft_timer.timeout.connect(self._emit_soft_now)
+        self._edit_timer = QTimer(self)
+        self._edit_timer.setSingleShot(True)
+        self._edit_timer.setInterval(16)
+        self._edit_timer.timeout.connect(self._emit_edit_now)
+        for row in self.soft_clip_rows.values():
+            row.interactionStarted.connect(self.interaction_started)
+            row.interactionEnded.connect(self._on_row_interaction_ended)
+        for row in self.edit_rows.values():
+            row.interactionStarted.connect(self.interaction_started)
+            row.interactionEnded.connect(self._on_row_interaction_ended)
+        self._wiring_ready = True
 
         self.sidebar_scroll.setWidget(self.sidebar)
         self.body.addWidget(self.sidebar_scroll)
@@ -302,15 +342,33 @@ class CurvesPanel(QWidget):
         self.curves_widget.set_active_channel("M" if channel == "Y" else channel)
 
     def _set_edit_linked(self, linked: bool) -> None:
+        # 链接编辑语义落在画布：拖动/加点/删点同步到全部通道（任务 5）
+        self.curves_widget.edit_linked = linked
         self.edit_group.setExclusive(False)
         active = "Y" if self.curves_widget.active_channel == "M" else self.curves_widget.active_channel
         for channel, button in self.edit_buttons.items():
             button.setChecked(linked or channel == active)
         self.edit_group.setExclusive(not linked)
+        self._schedule_edit_emit()
 
     def _reset_edit(self) -> None:
         for row in self.edit_rows.values():
             row.reset()
+        self._schedule_edit_emit()
+
+    def _store_edit_amount(self, channel: str, value: float) -> None:
+        """侧栏强度 -> 画布合成（compose_curves_lut），行值回吸防漂移。"""
+        amounts = self.curves_widget.get_edit_amounts()
+        amounts[channel] = float(value)
+        self.curves_widget.set_edit_amounts(amounts)
+        row = self.edit_rows.get(channel)
+        if row is not None:
+            row.setValue(self.curves_widget.edit_amounts[channel])
+        self._schedule_edit_emit()
+
+    def _on_soft_row_changed(self, key: str, value: float) -> None:
+        self._store_soft_value(key, value)
+        self._schedule_soft_emit()
 
     def _store_soft_value(self, key: str, value: float) -> None:
         targets = "RGB" if self.soft_clip_link_btn.isChecked() else self._soft_channel
@@ -396,12 +454,14 @@ class CurvesPanel(QWidget):
             button.setChecked(linked or channel == self._soft_channel)
         self.soft_clip_group.setExclusive(not linked)
         self._refresh_soft_rows()
+        self._schedule_soft_emit()
 
     def _reset_soft_clip(self) -> None:
         targets = "RGB" if self.soft_clip_link_btn.isChecked() else self._soft_channel
         for channel in targets:
             self._soft_values[channel] = dict(self._soft_defaults)
         self._select_soft_channel(self._soft_channel)
+        self._schedule_soft_emit()
 
     def _reset_soft_parameter(self, key: str) -> None:
         targets = "RGB" if self.soft_clip_link_btn.isChecked() else self._soft_channel
@@ -409,6 +469,7 @@ class CurvesPanel(QWidget):
             self._soft_values[channel] = self._clamped_channel(
                 self._soft_values[channel], key, self._soft_defaults[key])
         self._refresh_soft_rows()
+        self._schedule_soft_emit()
 
     def get_ui_state(self) -> dict:
         """Return detached draft state for future wiring; never a render payload."""
@@ -422,3 +483,108 @@ class CurvesPanel(QWidget):
                 ch: dict(values) for ch, values in self._soft_values.items()
             },
         }
+
+    # ============================================================
+    # 正式参数信号（任务 6/7）：节流发射 + 回填
+    # ============================================================
+
+    def get_soft_clip_payload(self) -> dict:
+        """四参数柔化裁切的模型形 payload（``soft_clip_changed`` 载荷）。"""
+        return {
+            "linked": self.soft_clip_link_btn.isChecked(),
+            "channels": {ch: dict(values) for ch, values in self._soft_values.items()},
+        }
+
+    def get_edit_payload(self) -> dict:
+        """Edit 强度/链接的模型形 payload（``edit_changed`` 载荷）。"""
+        return {
+            "linked": self.edit_link_btn.isChecked(),
+            "amounts": self.curves_widget.get_edit_amounts(),
+        }
+
+    def get_layer_state(self) -> dict:
+        """当前侧栏状态（回填收集口径，与 ``set_layer_state`` 对偶）。"""
+        return {
+            "curves_soft_clip": self.get_soft_clip_payload(),
+            "curves_edit": self.get_edit_payload(),
+        }
+
+    def set_layer_state(self, state: dict) -> None:
+        """图层/片段回填（任务 7）：屏蔽一切信号与节流发射。
+
+        草稿不跨目标泄漏——每次回填整体覆盖四参数与 Edit 强度；上一目标
+        的滑条值不会残留。
+        """
+        self.set_soft_clip_state(state.get("curves_soft_clip") or {})
+        self.set_edit_state(state.get("curves_edit") or {})
+
+    def set_soft_clip_state(self, state: dict) -> None:
+        """回填四参数柔化裁切（归一化 + 界面刷新，不发渲染信号）。"""
+        normalized = normalize_curves_soft_clip(state)
+        self._syncing = True
+        try:
+            self._soft_values = {
+                ch: dict(normalized["channels"][ch]) for ch in "RGB"
+            }
+            self.soft_clip_link_btn.blockSignals(True)
+            self.soft_clip_link_btn.setChecked(normalized["linked"])
+            self.soft_clip_link_btn.blockSignals(False)
+            self.soft_clip_group.setExclusive(False)
+            for name, button in self.soft_clip_buttons.items():
+                button.setChecked(
+                    normalized["linked"] or name == self._soft_channel)
+            self.soft_clip_group.setExclusive(not normalized["linked"])
+            self._refresh_soft_rows()
+        finally:
+            self._syncing = False
+
+    def set_edit_state(self, state: dict) -> None:
+        """回填 Edit 强度/链接（归一化 + 行/画布刷新，不发渲染信号）。"""
+        normalized = normalize_curves_edit(state)
+        self._syncing = True
+        try:
+            self.curves_widget.set_edit_amounts(normalized["amounts"])
+            for channel, row in self.edit_rows.items():
+                row.setValue(self.curves_widget.edit_amounts[channel])
+            linked = normalized["linked"]
+            self.edit_link_btn.blockSignals(True)
+            self.edit_link_btn.setChecked(linked)
+            self.edit_link_btn.blockSignals(False)
+            self.curves_widget.edit_linked = linked
+            active = ("Y" if self.curves_widget.active_channel == "M"
+                      else self.curves_widget.active_channel)
+            self.edit_group.setExclusive(False)
+            for channel, button in self.edit_buttons.items():
+                button.setChecked(linked or channel == active)
+            self.edit_group.setExclusive(not linked)
+        finally:
+            self._syncing = False
+
+    def _schedule_soft_emit(self) -> None:
+        if self._wiring_ready and not self._syncing \
+                and not self._soft_timer.isActive():
+            self._soft_timer.start()
+
+    def _schedule_edit_emit(self) -> None:
+        if self._wiring_ready and not self._syncing \
+                and not self._edit_timer.isActive():
+            self._edit_timer.start()
+
+    def _emit_soft_now(self) -> None:
+        self.soft_clip_changed.emit(self.get_soft_clip_payload())
+
+    def _emit_edit_now(self) -> None:
+        self.edit_changed.emit(self.get_edit_payload())
+
+    def _flush_pending(self) -> None:
+        """把未决的节流值立即发出（interaction 结束时最终值一次到位）。"""
+        if self._soft_timer.isActive():
+            self._soft_timer.stop()
+            self._emit_soft_now()
+        if self._edit_timer.isActive():
+            self._edit_timer.stop()
+            self._emit_edit_now()
+
+    def _on_row_interaction_ended(self) -> None:
+        self._flush_pending()
+        self.interaction_ended.emit()

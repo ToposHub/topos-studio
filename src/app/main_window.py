@@ -1752,6 +1752,16 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         self.soft_clip_panel.interaction_started.connect(self.on_interaction_started)
         self.soft_clip_panel.interaction_ended.connect(self.on_interaction_ended)
 
+        # 曲线面板侧栏（四参数柔化裁切 + Edit 强度）：正式参数信号。
+        # 画布控制点仍走 curves_widget.changed -> on_curves_changed，
+        # 两路互不重复提交；interaction 对复用同一撤销快照通道。
+        self.curves_panel.soft_clip_changed.connect(self.engine.set_curves_soft_clip_params)
+        self.curves_panel.soft_clip_changed.connect(self._invalidate_video_render_params_if_playing)
+        self.curves_panel.edit_changed.connect(self.engine.set_curves_edit_params)
+        self.curves_panel.edit_changed.connect(self._invalidate_video_render_params_if_playing)
+        self.curves_panel.interaction_started.connect(self.on_interaction_started)
+        self.curves_panel.interaction_ended.connect(self.on_interaction_ended)
+
         self.raw_panel.raw_params_changed.connect(self.on_raw_params_changed)
         self.raw_panel.interaction_started.connect(self.on_interaction_started)
         self.raw_panel.interaction_ended.connect(self.on_interaction_ended)

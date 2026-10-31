@@ -50,6 +50,9 @@ VARIANTS = {
     "softclip": dict(gl=dict(has_soft_clip=True),
                      manifest=dict(),
                      effects=("grading", "soft_clip")),
+    "curves_softclip": dict(gl=dict(has_curves_soft_clip=True),
+                            manifest=dict(),
+                            effects=("grading", "curves_soft_clip")),
     "both": dict(gl=dict(grain_enabled=True, has_soft_clip=True),
                  manifest=dict(grain_enabled=True),
                  effects=("grading", "soft_clip", "film_grain")),
@@ -66,11 +69,12 @@ class TestEmitterStructure:
         for effect in ("soft_clip", "film_grain"):
             assert effect in MIGRATED_EFFECTS
 
-    def test_all_eleven_snippets_migrated(self):
-        """composition 11 SNIPPET 全部完成（P7-03 收口判定）。"""
+    def test_all_twelve_snippets_migrated(self):
+        """composition 12 SNIPPET 全部完成（P7-03 收口 + curves_soft_clip）。"""
         assert set(MIGRATED_EFFECTS) == {
             "grading", "curves", "hsl_curve", "lut3d", "mixer", "warper",
-            "blur_sharpen", "blend_modes", "soft_clip", "film_grain"}
+            "blur_sharpen", "blend_modes", "soft_clip", "curves_soft_clip",
+            "film_grain"}
 
     def test_untranslated_effect_still_rejected(self):
         manifest = build_composition_uniform_manifest()
@@ -407,6 +411,85 @@ class TestSoftClipParity:
         gl_out, mt_out = self._run(gl, gl_progs, psos, metal_ctx,
                                    hdr_pattern, True, sc)
         _assert_hdr(gl_out, mt_out, f"softclip/HDR/{name}")
+
+
+# (名称, curves_soft_clip 状态)——覆盖双膝 / 单膝 / 每通道差异 / 纯 clip 点
+def _csc_state(**channels):
+    base = {"low_clip": 0.0, "low_soft": 0.0, "high_clip": 1.0, "high_soft": 0.0}
+    full = {ch: dict(base) for ch in "RGB"}
+    for name, values in channels.items():
+        full[name].update(values)
+    return {"linked": False, "channels": full}
+
+
+CURVES_SOFTCLIP_SDR_CASES = [
+    ("both_knees", _csc_state(R={"low_clip": -0.1, "low_soft": 0.2,
+                                 "high_clip": 0.9, "high_soft": 0.15})),
+    ("per_channel", _csc_state(
+        R={"high_clip": 0.8, "high_soft": 0.1},
+        G={"low_clip": 0.05, "low_soft": 0.1},
+        B={"low_clip": -0.2, "low_soft": 0.1,
+           "high_clip": 1.2, "high_soft": 0.25})),
+    ("clip_points_only", _csc_state(R={"low_clip": -0.05, "high_clip": 0.85})),
+]
+CURVES_SOFTCLIP_HDR_CASES = [
+    ("hdr_knees", _csc_state(R={"low_clip": -0.1, "low_soft": 0.2,
+                                "high_clip": 0.95, "high_soft": 0.1})),
+]
+
+
+@requires_metal
+class TestCurvesSoftClipParity:
+    """曲线面板四参数柔化裁切：GL↔MTL 对拍 + CPU 参考复验。
+
+    与 legacy soft clip 同一 G2 门禁（SDR ≤1/255、HDR ≤2e-3 rel）；CPU
+    参考直接复用 advanced_grade_cpu.apply_curves_soft_clip_image（导出
+    路径同一实现），输入先过 fp16 量化（P6-06 约定）。
+    """
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def sdr_pattern(cls):
+        return _pattern_sdr()
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def hdr_pattern(cls):
+        return _pattern_hdr()
+
+    def _run(self, gl, gl_progs, psos, metal_ctx, pattern, hdr, state):
+        from src.features.color.core.advanced_grade_cpu import (
+            apply_curves_soft_clip_image,
+        )
+        layer = {"opacity": 1.0, "blend_mode": "Normal",
+                 "grading_params": {}, "curves_soft_clip": state}
+        values = _values_for(layer)
+        gl_out = _gl_render(gl, gl_progs["curves_softclip"], pattern,
+                            values, hdr)
+        pso, dtype = psos["curves_softclip"]
+        mt_out = _metal_render(metal_ctx, pso, pattern, values, dtype)
+        cpu_ref = apply_curves_soft_clip_image(
+            pattern.astype(np.float16).astype(np.float32)[..., :3], state)
+        return gl_out, mt_out, cpu_ref
+
+    @pytest.mark.parametrize("name,state", CURVES_SOFTCLIP_SDR_CASES,
+                             ids=[c[0] for c in CURVES_SOFTCLIP_SDR_CASES])
+    def test_sdr(self, gl, gl_progs, psos, metal_ctx, sdr_pattern,
+                 name, state):
+        gl_out, mt_out, cpu_ref = self._run(gl, gl_progs, psos, metal_ctx,
+                                            sdr_pattern, False, state)
+        _assert_sdr(gl_out, mt_out, f"curves_softclip/SDR/{name}")
+        _assert_sdr(gl_out[..., :3], cpu_ref, f"curves_softclip/SDR/{name}/cpu")
+
+    @pytest.mark.parametrize("name,state", CURVES_SOFTCLIP_HDR_CASES,
+                             ids=[c[0] for c in CURVES_SOFTCLIP_HDR_CASES])
+    def test_hdr(self, gl, gl_progs, psos, metal_ctx, hdr_pattern,
+                 name, state):
+        gl_out, mt_out, cpu_ref = self._run(gl, gl_progs, psos, metal_ctx,
+                                            hdr_pattern, True, state)
+        _assert_hdr(gl_out, mt_out, f"curves_softclip/HDR/{name}")
+        _assert_hdr(gl_out[..., :3], cpu_ref,
+                    f"curves_softclip/HDR/{name}/cpu")
 
 
 @requires_metal

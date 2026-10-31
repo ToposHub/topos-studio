@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
 from src.shared.i18n.i18n import I18N
 from src.shared.media.thumbnail_provider import ThumbnailProvider
 
@@ -373,6 +374,10 @@ def _color_stack_has_grade(stack: object | None) -> bool:
         return True
     soft_clip_params = _stack_field(stack, "soft_clip_params") or {}
     if _mapping_differs_from_defaults(soft_clip_params, default_soft_clip):
+        return True
+    # 曲线面板侧栏：四参数柔化裁切非恒等即已调色（Edit 强度已折算进
+    # curves LUT，经上方 curves_data 覆盖）
+    if not curves_soft_clip_is_identity(_stack_field(stack, "curves_soft_clip")):
         return True
     if _stack_field(stack, "lut_path"):
         return True

@@ -77,6 +77,10 @@ from typing import Optional, Dict, Any, Tuple, List, Callable, TYPE_CHECKING
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QMutex, QTimer
 from PyQt6.QtGui import QImage, QOpenGLContext, QOffscreenSurface
 
+from src.features.color.core.curves_soft_clip import (
+    curves_edit_is_default,
+    curves_soft_clip_is_identity,
+)
 from src.features.edit.core.timeline_render_plan import (
     TimelineRenderPlan,
     FrameRenderPlan,
@@ -4904,6 +4908,9 @@ class PreviewRenderWorker(QThread):
             or getattr(stack, "mixer_params", None)
             or getattr(stack, "lut_path", None)
             or bool((getattr(stack, "soft_clip_params", {}) or {}).get("enabled", False))
+            or not curves_soft_clip_is_identity(
+                getattr(stack, "curves_soft_clip", None))
+            or not curves_edit_is_default(getattr(stack, "curves_edit", None))
         )
 
         # P1-COLOR-03: 提取调色关键帧轨道（活动层或首个含轨道的层），

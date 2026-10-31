@@ -51,6 +51,12 @@ class CurvesWidget(GpuScopeWidget):
         
         self.selected_point_idx = -1
         self.margin = 15
+        # 曲线面板侧栏状态（语义见 layer.compose_curves_lut）：
+        # - edit_amounts：YRGB 强度 0-100，100 = 曲线全额生效；
+        # - edit_linked：链接编辑（拖动/加点/删点同步到全部通道）。
+        # 默认值 = 既有单通道编辑行为，行为零回归。
+        self.edit_amounts = {"Y": 100.0, "R": 100.0, "G": 100.0, "B": 100.0}
+        self.edit_linked = False
         # AUD-38211: 左键 press 是否已发射 interaction_started（release 时
         # 据此配对 interaction_ended，避免点击空白处的孤儿 started 信号）
         self._press_interaction = False
@@ -413,14 +419,34 @@ class CurvesWidget(GpuScopeWidget):
                     pts.append(new_point)
                     pts.sort(key=lambda p: p.x())
                     self.selected_point_idx = pts.index(new_point)
+                    # 链接编辑：新点同步到全部通道（同一 x/y）
+                    if self.edit_linked:
+                        for ch in self.channels:
+                            if ch == self.active_channel:
+                                continue
+                            other = self.curves[ch]
+                            other.append(QPointF(mx_clamped, my_clamped))
+                            other.sort(key=lambda p: p.x())
+                            self._lut_dirty[ch] = True
                     self.update_lut()
         elif event.button() == Qt.MouseButton.RightButton:
             if clicked_idx != -1 and len(pts) > 2:
                 self.interaction_started.emit()
+                removed_x = pts[clicked_idx].x()
                 pts.pop(clicked_idx)
                 self.selected_point_idx = -1
                 # 标记当前通道为脏
                 self._lut_dirty[self.active_channel] = True
+                # 链接编辑：同步删除其余通道同 x 的控制点
+                if self.edit_linked:
+                    for ch in self.channels:
+                        if ch == self.active_channel:
+                            continue
+                        for p in self.curves[ch]:
+                            if abs(p.x() - removed_x) <= 0.5:
+                                self.curves[ch].remove(p)
+                                self._lut_dirty[ch] = True
+                                break
                 self.update_lut()
                 self.interaction_ended.emit()
         
@@ -458,7 +484,21 @@ class CurvesWidget(GpuScopeWidget):
             if self.selected_point_idx < len(pts) - 1:
                 mx = min(mx, pts[self.selected_point_idx+1].x() - 0.1)
 
+            prev_x = pts[self.selected_point_idx].x()
+            prev_y = pts[self.selected_point_idx].y()
             pts[self.selected_point_idx] = QPointF(mx, my)
+            # 链接编辑：把本帧的纵向增量镜像到其余通道同 x 的控制点
+            # （只镜像 dy——各通道端点约束不同，横向位置保持独立）
+            if self.edit_linked and self.selected_point_idx >= 0:
+                dy = my - prev_y
+                if dy != 0.0:
+                    for ch in self.channels:
+                        if ch == self.active_channel:
+                            continue
+                        for p in self.curves[ch]:
+                            if abs(p.x() - prev_x) <= 0.5:
+                                p.setY(max(0.0, min(255.0, p.y() + dy)))
+                                break
             self._lut_dirty[self.active_channel] = True
             self._final_lut_dirty = True
             self._compute_lut()
@@ -482,7 +522,10 @@ class CurvesWidget(GpuScopeWidget):
             event.ignore()
             return
         self.interaction_started.emit()
-        self.curves[self.active_channel] = [QPointF(0, 255), QPointF(255, 0)]
+        reset_targets = self.channels if self.edit_linked else [self.active_channel]
+        for ch in reset_targets:
+            self.curves[ch] = [QPointF(0, 255), QPointF(255, 0)]
+            self._lut_dirty[ch] = True
         self.selected_point_idx = -1
         self.update_lut()
         self.update()
@@ -515,42 +558,20 @@ class CurvesWidget(GpuScopeWidget):
                 self._final_lut_dirty = True
 
         if self._final_lut_dirty:
-            lut_m = self._lut_cache['M']
-            final_lut = np.zeros((256, 1, 3), dtype=np.float32)
-            
-            for ch, ch_idx in [('R', 0), ('G', 1), ('B', 2)]:
-                lut_c = self._lut_cache[ch]
-                
-                float_idx = lut_m * 255.0
-                
-                v0 = lut_c[0]
-                v1 = lut_c[1]
-                v254 = lut_c[254]
-                v255 = lut_c[255]
-                
-                slope_low = (v1 - v0) * 255.0
-                slope_high = (v255 - v254) * 255.0
-                
-                result = np.zeros(256, dtype=np.float32)
-                
-                mask_low = float_idx < 0.0
-                mask_high = float_idx > 255.0
-                mask_mid = ~(mask_low | mask_high)
-                
-                result[mask_low] = v0 + float_idx[mask_low] * slope_low
-                result[mask_high] = v255 + (float_idx[mask_high] - 255.0) * slope_high
-                
-                if np.any(mask_mid):
-                    idx_mid = float_idx[mask_mid]
-                    i0 = np.floor(idx_mid).astype(np.int32)
-                    i0 = np.maximum(0, np.minimum(255, i0))
-                    i1 = np.minimum(255, i0 + 1)
-                    f = idx_mid - i0
-                    
-                    result[mask_mid] = lut_c[i0] * (1.0 - f) + lut_c[i1] * f
-                
-                final_lut[:, 0, ch_idx] = result
-            
+            # 合成走 layer.compose_curves_lut 权威实现（先 master 后通道 +
+            # Edit 强度缩放），保证与工程重开/导出逐位一致。widget 的
+            # 通道缓存不做 0-1 裁剪（GPU 采样 edge clamp，语义不变）。
+            from src.features.color.core.layer import compose_curves_lut
+
+            amounts = (self.edit_amounts
+                       if any(v != 100.0 for v in self.edit_amounts.values())
+                       else None)
+            final_lut = compose_curves_lut(
+                self._lut_cache.get('M'),
+                {ch: self._lut_cache.get(ch) for ch in ('R', 'G', 'B')},
+                amounts,
+            )
+
             self._final_lut_cache = final_lut
             self._final_lut_dirty = False
 
@@ -716,6 +737,39 @@ class CurvesWidget(GpuScopeWidget):
         if self._pending_lut is not None:
             self._update_timer.stop()
             self._emit_changed_signal()
+
+    # ============================================================
+    # Edit 强度 / 链接编辑（曲线面板侧栏状态）
+    # ============================================================
+
+    def set_edit_amounts(self, amounts: Dict[str, Any],
+                         emit_changed: bool = False) -> None:
+        """设置 YRGB 侧栏强度（0-100，100 = 全额生效）并重算最终 LUT。
+
+        强度只影响合成阶段（compose_curves_lut），不改变控制点——通道
+        缓存保持有效，仅最终 LUT 置脏。默认不发射 ``changed``（侧栏
+        编辑经面板自身的参数信号走渲染，不与画布控制点信号混用）。
+        """
+        if not isinstance(amounts, dict):
+            return
+        changed = False
+        for ch in ('Y', 'R', 'G', 'B'):
+            value = amounts.get(ch, 100.0)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                value = 100.0
+            value = float(value)
+            if value != self.edit_amounts.get(ch):
+                self.edit_amounts[ch] = value
+                changed = True
+        if changed:
+            self._final_lut_dirty = True
+            self._final_lut_cache = None
+            self.update_lut(emit_changed=emit_changed)
+            self.update()
+
+    def get_edit_amounts(self) -> Dict[str, float]:
+        """返回当前 YRGB 强度的副本。"""
+        return dict(self.edit_amounts)
 
     # ============================================================
     # Color Picker (Eyedropper) Methods

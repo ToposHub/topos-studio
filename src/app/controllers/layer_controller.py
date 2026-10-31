@@ -151,6 +151,15 @@ class LayerOpsMixin:
         else:
             self.curves_widget.reset(emit_changed=False)
 
+        # 曲线面板侧栏（四参数柔化裁切 + Edit 强度）：随图层切换整体回填，
+        # 草稿不跨目标泄漏（set_layer_state 屏蔽一切回写）
+        curves_panel = getattr(self, "curves_panel", None)
+        if curves_panel is not None:
+            curves_panel.set_layer_state({
+                "curves_soft_clip": getattr(layer, "curves_soft_clip", None) or {},
+                "curves_edit": getattr(layer, "curves_edit", None) or {},
+            })
+
         # HSL Curve
         if layer.hsl_curve_data:
             self.hsl_curves_panel.set_curves_data(layer.hsl_curve_data)

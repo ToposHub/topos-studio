@@ -51,6 +51,7 @@ from PyQt6.QtCore import (
 )
 from src.features.color.core.history import HistoryManager
 from src.features.color.core.layer import Layer, MaskShape, MaskGroup
+from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
 from src.features.color.shaders.shaders import PASSTHROUGH_VERTEX, PASSTHROUGH_FRAGMENT, SPLIT_VIEW_FRAGMENT, ROTATION_PREVIEW_VERTEX, ROTATION_PREVIEW_FRAGMENT
 from src.features.color.core.shader_compiler import ShaderPipeline
@@ -1638,6 +1639,46 @@ class ImageEngine(QObject):
         if layer:
             layer.soft_clip_params.update(params)
             self.render_pipeline(render_reason='grading')
+
+    def set_curves_soft_clip_params(self, params: Dict[str, Any]) -> None:
+        """曲线面板四参数柔化裁切提交到活动层并触发调色渲染。
+
+        与旧 8 参数 ``soft_clip_params`` 是两个独立阶段：本方法只写
+        ``curves_soft_clip``（归一化钳制），不做旧参数的等价转换。
+        """
+        layer = self.get_active_layer()
+        if not layer:
+            return
+        from src.features.color.core.curves_soft_clip import (
+            normalize_curves_soft_clip,
+        )
+        layer.curves_soft_clip = normalize_curves_soft_clip(params)
+        self.render_pipeline(render_reason='grading')
+
+    def set_curves_edit_params(self, params: Dict[str, Any]) -> None:
+        """曲线面板 Edit 强度/链接提交到活动层并重建曲线 LUT。
+
+        强度参与 ``build_curves_lut_from_data`` 合成（与画布实时 LUT 同一
+        权威实现），重建后经 UPDATE_AUX_TEX 上传并触发调色渲染。
+        """
+        layer = self.get_active_layer()
+        if not layer:
+            return
+        from src.features.color.core.curves_soft_clip import (
+            normalize_curves_edit,
+        )
+        from src.features.color.core.layer import build_curves_lut_from_data
+        layer.curves_edit = normalize_curves_edit(params)
+        layer.curves_lut = build_curves_lut_from_data(
+            layer.curves_data, layer.curves_edit.get("amounts"))
+        if self.renderer and layer.curves_lut is not None:
+            lut = layer.curves_lut
+            if lut.dtype != np.float32:
+                lut = lut.astype(np.float32)
+            self.renderer.submit(RenderCommand.UPDATE_AUX_TEX, {
+                'layer_id': layer.id, 'type': 'curves', 'data': lut.tobytes()
+            })
+        self.render_pipeline(render_reason='grading')
 
     def set_qualifier_params(self, params: Dict[str, Any]) -> None:
         """Merge qualifier (keyer) params into the active layer and submit a grading render."""
@@ -3552,10 +3593,13 @@ class ImageEngine(QObject):
                     has_lut3d = layer.active_lut_path is not None
                     scp = layer.soft_clip_params or {}
                     has_soft_clip = scp.get('enabled', False)
-                
+                    # 曲线面板四参数柔化裁切：非恒等才编译进管线
+                    has_curves_soft_clip = not curves_soft_clip_is_identity(
+                        getattr(layer, 'curves_soft_clip', None))
+
                     # Phase 2: Matte already includes qualifier, so disable shader-side qualifier
                     has_qualifier = False
-                
+
                     has_hsl_curve = self.pipeline.has_active_hsl_curve_lut(layer.hsl_curve_lut)
                     has_mixer = self.pipeline.has_active_mixer_params(layer.mixer_params)
 
@@ -3576,6 +3620,7 @@ class ImageEngine(QObject):
                         has_qualifier=has_qualifier,
                         has_hsl_curve=has_hsl_curve,
                         has_mixer=has_mixer,
+                        has_curves_soft_clip=has_curves_soft_clip,
                         plugins=layer_plugins,
                         request_id=render_request_id,
                         layer_id=layer.id,

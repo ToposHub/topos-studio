@@ -14,7 +14,8 @@ from src.features.color.core.shader_nodes import (COMMON_DEFINITIONS, GRADING_SN
                                     CURVES_SNIPPET, MIXER_SNIPPET, LUT3D_SNIPPET,
                                     WARPER_SNIPPET, BLEND_MODES_SNIPPET,
                                     QUALIFIER_SNIPPET, FILM_GRAIN_SNIPPET,
-                                    SOFT_CLIP_SNIPPET, BLUR_SHARPEN_SNIPPET)
+                                    SOFT_CLIP_SNIPPET, CURVES_SOFT_CLIP_SNIPPET,
+                                    BLUR_SHARPEN_SNIPPET)
 from src.features.color.core.plugin_manager import get_plugin_manager
 from src.features.color.core.composition_uniforms import (
     build_composition_uniform_manifest,
@@ -288,6 +289,7 @@ class ShaderPipeline:
         has_qualifier: bool = False,
         has_hsl_curve: bool = False,
         has_mixer: bool = False,
+        has_curves_soft_clip: bool = False,
         plugins: Iterable[PluginBinding] | None = None,
         *,
         request_id: Any = None,
@@ -303,6 +305,8 @@ class ShaderPipeline:
             manifest（EffectSpec）驱动 uniform 声明、命名空间改写与
             结构化缓存键；原始 instance dict 进入编译入口即 TypeError
             （G5：显式失败，禁止静默降级）。
+            has_curves_soft_clip: 曲线面板四参数柔化裁切（指数软膝）。
+                旗标只在参数非恒等时开启（默认恒等映射无需编译进管线）。
             request_id/layer_id: 可选诊断关联上下文，不参与 shader 缓存键。
         """
         bindings: list[PluginBinding] = list(plugins) if plugins else []
@@ -333,7 +337,7 @@ class ShaderPipeline:
              binding.enabled, _binding_structural_params(binding))
             for binding in bindings
         ) if bindings else ()
-        key = (has_curves, has_warper, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, plugin_key)
+        key = (has_curves, has_warper, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, has_curves_soft_clip, plugin_key)
         if key in self.comp_cache:
             # AUD-0831：LRU 命中刷新新旧顺序
             self.comp_cache.move_to_end(key)
@@ -363,6 +367,7 @@ class ShaderPipeline:
             BLUR_SHARPEN_SNIPPET,  # Must be before FILM_GRAIN_SNIPPET (declares u_tex_size)
             FILM_GRAIN_SNIPPET,
             SOFT_CLIP_SNIPPET,
+            CURVES_SOFT_CLIP_SNIPPET,
             QUALIFIER_SNIPPET,
         ]
         shader_code += uniform_manifest.declarations("body")
@@ -488,6 +493,10 @@ class ShaderPipeline:
             shader_code.append("    if (u_sc_enabled) {")
             shader_code.append("        graded = apply_soft_clip(graded, u_sc_high, u_sc_white_point, u_sc_shoulder_strength, u_sc_low, u_sc_black_point, u_sc_toe_strength, u_sc_exposure, u_sc_contrast);")
             shader_code.append("    }")
+        # 曲线面板四参数柔化裁切（指数软膝）：编译期门控——只在参数非
+        # 恒等时编译进管线（默认恒等映射保留超白/负值，无需执行）。
+        if has_curves_soft_clip:
+            shader_code.append("    graded = apply_curves_soft_clip(graded, u_cs_low_clip, u_cs_low_soft, u_cs_high_clip, u_cs_high_soft);")
         if has_mixer:
             shader_code.append("    graded = apply_mixer(graded, u_red_p, u_orange_p, u_yellow_p, u_green_p, u_aqua_p, u_blue_p, u_purple_p, u_magenta_p);")
         if has_warper: shader_code.append("    graded = apply_warper(graded, u_warper_tex, u_warper_grid_size);")

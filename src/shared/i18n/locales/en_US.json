@@ -2529,6 +2529,7 @@
     "op_hsl_curves": "HSL Curves",
     "op_mixer": "RGB Mixer",
     "op_soft_clip": "Soft Clip",
+    "op_curves_soft_clip": "Curves Soft Clip",
     "op_lut": "3D LUT",
     "op_warper": "Color Warper",
     "op_effects": "Sharpen/Texture/Halo effects",
