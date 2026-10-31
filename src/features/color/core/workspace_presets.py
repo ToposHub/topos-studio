@@ -99,7 +99,7 @@ def builtin_color_workspaces() -> List[ColorWorkspacePreset]:
                 "workspace.viewport",
                 "color.timeline_clips",
                 "color.raw",
-                "color.soft_clip",
+                "color.curves",
                 "color.grading",
                 "color.lut",
                 "color.analysis",
@@ -326,6 +326,7 @@ def sanitize_preset(
 
     - drops panel ids that no longer exist (upgrade migration);
     - promotes legacy HSL Curves/Mixer/Warper ids to Color Mapping;
+    - promotes the retired Soft Clip panel to the combined Curves palette;
     - drops panels disabled for the current work mode
       (video: image-only Library/export; image: timeline clips);
     - keeps the viewport always visible.
@@ -341,6 +342,8 @@ def sanitize_preset(
         & {"color.hsl_curves", "color.mixer", "color.warper"}
     ):
         resolved.add("color.mapping")
+    if "color.curves" in registered and "color.soft_clip" in preset.visible_panels:
+        resolved.add("color.curves")
     if work_mode == "video":
         resolved -= {"workspace.library", "workspace.export"}
     elif work_mode == "image":

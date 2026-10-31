@@ -1973,7 +1973,9 @@ class AsyncRenderer(QThread):
                 mask_texture = self.layer_textures.get(
                     demand.mask_layer_id, {}
                 ).get('mask')
-            if not mode_needs_falsecolor(demand.mode):
+            if not mode_needs_falsecolor(demand.mode) or bool(
+                getattr(demand, 'histogram_overlay', False)
+            ):
                 self._scope_sample_front(
                     scope_source,
                     pool,
@@ -2013,7 +2015,9 @@ class AsyncRenderer(QThread):
                 self._scope_display_luma(pool)
                 luma_id = pool['wf_display'].glo
 
-            if mode_needs_histogram(demand.mode):
+            if mode_needs_histogram(demand.mode) or bool(
+                getattr(demand, 'histogram_overlay', False)
+            ):
                 self._scope_accumulate_histogram(pool)
                 self._scope_reduce_histogram(pool)
                 self._scope_display_histogram(pool)

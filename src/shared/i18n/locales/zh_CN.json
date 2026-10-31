@@ -639,6 +639,19 @@
     "contrast": "对比度",
     "reset_tooltip": "重置全部 RAW 参数"
   },
+  "curves_palette": {
+    "custom": "自定义曲线",
+    "edit": "编辑",
+    "soft_clip": "柔化裁切",
+    "low": "低点",
+    "low_soft": "低点柔化",
+    "high": "高点",
+    "high_soft": "高点柔化",
+    "link": "链接通道",
+    "reset_amount": "重置通道强度",
+    "reset_parameter": "重置此参数",
+    "reset_section": "重置此区域"
+  },
   "soft_clip": {
     "title": "软裁切",
     "high_shoulder": "高光/肩部",

@@ -597,6 +597,19 @@
     "contrast": "Contrast",
     "reset_tooltip": "Reset All RAW Parameters"
   },
+  "curves_palette": {
+    "custom": "Custom",
+    "edit": "Edit",
+    "soft_clip": "Soft Clip",
+    "low": "Low",
+    "low_soft": "Low Soft",
+    "high": "High",
+    "high_soft": "High Soft",
+    "link": "Link channels",
+    "reset_amount": "Reset channel amount",
+    "reset_parameter": "Reset parameter",
+    "reset_section": "Reset section"
+  },
   "soft_clip": {
     "title": "Soft Clip",
     "high_shoulder": "High / Shoulder",

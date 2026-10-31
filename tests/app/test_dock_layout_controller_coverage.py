@@ -146,7 +146,6 @@ _BASE_DOCKS: dict = {
     "dock_masks": ("dockMasks", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_qualifier": ("dockQualifier", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_lut": ("dockLut", Qt.DockWidgetArea.BottomDockWidgetArea),
-    "dock_soft_clip": ("dockSoftClip", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_raw": ("dockRaw", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_analysis": ("dockAnalysis", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_export": ("dockExport", Qt.DockWidgetArea.RightDockWidgetArea),

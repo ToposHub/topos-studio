@@ -374,7 +374,6 @@ class LayoutStore:
                 "color.grading",
                 "color.curves",
                 "color.mapping",
-                "color.soft_clip",
                 "color.lut",
                 "color.analysis",
                 "color.masks",
@@ -389,7 +388,6 @@ class LayoutStore:
                 "color.grading",
                 "color.curves",
                 "color.mapping",
-                "color.soft_clip",
                 "color.analysis",
             ],
             "Edit": [

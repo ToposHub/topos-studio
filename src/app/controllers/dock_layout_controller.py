@@ -54,8 +54,10 @@ _EDIT_TIMELINE_DOCK_MAX_HEIGHT = 480
 _EDIT_TIMELINE_DOCK_OPERABLE_MIN_HEIGHT = 240
 _EDIT_TIMELINE_DOCK_MIGRATION_DELAY_MS = 50
 _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY = "color_grading_dock_layout_version"
-_COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION = 1
-_COLOR_GRADING_DOCK_DEFAULT_HEIGHT = 280
+_COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION = 2
+_COLOR_TOOLS_DOCK_HEIGHT_RATIO = 0.32
+_COLOR_TOOLS_DOCK_HEIGHT_MIN_RATIO = 0.27
+_COLOR_TOOLS_DOCK_HEIGHT_MAX_RATIO = 0.37
 _COLOR_GRADING_DOCK_MIN_HEIGHT = 160
 _COLOR_GRADING_DOCK_MAX_HEIGHT = 480
 _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY = "color_mapping_dock_layout_version"
@@ -302,8 +304,11 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_grading)
 
 
-        self.dock_curves = create_custom_dock(I18N.tr("panel.curves", "Curves"), self.curves_widget, "dockCurves")
+        self.dock_curves = create_custom_dock(I18N.tr("panel.curves", "Curves"), self.curves_panel, "dockCurves")
+        self.dock_curves.setMinimumWidth(780)
+        self.dock_curves.setMaximumWidth(1680)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_curves)
+        self.dock_curves.visibilityChanged.connect(self._on_scope_visibility_changed)
 
         self.dock_color_mapping = create_custom_dock(
             I18N.tr("panel.color_mapping", "Color Mapping"),
@@ -335,9 +340,6 @@ class DockLayoutMixin:
 
         self.dock_lut = create_custom_dock(I18N.tr("panel.lut", "3D LUT"), self.lut_panel, "dockLut")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_lut)
-
-        self.dock_soft_clip = create_custom_dock(I18N.tr("panel.soft_clip", "Soft Clip"), self.soft_clip_panel, "dockSoftClip")
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_soft_clip)
 
         self.dock_raw = create_custom_dock(I18N.tr("panel.camera_raw", "Camera Raw"), self.raw_panel, "dockRaw")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_raw)
@@ -1036,7 +1038,7 @@ class DockLayoutMixin:
             self.dock_grading, self.dock_curves, self.dock_color_mapping,
             self.dock_audio_mixer, self.dock_effects, self.dock_grain,
             self.dock_masks, self.dock_qualifier, self.dock_lut,
-            self.dock_soft_clip, self.dock_raw, self.dock_analysis, self.dock_export,
+            self.dock_raw, self.dock_analysis, self.dock_export,
             self.dock_crop, self.dock_plugin, self.dock_script, self.dock_presets,
             self.dock_color_timeline_clips, self.dock_tracker,
         ]
@@ -1980,12 +1982,12 @@ class DockLayoutMixin:
         )
 
     def _migrate_color_grading_dock_height(self) -> None:
-        """Repair a stale, oversized Color Wheel splitter once.
+        """Balance the shared Color tools dock height once for this layout.
 
-        The three wheels intentionally fill the space their dock receives;
-        their panel remains shrinkable.  Old ``QMainWindow`` splitter state
-        can make that available space enormous, so resize both vertical sides
-        and persist the corrected Color layout.
+        Color Wheel, Qualifier, and Scopes share the same bottom dock row. A
+        layout restored from a different display can leave that row too short
+        or too tall, so migrate outlier ratios to a screen-relative height.
+        The ratio applies once; users can then resize the row themselves.
         """
         migration_version = self.config_manager.get(
             _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY
@@ -2011,32 +2013,32 @@ class DockLayoutMixin:
         ):
             return
 
-        saved_height: int | None = None
-        saved_size = self.config_manager.get(
-            f"dock_{dock.objectName()}_docked_size"
-        )
-        if isinstance(saved_size, str):
-            try:
-                _, saved_height_text = saved_size.split("x", 1)
-                saved_height = int(saved_height_text)
-            except ValueError:
-                logger.warning("Ignoring invalid Color Wheel dock size: %r", saved_size)
-
-        if (
-            saved_height is None
-            or not _COLOR_GRADING_DOCK_MIN_HEIGHT
-            <= saved_height
-            <= _COLOR_GRADING_DOCK_MAX_HEIGHT
-        ):
-            target_height = _COLOR_GRADING_DOCK_DEFAULT_HEIGHT
-        else:
-            target_height = saved_height
-
         current_height = dock.height()
-        if current_height <= max(target_height + 200, int(target_height * 1.6)):
+        available_height = viewport_dock.height() + current_height
+        if available_height <= 0:
             return
 
-        available_height = viewport_dock.height() + current_height
+        current_ratio = current_height / available_height
+        if _COLOR_TOOLS_DOCK_HEIGHT_MIN_RATIO <= current_ratio <= \
+                _COLOR_TOOLS_DOCK_HEIGHT_MAX_RATIO:
+            self.config_manager.set(
+                _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY,
+                _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION,
+                auto_save=False,
+            )
+            self.config_manager.save_config()
+            return
+
+        target_height = round(available_height * _COLOR_TOOLS_DOCK_HEIGHT_RATIO)
+        target_height = max(
+            _COLOR_GRADING_DOCK_MIN_HEIGHT,
+            min(_COLOR_GRADING_DOCK_MAX_HEIGHT, target_height),
+        )
+        # Keep the viewer above its existing minimum when the window is short.
+        max_tools_height = available_height - viewport_dock.minimumHeight()
+        if max_tools_height <= 0:
+            return
+        target_height = min(target_height, max_tools_height)
         viewport_target_height = max(
             viewport_dock.minimumHeight(),
             available_height - target_height,
@@ -2060,11 +2062,18 @@ class DockLayoutMixin:
             _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION,
             auto_save=False,
         )
+        self.config_manager.set(
+            f"dock_{dock.objectName()}_docked_size",
+            f"{dock.width()}x{target_height}",
+            auto_save=False,
+        )
         self._save_current_layout_to_store("Color")
         self.config_manager.save_config()
+        QTimer.singleShot(100, self._save_all_docked_sizes)
         logger.info(
-            "Migrated oversized Color Wheel dock from %dpx to %dpx",
-            current_height, target_height,
+            "Balanced Color tools dock from %dpx to %dpx (%.0f%% to %.0f%%)",
+            current_height, target_height, current_ratio * 100.0,
+            target_height / available_height * 100.0,
         )
 
     def _migrate_color_mapping_dock_layout(self, force: bool = False) -> None:
@@ -2436,8 +2445,7 @@ class DockLayoutMixin:
         self.tabifyDockWidget(self.dock_grain, self.dock_masks)
         self.tabifyDockWidget(self.dock_masks, self.dock_qualifier)
         self.tabifyDockWidget(self.dock_qualifier, self.dock_lut)
-        self.tabifyDockWidget(self.dock_lut, self.dock_soft_clip)
-        self.tabifyDockWidget(self.dock_soft_clip, self.dock_raw)
+        self.tabifyDockWidget(self.dock_lut, self.dock_raw)
         # dock_crop is kept separate and not tabified, allowing user to drag it freely
 
         # NEW: Tabify Right Side Panels (Info and Layers)

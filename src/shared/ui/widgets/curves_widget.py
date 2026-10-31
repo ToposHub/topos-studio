@@ -2,9 +2,10 @@ import logging
 
 import numpy as np
 from typing import Dict, Optional, Any
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QButtonGroup
+from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QButtonGroup, QWidget
 from PyQt6.QtCore import Qt, QPointF, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath
+from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
 
 try:
     from scipy.interpolate import PchipInterpolator
@@ -24,7 +25,7 @@ from src.shared.ui.style_sheet import (
 
 logger = logging.getLogger(__name__)
 
-class CurvesWidget(QWidget):
+class CurvesWidget(GpuScopeWidget):
     # Emits the LUT array (256, 1, 3) BGR and the control points data
     changed = pyqtSignal(np.ndarray, dict)
     interaction_started = pyqtSignal()
@@ -34,7 +35,7 @@ class CurvesWidget(QWidget):
     color_received = pyqtSignal(float, float, float)  # r, g, b (0-255)
 
     def __init__(self, parent=None) -> None:
-        super().__init__(parent)
+        super().__init__(parent, preserve_aspect=False, show_value_axis=False)
         self.setMinimumSize(300, 220)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         
@@ -147,6 +148,20 @@ class CurvesWidget(QWidget):
         return mx, my
 
     def paintEvent(self, event):
+        # QOpenGLWidget performs its own framebuffer pass via paintGL.
+        super().paintEvent(event)
+
+    def paintGL(self) -> None:
+        """Blit the shared GPU histogram, then paint the curve overlay."""
+        super().paintGL()
+        if self._frame_tex_id is None or not self._gl_ready:
+            self._paint_curve_overlay()
+
+    def _paint_scope_chrome(self) -> None:
+        super()._paint_scope_chrome()
+        self._paint_curve_overlay()
+
+    def _paint_curve_overlay(self) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
@@ -185,37 +200,31 @@ class CurvesWidget(QWidget):
         self._draw_control_points(painter, active_colors[self.active_channel], rect)
 
     def _draw_background(self, painter: QPainter, rect: QRectF):
-        """Draw professional dark background with subtle border."""
-        # Main background - #232326 for immersive feel
-        painter.setBrush(QColor(35, 35, 38))
-        painter.setPen(QPen(QColor(85, 85, 85), 0.7))
+        """Draw the curve surface with a fine black outer frame."""
+        if self._frame_tex_id is None:
+            painter.setBrush(QColor(35, 35, 38))
+        else:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(7, 7, 8), 0.8))
         painter.drawRect(rect)
 
     def _draw_grid(self, painter: QPainter, rect: QRectF):
-        """Draw dual-layer grid system (major + minor grid lines)."""
-        # Secondary grid (50x50 subdivisions) - very dense, color #2f2f33
-        secondary_pen = QPen(QColor(75, 75, 75), 0.4)
-        secondary_pen.setStyle(Qt.PenStyle.DotLine)
-        painter.setPen(secondary_pen)
-        
-        for i in range(1, 50):
-            if i % 10 == 0:  # Skip positions where major grid will be
-                continue
-            x = rect.left() + rect.width() * i / 25
-            y = rect.top() + rect.height() * i / 25
-            painter.drawLine(int(x), int(rect.top()), int(x), int(rect.bottom()))
-            painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+        """Draw fine continuous grid lines with a subtly stronger major grid."""
+        x_divisions = max(4, round(rect.width() / 50.0))
+        y_divisions = max(4, round(rect.height() / 38.0))
+        major_every = 3
 
-        # Primary grid (5x5) - solid lines, thinner, color #343438
-        primary_pen = QPen(QColor(85, 85, 85), 0.3)
-        primary_pen.setStyle(Qt.PenStyle.SolidLine)
-        painter.setPen(primary_pen)
-        
-        for i in range(1, 5):
-            x = rect.left() + rect.width() * i / 5
-            y = rect.top() + rect.height() * i / 5
-            painter.drawLine(int(x), int(rect.top()), int(x), int(rect.bottom()))
-            painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+        minor_pen = QPen(QColor(49, 49, 53), 0.55)
+        major_pen = QPen(QColor(62, 62, 66), 0.75)
+        for divisions, vertical in ((x_divisions, True), (y_divisions, False)):
+            for i in range(1, divisions):
+                x = rect.left() + rect.width() * i / divisions
+                y = rect.top() + rect.height() * i / divisions
+                painter.setPen(major_pen if i % major_every == 0 else minor_pen)
+                if vertical:
+                    painter.drawLine(round(x), round(rect.top()), round(x), round(rect.bottom()))
+                else:
+                    painter.drawLine(round(rect.left()), round(y), round(rect.right()), round(y))
 
         # Draw diagonal reference line (from bottom-left to top-right)
         diagonal_pen = QPen(QColor(52, 52, 56), 0.3)

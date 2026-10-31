@@ -649,7 +649,10 @@ class GpuScopeEngine:
         mode = demand.mode
         outputs: Dict[str, tuple] = {}
 
-        needs_sample = not mode_needs_falsecolor(mode)
+        needs_sample = (
+            not mode_needs_falsecolor(mode)
+            or bool(getattr(demand, 'histogram_overlay', False))
+        )
         if needs_sample:
             self.sample(source_texture, pool,
                         mask_texture=mask_texture, mask_uv_rect=mask_uv_rect)
@@ -671,7 +674,7 @@ class GpuScopeEngine:
             self.accumulate_waveform(pool, channel=3)
             self.display_waveform(pool, single_channel=True)
             outputs['luma'] = (pool['wf_display'].glo, pool['waveform_size'])
-        if mode_needs_histogram(mode):
+        if mode_needs_histogram(mode) or bool(getattr(demand, 'histogram_overlay', False)):
             self.accumulate_histogram(pool)
             self.reduce_histogram(pool)
             self.display_histogram(pool)

@@ -30,6 +30,16 @@ from src.shared.ui.style_sheet import (
 _DEFAULT_SLIDER_SHOW_WIDTH = 240
 
 
+def _to_scale_int(value: float, scale: int) -> int:
+    """浮点 -> slider int 域，四舍五入而非截断。
+
+    ``int(0.29 * 100) == 28`` 这类浮点噪声截断会让滑条上限/回显比真实
+    约束值少一格（如动态 range 的 Soft Clip 膝宽）；先 round 再取整，
+    已精确落在 int 域上的值行为不变。
+    """
+    return int(round(value * scale))
+
+
 class ParamSliderRow(QWidget):
     """Label + Slider + DragValue 三合一参数行。
 
@@ -85,9 +95,9 @@ class ParamSliderRow(QWidget):
         self._slider = ToposClickableSlider(
             Qt.Orientation.Horizontal,
             default_value=int(default_val * self._scale))
-        self._slider.setRange(int(min_val * self._scale),
-                              int(max_val * self._scale))
-        self._slider.setValue(int(default_val * self._scale))
+        self._slider.setRange(_to_scale_int(min_val, self._scale),
+                              _to_scale_int(max_val, self._scale))
+        self._slider.setValue(_to_scale_int(default_val, self._scale))
         self._slider.setMinimumHeight(18)
         self._slider.enable_velocity_drag = True
         layout.addWidget(self._slider)
@@ -126,7 +136,7 @@ class ParamSliderRow(QWidget):
         if self._updating:
             return
         self._updating = True
-        self._slider.setValue(int(float_val * self._scale))
+        self._slider.setValue(_to_scale_int(float_val, self._scale))
         self._updating = False
         self.valueChanged.emit(float_val)
 
@@ -144,7 +154,7 @@ class ParamSliderRow(QWidget):
             return
         self._updating = True
         self._drag.setValue(v)
-        self._slider.setValue(int(v * self._scale))
+        self._slider.setValue(_to_scale_int(v, self._scale))
         self._updating = False
 
     def reset(self):
@@ -164,8 +174,8 @@ class ParamSliderRow(QWidget):
 
     def setRange(self, min_val: float, max_val: float):
         self._drag.setRange(min_val, max_val)
-        self._slider.setRange(int(min_val * self._scale),
-                              int(max_val * self._scale))
+        self._slider.setRange(_to_scale_int(min_val, self._scale),
+                              _to_scale_int(max_val, self._scale))
 
     def setDefaultValue(self, v: float):
         self._default_val = float(v)

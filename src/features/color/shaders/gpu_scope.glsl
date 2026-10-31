@@ -491,18 +491,30 @@ void main() {
     vec3 log_sum = texelFetch(u_hist_sum, ivec2(col, 0), 0).rgb;
     vec3 norm = clamp(log_sum * u_max_inv, vec3(0.0), vec3(1.0));
     float y = v_texcoord.y;
-    vec3 col3 = vec3(0.0);
-    col3 += vec3(1.0, 0.23, 0.23) * step(y, norm.r);
-    col3 += vec3(0.23, 1.0, 0.23) * step(y, norm.g);
-    col3 += vec3(0.23, 0.47, 1.0) * step(y, norm.b);
-    col3 = clamp(col3, vec3(0.0), vec3(1.0));
+    vec3 colors[3] = vec3[3](
+        vec3(1.0, 0.23, 0.23),
+        vec3(0.23, 1.0, 0.23),
+        vec3(0.23, 0.47, 1.0)
+    );
+    vec3 fill = vec3(0.0);
+    vec3 trace = vec3(0.0);
+    float trace_width = 1.35 / u_display_size.y;
+    for (int channel = 0; channel < 3; channel++) {
+        float distance_to_curve = abs(y - norm[channel]);
+        float line = 1.0 - smoothstep(trace_width, trace_width * 2.0, distance_to_curve);
+        float under_curve = step(y, norm[channel]);
+        fill += colors[channel] * under_curve * 0.15;
+        trace += colors[channel] * line * 0.78;
+    }
+    vec3 background = vec3(0.137, 0.137, 0.149);
+    vec3 col3 = clamp(background + fill + trace, vec3(0.0), vec3(1.0));
     // Graticule: vertical 0% / 50% / 100% references plus the baseline.
     float px = 1.5 / u_display_size.x;
     float g0 = 1.0 - smoothstep(0.0, px, v_texcoord.x);
     float g50 = 1.0 - smoothstep(0.0, px, abs(v_texcoord.x - 0.5));
     float g100 = 1.0 - smoothstep(0.0, px, abs(v_texcoord.x - 1.0));
     float base = 1.0 - smoothstep(0.0, 1.5 / u_display_size.y, y);
-    vec3 grid = vec3(0.30) * max(max(g0, g50 * 0.7), max(g100 * 0.7, base * 0.6));
+    vec3 grid = vec3(0.20) * max(max(g0, g50 * 0.7), max(g100 * 0.7, base * 0.6));
     f_color = vec4(max(col3, grid), 1.0);
 }
 """

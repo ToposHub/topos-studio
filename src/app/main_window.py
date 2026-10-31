@@ -1249,6 +1249,7 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         from src.features.color.ui.raw_panel import RawPanel
         from src.features.color.ui.crop_panel import CropPanel
         from src.shared.ui.widgets.curves_widget import CurvesWidget
+        from src.features.color.ui.curves_panel import CurvesPanel
         from src.features.color.ui.hsl_curves_panel import HSLCurvesPanel
         from src.features.color.ui.lut_panel import LutPanel
         from src.features.color.ui.scope_panel import ScopePanel
@@ -1301,6 +1302,7 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         self.denoise_panel = DenoisePanel()
         self.deblur_panel = DeblurPanel()
         self.curves_widget = CurvesWidget()
+        self.curves_panel = CurvesPanel(self.curves_widget)
         self.hsl_curves_panel = HSLCurvesPanel(engine=self.engine)
         self.warper_panel = WarperPanel()
         self.mixer_panel = MixerPanel()
@@ -1332,7 +1334,11 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         self._active_tracker_task = None
         self._active_tracker_directions = ()
         self.qualifier_panel = QualifierPanel()
-        self.soft_clip_panel = SoftClipPanel()
+        # Legacy project/hydrator state only. No dock or visible panel remains;
+        # the new four-control UI in curves_panel is intentionally not wired.
+        # Remove this bridge with the schema migration in the UI follow-up plan.
+        self.soft_clip_panel = SoftClipPanel(parent=self)
+        self.soft_clip_panel.hide()
         self.raw_panel = RawPanel()
         self.crop_panel = CropPanel()
         self.export_panel = ExportPanel()
