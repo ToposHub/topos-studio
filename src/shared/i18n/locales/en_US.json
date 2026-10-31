@@ -399,6 +399,8 @@
     "tonal_saturation": "Tonal Saturation"
   },
   "qualifier": {
+    "matte_finesse": "Matte Finesse",
+    "blur_radius": "Blur Radius",
     "title": "Qualifier",
     "blur": "Blur:",
     "picker": "Pick",
