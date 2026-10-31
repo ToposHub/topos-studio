@@ -409,6 +409,8 @@
     "reset": "重置"
   },
   "qualifier": {
+    "matte_finesse": "Matte Finesse",
+    "blur_radius": "模糊半径",
     "title": "限定器",
     "blur": "Matte 模糊:",
     "picker": "拾取",

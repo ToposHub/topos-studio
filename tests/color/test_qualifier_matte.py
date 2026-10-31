@@ -3,7 +3,7 @@
 覆盖：
 - qualifier 参数模型（denoise 默认值 / 序列化往返）
 - matte 缓存键契约（matte_cache_hash 对所有内容输入敏感）
-- matte 预览三模式（面板按钮 / engine 状态 / controller 接线）
+- matte 预览三模式（engine 状态 / controller 接线）
 - qualifier 面板 denoise 滑条与 params 同步
 """
 
@@ -11,6 +11,7 @@ import os
 from types import SimpleNamespace
 
 import pytest
+from PyQt6.QtWidgets import QPushButton
 
 from src.features.color.core.layer import Layer
 
@@ -194,36 +195,18 @@ def test_panel_set_params_syncs_denoise(panel):
     assert panel.denoise_ctrl.value() == 25.0
 
 
-def test_panel_preview_buttons_request_modes(panel):
-    emitted = []
-    panel.matte_preview_requested.connect(emitted.append)
-
-    # 点击高亮 → 请求 highlight，按钮 checked
-    panel._preview_buttons["highlight"].click()
-    assert emitted == ["highlight"]
-    assert panel._preview_buttons["highlight"].isChecked()
-    assert not panel._preview_buttons["matte"].isChecked()
-
-    # 切到灰度 → 旧按钮取消，新按钮 checked
-    panel._preview_buttons["matte"].click()
-    assert emitted == ["highlight", "matte"]
-    assert panel._preview_buttons["matte"].isChecked()
-    assert not panel._preview_buttons["highlight"].isChecked()
-
-    # 再点当前激活按钮 → 关闭预览
-    panel._preview_buttons["matte"].click()
-    assert emitted == ["highlight", "matte", ""]
-    assert not panel._preview_buttons["matte"].isChecked()
+def test_panel_title_bar_has_no_preview_mode_buttons(panel):
+    assert panel._preview_buttons == {}
+    assert not any(
+        button.objectName().startswith("qualifierPreview_")
+        for button in panel.findChildren(QPushButton)
+    )
 
 
 def test_panel_set_matte_preview_active_external_sync(panel):
     panel.set_matte_preview_active(True, "black")
-    assert panel._preview_buttons["black"].isChecked()
-    assert not panel._preview_buttons["highlight"].isChecked()
-    assert not panel._preview_buttons["matte"].isChecked()
-
     panel.set_matte_preview_active(False)
-    assert not any(b.isChecked() for b in panel._preview_buttons.values())
+    assert panel._preview_buttons == {}
 
 
 # ---------------------------------------------------------------------------
