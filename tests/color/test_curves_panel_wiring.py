@@ -10,6 +10,7 @@ import pytest
 from PyQt6.QtTest import QSignalSpy, QTest
 
 from src.features.color.adapters.color_stack_hydrator import ColorStackHydrator
+from src.features.color.core.composition_uniforms import composition_uniform_values
 from src.features.color.core.curves_soft_clip import (
     curves_soft_clip_is_identity,
     set_soft_clip_control,
@@ -288,3 +289,162 @@ class TestGradeClipboardCurvesCategory:
         assert target.curves_edit["amounts"]["Y"] == 55.0
         # 非 curves 类别不受影响
         assert target.curves_data == {}
+
+
+# ================================================================
+# 任务 10 验收：undo/redo 快照、导出收集、渲染门控性能
+# ================================================================
+
+class TestUndoRedoSnapshot:
+    @staticmethod
+    def _sidebar_of(entry):
+        """undo/redo 快照按序列化形态返回（dict），兼容活 Layer 对象。"""
+        if isinstance(entry, dict):
+            return entry["curves_soft_clip"], entry["curves_edit"]
+        return entry.curves_soft_clip, entry.curves_edit
+
+    def test_undo_restores_curves_sidebar_state(self):
+        """一次连续拖动 = interaction_started 时的一次快照；undo 恢复侧栏。"""
+        from src.features.color.core.history import HistoryManager
+        from src.features.color.core.layer import Layer
+        from src.features.color.core.curves_soft_clip import (
+            normalize_curves_edit,
+        )
+
+        mgr = HistoryManager()
+        img = np.zeros((8, 8, 3), dtype=np.uint8)
+        layer = Layer()
+        mgr.push_state(img, [layer], 0, copy_image=False)
+
+        layer.curves_soft_clip = set_soft_clip_control({}, "R", "high_soft", 0.5)
+        layer.curves_edit = normalize_curves_edit({"amounts": {"Y": 30.0}})
+
+        state = mgr.undo(img, [layer], 0)
+        assert state is not None
+        soft, edit = self._sidebar_of(state["layers"][0])
+        assert curves_soft_clip_is_identity(soft)
+        assert edit["amounts"]["Y"] == 100.0
+
+        # redo 回到修改态（对称交换语义；redo 输入须为活 Layer 对象，
+        # 与 engine.undo 后的 deserialize 产物一致）
+        from src.features.color.core.layer import Layer as _Layer
+        live_layers = [_Layer.from_dict(d) for d in state["layers"]]
+        redone = mgr.redo(state["image"], live_layers, 0)
+        assert redone is not None
+        soft, edit = self._sidebar_of(redone["layers"][0])
+        assert soft["channels"]["R"]["high_soft"] == pytest.approx(0.5)
+        assert edit["amounts"]["Y"] == 30.0
+
+
+class TestExportGradeCollection:
+    """preview/export 一致性（收集层）：四参数/强度随栈快照进入 grade。
+
+    生产路径上平铺键由收集方从活动图层派生（hydrator / edit_controller
+    layers 快照），测试栈按同样形状构造。
+    """
+
+    @staticmethod
+    def _exporter_with_stack(layers, *, curves_soft_clip=None, curves_edit=None,
+                             grading_params=None):
+        from types import SimpleNamespace
+        from src.features.edit.core.timeline_export import TimelineExporter
+
+        stack = ColorStackData(
+            stack_id="stack",
+            grading_params=grading_params or {},
+            layers=tuple(layers),
+            active_layer_index=0,
+            curves_soft_clip=curves_soft_clip or {},
+            curves_edit=curves_edit or {},
+        )
+        exporter = TimelineExporter.__new__(TimelineExporter)
+        exporter._project = SimpleNamespace(color_stacks={"stack": stack})
+        exporter._color_grade_lut_cache = {}
+        layer = SimpleNamespace(
+            clip=SimpleNamespace(color_stack_id="stack"),
+            clip_id="clip",
+            source_frame=0,
+        )
+        return exporter, layer
+
+    def test_non_identity_state_reaches_export_grade(self):
+        state = set_soft_clip_control(
+            {"linked": False, "channels": {}}, "R", "high_soft", 0.4)
+        exporter, layer = self._exporter_with_stack(
+            [{"grading_params": {}, "curves_soft_clip": state}],
+            curves_soft_clip=state,
+        )
+        grade = exporter._get_clip_color_grade(layer)
+        assert grade is not None
+        assert grade["curves_soft_clip"]["channels"]["R"]["high_soft"] == 0.4
+
+    def test_identity_state_does_not_reach_export_grade(self):
+        # 有基础调色（grade 非 None）但侧栏恒等：不携带四参数
+        exporter, layer = self._exporter_with_stack(
+            [{"grading_params": {"exposure": 0.5}}],
+            grading_params={"exposure": 0.5},
+        )
+        grade = exporter._get_clip_color_grade(layer)
+        assert grade is not None
+        assert grade["curves_soft_clip"] is None
+
+    def test_non_default_edit_amounts_reach_export_grade(self):
+        edit_state = {"linked": True, "amounts": {"Y": 40.0}}
+        exporter, layer = self._exporter_with_stack(
+            [{"grading_params": {},
+              "curves_edit": edit_state}],
+            curves_edit=edit_state,
+        )
+        grade = exporter._get_clip_color_grade(layer)
+        assert grade is not None
+        assert grade["curves_edit"]["amounts"]["Y"] == 40.0
+
+    def test_default_edit_amounts_do_not_reach_export_grade(self):
+        exporter, layer = self._exporter_with_stack(
+            [{"grading_params": {"exposure": 0.5}}],
+            grading_params={"exposure": 0.5},
+        )
+        grade = exporter._get_clip_color_grade(layer)
+        assert grade is not None
+        assert grade["curves_edit"] is None
+
+
+class TestRenderGatingPerformance:
+    """性能验收：恒等状态不编译新 program（缓存命中），非恒等才进管线。"""
+
+    def test_identity_state_shares_cached_program(self):
+        moderngl = pytest.importorskip("moderngl")
+        ctx = moderngl.create_standalone_context(require=330)
+        try:
+            from src.features.color.core.shader_compiler import ShaderPipeline
+            from src.features.color.core.curves_soft_clip import (
+                normalize_curves_soft_clip,
+            )
+
+            pipeline = ShaderPipeline(ctx)
+            identity_layer = {
+                "opacity": 1.0, "blend_mode": "Normal",
+                "grading_params": {},
+                "curves_soft_clip": normalize_curves_soft_clip(None),
+            }
+            values_a = composition_uniform_values(
+                identity_layer, width=64, height=64)
+            values_b = composition_uniform_values(
+                identity_layer, width=64, height=64)
+            # 门控判定：恒等 → 无 curves_soft_clip 旗标（与其它层共享缓存）
+            assert curves_soft_clip_is_identity(identity_layer["curves_soft_clip"])
+            assert values_a["u_cs_low_clip"] == (0.0, 0.0, 0.0)
+            assert values_a["u_cs_high_clip"] == (1.0, 1.0, 1.0)
+            prog1 = pipeline.build_composition_shader()
+            prog2 = pipeline.build_composition_shader()
+            assert prog1 is prog2  # 缓存命中，无重编译
+            pipeline.release()
+        finally:
+            ctx.release()
+
+    def test_throttle_interval_is_16ms(self, qapp):
+        panel = CurvesPanel(CurvesWidget())
+        assert panel._soft_timer.interval() == 16
+        assert panel._edit_timer.interval() == 16
+        assert panel._soft_timer.isSingleShot()
+        assert panel._edit_timer.isSingleShot()
