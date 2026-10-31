@@ -291,7 +291,7 @@ def _make_ctrl(tmp_path, monkeypatch, layers, image=None, folder="User"):
     # MainWindow 提供）
     for attr in ("grading_panel", "layer_panel", "plugin_panel",
                  "curves_widget", "hsl_curves_panel", "mixer_panel",
-                 "effects_panel", "soft_clip_panel", "qualifier_panel",
+                 "effects_panel", "qualifier_panel",
                  "lut_panel", "warper_panel", "mask_panel", "info_panel"):
         setattr(ctrl, attr, MagicMock())
     ctrl._get_composite_graph_data = lambda: None

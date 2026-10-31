@@ -337,7 +337,6 @@ class ColorStackHydrator:
         self._apply_curves_palette_to_panel(stack, panels.get("curves_palette"))
         self._apply_hsl_to_panel(stack, panels.get("hsl_panel"))
         self._apply_mixer_to_panel(stack, panels.get("mixer_panel"))
-        self._apply_soft_clip_to_panel(stack, panels.get("soft_clip_panel"))
         self._apply_lut_to_panel(stack, panels.get("lut_panel"))
         self._apply_video_denoise_to_panel(
             stack, panels.get("denoise_panel"))
@@ -469,9 +468,8 @@ class ColorStackHydrator:
             if mp is not None and hasattr(mp, "params"):
                 mixer_params = {k: list(v) for k, v in mp.params.items()}
 
-            sp = panels.get("soft_clip_panel")
-            if sp is not None:
-                soft_clip_params = self._read_soft_clip_params(sp)
+            # 旧 SoftClipPanel 已删（任务 9）：无引擎图层时 legacy 8 参数
+            # 无面板可读，保持空 dict（图层路径始终权威）
 
             if engine and getattr(engine, "layers", None):
                 layer = engine.layers[0]
@@ -640,15 +638,6 @@ class ColorStackHydrator:
             panel.set_params(stack.mixer_params)
 
     @staticmethod
-    def _apply_soft_clip_to_panel(stack: ColorStackData, panel: Any) -> None:
-        if panel is None:
-            return
-        if not hasattr(panel, "set_params"):
-            logger.debug("soft_clip_panel missing or incompatible API, skipping")
-            return
-        panel.set_params(stack.soft_clip_params, emit=False)
-
-    @staticmethod
     def _apply_lut_to_panel(stack: ColorStackData, panel: Any) -> None:
         if panel is None:
             return
@@ -661,37 +650,6 @@ class ColorStackHydrator:
     # ------------------------------------------------------------------
     # Private helpers — per-panel collect
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _read_soft_clip_params(panel: Any) -> dict[str, Any]:
-        """Read soft clip params from the panel widget controls.
-
-        The SoftClipPanel stores params in its spin boxes. We read them
-        directly rather than relying on ``emit_params`` (which emits a signal).
-        """
-        result: dict[str, Any] = {}
-        try:
-            if hasattr(panel, "enable_check"):
-                result["enabled"] = panel.enable_check.isChecked()
-            controls_map: dict[str, Any] = {}
-            if hasattr(panel, "exposure_control"):
-                controls_map["exposure"] = panel.exposure_control
-            if hasattr(panel, "contrast_control"):
-                controls_map["contrast"] = panel.contrast_control
-            if hasattr(panel, "high_control"):
-                controls_map["high"] = panel.high_control
-            if hasattr(panel, "white_point_control"):
-                controls_map["white_point"] = panel.white_point_control
-            if hasattr(panel, "shoulder_strength_control"):
-                controls_map["shoulder_strength"] = panel.shoulder_strength_control
-            if hasattr(panel, "low_control"):
-                controls_map["low"] = panel.low_control
-            if hasattr(panel, "black_point_control"):
-                controls_map["black_point"] = panel.black_point_control
-            if hasattr(panel, "toe_strength_control"):
-                controls_map["toe_strength"] = panel.toe_strength_control
-            for key, ctrl in controls_map.items():
-                result[key] = ctrl["spin"].value()
-        except Exception:
-            logger.debug("Failed to read soft_clip_params from panel", exc_info=True)
-        return result
+    # 旧 SoftClipPanel 的 _apply_soft_clip_to_panel / _read_soft_clip_params
+    # 已随面板一并删除（任务 9）：legacy 8 参数 soft_clip_params 只保留
+    # 渲染与工程数据兼容路径，无 UI 读写。

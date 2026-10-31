@@ -256,7 +256,7 @@ def _make_layer_ctrl(tmp_path, layers):
     ctrl.status_bar = MagicMock()
     for attr in ("grading_panel", "layer_panel", "plugin_panel",
                  "curves_widget", "hsl_curves_panel", "mixer_panel",
-                 "effects_panel", "soft_clip_panel", "qualifier_panel",
+                 "effects_panel", "qualifier_panel",
                  "lut_panel", "warper_panel", "mask_panel", "info_panel"):
         setattr(ctrl, attr, MagicMock())
     ctrl.current_file_is_video = False

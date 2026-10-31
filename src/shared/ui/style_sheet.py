@@ -1043,8 +1043,8 @@ QWidget {
 /* === 面板专属背景强化 === */
 /* 确保所有面板使用统一的背景色 */
 QDockWidget, QDockWidget > QWidget,
-AdjustmentPanel, GradingPanel, RawPanel, MixerPanel, 
-QualifierPanel, BlurSharpenPanel, SoftClipPanel, 
+AdjustmentPanel, GradingPanel, RawPanel, MixerPanel,
+QualifierPanel, BlurSharpenPanel, CurvesPanel,
 FilmGrainPanel, LutPanel, DenoisePanel, PluginPanel {
     background-color: #27272b;  /* 面板背景色 */
 }
