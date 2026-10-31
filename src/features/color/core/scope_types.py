@@ -95,6 +95,8 @@ class ScopeDemand:
             should weight the analysis.  The texture is resolved inside the
             renderer context; no mask pixels cross into the UI.
         mask_enabled: Whether the mask texture should be applied.
+        histogram_overlay: Also emit the GPU histogram texture for the curves
+            canvas, regardless of the active scope mode.
     """
     revision: int
     source_revision: int
@@ -105,6 +107,7 @@ class ScopeDemand:
     is_playing: bool = False
     mask_layer_id: Optional[str] = None
     mask_enabled: bool = False
+    histogram_overlay: bool = False
     scope_transfer: str = 'srgb'
     scope_primaries: str = 'bt709'
     falsecolor_mode: str = 'sdr'

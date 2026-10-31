@@ -1247,7 +1247,7 @@ class LayerOpsMixin:
         # texture. Scope analysis is submitted as a GPU demand against that
         # texture. There is deliberately no CPU snapshot/readback here:
         # realtime Color-page scopes must remain GPU-only.
-        need_scope = self._is_scope_panel_visible()
+        need_scope = self._is_scope_panel_visible() or self._is_curves_panel_visible()
         video_controller = getattr(self, 'video_controller', None)
         is_playing = bool(getattr(video_controller, 'is_playing', False))
         if need_scope:
@@ -1337,6 +1337,7 @@ class LayerOpsMixin:
                 is_playing=is_playing,
                 mask_layer_id=mask_layer_id,
                 mask_enabled=mask_enabled,
+                histogram_overlay=self._is_curves_panel_visible(),
                 scope_transfer=state.get('scope_transfer', 'srgb'),
                 scope_primaries=state.get('scope_primaries', 'bt709'),
                 falsecolor_mode=state.get('falsecolor_mode', 'sdr'),
@@ -1352,7 +1353,7 @@ class LayerOpsMixin:
 
     def _on_scope_demand_changed(self) -> None:
         """Submit a GPU refresh after a mode/zoom/size-only change."""
-        if not self._is_scope_panel_visible():
+        if not (self._is_scope_panel_visible() or self._is_curves_panel_visible()):
             return
         video_controller = getattr(self, 'video_controller', None)
         is_playing = bool(getattr(video_controller, 'is_playing', False))
@@ -1360,7 +1361,7 @@ class LayerOpsMixin:
 
     def _on_scope_visibility_changed(self, visible: bool) -> None:
         """Start/stop the low-priority GPU scope lane with the dock."""
-        if not visible:
+        if not (self._is_scope_panel_visible() or self._is_curves_panel_visible()):
             try:
                 self.engine.discard_pending_gpu_scope()
             except Exception:
@@ -1372,7 +1373,7 @@ class LayerOpsMixin:
 
     def on_gpu_scope_ready(self, frame) -> None:
         """Forward a ``ScopeGpuFrame`` to the panel if still visible."""
-        if not self._is_scope_panel_visible() or frame is None:
+        if not (self._is_scope_panel_visible() or self._is_curves_panel_visible()) or frame is None:
             return
         from src.features.color.core.scope_types import is_frame_valid_for_demand
 
@@ -1380,11 +1381,16 @@ class LayerOpsMixin:
             frame, getattr(self, '_latest_gpu_scope_demand', None)
         ):
             return
-        panel = getattr(self, 'scope_panel', None)
-        if panel is None:
-            return
         try:
-            panel.update_gpu_scope(frame)
+            panel = getattr(self, 'scope_panel', None)
+            if panel is not None:
+                panel.update_gpu_scope(frame)
+            curves_widget = getattr(self, 'curves_widget', None)
+            if curves_widget is not None:
+                curves_widget.set_scope_frame(
+                    frame.histogram_texture_id,
+                    *frame.histogram_size,
+                )
         except Exception as exc:
             logger.debug("GPU scope present failed: %s", exc)
 
@@ -1399,6 +1405,17 @@ class LayerOpsMixin:
         """Return whether the actual ScopePanel is exposed to the user."""
         dock = getattr(self, 'dock_analysis', None)
         panel = getattr(self, 'scope_panel', None)
+        return bool(
+            dock is not None
+            and panel is not None
+            and dock.isVisible()
+            and panel.isVisible()
+        )
+
+    def _is_curves_panel_visible(self) -> bool:
+        """Return whether the integrated curve histogram is exposed."""
+        dock = getattr(self, 'dock_curves', None)
+        panel = getattr(self, 'curves_widget', None)
         return bool(
             dock is not None
             and panel is not None

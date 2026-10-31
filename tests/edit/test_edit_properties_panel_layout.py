@@ -375,8 +375,8 @@ def test_timeline_layout_migration_replaces_a_corrupted_giant_saved_height(qapp)
     window.close()
 
 
-def test_oversized_color_wheel_layout_resizes_both_vertical_docks_once() -> None:
-    """Color Wheel must not retain a stale bottom-splitter proportion."""
+def test_unbalanced_color_tools_height_resizes_both_vertical_docks_once() -> None:
+    """Color tools should keep a consistent share of the viewport height."""
     grading_dock = MagicMock()
     grading_dock.isFloating.return_value = False
     grading_dock.objectName.return_value = "dockGrading"
@@ -391,7 +391,7 @@ def test_oversized_color_wheel_layout_resizes_both_vertical_docks_once() -> None
 
     host.resizeDocks.assert_called_once_with(
         [host.dock_viewport, grading_dock],
-        [1043, 257],
+        [884, 416],
         Qt.Orientation.Vertical,
     )
     assert config.data[_COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY] == \

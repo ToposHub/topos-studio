@@ -430,17 +430,6 @@ class ColorModule:
             default_visible=False,
         ))
         panel_registry.register(PanelDescriptor(
-            panel_id="color.soft_clip",
-            title_key="panel.soft_clip",
-            fallback_title="Soft Clip",
-            feature_id="color",
-            category="Color",
-            page_ids=("Color",),
-            dock_attr="dock_soft_clip",
-            order=910,
-            default_visible=False,
-        ))
-        panel_registry.register(PanelDescriptor(
             panel_id="color.raw",
             title_key="panel.raw",
             fallback_title="Camera Raw",
