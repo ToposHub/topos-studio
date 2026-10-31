@@ -157,6 +157,28 @@ def curves_soft_clip_is_identity(params: Any) -> bool:
     return True
 
 
+def curves_edit_is_default(state: Any) -> bool:
+    """Edit 强度是否全部为默认（100 = 曲线全额生效）。
+
+    渲染/导出门控用：默认状态与"无 Edit 强度"同义，不触发任何额外
+    处理。链接开关不影响渲染，不计入判定。
+    """
+    if not isinstance(state, dict):
+        return True
+    amounts = state.get("amounts")
+    if not isinstance(amounts, dict):
+        return True
+    for channel in ("Y", "R", "G", "B"):
+        value = amounts.get(channel, 100.0)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            if channel in amounts:
+                return False
+            continue
+        if float(value) != 100.0:
+            return False
+    return True
+
+
 def set_soft_clip_control(
     params: Dict[str, Any], channel: str, key: str, value: float,
 ) -> Dict[str, Any]:
@@ -245,6 +267,7 @@ def sanitize_payload(payload: Any) -> Dict[str, Any]:
 __all__ = [
     "SOFT_CLIP_PARAM_KEYS",
     "apply_soft_clip_channel",
+    "curves_edit_is_default",
     "curves_soft_clip_is_identity",
     "default_curves_edit",
     "default_curves_soft_clip",

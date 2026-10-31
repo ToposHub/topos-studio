@@ -55,7 +55,9 @@ def _iter_mask_shapes(items: Iterable[Any]) -> Iterator[Any]:
 
 GRADE_CATEGORY_KEYS: Dict[str, Sequence[str]] = {
     "primary": ("grading_params",),
-    "curves": ("curves_data",),
+    # "curves" 面板 = 控制点 + 侧栏（Edit 强度/链接 + 四参数柔化裁切），
+    # 三者作为同一工具整体粘贴
+    "curves": ("curves_data", "curves_edit", "curves_soft_clip"),
     "hsl": ("hsl_curve_data",),
     "mixer": ("mixer_params",),
     "warper": ("warper_params",),

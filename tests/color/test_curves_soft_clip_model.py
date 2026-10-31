@@ -225,6 +225,69 @@ class TestApplySoftClipChannel:
         ) == pytest.approx(low_clip + low_soft, abs=1e-9)
 
 
+class TestApplyCurvesSoftClipImage:
+    """图像级 CPU 实现（advanced_grade_cpu.apply_curves_soft_clip_image）。"""
+
+    @staticmethod
+    def _image() -> np.ndarray:
+        rng = np.random.default_rng(7)
+        img = rng.uniform(-0.5, 2.5, size=(6, 5, 3)).astype(np.float32)
+        img[0, 0] = (-0.7, 0.4, 3.0)   # 负值 / 超白端点
+        img[0, 1] = (0.0, 1.0, 0.5)
+        return img
+
+    def test_identity_state_returns_input_unchanged(self):
+        from src.features.color.core.advanced_grade_cpu import (
+            apply_curves_soft_clip_image,
+        )
+        img = self._image()
+        out = apply_curves_soft_clip_image(img, default_curves_soft_clip())
+        assert np.array_equal(out, img)
+
+    def test_identity_state_preserves_non_finite_pixels(self):
+        from src.features.color.core.advanced_grade_cpu import (
+            apply_curves_soft_clip_image,
+        )
+        img = self._image()
+        img[1, 1] = (np.nan, np.inf, -np.inf)
+        out = apply_curves_soft_clip_image(img, default_curves_soft_clip())
+        assert np.isnan(out[1, 1, 0])
+        assert out[1, 1, 1] == np.inf
+        assert out[1, 1, 2] == -np.inf
+
+    def test_per_channel_independence(self):
+        from src.features.color.core.advanced_grade_cpu import (
+            apply_curves_soft_clip_image,
+        )
+        params = normalize_curves_soft_clip({
+            "linked": False,
+            "channels": {"R": {"high_clip": 0.8, "high_soft": 0.0}},
+        })
+        img = self._image()
+        out = apply_curves_soft_clip_image(img, params)
+        # R 通道被硬钳到 0.8；G/B 通道原样
+        assert out[..., 0].max() == pytest.approx(0.8, abs=1e-6)
+        assert np.array_equal(out[..., 1], img[..., 1])
+        assert np.array_equal(out[..., 2], img[..., 2])
+
+    def test_matches_scalar_reference(self):
+        from src.features.color.core.advanced_grade_cpu import (
+            apply_curves_soft_clip_image,
+        )
+        params = normalize_curves_soft_clip({
+            "channels": {"G": {"low_clip": -0.15, "low_soft": 0.2,
+                               "high_clip": 1.1, "high_soft": 0.2}},
+        })
+        img = self._image()
+        out = apply_curves_soft_clip_image(img, params)
+        values = params["channels"]["G"]
+        for y, x in ((0, 0), (1, 1), (2, 2), (3, 3)):
+            expected = apply_soft_clip_channel(
+                float(img[y, x, 1]), values["low_clip"], values["low_soft"],
+                values["high_clip"], values["high_soft"])
+            assert out[y, x, 1] == pytest.approx(expected, abs=1e-5)
+
+
 # ================================================================
 # Layer 集成
 # ================================================================

@@ -827,6 +827,50 @@ float3 msl_apply_soft_clip(float3 color, float high, float white_point,
 """
 
 
+# ── CURVES_SOFT_CLIP_SNIPPET 的 MSL 翻译 ────────────────────────────────
+
+# 曲线面板四参数柔化裁切（指数软膝）——与 GLSL CURVES_SOFT_CLIP_SNIPPET
+# 及移动端 soft_clip.frag 逐式同形；默认参数下严格恒等。修改必须三端同步。
+MSL_CURVES_SOFT_CLIP = """
+// —— CURVES_SOFT_CLIP_SNIPPET 逐条翻译（每通道指数软膝，移动端同式）
+float msl_apply_soft_clip_knee(float value, float low_clip, float low_soft,
+                               float high_clip, float high_soft) {
+    float gap = max(high_clip - low_clip, 0.0);
+    if (gap == 0.0) return low_clip;
+    float low_knee = clamp(low_soft, 0.0, gap);
+    float high_knee = clamp(high_soft, 0.0, max(gap - low_knee, 0.0));
+
+    if (low_knee > 0.0) {
+        float low_start = low_clip + low_knee;
+        if (value < low_start) {
+            value = low_clip + low_knee * exp((value - low_start) / low_knee);
+        }
+    } else if (low_clip != 0.0 && value < low_clip) {
+        value = low_clip;
+    }
+
+    if (high_knee > 0.0) {
+        float high_start = high_clip - high_knee;
+        if (value > high_start) {
+            value = high_clip - high_knee * exp(-(value - high_start) / high_knee);
+        }
+    } else if (high_clip != 1.0 && value > high_clip) {
+        value = high_clip;
+    }
+    return value;
+}
+
+float3 msl_apply_curves_soft_clip(float3 color, float3 low_clip, float3 low_soft,
+                                  float3 high_clip, float3 high_soft) {
+    return float3(
+        msl_apply_soft_clip_knee(color.r, low_clip.r, low_soft.r, high_clip.r, high_soft.r),
+        msl_apply_soft_clip_knee(color.g, low_clip.g, low_soft.g, high_clip.g, high_soft.g),
+        msl_apply_soft_clip_knee(color.b, low_clip.b, low_soft.b, high_clip.b, high_soft.b)
+    );
+}
+"""
+
+
 # ── FILM_GRAIN_SNIPPET 的 MSL 翻译 ───────────────────────────────────────
 
 # hash_grain 为无 sin 的 fract-hash（纯 +/* 运算）——与 P6-06 compute

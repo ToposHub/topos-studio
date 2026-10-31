@@ -101,6 +101,12 @@ _BODY_BASELINE_MINIMAL = [
     "uniform float u_lift_saturation;",
     "uniform float u_gamma_saturation;",
     "uniform float u_gain_saturation;",
+    # 曲线面板四参数柔化裁切（追加在基础段末尾，既有偏移不变；
+    # 编译期门控——无运行期开关 uniform）
+    "uniform vec3 u_cs_low_clip;",
+    "uniform vec3 u_cs_low_soft;",
+    "uniform vec3 u_cs_high_clip;",
+    "uniform vec3 u_cs_high_soft;",
 ]
 
 
@@ -119,8 +125,9 @@ def test_optional_and_grain_declarations():
         has_curves=True, has_hsl_curve=True, has_warper=True,
         has_lut3d=True, grain_enabled=True)
     body = m.declarations("body")
-    # 可选 sampler 段在 mixer 之后、grain 段在其后（插件除外）
-    assert body[body.index("uniform float u_gain_saturation;") + 1:] == [
+    # 可选 sampler 段在基础段末尾（u_cs_* 四参数）之后、grain 段在其后
+    # （插件除外）
+    assert body[body.index("uniform vec3 u_cs_high_soft;") + 1:] == [
         "uniform sampler2D u_curves_tex;",
         "uniform sampler2D u_hsl_curve_tex;",
         "uniform sampler2D u_warper_tex;",

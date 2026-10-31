@@ -156,4 +156,64 @@ def apply_soft_clip_image(rgb: np.ndarray, params: Dict[str, Any],
     return result.astype(np.float32)
 
 
-__all__ = ["apply_hsl_curves_image", "apply_soft_clip_image"]
+def apply_curves_soft_clip_image(rgb: np.ndarray, params: Dict[str, Any],
+                                 ) -> np.ndarray:
+    """曲线面板四参数软剪裁（指数软膝）作用于 RGB 图像。
+
+    逐式镜像 curves_soft_clip.apply_soft_clip_channel（= 移动版
+    soft_clip.frag / GLSL CURVES_SOFT_CLIP_SNIPPET / MSL 同式）。默认
+    参数下严格恒等：超白与负 RGB 原样保留。非有限像素原样直通（软膝
+    只定义在有限域上，与旧 soft-clip 的行为一致）。
+    """
+    result = rgb.astype(np.float64, copy=True)
+    channels = params.get("channels") if isinstance(params, dict) else None
+    if not isinstance(channels, dict):
+        return result.astype(np.float32)
+
+    finite = np.isfinite(result)
+    for idx, name in ((0, "R"), (1, "G"), (2, "B")):
+        values = channels.get(name)
+        if not isinstance(values, dict):
+            continue
+        low_clip = float(values.get("low_clip", 0.0))
+        low_soft = float(values.get("low_soft", 0.0))
+        high_clip = float(values.get("high_clip", 1.0))
+        high_soft = float(values.get("high_soft", 0.0))
+
+        gap = max(high_clip - low_clip, 0.0)
+        if gap == 0.0:
+            result[..., idx] = np.where(finite[..., idx], low_clip,
+                                        result[..., idx])
+            continue
+        low_knee = min(max(low_soft, 0.0), gap)
+        high_knee = min(max(high_soft, 0.0), max(gap - low_knee, 0.0))
+
+        col = result[..., idx]
+        col_finite = finite[..., idx]
+        if low_knee > 0.0:
+            low_start = low_clip + low_knee
+            mask = col_finite & (col < low_start)
+            if np.any(mask):
+                col[mask] = low_clip + low_knee * np.exp(
+                    (col[mask] - low_start) / low_knee)
+        elif low_clip != 0.0:
+            mask = col_finite & (col < low_clip)
+            if np.any(mask):
+                col[mask] = low_clip
+
+        if high_knee > 0.0:
+            high_start = high_clip - high_knee
+            mask = col_finite & (col > high_start)
+            if np.any(mask):
+                col[mask] = high_clip - high_knee * np.exp(
+                    -(col[mask] - high_start) / high_knee)
+        elif high_clip != 1.0:
+            mask = col_finite & (col > high_clip)
+            if np.any(mask):
+                col[mask] = high_clip
+        result[..., idx] = col
+    return result.astype(np.float32)
+
+
+__all__ = ["apply_curves_soft_clip_image", "apply_hsl_curves_image",
+           "apply_soft_clip_image"]

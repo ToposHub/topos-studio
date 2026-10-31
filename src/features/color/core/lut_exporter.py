@@ -26,6 +26,8 @@ import os
 from typing import TYPE_CHECKING, Callable, Optional, Tuple, Dict, Any
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, Qt
 
+from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
+
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
     from src.features.color.core.layer import Layer
 
@@ -509,6 +511,13 @@ class LutExportWorker(QObject):
         if soft_clip and soft_clip.get('enabled', False):
             result = self._apply_soft_clip_cpu(result, soft_clip)
 
+        # 4.5 曲线面板四参数柔化裁切（指数软膝；GPU 合成序中在 legacy
+        # soft clip 之后）——与 advanced_grade_cpu.apply_curves_soft_clip_image
+        # 同一数学
+        curves_soft_clip = layer_data.get('curves_soft_clip')
+        if curves_soft_clip and not curves_soft_clip_is_identity(curves_soft_clip):
+            result = self._apply_curves_soft_clip_cpu(result, curves_soft_clip)
+
         # 5. Apply RGB mixer
         mixer_params = layer_data.get('mixer_params', {})
         if self._has_active_mixer_params(mixer_params):
@@ -856,6 +865,18 @@ class LutExportWorker(QObject):
 
         return result
 
+    def _apply_curves_soft_clip_cpu(self, lut: np.ndarray, params: Dict) -> np.ndarray:
+        """曲线面板四参数柔化裁切（指数软膝）作用于 LUT 数据。
+
+        直接复用 ``advanced_grade_cpu.apply_curves_soft_clip_image``——
+        同一实现保证导出 LUT、CPU 成片导出与 GPU 预览三方一致（数组
+        按 ``[..., 3]`` 通道约定，任意网格形状通用）。
+        """
+        from src.features.color.core.advanced_grade_cpu import (
+            apply_curves_soft_clip_image,
+        )
+        return apply_curves_soft_clip_image(lut, params)
+
     def _apply_soft_clip_cpu(self, lut: np.ndarray, params: Dict) -> np.ndarray:
         """
         Apply soft clip (filmic tone mapping) to LUT data.
@@ -1179,6 +1200,12 @@ class LutExporter:
         # Soft clip
         if hasattr(layer, 'soft_clip_params') and layer.soft_clip_params:
             data['soft_clip_params'] = copy.deepcopy(layer.soft_clip_params)
+
+        # 曲线面板侧栏状态（四参数柔化裁切：非恒等才携带；Edit 强度已
+        # 折算进 layer.curves_lut，无需单独传递）
+        if hasattr(layer, 'curves_soft_clip') and \
+                not curves_soft_clip_is_identity(layer.curves_soft_clip):
+            data['curves_soft_clip'] = copy.deepcopy(layer.curves_soft_clip)
 
         # LUT intensity (for applied LUT)
         if hasattr(layer, 'lut_intensity'):

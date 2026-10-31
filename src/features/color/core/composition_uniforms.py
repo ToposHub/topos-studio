@@ -233,6 +233,13 @@ _BASE_DECLS = [
     ("u_lift_saturation", "float"),
     ("u_gamma_saturation", "float"),
     ("u_gain_saturation", "float"),
+    # 曲线面板四参数柔化裁切（每通道 R/G/B 三元组；指数软膝，默认恒等）。
+    # 无开关 uniform——编译期门控（has_curves_soft_clip 旗标进 program
+    # 缓存键），非恒等才编译进管线。
+    ("u_cs_low_clip", "vec3"),
+    ("u_cs_low_soft", "vec3"),
+    ("u_cs_high_clip", "vec3"),
+    ("u_cs_high_soft", "vec3"),
 ]
 
 _GRAIN_DECLS = [
@@ -452,6 +459,34 @@ def composition_uniform_values(
     values["u_sc_toe_strength"] = float(scp.get("toe_strength", 1.0))
     values["u_sc_exposure"] = float(scp.get("exposure", 0.0))
     values["u_sc_contrast"] = float(scp.get("contrast", 0.0))
+
+    # 曲线面板四参数柔化裁切：每通道读值组 vec3，缺键回退恒等默认
+    # （共享缓存 program 的残留 uniforms 被覆盖，与 fx 组同一防串参口径）。
+    csc = _layer_get(layer, "curves_soft_clip") or {}
+    if not isinstance(csc, dict):
+        csc = {}
+    csc_channels = csc.get("channels")
+    if not isinstance(csc_channels, dict):
+        csc_channels = {}
+    _CS_DEFAULTS = {
+        "low_clip": (0.0, 0.0, 0.0),
+        "low_soft": (0.0, 0.0, 0.0),
+        "high_clip": (1.0, 1.0, 1.0),
+        "high_soft": (0.0, 0.0, 0.0),
+    }
+    for key, defaults in _CS_DEFAULTS.items():
+        triple = []
+        for ch_idx, ch_name in enumerate("RGB"):
+            ch_values = csc_channels.get(ch_name)
+            value = None
+            if isinstance(ch_values, dict):
+                value = ch_values.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                    and math.isfinite(float(value)):
+                triple.append(float(value))
+            else:
+                triple.append(defaults[ch_idx])
+        values[f"u_cs_{key}"] = tuple(triple)
 
     if grain_params is not None:
         gp = grain_params or {}

@@ -64,6 +64,7 @@ from src.shared.gpu.gl_resource_registry import (
     GROUP_UPLOAD,
 )
 from src.features.color.core.opengl_render_backend import OpenGLRenderBackend
+from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
 from src.shared.media.gpu_frame import (
     GpuDecodedFrame,
     GpuFrameRelease,
@@ -2913,6 +2914,9 @@ class AsyncRenderer(QThread):
             has_lut3d = layer.get('active_lut_path') is not None
             scp = layer.get('soft_clip_params') or {}
             has_soft_clip = scp.get('enabled', False)
+            # 曲线面板四参数柔化裁切：非恒等才编译进管线（默认恒等直通）
+            has_curves_soft_clip = not curves_soft_clip_is_identity(
+                layer.get('curves_soft_clip'))
             has_hsl_curve = self.pipeline.has_active_hsl_curve_lut(layer.get('hsl_curve_lut'))
             has_mixer = self.pipeline.has_active_mixer_params(layer.get('mixer_params'))
 
@@ -2927,7 +2931,7 @@ class AsyncRenderer(QThread):
                 has_curves=has_curves, has_warper=has_warper,
                 has_lut3d=has_lut3d, has_soft_clip=has_soft_clip,
                 grain_enabled=False, has_hsl_curve=has_hsl_curve,
-                has_mixer=has_mixer,
+                has_mixer=has_mixer, has_curves_soft_clip=has_curves_soft_clip,
                 plugins=plugin_bindings,
                 request_id=render_request_id,
                 layer_id=l_id,
@@ -6811,6 +6815,10 @@ class AsyncRenderer(QThread):
                     scp = (prefix_layer.get('soft_clip_params') if pl_is_dict
                            else getattr(prefix_layer, 'soft_clip_params', {}))
                     has_soft_clip = scp.get('enabled', False) if scp else False
+                    # 曲线面板四参数柔化裁切：非恒等才编译进管线
+                    csc = (prefix_layer.get('curves_soft_clip') if pl_is_dict
+                           else getattr(prefix_layer, 'curves_soft_clip', None))
+                    has_curves_soft_clip = not curves_soft_clip_is_identity(csc)
                     hsl_lut = (prefix_layer.get('hsl_curve_lut') if pl_is_dict
                                else getattr(prefix_layer, 'hsl_curve_lut', None))
                     has_hsl_curve = self.pipeline.has_active_hsl_curve_lut(hsl_lut)
@@ -6833,6 +6841,7 @@ class AsyncRenderer(QThread):
                         has_qualifier=False,
                         has_hsl_curve=has_hsl_curve,
                         has_mixer=has_mixer,
+                        has_curves_soft_clip=has_curves_soft_clip,
                         plugins=layer_plugins,
                         request_id=render_request_id,
                         layer_id=pl_id,

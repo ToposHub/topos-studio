@@ -334,6 +334,7 @@ class ColorStackHydrator:
         """
         self._apply_grading_to_panel(stack, panels.get("grading_panel"))
         self._apply_curves_to_panel(stack, panels.get("curves_panel"))
+        self._apply_curves_palette_to_panel(stack, panels.get("curves_palette"))
         self._apply_hsl_to_panel(stack, panels.get("hsl_panel"))
         self._apply_mixer_to_panel(stack, panels.get("mixer_panel"))
         self._apply_soft_clip_to_panel(stack, panels.get("soft_clip_panel"))
@@ -450,6 +451,15 @@ class ColorStackHydrator:
             cp = panels.get("curves_panel")
             if cp is not None and hasattr(cp, "get_curves_data"):
                 curves_data = cp.get_curves_data()
+
+            # 曲线面板侧栏（无引擎图层时的兜底收集；模型形状态直读）
+            palette = panels.get("curves_palette")
+            if palette is not None:
+                getter = getattr(palette, "get_layer_state", None)
+                if callable(getter):
+                    sidebar_state = getter() or {}
+                    curves_soft_clip = sidebar_state.get("curves_soft_clip") or {}
+                    curves_edit = sidebar_state.get("curves_edit") or {}
 
             hp = panels.get("hsl_panel")
             if hp is not None and hasattr(hp, "get_curves_data"):
@@ -575,6 +585,37 @@ class ColorStackHydrator:
             panel.set_curves_data(stack.curves_data, emit_changed=False)
         else:
             panel.reset(emit_changed=False)
+
+    @staticmethod
+    def _apply_curves_palette_to_panel(stack: ColorStackData, panel: Any) -> None:
+        """曲线面板侧栏回填（任务 7）：活动层快照优先，平铺键兜底。
+
+        v2+ 工程的权威状态在 Layer 快照内（``curves_soft_clip`` /
+        ``curves_edit``）；平铺键只服务无快照的旧格式。``set_layer_state``
+        屏蔽一切回写，不会触发渲染或撤销快照。
+        """
+        if panel is None:
+            return
+        setter = getattr(panel, "set_layer_state", None)
+        if not callable(setter):
+            logger.debug("curves_palette missing set_layer_state, skipping")
+            return
+        layers = getattr(stack, "layers", None) or ()
+        if layers:
+            idx = getattr(stack, "active_layer_index", 0) or 0
+            if not isinstance(idx, int) or not (0 <= idx < len(layers)):
+                idx = 0
+            entry = layers[idx]
+            if isinstance(entry, dict):
+                setter({
+                    "curves_soft_clip": entry.get("curves_soft_clip") or {},
+                    "curves_edit": entry.get("curves_edit") or {},
+                })
+                return
+        setter({
+            "curves_soft_clip": getattr(stack, "curves_soft_clip", None) or {},
+            "curves_edit": getattr(stack, "curves_edit", None) or {},
+        })
 
     @staticmethod
     def _apply_hsl_to_panel(stack: ColorStackData, panel: Any) -> None:

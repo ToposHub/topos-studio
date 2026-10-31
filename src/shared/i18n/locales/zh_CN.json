@@ -2529,6 +2529,7 @@
     "op_hsl_curves": "HSL 曲线",
     "op_mixer": "RGB 混色器",
     "op_soft_clip": "柔化裁切 (Soft Clip)",
+    "op_curves_soft_clip": "曲线柔化裁切 (Curves Soft Clip)",
     "op_lut": "3D LUT",
     "op_warper": "色彩扭曲器 (Warper)",
     "op_effects": "锐化/纹理/光晕效果",

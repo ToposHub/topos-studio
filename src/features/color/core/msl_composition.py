@@ -37,6 +37,7 @@ from src.features.color.core.shader_nodes_msl import (
     MSL_BLUR_SHARPEN,
     MSL_CURVES,
     MSL_CURVES_HELPERS,
+    MSL_CURVES_SOFT_CLIP,
     MSL_FILM_GRAIN,
     MSL_GRADING,
     MSL_GRADING_HELPERS,
@@ -55,7 +56,7 @@ from src.features.color.core.shader_nodes_msl import (
 # qualifier 归属 matte 生成侧（P6-02~04）。
 MIGRATED_EFFECTS = ("grading", "curves", "hsl_curve", "lut3d",
                     "mixer", "warper", "blur_sharpen", "blend_modes",
-                    "soft_clip", "film_grain")
+                    "soft_clip", "curves_soft_clip", "film_grain")
 
 _MSL_HEADER = """\
 #include <metal_stdlib>
@@ -158,6 +159,14 @@ _PIPELINE_CALLS = {
                   "params.u_sc_low, params.u_sc_black_point, "
                   "params.u_sc_toe_strength, params.u_sc_exposure, "
                   "params.u_sc_contrast); }"),
+    # curves_soft_clip：编译期门控（GL 侧 has_curves_soft_clip 旗标同语义）——
+    # 非恒等才进入 active_effects，无运行期开关 uniform
+    "curves_soft_clip": (
+        "color = msl_apply_curves_soft_clip(color, "
+        "float3(params.u_cs_low_clip_x, params.u_cs_low_clip_y, params.u_cs_low_clip_z), "
+        "float3(params.u_cs_low_soft_x, params.u_cs_low_soft_y, params.u_cs_low_soft_z), "
+        "float3(params.u_cs_high_clip_x, params.u_cs_high_clip_y, params.u_cs_high_clip_z), "
+        "float3(params.u_cs_high_soft_x, params.u_cs_high_soft_y, params.u_cs_high_soft_z));"),
     # blend_modes 无管线位调用——语义在 main 尾部 epilog（见
     # _MSL_FRAGMENT_EPILOG_BLEND）。
     # film_grain 位于 blend/mix 之后（GL main 末位），由 epilog 组装段
@@ -216,6 +225,8 @@ def emit_composition_msl(
         parts.append(MSL_BLEND_MODES)
     if "soft_clip" in active_effects:
         parts += [MSL_SOFT_CLIP_HELPERS, MSL_SOFT_CLIP]
+    if "curves_soft_clip" in active_effects:
+        parts.append(MSL_CURVES_SOFT_CLIP)
     if "film_grain" in active_effects:
         parts.append(MSL_FILM_GRAIN)
 

@@ -3223,6 +3223,9 @@ class PageManagementMixin:
             panels["grading_panel"] = self.grading_panel
         if hasattr(self, 'curves_widget') and self.curves_widget:
             panels["curves_panel"] = self.curves_widget
+            # 曲线面板侧栏（四参数柔化裁切 + Edit 强度）的水合入口
+            if getattr(self, "curves_panel", None):
+                panels["curves_palette"] = self.curves_panel
         if hasattr(self, 'hsl_curves_panel') and self.hsl_curves_panel:
             panels["hsl_panel"] = self.hsl_curves_panel
         if hasattr(self, 'mixer_panel') and self.mixer_panel:
