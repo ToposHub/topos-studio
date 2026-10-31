@@ -1,0 +1,25 @@
+{
+  "recipe_id": "P39",
+  "name": "上推",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "硬切替代/垂直上移（如建筑仰拍衔接）；base 在用户转场白名单",
+  "component": "X09 true_push（生产 lib1_true_push，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/true_push）",
+  "dependencies": {
+    "component_id": "X09",
+    "component_slug": "true_push",
+    "component_kind": "transition",
+    "transition_type": "lib1_true_push",
+    "user_json_base": true
+  },
+  "params": {
+    "direction": "up",
+    "seam_softness": 0.0
+  },
+  "notes": "X09 生产 base lib1_true_push；base 在用户转场白名单。"
+}

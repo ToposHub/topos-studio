@@ -1,0 +1,162 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 1546 items
+
+tests/edit/test_audio_transitions.py .............................       [  1%]
+tests/edit/test_audio_waveform.py ..........................             [  3%]
+tests/edit/test_audio_waveform_lifecycle.py ..                           [  3%]
+tests/edit/test_audio_waveform_perf_and_fx.py .............s......       [  4%]
+tests/edit/test_automation_boundaries.py ........                        [  5%]
+tests/edit/test_automation_ramp_precision.py .......                     [  5%]
+tests/edit/test_automation_recorder.py ..................                [  7%]
+tests/edit/test_automation_timebase_semantics.py ......                  [  7%]
+tests/edit/test_batch_mute_solo_macro.py .....                           [  7%]
+tests/edit/test_bin_commands.py ..........................               [  9%]
+tests/edit/test_bus_full_routing.py .......                              [  9%]
+tests/edit/test_bwf.py .........                                         [ 10%]
+tests/edit/test_capability_registry.py ......................            [ 11%]
+tests/edit/test_caption_data_model.py .................................. [ 14%]
+....................                                                     [ 15%]
+tests/edit/test_caption_delivery_extensions.py ........                  [ 15%]
+tests/edit/test_caption_edit_mode.py ................                    [ 17%]
+tests/edit/test_caption_export.py .....                                  [ 17%]
+tests/edit/test_caption_global_style.py ......                           [ 17%]
+tests/edit/test_caption_graphic_effects.py ........                      [ 18%]
+tests/edit/test_caption_graphics.py ...................                  [ 19%]
+tests/edit/test_caption_importer.py .........                            [ 20%]
+tests/edit/test_caption_lock_enforcement.py .............                [ 20%]
+tests/edit/test_caption_quality.py ..                                    [ 21%]
+tests/edit/test_caption_split_merge_style.py .......                     [ 21%]
+tests/edit/test_caption_timeline_integration.py .....................    [ 22%]
+tests/edit/test_caption_workspace.py ................................... [ 25%]
+....                                                                     [ 25%]
+tests/edit/test_channel_layout.py ...................................... [ 27%]
+.                                                                        [ 27%]
+tests/edit/test_channel_layout_import.py ...............                 [ 28%]
+tests/edit/test_channel_layout_truth.py ...............                  [ 29%]
+tests/edit/test_chapter_markers.py ...................                   [ 31%]
+tests/edit/test_clip_audio_effect_dialog_adapter.py ........             [ 31%]
+tests/edit/test_clip_audio_fade.py ..............                        [ 32%]
+tests/edit/test_clip_audio_gain.py ........                              [ 32%]
+tests/edit/test_clip_blend_modes.py ................                     [ 34%]
+tests/edit/test_clip_field_preservation.py ...........                   [ 34%]
+tests/edit/test_clip_fps_metadata_propagation.py ..........              [ 35%]
+tests/edit/test_clip_item_trim_preview.py .......                        [ 35%]
+tests/edit/test_clip_speed_fade_realtime.py ...........                  [ 36%]
+tests/edit/test_clip_timeline_color_frame_mapping.py ................... [ 37%]
+.................                                                        [ 38%]
+tests/edit/test_clip_transform_handle_controller.py ....                 [ 39%]
+tests/edit/test_clip_transform_matrix_parity.py ..................       [ 40%]
+tests/edit/test_color_stack.py ........................................  [ 42%]
+tests/edit/test_color_stack_preview_grade.py ...                         [ 43%]
+tests/edit/test_commands_no_duplicate_definitions.py .......             [ 43%]
+tests/edit/test_comp_clip_promotion_lifecycle.py ....................    [ 44%]
+tests/edit/test_comp_clip_reset.py .......................               [ 46%]
+tests/edit/test_comp_clip_settings.py ...................                [ 47%]
+tests/edit/test_comp_clip_settings_dialog_ui.py .....                    [ 47%]
+tests/edit/test_comp_clip_timeline_export.py ............                [ 48%]
+tests/edit/test_comp_clip_timeline_preview.py .......................... [ 50%]
+..........                                                               [ 50%]
+tests/edit/test_composite_direct_entry_does_not_mutate_project.py ...... [ 51%]
+.......                                                                  [ 51%]
+tests/edit/test_composite_failure_no_silent_fallback.py ...              [ 52%]
+tests/edit/test_composite_graph_data.py ................................ [ 54%]
+.........................                                                [ 55%]
+tests/edit/test_consolidate.py ..............                            [ 56%]
+tests/edit/test_content_state_transactions.py ..........                 [ 57%]
+tests/edit/test_crop_render_stage.py ....................                [ 58%]
+tests/edit/test_custom_transitions.py .............                      [ 59%]
+tests/edit/test_decode_saturation_telemetry.py ........                  [ 59%]
+tests/edit/test_delivery_qc.py .......................                   [ 61%]
+tests/edit/test_edit_commands.py ...............................         [ 63%]
+tests/edit/test_edit_crop_param_sync.py .                                [ 63%]
+tests/edit/test_edit_effect_drag_routing.py ...                          [ 63%]
+tests/edit/test_edit_effect_param_no_rebuild.py .                        [ 63%]
+tests/edit/test_edit_effect_sections.py ................................ [ 65%]
+.                                                                        [ 65%]
+tests/edit/test_edit_effects_panel_drag_inject.py ......F......          [ 66%]
+tests/edit/test_edit_gpu_decode_manager.py ............................. [ 68%]
+....................                                                     [ 69%]
+tests/edit/test_edit_keyframe_effect_commands.py ..........              [ 70%]
+tests/edit/test_edit_mode_toggle.py ...........                          [ 71%]
+tests/edit/test_edit_page_playback_preview.py .......................... [ 72%]
+.                                                                        [ 72%]
+tests/edit/test_edit_page_waveform_signal_lifecycle.py ..                [ 73%]
+tests/edit/test_edit_playback_timecode.py .......................        [ 74%]
+tests/edit/test_edit_project.py ........................................ [ 77%]
+............                                                             [ 77%]
+tests/edit/test_edit_project_composite_state_preservation.py .....       [ 78%]
+tests/edit/test_edit_project_initialization.py .                         [ 78%]
+tests/edit/test_edit_project_io_root_bin.py ..                           [ 78%]
+tests/edit/test_edit_properties_panel_layout.py ...................      [ 79%]
+tests/edit/test_edit_realtime_regression.py .............                [ 80%]
+tests/edit/test_edit_reset_transform_viewer_sync.py ..                   [ 80%]
+tests/edit/test_edit_track_mutation_preserves_effect_chain.py .......... [ 81%]
+..                                                                       [ 81%]
+tests/edit/test_edit_transaction_undo_integrity.py ............          [ 82%]
+tests/edit/test_ef01_aud_part1.py ...................................... [ 84%]
+................                                                         [ 85%]
+tests/edit/test_ef01_aud_part2.py ...................................... [ 88%]
+..........                                                               [ 88%]
+tests/edit/test_ef01_aud_part3.py .....................................F [ 91%]
+FF...........................                                            [ 93%]
+tests/edit/test_effect_capability_diagnostics.py ....................... [ 94%]
+.............................                                            [ 96%]
+tests/edit/test_effect_catalog_capabilities.py ......................... [ 98%]
+...........                                                              [ 98%]
+tests/edit/test_effect_clip_field_preservation.py ....                   [ 99%]
+tests/edit/test_effect_edit_cache_invalidation_wiring.py ....            [ 99%]
+tests/edit/test_effect_execution_capability.py ..........                [100%]
+
+=================================== FAILURES ===================================
+_____________ test_transitions_use_full_label_and_responsive_grid ______________
+tests/edit/test_edit_effects_panel_drag_inject.py:105: in test_transitions_use_full_label_and_responsive_grid
+    assert all(
+E   assert False
+E    +  where False = all(<generator object test_transitions_use_full_label_and_responsive_grid.<locals>.<genexpr> at 0x3310ba7a0>)
+----------------------------- Captured Qt messages -----------------------------
+QtWarningMsg: This plugin does not support propagateSizeHints()
+_______ TestAud18511SourceTimeSemantics.test_forward_mapping_local_time ________
+tests/edit/test_ef01_aud_part3.py:842: in test_forward_mapping_local_time
+    result = map_frame(request)  # type: ignore[arg-type]
+             ^^^^^^^^^^^^^^^^^^
+src/features/edit/core/timeline_frame_mapper.py:279: in map_frame
+    return map_cfr_frame(request)
+           ^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/timeline_frame_mapper.py:162: in map_cfr_frame
+    source_frac = source_local_time * source_fps + request.source_frame_phase
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'source_frame_phase'
+__ TestAud18511SourceTimeSemantics.test_reverse_mapping_keeps_clip_local_time __
+tests/edit/test_ef01_aud_part3.py:862: in test_reverse_mapping_keeps_clip_local_time
+    result = map_frame(request)  # type: ignore[arg-type]
+             ^^^^^^^^^^^^^^^^^^
+src/features/edit/core/timeline_frame_mapper.py:279: in map_frame
+    return map_cfr_frame(request)
+           ^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/timeline_frame_mapper.py:162: in map_cfr_frame
+    source_frac = source_local_time * source_fps + request.source_frame_phase
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'source_frame_phase'
+_______ TestAud18511SourceTimeSemantics.test_ignores_source_start_offset _______
+tests/edit/test_ef01_aud_part3.py:884: in test_ignores_source_start_offset
+    result = map_frame(request)  # type: ignore[arg-type]
+             ^^^^^^^^^^^^^^^^^^
+src/features/edit/core/timeline_frame_mapper.py:279: in map_frame
+    return map_cfr_frame(request)
+           ^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/timeline_frame_mapper.py:162: in map_cfr_frame
+    source_frac = source_local_time * source_fps + request.source_frame_phase
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'source_frame_phase'
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/validation/edit-batch-3.xml -
+=========================== short test summary info ============================
+FAILED tests/edit/test_edit_effects_panel_drag_inject.py::test_transitions_use_full_label_and_responsive_grid
+FAILED tests/edit/test_ef01_aud_part3.py::TestAud18511SourceTimeSemantics::test_forward_mapping_local_time
+FAILED tests/edit/test_ef01_aud_part3.py::TestAud18511SourceTimeSemantics::test_reverse_mapping_keeps_clip_local_time
+FAILED tests/edit/test_ef01_aud_part3.py::TestAud18511SourceTimeSemantics::test_ignores_source_start_offset
+================== 4 failed, 1541 passed, 1 skipped in 29.93s ==================

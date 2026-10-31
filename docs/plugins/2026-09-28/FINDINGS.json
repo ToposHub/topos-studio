@@ -1,0 +1,58 @@
+[
+ {
+  "id": "PLUG-001",
+  "source": "plan-03",
+  "type": "process",
+  "severity": "Suggestion",
+  "title": "i18n 片段存在两种 JSON 形状混用（已归一消化，规范应固化单一形状）",
+  "location": "docs/plugins/2026-09-28/i18n/",
+  "evidence": "docs/plugins/2026-09-28/DEFECTS.md D-1",
+  "recommendation": "STYLE_NOTES 增加 i18n 片段规范形状",
+  "confidence": "high",
+  "effort": "S",
+  "round": 1,
+  "status": "open"
+ },
+ {
+  "id": "PLUG-002",
+  "source": "plan-03",
+  "type": "doc-gap",
+  "severity": "Suggestion",
+  "title": "@export_support opengl 值域未在 PLUGIN_DEV_GUIDE 能力清单中文档化（Two 插件沿用 warm_tint 先例）",
+  "location": "docs/PLUGIN_DEV_GUIDE.md",
+  "evidence": "docs/plugins/2026-09-28/DEFECTS.md D-2",
+  "recommendation": "指南补充能力键合法值域",
+  "confidence": "high",
+  "effort": "S",
+  "round": 1,
+  "status": "open"
+ },
+ {
+  "id": "PLUG-003",
+  "source": "plan-03",
+  "type": "i18n-gap",
+  "severity": "Suggestion",
+  "title": "12 插件的非中英 8 个 locale 为英文回退，待母语翻译",
+  "location": "src/shared/i18n/locales/",
+  "evidence": "docs/plugins/2026-09-28/SUMMARY.md",
+  "recommendation": "第 2 轮安排翻译",
+  "confidence": "high",
+  "effort": "M",
+  "round": 1,
+  "status": "open"
+ },
+ {
+  "id": "PLUG-004",
+  "source": "plan-03",
+  "type": "process",
+  "severity": "Suggestion",
+  "title": "第二批插件候选（计划已列 12-20 个方向）待第 2 轮开发",
+  "location": "plugins/",
+  "evidence": "docs/plans/2026-09-28-multi-machine-program/plan-03-glsl-plugin-library.md",
+  "recommendation": "按同流程扩展",
+  "confidence": "high",
+  "effort": "L",
+  "round": 1,
+  "status": "open"
+ }
+]

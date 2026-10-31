@@ -1,0 +1,116 @@
+// --- Topos Plugin Metadata ---
+// @name Tilt Shift Focus
+// @i18n_name Tilt_Shift_Focus
+// @author Topos Team
+// @version 1.0
+// @description Tilt-shift miniature look: orientation-selectable focus band with smoothstep falloff driving a fixed 17-tap disc blur radius
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost medium
+// @param select tilt_orientation "Band Orientation" 0 "Vertical Band" "Horizontal Band" "Diagonal Band"
+// @param slider focus_center "Focus Center" 0.5 0.0 1.0
+// @param slider focus_width "Focus Width" 0.35 0.05 1.0
+// @param separator
+// @param slider tilt_blur "Blur Strength" 0.5 0.0 1.0
+// -----------------------------
+//
+// Tilt Shift Focus —— 移轴焦点（微缩景观）。
+//
+// 原理：选定一条"焦带"（竖直/水平/对角），到焦带的归一化距离经
+// smoothstep 变成散焦权重 m；散焦半径 = tilt_blur * m * 画幅宽 3%
+// 上限——焦内半径 < 0.5 px 直接直通，焦外平滑散焦。真实移轴镜头
+// 的倾角把焦平面掰斜，微缩景观感即来源于此。
+//
+// 设计要点：
+// - 固定 17 tap 圆盘核（中心 + 2 环 x 8 方向，第 2 环 const mat2
+//   错位 22.5 度提升覆盖率，Skin_Even_Matte 的 stagger 惯例），
+//   散焦强度由"半径"而非 tap 数承载——循环上限天然编译期常量，
+//   无需 select 分档；
+// - 焦带坐标 select 早退 if 链分派（0=uv.y / 1=uv.x / 2=对角平均）；
+// - 线性平均无 clamp 触碰内容色（HDR 安全）；采样 UV 钳半纹素；
+//   Delta 输出惯例（散焦差值叠加到已调色画面）；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+const vec2 TS_RING_DIRS[8] = vec2[8](
+    vec2( 1.00000000,  0.00000000),
+    vec2( 0.70710678,  0.70710678),
+    vec2( 0.00000000,  1.00000000),
+    vec2(-0.70710678,  0.70710678),
+    vec2(-1.00000000,  0.00000000),
+    vec2(-0.70710678, -0.70710678),
+    vec2( 0.00000000, -1.00000000),
+    vec2( 0.70710678, -0.70710678)
+);
+
+// 22.5 度旋转矩阵（列主序，编译期常量）：第 2 环错位相位
+const mat2 TS_RING_STAGGER = mat2(0.92387953, 0.38268343,
+                                  -0.38268343, 0.92387953);
+
+// 固定 17 tap 圆盘（中心 + 2 环 x 8 方向），半径由参数承载；
+// radius_uv 已逐轴换算为 UV 量纲（像素域圆盘各向同性），步长下限
+// 0.5 px 同步换算，语义与像素域 max(radius*0.5, 0.5) 一致
+vec3 tilt_shift_disc(vec2 uv, vec2 radius_uv, vec2 min_uv, vec2 max_uv) {
+    vec3 center_col = texture(u_input_tex, uv).rgb;
+    vec3 acc = center_col;
+    float w_sum = 1.0;
+    vec2 safe_size = max(vec2(textureSize(u_input_tex, 0)), vec2(1.0));
+    vec2 step_uv = max(radius_uv * 0.5, 0.5 / safe_size);
+
+    for (int ring = 0; ring < 2; ring++) {
+        float ring_w = 1.0 - 0.5 * float(ring);
+        for (int t = 0; t < 8; t++) {
+            vec2 dir = TS_RING_DIRS[t];
+            vec2 staggered = TS_RING_STAGGER * dir;
+            dir = mix(dir, staggered, float(ring));
+            vec3 s = texture(u_input_tex,
+                clamp(uv + dir * (step_uv * float(ring + 1)),
+                      min_uv, max_uv)).rgb;
+            acc += s * ring_w;
+            w_sum += ring_w;
+        }
+    }
+    return acc / w_sum;
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (tilt_blur < 0.001) return color;
+
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 safe_size = max(tex_size, vec2(1.0));
+    vec2 half_texel = 0.5 / safe_size;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+
+    // 焦带坐标分派（select 早退 if 链惯例，fallback = 对角带）
+    float a;
+    if (tilt_orientation == 0) {
+        a = uv.y;
+    } else if (tilt_orientation == 1) {
+        a = uv.x;
+    } else {
+        a = (uv.x + uv.y) * 0.5;
+    }
+
+    // 到焦带的归一化距离 → 散焦权重（smoothstep 只作用于权重掩码）
+    float half_w = max(focus_width * 0.5, 0.02);
+    float m = smoothstep(half_w, half_w + 0.3, abs(a - focus_center));
+
+    // 焦内半径 < 0.5 px 时严格直通（零开销）；激活后逐轴换算 UV 量纲
+    float radius_px = tilt_blur * m * 0.03 * safe_size.x;
+    if (radius_px < 0.5) return color;
+
+    vec2 radius_uv = vec2(radius_px) / safe_size;
+    vec3 blurred = tilt_shift_disc(uv, radius_uv, min_uv, max_uv);
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    return color + (blurred - original_color);
+}

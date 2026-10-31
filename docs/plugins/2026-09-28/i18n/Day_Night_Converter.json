@@ -1,0 +1,46 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Day_Night_Converter": {
+        "name": "日转夜转换",
+        "params": {
+          "night_depth": "夜景深度",
+          "temperature_shift": "冷色偏移",
+          "sky_protection": "天空保护",
+          "exposure": "曝光"
+        },
+        "desc": {
+          "short": "启发式日转夜：亮度加权的曝光下压 + 冷色温偏移 + 高光（天空）保护与轻微月光蓝移；全乘性增益保留 HDR。非真实日夜替换",
+          "params": {
+            "night_depth": "夜景整体深度：驱动曝光下压（最多约 -2.3 档）与冷移强度；暗区/中间调吃满，亮区受天空保护衰减",
+            "temperature_shift": "冷色温偏移量（R 下沉 / B 抬升），0 为中性锚点",
+            "sky_protection": "亮区（≈天空）保护量：衰减下压与冷移以保留高光层次，满值时天空只剩轻微月光蓝",
+            "exposure": "曝光微调（档位，-3 至 +3），叠加在夜景深度驱动的下压之上"
+          }
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Day_Night_Converter": {
+        "name": "Day-Night Converter",
+        "params": {
+          "night_depth": "Night Depth",
+          "temperature_shift": "Cool Shift",
+          "sky_protection": "Sky Protection",
+          "exposure": "Exposure"
+        },
+        "desc": {
+          "short": "Heuristic day-for-night look: luminance-weighted exposure pull-down, cool shift, sky highlight protection and a slight moonlight blue lift; fully multiplicative, HDR-safe. Not a real day/night replacement",
+          "params": {
+            "night_depth": "Overall night strength driving exposure pull-down (up to about -2.3 stops) and cool shift; shadows/midtones get the full amount, highlights are eased by Sky Protection",
+            "temperature_shift": "Cool temperature shift amount (R sinks, B lifts), 0 is the neutral pivot",
+            "sky_protection": "Protection for bright regions (approx. sky): eases pull-down and cool shift to keep highlight detail; at full value the sky keeps only a slight moonlight blue",
+            "exposure": "Exposure trim in stops (-3 to +3), applied on top of the depth-driven pull-down"
+          }
+        }
+      }
+    }
+  }
+}

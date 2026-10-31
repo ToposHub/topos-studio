@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "result": {
+    "drag": true,
+    "drop": true,
+    "assets": [
+      "2K_h264.mp4",
+      "2K_H265.mov",
+      "2K_prores422.mov",
+      "4K_H264.mov",
+      "4K_H265.mov",
+      "4K_prores422Proxy.mov",
+      "2K_DNxHR HQX 10bit.mov",
+      "2K_topos_422_LT.mov",
+      "2K_Prores4444_Alpha.mov"
+    ]
+  }
+}

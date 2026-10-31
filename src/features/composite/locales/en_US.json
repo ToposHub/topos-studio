@@ -1,0 +1,933 @@
+{
+  "nodes": {
+    "blur": {
+      "title": "Blur",
+      "description": "Multi-type blur with per-channel control",
+      "blur_type": {
+        "box": "Box Blur",
+        "gaussian": "Gaussian Blur",
+        "bilateral": "Surface Blur (Bilateral)",
+        "motion": "Motion Blur",
+        "bokeh": "Lens Blur (Bokeh)"
+      },
+      "edge_policy": {
+        "clamp": "Clamp",
+        "wrap": "Wrap",
+        "mirror": "Mirror"
+      },
+      "quality": {
+        "fast": "Fast",
+        "normal": "Normal",
+        "high": "High"
+      },
+      "aperture_blades": {
+        "circle": "Circle",
+        "5": "5 Blades",
+        "6": "6 Blades",
+        "8": "8 Blades"
+      },
+      "params": {
+        "blur_type": "Blur Type",
+        "radius_x": "Radius X",
+        "radius_y": "Radius Y",
+        "radius": "Radius",
+        "angle": "Angle",
+        "motion_source": "Motion Source",
+        "shutter": "Shutter",
+        "edge_preserve": "Edge Preserve",
+        "aperture_blades": "Aperture Blades",
+        "anamorphic": "Anamorphic",
+        "highlight_gain": "Highlight Gain",
+        "edge_policy": "Edge Policy",
+        "quality": "Quality",
+        "channel_r": "Red Channel",
+        "channel_g": "Green Channel",
+        "channel_b": "Blue Channel",
+        "channel_a": "Alpha Channel",
+        "mix": "Mix",
+        "process_alpha": "Process Alpha"
+      }
+    },
+    "transform": {
+      "title": "Transform",
+      "pivot_mode": {
+        "center": "Center",
+        "custom": "Custom"
+      },
+      "filter": {
+        "linear": "Linear (Bilinear)",
+        "nearest": "Nearest (Hard Edge)"
+      },
+      "params": {
+        "translate_x": "Translate X",
+        "translate_y": "Translate Y",
+        "translate": "Translate",
+        "scale_x": "Scale X",
+        "scale_y": "Scale Y",
+        "scale": "Scale",
+        "rotation": "Rotation",
+        "pivot_mode": "Pivot Mode",
+        "pivot_x": "Pivot X",
+        "pivot_y": "Pivot Y",
+        "pivot": "Pivot",
+        "filter": "Filter"
+      }
+    },
+    "constant": {
+      "title": "Constant",
+      "mode": {
+        "solid": "Solid",
+        "checker": "Checkerboard",
+        "gradient": "Linear Gradient",
+        "radial": "Radial Gradient"
+      },
+      "params": {
+        "width": "Width",
+        "height": "Height",
+        "mode": "Mode",
+        "color_r": "Color R",
+        "color_g": "Color G",
+        "color_b": "Color B",
+        "color_a": "Color A",
+        "color2_r": "Color 2 R",
+        "color2_g": "Color 2 G",
+        "color2_b": "Color 2 B",
+        "color2_a": "Color 2 A",
+        "checker_size": "Checker Size",
+        "start_x": "Start X",
+        "start_y": "Start Y",
+        "start": "Start",
+        "end_x": "End X",
+        "end_y": "End Y",
+        "end": "End",
+        "center_x": "Center X",
+        "center_y": "Center Y",
+        "center": "Center",
+        "radial_radius": "Radial Radius",
+        "feather": "Feather",
+        "format_name": "Format",
+        "size_preset": "Size Preset",
+        "color_hex": "Color Hex",
+        "color2_hex": "Color 2 Hex"
+      }
+    },
+    "merge": {
+      "title": "Merge",
+      "blend_mode": {
+        "over": "Normal (Over)",
+        "under": "Under",
+        "add": "Add",
+        "subtract": "Subtract",
+        "multiply": "Multiply",
+        "screen": "Screen",
+        "overlay": "Overlay",
+        "difference": "Difference",
+        "divide": "Divide",
+        "min": "Min",
+        "max": "Max",
+        "average": "Average",
+        "copy": "Copy",
+        "stencil": "Stencil",
+        "mask": "Mask",
+        "in": "In",
+        "out": "Out",
+        "atop": "Atop",
+        "xor": "Xor",
+        "color-dodge": "Color Dodge",
+        "color-burn": "Color Burn",
+        "soft-light": "Soft Light",
+        "hard-light": "Hard Light",
+        "linear-light": "Linear Light",
+        "hue": "Hue",
+        "saturation": "Saturation",
+        "color": "Color",
+        "luminosity": "Luminosity"
+      },
+      "format_policy": {
+        "from_b": "From B",
+        "from_a": "From A",
+        "larger": "Larger",
+        "smaller": "Smaller"
+      },
+      "bbox_policy": {
+        "union": "Union",
+        "intersection": "Intersection",
+        "a": "A",
+        "b": "B"
+      },
+      "alpha_policy": {
+        "auto": "Auto",
+        "premult_force": "Force Premultiplied",
+        "straight_force": "Force Straight",
+        "output_straight": "Output Straight"
+      },
+      "mask_channel": {
+        "luma": "Luminance",
+        "red": "Red",
+        "green": "Green",
+        "blue": "Blue",
+        "alpha": "Alpha"
+      },
+      "params": {
+        "blend_mode": "Blend Mode",
+        "opacity": "Opacity",
+        "mix": "Mix",
+        "format_policy": "Format Policy",
+        "bbox_policy": "Bounding Box Policy",
+        "alpha_policy": "Alpha Policy",
+        "alpha_clamp": "Alpha Clamp",
+        "mask_channel": "Mask Channel",
+        "mask_invert": "Invert Mask"
+      }
+    },
+    "crop": {
+      "title": "Crop",
+      "outside": {
+        "black": "Black",
+        "transparent": "Transparent",
+        "repeat": "Repeat",
+        "mirror": "Mirror"
+      },
+      "params": {
+        "x": "X",
+        "y": "Y",
+        "width": "Width",
+        "height": "Height",
+        "reformat": "Resize Canvas",
+        "outside": "Outside Fill"
+      }
+    },
+    "cornerpin": {
+      "title": "Corner Pin",
+      "interpolation": {
+        "bilinear": "Bilinear",
+        "bicubic": "Bicubic"
+      },
+      "params": {
+        "to1_x": "To 1 X",
+        "to1_y": "To 1 Y",
+        "to2_x": "To 2 X",
+        "to2_y": "To 2 Y",
+        "to3_x": "To 3 X",
+        "to3_y": "To 3 Y",
+        "to4_x": "To 4 X",
+        "to4_y": "To 4 Y",
+        "from1_x": "From 1 X",
+        "from1_y": "From 1 Y",
+        "from2_x": "From 2 X",
+        "from2_y": "From 2 Y",
+        "from3_x": "From 3 X",
+        "from3_y": "From 3 Y",
+        "from4_x": "From 4 X",
+        "from4_y": "From 4 Y",
+        "interpolation": "Filter"
+      }
+    },
+    "reformat": {
+      "title": "Reformat",
+      "format_mode": {
+        "preset": "Preset",
+        "custom": "Custom"
+      },
+      "preset": {
+        "SD NTSC": "SD NTSC",
+        "SD PAL": "SD PAL",
+        "HD 720": "HD 720",
+        "HD 1080": "HD 1080",
+        "HD 1080 Anamorphic": "HD 1080 Anamorphic",
+        "UHD 4K": "UHD 4K",
+        "DCI 4K": "DCI 4K",
+        "UHD 8K": "UHD 8K",
+        "Square 1024": "Square 1024",
+        "Square 2048": "Square 2048",
+        "Square 4096": "Square 4096"
+      },
+      "resize_mode": {
+        "no_resize": "No Resize",
+        "fit": "Fit (Letterbox)",
+        "fill": "Fill (Crop)",
+        "distort": "Distort (Stretch)",
+        "center_crop": "Center Crop"
+      },
+      "filter": {
+        "nearest": "Nearest (Hard Edge)",
+        "linear": "Linear (Bilinear)",
+        "cubic": "Cubic (Bicubic)",
+        "lanczos": "Lanczos (Sharp)"
+      },
+      "params": {
+        "format_mode": "Mode",
+        "preset": "Preset",
+        "width": "Width",
+        "height": "Height",
+        "resize_mode": "Resize Mode",
+        "filter": "Filter",
+        "preserve_bbox": "Preserve BBox"
+      }
+    },
+    "glow": {
+      "title": "Glow",
+      "quality": {
+        "fast": "Fast",
+        "normal": "Normal",
+        "high": "High"
+      },
+      "params": {
+        "threshold": "Threshold",
+        "radius": "Radius",
+        "intensity": "Intensity",
+        "tint_r": "Tint R",
+        "tint_g": "Tint G",
+        "tint_b": "Tint B",
+        "mix": "Mix",
+        "quality": "Quality"
+      }
+    },
+    "shuffle": {
+      "title": "Shuffle",
+      "r_from": {
+        "r": "Red",
+        "g": "Green",
+        "b": "Blue",
+        "a": "Alpha",
+        "zero": "Zero",
+        "one": "One",
+        "luma": "Luma"
+      },
+      "g_from": {
+        "r": "Red",
+        "g": "Green",
+        "b": "Blue",
+        "a": "Alpha",
+        "zero": "Zero",
+        "one": "One",
+        "luma": "Luma"
+      },
+      "b_from": {
+        "r": "Red",
+        "g": "Green",
+        "b": "Blue",
+        "a": "Alpha",
+        "zero": "Zero",
+        "one": "One",
+        "luma": "Luma"
+      },
+      "a_from": {
+        "r": "Red",
+        "g": "Green",
+        "b": "Blue",
+        "a": "Alpha",
+        "zero": "Zero",
+        "one": "One",
+        "luma": "Luma"
+      },
+      "params": {
+        "r_from": "Red From",
+        "g_from": "Green From",
+        "b_from": "Blue From",
+        "a_from": "Alpha From"
+      }
+    },
+    "text": {
+      "title": "Text",
+      "description": "Text layer (font, size, alignment, outline, shadow)",
+      "per_char_mode": {
+        "fade": "Fade",
+        "slide_up": "Slide Up",
+        "slide_left": "Slide Left",
+        "scale_pop": "Scale Pop",
+        "rotate_in": "Rotate In",
+        "typewriter": "Typewriter"
+      },
+      "path_direction": {
+        "up": "Arc Up",
+        "down": "Arc Down"
+      },
+      "params": {
+        "text": "Text",
+        "caption_input_enabled": "Caption Input",
+        "caption_input_field": "Caption Field",
+        "font_family": "Font",
+        "font_size": "Size",
+        "font_weight": "Weight",
+        "italic": "Italic",
+        "halign": "H Align",
+        "valign": "V Align",
+        "letter_spacing": "Tracking",
+        "line_spacing": "Line Spacing",
+        "per_char_enable": "Per-Char Animation",
+        "per_char_mode": "Animation Mode",
+        "per_char_delay": "Stagger (frames)",
+        "per_char_overlap": "Overlap",
+        "per_char_slide_distance": "Slide Distance",
+        "per_char_rotation": "In Rotation",
+        "per_char_scale_from": "Start Scale",
+        "path_enable": "Layout on Path",
+        "path_radius": "Arc Radius",
+        "path_arc_degrees": "Arc Angle (0=auto)",
+        "path_direction": "Arc Direction",
+        "translate_x": "Translate X",
+        "translate_y": "Translate Y",
+        "scale_x": "Scale X",
+        "scale_y": "Scale Y",
+        "rotation": "Rotation",
+        "pivot_mode": "Pivot Mode",
+        "pivot_x": "Pivot X",
+        "pivot_y": "Pivot Y",
+        "filter": "Filter",
+        "fill_r": "Fill R",
+        "fill_g": "Fill G",
+        "fill_b": "Fill B",
+        "fill_a": "Fill A",
+        "outline_enable": "Outline",
+        "outline_width": "Outline Width",
+        "outline_r": "Outline R",
+        "outline_g": "Outline G",
+        "outline_b": "Outline B",
+        "outline_a": "Outline A",
+        "shadow_enable": "Shadow",
+        "shadow_offset_x": "Shadow Offset X",
+        "shadow_offset_y": "Shadow Offset Y",
+        "shadow_blur": "Shadow Blur",
+        "shadow_r": "Shadow R",
+        "shadow_g": "Shadow G",
+        "shadow_b": "Shadow B",
+        "shadow_a": "Shadow A"
+      }
+    },
+    "paint": {
+      "title": "Paint",
+      "description": "Paint strokes layer (clone repair, erase, solid brush)",
+      "params": {
+        "strokes": "Strokes"
+      }
+    },
+    "particle": {
+      "title": "Particles",
+      "description": "Stateless deterministic 2D particle emitter (gravity/wind/turbulence)"
+    },
+    "mesh_warp": {
+      "title": "Mesh Warp",
+      "description": "Grid warp: drag lattice points for local displacement"
+    },
+    "keyer": {
+      "title": "Keyer",
+      "keyer_mode": {
+        "auto": "Auto",
+        "chroma": "Chroma",
+        "luma": "Luma",
+        "difference": "Difference"
+      },
+      "despill_method": {
+        "none": "None",
+        "subtract": "Subtract",
+        "scale": "Scale"
+      },
+      "output_mode": {
+        "result": "Result",
+        "matte": "Matte"
+      },
+      "params": {
+        "keyer_mode": "Keyer Mode",
+        "screen_color": "Screen Colour",
+        "screen_color_r": "Screen R",
+        "screen_color_g": "Screen G",
+        "screen_color_b": "Screen B",
+        "screen_color_hex": "Screen Hex",
+        "screen_balance": "Screen Balance",
+        "clip_black": "Clip Black",
+        "clip_white": "Clip White",
+        "gain": "Gain",
+        "softness": "Softness",
+        "alpha_offset": "Alpha Offset",
+        "despill_strength": "Despill Strength",
+        "despill_method": "Despill Method",
+        "invert": "Invert",
+        "output_mode": "Output Mode"
+      }
+    },
+    "light_wrap": {
+      "title": "Light Wrap",
+      "params": {
+        "width": "Wrap Width",
+        "intensity": "Intensity",
+        "brightness": "Brightness",
+        "falloff": "Falloff",
+        "source_alpha": "Use Foreground Alpha"
+      }
+    },
+    "relight": {
+      "title": "Relight",
+      "light_type": {
+        "point": "Point Light",
+        "directional": "Directional"
+      },
+      "params": {
+        "light_type": "Light Type",
+        "light_position_x": "Light Position X",
+        "light_position_y": "Light Position Y",
+        "light_position_z": "Light Position Z",
+        "light_direction_x": "Light Direction X",
+        "light_direction_y": "Light Direction Y",
+        "light_direction_z": "Light Direction Z",
+        "intensity": "Intensity",
+        "color": "Light Color",
+        "ambient": "Ambient",
+        "normal_decode": "Normal Decode",
+        "normal_flip_y": "Flip Normal Y",
+        "normal_decode_options": {
+          "encoded": "Encoded [0,1]",
+          "signed": "Signed (-1~1)"
+        }
+      }
+    },
+    "cryptomatte_select": {
+      "title": "Cryptomatte Select",
+      "id_encoding": {
+        "rgba24": "RGBA24 Allocator ID",
+        "float_r": "Float R (Standard Cryptomatte)"
+      },
+      "output_mode": {
+        "matte": "Matte",
+        "isolate": "Isolate"
+      },
+      "params": {
+        "id_encoding": "ID Encoding",
+        "output_mode": "Output Mode"
+      }
+    },
+    "zblur": {
+      "title": "ZBlur",
+      "depth_units": {
+        "normalized": "Normalized",
+        "world": "World Distance"
+      },
+      "quality": {
+        "fast": "Fast",
+        "normal": "Normal",
+        "high": "High"
+      },
+      "params": {
+        "focus_distance": "Focus Distance",
+        "focal_range": "Focal Range",
+        "max_blur_radius": "Max Blur Radius",
+        "bokeh_toggle": "Aperture Disc Sampling",
+        "depth_units": "Depth Units",
+        "near": "Near",
+        "far": "Far",
+        "quality": "Quality"
+      }
+    },
+    "fog": {
+      "title": "Fog",
+      "depth_units": {
+        "normalized": "Normalized",
+        "world": "World Distance"
+      },
+      "params": {
+        "color": "Fog Color",
+        "density": "Density",
+        "start": "Start",
+        "end": "End",
+        "depth_units": "Depth Units",
+        "near": "Near",
+        "far": "Far"
+      }
+    },
+    "depth_matte": {
+      "title": "Depth Matte",
+      "depth_units": {
+        "normalized": "Normalized",
+        "world": "World Distance"
+      },
+      "params": {
+        "range_start": "Range Start",
+        "range_end": "Range End",
+        "feather": "Feather",
+        "depth_units": "Depth Units",
+        "near": "Near",
+        "far": "Far"
+      }
+    },
+    "godrays": {
+      "title": "God Rays",
+      "params": {
+        "light_x": "Light X",
+        "light_y": "Light Y",
+        "color": "Light Color",
+        "density": "Density",
+        "weight": "Weight",
+        "decay": "Decay",
+        "samples": "Samples"
+      }
+    },
+    "chromatic_aberration": {
+      "title": "Chromatic Aberration",
+      "params": {
+        "offset_r": "R Offset",
+        "offset_b": "B Offset",
+        "center_x": "Center X",
+        "center_y": "Center Y",
+        "edge_boost": "Edge Boost"
+      }
+    },
+    "vignette": {
+      "title": "Vignette",
+      "params": {
+        "amount": "Amount",
+        "radius": "Radius",
+        "softness": "Softness",
+        "roundness": "Roundness"
+      }
+    },
+    "lens_flare": {
+      "title": "Lens Flare",
+      "blend_mode": {
+        "screen": "Screen",
+        "add": "Add"
+      },
+      "params": {
+        "light_x": "Light X",
+        "light_y": "Light Y",
+        "color": "Light Color",
+        "intensity": "Intensity",
+        "ghost_count": "Ghost Count",
+        "ghost_spacing": "Ghost Spacing",
+        "ghost_decay": "Ghost Decay",
+        "ghost_size": "Ghost Size",
+        "halo_radius": "Halo Radius",
+        "halo_strength": "Halo Strength",
+        "streak_strength": "Streak Strength",
+        "streak_width": "Streak Width",
+        "use_occlusion": "Occlusion Aware",
+        "blend_mode": "Blend Mode"
+      }
+    },
+    "deflicker": {
+      "title": "Deflicker",
+      "window": {
+        "3": "3 frames",
+        "5": "5 frames",
+        "7": "7 frames",
+        "9": "9 frames"
+      },
+      "mode": {
+        "per_pixel": "Per-pixel",
+        "global_gain": "Global gain"
+      },
+      "params": {
+        "window": "Window",
+        "percentile": "Percentile",
+        "luma_only": "Luma Only",
+        "mode": "Mode"
+      }
+    },
+    "ai_gen_expand": {
+      "title": "AI Gen Expand",
+      "params": {
+        "prompt": "Prompt",
+        "negative_prompt": "Negative",
+        "model": "Model",
+        "seed": "Seed",
+        "strength": "Strength",
+        "expand_left": "Expand Left",
+        "expand_top": "Expand Top",
+        "expand_right": "Expand Right",
+        "expand_bottom": "Expand Bottom"
+      }
+    },
+    "frame_interpolate": {
+      "title": "Frame Interpolate",
+      "params": {
+        "t": "Interpolation t",
+        "hd_mode": "HD Tiling"
+      }
+    },
+    "face_track": {
+      "title": "Face Track",
+      "params": {
+        "face_index": "Face Index"
+      }
+    },
+    "face_smooth": {
+      "title": "Face Smooth",
+      "params": {
+        "strength": "Strength",
+        "radius": "Radius",
+        "luminance_only": "Luma Only"
+      }
+    },
+    "pointcloud3d": {
+      "title": "Point Cloud",
+      "source": {
+        "file": "File",
+        "tracker": "From Tracker"
+      },
+      "color_mode": {
+        "flat": "Flat",
+        "vertex_color": "Vertex Color",
+        "depth_ramp": "Depth Ramp"
+      },
+      "params": {
+        "source": "Source",
+        "file_path": "File Path",
+        "output_width": "Output Width",
+        "output_height": "Output Height",
+        "point_size": "Point Size",
+        "color_mode": "Color Mode",
+        "point_color": "Point Color",
+        "opacity": "Opacity"
+      }
+    },
+    "volume3d": {
+      "title": "Volume 3D",
+      "params": {
+        "file_path": "Volume File",
+        "density_multiplier": "Density Multiplier",
+        "absorption_color": "Absorption Color",
+        "step_count": "Step Count",
+        "output_width": "Output Width",
+        "output_height": "Output Height"
+      }
+    },
+    "chroma_keyer": {
+      "title": "Chroma Keyer",
+      "output_mode": {
+        "result": "Result",
+        "matte": "Matte"
+      },
+      "params": {
+        "screen_color_r": "Screen R",
+        "screen_color_g": "Screen G",
+        "screen_color_b": "Screen B",
+        "tolerance": "Tolerance",
+        "softness": "Softness",
+        "despill": "Despill",
+        "edge_width": "Edge Width",
+        "output_mode": "Output Mode"
+      }
+    },
+    "luma_keyer": {
+      "title": "Luma Keyer",
+      "output_mode": {
+        "result": "Result",
+        "matte": "Matte"
+      },
+      "params": {
+        "black_point": "Black Point",
+        "white_point": "White Point",
+        "softness": "Softness",
+        "invert": "Invert",
+        "output_mode": "Output Mode"
+      }
+    },
+    "camera3d": {
+      "title": "Camera",
+      "params": {
+        "camera_mode": "Camera Mode",
+        "cam_fov": "Field of View",
+        "cam_focal_length": "Focal Length (mm)",
+        "cam_sensor_size": "Sensor Size (mm)",
+        "cam_near": "Near Clip",
+        "cam_far": "Far Clip",
+        "cam_lens_shift_x": "Lens Shift X",
+        "cam_lens_shift_y": "Lens Shift Y",
+        "cam_exposure": "Exposure (EV)",
+        "cam_focus_distance": "Focus Distance",
+        "cam_fstop": "Aperture (f-stop)",
+        "cam_dof_enable": "Depth of Field",
+        "cam_show_safe_areas": "Safe Areas"
+      }
+    },
+    "light3d": {
+      "title": "Light",
+      "light_type": {
+        "directional": "Directional",
+        "point": "Point",
+        "spot": "Spot",
+        "ambient": "Ambient"
+      },
+      "params": {
+        "light_type": "Light Type",
+        "light_pos_x": "Position X",
+        "light_pos_y": "Position Y",
+        "light_pos_z": "Position Z",
+        "light_dir_x": "Direction X",
+        "light_dir_y": "Direction Y",
+        "light_dir_z": "Direction Z",
+        "light_color_r": "Color R",
+        "light_color_g": "Color G",
+        "light_color_b": "Color B",
+        "light_intensity": "Intensity",
+        "light_range": "Range",
+        "light_inner_cone": "Inner Cone",
+        "light_outer_cone": "Outer Cone",
+        "hdri_path": "HDRI File",
+        "use_ibl": "Use IBL",
+        "env_intensity": "Env Intensity",
+        "icon_pos_x": "Icon Pos X",
+        "icon_pos_y": "Icon Pos Y",
+        "icon_pos_z": "Icon Pos Z"
+      }
+    },
+    "model3d": {
+      "title": "Model3D",
+      "size_mode": {
+        "fit_to_scene": "Fit to Scene",
+        "real_world": "Real World"
+      },
+      "source_unit": {
+        "m": "Meters",
+        "cm": "Centimeters",
+        "mm": "Millimeters",
+        "in": "Inches",
+        "ft": "Feet",
+        "custom": "Custom"
+      },
+      "axis_mode": {
+        "auto": "Auto",
+        "y_up": "Y Up",
+        "z_up": "Z Up",
+        "none": "None"
+      },
+      "uv_v_mode": {
+        "auto": "Auto",
+        "original": "Original",
+        "flip": "Flip V"
+      },
+      "anim_play_mode": {
+        "loop": "Loop",
+        "pingpong": "Ping-Pong",
+        "once": "Once",
+        "clamp": "Clamp"
+      },
+      "material_mode": {
+        "imported": "Imported",
+        "override": "Override",
+        "mix": "Mix"
+      },
+      "normal_format": {
+        "OpenGL": "OpenGL",
+        "DirectX": "DirectX"
+      },
+      "orm_layout": {
+        "glTF ORM": "glTF ORM",
+        "separate": "Separate"
+      },
+      "texture_filter": {
+        "nearest": "Nearest",
+        "linear": "Linear",
+        "mipmap": "Mipmap"
+      },
+      "texture_wrap": {
+        "repeat": "Repeat",
+        "clamp": "Clamp",
+        "mirror": "Mirror"
+      },
+      "viewport_lod_mode": {
+        "auto": "Auto",
+        "force_lod0": "Force LOD 0",
+        "force_lod1": "Force LOD 1",
+        "force_lod2": "Force LOD 2"
+      },
+      "render_role": {
+        "solid": "Solid",
+        "holdout": "Holdout",
+        "shadow_catcher": "Shadow Catcher",
+        "matte": "Matte"
+      },
+      "params": {
+        "model_path": "Model File",
+        "use_imported_model": "Use Imported Model",
+        "size_mode": "Size Mode",
+        "source_unit": "Source Unit",
+        "unit_scale": "Unit Scale",
+        "axis_mode": "Axis Mode",
+        "uv_v_mode": "UV V Mode",
+        "object_pos_x": "Position X",
+        "object_pos_y": "Position Y",
+        "object_pos_z": "Position Z",
+        "object_rot_x": "Rotation X",
+        "object_rot_y": "Rotation Y",
+        "object_rot_z": "Rotation Z",
+        "mesh_scale": "Scale",
+        "anim_enabled": "Animation Enabled",
+        "anim_time": "Animation Time",
+        "anim_speed": "Animation Speed",
+        "anim_clip": "Animation Clip",
+        "anim_play_mode": "Playback Mode",
+        "anim_clip_name": "Clip Name",
+        "anim_time_offset": "Time Offset",
+        "anim_start_frame": "Start Frame",
+        "anim_end_frame": "End Frame",
+        "anim_fps": "Animation FPS",
+        "material_mode": "Material Mode",
+        "normal_format": "Normal Format",
+        "orm_layout": "ORM Layout",
+        "texture_filter": "Texture Filter",
+        "texture_wrap": "Texture Wrap",
+        "emissive_intensity": "Emissive Intensity",
+        "viewport_lod_mode": "Viewport LOD",
+        "render_role": "Render Role",
+        "matte_id": "Matte ID",
+        "shadow_intensity": "Shadow Intensity",
+        "shadow_softness": "Shadow Softness"
+      }
+    },
+    "scene3d": {
+      "title": "Scene3D",
+      "params": {
+        "width": "Width",
+        "height": "Height"
+      }
+    }
+  },
+  "param_groups": {
+    "Blur": "Blur",
+    "Channels": "Channels",
+    "Keying": "Keying",
+    "Screen": "Screen",
+    "Matte": "Matte",
+    "Despill": "Despill",
+    "Output": "Output"
+  },
+  "channels": {
+    "label": "Channels"
+  },
+  "panel": {
+    "node_graph": "Node Graph",
+    "node_properties": "Node Properties",
+    "performance": "Performance",
+    "perf": "Performance",
+    "composite_scopes": "Scopes",
+    "keyframes": "Keyframes",
+    "spline": "Spline",
+    "animation": "Animation",
+    "import_report": "Import Report",
+    "asset_dependency": "Asset Dependencies",
+    "scene_outliner": "Scene Outliner",
+    "material": "Material"
+  },
+  "keyframes": {
+    "prev_kf": "Previous keyframe",
+    "next_kf": "Next keyframe",
+    "fit": "Fit time range",
+    "zoom_in": "Zoom in",
+    "expand_all": "Expand all",
+    "collapse_all": "Collapse all",
+    "pan": "Pan to playhead",
+    "unit_time": "Time",
+    "unit_frame": "Frame",
+    "unit_seconds": "Seconds",
+    "unit_timecode": "Timecode",
+    "empty": "No animated parameters"
+  },
+  "spline": {
+    "empty": "No curves",
+    "fit": "Fit curves",
+    "smooth": "Smooth",
+    "linear": "Linear",
+    "flat": "Flat",
+    "step": "Step/Hold"
+  }
+}

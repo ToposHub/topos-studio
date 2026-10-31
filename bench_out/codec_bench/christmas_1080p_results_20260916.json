@@ -1,0 +1,174 @@
+{
+ "schema": "topos.christmas_1080p_bench.v1",
+ "created_at": "2026-09-16T11:09:17.890005+08:00",
+ "source": "/Users/testuser/Desktop/Christmas.mp4",
+ "slice_threads": 8,
+ "host": {
+  "machine": "Apple M1 MacBook Air (8C, 8GB)",
+  "platform": "darwin arm64"
+ },
+ "tiers": [
+  {
+   "tier": "proxy",
+   "pix_fmt": "yuv422p10le",
+   "frames": 901,
+   "src_fps": 29.97002997002997,
+   "duration_s": 30.063366666666667,
+   "encode": {
+    "fps": 185.00547829967934,
+    "codec_s": 4.870126054,
+    "wall_s": 17.51404845900015,
+    "mean_qp": 77.88679245283019,
+    "mean_payload_bytes": 76108.29189789123
+   },
+   "decode": {
+    "fps": 88.71391454817977,
+    "codec_s": 10.15624217,
+    "avg_ms": 11.272188867924529,
+    "p50_ms": 10.760792,
+    "p95_ms": 16.274542
+   },
+   "file": {
+    "path": "/Users/testuser/Documents/vscode/topos-color/bench_out/codec_bench/christmas_1080p_proxy.mov",
+    "bytes": 68585102,
+    "mbps_incl_container": 18.250810765261374,
+    "payload_mbps": 18.247742313180716
+   }
+  },
+  {
+   "tier": "lt",
+   "pix_fmt": "yuv422p10le",
+   "frames": 901,
+   "src_fps": 29.97002997002997,
+   "duration_s": 30.063366666666667,
+   "encode": {
+    "fps": 59.1750934984834,
+    "codec_s": 15.226000446,
+    "wall_s": 37.31068404100006,
+    "mean_qp": 62.789123196448394,
+    "mean_payload_bytes": 247515.93007769145
+   },
+   "decode": {
+    "fps": 80.26668962368822,
+    "codec_s": 11.225079846,
+    "avg_ms": 12.458468197558268,
+    "p50_ms": 12.213833,
+    "p95_ms": 15.816416
+   },
+   "file": {
+    "path": "/Users/testuser/Documents/vscode/topos-color/bench_out/codec_bench/christmas_1080p_lt.mov",
+    "bytes": 223023384,
+    "mbps_incl_container": 59.3475471919867,
+    "payload_mbps": 59.344478739906044
+   }
+  },
+  {
+   "tier": "standard",
+   "pix_fmt": "yuv422p10le",
+   "frames": 901,
+   "src_fps": 29.97002997002997,
+   "duration_s": 30.063366666666667,
+   "encode": {
+    "fps": 53.98647677607849,
+    "codec_s": 16.689364704,
+    "wall_s": 39.18729433300041,
+    "mean_qp": 55.29633740288568,
+    "mean_payload_bytes": 382957.35627081024
+   },
+   "decode": {
+    "fps": 40.73880254469196,
+    "codec_s": 22.116506714,
+    "avg_ms": 24.54662232408435,
+    "p50_ms": 24.388417,
+    "p95_ms": 33.867042
+   },
+   "file": {
+    "path": "/Users/testuser/Documents/vscode/topos-color/bench_out/codec_bench/christmas_1080p_standard.mov",
+    "bytes": 345056109,
+    "mbps_incl_container": 91.82101600951766,
+    "payload_mbps": 91.81794755743702
+   }
+  },
+  {
+   "tier": "hq",
+   "pix_fmt": "yuv422p10le",
+   "frames": 901,
+   "src_fps": 29.97002997002997,
+   "duration_s": 30.063366666666667,
+   "encode": {
+    "fps": 83.75898262390669,
+    "codec_s": 10.757055205,
+    "wall_s": 25.271270584000376,
+    "mean_qp": 45.16204217536071,
+    "mean_payload_bytes": 631684.8401775805
+   },
+   "decode": {
+    "fps": 65.75801684799053,
+    "codec_s": 13.701751409,
+    "avg_ms": 15.207271264150943,
+    "p50_ms": 15.468083,
+    "p95_ms": 17.649583
+   },
+   "file": {
+    "path": "/Users/testuser/Documents/vscode/topos-color/bench_out/codec_bench/christmas_1080p_hq.mov",
+    "bytes": 569159572,
+    "mbps_incl_container": 151.45597718596608,
+    "payload_mbps": 151.45290873388544
+   }
+  },
+  {
+   "tier": "4444",
+   "pix_fmt": "yuv444p10le",
+   "frames": 901,
+   "src_fps": 29.97002997002997,
+   "duration_s": 30.063366666666667,
+   "encode": {
+    "fps": 50.049959536313075,
+    "codec_s": 18.002012556,
+    "wall_s": 36.87920099999974,
+    "mean_qp": 39.36958934517203,
+    "mean_payload_bytes": 1041041.8224195339
+   },
+   "decode": {
+    "fps": 42.31587173972352,
+    "codec_s": 21.292247163,
+    "avg_ms": 23.631794853496114,
+    "p50_ms": 24.33775,
+    "p95_ms": 28.04075
+   },
+   "file": {
+    "path": "/Users/testuser/Documents/vscode/topos-color/bench_out/codec_bench/christmas_1080p_4444.mov",
+    "bytes": 937990213,
+    "mbps_incl_container": 249.60350539582504,
+    "payload_mbps": 249.6004369437444
+   }
+  },
+  {
+   "tier": "4444xq",
+   "pix_fmt": "yuv444p12le",
+   "frames": 901,
+   "src_fps": 29.97002997002997,
+   "duration_s": 30.063366666666667,
+   "encode": {
+    "fps": 43.11240253905133,
+    "codec_s": 20.898858494,
+    "wall_s": 39.98778179199962,
+    "mean_qp": 32.37402885682575,
+    "mean_payload_bytes": 1516816.5160932296
+   },
+   "decode": {
+    "fps": 35.50721291105353,
+    "codec_s": 25.375125957,
+    "avg_ms": 28.16329185016648,
+    "p50_ms": 28.704291,
+    "p95_ms": 33.329916
+   },
+   "file": {
+    "path": "/Users/testuser/Documents/vscode/topos-color/bench_out/codec_bench/christmas_1080p_4444xq.mov",
+    "bytes": 1366663212,
+    "mbps_incl_container": 363.67536002288495,
+    "payload_mbps": 363.6722915708043
+   }
+  }
+ ]
+}

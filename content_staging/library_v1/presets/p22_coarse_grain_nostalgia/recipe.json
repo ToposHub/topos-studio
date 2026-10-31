@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P22",
+  "name": "粗颗粒怀旧",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合怀旧/老片质感；grain_size 3.0–6.0，chroma 0.3–0.5 增彩色颗粒",
+  "component": "F07 seeded_grain（暂存组件 content_staging/library_v1/filters/seeded_grain）",
+  "dependencies": {
+    "component_id": "F07",
+    "component_slug": "seeded_grain",
+    "component_kind": "filter"
+  },
+  "params": {
+    "strength": 0.55,
+    "grain_size": 4.0,
+    "seed": 7.0,
+    "chroma": 0.4,
+    "shadow_bias": 0.3,
+    "highlight_bias": 0.2
+  },
+  "notes": "依赖暂存组件（L12 未接缝）：seed 固定的可复现颗粒（time_domain=static，seed=7 为固定参数默认；动态 frame/seed 子门未接入，不启用动画模式）。"
+}

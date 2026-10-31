@@ -1,0 +1,78 @@
+{
+ "manifest": {
+  "schema": "bench_manifest.v1",
+  "topos_version": "0.1.0",
+  "dylib_commit_embedded": "8efc9a50",
+  "git_head": "8efc9a50",
+  "git_dirty": false,
+  "dylib_path": "/Users/testuser/Documents/vscode/topos/native/topos_codec/build/release/topos_codec.dylib",
+  "dylib_sha256": "ffbb80752f81bc924c39776ee21657e2172bf8ae37f2f09a63498588f5f755e4",
+  "abi_version": 2,
+  "slice_threads": 16,
+  "simd_avx2": true,
+  "simd_neon": false,
+  "cpu": "Genuine Intel(R) 0000",
+  "os": "darwin",
+  "python": "3.12.14"
+ },
+ "meta": {
+  "threads": 16,
+  "frames": 96,
+  "runs": 3,
+  "fps": 25.0,
+  "pyav": "18.1.0",
+  "pyav_ffmpeg": "8.1.2",
+  "entropy": "v2"
+ },
+ "groups": [
+  {
+   "res": "4k",
+   "family": "44412",
+   "frames_total": 96,
+   "measure": 48,
+   "cells": [
+    {
+     "res": "4k",
+     "family": "44412",
+     "codec": "topos",
+     "variant": "extreme",
+     "bit_depth": 12,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 1373.24,
+     "bpp": 6.623,
+     "enc_ms": 84.32,
+     "enc_fps": 11.9,
+     "dec_ms": 22.48,
+     "dec_fps": 44.5,
+     "chroma_qp_offset": 4,
+     "enc_s": [
+      7.675,
+      8.095,
+      8.867
+     ],
+     "dec_s": [
+      0.0222,
+      0.0225,
+      0.023
+     ],
+     "psnr_y": 61.578,
+     "ssim_y": 0.99941,
+     "frames_measured": 48
+    }
+   ],
+   "rd_deltas": [
+    {
+     "tier": "extreme",
+     "mbps": 1373.24,
+     "psnr_y": 61.578,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    }
+   ],
+   "speed_pairs": []
+  }
+ ]
+}

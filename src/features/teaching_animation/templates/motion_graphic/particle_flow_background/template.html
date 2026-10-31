@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root {
+      --accent: {{token:accent}};
+      --particle-density: {{token:particle_density}};
+      --motion-speed: {{token:motion_speed}};
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #030812; }
+    [data-topos-page] { position: absolute; inset: 0; overflow: hidden; background: #030812; }
+    .grid {
+      position: absolute; inset: 0; pointer-events: none; opacity: 0.72;
+      background-image:
+        linear-gradient(rgba(43, 214, 255, 0.052) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(43, 214, 255, 0.052) 1px, transparent 1px);
+      background-size: clamp(38px, 5vw, 78px) clamp(38px, 5vw, 78px);
+    }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <section data-topos-page="1" class="active" aria-label="Particle flow background">
+    <div class="grid"></div>
+    <canvas id="particle-flow"></canvas>
+  </section>
+  <script>
+    (() => {
+      const canvas = document.getElementById("particle-flow");
+      const ctx = canvas.getContext("2d");
+      const style = getComputedStyle(document.documentElement);
+      const accent = style.getPropertyValue("--accent").trim() || "#22d9ff";
+      const count = Math.max(24, Math.min(360, Number(style.getPropertyValue("--particle-density")) || 150));
+      const speed = Math.max(0.1, Math.min(2.5, Number(style.getPropertyValue("--motion-speed")) || 0.72));
+      let width = 1;
+      let height = 1;
+      let particles = [];
+      const random = (minimum, maximum) => minimum + Math.random() * (maximum - minimum);
+
+      function resize() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        particles = Array.from({ length: count }, () => ({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          vx: random(-0.48, 0.48) * speed,
+          vy: random(-0.34, 0.34) * speed,
+          size: random(0.55, 2.25),
+          alpha: random(0.24, 0.94),
+          phase: random(0, Math.PI * 2)
+        }));
+      }
+
+      function draw(time) {
+        ctx.clearRect(0, 0, width, height);
+        for (const particle of particles) {
+          particle.x += particle.vx;
+          particle.y += particle.vy;
+          if (particle.x < -8) particle.x = width + 8;
+          if (particle.x > width + 8) particle.x = -8;
+          if (particle.y < -8) particle.y = height + 8;
+          if (particle.y > height + 8) particle.y = -8;
+          const pulse = 0.7 + Math.sin(time * 0.0018 + particle.phase) * 0.3;
+          ctx.globalAlpha = particle.alpha * pulse;
+          ctx.fillStyle = accent;
+          ctx.shadowBlur = 11;
+          ctx.shadowColor = accent;
+          ctx.beginPath();
+          ctx.arc(particle.x, particle.y, particle.size * pulse, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+        requestAnimationFrame(draw);
+      }
+
+      window.addEventListener("resize", resize);
+      resize();
+      requestAnimationFrame(draw);
+    })();
+  </script>
+</body>
+</html>

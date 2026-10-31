@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P34",
+  "name": "细百叶",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "内容倍数感衔接；count 10–16 细百叶，softness 0.04 轻羽化",
+  "component": "X02 venetian_blinds（生产 lib1_venetian_blinds，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/venetian_blinds）",
+  "dependencies": {
+    "component_id": "X02",
+    "component_slug": "venetian_blinds",
+    "component_kind": "transition",
+    "transition_type": "lib1_venetian_blinds",
+    "user_json_base": false
+  },
+  "params": {
+    "count": 12,
+    "angle": 0.0,
+    "phase": 0.0,
+    "softness": 0.04
+  },
+  "notes": "X02 生产 base lib1_venetian_blinds（transition_catalog 已注册，L13 mask 家族）；base 不在 custom_transitions._BASE_TYPES 白名单（L05 口径仅 clock_wipe/true_push），故只产出转场实例载荷，不产出用户转场 JSON。"
+}

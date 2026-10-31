@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "AI 워크플로"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "위에서 템플릿을 선택하거나 여기에 에셋을 드롭하세요",
+      "zoom": "줌: {percent}%"
+    },
+    "toolbar": {
+      "template": "템플릿",
+      "load": "불러오기",
+      "clear": "지우기",
+      "form": "폼",
+      "canvas": "캔버스",
+      "run": "실행",
+      "cancel": "취소"
+    },
+    "gallery": {
+      "title": "워크플로 템플릿 선택",
+      "use": "사용"
+    },
+    "form": {
+      "title": "파라미터",
+      "title_with_name": "{name} · 파라미터",
+      "node_section": "노드: {node}",
+      "no_params": "이 템플릿에는 조정 가능한 파라미터가 없습니다 — 그냥 실행하세요",
+      "advanced_edit": "고급 편집(캔버스)",
+      "back_to_gallery": "템플릿으로 돌아가기",
+      "back_to_gallery_tooltip": "템플릿 갤러리로 돌아갑니다. 현재 워크플로는 유지됩니다(지우면 버려짐)"
+    },
+    "status": {
+      "idle": "대기 중",
+      "queued": "대기열에 추가됨",
+      "running": "실행 중",
+      "cached": "캐시됨",
+      "succeeded": "성공",
+      "failed": "실패",
+      "cancelled": "취소됨",
+      "waiting_input": "대기 중",
+      "skipped": "건너뜀",
+      "not_assembled": "상태: 미조립",
+      "no_plan": "아직 계획 없음"
+    },
+    "actions": {
+      "preview_plan": "계획 미리보기",
+      "request_approval": "승인 요청",
+      "apply_approved_plan": "승인된 계획 적용"
+    },
+    "inspector": {
+      "no_selection": "<b>(선택 없음)</b>"
+    },
+    "node_search": {
+      "placeholder": "노드 검색…"
+    }
+  }
+}

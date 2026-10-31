@@ -1,0 +1,25 @@
+============================= test session starts ==============================
+collected 86 items
+
+tests/color/test_m05_advanced_cpu.py ..........                          [ 11%]
+tests/color/test_m06_keyer_gpu_parity.py ....                            [ 16%]
+tests/color/test_m06_mask_shapes_cpu.py .........                        [ 26%]
+tests/color/test_m06_qualifier_cpu.py ........                           [ 36%]
+tests/color/test_m09_lightbox_alpha.py ........                          [ 45%]
+tests/color/test_m13_keyframe_curves.py ........                         [ 54%]
+tests/color/test_m19_color_context.py ........                           [ 63%]
+tests/color/test_m19_hdr_vectors.py ......                               [ 70%]
+tests/color/test_m19_three_page_vectors.py ....                          [ 75%]
+tests/color/test_m19_transform_typed.py ...........                      [ 88%]
+tests/color/test_m22_grade_diff.py ....                                  [ 93%]
+tests/color/test_m22_shot_match_panel.py ......                          [100%]
+
+=============================== warnings summary ===============================
+tests/color/test_m05_advanced_cpu.py::TestHslCurvesImage::test_sat_boost_changes_saturation
+tests/color/test_m05_advanced_cpu.py::TestHslCurvesImage::test_sat_boost_changes_saturation
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/color/test_m05_advanced_cpu.py:40: DeprecationWarning: Conversion of an array with ndim > 0 to a scalar is deprecated, and will error in future. Ensure you extract a single element from your array before performing this operation. (Deprecated NumPy 1.25.)
+    assert float(out[..., 0] - out[..., 2]) > float(rgb[..., 0] - rgb[..., 2])
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 86 passed, 2 warnings in 2.48s ========================
+

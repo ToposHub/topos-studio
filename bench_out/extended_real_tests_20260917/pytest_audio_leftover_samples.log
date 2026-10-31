@@ -1,0 +1,45 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 16 items
+
+tests/edit/test_audio_leftover_samples.py ..........FF.FF.               [100%]
+
+=================================== FAILURES ===================================
+_ TestLeftoverContinuity.test_waveform_continuity_at_packet_boundary[2K_H265.mov] _
+../topos/tests/edit/test_audio_leftover_samples.py:168: in test_waveform_continuity_at_packet_boundary
+    assert np.allclose(
+E   AssertionError: 2K_H265.mov: discontinuity at packet boundary (leftover lost)
+E   assert False
+E    +  where False = <function allclose at 0x2ca253af0>(array([[-0.05819702],\n       [-0.02502441]], dtype=float32), array([[-1.4621082e+08]], dtype=float32), atol=0.01)
+E    +    where <function allclose at 0x2ca253af0> = np.allclose
+_ TestLeftoverContinuity.test_waveform_continuity_at_packet_boundary[2K_prores422HQ.mov] _
+../topos/tests/edit/test_audio_leftover_samples.py:168: in test_waveform_continuity_at_packet_boundary
+    assert np.allclose(
+E   AssertionError: 2K_prores422HQ.mov: discontinuity at packet boundary (leftover lost)
+E   assert False
+E    +  where False = <function allclose at 0x2ca253af0>(array([[-0.05819702],\n       [-0.02502441]], dtype=float32), array([[-1.4621082e+08]], dtype=float32), atol=0.01)
+E    +    where <function allclose at 0x2ca253af0> = np.allclose
+_____ TestLeftoverContinuity.test_seek_clears_leftover_audio[2K_H265.mov] ______
+../topos/tests/edit/test_audio_leftover_samples.py:208: in test_seek_clears_leftover_audio
+    assert np.allclose(first[:, :100], ref[:, :100], atol=0.01), (
+E   AssertionError: 2K_H265.mov: seek did not reset to start (leftover leaked)
+E   assert False
+E    +  where False = <function allclose at 0x2ca253af0>(array([[ 0.00000000e+00,  2.74181366e-06,  1.19209290e-05,\n         2.81333923e-05,  5.20944595e-05,  8.40425491e-05,\n...,  2.23693848e-02,\n         2.31933594e-02,  2.41394043e-02,  2.47192383e-02,\n         2.51464844e-02]], dtype=float32), array([[ 0.0000000e+00,  0.0000000e+00,  5.8880000e+03,  1.0496000e+04,\n         2.5600000e+04,  4.3008000e+04,  6.041...088e+07, -3.2115200e+07,\n        -1.2699392e+07, -3.4078720e+07, -1.3568000e+07, -3.5756288e+07]],\n      dtype=float32), atol=0.01)
+E    +    where <function allclose at 0x2ca253af0> = np.allclose
+__ TestLeftoverContinuity.test_seek_clears_leftover_audio[2K_prores422HQ.mov] __
+../topos/tests/edit/test_audio_leftover_samples.py:208: in test_seek_clears_leftover_audio
+    assert np.allclose(first[:, :100], ref[:, :100], atol=0.01), (
+E   AssertionError: 2K_prores422HQ.mov: seek did not reset to start (leftover leaked)
+E   assert False
+E    +  where False = <function allclose at 0x2ca253af0>(array([[ 0.00000000e+00,  2.74181366e-06,  1.19209290e-05,\n         2.81333923e-05,  5.20944595e-05,  8.40425491e-05,\n...,  2.23693848e-02,\n         2.31933594e-02,  2.41394043e-02,  2.47192383e-02,\n         2.51464844e-02]], dtype=float32), array([[ 0.0000000e+00,  0.0000000e+00,  5.8880000e+03,  1.0496000e+04,\n         2.5600000e+04,  4.3008000e+04,  6.041...088e+07, -3.2115200e+07,\n        -1.2699392e+07, -3.4078720e+07, -1.3568000e+07, -3.5756288e+07]],\n      dtype=float32), atol=0.01)
+E    +    where <function allclose at 0x2ca253af0> = np.allclose
+=========================== short test summary info ============================
+FAILED tests/edit/test_audio_leftover_samples.py::TestLeftoverContinuity::test_waveform_continuity_at_packet_boundary[2K_H265.mov]
+FAILED tests/edit/test_audio_leftover_samples.py::TestLeftoverContinuity::test_waveform_continuity_at_packet_boundary[2K_prores422HQ.mov]
+FAILED tests/edit/test_audio_leftover_samples.py::TestLeftoverContinuity::test_seek_clears_leftover_audio[2K_H265.mov]
+FAILED tests/edit/test_audio_leftover_samples.py::TestLeftoverContinuity::test_seek_clears_leftover_audio[2K_prores422HQ.mov]
+========================= 4 failed, 12 passed in 3.10s =========================

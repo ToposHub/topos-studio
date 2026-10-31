@@ -1,0 +1,191 @@
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py", line 4426, in keyPressEvent
+    self.undo()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py", line 5437, in undo
+    new_timeline = self._command_stack.undo(self._timeline)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 3894, in undo
+    new_timeline = command.undo(timeline)
+                   ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 12486, in undo
+    new_track = new_track.with_clip_updated(restored_clip)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/timeline_v2.py", line 2479, in with_clip_updated
+    raise ValueError(f"Updated clip overlaps with {existing.clip_id}")
+ValueError: Updated clip overlaps with 4505275a-8ae0-41ed-a82b-ca6f6d7e7d7e
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py", line 9238, in _on_ripple_trim_right_finished
+    self._execute_command(cmd)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py", line 5350, in _execute_command
+    new_timeline = self._command_stack.execute(command, self._timeline)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 3851, in execute
+    result = command.apply(timeline)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 13221, in apply
+    new_timeline = ripple_trim_clip_right(
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/timeline_ops.py", line 2462, in ripple_trim_clip_right
+    raise TimelineOperationError(
+src.features.edit.core.timeline_ops.TimelineOperationError: new_end_frame 0 must be after clip start 110

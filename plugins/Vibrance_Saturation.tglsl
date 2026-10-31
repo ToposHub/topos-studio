@@ -1,0 +1,67 @@
+// --- Topos Plugin Metadata ---
+// @name Vibrance Saturation
+// @i18n_name Vibrance_Saturation
+// @author Topos Team
+// @version 1.0
+// @description Split saturation and vibrance control: chroma gain plus low-saturation-weighted vibrance boost with exact 709 luma preservation
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider saturation "Saturation" 0.0 -1.0 1.0
+// @param slider vibrance "Vibrance" 0.0 -1.0 1.0
+// @param separator
+// @param checkbox lum_preserve "Luminance Preserve" 1
+// -----------------------------
+//
+// Vibrance Saturation —— 饱和度 / 活泼度分离控制。
+//
+// 原理：把像素分解为 709 亮度 + 色度向量。saturation 对全部色度做均匀
+// 增益；vibrance 的增益按"当前色度幅值"反比加权——低饱和区域（肤色、
+// 天空、灰墙）提升多，已饱和区域提升少，避免肤色被推爆。可选精确亮度
+// 保持：把调整后 RGB 的亮度差补回，明暗结构完全不动。
+//
+// 与现有饱和度工具的差异：Color_Space_Transform 的 saturation 是全局
+// 单增益；本插件把"均匀增益"与"低饱和加权增益"拆成两个独立滑杆，
+// 并提供精确亮度守恒。
+//
+// 设计要点：
+// - 纯逐像素数学，零采样、零循环；clamp 只作用于活泼度权重（不碰
+//   内容色），色度增益对 HDR 线性外推（负值/超白按同一增益缩放）；
+// - 权重归一常数 0.35 为 scene-linear 色度幅值的经验尺度（18% 灰典型
+//   肤色色度幅值 ~0.05-0.12，高饱和 foliage ~0.3+）；
+// - 亮度保持项 result += W * (luma - dot(result, W)) 为精确代数补偿，
+//   非近似；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+const vec3 VS_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：双滑杆归零为纯直通（含亮度保持分支）
+    if (abs(saturation) < 0.001 && abs(vibrance) < 0.001) return color;
+
+    float luma = dot(color, VS_LUMA_W);
+    vec3 chroma = color - luma;
+    float chroma_mag = length(chroma);
+
+    // 活泼度权重：色度越低权重越高；clamp 仅收敛权重到 [0,1]，
+    // 不触碰内容色（HDR 红线允许的 clamp 类别）
+    float low_sat_w = 1.0 - clamp(chroma_mag / 0.35, 0.0, 1.0);
+
+    float gain = 1.0 + saturation + vibrance * low_sat_w;
+    vec3 result = luma + chroma * gain;
+
+    if (lum_preserve == 1) {
+        // 精确 709 亮度保持：把调整后的亮度差按亮度系数补回
+        result += VS_LUMA_W * (luma - dot(result, VS_LUMA_W));
+    }
+
+    return result;
+}

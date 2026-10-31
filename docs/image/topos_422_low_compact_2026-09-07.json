@@ -1,0 +1,18 @@
+{
+  "schema": "topos.image_422_low_compact.v1",
+  "date": "2026-09-07",
+  "source": {
+    "path": "tests/test_videos/2K_h264.mp4",
+    "frame_index": 0,
+    "size": "1920x1080",
+    "source_pix_fmt": "yuv420p",
+    "derived_input": "yuv422p10le planar uint16 LE"
+  },
+  "tiers": [
+    {"tier": "422-low", "qmatrix": 3, "qp": 63, "bytes": 1080613, "mb_decimal": 1.080613, "psnr_db": 46.4858401726, "decode_p50_ms": 4.241, "decode_p95_ms": 4.923},
+    {"tier": "422-low-standard-baseline", "qmatrix": 1, "qp": 63, "bytes": 1116689, "mb_decimal": 1.116689, "psnr_db": 46.9325498248},
+    {"tier": "422-medium", "qmatrix": 1, "qp": 61, "bytes": 1364980, "mb_decimal": 1.36498, "psnr_db": 50.0160283503, "decode_p50_ms": 5.009, "decode_p95_ms": 6.254}
+  ],
+  "verification": "toos verify --deep",
+  "benchmark_iters": 20
+}

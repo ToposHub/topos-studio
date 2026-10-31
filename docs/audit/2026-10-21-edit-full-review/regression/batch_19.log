@@ -1,0 +1,33 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 229 items
+
+tests/edit/test_mg_idle_cache_and_static_frame.py ...............        [  6%]
+tests/edit/test_mixed_fps_playback_cadence.py .............              [ 12%]
+tests/edit/test_mixer_placeholder_entrances_disabled.py .....            [ 14%]
+tests/edit/test_mixer_preset_completeness.py ........                    [ 17%]
+tests/edit/test_motion_graphic_creation_entrypoints.py .....             [ 20%]
+tests/edit/test_motion_graphic_editor_cache_bridge.py ..                 [ 20%]
+tests/edit/test_motion_graphic_generator_registry.py ....                [ 22%]
+tests/edit/test_motion_graphic_html_import_workflow.py .                 [ 23%]
+tests/edit/test_motion_graphic_manual_editing.py ...                     [ 24%]
+tests/edit/test_motion_graphic_retime.py ...                             [ 25%]
+tests/edit/test_motion_graphic_virtual_asset.py ..                       [ 26%]
+tests/edit/test_move_to_existing_track_command.py ...............        [ 33%]
+tests/edit/test_multicam.py ..................                           [ 41%]
+tests/edit/test_multicam_nested_timecode_truepeak.py ........            [ 44%]
+tests/edit/test_multicam_panel_grid.py ...........                       [ 49%]
+tests/edit/test_multicam_production.py ......................            [ 58%]
+tests/edit/test_multicam_sync.py .....................                   [ 68%]
+tests/edit/test_multicam_sync_result_dialog.py ......                    [ 70%]
+tests/edit/test_native_gpu_bridge_eligibility.py ....................... [ 80%]
+.s                                                                       [ 81%]
+tests/edit/test_native_transitions.py .................................. [ 96%]
+........                                                                 [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_19.xml -
+======================== 228 passed, 1 skipped in 7.65s ========================

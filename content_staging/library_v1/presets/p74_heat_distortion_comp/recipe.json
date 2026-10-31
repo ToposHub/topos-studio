@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P74",
+  "name": "热扰动合成",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "热扰动合成：热浪向量场位移前景后叠底；units=Pixels",
+  "component": "C12 vector_displace（暂存节点 lib1_vector_displace）＋生产 merge",
+  "dependencies": {
+    "component_id": "C12",
+    "component_slug": "vector_displace",
+    "component_kind": "node",
+    "node_type": "lib1_vector_displace",
+    "aux_node_types": [
+      "merge"
+    ]
+  },
+  "params": {
+    "scale": 50.0,
+    "neutral": 0.5,
+    "units": "Pixels"
+  },
+  "notes": "C12 vector_displace 暂存组件＋生产 merge 组成热扰动宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；向量场走显式插槽（vector_field）。"
+}

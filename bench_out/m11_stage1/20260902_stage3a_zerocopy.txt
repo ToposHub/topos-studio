@@ -1,0 +1,23 @@
+# 阶段 3a：零拷贝平面传递（2026-09-02，同窗 stash A/B，位精确验证）
+
+## 改动
+- topos_binding._fill_frame_input/_plane_nbytes：encode/encode_sized 平面
+  接受 bytes（零转换）或 C 连续小端 uint16 numpy 数组（ctypes 指针直取，
+  keep 列表持有引用防 GC）
+- topos_encoder：planar/alpha/RGB 三路径全部去掉 tobytes()（4K 全平面
+  拷贝 ~4ms/帧）；ascontiguousarray 对已连续数组零拷贝直通
+
+## 位精确性
+同输入 10 帧 hq 率控序列：新旧代码输出 .mov sha256 完全一致
+（e604beea39f7d82772cd6ad30a26d742b9628d68987d9d488c37f86088814c93）——
+纯管线改动，零字节漂移。
+
+## 基准（用户素材 1080p→4K 放大 hq t16，150 帧，预热 2 帧不计）
+基线（阶段1后，tobytes）：  20.96 / 21.48 fps（中位 21.2）
+零拷贝：                    22.95 / 23.31 fps（中位 23.1）→ +9%
+
+## 说明
+_prepare_planes 仍有 ~10ms/帧（主要为 3 平面 p.max() 值域校验扫描 ~7ms，
+R1 契约"拒绝而非静默截断"不能省 + 平面几何/位深校验）。
+累计（用户素材 4K hq 产品路径）：sized 基线 15.93 → 阶段1 19.79 → 3a 23.1
+= +45%。

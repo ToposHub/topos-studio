@@ -1,0 +1,26 @@
+{
+  "recipe_id": "P31",
+  "name": "局部太阳化",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合局部反相风格；threshold 0.5 上下只折返亮部，amount 0.5–0.8 保留原片",
+  "component": "F17 solarize（暂存组件 content_staging/library_v1/filters/solarize）",
+  "dependencies": {
+    "component_id": "F17",
+    "component_slug": "solarize",
+    "component_kind": "filter"
+  },
+  "params": {
+    "threshold": 0.55,
+    "softness": 0.25,
+    "channel_mode": "Luma",
+    "amount": 0.7
+  },
+  "notes": "依赖暂存组件（L10 未接缝）：可控阈值折返 + 软过渡（强度零恒等，非 Invert 换名）。"
+}

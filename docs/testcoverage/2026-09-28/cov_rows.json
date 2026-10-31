@@ -1,0 +1,8783 @@
+{
+ "rows": [
+  {
+   "file": "src/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/app/__init__.py",
+   "pct": 100.0,
+   "stmts": 4,
+   "missing": 0
+  },
+  {
+   "file": "src/app/app_context.py",
+   "pct": 75.0,
+   "stmts": 20,
+   "missing": 5
+  },
+  {
+   "file": "src/app/controllers/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/app/controllers/agent_v2_chat_worker.py",
+   "pct": 0.0,
+   "stmts": 35,
+   "missing": 35
+  },
+  {
+   "file": "src/app/controllers/ai_edit_controller.py",
+   "pct": 38.8,
+   "stmts": 3594,
+   "missing": 2199
+  },
+  {
+   "file": "src/app/controllers/ai_edit_host_bridge.py",
+   "pct": 67.3,
+   "stmts": 107,
+   "missing": 35
+  },
+  {
+   "file": "src/app/controllers/ai_edit_host_bridge_impl.py",
+   "pct": 36.3,
+   "stmts": 954,
+   "missing": 608
+  },
+  {
+   "file": "src/app/controllers/ai_editing_mixin.py",
+   "pct": 59.0,
+   "stmts": 1031,
+   "missing": 423
+  },
+  {
+   "file": "src/app/controllers/ai_workflow_composite_render.py",
+   "pct": 0.0,
+   "stmts": 159,
+   "missing": 159
+  },
+  {
+   "file": "src/app/controllers/color_controller.py",
+   "pct": 31.5,
+   "stmts": 1135,
+   "missing": 777
+  },
+  {
+   "file": "src/app/controllers/color_workspace_controller.py",
+   "pct": 44.7,
+   "stmts": 159,
+   "missing": 88
+  },
+  {
+   "file": "src/app/controllers/composite_controller.py",
+   "pct": 39.1,
+   "stmts": 675,
+   "missing": 411
+  },
+  {
+   "file": "src/app/controllers/deliver_controller.py",
+   "pct": 19.4,
+   "stmts": 1004,
+   "missing": 809
+  },
+  {
+   "file": "src/app/controllers/dock_layout_controller.py",
+   "pct": 20.7,
+   "stmts": 1616,
+   "missing": 1282
+  },
+  {
+   "file": "src/app/controllers/edit_controller.py",
+   "pct": 32.4,
+   "stmts": 5030,
+   "missing": 3398
+  },
+  {
+   "file": "src/app/controllers/file_controller.py",
+   "pct": 22.0,
+   "stmts": 3935,
+   "missing": 3070
+  },
+  {
+   "file": "src/app/controllers/host_help_sources.py",
+   "pct": 43.4,
+   "stmts": 159,
+   "missing": 90
+  },
+  {
+   "file": "src/app/controllers/layer_controller.py",
+   "pct": 42.9,
+   "stmts": 1116,
+   "missing": 637
+  },
+  {
+   "file": "src/app/controllers/media_analysis_controller.py",
+   "pct": 77.8,
+   "stmts": 108,
+   "missing": 24
+  },
+  {
+   "file": "src/app/controllers/menu_toolbar_controller.py",
+   "pct": 9.9,
+   "stmts": 1021,
+   "missing": 920
+  },
+  {
+   "file": "src/app/controllers/page_controller.py",
+   "pct": 42.8,
+   "stmts": 1928,
+   "missing": 1103
+  },
+  {
+   "file": "src/app/feature_flags.py",
+   "pct": 0.0,
+   "stmts": 7,
+   "missing": 7
+  },
+  {
+   "file": "src/app/feature_registry.py",
+   "pct": 70.8,
+   "stmts": 89,
+   "missing": 26
+  },
+  {
+   "file": "src/app/integrations/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/app/integrations/file_explorer/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/app/integrations/file_explorer/adapter.py",
+   "pct": 49.4,
+   "stmts": 172,
+   "missing": 87
+  },
+  {
+   "file": "src/app/integrations/file_explorer/edit_benchmark_service.py",
+   "pct": 0.0,
+   "stmts": 320,
+   "missing": 320
+  },
+  {
+   "file": "src/app/main_window.py",
+   "pct": 18.7,
+   "stmts": 1159,
+   "missing": 942
+  },
+  {
+   "file": "src/app/menu/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/app/menu/menu_builder.py",
+   "pct": 69.9,
+   "stmts": 103,
+   "missing": 31
+  },
+  {
+   "file": "src/app/module_loader.py",
+   "pct": 82.4,
+   "stmts": 74,
+   "missing": 13
+  },
+  {
+   "file": "src/app/page_contract.py",
+   "pct": 95.0,
+   "stmts": 20,
+   "missing": 1
+  },
+  {
+   "file": "src/app/ui/__init__.py",
+   "pct": 100.0,
+   "stmts": 10,
+   "missing": 0
+  },
+  {
+   "file": "src/app/ui/audio_mixer.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/app/ui/files_panel.py",
+   "pct": 25.7,
+   "stmts": 241,
+   "missing": 179
+  },
+  {
+   "file": "src/app/ui/info_panel.py",
+   "pct": 14.3,
+   "stmts": 77,
+   "missing": 66
+  },
+  {
+   "file": "src/app/ui/library_adapter.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/app/ui/library_panel.py",
+   "pct": 12.1,
+   "stmts": 438,
+   "missing": 385
+  },
+  {
+   "file": "src/app/ui/preferences_dialog.py",
+   "pct": 7.0,
+   "stmts": 1333,
+   "missing": 1240
+  },
+  {
+   "file": "src/app/ui/project_manager_dialog.py",
+   "pct": 11.6,
+   "stmts": 675,
+   "missing": 597
+  },
+  {
+   "file": "src/app/ui/resize_dialog.py",
+   "pct": 16.3,
+   "stmts": 49,
+   "missing": 41
+  },
+  {
+   "file": "src/app/ui/script_panel.py",
+   "pct": 10.0,
+   "stmts": 1089,
+   "missing": 980
+  },
+  {
+   "file": "src/app/ui/shortcut_dialog.py",
+   "pct": 11.4,
+   "stmts": 308,
+   "missing": 273
+  },
+  {
+   "file": "src/app/ui/welcome_dialog.py",
+   "pct": 12.9,
+   "stmts": 232,
+   "missing": 202
+  },
+  {
+   "file": "src/app/update_checker.py",
+   "pct": 45.9,
+   "stmts": 61,
+   "missing": 33
+  },
+  {
+   "file": "src/features/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/features/ai_harness/__init__.py",
+   "pct": 100.0,
+   "stmts": 17,
+   "missing": 0
+  },
+  {
+   "file": "src/features/ai_harness/analysis_skills.py",
+   "pct": 0.0,
+   "stmts": 146,
+   "missing": 146
+  },
+  {
+   "file": "src/features/ai_harness/editorial_skills.py",
+   "pct": 41.3,
+   "stmts": 121,
+   "missing": 71
+  },
+  {
+   "file": "src/features/ai_harness/generation_adapter.py",
+   "pct": 17.6,
+   "stmts": 136,
+   "missing": 112
+  },
+  {
+   "file": "src/features/ai_harness/help_assistant.py",
+   "pct": 57.3,
+   "stmts": 75,
+   "missing": 32
+  },
+  {
+   "file": "src/features/ai_harness/invocation_models.py",
+   "pct": 91.1,
+   "stmts": 246,
+   "missing": 22
+  },
+  {
+   "file": "src/features/ai_harness/invocation_router.py",
+   "pct": 63.4,
+   "stmts": 161,
+   "missing": 59
+  },
+  {
+   "file": "src/features/ai_harness/legacy_adapters.py",
+   "pct": 13.8,
+   "stmts": 320,
+   "missing": 276
+  },
+  {
+   "file": "src/features/ai_harness/llm_role_executor.py",
+   "pct": 43.5,
+   "stmts": 177,
+   "missing": 100
+  },
+  {
+   "file": "src/features/ai_harness/llm_role_model_client.py",
+   "pct": 0.0,
+   "stmts": 34,
+   "missing": 34
+  },
+  {
+   "file": "src/features/ai_harness/mcp_http_transport.py",
+   "pct": 63.8,
+   "stmts": 265,
+   "missing": 96
+  },
+  {
+   "file": "src/features/ai_harness/mcp_outbound.py",
+   "pct": 62.6,
+   "stmts": 294,
+   "missing": 110
+  },
+  {
+   "file": "src/features/ai_harness/mcp_protocol.py",
+   "pct": 53.1,
+   "stmts": 179,
+   "missing": 84
+  },
+  {
+   "file": "src/features/ai_harness/mcp_stdio_transport.py",
+   "pct": 72.7,
+   "stmts": 216,
+   "missing": 59
+  },
+  {
+   "file": "src/features/ai_harness/plugin_broker.py",
+   "pct": 28.7,
+   "stmts": 268,
+   "missing": 191
+  },
+  {
+   "file": "src/features/ai_harness/plugin_discovery.py",
+   "pct": 54.6,
+   "stmts": 97,
+   "missing": 44
+  },
+  {
+   "file": "src/features/ai_harness/plugin_isolation.py",
+   "pct": 13.3,
+   "stmts": 390,
+   "missing": 338
+  },
+  {
+   "file": "src/features/ai_harness/plugin_persistence.py",
+   "pct": 24.2,
+   "stmts": 356,
+   "missing": 270
+  },
+  {
+   "file": "src/features/ai_harness/plugin_rollout.py",
+   "pct": 54.6,
+   "stmts": 163,
+   "missing": 74
+  },
+  {
+   "file": "src/features/ai_harness/plugin_runtime.py",
+   "pct": 66.2,
+   "stmts": 559,
+   "missing": 189
+  },
+  {
+   "file": "src/features/ai_harness/plugin_sandbox.py",
+   "pct": 28.6,
+   "stmts": 168,
+   "missing": 120
+  },
+  {
+   "file": "src/features/ai_harness/plugin_sandbox_worker.py",
+   "pct": 0.0,
+   "stmts": 25,
+   "missing": 25
+  },
+  {
+   "file": "src/features/ai_harness/plugin_status.py",
+   "pct": 82.9,
+   "stmts": 152,
+   "missing": 26
+  },
+  {
+   "file": "src/features/ai_harness/plugin_trace.py",
+   "pct": 52.4,
+   "stmts": 42,
+   "missing": 20
+  },
+  {
+   "file": "src/features/ai_harness/plugin_trust.py",
+   "pct": 48.8,
+   "stmts": 43,
+   "missing": 22
+  },
+  {
+   "file": "src/features/ai_harness/result_card.py",
+   "pct": 77.0,
+   "stmts": 87,
+   "missing": 20
+  },
+  {
+   "file": "src/features/ai_harness/result_card_builder.py",
+   "pct": 28.8,
+   "stmts": 132,
+   "missing": 94
+  },
+  {
+   "file": "src/features/ai_harness/rollout_metrics.py",
+   "pct": 44.0,
+   "stmts": 84,
+   "missing": 47
+  },
+  {
+   "file": "src/features/ai_harness/run_trace.py",
+   "pct": 37.0,
+   "stmts": 330,
+   "missing": 208
+  },
+  {
+   "file": "src/features/ai_harness/runtime.py",
+   "pct": 69.9,
+   "stmts": 386,
+   "missing": 116
+  },
+  {
+   "file": "src/features/ai_harness/runtime_invariants.py",
+   "pct": 44.9,
+   "stmts": 78,
+   "missing": 43
+  },
+  {
+   "file": "src/features/ai_harness/scheduler_adapter.py",
+   "pct": 49.4,
+   "stmts": 83,
+   "missing": 42
+  },
+  {
+   "file": "src/features/ai_harness/session_fork.py",
+   "pct": 45.2,
+   "stmts": 73,
+   "missing": 40
+  },
+  {
+   "file": "src/features/ai_harness/skill_catalog.py",
+   "pct": 38.7,
+   "stmts": 186,
+   "missing": 114
+  },
+  {
+   "file": "src/features/ai_harness/skill_compiler.py",
+   "pct": 41.9,
+   "stmts": 93,
+   "missing": 54
+  },
+  {
+   "file": "src/features/ai_harness/skill_dry_run.py",
+   "pct": 0.0,
+   "stmts": 252,
+   "missing": 252
+  },
+  {
+   "file": "src/features/ai_harness/skill_eval_suite.py",
+   "pct": 0.0,
+   "stmts": 133,
+   "missing": 133
+  },
+  {
+   "file": "src/features/ai_harness/skill_release.py",
+   "pct": 0.0,
+   "stmts": 91,
+   "missing": 91
+  },
+  {
+   "file": "src/features/ai_harness/skill_studio_drafts.py",
+   "pct": 0.0,
+   "stmts": 270,
+   "missing": 270
+  },
+  {
+   "file": "src/features/ai_harness/subagent_runtime.py",
+   "pct": 71.9,
+   "stmts": 135,
+   "missing": 38
+  },
+  {
+   "file": "src/features/ai_harness/tests/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_analysis_skills.py",
+   "pct": 0.0,
+   "stmts": 143,
+   "missing": 143
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_composite_render_skill.py",
+   "pct": 0.0,
+   "stmts": 86,
+   "missing": 86
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_editorial_skills.py",
+   "pct": 0.0,
+   "stmts": 119,
+   "missing": 119
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_generation_adapter.py",
+   "pct": 0.0,
+   "stmts": 109,
+   "missing": 109
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_help_assistant.py",
+   "pct": 0.0,
+   "stmts": 103,
+   "missing": 103
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_invocation_models.py",
+   "pct": 0.0,
+   "stmts": 156,
+   "missing": 156
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_invocation_router.py",
+   "pct": 0.0,
+   "stmts": 186,
+   "missing": 186
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_legacy_adapters.py",
+   "pct": 0.0,
+   "stmts": 198,
+   "missing": 198
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_llm_role_executor.py",
+   "pct": 0.0,
+   "stmts": 125,
+   "missing": 125
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_llm_role_model_client.py",
+   "pct": 0.0,
+   "stmts": 31,
+   "missing": 31
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_mcp_outbound.py",
+   "pct": 0.0,
+   "stmts": 206,
+   "missing": 206
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_p1_editorial_provider.py",
+   "pct": 0.0,
+   "stmts": 72,
+   "missing": 72
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_p1_host_wiring.py",
+   "pct": 0.0,
+   "stmts": 105,
+   "missing": 105
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_p2_acceptance.py",
+   "pct": 0.0,
+   "stmts": 102,
+   "missing": 102
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_p2_wiring.py",
+   "pct": 0.0,
+   "stmts": 158,
+   "missing": 158
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_p3_red_lines.py",
+   "pct": 0.0,
+   "stmts": 115,
+   "missing": 115
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_p4_acceptance.py",
+   "pct": 0.0,
+   "stmts": 155,
+   "missing": 155
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_p4_security.py",
+   "pct": 0.0,
+   "stmts": 119,
+   "missing": 119
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_result_card.py",
+   "pct": 0.0,
+   "stmts": 109,
+   "missing": 109
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_result_card_builder.py",
+   "pct": 0.0,
+   "stmts": 153,
+   "missing": 153
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_rollout_metrics.py",
+   "pct": 0.0,
+   "stmts": 44,
+   "missing": 44
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_run_trace.py",
+   "pct": 0.0,
+   "stmts": 72,
+   "missing": 72
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_runtime.py",
+   "pct": 0.0,
+   "stmts": 324,
+   "missing": 324
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_runtime_node_events.py",
+   "pct": 0.0,
+   "stmts": 52,
+   "missing": 52
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_scheduler_adapter.py",
+   "pct": 0.0,
+   "stmts": 118,
+   "missing": 118
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_skill_catalog.py",
+   "pct": 0.0,
+   "stmts": 123,
+   "missing": 123
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_skill_compiler.py",
+   "pct": 0.0,
+   "stmts": 196,
+   "missing": 196
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_skill_dry_run.py",
+   "pct": 0.0,
+   "stmts": 132,
+   "missing": 132
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_skill_eval_suite.py",
+   "pct": 0.0,
+   "stmts": 136,
+   "missing": 136
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_skill_release.py",
+   "pct": 0.0,
+   "stmts": 117,
+   "missing": 117
+  },
+  {
+   "file": "src/features/ai_harness/tests/test_skill_studio_drafts.py",
+   "pct": 0.0,
+   "stmts": 159,
+   "missing": 159
+  },
+  {
+   "file": "src/features/ai_workflow/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/comfyui_client.py",
+   "pct": 15.9,
+   "stmts": 264,
+   "missing": 222
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/comfyui_converter.py",
+   "pct": 0.0,
+   "stmts": 92,
+   "missing": 92
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/comfyui_executor.py",
+   "pct": 30.1,
+   "stmts": 296,
+   "missing": 207
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/comfyui_export.py",
+   "pct": 0.0,
+   "stmts": 128,
+   "missing": 128
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/comfyui_importer.py",
+   "pct": 47.7,
+   "stmts": 128,
+   "missing": 67
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/comfyui_models.py",
+   "pct": 51.8,
+   "stmts": 272,
+   "missing": 131
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/comfyui_node_specs.py",
+   "pct": 0.0,
+   "stmts": 12,
+   "missing": 12
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/comfyui_profiles.py",
+   "pct": 45.8,
+   "stmts": 48,
+   "missing": 26
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/composite_adapter.py",
+   "pct": 0.0,
+   "stmts": 218,
+   "missing": 218
+  },
+  {
+   "file": "src/features/ai_workflow/adapters/generation_node_specs.py",
+   "pct": 0.0,
+   "stmts": 60,
+   "missing": 60
+  },
+  {
+   "file": "src/features/ai_workflow/core/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/ai_workflow/core/node_specs.py",
+   "pct": 0.0,
+   "stmts": 132,
+   "missing": 132
+  },
+  {
+   "file": "src/features/ai_workflow/core/publish_as_skill.py",
+   "pct": 0.0,
+   "stmts": 76,
+   "missing": 76
+  },
+  {
+   "file": "src/features/ai_workflow/core/template_registry.py",
+   "pct": 85.5,
+   "stmts": 69,
+   "missing": 10
+  },
+  {
+   "file": "src/features/ai_workflow/core/workflow_compiler.py",
+   "pct": 0.0,
+   "stmts": 84,
+   "missing": 84
+  },
+  {
+   "file": "src/features/ai_workflow/core/workflow_graph_edit.py",
+   "pct": 0.0,
+   "stmts": 65,
+   "missing": 65
+  },
+  {
+   "file": "src/features/ai_workflow/core/workflow_models.py",
+   "pct": 82.9,
+   "stmts": 158,
+   "missing": 27
+  },
+  {
+   "file": "src/features/ai_workflow/core/workflow_validator.py",
+   "pct": 0.0,
+   "stmts": 161,
+   "missing": 161
+  },
+  {
+   "file": "src/features/ai_workflow/module.py",
+   "pct": 46.7,
+   "stmts": 45,
+   "missing": 24
+  },
+  {
+   "file": "src/features/ai_workflow/runtime/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/ai_workflow/runtime/fake_workflow_service.py",
+   "pct": 0.0,
+   "stmts": 59,
+   "missing": 59
+  },
+  {
+   "file": "src/features/ai_workflow/runtime/workflow_action_service.py",
+   "pct": 0.0,
+   "stmts": 167,
+   "missing": 167
+  },
+  {
+   "file": "src/features/ai_workflow/runtime/workflow_context.py",
+   "pct": 0.0,
+   "stmts": 108,
+   "missing": 108
+  },
+  {
+   "file": "src/features/ai_workflow/runtime/workflow_run_bridge.py",
+   "pct": 0.0,
+   "stmts": 11,
+   "missing": 11
+  },
+  {
+   "file": "src/features/ai_workflow/runtime/workflow_run_controller.py",
+   "pct": 0.0,
+   "stmts": 494,
+   "missing": 494
+  },
+  {
+   "file": "src/features/ai_workflow/tests/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_comfyui_client.py",
+   "pct": 0.0,
+   "stmts": 177,
+   "missing": 177
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_comfyui_converter.py",
+   "pct": 0.0,
+   "stmts": 153,
+   "missing": 153
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_comfyui_executor.py",
+   "pct": 0.0,
+   "stmts": 305,
+   "missing": 305
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_comfyui_export.py",
+   "pct": 0.0,
+   "stmts": 130,
+   "missing": 130
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_comfyui_importer.py",
+   "pct": 0.0,
+   "stmts": 170,
+   "missing": 170
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_comfyui_models.py",
+   "pct": 0.0,
+   "stmts": 242,
+   "missing": 242
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_composite_adapter.py",
+   "pct": 0.0,
+   "stmts": 204,
+   "missing": 204
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_fake_workflow_service.py",
+   "pct": 0.0,
+   "stmts": 90,
+   "missing": 90
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_generation_node_specs.py",
+   "pct": 0.0,
+   "stmts": 156,
+   "missing": 156
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_node_canvas_protocol.py",
+   "pct": 0.0,
+   "stmts": 80,
+   "missing": 80
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_node_specs.py",
+   "pct": 0.0,
+   "stmts": 87,
+   "missing": 87
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_p10_3_templates.py",
+   "pct": 0.0,
+   "stmts": 77,
+   "missing": 77
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_p5_acceptance.py",
+   "pct": 0.0,
+   "stmts": 102,
+   "missing": 102
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_p6_acceptance.py",
+   "pct": 0.0,
+   "stmts": 248,
+   "missing": 248
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_p7_acceptance.py",
+   "pct": 0.0,
+   "stmts": 156,
+   "missing": 156
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_publish_as_skill.py",
+   "pct": 0.0,
+   "stmts": 80,
+   "missing": 80
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_template_registry.py",
+   "pct": 0.0,
+   "stmts": 98,
+   "missing": 98
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_template_runnability.py",
+   "pct": 0.0,
+   "stmts": 100,
+   "missing": 100
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_workflow_action_service.py",
+   "pct": 0.0,
+   "stmts": 112,
+   "missing": 112
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_workflow_compiler.py",
+   "pct": 0.0,
+   "stmts": 81,
+   "missing": 81
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_workflow_context.py",
+   "pct": 0.0,
+   "stmts": 72,
+   "missing": 72
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_workflow_graph_edit.py",
+   "pct": 0.0,
+   "stmts": 97,
+   "missing": 97
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_workflow_models.py",
+   "pct": 0.0,
+   "stmts": 155,
+   "missing": 155
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_workflow_run_bridge.py",
+   "pct": 0.0,
+   "stmts": 49,
+   "missing": 49
+  },
+  {
+   "file": "src/features/ai_workflow/tests/test_workflow_validator.py",
+   "pct": 0.0,
+   "stmts": 98,
+   "missing": 98
+  },
+  {
+   "file": "src/features/ai_workflow/ui/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/ai_workflow/ui/workflow_canvas_adapter.py",
+   "pct": 32.5,
+   "stmts": 80,
+   "missing": 54
+  },
+  {
+   "file": "src/features/ai_workflow/ui/workflow_canvas_view.py",
+   "pct": 16.8,
+   "stmts": 375,
+   "missing": 312
+  },
+  {
+   "file": "src/features/ai_workflow/ui/workflow_connection_item.py",
+   "pct": 35.4,
+   "stmts": 82,
+   "missing": 53
+  },
+  {
+   "file": "src/features/ai_workflow/ui/workflow_form_page.py",
+   "pct": 0.0,
+   "stmts": 82,
+   "missing": 82
+  },
+  {
+   "file": "src/features/ai_workflow/ui/workflow_gallery_page.py",
+   "pct": 0.0,
+   "stmts": 68,
+   "missing": 68
+  },
+  {
+   "file": "src/features/ai_workflow/ui/workflow_inspector.py",
+   "pct": 0.0,
+   "stmts": 91,
+   "missing": 91
+  },
+  {
+   "file": "src/features/ai_workflow/ui/workflow_node_item.py",
+   "pct": 19.2,
+   "stmts": 208,
+   "missing": 168
+  },
+  {
+   "file": "src/features/ai_workflow/ui/workflow_node_search.py",
+   "pct": 0.0,
+   "stmts": 61,
+   "missing": 61
+  },
+  {
+   "file": "src/features/ai_workflow/ui/workflow_panel.py",
+   "pct": 14.1,
+   "stmts": 376,
+   "missing": 323
+  },
+  {
+   "file": "src/features/color/__init__.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/adapters/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/adapters/color_stack_hydrator.py",
+   "pct": 91.3,
+   "stmts": 231,
+   "missing": 20
+  },
+  {
+   "file": "src/features/color/ai/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/ai/color_context.py",
+   "pct": 0.0,
+   "stmts": 271,
+   "missing": 271
+  },
+  {
+   "file": "src/features/color/core/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/core/async_renderer.py",
+   "pct": 32.4,
+   "stmts": 3550,
+   "missing": 2399
+  },
+  {
+   "file": "src/features/color/core/auto_color.py",
+   "pct": 97.6,
+   "stmts": 126,
+   "missing": 3
+  },
+  {
+   "file": "src/features/color/core/cache_manager.py",
+   "pct": 79.3,
+   "stmts": 484,
+   "missing": 100
+  },
+  {
+   "file": "src/features/color/core/color_manager.py",
+   "pct": 17.1,
+   "stmts": 246,
+   "missing": 204
+  },
+  {
+   "file": "src/features/color/core/color_output.py",
+   "pct": 69.0,
+   "stmts": 42,
+   "missing": 13
+  },
+  {
+   "file": "src/features/color/core/color_session.py",
+   "pct": 89.6,
+   "stmts": 193,
+   "missing": 20
+  },
+  {
+   "file": "src/features/color/core/color_stack_render_service.py",
+   "pct": 0.0,
+   "stmts": 38,
+   "missing": 38
+  },
+  {
+   "file": "src/features/color/core/composition_uniforms.py",
+   "pct": 97.0,
+   "stmts": 231,
+   "missing": 7
+  },
+  {
+   "file": "src/features/color/core/delivery_matrix.py",
+   "pct": 88.3,
+   "stmts": 325,
+   "missing": 38
+  },
+  {
+   "file": "src/features/color/core/denoise_engine.py",
+   "pct": 0.0,
+   "stmts": 328,
+   "missing": 328
+  },
+  {
+   "file": "src/features/color/core/export_denoise_bridge.py",
+   "pct": 79.4,
+   "stmts": 97,
+   "missing": 20
+  },
+  {
+   "file": "src/features/color/core/grade_clipboard.py",
+   "pct": 97.2,
+   "stmts": 71,
+   "missing": 2
+  },
+  {
+   "file": "src/features/color/core/grade_keyframes.py",
+   "pct": 93.9,
+   "stmts": 164,
+   "missing": 10
+  },
+  {
+   "file": "src/features/color/core/history.py",
+   "pct": 100.0,
+   "stmts": 50,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/core/image_engine.py",
+   "pct": 45.3,
+   "stmts": 2569,
+   "missing": 1406
+  },
+  {
+   "file": "src/features/color/core/layer.py",
+   "pct": 84.3,
+   "stmts": 568,
+   "missing": 89
+  },
+  {
+   "file": "src/features/color/core/lut_exporter.py",
+   "pct": 25.0,
+   "stmts": 568,
+   "missing": 426
+  },
+  {
+   "file": "src/features/color/core/msl_composition.py",
+   "pct": 100.0,
+   "stmts": 56,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/core/opengl_render_backend.py",
+   "pct": 98.5,
+   "stmts": 68,
+   "missing": 1
+  },
+  {
+   "file": "src/features/color/core/plugin_manager.py",
+   "pct": 90.2,
+   "stmts": 215,
+   "missing": 21
+  },
+  {
+   "file": "src/features/color/core/preset_meta.py",
+   "pct": 88.7,
+   "stmts": 133,
+   "missing": 15
+  },
+  {
+   "file": "src/features/color/core/project_dependencies.py",
+   "pct": 93.4,
+   "stmts": 151,
+   "missing": 10
+  },
+  {
+   "file": "src/features/color/core/scope_types.py",
+   "pct": 100.0,
+   "stmts": 75,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/core/shader_compiler.py",
+   "pct": 71.3,
+   "stmts": 171,
+   "missing": 49
+  },
+  {
+   "file": "src/features/color/core/shader_nodes.py",
+   "pct": 100.0,
+   "stmts": 11,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/core/shader_nodes_msl.py",
+   "pct": 100.0,
+   "stmts": 14,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/core/the_decompiler.py",
+   "pct": 37.0,
+   "stmts": 335,
+   "missing": 211
+  },
+  {
+   "file": "src/features/color/core/video_denoise_gl.py",
+   "pct": 71.0,
+   "stmts": 93,
+   "missing": 27
+  },
+  {
+   "file": "src/features/color/core/video_denoise_pipeline.py",
+   "pct": 60.8,
+   "stmts": 120,
+   "missing": 47
+  },
+  {
+   "file": "src/features/color/core/video_denoise_shaders.py",
+   "pct": 100.0,
+   "stmts": 15,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/core/video_spatial_denoise.py",
+   "pct": 52.1,
+   "stmts": 163,
+   "missing": 78
+  },
+  {
+   "file": "src/features/color/core/video_temporal_denoise.py",
+   "pct": 24.5,
+   "stmts": 343,
+   "missing": 259
+  },
+  {
+   "file": "src/features/color/core/workspace_presets.py",
+   "pct": 95.4,
+   "stmts": 109,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/facade.py",
+   "pct": 41.3,
+   "stmts": 104,
+   "missing": 61
+  },
+  {
+   "file": "src/features/color/integrations/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/integrations/tangent_bridge.py",
+   "pct": 74.0,
+   "stmts": 508,
+   "missing": 132
+  },
+  {
+   "file": "src/features/color/module.py",
+   "pct": 88.1,
+   "stmts": 84,
+   "missing": 10
+  },
+  {
+   "file": "src/features/color/preferences.py",
+   "pct": 97.7,
+   "stmts": 396,
+   "missing": 9
+  },
+  {
+   "file": "src/features/color/shaders/shaders.py",
+   "pct": 100.0,
+   "stmts": 8,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/tracking/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/tracking/coordinate_map.py",
+   "pct": 80.0,
+   "stmts": 5,
+   "missing": 1
+  },
+  {
+   "file": "src/features/color/tracking/corner_pin.py",
+   "pct": 80.0,
+   "stmts": 5,
+   "missing": 1
+  },
+  {
+   "file": "src/features/color/tracking/feature_detector.py",
+   "pct": 0.0,
+   "stmts": 5,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/tracking/frame_sampler.py",
+   "pct": 0.0,
+   "stmts": 5,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/tracking/homography_stability.py",
+   "pct": 0.0,
+   "stmts": 5,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/tracking/merge.py",
+   "pct": 0.0,
+   "stmts": 5,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/tracking/point_manager.py",
+   "pct": 0.0,
+   "stmts": 5,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/tracking/shape_mask.py",
+   "pct": 0.0,
+   "stmts": 5,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/tracking/track_data.py",
+   "pct": 80.0,
+   "stmts": 5,
+   "missing": 1
+  },
+  {
+   "file": "src/features/color/tracking/tracker_2d.py",
+   "pct": 100.0,
+   "stmts": 5,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/tracking/tracking_cache.py",
+   "pct": 0.0,
+   "stmts": 5,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/tracking/tracking_evaluator.py",
+   "pct": 96.0,
+   "stmts": 125,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/tracking/tracking_service.py",
+   "pct": 96.8,
+   "stmts": 158,
+   "missing": 5
+  },
+  {
+   "file": "src/features/color/tracking/tracking_store.py",
+   "pct": 100.0,
+   "stmts": 71,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/tracking/tracking_worker.py",
+   "pct": 78.0,
+   "stmts": 41,
+   "missing": 9
+  },
+  {
+   "file": "src/features/color/tracking/types.py",
+   "pct": 80.0,
+   "stmts": 5,
+   "missing": 1
+  },
+  {
+   "file": "src/features/color/ui/__init__.py",
+   "pct": 100.0,
+   "stmts": 9,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/ui/adjustment_panel.py",
+   "pct": 0.0,
+   "stmts": 69,
+   "missing": 69
+  },
+  {
+   "file": "src/features/color/ui/auto_color_dialog.py",
+   "pct": 93.0,
+   "stmts": 57,
+   "missing": 4
+  },
+  {
+   "file": "src/features/color/ui/blur_sharpen_panel.py",
+   "pct": 0.0,
+   "stmts": 339,
+   "missing": 339
+  },
+  {
+   "file": "src/features/color/ui/canvas.py",
+   "pct": 29.4,
+   "stmts": 3706,
+   "missing": 2617
+  },
+  {
+   "file": "src/features/color/ui/color_mapping_panel.py",
+   "pct": 100.0,
+   "stmts": 20,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/ui/color_status_bar.py",
+   "pct": 89.1,
+   "stmts": 156,
+   "missing": 17
+  },
+  {
+   "file": "src/features/color/ui/color_wheel.py",
+   "pct": 35.3,
+   "stmts": 648,
+   "missing": 419
+  },
+  {
+   "file": "src/features/color/ui/crop_panel.py",
+   "pct": 74.7,
+   "stmts": 245,
+   "missing": 62
+  },
+  {
+   "file": "src/features/color/ui/deblur_panel.py",
+   "pct": 0.0,
+   "stmts": 139,
+   "missing": 139
+  },
+  {
+   "file": "src/features/color/ui/delivery_matrix_dialog.py",
+   "pct": 23.6,
+   "stmts": 72,
+   "missing": 55
+  },
+  {
+   "file": "src/features/color/ui/denoise_panel.py",
+   "pct": 0.0,
+   "stmts": 337,
+   "missing": 337
+  },
+  {
+   "file": "src/features/color/ui/dependency_report_dialog.py",
+   "pct": 94.6,
+   "stmts": 56,
+   "missing": 3
+  },
+  {
+   "file": "src/features/color/ui/film_grain_panel.py",
+   "pct": 77.6,
+   "stmts": 165,
+   "missing": 37
+  },
+  {
+   "file": "src/features/color/ui/gl_viewport.py",
+   "pct": 40.0,
+   "stmts": 95,
+   "missing": 57
+  },
+  {
+   "file": "src/features/color/ui/grade_paste_dialog.py",
+   "pct": 27.5,
+   "stmts": 40,
+   "missing": 29
+  },
+  {
+   "file": "src/features/color/ui/hsl_curves_panel.py",
+   "pct": 31.2,
+   "stmts": 48,
+   "missing": 33
+  },
+  {
+   "file": "src/features/color/ui/layer_panel.py",
+   "pct": 0.0,
+   "stmts": 512,
+   "missing": 512
+  },
+  {
+   "file": "src/features/color/ui/lut_panel.py",
+   "pct": 56.8,
+   "stmts": 37,
+   "missing": 16
+  },
+  {
+   "file": "src/features/color/ui/mask_panel.py",
+   "pct": 70.1,
+   "stmts": 595,
+   "missing": 178
+  },
+  {
+   "file": "src/features/color/ui/mixer_panel.py",
+   "pct": 0.0,
+   "stmts": 176,
+   "missing": 176
+  },
+  {
+   "file": "src/features/color/ui/plugin_panel.py",
+   "pct": 53.3,
+   "stmts": 420,
+   "missing": 196
+  },
+  {
+   "file": "src/features/color/ui/presets_panel.py",
+   "pct": 47.1,
+   "stmts": 431,
+   "missing": 228
+  },
+  {
+   "file": "src/features/color/ui/qualifier_panel.py",
+   "pct": 68.6,
+   "stmts": 440,
+   "missing": 138
+  },
+  {
+   "file": "src/features/color/ui/raw_panel.py",
+   "pct": 10.7,
+   "stmts": 290,
+   "missing": 259
+  },
+  {
+   "file": "src/features/color/ui/scope_panel.py",
+   "pct": 78.0,
+   "stmts": 501,
+   "missing": 110
+  },
+  {
+   "file": "src/features/color/ui/soft_clip_panel.py",
+   "pct": 15.2,
+   "stmts": 276,
+   "missing": 234
+  },
+  {
+   "file": "src/features/color/ui/timeline_clip_strip.py",
+   "pct": 81.8,
+   "stmts": 910,
+   "missing": 166
+  },
+  {
+   "file": "src/features/color/ui/tools_panel.py",
+   "pct": 0.0,
+   "stmts": 142,
+   "missing": 142
+  },
+  {
+   "file": "src/features/color/ui/tracker_graph.py",
+   "pct": 83.8,
+   "stmts": 321,
+   "missing": 52
+  },
+  {
+   "file": "src/features/color/ui/tracker_overlay.py",
+   "pct": 80.4,
+   "stmts": 445,
+   "missing": 87
+  },
+  {
+   "file": "src/features/color/ui/tracker_panel.py",
+   "pct": 93.9,
+   "stmts": 611,
+   "missing": 37
+  },
+  {
+   "file": "src/features/color/ui/tracker_status.py",
+   "pct": 100.0,
+   "stmts": 36,
+   "missing": 0
+  },
+  {
+   "file": "src/features/color/ui/tracker_toolbar.py",
+   "pct": 85.6,
+   "stmts": 104,
+   "missing": 15
+  },
+  {
+   "file": "src/features/color/ui/viewer_guides.py",
+   "pct": 46.2,
+   "stmts": 292,
+   "missing": 157
+  },
+  {
+   "file": "src/features/color/ui/warper_panel.py",
+   "pct": 0.0,
+   "stmts": 84,
+   "missing": 84
+  },
+  {
+   "file": "src/features/composite/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/adapters/__init__.py",
+   "pct": 100.0,
+   "stmts": 4,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/adapters/caption_input.py",
+   "pct": 91.7,
+   "stmts": 12,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/adapters/main_window_adapter.py",
+   "pct": 24.8,
+   "stmts": 375,
+   "missing": 282
+  },
+  {
+   "file": "src/features/composite/ai/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/ai/composite_plan.py",
+   "pct": 83.8,
+   "stmts": 142,
+   "missing": 23
+  },
+  {
+   "file": "src/features/composite/bake_service.py",
+   "pct": 86.2,
+   "stmts": 123,
+   "missing": 17
+  },
+  {
+   "file": "src/features/composite/core/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/core/asset_dependency.py",
+   "pct": 78.9,
+   "stmts": 454,
+   "missing": 96
+  },
+  {
+   "file": "src/features/composite/core/color_space.py",
+   "pct": 94.1,
+   "stmts": 17,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/core/eval_context.py",
+   "pct": 100.0,
+   "stmts": 28,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/core/format.py",
+   "pct": 99.2,
+   "stmts": 126,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/core/frame_sequence.py",
+   "pct": 100.0,
+   "stmts": 13,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/core/gl_bind.py",
+   "pct": 57.9,
+   "stmts": 19,
+   "missing": 8
+  },
+  {
+   "file": "src/features/composite/core/graph_migration.py",
+   "pct": 92.5,
+   "stmts": 279,
+   "missing": 21
+  },
+  {
+   "file": "src/features/composite/core/graph_preflight.py",
+   "pct": 89.5,
+   "stmts": 608,
+   "missing": 64
+  },
+  {
+   "file": "src/features/composite/core/graph_snapshot.py",
+   "pct": 80.8,
+   "stmts": 73,
+   "missing": 14
+  },
+  {
+   "file": "src/features/composite/core/image_loader.py",
+   "pct": 24.7,
+   "stmts": 392,
+   "missing": 295
+  },
+  {
+   "file": "src/features/composite/core/layer_model.py",
+   "pct": 80.2,
+   "stmts": 101,
+   "missing": 20
+  },
+  {
+   "file": "src/features/composite/core/layer_provenance.py",
+   "pct": 86.3,
+   "stmts": 131,
+   "missing": 18
+  },
+  {
+   "file": "src/features/composite/core/layer_stack_compiler.py",
+   "pct": 90.1,
+   "stmts": 273,
+   "missing": 27
+  },
+  {
+   "file": "src/features/composite/core/layer_stack_controller.py",
+   "pct": 81.9,
+   "stmts": 1023,
+   "missing": 185
+  },
+  {
+   "file": "src/features/composite/core/layer_stack_validator.py",
+   "pct": 88.9,
+   "stmts": 144,
+   "missing": 16
+  },
+  {
+   "file": "src/features/composite/core/media_drop_payload.py",
+   "pct": 70.4,
+   "stmts": 189,
+   "missing": 56
+  },
+  {
+   "file": "src/features/composite/core/node_capabilities.py",
+   "pct": 90.2,
+   "stmts": 173,
+   "missing": 17
+  },
+  {
+   "file": "src/features/composite/core/node_engine.py",
+   "pct": 75.1,
+   "stmts": 1283,
+   "missing": 319
+  },
+  {
+   "file": "src/features/composite/core/node_plugin.py",
+   "pct": 34.9,
+   "stmts": 235,
+   "missing": 153
+  },
+  {
+   "file": "src/features/composite/core/output_targets.py",
+   "pct": 95.3,
+   "stmts": 64,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/core/quality_profile.py",
+   "pct": 91.3,
+   "stmts": 23,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/core/runtime_context.py",
+   "pct": 93.3,
+   "stmts": 30,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/core/runtime_diagnostics.py",
+   "pct": 92.2,
+   "stmts": 77,
+   "missing": 6
+  },
+  {
+   "file": "src/features/composite/core/shaders.py",
+   "pct": 100.0,
+   "stmts": 100,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/core/tile_padding_computer.py",
+   "pct": 79.3,
+   "stmts": 213,
+   "missing": 44
+  },
+  {
+   "file": "src/features/composite/core/tile_scheduler.py",
+   "pct": 100.0,
+   "stmts": 28,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/core/time_remap.py",
+   "pct": 91.5,
+   "stmts": 177,
+   "missing": 15
+  },
+  {
+   "file": "src/features/composite/core/undo_stack.py",
+   "pct": 77.5,
+   "stmts": 488,
+   "missing": 110
+  },
+  {
+   "file": "src/features/composite/core/video_context.py",
+   "pct": 65.7,
+   "stmts": 271,
+   "missing": 93
+  },
+  {
+   "file": "src/features/composite/edit_service.py",
+   "pct": 81.1,
+   "stmts": 672,
+   "missing": 127
+  },
+  {
+   "file": "src/features/composite/evaluators/__init__.py",
+   "pct": 100.0,
+   "stmts": 15,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/evaluators/ai_evaluator.py",
+   "pct": 83.3,
+   "stmts": 6,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/evaluators/base_evaluator.py",
+   "pct": 60.9,
+   "stmts": 1692,
+   "missing": 661
+  },
+  {
+   "file": "src/features/composite/evaluators/blur_evaluator.py",
+   "pct": 11.8,
+   "stmts": 204,
+   "missing": 180
+  },
+  {
+   "file": "src/features/composite/evaluators/cache_evaluator.py",
+   "pct": 58.0,
+   "stmts": 88,
+   "missing": 37
+  },
+  {
+   "file": "src/features/composite/evaluators/channel_evaluator.py",
+   "pct": 44.6,
+   "stmts": 121,
+   "missing": 67
+  },
+  {
+   "file": "src/features/composite/evaluators/color_evaluator.py",
+   "pct": 26.9,
+   "stmts": 290,
+   "missing": 212
+  },
+  {
+   "file": "src/features/composite/evaluators/expression_evaluator.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/evaluators/filter_evaluator.py",
+   "pct": 49.1,
+   "stmts": 952,
+   "missing": 485
+  },
+  {
+   "file": "src/features/composite/evaluators/graph_evaluator_mixin.py",
+   "pct": 100.0,
+   "stmts": 17,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/evaluators/histogram_evaluator.py",
+   "pct": 100.0,
+   "stmts": 4,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/evaluators/histogram_manager.py",
+   "pct": 39.8,
+   "stmts": 344,
+   "missing": 207
+  },
+  {
+   "file": "src/features/composite/evaluators/keyer_evaluator.py",
+   "pct": 42.5,
+   "stmts": 247,
+   "missing": 142
+  },
+  {
+   "file": "src/features/composite/evaluators/keyframe_evaluator.py",
+   "pct": 100.0,
+   "stmts": 4,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/evaluators/merge_evaluator.py",
+   "pct": 4.0,
+   "stmts": 177,
+   "missing": 170
+  },
+  {
+   "file": "src/features/composite/evaluators/shader_library.py",
+   "pct": 55.3,
+   "stmts": 94,
+   "missing": 42
+  },
+  {
+   "file": "src/features/composite/evaluators/tile_evaluator.py",
+   "pct": 11.9,
+   "stmts": 67,
+   "missing": 59
+  },
+  {
+   "file": "src/features/composite/evaluators/transform_evaluator.py",
+   "pct": 18.8,
+   "stmts": 202,
+   "missing": 164
+  },
+  {
+   "file": "src/features/composite/export_provider.py",
+   "pct": 46.3,
+   "stmts": 54,
+   "missing": 29
+  },
+  {
+   "file": "src/features/composite/facade.py",
+   "pct": 36.2,
+   "stmts": 116,
+   "missing": 74
+  },
+  {
+   "file": "src/features/composite/face_workflow.py",
+   "pct": 89.9,
+   "stmts": 69,
+   "missing": 7
+  },
+  {
+   "file": "src/features/composite/ml_roto.py",
+   "pct": 79.1,
+   "stmts": 177,
+   "missing": 37
+  },
+  {
+   "file": "src/features/composite/module.py",
+   "pct": 48.5,
+   "stmts": 171,
+   "missing": 88
+  },
+  {
+   "file": "src/features/composite/nodes/__init__.py",
+   "pct": 100.0,
+   "stmts": 84,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/_gpu_readback.py",
+   "pct": 91.9,
+   "stmts": 37,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/ai_denoise_node.py",
+   "pct": 100.0,
+   "stmts": 12,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/ai_expand_node.py",
+   "pct": 100.0,
+   "stmts": 12,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/ai_gen_expand_node.py",
+   "pct": 92.9,
+   "stmts": 85,
+   "missing": 6
+  },
+  {
+   "file": "src/features/composite/nodes/ai_generate_node.py",
+   "pct": 100.0,
+   "stmts": 12,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/ai_inpaint_node.py",
+   "pct": 100.0,
+   "stmts": 12,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/ai_remove_node.py",
+   "pct": 92.6,
+   "stmts": 27,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/nodes/base_node.py",
+   "pct": 87.4,
+   "stmts": 548,
+   "missing": 69
+  },
+  {
+   "file": "src/features/composite/nodes/blend_node.py",
+   "pct": 92.3,
+   "stmts": 65,
+   "missing": 5
+  },
+  {
+   "file": "src/features/composite/nodes/blur_node.py",
+   "pct": 91.4,
+   "stmts": 116,
+   "missing": 10
+  },
+  {
+   "file": "src/features/composite/nodes/camera3d_node.py",
+   "pct": 86.6,
+   "stmts": 112,
+   "missing": 15
+  },
+  {
+   "file": "src/features/composite/nodes/channel_merge_node.py",
+   "pct": 88.4,
+   "stmts": 69,
+   "missing": 8
+  },
+  {
+   "file": "src/features/composite/nodes/chroma_keyer_node.py",
+   "pct": 94.7,
+   "stmts": 38,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/nodes/chromatic_aberration_node.py",
+   "pct": 87.5,
+   "stmts": 40,
+   "missing": 5
+  },
+  {
+   "file": "src/features/composite/nodes/clamp_node.py",
+   "pct": 93.5,
+   "stmts": 31,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/nodes/color_correct_node.py",
+   "pct": 76.0,
+   "stmts": 25,
+   "missing": 6
+  },
+  {
+   "file": "src/features/composite/nodes/color_node.py",
+   "pct": 97.2,
+   "stmts": 36,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/nodes/compare_node.py",
+   "pct": 79.2,
+   "stmts": 48,
+   "missing": 10
+  },
+  {
+   "file": "src/features/composite/nodes/constant_node.py",
+   "pct": 66.2,
+   "stmts": 263,
+   "missing": 89
+  },
+  {
+   "file": "src/features/composite/nodes/copy_channel_node.py",
+   "pct": 100.0,
+   "stmts": 30,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/cornerpin_node.py",
+   "pct": 38.1,
+   "stmts": 113,
+   "missing": 70
+  },
+  {
+   "file": "src/features/composite/nodes/crop_node.py",
+   "pct": 95.1,
+   "stmts": 61,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/cryptomatte_select_node.py",
+   "pct": 84.4,
+   "stmts": 141,
+   "missing": 22
+  },
+  {
+   "file": "src/features/composite/nodes/cs_transform_node.py",
+   "pct": 100.0,
+   "stmts": 30,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/deep_merge_node.py",
+   "pct": 60.8,
+   "stmts": 74,
+   "missing": 29
+  },
+  {
+   "file": "src/features/composite/nodes/deflicker_node.py",
+   "pct": 90.1,
+   "stmts": 292,
+   "missing": 29
+  },
+  {
+   "file": "src/features/composite/nodes/defocus_node.py",
+   "pct": 60.4,
+   "stmts": 53,
+   "missing": 21
+  },
+  {
+   "file": "src/features/composite/nodes/deformer3d_node.py",
+   "pct": 78.9,
+   "stmts": 190,
+   "missing": 40
+  },
+  {
+   "file": "src/features/composite/nodes/denoise_node.py",
+   "pct": 83.7,
+   "stmts": 49,
+   "missing": 8
+  },
+  {
+   "file": "src/features/composite/nodes/depth_common.py",
+   "pct": 79.3,
+   "stmts": 29,
+   "missing": 6
+  },
+  {
+   "file": "src/features/composite/nodes/depth_matte_node.py",
+   "pct": 88.9,
+   "stmts": 36,
+   "missing": 4
+  },
+  {
+   "file": "src/features/composite/nodes/difference_keyer_node.py",
+   "pct": 80.0,
+   "stmts": 45,
+   "missing": 9
+  },
+  {
+   "file": "src/features/composite/nodes/dissolve_node.py",
+   "pct": 71.4,
+   "stmts": 63,
+   "missing": 18
+  },
+  {
+   "file": "src/features/composite/nodes/dot_node.py",
+   "pct": 88.0,
+   "stmts": 25,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/edge_detect_node.py",
+   "pct": 83.3,
+   "stmts": 48,
+   "missing": 8
+  },
+  {
+   "file": "src/features/composite/nodes/erode_dilate_node.py",
+   "pct": 95.6,
+   "stmts": 45,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/nodes/face_smooth_node.py",
+   "pct": 86.0,
+   "stmts": 43,
+   "missing": 6
+  },
+  {
+   "file": "src/features/composite/nodes/face_track_node.py",
+   "pct": 80.0,
+   "stmts": 70,
+   "missing": 14
+  },
+  {
+   "file": "src/features/composite/nodes/file_output_node.py",
+   "pct": 40.1,
+   "stmts": 207,
+   "missing": 124
+  },
+  {
+   "file": "src/features/composite/nodes/fog_node.py",
+   "pct": 89.5,
+   "stmts": 38,
+   "missing": 4
+  },
+  {
+   "file": "src/features/composite/nodes/frame_hold_node.py",
+   "pct": 87.5,
+   "stmts": 24,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/frame_interpolate_node.py",
+   "pct": 66.9,
+   "stmts": 133,
+   "missing": 44
+  },
+  {
+   "file": "src/features/composite/nodes/geo3d_node.py",
+   "pct": 26.3,
+   "stmts": 152,
+   "missing": 112
+  },
+  {
+   "file": "src/features/composite/nodes/glow_node.py",
+   "pct": 60.4,
+   "stmts": 53,
+   "missing": 21
+  },
+  {
+   "file": "src/features/composite/nodes/godrays_node.py",
+   "pct": 96.3,
+   "stmts": 54,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/nodes/grade_node.py",
+   "pct": 100.0,
+   "stmts": 28,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/group_node.py",
+   "pct": 72.8,
+   "stmts": 158,
+   "missing": 43
+  },
+  {
+   "file": "src/features/composite/nodes/huecorrect_node.py",
+   "pct": 59.4,
+   "stmts": 32,
+   "missing": 13
+  },
+  {
+   "file": "src/features/composite/nodes/image_input_node.py",
+   "pct": 42.1,
+   "stmts": 292,
+   "missing": 169
+  },
+  {
+   "file": "src/features/composite/nodes/invert_node.py",
+   "pct": 95.0,
+   "stmts": 20,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/nodes/keyer_node.py",
+   "pct": 77.8,
+   "stmts": 90,
+   "missing": 20
+  },
+  {
+   "file": "src/features/composite/nodes/lens_distortion_node.py",
+   "pct": 88.0,
+   "stmts": 75,
+   "missing": 9
+  },
+  {
+   "file": "src/features/composite/nodes/lens_flare_node.py",
+   "pct": 92.3,
+   "stmts": 39,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/light3d_node.py",
+   "pct": 59.2,
+   "stmts": 142,
+   "missing": 58
+  },
+  {
+   "file": "src/features/composite/nodes/light_wrap_node.py",
+   "pct": 78.7,
+   "stmts": 47,
+   "missing": 10
+  },
+  {
+   "file": "src/features/composite/nodes/luma_keyer_node.py",
+   "pct": 94.1,
+   "stmts": 34,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/nodes/lut_node.py",
+   "pct": 35.3,
+   "stmts": 85,
+   "missing": 55
+  },
+  {
+   "file": "src/features/composite/nodes/mask_merge_node.py",
+   "pct": 76.7,
+   "stmts": 43,
+   "missing": 10
+  },
+  {
+   "file": "src/features/composite/nodes/mask_node.py",
+   "pct": 100.0,
+   "stmts": 37,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/matte_cleanup_node.py",
+   "pct": 97.5,
+   "stmts": 40,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/nodes/matte_node.py",
+   "pct": 94.1,
+   "stmts": 34,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/nodes/model3d_node.py",
+   "pct": 67.4,
+   "stmts": 559,
+   "missing": 182
+  },
+  {
+   "file": "src/features/composite/nodes/node_state.py",
+   "pct": 100.0,
+   "stmts": 8,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/noise_node.py",
+   "pct": 100.0,
+   "stmts": 33,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/noop_node.py",
+   "pct": 92.0,
+   "stmts": 25,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/nodes/normalize_node.py",
+   "pct": 60.0,
+   "stmts": 40,
+   "missing": 16
+  },
+  {
+   "file": "src/features/composite/nodes/output_node.py",
+   "pct": 48.3,
+   "stmts": 317,
+   "missing": 164
+  },
+  {
+   "file": "src/features/composite/nodes/paint_node.py",
+   "pct": 73.4,
+   "stmts": 94,
+   "missing": 25
+  },
+  {
+   "file": "src/features/composite/nodes/particle_node.py",
+   "pct": 95.9,
+   "stmts": 340,
+   "missing": 14
+  },
+  {
+   "file": "src/features/composite/nodes/placeholder_node.py",
+   "pct": 100.0,
+   "stmts": 10,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/pointcloud3d_node.py",
+   "pct": 70.5,
+   "stmts": 88,
+   "missing": 26
+  },
+  {
+   "file": "src/features/composite/nodes/precomp_node.py",
+   "pct": 71.4,
+   "stmts": 21,
+   "missing": 6
+  },
+  {
+   "file": "src/features/composite/nodes/premult_node.py",
+   "pct": 100.0,
+   "stmts": 20,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/ramp_node.py",
+   "pct": 100.0,
+   "stmts": 55,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/reformat_node.py",
+   "pct": 76.9,
+   "stmts": 134,
+   "missing": 31
+  },
+  {
+   "file": "src/features/composite/nodes/relight_node.py",
+   "pct": 97.8,
+   "stmts": 46,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/nodes/remove_channels_node.py",
+   "pct": 91.4,
+   "stmts": 35,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/retime_node.py",
+   "pct": 89.7,
+   "stmts": 29,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/roto_shape_node.py",
+   "pct": 93.0,
+   "stmts": 128,
+   "missing": 9
+  },
+  {
+   "file": "src/features/composite/nodes/scene3d_node.py",
+   "pct": 13.2,
+   "stmts": 2788,
+   "missing": 2419
+  },
+  {
+   "file": "src/features/composite/nodes/set_alpha_node.py",
+   "pct": 90.9,
+   "stmts": 33,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/sharpen_node.py",
+   "pct": 100.0,
+   "stmts": 36,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/shuffle_node.py",
+   "pct": 100.0,
+   "stmts": 28,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/switch_node.py",
+   "pct": 84.5,
+   "stmts": 71,
+   "missing": 11
+  },
+  {
+   "file": "src/features/composite/nodes/text_node.py",
+   "pct": 80.3,
+   "stmts": 752,
+   "missing": 148
+  },
+  {
+   "file": "src/features/composite/nodes/time_offset_node.py",
+   "pct": 87.5,
+   "stmts": 24,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/timeline_clip_input_node.py",
+   "pct": 100.0,
+   "stmts": 65,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/topos_color_node.py",
+   "pct": 65.2,
+   "stmts": 23,
+   "missing": 8
+  },
+  {
+   "file": "src/features/composite/nodes/tracker_node.py",
+   "pct": 92.7,
+   "stmts": 55,
+   "missing": 4
+  },
+  {
+   "file": "src/features/composite/nodes/transform_node.py",
+   "pct": 93.2,
+   "stmts": 133,
+   "missing": 9
+  },
+  {
+   "file": "src/features/composite/nodes/unknown_placeholder_node.py",
+   "pct": 96.4,
+   "stmts": 55,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/nodes/unpremult_node.py",
+   "pct": 100.0,
+   "stmts": 20,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/nodes/video_frame_node.py",
+   "pct": 58.6,
+   "stmts": 1287,
+   "missing": 533
+  },
+  {
+   "file": "src/features/composite/nodes/vignette_node.py",
+   "pct": 92.3,
+   "stmts": 39,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/nodes/volume3d_node.py",
+   "pct": 81.4,
+   "stmts": 97,
+   "missing": 18
+  },
+  {
+   "file": "src/features/composite/nodes/warp_node.py",
+   "pct": 84.8,
+   "stmts": 138,
+   "missing": 21
+  },
+  {
+   "file": "src/features/composite/nodes/zblur_node.py",
+   "pct": 93.8,
+   "stmts": 48,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/preferences.py",
+   "pct": 92.8,
+   "stmts": 223,
+   "missing": 16
+  },
+  {
+   "file": "src/features/composite/render/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/render/ai_cache_manager.py",
+   "pct": 55.3,
+   "stmts": 141,
+   "missing": 63
+  },
+  {
+   "file": "src/features/composite/render/ai_compute_manager.py",
+   "pct": 18.3,
+   "stmts": 635,
+   "missing": 519
+  },
+  {
+   "file": "src/features/composite/render/cache_manager.py",
+   "pct": 90.2,
+   "stmts": 366,
+   "missing": 36
+  },
+  {
+   "file": "src/features/composite/render/composite_export_renderer.py",
+   "pct": 77.3,
+   "stmts": 643,
+   "missing": 146
+  },
+  {
+   "file": "src/features/composite/render/composite_frame_renderer.py",
+   "pct": 57.1,
+   "stmts": 282,
+   "missing": 121
+  },
+  {
+   "file": "src/features/composite/render/composite_graph_render_service.py",
+   "pct": 76.9,
+   "stmts": 78,
+   "missing": 18
+  },
+  {
+   "file": "src/features/composite/render/composite_render_output.py",
+   "pct": 28.1,
+   "stmts": 477,
+   "missing": 343
+  },
+  {
+   "file": "src/features/composite/render/composite_render_worker.py",
+   "pct": 52.3,
+   "stmts": 111,
+   "missing": 53
+  },
+  {
+   "file": "src/features/composite/render/composite_renderer.py",
+   "pct": 31.9,
+   "stmts": 1173,
+   "missing": 799
+  },
+  {
+   "file": "src/features/composite/render/compute_shader_manager.py",
+   "pct": 52.2,
+   "stmts": 251,
+   "missing": 120
+  },
+  {
+   "file": "src/features/composite/render/disk_cache_store.py",
+   "pct": 84.7,
+   "stmts": 268,
+   "missing": 41
+  },
+  {
+   "file": "src/features/composite/render/frame_trace.py",
+   "pct": 92.4,
+   "stmts": 66,
+   "missing": 5
+  },
+  {
+   "file": "src/features/composite/render/gl_utils.py",
+   "pct": 0.0,
+   "stmts": 127,
+   "missing": 127
+  },
+  {
+   "file": "src/features/composite/render/gpu_resource_pool.py",
+   "pct": 65.4,
+   "stmts": 739,
+   "missing": 256
+  },
+  {
+   "file": "src/features/composite/render/metal_compute_bridge.py",
+   "pct": 19.6,
+   "stmts": 92,
+   "missing": 74
+  },
+  {
+   "file": "src/features/composite/render/parallel_frame_render.py",
+   "pct": 89.5,
+   "stmts": 153,
+   "missing": 16
+  },
+  {
+   "file": "src/features/composite/render/pbo_readback.py",
+   "pct": 64.9,
+   "stmts": 313,
+   "missing": 110
+  },
+  {
+   "file": "src/features/composite/render/prefetch_scheduler.py",
+   "pct": 38.2,
+   "stmts": 199,
+   "missing": 123
+  },
+  {
+   "file": "src/features/composite/render/render_scheduler.py",
+   "pct": 84.5,
+   "stmts": 547,
+   "missing": 85
+  },
+  {
+   "file": "src/features/composite/render/thumbnail_policy.py",
+   "pct": 98.1,
+   "stmts": 52,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/render/topos_cache_codec.py",
+   "pct": 91.9,
+   "stmts": 135,
+   "missing": 11
+  },
+  {
+   "file": "src/features/composite/render/tracker_analyze_worker.py",
+   "pct": 0.0,
+   "stmts": 79,
+   "missing": 79
+  },
+  {
+   "file": "src/features/composite/render3d/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/render3d/animation.py",
+   "pct": 99.2,
+   "stmts": 118,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/render3d/aov.py",
+   "pct": 99.4,
+   "stmts": 165,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/render3d/camera_model.py",
+   "pct": 94.6,
+   "stmts": 37,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/render3d/cryptomatte.py",
+   "pct": 95.4,
+   "stmts": 87,
+   "missing": 4
+  },
+  {
+   "file": "src/features/composite/render3d/deformers/__init__.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/render3d/deformers/base.py",
+   "pct": 98.3,
+   "stmts": 58,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/render3d/deformers/cpu.py",
+   "pct": 92.1,
+   "stmts": 140,
+   "missing": 11
+  },
+  {
+   "file": "src/features/composite/render3d/fields.py",
+   "pct": 96.1,
+   "stmts": 76,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/render3d/format_capabilities.py",
+   "pct": 94.4,
+   "stmts": 287,
+   "missing": 16
+  },
+  {
+   "file": "src/features/composite/render3d/frustum.py",
+   "pct": 83.1,
+   "stmts": 65,
+   "missing": 11
+  },
+  {
+   "file": "src/features/composite/render3d/gizmo_overlay.py",
+   "pct": 88.2,
+   "stmts": 380,
+   "missing": 45
+  },
+  {
+   "file": "src/features/composite/render3d/gizmo_renderer.py",
+   "pct": 12.5,
+   "stmts": 112,
+   "missing": 98
+  },
+  {
+   "file": "src/features/composite/render3d/hdri.py",
+   "pct": 16.6,
+   "stmts": 277,
+   "missing": 231
+  },
+  {
+   "file": "src/features/composite/render3d/ies_profile.py",
+   "pct": 86.8,
+   "stmts": 68,
+   "missing": 9
+  },
+  {
+   "file": "src/features/composite/render3d/lod_builder.py",
+   "pct": 86.1,
+   "stmts": 101,
+   "missing": 14
+  },
+  {
+   "file": "src/features/composite/render3d/material_model.py",
+   "pct": 92.7,
+   "stmts": 301,
+   "missing": 22
+  },
+  {
+   "file": "src/features/composite/render3d/material_state.py",
+   "pct": 98.2,
+   "stmts": 55,
+   "missing": 1
+  },
+  {
+   "file": "src/features/composite/render3d/material_texture_loader.py",
+   "pct": 35.8,
+   "stmts": 148,
+   "missing": 95
+  },
+  {
+   "file": "src/features/composite/render3d/math_utils.py",
+   "pct": 72.2,
+   "stmts": 180,
+   "missing": 50
+  },
+  {
+   "file": "src/features/composite/render3d/mesh_diagnostics.py",
+   "pct": 89.6,
+   "stmts": 96,
+   "missing": 10
+  },
+  {
+   "file": "src/features/composite/render3d/mesh_picking.py",
+   "pct": 89.3,
+   "stmts": 375,
+   "missing": 40
+  },
+  {
+   "file": "src/features/composite/render3d/mesh_vbo_pool.py",
+   "pct": 78.9,
+   "stmts": 76,
+   "missing": 16
+  },
+  {
+   "file": "src/features/composite/render3d/model_import_cache.py",
+   "pct": 84.3,
+   "stmts": 178,
+   "missing": 28
+  },
+  {
+   "file": "src/features/composite/render3d/model_import_report.py",
+   "pct": 96.0,
+   "stmts": 50,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/render3d/model_import_service.py",
+   "pct": 94.3,
+   "stmts": 228,
+   "missing": 13
+  },
+  {
+   "file": "src/features/composite/render3d/model_loader.py",
+   "pct": 51.2,
+   "stmts": 1033,
+   "missing": 504
+  },
+  {
+   "file": "src/features/composite/render3d/morph.py",
+   "pct": 84.2,
+   "stmts": 57,
+   "missing": 9
+  },
+  {
+   "file": "src/features/composite/render3d/node_icon_overlay.py",
+   "pct": 31.0,
+   "stmts": 364,
+   "missing": 251
+  },
+  {
+   "file": "src/features/composite/render3d/perf_stats.py",
+   "pct": 98.3,
+   "stmts": 118,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/render3d/point_cloud.py",
+   "pct": 93.3,
+   "stmts": 119,
+   "missing": 8
+  },
+  {
+   "file": "src/features/composite/render3d/primitives.py",
+   "pct": 86.2,
+   "stmts": 355,
+   "missing": 49
+  },
+  {
+   "file": "src/features/composite/render3d/procedural_hdri.py",
+   "pct": 0.0,
+   "stmts": 19,
+   "missing": 19
+  },
+  {
+   "file": "src/features/composite/render3d/raycast.py",
+   "pct": 42.9,
+   "stmts": 84,
+   "missing": 48
+  },
+  {
+   "file": "src/features/composite/render3d/scene_graph.py",
+   "pct": 97.1,
+   "stmts": 276,
+   "missing": 8
+  },
+  {
+   "file": "src/features/composite/render3d/scene_hierarchy.py",
+   "pct": 96.2,
+   "stmts": 130,
+   "missing": 5
+  },
+  {
+   "file": "src/features/composite/render3d/scene_payload.py",
+   "pct": 100.0,
+   "stmts": 131,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/render3d/selection.py",
+   "pct": 91.6,
+   "stmts": 191,
+   "missing": 16
+  },
+  {
+   "file": "src/features/composite/render3d/skeleton.py",
+   "pct": 98.7,
+   "stmts": 150,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/render3d/skeleton_renderer.py",
+   "pct": 93.7,
+   "stmts": 95,
+   "missing": 6
+  },
+  {
+   "file": "src/features/composite/render3d/skinning.py",
+   "pct": 78.6,
+   "stmts": 112,
+   "missing": 24
+  },
+  {
+   "file": "src/features/composite/render3d/viewport_overlays.py",
+   "pct": 58.5,
+   "stmts": 123,
+   "missing": 51
+  },
+  {
+   "file": "src/features/composite/render3d/volume_grid.py",
+   "pct": 92.5,
+   "stmts": 40,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/runtime.py",
+   "pct": 11.3,
+   "stmts": 142,
+   "missing": 126
+  },
+  {
+   "file": "src/features/composite/ui/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/ui/asset_dependency_panel.py",
+   "pct": 97.0,
+   "stmts": 101,
+   "missing": 3
+  },
+  {
+   "file": "src/features/composite/ui/backdrop_item.py",
+   "pct": 11.2,
+   "stmts": 481,
+   "missing": 427
+  },
+  {
+   "file": "src/features/composite/ui/composite_page.py",
+   "pct": 34.9,
+   "stmts": 5534,
+   "missing": 3601
+  },
+  {
+   "file": "src/features/composite/ui/composite_render_dialog.py",
+   "pct": 87.2,
+   "stmts": 250,
+   "missing": 32
+  },
+  {
+   "file": "src/features/composite/ui/composite_scope_widgets.py",
+   "pct": 100.0,
+   "stmts": 11,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/ui/composite_viewport.py",
+   "pct": 31.3,
+   "stmts": 6308,
+   "missing": 4332
+  },
+  {
+   "file": "src/features/composite/ui/connection_item.py",
+   "pct": 31.7,
+   "stmts": 526,
+   "missing": 359
+  },
+  {
+   "file": "src/features/composite/ui/graph_editor_view.py",
+   "pct": 14.9,
+   "stmts": 1153,
+   "missing": 981
+  },
+  {
+   "file": "src/features/composite/ui/graph_expression_editor.py",
+   "pct": 67.1,
+   "stmts": 146,
+   "missing": 48
+  },
+  {
+   "file": "src/features/composite/ui/graph_layout.py",
+   "pct": 12.3,
+   "stmts": 179,
+   "missing": 157
+  },
+  {
+   "file": "src/features/composite/ui/graph_model.py",
+   "pct": 94.1,
+   "stmts": 376,
+   "missing": 22
+  },
+  {
+   "file": "src/features/composite/ui/graph_navigation.py",
+   "pct": 91.9,
+   "stmts": 111,
+   "missing": 9
+  },
+  {
+   "file": "src/features/composite/ui/graph_node_search_popup.py",
+   "pct": 11.3,
+   "stmts": 222,
+   "missing": 197
+  },
+  {
+   "file": "src/features/composite/ui/graph_view.py",
+   "pct": 66.7,
+   "stmts": 93,
+   "missing": 31
+  },
+  {
+   "file": "src/features/composite/ui/group_commands.py",
+   "pct": 62.7,
+   "stmts": 153,
+   "missing": 57
+  },
+  {
+   "file": "src/features/composite/ui/import_report_panel.py",
+   "pct": 94.4,
+   "stmts": 252,
+   "missing": 14
+  },
+  {
+   "file": "src/features/composite/ui/keyframe_editor.py",
+   "pct": 15.1,
+   "stmts": 543,
+   "missing": 461
+  },
+  {
+   "file": "src/features/composite/ui/keyframes_model.py",
+   "pct": 82.0,
+   "stmts": 534,
+   "missing": 96
+  },
+  {
+   "file": "src/features/composite/ui/keyframes_panel.py",
+   "pct": 57.5,
+   "stmts": 1702,
+   "missing": 724
+  },
+  {
+   "file": "src/features/composite/ui/keyframes_timeline_view.py",
+   "pct": 40.8,
+   "stmts": 1222,
+   "missing": 723
+  },
+  {
+   "file": "src/features/composite/ui/keyframes_tree_view.py",
+   "pct": 52.9,
+   "stmts": 1054,
+   "missing": 496
+  },
+  {
+   "file": "src/features/composite/ui/material_panel.py",
+   "pct": 84.7,
+   "stmts": 262,
+   "missing": 40
+  },
+  {
+   "file": "src/features/composite/ui/minimap_widget.py",
+   "pct": 42.4,
+   "stmts": 210,
+   "missing": 121
+  },
+  {
+   "file": "src/features/composite/ui/node_editor_actions.py",
+   "pct": 14.4,
+   "stmts": 645,
+   "missing": 552
+  },
+  {
+   "file": "src/features/composite/ui/node_editor_widget.py",
+   "pct": 26.1,
+   "stmts": 2876,
+   "missing": 2125
+  },
+  {
+   "file": "src/features/composite/ui/node_graph_commands.py",
+   "pct": 90.0,
+   "stmts": 432,
+   "missing": 43
+  },
+  {
+   "file": "src/features/composite/ui/node_item.py",
+   "pct": 36.1,
+   "stmts": 496,
+   "missing": 317
+  },
+  {
+   "file": "src/features/composite/ui/node_properties_panel.py",
+   "pct": 37.9,
+   "stmts": 4168,
+   "missing": 2587
+  },
+  {
+   "file": "src/features/composite/ui/node_search_popup.py",
+   "pct": 12.5,
+   "stmts": 304,
+   "missing": 266
+  },
+  {
+   "file": "src/features/composite/ui/node_thumbnail.py",
+   "pct": 28.4,
+   "stmts": 257,
+   "missing": 184
+  },
+  {
+   "file": "src/features/composite/ui/perf_panel.py",
+   "pct": 70.8,
+   "stmts": 130,
+   "missing": 38
+  },
+  {
+   "file": "src/features/composite/ui/port_item.py",
+   "pct": 47.3,
+   "stmts": 112,
+   "missing": 59
+  },
+  {
+   "file": "src/features/composite/ui/preview_connection_item.py",
+   "pct": 81.7,
+   "stmts": 93,
+   "missing": 17
+  },
+  {
+   "file": "src/features/composite/ui/project_settings_section.py",
+   "pct": 0.0,
+   "stmts": 82,
+   "missing": 82
+  },
+  {
+   "file": "src/features/composite/ui/project_settings_widget.py",
+   "pct": 84.9,
+   "stmts": 218,
+   "missing": 33
+  },
+  {
+   "file": "src/features/composite/ui/scene_outliner_panel.py",
+   "pct": 85.6,
+   "stmts": 222,
+   "missing": 32
+  },
+  {
+   "file": "src/features/composite/ui/spline_commands.py",
+   "pct": 0.0,
+   "stmts": 47,
+   "missing": 47
+  },
+  {
+   "file": "src/features/composite/ui/spline_model.py",
+   "pct": 88.6,
+   "stmts": 280,
+   "missing": 32
+  },
+  {
+   "file": "src/features/composite/ui/spline_panel.py",
+   "pct": 57.2,
+   "stmts": 451,
+   "missing": 193
+  },
+  {
+   "file": "src/features/composite/ui/spline_view.py",
+   "pct": 17.1,
+   "stmts": 1044,
+   "missing": 865
+  },
+  {
+   "file": "src/features/composite/ui/sticky_note_item.py",
+   "pct": 12.8,
+   "stmts": 382,
+   "missing": 333
+  },
+  {
+   "file": "src/features/composite/ui/timeline_commands.py",
+   "pct": 86.0,
+   "stmts": 414,
+   "missing": 58
+  },
+  {
+   "file": "src/features/composite/ui/timeline_expression.py",
+   "pct": 94.2,
+   "stmts": 120,
+   "missing": 7
+  },
+  {
+   "file": "src/features/composite/ui/timeline_expression_editor.py",
+   "pct": 0.0,
+   "stmts": 150,
+   "missing": 150
+  },
+  {
+   "file": "src/features/composite/ui/timeline_icons.py",
+   "pct": 81.8,
+   "stmts": 285,
+   "missing": 52
+  },
+  {
+   "file": "src/features/composite/ui/timeline_layout.py",
+   "pct": 87.8,
+   "stmts": 123,
+   "missing": 15
+  },
+  {
+   "file": "src/features/composite/ui/timeline_session.py",
+   "pct": 91.1,
+   "stmts": 168,
+   "missing": 15
+  },
+  {
+   "file": "src/features/composite/ui/timeline_shortcuts.py",
+   "pct": 93.2,
+   "stmts": 147,
+   "missing": 10
+  },
+  {
+   "file": "src/features/composite/ui/timeline_time_display.py",
+   "pct": 55.7,
+   "stmts": 194,
+   "missing": 86
+  },
+  {
+   "file": "src/features/composite/ui/timeline_view_model.py",
+   "pct": 95.6,
+   "stmts": 295,
+   "missing": 13
+  },
+  {
+   "file": "src/features/composite/ui/viewer3d_settings_section.py",
+   "pct": 79.0,
+   "stmts": 610,
+   "missing": 128
+  },
+  {
+   "file": "src/features/composite/ui/viewer_handle_drawing.py",
+   "pct": 0.0,
+   "stmts": 111,
+   "missing": 111
+  },
+  {
+   "file": "src/features/composite/ui/viewer_handles.py",
+   "pct": 77.1,
+   "stmts": 719,
+   "missing": 165
+  },
+  {
+   "file": "src/features/composite/ui/viewer_tool_system.py",
+   "pct": 43.6,
+   "stmts": 675,
+   "missing": 381
+  },
+  {
+   "file": "src/features/composite/ui/viewport3d_controller.py",
+   "pct": 96.8,
+   "stmts": 62,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/ui/viewport3d_state.py",
+   "pct": 93.1,
+   "stmts": 102,
+   "missing": 7
+  },
+  {
+   "file": "src/features/composite/ui/viewport3d_toolbar.py",
+   "pct": 97.3,
+   "stmts": 74,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/utils/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/utils/expression_parser.py",
+   "pct": 77.0,
+   "stmts": 562,
+   "missing": 129
+  },
+  {
+   "file": "src/features/composite/utils/keyframe.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/features/composite/utils/pass_fusion.py",
+   "pct": 81.8,
+   "stmts": 181,
+   "missing": 33
+  },
+  {
+   "file": "src/features/composite/utils/path_versioning.py",
+   "pct": 95.7,
+   "stmts": 47,
+   "missing": 2
+  },
+  {
+   "file": "src/features/composite/utils/perf_monitor.py",
+   "pct": 94.1,
+   "stmts": 136,
+   "missing": 8
+  },
+  {
+   "file": "src/features/composite/utils/preset_manager.py",
+   "pct": 87.1,
+   "stmts": 155,
+   "missing": 20
+  },
+  {
+   "file": "src/features/composite/utils/serialization_formats.py",
+   "pct": 0.0,
+   "stmts": 223,
+   "missing": 223
+  },
+  {
+   "file": "src/features/deliver/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/features/deliver/adapters/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/deliver/core/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/deliver/core/custom_export_presets.py",
+   "pct": 83.9,
+   "stmts": 143,
+   "missing": 23
+  },
+  {
+   "file": "src/features/deliver/core/delivery_capability.py",
+   "pct": 82.4,
+   "stmts": 51,
+   "missing": 9
+  },
+  {
+   "file": "src/features/deliver/core/export_queue.py",
+   "pct": 87.9,
+   "stmts": 240,
+   "missing": 29
+  },
+  {
+   "file": "src/features/deliver/core/video_batch_export_controller.py",
+   "pct": 82.5,
+   "stmts": 137,
+   "missing": 24
+  },
+  {
+   "file": "src/features/deliver/core/video_export_formats.py",
+   "pct": 95.5,
+   "stmts": 22,
+   "missing": 1
+  },
+  {
+   "file": "src/features/deliver/core/video_export_job.py",
+   "pct": 92.9,
+   "stmts": 309,
+   "missing": 22
+  },
+  {
+   "file": "src/features/deliver/core/video_export_preflight.py",
+   "pct": 80.6,
+   "stmts": 315,
+   "missing": 61
+  },
+  {
+   "file": "src/features/deliver/core/video_export_presets.py",
+   "pct": 91.4,
+   "stmts": 58,
+   "missing": 5
+  },
+  {
+   "file": "src/features/deliver/core/video_job_runner.py",
+   "pct": 40.3,
+   "stmts": 154,
+   "missing": 92
+  },
+  {
+   "file": "src/features/deliver/facade.py",
+   "pct": 0.0,
+   "stmts": 16,
+   "missing": 16
+  },
+  {
+   "file": "src/features/deliver/module.py",
+   "pct": 64.3,
+   "stmts": 84,
+   "missing": 30
+  },
+  {
+   "file": "src/features/deliver/preferences.py",
+   "pct": 93.9,
+   "stmts": 147,
+   "missing": 9
+  },
+  {
+   "file": "src/features/deliver/srt_exporter.py",
+   "pct": 0.0,
+   "stmts": 49,
+   "missing": 49
+  },
+  {
+   "file": "src/features/deliver/ui/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/deliver/ui/deliver_page.py",
+   "pct": 0.0,
+   "stmts": 598,
+   "missing": 598
+  },
+  {
+   "file": "src/features/deliver/ui/deliver_workspace.py",
+   "pct": 83.8,
+   "stmts": 352,
+   "missing": 57
+  },
+  {
+   "file": "src/features/deliver/ui/detachable_panel_host.py",
+   "pct": 77.1,
+   "stmts": 105,
+   "missing": 24
+  },
+  {
+   "file": "src/features/deliver/ui/video_batch_export_panel.py",
+   "pct": 63.0,
+   "stmts": 656,
+   "missing": 243
+  },
+  {
+   "file": "src/features/deliver/ui/video_export_settings_panel.py",
+   "pct": 84.6,
+   "stmts": 1601,
+   "missing": 246
+  },
+  {
+   "file": "src/features/edit/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/adapters/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/adapters/fcpxml_adapter.py",
+   "pct": 88.7,
+   "stmts": 195,
+   "missing": 22
+  },
+  {
+   "file": "src/features/edit/adapters/import_builder.py",
+   "pct": 98.4,
+   "stmts": 126,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/adapters/interchange_types.py",
+   "pct": 95.2,
+   "stmts": 63,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/adapters/otio_adapter.py",
+   "pct": 40.0,
+   "stmts": 95,
+   "missing": 57
+  },
+  {
+   "file": "src/features/edit/ai_editing/__init__.py",
+   "pct": 100.0,
+   "stmts": 14,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/action_contract.py",
+   "pct": 0.0,
+   "stmts": 90,
+   "missing": 90
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_feature_flags.py",
+   "pct": 100.0,
+   "stmts": 24,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_inbox.py",
+   "pct": 91.1,
+   "stmts": 123,
+   "missing": 11
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_metrics.py",
+   "pct": 96.5,
+   "stmts": 113,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_models.py",
+   "pct": 98.2,
+   "stmts": 332,
+   "missing": 6
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_orchestrator.py",
+   "pct": 93.9,
+   "stmts": 245,
+   "missing": 15
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_phase_presenter.py",
+   "pct": 93.1,
+   "stmts": 72,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_presets.py",
+   "pct": 85.4,
+   "stmts": 48,
+   "missing": 7
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_task_executor.py",
+   "pct": 73.5,
+   "stmts": 393,
+   "missing": 104
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_task_prompts.py",
+   "pct": 100.0,
+   "stmts": 35,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/agent_tool_loop.py",
+   "pct": 87.0,
+   "stmts": 231,
+   "missing": 30
+  },
+  {
+   "file": "src/features/edit/ai_editing/ai_provider_catalog.py",
+   "pct": 73.9,
+   "stmts": 88,
+   "missing": 23
+  },
+  {
+   "file": "src/features/edit/ai_editing/analysis_models.py",
+   "pct": 95.7,
+   "stmts": 231,
+   "missing": 10
+  },
+  {
+   "file": "src/features/edit/ai_editing/analysis_request.py",
+   "pct": 96.8,
+   "stmts": 126,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/analysis_scheduler.py",
+   "pct": 97.4,
+   "stmts": 192,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/ai_editing/analysis_service.py",
+   "pct": 88.2,
+   "stmts": 381,
+   "missing": 45
+  },
+  {
+   "file": "src/features/edit/ai_editing/approval_service.py",
+   "pct": 96.2,
+   "stmts": 130,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/ai_editing/artifact_models.py",
+   "pct": 86.3,
+   "stmts": 197,
+   "missing": 27
+  },
+  {
+   "file": "src/features/edit/ai_editing/artifact_store.py",
+   "pct": 97.4,
+   "stmts": 76,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/assistant_capability_router.py",
+   "pct": 95.0,
+   "stmts": 100,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/ai_editing/assistant_events.py",
+   "pct": 100.0,
+   "stmts": 101,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/assistant_modes.py",
+   "pct": 87.1,
+   "stmts": 31,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/assistant_plugins.py",
+   "pct": 75.5,
+   "stmts": 200,
+   "missing": 49
+  },
+  {
+   "file": "src/features/edit/ai_editing/assistant_service.py",
+   "pct": 68.4,
+   "stmts": 395,
+   "missing": 125
+  },
+  {
+   "file": "src/features/edit/ai_editing/assistant_session_store.py",
+   "pct": 81.7,
+   "stmts": 240,
+   "missing": 44
+  },
+  {
+   "file": "src/features/edit/ai_editing/audio_extractor.py",
+   "pct": 39.7,
+   "stmts": 131,
+   "missing": 79
+  },
+  {
+   "file": "src/features/edit/ai_editing/audit_store.py",
+   "pct": 86.7,
+   "stmts": 90,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/ai_editing/autonomous_agent.py",
+   "pct": 82.0,
+   "stmts": 200,
+   "missing": 36
+  },
+  {
+   "file": "src/features/edit/ai_editing/autonomous_mission.py",
+   "pct": 86.5,
+   "stmts": 155,
+   "missing": 21
+  },
+  {
+   "file": "src/features/edit/ai_editing/autonomous_recovery.py",
+   "pct": 87.7,
+   "stmts": 122,
+   "missing": 15
+  },
+  {
+   "file": "src/features/edit/ai_editing/brief_service.py",
+   "pct": 87.1,
+   "stmts": 171,
+   "missing": 22
+  },
+  {
+   "file": "src/features/edit/ai_editing/capability_catalog.py",
+   "pct": 85.4,
+   "stmts": 130,
+   "missing": 19
+  },
+  {
+   "file": "src/features/edit/ai_editing/capability_manifest.py",
+   "pct": 87.7,
+   "stmts": 122,
+   "missing": 15
+  },
+  {
+   "file": "src/features/edit/ai_editing/capability_status.py",
+   "pct": 81.0,
+   "stmts": 168,
+   "missing": 32
+  },
+  {
+   "file": "src/features/edit/ai_editing/chat_run_driver.py",
+   "pct": 77.4,
+   "stmts": 257,
+   "missing": 58
+  },
+  {
+   "file": "src/features/edit/ai_editing/commercial_acceptance.py",
+   "pct": 93.4,
+   "stmts": 151,
+   "missing": 10
+  },
+  {
+   "file": "src/features/edit/ai_editing/commercial_gate.py",
+   "pct": 83.7,
+   "stmts": 43,
+   "missing": 7
+  },
+  {
+   "file": "src/features/edit/ai_editing/composition_plugin.py",
+   "pct": 81.7,
+   "stmts": 153,
+   "missing": 28
+  },
+  {
+   "file": "src/features/edit/ai_editing/context_budget.py",
+   "pct": 94.7,
+   "stmts": 75,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/context_bundle.py",
+   "pct": 97.7,
+   "stmts": 128,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/ai_editing/context_service.py",
+   "pct": 93.7,
+   "stmts": 159,
+   "missing": 10
+  },
+  {
+   "file": "src/features/edit/ai_editing/context_spill.py",
+   "pct": 87.5,
+   "stmts": 96,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/ai_editing/creative_assets.py",
+   "pct": 93.2,
+   "stmts": 74,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/ai_editing/credential_store.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/cross_domain.py",
+   "pct": 0.0,
+   "stmts": 156,
+   "missing": 156
+  },
+  {
+   "file": "src/features/edit/ai_editing/cross_domain_cost.py",
+   "pct": 0.0,
+   "stmts": 102,
+   "missing": 102
+  },
+  {
+   "file": "src/features/edit/ai_editing/decision_service.py",
+   "pct": 96.3,
+   "stmts": 54,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/delivery_analyzer.py",
+   "pct": 59.3,
+   "stmts": 199,
+   "missing": 81
+  },
+  {
+   "file": "src/features/edit/ai_editing/delivery_contracts.py",
+   "pct": 80.7,
+   "stmts": 482,
+   "missing": 93
+  },
+  {
+   "file": "src/features/edit/ai_editing/delivery_quality_gate.py",
+   "pct": 98.5,
+   "stmts": 131,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/diagnostics.py",
+   "pct": 94.9,
+   "stmts": 79,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/edit_api.py",
+   "pct": 71.3,
+   "stmts": 136,
+   "missing": 39
+  },
+  {
+   "file": "src/features/edit/ai_editing/edit_capability_plugin.py",
+   "pct": 87.4,
+   "stmts": 103,
+   "missing": 13
+  },
+  {
+   "file": "src/features/edit/ai_editing/edit_project_service.py",
+   "pct": 89.4,
+   "stmts": 104,
+   "missing": 11
+  },
+  {
+   "file": "src/features/edit/ai_editing/editorial_advanced.py",
+   "pct": 0.0,
+   "stmts": 183,
+   "missing": 183
+  },
+  {
+   "file": "src/features/edit/ai_editing/editorial_models.py",
+   "pct": 90.5,
+   "stmts": 296,
+   "missing": 28
+  },
+  {
+   "file": "src/features/edit/ai_editing/editorial_quality.py",
+   "pct": 0.0,
+   "stmts": 140,
+   "missing": 140
+  },
+  {
+   "file": "src/features/edit/ai_editing/eval_runner.py",
+   "pct": 91.5,
+   "stmts": 94,
+   "missing": 8
+  },
+  {
+   "file": "src/features/edit/ai_editing/eval_trace.py",
+   "pct": 96.9,
+   "stmts": 129,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/evidence_kinds.py",
+   "pct": 0.0,
+   "stmts": 84,
+   "missing": 84
+  },
+  {
+   "file": "src/features/edit/ai_editing/evidence_policy.py",
+   "pct": 69.7,
+   "stmts": 33,
+   "missing": 10
+  },
+  {
+   "file": "src/features/edit/ai_editing/execution_policy.py",
+   "pct": 62.2,
+   "stmts": 217,
+   "missing": 82
+  },
+  {
+   "file": "src/features/edit/ai_editing/export_service.py",
+   "pct": 73.9,
+   "stmts": 357,
+   "missing": 93
+  },
+  {
+   "file": "src/features/edit/ai_editing/feedback_store.py",
+   "pct": 0.0,
+   "stmts": 101,
+   "missing": 101
+  },
+  {
+   "file": "src/features/edit/ai_editing/generated_media_materializer.py",
+   "pct": 76.4,
+   "stmts": 191,
+   "missing": 45
+  },
+  {
+   "file": "src/features/edit/ai_editing/generation_bin.py",
+   "pct": 93.3,
+   "stmts": 120,
+   "missing": 8
+  },
+  {
+   "file": "src/features/edit/ai_editing/generation_models.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/generation_provider.py",
+   "pct": 95.1,
+   "stmts": 82,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/generation_provider_pack.py",
+   "pct": 86.2,
+   "stmts": 254,
+   "missing": 35
+  },
+  {
+   "file": "src/features/edit/ai_editing/goal_round_driver.py",
+   "pct": 86.9,
+   "stmts": 84,
+   "missing": 11
+  },
+  {
+   "file": "src/features/edit/ai_editing/goal_supervisor.py",
+   "pct": 77.7,
+   "stmts": 305,
+   "missing": 68
+  },
+  {
+   "file": "src/features/edit/ai_editing/help_index.py",
+   "pct": 94.6,
+   "stmts": 167,
+   "missing": 9
+  },
+  {
+   "file": "src/features/edit/ai_editing/http_generation_provider.py",
+   "pct": 79.9,
+   "stmts": 294,
+   "missing": 59
+  },
+  {
+   "file": "src/features/edit/ai_editing/image_attachment.py",
+   "pct": 89.5,
+   "stmts": 124,
+   "missing": 13
+  },
+  {
+   "file": "src/features/edit/ai_editing/jobs.py",
+   "pct": 84.9,
+   "stmts": 299,
+   "missing": 45
+  },
+  {
+   "file": "src/features/edit/ai_editing/keyframe_sampler.py",
+   "pct": 96.0,
+   "stmts": 101,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/kill_switch.py",
+   "pct": 98.9,
+   "stmts": 88,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/ai_editing/llm_client.py",
+   "pct": 62.0,
+   "stmts": 787,
+   "missing": 299
+  },
+  {
+   "file": "src/features/edit/ai_editing/llm_cost.py",
+   "pct": 94.6,
+   "stmts": 37,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/llm_variant_planner.py",
+   "pct": 30.2,
+   "stmts": 169,
+   "missing": 118
+  },
+  {
+   "file": "src/features/edit/ai_editing/mcp_gateway.py",
+   "pct": 94.0,
+   "stmts": 183,
+   "missing": 11
+  },
+  {
+   "file": "src/features/edit/ai_editing/mcp_local_ipc.py",
+   "pct": 19.2,
+   "stmts": 219,
+   "missing": 177
+  },
+  {
+   "file": "src/features/edit/ai_editing/mcp_plugin.py",
+   "pct": 96.6,
+   "stmts": 87,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/ai_editing/mcp_stdio.py",
+   "pct": 0.0,
+   "stmts": 75,
+   "missing": 75
+  },
+  {
+   "file": "src/features/edit/ai_editing/mcp_vision_gateway.py",
+   "pct": 75.7,
+   "stmts": 317,
+   "missing": 77
+  },
+  {
+   "file": "src/features/edit/ai_editing/media_generation_service.py",
+   "pct": 85.4,
+   "stmts": 198,
+   "missing": 29
+  },
+  {
+   "file": "src/features/edit/ai_editing/media_materialization_pipeline.py",
+   "pct": 83.3,
+   "stmts": 108,
+   "missing": 18
+  },
+  {
+   "file": "src/features/edit/ai_editing/media_probe.py",
+   "pct": 63.1,
+   "stmts": 206,
+   "missing": 76
+  },
+  {
+   "file": "src/features/edit/ai_editing/message_record.py",
+   "pct": 100.0,
+   "stmts": 65,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/mission_workspace.py",
+   "pct": 0.0,
+   "stmts": 39,
+   "missing": 39
+  },
+  {
+   "file": "src/features/edit/ai_editing/missions.py",
+   "pct": 0.0,
+   "stmts": 151,
+   "missing": 151
+  },
+  {
+   "file": "src/features/edit/ai_editing/model_pack_manager.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/model_router.py",
+   "pct": 93.3,
+   "stmts": 45,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/ai_editing/models.py",
+   "pct": 92.5,
+   "stmts": 228,
+   "missing": 17
+  },
+  {
+   "file": "src/features/edit/ai_editing/motion_graphic_artifacts.py",
+   "pct": 97.9,
+   "stmts": 94,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/motion_graphic_run.py",
+   "pct": 98.2,
+   "stmts": 55,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/ai_editing/music_policy.py",
+   "pct": 87.3,
+   "stmts": 63,
+   "missing": 8
+  },
+  {
+   "file": "src/features/edit/ai_editing/ocr_provider.py",
+   "pct": 82.6,
+   "stmts": 219,
+   "missing": 38
+  },
+  {
+   "file": "src/features/edit/ai_editing/operation_protocol.py",
+   "pct": 100.0,
+   "stmts": 53,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/plan_compiler.py",
+   "pct": 66.7,
+   "stmts": 330,
+   "missing": 110
+  },
+  {
+   "file": "src/features/edit/ai_editing/plan_repository.py",
+   "pct": 95.5,
+   "stmts": 112,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/ai_editing/plan_validator.py",
+   "pct": 76.9,
+   "stmts": 216,
+   "missing": 50
+  },
+  {
+   "file": "src/features/edit/ai_editing/postcondition_checker.py",
+   "pct": 98.0,
+   "stmts": 102,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/privacy_guard.py",
+   "pct": 89.5,
+   "stmts": 38,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/professional_skills.py",
+   "pct": 0.0,
+   "stmts": 73,
+   "missing": 73
+  },
+  {
+   "file": "src/features/edit/ai_editing/profile_tts_provider.py",
+   "pct": 33.6,
+   "stmts": 122,
+   "missing": 81
+  },
+  {
+   "file": "src/features/edit/ai_editing/provider_capabilities.py",
+   "pct": 95.9,
+   "stmts": 146,
+   "missing": 6
+  },
+  {
+   "file": "src/features/edit/ai_editing/provider_plugin.py",
+   "pct": 89.4,
+   "stmts": 113,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/ai_editing/provider_profiles.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/provider_resume.py",
+   "pct": 0.0,
+   "stmts": 87,
+   "missing": 87
+  },
+  {
+   "file": "src/features/edit/ai_editing/quality_gate.py",
+   "pct": 100.0,
+   "stmts": 75,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/release_evidence.py",
+   "pct": 93.5,
+   "stmts": 124,
+   "missing": 8
+  },
+  {
+   "file": "src/features/edit/ai_editing/release_gate.py",
+   "pct": 100.0,
+   "stmts": 54,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/release_manifest.py",
+   "pct": 96.4,
+   "stmts": 56,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/release_test_matrix.py",
+   "pct": 96.7,
+   "stmts": 61,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/remote_transcript_provider.py",
+   "pct": 63.1,
+   "stmts": 195,
+   "missing": 72
+  },
+  {
+   "file": "src/features/edit/ai_editing/replan_policy.py",
+   "pct": 0.0,
+   "stmts": 102,
+   "missing": 102
+  },
+  {
+   "file": "src/features/edit/ai_editing/request_recovery.py",
+   "pct": 93.8,
+   "stmts": 64,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/rollout_metrics.py",
+   "pct": 92.9,
+   "stmts": 56,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/run_context.py",
+   "pct": 0.0,
+   "stmts": 81,
+   "missing": 81
+  },
+  {
+   "file": "src/features/edit/ai_editing/runtime_capability_snapshot.py",
+   "pct": 83.9,
+   "stmts": 186,
+   "missing": 30
+  },
+  {
+   "file": "src/features/edit/ai_editing/safe_path_policy.py",
+   "pct": 89.8,
+   "stmts": 59,
+   "missing": 6
+  },
+  {
+   "file": "src/features/edit/ai_editing/schema.py",
+   "pct": 80.6,
+   "stmts": 93,
+   "missing": 18
+  },
+  {
+   "file": "src/features/edit/ai_editing/semantic_index.py",
+   "pct": 86.2,
+   "stmts": 160,
+   "missing": 22
+  },
+  {
+   "file": "src/features/edit/ai_editing/session_models.py",
+   "pct": 97.3,
+   "stmts": 184,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/ai_editing/skill_manifest.py",
+   "pct": 100.0,
+   "stmts": 113,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/skill_registry.py",
+   "pct": 97.3,
+   "stmts": 110,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/ai_editing/skill_runtime.py",
+   "pct": 94.9,
+   "stmts": 195,
+   "missing": 10
+  },
+  {
+   "file": "src/features/edit/ai_editing/snapshot_service.py",
+   "pct": 79.7,
+   "stmts": 59,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/ai_editing/speech_preprocessor.py",
+   "pct": 47.8,
+   "stmts": 67,
+   "missing": 35
+  },
+  {
+   "file": "src/features/edit/ai_editing/startup_diagnostics.py",
+   "pct": 83.3,
+   "stmts": 60,
+   "missing": 10
+  },
+  {
+   "file": "src/features/edit/ai_editing/structured_output.py",
+   "pct": 77.8,
+   "stmts": 45,
+   "missing": 10
+  },
+  {
+   "file": "src/features/edit/ai_editing/subtitle_ai_planner.py",
+   "pct": 78.1,
+   "stmts": 64,
+   "missing": 14
+  },
+  {
+   "file": "src/features/edit/ai_editing/subtitle_draft.py",
+   "pct": 96.8,
+   "stmts": 63,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/subtitle_placement.py",
+   "pct": 84.1,
+   "stmts": 107,
+   "missing": 17
+  },
+  {
+   "file": "src/features/edit/ai_editing/task_artifacts.py",
+   "pct": 87.9,
+   "stmts": 141,
+   "missing": 17
+  },
+  {
+   "file": "src/features/edit/ai_editing/task_graph.py",
+   "pct": 94.5,
+   "stmts": 236,
+   "missing": 13
+  },
+  {
+   "file": "src/features/edit/ai_editing/timebase.py",
+   "pct": 93.7,
+   "stmts": 127,
+   "missing": 8
+  },
+  {
+   "file": "src/features/edit/ai_editing/token_estimator.py",
+   "pct": 77.6,
+   "stmts": 58,
+   "missing": 13
+  },
+  {
+   "file": "src/features/edit/ai_editing/tool_call_log.py",
+   "pct": 99.1,
+   "stmts": 113,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/ai_editing/tool_calling_client.py",
+   "pct": 96.0,
+   "stmts": 101,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ai_editing/tool_facade.py",
+   "pct": 79.6,
+   "stmts": 387,
+   "missing": 79
+  },
+  {
+   "file": "src/features/edit/ai_editing/tool_invocation.py",
+   "pct": 84.8,
+   "stmts": 243,
+   "missing": 37
+  },
+  {
+   "file": "src/features/edit/ai_editing/tool_operation_ledger.py",
+   "pct": 84.7,
+   "stmts": 170,
+   "missing": 26
+  },
+  {
+   "file": "src/features/edit/ai_editing/tool_result.py",
+   "pct": 98.7,
+   "stmts": 79,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/ai_editing/tool_result_pruner.py",
+   "pct": 94.9,
+   "stmts": 39,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/toposctl.py",
+   "pct": 88.7,
+   "stmts": 177,
+   "missing": 20
+  },
+  {
+   "file": "src/features/edit/ai_editing/transaction_service.py",
+   "pct": 90.0,
+   "stmts": 211,
+   "missing": 21
+  },
+  {
+   "file": "src/features/edit/ai_editing/transcript_provider.py",
+   "pct": 63.3,
+   "stmts": 656,
+   "missing": 241
+  },
+  {
+   "file": "src/features/edit/ai_editing/transcript_router.py",
+   "pct": 58.4,
+   "stmts": 173,
+   "missing": 72
+  },
+  {
+   "file": "src/features/edit/ai_editing/tts_provider.py",
+   "pct": 22.8,
+   "stmts": 197,
+   "missing": 152
+  },
+  {
+   "file": "src/features/edit/ai_editing/tts_settings.py",
+   "pct": 97.1,
+   "stmts": 34,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/ai_editing/user_ai_config.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/variant_planner.py",
+   "pct": 98.4,
+   "stmts": 128,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ai_editing/visual_semantic_provider.py",
+   "pct": 65.8,
+   "stmts": 222,
+   "missing": 76
+  },
+  {
+   "file": "src/features/edit/ai_editing/visual_semantics.py",
+   "pct": 90.8,
+   "stmts": 206,
+   "missing": 19
+  },
+  {
+   "file": "src/features/edit/ai_editing/volcengine_generation_provider.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ai_editing/whisperx_provider.py",
+   "pct": 33.7,
+   "stmts": 98,
+   "missing": 65
+  },
+  {
+   "file": "src/features/edit/ai_editing/workflow.py",
+   "pct": 92.3,
+   "stmts": 208,
+   "missing": 16
+  },
+  {
+   "file": "src/features/edit/ai_editing/workflow_transaction.py",
+   "pct": 96.6,
+   "stmts": 116,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/commands_facade.py",
+   "pct": 34.7,
+   "stmts": 98,
+   "missing": 64
+  },
+  {
+   "file": "src/features/edit/core/__init__.py",
+   "pct": 100.0,
+   "stmts": 11,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/adjustment_composite.py",
+   "pct": 78.5,
+   "stmts": 65,
+   "missing": 14
+  },
+  {
+   "file": "src/features/edit/core/asset_usage_index.py",
+   "pct": 98.2,
+   "stmts": 55,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/core/audio_capabilities.py",
+   "pct": 87.8,
+   "stmts": 74,
+   "missing": 9
+  },
+  {
+   "file": "src/features/edit/core/audio_dsp.py",
+   "pct": 91.7,
+   "stmts": 1172,
+   "missing": 97
+  },
+  {
+   "file": "src/features/edit/core/audio_graph_renderer.py",
+   "pct": 79.2,
+   "stmts": 264,
+   "missing": 55
+  },
+  {
+   "file": "src/features/edit/core/audio_graph_snapshot.py",
+   "pct": 88.5,
+   "stmts": 157,
+   "missing": 18
+  },
+  {
+   "file": "src/features/edit/core/audio_health.py",
+   "pct": 83.6,
+   "stmts": 146,
+   "missing": 24
+  },
+  {
+   "file": "src/features/edit/core/audio_playback.py",
+   "pct": 71.2,
+   "stmts": 2166,
+   "missing": 624
+  },
+  {
+   "file": "src/features/edit/core/audio_timestretch.py",
+   "pct": 94.5,
+   "stmts": 73,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/core/audio_transition_catalog.py",
+   "pct": 100.0,
+   "stmts": 17,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/audio_waveform.py",
+   "pct": 60.9,
+   "stmts": 731,
+   "missing": 286
+  },
+  {
+   "file": "src/features/edit/core/automation_recorder.py",
+   "pct": 94.6,
+   "stmts": 111,
+   "missing": 6
+  },
+  {
+   "file": "src/features/edit/core/blend_modes.py",
+   "pct": 98.9,
+   "stmts": 88,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/core/blend_shader.py",
+   "pct": 83.3,
+   "stmts": 12,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/core/bwf.py",
+   "pct": 88.4,
+   "stmts": 112,
+   "missing": 13
+  },
+  {
+   "file": "src/features/edit/core/capability_registry.py",
+   "pct": 89.0,
+   "stmts": 118,
+   "missing": 13
+  },
+  {
+   "file": "src/features/edit/core/captions/__init__.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/captions/commands.py",
+   "pct": 78.8,
+   "stmts": 514,
+   "missing": 109
+  },
+  {
+   "file": "src/features/edit/core/captions/delivery.py",
+   "pct": 95.2,
+   "stmts": 126,
+   "missing": 6
+  },
+  {
+   "file": "src/features/edit/core/captions/edit_policy.py",
+   "pct": 87.1,
+   "stmts": 93,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/core/captions/export.py",
+   "pct": 75.8,
+   "stmts": 153,
+   "missing": 37
+  },
+  {
+   "file": "src/features/edit/core/captions/font_resolver.py",
+   "pct": 80.4,
+   "stmts": 158,
+   "missing": 31
+  },
+  {
+   "file": "src/features/edit/core/captions/graphics.py",
+   "pct": 76.0,
+   "stmts": 362,
+   "missing": 87
+  },
+  {
+   "file": "src/features/edit/core/captions/importer.py",
+   "pct": 79.8,
+   "stmts": 223,
+   "missing": 45
+  },
+  {
+   "file": "src/features/edit/core/captions/model.py",
+   "pct": 90.2,
+   "stmts": 285,
+   "missing": 28
+  },
+  {
+   "file": "src/features/edit/core/captions/mux.py",
+   "pct": 85.7,
+   "stmts": 14,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/core/captions/quality.py",
+   "pct": 82.4,
+   "stmts": 85,
+   "missing": 15
+  },
+  {
+   "file": "src/features/edit/core/captions/render_plan.py",
+   "pct": 100.0,
+   "stmts": 46,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/captions/schema.py",
+   "pct": 92.8,
+   "stmts": 69,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/core/captions/style_preset.py",
+   "pct": 86.9,
+   "stmts": 107,
+   "missing": 14
+  },
+  {
+   "file": "src/features/edit/core/captions/translation.py",
+   "pct": 65.3,
+   "stmts": 95,
+   "missing": 33
+  },
+  {
+   "file": "src/features/edit/core/channel_layout.py",
+   "pct": 93.9,
+   "stmts": 115,
+   "missing": 7
+  },
+  {
+   "file": "src/features/edit/core/chapter_export.py",
+   "pct": 96.3,
+   "stmts": 54,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/core/clip_params.py",
+   "pct": 84.1,
+   "stmts": 371,
+   "missing": 59
+  },
+  {
+   "file": "src/features/edit/core/commands.py",
+   "pct": 75.5,
+   "stmts": 6142,
+   "missing": 1503
+  },
+  {
+   "file": "src/features/edit/core/comp_clip_data.py",
+   "pct": 74.7,
+   "stmts": 91,
+   "missing": 23
+  },
+  {
+   "file": "src/features/edit/core/composite_failure_policy.py",
+   "pct": 0.0,
+   "stmts": 19,
+   "missing": 19
+  },
+  {
+   "file": "src/features/edit/core/composite_graph_data.py",
+   "pct": 93.4,
+   "stmts": 183,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/core/consolidate.py",
+   "pct": 87.9,
+   "stmts": 406,
+   "missing": 49
+  },
+  {
+   "file": "src/features/edit/core/crop_cpu.py",
+   "pct": 93.1,
+   "stmts": 58,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/core/crop_render.py",
+   "pct": 97.5,
+   "stmts": 81,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/core/custom_transitions.py",
+   "pct": 95.5,
+   "stmts": 88,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/core/delivery_qc.py",
+   "pct": 96.4,
+   "stmts": 168,
+   "missing": 6
+  },
+  {
+   "file": "src/features/edit/core/edit_frame_coordinator.py",
+   "pct": 35.5,
+   "stmts": 265,
+   "missing": 171
+  },
+  {
+   "file": "src/features/edit/core/edit_gpu_decode_manager.py",
+   "pct": 67.1,
+   "stmts": 1386,
+   "missing": 456
+  },
+  {
+   "file": "src/features/edit/core/edit_gpu_preview_renderer.py",
+   "pct": 22.9,
+   "stmts": 2411,
+   "missing": 1858
+  },
+  {
+   "file": "src/features/edit/core/edit_playback_controller.py",
+   "pct": 73.4,
+   "stmts": 459,
+   "missing": 122
+  },
+  {
+   "file": "src/features/edit/core/edit_project_io.py",
+   "pct": 67.6,
+   "stmts": 608,
+   "missing": 197
+  },
+  {
+   "file": "src/features/edit/core/effect_instance.py",
+   "pct": 81.7,
+   "stmts": 197,
+   "missing": 36
+  },
+  {
+   "file": "src/features/edit/core/effect_registry.py",
+   "pct": 92.0,
+   "stmts": 163,
+   "missing": 13
+  },
+  {
+   "file": "src/features/edit/core/effect_render_operations.py",
+   "pct": 95.2,
+   "stmts": 42,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/core/export_manifest.py",
+   "pct": 92.6,
+   "stmts": 203,
+   "missing": 15
+  },
+  {
+   "file": "src/features/edit/core/generator_clip_transaction.py",
+   "pct": 100.0,
+   "stmts": 38,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/generator_transaction_guard.py",
+   "pct": 96.6,
+   "stmts": 117,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/core/gpu_transition_shaders.py",
+   "pct": 100.0,
+   "stmts": 5,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/interchange.py",
+   "pct": 93.0,
+   "stmts": 172,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/core/loudness_analyzer.py",
+   "pct": 100.0,
+   "stmts": 71,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/loudness_meter.py",
+   "pct": 92.9,
+   "stmts": 169,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/core/mixer_preset.py",
+   "pct": 61.9,
+   "stmts": 113,
+   "missing": 43
+  },
+  {
+   "file": "src/features/edit/core/multicam.py",
+   "pct": 94.3,
+   "stmts": 105,
+   "missing": 6
+  },
+  {
+   "file": "src/features/edit/core/multicam_sync.py",
+   "pct": 76.7,
+   "stmts": 146,
+   "missing": 34
+  },
+  {
+   "file": "src/features/edit/core/nested_sequence.py",
+   "pct": 94.6,
+   "stmts": 261,
+   "missing": 14
+  },
+  {
+   "file": "src/features/edit/core/placeholder_frame.py",
+   "pct": 97.2,
+   "stmts": 36,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/core/playback_debug.py",
+   "pct": 52.4,
+   "stmts": 63,
+   "missing": 30
+  },
+  {
+   "file": "src/features/edit/core/project.py",
+   "pct": 82.2,
+   "stmts": 1813,
+   "missing": 323
+  },
+  {
+   "file": "src/features/edit/core/project_archive.py",
+   "pct": 94.2,
+   "stmts": 121,
+   "missing": 7
+  },
+  {
+   "file": "src/features/edit/core/project_migration.py",
+   "pct": 96.6,
+   "stmts": 89,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/core/project_serializer.py",
+   "pct": 29.7,
+   "stmts": 118,
+   "missing": 83
+  },
+  {
+   "file": "src/features/edit/core/proxy_generator.py",
+   "pct": 13.7,
+   "stmts": 328,
+   "missing": 283
+  },
+  {
+   "file": "src/features/edit/core/proxy_policy.py",
+   "pct": 94.8,
+   "stmts": 97,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/__init__.py",
+   "pct": 100.0,
+   "stmts": 17,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/adaptive_quality.py",
+   "pct": 96.0,
+   "stmts": 99,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/audio_ring_buffer.py",
+   "pct": 83.0,
+   "stmts": 135,
+   "missing": 23
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/avsync_controller.py",
+   "pct": 96.6,
+   "stmts": 88,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/clip_decode_stream.py",
+   "pct": 81.3,
+   "stmts": 273,
+   "missing": 51
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/decode_manager_source.py",
+   "pct": 85.2,
+   "stmts": 27,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/engine.py",
+   "pct": 83.5,
+   "stmts": 478,
+   "missing": 79
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/frame_ring_buffer.py",
+   "pct": 88.0,
+   "stmts": 117,
+   "missing": 14
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/gpu_frame_pool.py",
+   "pct": 78.0,
+   "stmts": 109,
+   "missing": 24
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/playback_budget.py",
+   "pct": 99.1,
+   "stmts": 108,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/policy.py",
+   "pct": 100.0,
+   "stmts": 56,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/render_cache_adapter.py",
+   "pct": 81.6,
+   "stmts": 179,
+   "missing": 33
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/source_resolver.py",
+   "pct": 77.5,
+   "stmts": 142,
+   "missing": 32
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/task_priority.py",
+   "pct": 100.0,
+   "stmts": 35,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/telemetry.py",
+   "pct": 82.9,
+   "stmts": 140,
+   "missing": 24
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/timeline_decode_scheduler.py",
+   "pct": 87.2,
+   "stmts": 321,
+   "missing": 41
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/timeline_gpu_compositor.py",
+   "pct": 78.8,
+   "stmts": 165,
+   "missing": 35
+  },
+  {
+   "file": "src/features/edit/core/realtime_playback/types.py",
+   "pct": 99.2,
+   "stmts": 125,
+   "missing": 1
+  },
+  {
+   "file": "src/features/edit/core/recording_manager.py",
+   "pct": 72.2,
+   "stmts": 741,
+   "missing": 206
+  },
+  {
+   "file": "src/features/edit/core/render_cache.py",
+   "pct": 88.6,
+   "stmts": 149,
+   "missing": 17
+  },
+  {
+   "file": "src/features/edit/core/render_cache_encoder.py",
+   "pct": 66.7,
+   "stmts": 102,
+   "missing": 34
+  },
+  {
+   "file": "src/features/edit/core/render_cache_evaluator.py",
+   "pct": 92.0,
+   "stmts": 50,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/core/render_cache_status.py",
+   "pct": 86.1,
+   "stmts": 187,
+   "missing": 26
+  },
+  {
+   "file": "src/features/edit/core/render_cache_worker.py",
+   "pct": 50.6,
+   "stmts": 387,
+   "missing": 191
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/__init__.py",
+   "pct": 100.0,
+   "stmts": 12,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/apply_ops.py",
+   "pct": 78.1,
+   "stmts": 274,
+   "missing": 60
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/cache.py",
+   "pct": 79.1,
+   "stmts": 422,
+   "missing": 88
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/detector.py",
+   "pct": 82.3,
+   "stmts": 186,
+   "missing": 33
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/filters.py",
+   "pct": 73.3,
+   "stmts": 348,
+   "missing": 93
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/frame_sampler.py",
+   "pct": 47.5,
+   "stmts": 383,
+   "missing": 201
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/metrics.py",
+   "pct": 67.4,
+   "stmts": 215,
+   "missing": 70
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/models.py",
+   "pct": 95.6,
+   "stmts": 428,
+   "missing": 19
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/subclips.py",
+   "pct": 85.1,
+   "stmts": 208,
+   "missing": 31
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/timeline_mapping.py",
+   "pct": 85.0,
+   "stmts": 327,
+   "missing": 49
+  },
+  {
+   "file": "src/features/edit/core/scene_cut/worker.py",
+   "pct": 73.3,
+   "stmts": 288,
+   "missing": 77
+  },
+  {
+   "file": "src/features/edit/core/scene_cut_controller.py",
+   "pct": 68.8,
+   "stmts": 221,
+   "missing": 69
+  },
+  {
+   "file": "src/features/edit/core/selection.py",
+   "pct": 44.8,
+   "stmts": 145,
+   "missing": 80
+  },
+  {
+   "file": "src/features/edit/core/serialization.py",
+   "pct": 56.5,
+   "stmts": 285,
+   "missing": 124
+  },
+  {
+   "file": "src/features/edit/core/sidechain_ducker.py",
+   "pct": 93.8,
+   "stmts": 113,
+   "missing": 7
+  },
+  {
+   "file": "src/features/edit/core/stem_export.py",
+   "pct": 74.5,
+   "stmts": 286,
+   "missing": 73
+  },
+  {
+   "file": "src/features/edit/core/subtitle_renderer.py",
+   "pct": 77.0,
+   "stmts": 183,
+   "missing": 42
+  },
+  {
+   "file": "src/features/edit/core/take_sheet.py",
+   "pct": 96.3,
+   "stmts": 109,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/core/timeline_clip_frame_provider.py",
+   "pct": 64.9,
+   "stmts": 1033,
+   "missing": 363
+  },
+  {
+   "file": "src/features/edit/core/timeline_export.py",
+   "pct": 79.1,
+   "stmts": 5043,
+   "missing": 1053
+  },
+  {
+   "file": "src/features/edit/core/timeline_frame_mapper.py",
+   "pct": 86.4,
+   "stmts": 125,
+   "missing": 17
+  },
+  {
+   "file": "src/features/edit/core/timeline_gpu_export_renderer.py",
+   "pct": 75.4,
+   "stmts": 962,
+   "missing": 237
+  },
+  {
+   "file": "src/features/edit/core/timeline_metal_export_renderer.py",
+   "pct": 74.1,
+   "stmts": 1100,
+   "missing": 285
+  },
+  {
+   "file": "src/features/edit/core/timeline_occlusion.py",
+   "pct": 93.7,
+   "stmts": 348,
+   "missing": 22
+  },
+  {
+   "file": "src/features/edit/core/timeline_ops.py",
+   "pct": 67.4,
+   "stmts": 971,
+   "missing": 317
+  },
+  {
+   "file": "src/features/edit/core/timeline_preview_renderer.py",
+   "pct": 63.7,
+   "stmts": 5334,
+   "missing": 1935
+  },
+  {
+   "file": "src/features/edit/core/timeline_render_plan.py",
+   "pct": 85.3,
+   "stmts": 648,
+   "missing": 95
+  },
+  {
+   "file": "src/features/edit/core/timeline_thumbnail_scheduler.py",
+   "pct": 98.2,
+   "stmts": 110,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/core/timeline_v2.py",
+   "pct": 85.4,
+   "stmts": 1510,
+   "missing": 221
+  },
+  {
+   "file": "src/features/edit/core/title_templates.py",
+   "pct": 76.8,
+   "stmts": 99,
+   "missing": 23
+  },
+  {
+   "file": "src/features/edit/core/transition_catalog.py",
+   "pct": 77.5,
+   "stmts": 40,
+   "missing": 9
+  },
+  {
+   "file": "src/features/edit/core/transition_effects.py",
+   "pct": 87.6,
+   "stmts": 258,
+   "missing": 32
+  },
+  {
+   "file": "src/features/edit/core/transition_mask.py",
+   "pct": 96.4,
+   "stmts": 83,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/core/transition_mask_gpu.py",
+   "pct": 94.0,
+   "stmts": 84,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/core/transition_wipe.py",
+   "pct": 97.3,
+   "stmts": 75,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/core/workspace_presets.py",
+   "pct": 90.2,
+   "stmts": 51,
+   "missing": 5
+  },
+  {
+   "file": "src/features/edit/facade.py",
+   "pct": 43.0,
+   "stmts": 79,
+   "missing": 45
+  },
+  {
+   "file": "src/features/edit/module.py",
+   "pct": 71.6,
+   "stmts": 134,
+   "missing": 38
+  },
+  {
+   "file": "src/features/edit/preferences.py",
+   "pct": 98.4,
+   "stmts": 190,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/ui/__init__.py",
+   "pct": 57.1,
+   "stmts": 21,
+   "missing": 9
+  },
+  {
+   "file": "src/features/edit/ui/adr_take_sheet_panel.py",
+   "pct": 72.1,
+   "stmts": 390,
+   "missing": 109
+  },
+  {
+   "file": "src/features/edit/ui/ai_assistant_composer.py",
+   "pct": 55.1,
+   "stmts": 857,
+   "missing": 385
+  },
+  {
+   "file": "src/features/edit/ui/ai_brief_editor.py",
+   "pct": 74.8,
+   "stmts": 107,
+   "missing": 27
+  },
+  {
+   "file": "src/features/edit/ui/ai_context_summary.py",
+   "pct": 78.6,
+   "stmts": 42,
+   "missing": 9
+  },
+  {
+   "file": "src/features/edit/ui/ai_decision_inspector.py",
+   "pct": 0.0,
+   "stmts": 94,
+   "missing": 94
+  },
+  {
+   "file": "src/features/edit/ui/ai_edit_assistant_panel.py",
+   "pct": 39.5,
+   "stmts": 2176,
+   "missing": 1316
+  },
+  {
+   "file": "src/features/edit/ui/ai_help_answer.py",
+   "pct": 0.0,
+   "stmts": 102,
+   "missing": 102
+  },
+  {
+   "file": "src/features/edit/ui/ai_job_panel.py",
+   "pct": 0.0,
+   "stmts": 86,
+   "missing": 86
+  },
+  {
+   "file": "src/features/edit/ui/ai_preferences_page.py",
+   "pct": 10.8,
+   "stmts": 808,
+   "missing": 721
+  },
+  {
+   "file": "src/features/edit/ui/ai_result_card.py",
+   "pct": 0.0,
+   "stmts": 85,
+   "missing": 85
+  },
+  {
+   "file": "src/features/edit/ui/ai_skill_card.py",
+   "pct": 0.0,
+   "stmts": 226,
+   "missing": 226
+  },
+  {
+   "file": "src/features/edit/ui/ai_timeline_diff.py",
+   "pct": 0.0,
+   "stmts": 142,
+   "missing": 142
+  },
+  {
+   "file": "src/features/edit/ui/ai_variant_list.py",
+   "pct": 0.0,
+   "stmts": 102,
+   "missing": 102
+  },
+  {
+   "file": "src/features/edit/ui/caption_workspace.py",
+   "pct": 91.6,
+   "stmts": 309,
+   "missing": 26
+  },
+  {
+   "file": "src/features/edit/ui/chapter_export_dialog.py",
+   "pct": 0.0,
+   "stmts": 90,
+   "missing": 90
+  },
+  {
+   "file": "src/features/edit/ui/clip_audio_effect_dialog_adapter.py",
+   "pct": 82.9,
+   "stmts": 70,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/ui/clip_transform_handle_controller.py",
+   "pct": 50.2,
+   "stmts": 245,
+   "missing": 122
+  },
+  {
+   "file": "src/features/edit/ui/comp_clip_settings_dialog.py",
+   "pct": 80.3,
+   "stmts": 223,
+   "missing": 44
+  },
+  {
+   "file": "src/features/edit/ui/edit_effects_panel.py",
+   "pct": 76.5,
+   "stmts": 1117,
+   "missing": 263
+  },
+  {
+   "file": "src/features/edit/ui/edit_info_panel.py",
+   "pct": 0.0,
+   "stmts": 246,
+   "missing": 246
+  },
+  {
+   "file": "src/features/edit/ui/edit_page.py",
+   "pct": 56.2,
+   "stmts": 1507,
+   "missing": 660
+  },
+  {
+   "file": "src/features/edit/ui/edit_properties_panel.py",
+   "pct": 59.6,
+   "stmts": 2538,
+   "missing": 1025
+  },
+  {
+   "file": "src/features/edit/ui/edit_style.py",
+   "pct": 73.7,
+   "stmts": 38,
+   "missing": 10
+  },
+  {
+   "file": "src/features/edit/ui/interchange_dialog.py",
+   "pct": 96.1,
+   "stmts": 77,
+   "missing": 3
+  },
+  {
+   "file": "src/features/edit/ui/media_pool_panel.py",
+   "pct": 47.1,
+   "stmts": 5621,
+   "missing": 2973
+  },
+  {
+   "file": "src/features/edit/ui/multicam_panel.py",
+   "pct": 94.4,
+   "stmts": 215,
+   "missing": 12
+  },
+  {
+   "file": "src/features/edit/ui/multicam_sync_result_dialog.py",
+   "pct": 100.0,
+   "stmts": 62,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ui/new_project_dialog.py",
+   "pct": 0.0,
+   "stmts": 158,
+   "missing": 158
+  },
+  {
+   "file": "src/features/edit/ui/new_timeline_dialog.py",
+   "pct": 87.7,
+   "stmts": 310,
+   "missing": 38
+  },
+  {
+   "file": "src/features/edit/ui/placeholder_dialog.py",
+   "pct": 0.0,
+   "stmts": 49,
+   "missing": 49
+  },
+  {
+   "file": "src/features/edit/ui/playback_hud.py",
+   "pct": 86.1,
+   "stmts": 122,
+   "missing": 17
+  },
+  {
+   "file": "src/features/edit/ui/preview_view_transform.py",
+   "pct": 83.1,
+   "stmts": 65,
+   "missing": 11
+  },
+  {
+   "file": "src/features/edit/ui/program_viewer.py",
+   "pct": 41.3,
+   "stmts": 1684,
+   "missing": 989
+  },
+  {
+   "file": "src/features/edit/ui/quick_project_dialog.py",
+   "pct": 0.0,
+   "stmts": 286,
+   "missing": 286
+  },
+  {
+   "file": "src/features/edit/ui/relink_media_dialog.py",
+   "pct": 12.5,
+   "stmts": 224,
+   "missing": 196
+  },
+  {
+   "file": "src/features/edit/ui/scene_cut_dialog.py",
+   "pct": 55.4,
+   "stmts": 1062,
+   "missing": 474
+  },
+  {
+   "file": "src/features/edit/ui/scene_cut_graph_widget.py",
+   "pct": 75.2,
+   "stmts": 412,
+   "missing": 102
+  },
+  {
+   "file": "src/features/edit/ui/scene_cut_preview_widget.py",
+   "pct": 71.7,
+   "stmts": 269,
+   "missing": 76
+  },
+  {
+   "file": "src/features/edit/ui/scene_cut_result_model.py",
+   "pct": 81.9,
+   "stmts": 415,
+   "missing": 75
+  },
+  {
+   "file": "src/features/edit/ui/scene_cut_shortcuts.py",
+   "pct": 62.8,
+   "stmts": 43,
+   "missing": 16
+  },
+  {
+   "file": "src/features/edit/ui/scene_cut_timeline_overlay.py",
+   "pct": 53.4,
+   "stmts": 354,
+   "missing": 165
+  },
+  {
+   "file": "src/features/edit/ui/source_viewer.py",
+   "pct": 61.8,
+   "stmts": 1218,
+   "missing": 465
+  },
+  {
+   "file": "src/features/edit/ui/speech_to_text_dialog.py",
+   "pct": 100.0,
+   "stmts": 68,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ui/stem_export_dialog.py",
+   "pct": 51.5,
+   "stmts": 194,
+   "missing": 94
+  },
+  {
+   "file": "src/features/edit/ui/subtitle_clip_item.py",
+   "pct": 44.5,
+   "stmts": 290,
+   "missing": 161
+  },
+  {
+   "file": "src/features/edit/ui/subtitle_delivery_dialog.py",
+   "pct": 95.3,
+   "stmts": 43,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ui/subtitle_handle_controller.py",
+   "pct": 56.2,
+   "stmts": 304,
+   "missing": 133
+  },
+  {
+   "file": "src/features/edit/ui/timeline_interaction.py",
+   "pct": 98.4,
+   "stmts": 126,
+   "missing": 2
+  },
+  {
+   "file": "src/features/edit/ui/timeline_items.py",
+   "pct": 48.9,
+   "stmts": 5364,
+   "missing": 2739
+  },
+  {
+   "file": "src/features/edit/ui/timeline_layout.py",
+   "pct": 85.1,
+   "stmts": 450,
+   "missing": 67
+  },
+  {
+   "file": "src/features/edit/ui/timeline_panel.py",
+   "pct": 64.6,
+   "stmts": 1329,
+   "missing": 470
+  },
+  {
+   "file": "src/features/edit/ui/timeline_shortcuts.py",
+   "pct": 91.8,
+   "stmts": 49,
+   "missing": 4
+  },
+  {
+   "file": "src/features/edit/ui/timeline_view.py",
+   "pct": 47.4,
+   "stmts": 7750,
+   "missing": 4077
+  },
+  {
+   "file": "src/features/edit/ui/trim_numeric_dialog.py",
+   "pct": 100.0,
+   "stmts": 107,
+   "missing": 0
+  },
+  {
+   "file": "src/features/edit/ui/tts_settings_dialog.py",
+   "pct": 0.0,
+   "stmts": 161,
+   "missing": 161
+  },
+  {
+   "file": "src/features/scripting/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/scripting/api.py",
+   "pct": 25.3,
+   "stmts": 839,
+   "missing": 627
+  },
+  {
+   "file": "src/features/scripting/composite_api.py",
+   "pct": 68.5,
+   "stmts": 54,
+   "missing": 17
+  },
+  {
+   "file": "src/features/scripting/engine.py",
+   "pct": 38.2,
+   "stmts": 259,
+   "missing": 160
+  },
+  {
+   "file": "src/features/scripting/module.py",
+   "pct": 0.0,
+   "stmts": 9,
+   "missing": 9
+  },
+  {
+   "file": "src/features/shared/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/features/shared/effects/__init__.py",
+   "pct": 100.0,
+   "stmts": 6,
+   "missing": 0
+  },
+  {
+   "file": "src/features/shared/effects/dctl_wrapper.py",
+   "pct": 88.1,
+   "stmts": 42,
+   "missing": 5
+  },
+  {
+   "file": "src/features/shared/effects/effect_capability.py",
+   "pct": 96.9,
+   "stmts": 194,
+   "missing": 6
+  },
+  {
+   "file": "src/features/shared/effects/effect_catalog.py",
+   "pct": 95.5,
+   "stmts": 178,
+   "missing": 8
+  },
+  {
+   "file": "src/features/shared/effects/effect_pass_runner.py",
+   "pct": 82.4,
+   "stmts": 653,
+   "missing": 115
+  },
+  {
+   "file": "src/features/shared/effects/effect_spec.py",
+   "pct": 97.6,
+   "stmts": 83,
+   "missing": 2
+  },
+  {
+   "file": "src/features/shared/effects/effect_tiers.py",
+   "pct": 100.0,
+   "stmts": 11,
+   "missing": 0
+  },
+  {
+   "file": "src/features/shared/effects/plugin_identity.py",
+   "pct": 100.0,
+   "stmts": 106,
+   "missing": 0
+  },
+  {
+   "file": "src/features/shared/effects/preview_policy.py",
+   "pct": 95.3,
+   "stmts": 106,
+   "missing": 5
+  },
+  {
+   "file": "src/features/teaching_animation/__init__.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/ai/__init__.py",
+   "pct": 100.0,
+   "stmts": 35,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/ai/action_matrix.py",
+   "pct": 64.3,
+   "stmts": 126,
+   "missing": 45
+  },
+  {
+   "file": "src/features/teaching_animation/ai/advanced_capabilities.py",
+   "pct": 55.3,
+   "stmts": 103,
+   "missing": 46
+  },
+  {
+   "file": "src/features/teaching_animation/ai/approval_scope.py",
+   "pct": 31.8,
+   "stmts": 179,
+   "missing": 122
+  },
+  {
+   "file": "src/features/teaching_animation/ai/artifact_links.py",
+   "pct": 57.5,
+   "stmts": 134,
+   "missing": 57
+  },
+  {
+   "file": "src/features/teaching_animation/ai/asset_provenance.py",
+   "pct": 48.1,
+   "stmts": 106,
+   "missing": 55
+  },
+  {
+   "file": "src/features/teaching_animation/ai/audio_plan.py",
+   "pct": 63.3,
+   "stmts": 90,
+   "missing": 33
+  },
+  {
+   "file": "src/features/teaching_animation/ai/brief.py",
+   "pct": 49.7,
+   "stmts": 157,
+   "missing": 79
+  },
+  {
+   "file": "src/features/teaching_animation/ai/capability_context.py",
+   "pct": 50.5,
+   "stmts": 93,
+   "missing": 46
+  },
+  {
+   "file": "src/features/teaching_animation/ai/command_catalog.py",
+   "pct": 24.4,
+   "stmts": 536,
+   "missing": 405
+  },
+  {
+   "file": "src/features/teaching_animation/ai/commands.py",
+   "pct": 39.3,
+   "stmts": 89,
+   "missing": 54
+  },
+  {
+   "file": "src/features/teaching_animation/ai/context_collector.py",
+   "pct": 75.0,
+   "stmts": 92,
+   "missing": 23
+  },
+  {
+   "file": "src/features/teaching_animation/ai/context_provider.py",
+   "pct": 49.2,
+   "stmts": 63,
+   "missing": 32
+  },
+  {
+   "file": "src/features/teaching_animation/ai/creative_rubric.py",
+   "pct": 25.4,
+   "stmts": 181,
+   "missing": 135
+  },
+  {
+   "file": "src/features/teaching_animation/ai/creative_templates.py",
+   "pct": 56.3,
+   "stmts": 142,
+   "missing": 62
+  },
+  {
+   "file": "src/features/teaching_animation/ai/delivery_profile.py",
+   "pct": 64.7,
+   "stmts": 133,
+   "missing": 47
+  },
+  {
+   "file": "src/features/teaching_animation/ai/design_validator.py",
+   "pct": 19.2,
+   "stmts": 308,
+   "missing": 249
+  },
+  {
+   "file": "src/features/teaching_animation/ai/error_codes.py",
+   "pct": 65.8,
+   "stmts": 117,
+   "missing": 40
+  },
+  {
+   "file": "src/features/teaching_animation/ai/eval_rubric.py",
+   "pct": 54.0,
+   "stmts": 124,
+   "missing": 57
+  },
+  {
+   "file": "src/features/teaching_animation/ai/export_job.py",
+   "pct": 55.6,
+   "stmts": 142,
+   "missing": 63
+  },
+  {
+   "file": "src/features/teaching_animation/ai/fallback.py",
+   "pct": 59.7,
+   "stmts": 67,
+   "missing": 27
+  },
+  {
+   "file": "src/features/teaching_animation/ai/html_design_quality.py",
+   "pct": 78.5,
+   "stmts": 195,
+   "missing": 42
+  },
+  {
+   "file": "src/features/teaching_animation/ai/html_edit_audit.py",
+   "pct": 0.0,
+   "stmts": 59,
+   "missing": 59
+  },
+  {
+   "file": "src/features/teaching_animation/ai/html_edit_autonomy.py",
+   "pct": 0.0,
+   "stmts": 321,
+   "missing": 321
+  },
+  {
+   "file": "src/features/teaching_animation/ai/html_generation_protocol.py",
+   "pct": 82.7,
+   "stmts": 196,
+   "missing": 34
+  },
+  {
+   "file": "src/features/teaching_animation/ai/html_llm_generator.py",
+   "pct": 27.8,
+   "stmts": 72,
+   "missing": 52
+  },
+  {
+   "file": "src/features/teaching_animation/ai/html_quality_gate.py",
+   "pct": 85.7,
+   "stmts": 98,
+   "missing": 14
+  },
+  {
+   "file": "src/features/teaching_animation/ai/motion_graphic_eval.py",
+   "pct": 0.0,
+   "stmts": 62,
+   "missing": 62
+  },
+  {
+   "file": "src/features/teaching_animation/ai/motion_quality_gate.py",
+   "pct": 48.4,
+   "stmts": 128,
+   "missing": 66
+  },
+  {
+   "file": "src/features/teaching_animation/ai/preview.py",
+   "pct": 44.9,
+   "stmts": 136,
+   "missing": 75
+  },
+  {
+   "file": "src/features/teaching_animation/ai/proposal.py",
+   "pct": 58.7,
+   "stmts": 172,
+   "missing": 71
+  },
+  {
+   "file": "src/features/teaching_animation/ai/proposal_card.py",
+   "pct": 53.5,
+   "stmts": 114,
+   "missing": 53
+  },
+  {
+   "file": "src/features/teaching_animation/ai/provider_registry.py",
+   "pct": 85.7,
+   "stmts": 21,
+   "missing": 3
+  },
+  {
+   "file": "src/features/teaching_animation/ai/quality_gate.py",
+   "pct": 57.6,
+   "stmts": 118,
+   "missing": 50
+  },
+  {
+   "file": "src/features/teaching_animation/ai/revision.py",
+   "pct": 41.5,
+   "stmts": 176,
+   "missing": 103
+  },
+  {
+   "file": "src/features/teaching_animation/ai/rollout.py",
+   "pct": 53.5,
+   "stmts": 127,
+   "missing": 59
+  },
+  {
+   "file": "src/features/teaching_animation/ai/service.py",
+   "pct": 0.0,
+   "stmts": 93,
+   "missing": 93
+  },
+  {
+   "file": "src/features/teaching_animation/ai/session.py",
+   "pct": 64.7,
+   "stmts": 34,
+   "missing": 12
+  },
+  {
+   "file": "src/features/teaching_animation/ai/session_store.py",
+   "pct": 40.4,
+   "stmts": 146,
+   "missing": 87
+  },
+  {
+   "file": "src/features/teaching_animation/ai/slo_benchmark.py",
+   "pct": 54.4,
+   "stmts": 90,
+   "missing": 41
+  },
+  {
+   "file": "src/features/teaching_animation/ai/test_matrix.py",
+   "pct": 65.5,
+   "stmts": 55,
+   "missing": 19
+  },
+  {
+   "file": "src/features/teaching_animation/cache_quality.py",
+   "pct": 60.0,
+   "stmts": 15,
+   "missing": 6
+  },
+  {
+   "file": "src/features/teaching_animation/composite_node.py",
+   "pct": 42.4,
+   "stmts": 92,
+   "missing": 53
+  },
+  {
+   "file": "src/features/teaching_animation/core/__init__.py",
+   "pct": 100.0,
+   "stmts": 26,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/core/asset_provider.py",
+   "pct": 82.4,
+   "stmts": 205,
+   "missing": 36
+  },
+  {
+   "file": "src/features/teaching_animation/core/audio_plan.py",
+   "pct": 87.1,
+   "stmts": 132,
+   "missing": 17
+  },
+  {
+   "file": "src/features/teaching_animation/core/builtin_templates.py",
+   "pct": 95.6,
+   "stmts": 412,
+   "missing": 18
+  },
+  {
+   "file": "src/features/teaching_animation/core/commands.py",
+   "pct": 72.4,
+   "stmts": 859,
+   "missing": 237
+  },
+  {
+   "file": "src/features/teaching_animation/core/components.py",
+   "pct": 94.2,
+   "stmts": 137,
+   "missing": 8
+  },
+  {
+   "file": "src/features/teaching_animation/core/composition_schema.py",
+   "pct": 89.7,
+   "stmts": 97,
+   "missing": 10
+  },
+  {
+   "file": "src/features/teaching_animation/core/constraints.py",
+   "pct": 95.0,
+   "stmts": 120,
+   "missing": 6
+  },
+  {
+   "file": "src/features/teaching_animation/core/content_localization.py",
+   "pct": 89.3,
+   "stmts": 28,
+   "missing": 3
+  },
+  {
+   "file": "src/features/teaching_animation/core/contracts.py",
+   "pct": 90.5,
+   "stmts": 241,
+   "missing": 23
+  },
+  {
+   "file": "src/features/teaching_animation/core/design_tokens.py",
+   "pct": 66.7,
+   "stmts": 147,
+   "missing": 49
+  },
+  {
+   "file": "src/features/teaching_animation/core/devtools_property_mapping.py",
+   "pct": 88.0,
+   "stmts": 175,
+   "missing": 21
+  },
+  {
+   "file": "src/features/teaching_animation/core/executable_template.py",
+   "pct": 90.3,
+   "stmts": 145,
+   "missing": 14
+  },
+  {
+   "file": "src/features/teaching_animation/core/font_registry.py",
+   "pct": 81.5,
+   "stmts": 108,
+   "missing": 20
+  },
+  {
+   "file": "src/features/teaching_animation/core/graphics.py",
+   "pct": 94.7,
+   "stmts": 150,
+   "missing": 8
+  },
+  {
+   "file": "src/features/teaching_animation/core/hierarchy.py",
+   "pct": 96.1,
+   "stmts": 129,
+   "missing": 5
+  },
+  {
+   "file": "src/features/teaching_animation/core/html_fonts.py",
+   "pct": 91.9,
+   "stmts": 62,
+   "missing": 5
+  },
+  {
+   "file": "src/features/teaching_animation/core/html_layer.py",
+   "pct": 91.8,
+   "stmts": 73,
+   "missing": 6
+  },
+  {
+   "file": "src/features/teaching_animation/core/html_layer_commands.py",
+   "pct": 92.7,
+   "stmts": 205,
+   "missing": 15
+  },
+  {
+   "file": "src/features/teaching_animation/core/html_page_deck.py",
+   "pct": 89.0,
+   "stmts": 227,
+   "missing": 25
+  },
+  {
+   "file": "src/features/teaching_animation/core/html_template.py",
+   "pct": 96.8,
+   "stmts": 95,
+   "missing": 3
+  },
+  {
+   "file": "src/features/teaching_animation/core/layout.py",
+   "pct": 83.9,
+   "stmts": 236,
+   "missing": 38
+  },
+  {
+   "file": "src/features/teaching_animation/core/mg_package_registry.py",
+   "pct": 0.0,
+   "stmts": 86,
+   "missing": 86
+  },
+  {
+   "file": "src/features/teaching_animation/core/migration.py",
+   "pct": 84.0,
+   "stmts": 119,
+   "missing": 19
+  },
+  {
+   "file": "src/features/teaching_animation/core/model.py",
+   "pct": 83.4,
+   "stmts": 452,
+   "missing": 75
+  },
+  {
+   "file": "src/features/teaching_animation/core/motion_graphic_generator_registry.py",
+   "pct": 93.9,
+   "stmts": 82,
+   "missing": 5
+  },
+  {
+   "file": "src/features/teaching_animation/core/motion_graphic_template_library.py",
+   "pct": 82.9,
+   "stmts": 105,
+   "missing": 18
+  },
+  {
+   "file": "src/features/teaching_animation/core/motion_graphic_template_store.py",
+   "pct": 80.7,
+   "stmts": 150,
+   "missing": 29
+  },
+  {
+   "file": "src/features/teaching_animation/core/pages.py",
+   "pct": 87.8,
+   "stmts": 98,
+   "missing": 12
+  },
+  {
+   "file": "src/features/teaching_animation/core/professional.py",
+   "pct": 85.1,
+   "stmts": 101,
+   "missing": 15
+  },
+  {
+   "file": "src/features/teaching_animation/core/style_schema.py",
+   "pct": 83.6,
+   "stmts": 146,
+   "missing": 24
+  },
+  {
+   "file": "src/features/teaching_animation/core/template_commands.py",
+   "pct": 96.0,
+   "stmts": 101,
+   "missing": 4
+  },
+  {
+   "file": "src/features/teaching_animation/core/template_registry.py",
+   "pct": 85.7,
+   "stmts": 49,
+   "missing": 7
+  },
+  {
+   "file": "src/features/teaching_animation/core/text_layout.py",
+   "pct": 89.5,
+   "stmts": 181,
+   "missing": 19
+  },
+  {
+   "file": "src/features/teaching_animation/core/validator.py",
+   "pct": 63.6,
+   "stmts": 387,
+   "missing": 141
+  },
+  {
+   "file": "src/features/teaching_animation/core/vector_shapes.py",
+   "pct": 85.7,
+   "stmts": 70,
+   "missing": 10
+  },
+  {
+   "file": "src/features/teaching_animation/export_service.py",
+   "pct": 59.3,
+   "stmts": 248,
+   "missing": 101
+  },
+  {
+   "file": "src/features/teaching_animation/facade.py",
+   "pct": 49.2,
+   "stmts": 120,
+   "missing": 61
+  },
+  {
+   "file": "src/features/teaching_animation/host_adapters.py",
+   "pct": 70.9,
+   "stmts": 309,
+   "missing": 90
+  },
+  {
+   "file": "src/features/teaching_animation/module.py",
+   "pct": 10.5,
+   "stmts": 2686,
+   "missing": 2405
+  },
+  {
+   "file": "src/features/teaching_animation/motion/__init__.py",
+   "pct": 100.0,
+   "stmts": 12,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/motion/beat.py",
+   "pct": 85.5,
+   "stmts": 69,
+   "missing": 10
+  },
+  {
+   "file": "src/features/teaching_animation/motion/easing.py",
+   "pct": 30.9,
+   "stmts": 136,
+   "missing": 94
+  },
+  {
+   "file": "src/features/teaching_animation/motion/expression.py",
+   "pct": 38.0,
+   "stmts": 92,
+   "missing": 57
+  },
+  {
+   "file": "src/features/teaching_animation/motion/interpolate.py",
+   "pct": 16.9,
+   "stmts": 89,
+   "missing": 74
+  },
+  {
+   "file": "src/features/teaching_animation/motion/motion_binding.py",
+   "pct": 89.7,
+   "stmts": 39,
+   "missing": 4
+  },
+  {
+   "file": "src/features/teaching_animation/motion/motion_commands.py",
+   "pct": 80.8,
+   "stmts": 245,
+   "missing": 47
+  },
+  {
+   "file": "src/features/teaching_animation/motion/presets.py",
+   "pct": 49.0,
+   "stmts": 151,
+   "missing": 77
+  },
+  {
+   "file": "src/features/teaching_animation/motion/sequence.py",
+   "pct": 40.9,
+   "stmts": 110,
+   "missing": 65
+  },
+  {
+   "file": "src/features/teaching_animation/motion/spring.py",
+   "pct": 73.1,
+   "stmts": 67,
+   "missing": 18
+  },
+  {
+   "file": "src/features/teaching_animation/motion/time_range.py",
+   "pct": 39.6,
+   "stmts": 48,
+   "missing": 29
+  },
+  {
+   "file": "src/features/teaching_animation/presets/__init__.py",
+   "pct": 100.0,
+   "stmts": 9,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/presets/builders.py",
+   "pct": 23.8,
+   "stmts": 80,
+   "missing": 61
+  },
+  {
+   "file": "src/features/teaching_animation/presets/fragment.py",
+   "pct": 16.2,
+   "stmts": 105,
+   "missing": 88
+  },
+  {
+   "file": "src/features/teaching_animation/presets/i18n_fields.py",
+   "pct": 85.7,
+   "stmts": 7,
+   "missing": 1
+  },
+  {
+   "file": "src/features/teaching_animation/presets/library.py",
+   "pct": 38.3,
+   "stmts": 264,
+   "missing": 163
+  },
+  {
+   "file": "src/features/teaching_animation/presets/loader.py",
+   "pct": 21.9,
+   "stmts": 73,
+   "missing": 57
+  },
+  {
+   "file": "src/features/teaching_animation/presets/manifest.py",
+   "pct": 89.7,
+   "stmts": 58,
+   "missing": 6
+  },
+  {
+   "file": "src/features/teaching_animation/presets/paths.py",
+   "pct": 75.6,
+   "stmts": 45,
+   "missing": 11
+  },
+  {
+   "file": "src/features/teaching_animation/presets/preview.py",
+   "pct": 20.3,
+   "stmts": 59,
+   "missing": 47
+  },
+  {
+   "file": "src/features/teaching_animation/render/__init__.py",
+   "pct": 100.0,
+   "stmts": 20,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/render/advanced.py",
+   "pct": 89.6,
+   "stmts": 96,
+   "missing": 10
+  },
+  {
+   "file": "src/features/teaching_animation/render/asset_resolver.py",
+   "pct": 82.9,
+   "stmts": 82,
+   "missing": 14
+  },
+  {
+   "file": "src/features/teaching_animation/render/benchmark.py",
+   "pct": 53.4,
+   "stmts": 311,
+   "missing": 145
+  },
+  {
+   "file": "src/features/teaching_animation/render/bitrate_probe.py",
+   "pct": 85.5,
+   "stmts": 83,
+   "missing": 12
+  },
+  {
+   "file": "src/features/teaching_animation/render/cache.py",
+   "pct": 88.8,
+   "stmts": 134,
+   "missing": 15
+  },
+  {
+   "file": "src/features/teaching_animation/render/composite_effect_bridge.py",
+   "pct": 79.3,
+   "stmts": 58,
+   "missing": 12
+  },
+  {
+   "file": "src/features/teaching_animation/render/consistency.py",
+   "pct": 96.3,
+   "stmts": 81,
+   "missing": 3
+  },
+  {
+   "file": "src/features/teaching_animation/render/effect_capabilities.py",
+   "pct": 89.1,
+   "stmts": 175,
+   "missing": 19
+  },
+  {
+   "file": "src/features/teaching_animation/render/evaluator.py",
+   "pct": 88.8,
+   "stmts": 161,
+   "missing": 18
+  },
+  {
+   "file": "src/features/teaching_animation/render/frame_adapter.py",
+   "pct": 90.9,
+   "stmts": 44,
+   "missing": 4
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_layer/__init__.py",
+   "pct": 100.0,
+   "stmts": 8,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_layer/budget.py",
+   "pct": 88.1,
+   "stmts": 84,
+   "missing": 10
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_layer/html_patch.py",
+   "pct": 88.7,
+   "stmts": 115,
+   "missing": 13
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_layer/html_patch_apply.py",
+   "pct": 66.1,
+   "stmts": 180,
+   "missing": 61
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_layer/node_identity.py",
+   "pct": 84.8,
+   "stmts": 46,
+   "missing": 7
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_layer/sanitizer.py",
+   "pct": 88.6,
+   "stmts": 498,
+   "missing": 57
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_layer/template_promote.py",
+   "pct": 86.5,
+   "stmts": 126,
+   "missing": 17
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_native_overlay.py",
+   "pct": 83.3,
+   "stmts": 377,
+   "missing": 63
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_preview_renderer.py",
+   "pct": 100.0,
+   "stmts": 18,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_realtime_recorder.py",
+   "pct": 18.1,
+   "stmts": 309,
+   "missing": 253
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_renderer_service.py",
+   "pct": 82.5,
+   "stmts": 120,
+   "missing": 21
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_renderer_spike/__init__.py",
+   "pct": 100.0,
+   "stmts": 9,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_renderer_spike/capture_backend.py",
+   "pct": 95.8,
+   "stmts": 96,
+   "missing": 4
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_renderer_spike/determinism.py",
+   "pct": 90.0,
+   "stmts": 30,
+   "missing": 3
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_renderer_spike/fixtures.py",
+   "pct": 92.6,
+   "stmts": 27,
+   "missing": 2
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_renderer_spike/html_spike.py",
+   "pct": 60.6,
+   "stmts": 142,
+   "missing": 56
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_renderer_spike/playwright_backend.py",
+   "pct": 21.7,
+   "stmts": 253,
+   "missing": 198
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_renderer_spike/qt_capture_backend.py",
+   "pct": 20.6,
+   "stmts": 107,
+   "missing": 85
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_renderer_spike/security.py",
+   "pct": 93.2,
+   "stmts": 192,
+   "missing": 13
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_scene_renderer_v2.py",
+   "pct": 91.5,
+   "stmts": 129,
+   "missing": 11
+  },
+  {
+   "file": "src/features/teaching_animation/render/html_validation.py",
+   "pct": 88.5,
+   "stmts": 131,
+   "missing": 15
+  },
+  {
+   "file": "src/features/teaching_animation/render/perf_slo.py",
+   "pct": 92.0,
+   "stmts": 75,
+   "missing": 6
+  },
+  {
+   "file": "src/features/teaching_animation/render/release_fixtures.py",
+   "pct": 100.0,
+   "stmts": 45,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/render/release_manifest.py",
+   "pct": 98.1,
+   "stmts": 52,
+   "missing": 1
+  },
+  {
+   "file": "src/features/teaching_animation/render/render_worker.py",
+   "pct": 92.8,
+   "stmts": 83,
+   "missing": 6
+  },
+  {
+   "file": "src/features/teaching_animation/render/scene_renderer.py",
+   "pct": 100.0,
+   "stmts": 12,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/render/scene_renderer_router.py",
+   "pct": 86.0,
+   "stmts": 171,
+   "missing": 24
+  },
+  {
+   "file": "src/features/teaching_animation/render/svg_renderer.py",
+   "pct": 80.8,
+   "stmts": 386,
+   "missing": 74
+  },
+  {
+   "file": "src/features/teaching_animation/render/v2_adapter.py",
+   "pct": 90.1,
+   "stmts": 91,
+   "missing": 9
+  },
+  {
+   "file": "src/features/teaching_animation/scene_cache.py",
+   "pct": 62.2,
+   "stmts": 37,
+   "missing": 14
+  },
+  {
+   "file": "src/features/teaching_animation/scene_store.py",
+   "pct": 81.0,
+   "stmts": 63,
+   "missing": 12
+  },
+  {
+   "file": "src/features/teaching_animation/ui/__init__.py",
+   "pct": 100.0,
+   "stmts": 15,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/ui/align.py",
+   "pct": 12.7,
+   "stmts": 63,
+   "missing": 55
+  },
+  {
+   "file": "src/features/teaching_animation/ui/asset_library_panel.py",
+   "pct": 14.8,
+   "stmts": 458,
+   "missing": 390
+  },
+  {
+   "file": "src/features/teaching_animation/ui/editor_controller.py",
+   "pct": 30.8,
+   "stmts": 211,
+   "missing": 146
+  },
+  {
+   "file": "src/features/teaching_animation/ui/editor_window_registry.py",
+   "pct": 30.6,
+   "stmts": 36,
+   "missing": 25
+  },
+  {
+   "file": "src/features/teaching_animation/ui/html_browser_preview.py",
+   "pct": 23.8,
+   "stmts": 340,
+   "missing": 259
+  },
+  {
+   "file": "src/features/teaching_animation/ui/html_devtools_panel.py",
+   "pct": 18.4,
+   "stmts": 98,
+   "missing": 80
+  },
+  {
+   "file": "src/features/teaching_animation/ui/html_inspector.py",
+   "pct": 15.3,
+   "stmts": 248,
+   "missing": 210
+  },
+  {
+   "file": "src/features/teaching_animation/ui/html_source_editor.py",
+   "pct": 17.6,
+   "stmts": 131,
+   "missing": 108
+  },
+  {
+   "file": "src/features/teaching_animation/ui/layer_tree_model.py",
+   "pct": 49.3,
+   "stmts": 69,
+   "missing": 35
+  },
+  {
+   "file": "src/features/teaching_animation/ui/layer_tree_panel.py",
+   "pct": 16.5,
+   "stmts": 395,
+   "missing": 330
+  },
+  {
+   "file": "src/features/teaching_animation/ui/mg_keyframes_model.py",
+   "pct": 35.1,
+   "stmts": 171,
+   "missing": 111
+  },
+  {
+   "file": "src/features/teaching_animation/ui/mg_keyframes_panel.py",
+   "pct": 12.1,
+   "stmts": 1403,
+   "missing": 1233
+  },
+  {
+   "file": "src/features/teaching_animation/ui/mg_shortcuts.py",
+   "pct": 46.9,
+   "stmts": 32,
+   "missing": 17
+  },
+  {
+   "file": "src/features/teaching_animation/ui/motion_graphic_editor_window.py",
+   "pct": 10.4,
+   "stmts": 1809,
+   "missing": 1620
+  },
+  {
+   "file": "src/features/teaching_animation/ui/motion_graphic_style.py",
+   "pct": 100.0,
+   "stmts": 4,
+   "missing": 0
+  },
+  {
+   "file": "src/features/teaching_animation/ui/page_navigation.py",
+   "pct": 0.0,
+   "stmts": 106,
+   "missing": 106
+  },
+  {
+   "file": "src/features/teaching_animation/ui/page_timing_panel.py",
+   "pct": 11.3,
+   "stmts": 293,
+   "missing": 260
+  },
+  {
+   "file": "src/features/teaching_animation/ui/preview_bridge.py",
+   "pct": 43.2,
+   "stmts": 74,
+   "missing": 42
+  },
+  {
+   "file": "src/features/teaching_animation/ui/scene_inspector.py",
+   "pct": 11.6,
+   "stmts": 696,
+   "missing": 615
+  },
+  {
+   "file": "src/features/teaching_animation/ui/scene_timeline.py",
+   "pct": 16.7,
+   "stmts": 221,
+   "missing": 184
+  },
+  {
+   "file": "src/features/teaching_animation/ui/scene_view.py",
+   "pct": 14.1,
+   "stmts": 411,
+   "missing": 353
+  },
+  {
+   "file": "src/features/teaching_animation/ui/storyboard_panel.py",
+   "pct": 29.4,
+   "stmts": 68,
+   "missing": 48
+  },
+  {
+   "file": "src/main.py",
+   "pct": 0.0,
+   "stmts": 130,
+   "missing": 130
+  },
+  {
+   "file": "src/products/__init__.py",
+   "pct": 100.0,
+   "stmts": 49,
+   "missing": 0
+  },
+  {
+   "file": "src/products/packaging.py",
+   "pct": 100.0,
+   "stmts": 19,
+   "missing": 0
+  },
+  {
+   "file": "src/products/topos_color.py",
+   "pct": 100.0,
+   "stmts": 9,
+   "missing": 0
+  },
+  {
+   "file": "src/products/topos_composite.py",
+   "pct": 100.0,
+   "stmts": 9,
+   "missing": 0
+  },
+  {
+   "file": "src/products/topos_edit.py",
+   "pct": 100.0,
+   "stmts": 9,
+   "missing": 0
+  },
+  {
+   "file": "src/products/topos_studio.py",
+   "pct": 100.0,
+   "stmts": 9,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/actions/__init__.py",
+   "pct": 100.0,
+   "stmts": 40,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ai_models/__init__.py",
+   "pct": 41.7,
+   "stmts": 12,
+   "missing": 7
+  },
+  {
+   "file": "src/shared/ai_models/ai_mask_engine.py",
+   "pct": 22.2,
+   "stmts": 243,
+   "missing": 189
+  },
+  {
+   "file": "src/shared/ai_models/ai_plugin_engine.py",
+   "pct": 12.1,
+   "stmts": 306,
+   "missing": 269
+  },
+  {
+   "file": "src/shared/ai_models/denoise_worker.py",
+   "pct": 0.0,
+   "stmts": 301,
+   "missing": 301
+  },
+  {
+   "file": "src/shared/ai_models/generation/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ai_models/generation/credential_store.py",
+   "pct": 70.2,
+   "stmts": 168,
+   "missing": 50
+  },
+  {
+   "file": "src/shared/ai_models/generation/generation_models.py",
+   "pct": 93.7,
+   "stmts": 238,
+   "missing": 15
+  },
+  {
+   "file": "src/shared/ai_models/generation/image_gen_job.py",
+   "pct": 71.4,
+   "stmts": 119,
+   "missing": 34
+  },
+  {
+   "file": "src/shared/ai_models/generation/model_pack_manager.py",
+   "pct": 79.6,
+   "stmts": 284,
+   "missing": 58
+  },
+  {
+   "file": "src/shared/ai_models/generation/provider_profiles.py",
+   "pct": 92.9,
+   "stmts": 184,
+   "missing": 13
+  },
+  {
+   "file": "src/shared/ai_models/generation/user_ai_config.py",
+   "pct": 90.7,
+   "stmts": 43,
+   "missing": 4
+  },
+  {
+   "file": "src/shared/ai_models/generation/volcengine_generation_provider.py",
+   "pct": 70.1,
+   "stmts": 284,
+   "missing": 85
+  },
+  {
+   "file": "src/shared/ai_models/inference_engine.py",
+   "pct": 13.7,
+   "stmts": 475,
+   "missing": 410
+  },
+  {
+   "file": "src/shared/ai_models/model_manager.py",
+   "pct": 38.1,
+   "stmts": 244,
+   "missing": 151
+  },
+  {
+   "file": "src/shared/ai_models/nafnet.py",
+   "pct": 0.0,
+   "stmts": 96,
+   "missing": 96
+  },
+  {
+   "file": "src/shared/ai_models/onnx_env.py",
+   "pct": 32.5,
+   "stmts": 151,
+   "missing": 102
+  },
+  {
+   "file": "src/shared/ai_models/rife_interpolator.py",
+   "pct": 95.8,
+   "stmts": 72,
+   "missing": 3
+  },
+  {
+   "file": "src/shared/ai_models/swinir.py",
+   "pct": 0.0,
+   "stmts": 227,
+   "missing": 227
+  },
+  {
+   "file": "src/shared/app_restart.py",
+   "pct": 0.0,
+   "stmts": 19,
+   "missing": 19
+  },
+  {
+   "file": "src/shared/assets/__init__.py",
+   "pct": 100.0,
+   "stmts": 1,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/assets/icon_manager.py",
+   "pct": 81.6,
+   "stmts": 256,
+   "missing": 47
+  },
+  {
+   "file": "src/shared/codec/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/codec/color_metadata_config.py",
+   "pct": 97.9,
+   "stmts": 48,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/codec/decode_worker_budget.py",
+   "pct": 86.0,
+   "stmts": 129,
+   "missing": 18
+  },
+  {
+   "file": "src/shared/codec/slice_threads_policy.py",
+   "pct": 85.6,
+   "stmts": 90,
+   "missing": 13
+  },
+  {
+   "file": "src/shared/codec/topos_binding.py",
+   "pct": 78.7,
+   "stmts": 2097,
+   "missing": 446
+  },
+  {
+   "file": "src/shared/codec/topos_image_binding.py",
+   "pct": 84.6,
+   "stmts": 518,
+   "missing": 80
+  },
+  {
+   "file": "src/shared/codec/topos_meta.py",
+   "pct": 100.0,
+   "stmts": 56,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/codec/topos_profiles.py",
+   "pct": 92.1,
+   "stmts": 140,
+   "missing": 11
+  },
+  {
+   "file": "src/shared/codec/topos_trwm.py",
+   "pct": 93.2,
+   "stmts": 44,
+   "missing": 3
+  },
+  {
+   "file": "src/shared/color/__init__.py",
+   "pct": 100.0,
+   "stmts": 4,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/color/color_conversion.py",
+   "pct": 94.1,
+   "stmts": 17,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/color/color_picker.py",
+   "pct": 46.2,
+   "stmts": 1714,
+   "missing": 922
+  },
+  {
+   "file": "src/shared/color/color_space_descriptor.py",
+   "pct": 87.3,
+   "stmts": 102,
+   "missing": 13
+  },
+  {
+   "file": "src/shared/color/color_transform_provider.py",
+   "pct": 92.5,
+   "stmts": 345,
+   "missing": 26
+  },
+  {
+   "file": "src/shared/color/lut_loader.py",
+   "pct": 84.7,
+   "stmts": 235,
+   "missing": 36
+  },
+  {
+   "file": "src/shared/color/types.py",
+   "pct": 77.9,
+   "stmts": 86,
+   "missing": 19
+  },
+  {
+   "file": "src/shared/config/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/config/config_manager.py",
+   "pct": 79.1,
+   "stmts": 215,
+   "missing": 45
+  },
+  {
+   "file": "src/shared/control_surfaces/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/control_surfaces/tangent/__init__.py",
+   "pct": 100.0,
+   "stmts": 4,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/control_surfaces/tangent/hub_client.py",
+   "pct": 49.5,
+   "stmts": 208,
+   "missing": 105
+  },
+  {
+   "file": "src/shared/control_surfaces/tangent/protocol.py",
+   "pct": 87.0,
+   "stmts": 92,
+   "missing": 12
+  },
+  {
+   "file": "src/shared/control_surfaces/tangent/settings.py",
+   "pct": 87.9,
+   "stmts": 33,
+   "missing": 4
+  },
+  {
+   "file": "src/shared/db/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/db/database.py",
+   "pct": 40.7,
+   "stmts": 113,
+   "missing": 67
+  },
+  {
+   "file": "src/shared/diagnostics/__init__.py",
+   "pct": 100.0,
+   "stmts": 0,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/diagnostics/flash_diag.py",
+   "pct": 61.5,
+   "stmts": 26,
+   "missing": 10
+  },
+  {
+   "file": "src/shared/diagnostics/performance_bundle.py",
+   "pct": 69.2,
+   "stmts": 78,
+   "missing": 24
+  },
+  {
+   "file": "src/shared/diagnostics/resource_snapshot.py",
+   "pct": 91.3,
+   "stmts": 150,
+   "missing": 13
+  },
+  {
+   "file": "src/shared/effects/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/effects/preview_quality.py",
+   "pct": 87.1,
+   "stmts": 140,
+   "missing": 18
+  },
+  {
+   "file": "src/shared/export/__init__.py",
+   "pct": 100.0,
+   "stmts": 10,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/export/batch_queue_store.py",
+   "pct": 38.1,
+   "stmts": 97,
+   "missing": 60
+  },
+  {
+   "file": "src/shared/export/encoder.py",
+   "pct": 66.3,
+   "stmts": 178,
+   "missing": 60
+  },
+  {
+   "file": "src/shared/export/export_dialog.py",
+   "pct": 0.0,
+   "stmts": 183,
+   "missing": 183
+  },
+  {
+   "file": "src/shared/export/export_panel.py",
+   "pct": 61.6,
+   "stmts": 804,
+   "missing": 309
+  },
+  {
+   "file": "src/shared/export/export_source.py",
+   "pct": 0.0,
+   "stmts": 7,
+   "missing": 7
+  },
+  {
+   "file": "src/shared/export/export_stage_telemetry.py",
+   "pct": 91.1,
+   "stmts": 169,
+   "missing": 15
+  },
+  {
+   "file": "src/shared/export/frame_provider.py",
+   "pct": 91.5,
+   "stmts": 142,
+   "missing": 12
+  },
+  {
+   "file": "src/shared/export/gif_encoder.py",
+   "pct": 73.8,
+   "stmts": 130,
+   "missing": 34
+  },
+  {
+   "file": "src/shared/export/gpu_benchmark_report.py",
+   "pct": 79.6,
+   "stmts": 108,
+   "missing": 22
+  },
+  {
+   "file": "src/shared/export/gpu_encode_surface.py",
+   "pct": 82.0,
+   "stmts": 89,
+   "missing": 16
+  },
+  {
+   "file": "src/shared/export/gpu_trail.py",
+   "pct": 92.6,
+   "stmts": 175,
+   "missing": 13
+  },
+  {
+   "file": "src/shared/export/presets.py",
+   "pct": 44.9,
+   "stmts": 89,
+   "missing": 49
+  },
+  {
+   "file": "src/shared/export/quick_export_dialog.py",
+   "pct": 81.8,
+   "stmts": 746,
+   "missing": 136
+  },
+  {
+   "file": "src/shared/export/render_cache.py",
+   "pct": 84.9,
+   "stmts": 159,
+   "missing": 24
+  },
+  {
+   "file": "src/shared/export/sequence_exporter.py",
+   "pct": 19.8,
+   "stmts": 293,
+   "missing": 235
+  },
+  {
+   "file": "src/shared/export/topos_encoder.py",
+   "pct": 81.4,
+   "stmts": 1799,
+   "missing": 334
+  },
+  {
+   "file": "src/shared/export/topos_rate_control.py",
+   "pct": 97.4,
+   "stmts": 117,
+   "missing": 3
+  },
+  {
+   "file": "src/shared/export/video_encoder.py",
+   "pct": 80.2,
+   "stmts": 1039,
+   "missing": 206
+  },
+  {
+   "file": "src/shared/export/video_export_worker.py",
+   "pct": 44.0,
+   "stmts": 159,
+   "missing": 89
+  },
+  {
+   "file": "src/shared/feature_flags.py",
+   "pct": 89.2,
+   "stmts": 102,
+   "missing": 11
+  },
+  {
+   "file": "src/shared/ffmpeg_locator.py",
+   "pct": 93.0,
+   "stmts": 57,
+   "missing": 4
+  },
+  {
+   "file": "src/shared/gpu/__init__.py",
+   "pct": 100.0,
+   "stmts": 6,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/backend_selector.py",
+   "pct": 98.7,
+   "stmts": 75,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/gpu/backend_types.py",
+   "pct": 97.8,
+   "stmts": 90,
+   "missing": 2
+  },
+  {
+   "file": "src/shared/gpu/capabilities.py",
+   "pct": 86.0,
+   "stmts": 136,
+   "missing": 19
+  },
+  {
+   "file": "src/shared/gpu/composite_gpu_frame_handle.py",
+   "pct": 80.2,
+   "stmts": 86,
+   "missing": 17
+  },
+  {
+   "file": "src/shared/gpu/gl_backend.py",
+   "pct": 75.9,
+   "stmts": 83,
+   "missing": 20
+  },
+  {
+   "file": "src/shared/gpu/gl_context_hub.py",
+   "pct": 23.1,
+   "stmts": 65,
+   "missing": 50
+  },
+  {
+   "file": "src/shared/gpu/gl_pass_timer.py",
+   "pct": 77.6,
+   "stmts": 98,
+   "missing": 22
+  },
+  {
+   "file": "src/shared/gpu/gl_resource_registry.py",
+   "pct": 100.0,
+   "stmts": 82,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/gpu_scope_engine.py",
+   "pct": 83.1,
+   "stmts": 437,
+   "missing": 74
+  },
+  {
+   "file": "src/shared/gpu/graphics_backend.py",
+   "pct": 100.0,
+   "stmts": 37,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/host_gpu_info.py",
+   "pct": 82.1,
+   "stmts": 28,
+   "missing": 5
+  },
+  {
+   "file": "src/shared/gpu/metal/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/metal/context.py",
+   "pct": 82.2,
+   "stmts": 253,
+   "missing": 45
+  },
+  {
+   "file": "src/shared/gpu/metal/kernels.py",
+   "pct": 100.0,
+   "stmts": 60,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/metal/kernels_color.py",
+   "pct": 100.0,
+   "stmts": 152,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/metal/kernels_dct.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/metal/kernels_dec.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/metal/kernels_enc.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/metal/kernels_histogram.py",
+   "pct": 98.0,
+   "stmts": 50,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/gpu/metal/kernels_idct.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/metal/kernels_video.py",
+   "pct": 100.0,
+   "stmts": 49,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/gpu/metal/submission_scheduler.py",
+   "pct": 79.3,
+   "stmts": 87,
+   "missing": 18
+  },
+  {
+   "file": "src/shared/gpu/present_frame.py",
+   "pct": 89.4,
+   "stmts": 180,
+   "missing": 19
+  },
+  {
+   "file": "src/shared/i18n/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/i18n/i18n.py",
+   "pct": 67.8,
+   "stmts": 205,
+   "missing": 66
+  },
+  {
+   "file": "src/shared/io/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/io/file_io.py",
+   "pct": 20.3,
+   "stmts": 676,
+   "missing": 539
+  },
+  {
+   "file": "src/shared/keyframe.py",
+   "pct": 78.1,
+   "stmts": 503,
+   "missing": 110
+  },
+  {
+   "file": "src/shared/layout/__init__.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/layout/profile.py",
+   "pct": 100.0,
+   "stmts": 37,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/layout/store.py",
+   "pct": 80.9,
+   "stmts": 188,
+   "missing": 36
+  },
+  {
+   "file": "src/shared/logging/__init__.py",
+   "pct": 0.0,
+   "stmts": 2,
+   "missing": 2
+  },
+  {
+   "file": "src/shared/logging/log_manager.py",
+   "pct": 0.0,
+   "stmts": 61,
+   "missing": 61
+  },
+  {
+   "file": "src/shared/media/__init__.py",
+   "pct": 100.0,
+   "stmts": 29,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/media/adapter.py",
+   "pct": 46.6,
+   "stmts": 266,
+   "missing": 142
+  },
+  {
+   "file": "src/shared/media/asset_proxy_manager.py",
+   "pct": 58.6,
+   "stmts": 152,
+   "missing": 63
+  },
+  {
+   "file": "src/shared/media/cache.py",
+   "pct": 74.1,
+   "stmts": 162,
+   "missing": 42
+  },
+  {
+   "file": "src/shared/media/color_decode.py",
+   "pct": 86.3,
+   "stmts": 299,
+   "missing": 41
+  },
+  {
+   "file": "src/shared/media/color_metadata.py",
+   "pct": 51.6,
+   "stmts": 182,
+   "missing": 88
+  },
+  {
+   "file": "src/shared/media/decode_policy.py",
+   "pct": 91.0,
+   "stmts": 155,
+   "missing": 14
+  },
+  {
+   "file": "src/shared/media/decode_queue.py",
+   "pct": 67.0,
+   "stmts": 221,
+   "missing": 73
+  },
+  {
+   "file": "src/shared/media/disk_proxy_service.py",
+   "pct": 30.5,
+   "stmts": 249,
+   "missing": 173
+  },
+  {
+   "file": "src/shared/media/error_handling.py",
+   "pct": 36.3,
+   "stmts": 237,
+   "missing": 151
+  },
+  {
+   "file": "src/shared/media/errors.py",
+   "pct": 55.6,
+   "stmts": 27,
+   "missing": 12
+  },
+  {
+   "file": "src/shared/media/factory.py",
+   "pct": 74.0,
+   "stmts": 500,
+   "missing": 130
+  },
+  {
+   "file": "src/shared/media/ffmpeg_source.py",
+   "pct": 65.5,
+   "stmts": 1159,
+   "missing": 400
+  },
+  {
+   "file": "src/shared/media/format_registry.py",
+   "pct": 85.4,
+   "stmts": 48,
+   "missing": 7
+  },
+  {
+   "file": "src/shared/media/frame.py",
+   "pct": 70.1,
+   "stmts": 144,
+   "missing": 43
+  },
+  {
+   "file": "src/shared/media/frame_cache.py",
+   "pct": 56.4,
+   "stmts": 179,
+   "missing": 78
+  },
+  {
+   "file": "src/shared/media/frame_path.py",
+   "pct": 96.8,
+   "stmts": 221,
+   "missing": 7
+  },
+  {
+   "file": "src/shared/media/gop_index.py",
+   "pct": 84.2,
+   "stmts": 183,
+   "missing": 29
+  },
+  {
+   "file": "src/shared/media/gpu_frame.py",
+   "pct": 85.6,
+   "stmts": 188,
+   "missing": 27
+  },
+  {
+   "file": "src/shared/media/gpu_frame_handle.py",
+   "pct": 0.0,
+   "stmts": 15,
+   "missing": 15
+  },
+  {
+   "file": "src/shared/media/hwaccel.py",
+   "pct": 45.3,
+   "stmts": 380,
+   "missing": 208
+  },
+  {
+   "file": "src/shared/media/macos_vt/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/media/macos_vt/capability.py",
+   "pct": 65.3,
+   "stmts": 343,
+   "missing": 119
+  },
+  {
+   "file": "src/shared/media/macos_vt/cv_metal_bridge.py",
+   "pct": 78.7,
+   "stmts": 347,
+   "missing": 74
+  },
+  {
+   "file": "src/shared/media/macos_vt/external_texture.py",
+   "pct": 100.0,
+   "stmts": 19,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/media/macos_vt/gpu_encode_surface.py",
+   "pct": 75.9,
+   "stmts": 58,
+   "missing": 14
+  },
+  {
+   "file": "src/shared/media/macos_vt/gpu_export_bridge.py",
+   "pct": 90.7,
+   "stmts": 54,
+   "missing": 5
+  },
+  {
+   "file": "src/shared/media/macos_vt/hardware_capability.py",
+   "pct": 79.3,
+   "stmts": 169,
+   "missing": 35
+  },
+  {
+   "file": "src/shared/media/macos_vt/iosurface_gl_bridge.py",
+   "pct": 73.5,
+   "stmts": 521,
+   "missing": 138
+  },
+  {
+   "file": "src/shared/media/macos_vt/metal_capability_report.py",
+   "pct": 88.9,
+   "stmts": 54,
+   "missing": 6
+  },
+  {
+   "file": "src/shared/media/macos_vt/packet_demux.py",
+   "pct": 84.9,
+   "stmts": 119,
+   "missing": 18
+  },
+  {
+   "file": "src/shared/media/macos_vt/source.py",
+   "pct": 58.7,
+   "stmts": 606,
+   "missing": 250
+  },
+  {
+   "file": "src/shared/media/macos_vt/topos_surface.py",
+   "pct": 82.9,
+   "stmts": 117,
+   "missing": 20
+  },
+  {
+   "file": "src/shared/media/macos_vt/vt_compression.py",
+   "pct": 60.0,
+   "stmts": 468,
+   "missing": 187
+  },
+  {
+   "file": "src/shared/media/macos_vt/vt_session.py",
+   "pct": 63.2,
+   "stmts": 813,
+   "missing": 299
+  },
+  {
+   "file": "src/shared/media/macos_vt/vt_zero_copy_probe.py",
+   "pct": 19.2,
+   "stmts": 402,
+   "missing": 325
+  },
+  {
+   "file": "src/shared/media/metadata.py",
+   "pct": 91.7,
+   "stmts": 217,
+   "missing": 18
+  },
+  {
+   "file": "src/shared/media/motion_graphic_delivery.py",
+   "pct": 90.0,
+   "stmts": 40,
+   "missing": 4
+  },
+  {
+   "file": "src/shared/media/performance_monitor.py",
+   "pct": 90.3,
+   "stmts": 590,
+   "missing": 57
+  },
+  {
+   "file": "src/shared/media/pixel_format.py",
+   "pct": 99.5,
+   "stmts": 182,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/media/probe.py",
+   "pct": 20.0,
+   "stmts": 105,
+   "missing": 84
+  },
+  {
+   "file": "src/shared/media/proxy.py",
+   "pct": 82.0,
+   "stmts": 323,
+   "missing": 58
+  },
+  {
+   "file": "src/shared/media/proxy_generator.py",
+   "pct": 57.3,
+   "stmts": 729,
+   "missing": 311
+  },
+  {
+   "file": "src/shared/media/proxy_manager.py",
+   "pct": 40.7,
+   "stmts": 280,
+   "missing": 166
+  },
+  {
+   "file": "src/shared/media/proxy_manifest.py",
+   "pct": 96.0,
+   "stmts": 149,
+   "missing": 6
+  },
+  {
+   "file": "src/shared/media/seek.py",
+   "pct": 70.7,
+   "stmts": 99,
+   "missing": 29
+  },
+  {
+   "file": "src/shared/media/source.py",
+   "pct": 100.0,
+   "stmts": 73,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/media/thumbnail_provider.py",
+   "pct": 58.5,
+   "stmts": 914,
+   "missing": 379
+  },
+  {
+   "file": "src/shared/media/timecode.py",
+   "pct": 90.6,
+   "stmts": 171,
+   "missing": 16
+  },
+  {
+   "file": "src/shared/media/timeline.py",
+   "pct": 91.0,
+   "stmts": 222,
+   "missing": 20
+  },
+  {
+   "file": "src/shared/media/topos_frame_extract.py",
+   "pct": 84.7,
+   "stmts": 98,
+   "missing": 15
+  },
+  {
+   "file": "src/shared/media/topos_image_sequence.py",
+   "pct": 90.0,
+   "stmts": 359,
+   "missing": 36
+  },
+  {
+   "file": "src/shared/media/topos_image_source.py",
+   "pct": 90.2,
+   "stmts": 123,
+   "missing": 12
+  },
+  {
+   "file": "src/shared/media/topos_source.py",
+   "pct": 83.3,
+   "stmts": 1093,
+   "missing": 182
+  },
+  {
+   "file": "src/shared/media/topos_surface_capability.py",
+   "pct": 87.5,
+   "stmts": 80,
+   "missing": 10
+  },
+  {
+   "file": "src/shared/media/windows_hw/__init__.py",
+   "pct": 100.0,
+   "stmts": 15,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/media/windows_hw/capability.py",
+   "pct": 72.2,
+   "stmts": 90,
+   "missing": 25
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_decoder.py",
+   "pct": 76.2,
+   "stmts": 147,
+   "missing": 35
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_device.py",
+   "pct": 49.4,
+   "stmts": 174,
+   "missing": 88
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_effects.py",
+   "pct": 95.2,
+   "stmts": 21,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_export_capability.py",
+   "pct": 80.7,
+   "stmts": 88,
+   "missing": 17
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_format_contract.py",
+   "pct": 85.7,
+   "stmts": 70,
+   "missing": 10
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_frame.py",
+   "pct": 88.7,
+   "stmts": 53,
+   "missing": 6
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_gl_bridge.py",
+   "pct": 58.9,
+   "stmts": 73,
+   "missing": 30
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_passthrough_chain.py",
+   "pct": 78.6,
+   "stmts": 98,
+   "missing": 21
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_pipeline.py",
+   "pct": 76.6,
+   "stmts": 167,
+   "missing": 39
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_render_graph.py",
+   "pct": 55.9,
+   "stmts": 188,
+   "missing": 83
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_shaders.py",
+   "pct": 87.5,
+   "stmts": 8,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_sync.py",
+   "pct": 91.7,
+   "stmts": 24,
+   "missing": 2
+  },
+  {
+   "file": "src/shared/media/windows_hw/d3d11_texture_pool.py",
+   "pct": 81.2,
+   "stmts": 240,
+   "missing": 45
+  },
+  {
+   "file": "src/shared/media/windows_hw/gpu_capability.py",
+   "pct": 67.5,
+   "stmts": 123,
+   "missing": 40
+  },
+  {
+   "file": "src/shared/media/windows_hw/gpu_encode_surface.py",
+   "pct": 79.0,
+   "stmts": 138,
+   "missing": 29
+  },
+  {
+   "file": "src/shared/media/windows_hw/hw_planar_source.py",
+   "pct": 66.1,
+   "stmts": 109,
+   "missing": 37
+  },
+  {
+   "file": "src/shared/media/windows_hw/native_bridge.py",
+   "pct": 89.1,
+   "stmts": 92,
+   "missing": 10
+  },
+  {
+   "file": "src/shared/media/windows_hw/reasons.py",
+   "pct": 100.0,
+   "stmts": 26,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/media/windows_hw/vendor_policy.py",
+   "pct": 89.4,
+   "stmts": 47,
+   "missing": 5
+  },
+  {
+   "file": "src/shared/media/windows_hw/windows_zero_copy_probe.py",
+   "pct": 39.0,
+   "stmts": 77,
+   "missing": 47
+  },
+  {
+   "file": "src/shared/node_canvas/graph_ui_protocol.py",
+   "pct": 82.4,
+   "stmts": 108,
+   "missing": 19
+  },
+  {
+   "file": "src/shared/node_help/__init__.py",
+   "pct": 77.6,
+   "stmts": 58,
+   "missing": 13
+  },
+  {
+   "file": "src/shared/node_help/dialog.py",
+   "pct": 98.8,
+   "stmts": 83,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/panels/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/panels/registry.py",
+   "pct": 65.0,
+   "stmts": 80,
+   "missing": 28
+  },
+  {
+   "file": "src/shared/paths/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/paths/paths.py",
+   "pct": 29.5,
+   "stmts": 44,
+   "missing": 31
+  },
+  {
+   "file": "src/shared/preferences/__init__.py",
+   "pct": 96.1,
+   "stmts": 51,
+   "missing": 2
+  },
+  {
+   "file": "src/shared/project/__init__.py",
+   "pct": 100.0,
+   "stmts": 10,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/project/color_stack.py",
+   "pct": 93.4,
+   "stmts": 91,
+   "missing": 6
+  },
+  {
+   "file": "src/shared/project/document.py",
+   "pct": 100.0,
+   "stmts": 7,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/project/edit_project_adapter.py",
+   "pct": 70.2,
+   "stmts": 57,
+   "missing": 17
+  },
+  {
+   "file": "src/shared/project/layer_adapter.py",
+   "pct": 100.0,
+   "stmts": 14,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/project/library.py",
+   "pct": 71.4,
+   "stmts": 430,
+   "missing": 123
+  },
+  {
+   "file": "src/shared/project/manifest.py",
+   "pct": 93.0,
+   "stmts": 57,
+   "missing": 4
+  },
+  {
+   "file": "src/shared/project/offline_asset_manager.py",
+   "pct": 90.6,
+   "stmts": 191,
+   "missing": 18
+  },
+  {
+   "file": "src/shared/project/payload_cache.py",
+   "pct": 88.5,
+   "stmts": 87,
+   "missing": 10
+  },
+  {
+   "file": "src/shared/project/project_manager.py",
+   "pct": 19.3,
+   "stmts": 393,
+   "missing": 317
+  },
+  {
+   "file": "src/shared/project/save_router.py",
+   "pct": 56.6,
+   "stmts": 579,
+   "missing": 251
+  },
+  {
+   "file": "src/shared/project/schema_v1_spec.py",
+   "pct": 58.6,
+   "stmts": 29,
+   "missing": 12
+  },
+  {
+   "file": "src/shared/project/topos_project.py",
+   "pct": 75.6,
+   "stmts": 270,
+   "missing": 66
+  },
+  {
+   "file": "src/shared/project/topos_project_controller.py",
+   "pct": 97.8,
+   "stmts": 183,
+   "missing": 4
+  },
+  {
+   "file": "src/shared/project/topos_project_io.py",
+   "pct": 70.8,
+   "stmts": 534,
+   "missing": 156
+  },
+  {
+   "file": "src/shared/project/topos_project_read_service.py",
+   "pct": 85.4,
+   "stmts": 89,
+   "missing": 13
+  },
+  {
+   "file": "src/shared/render/__init__.py",
+   "pct": 0.0,
+   "stmts": 2,
+   "missing": 2
+  },
+  {
+   "file": "src/shared/render/source.py",
+   "pct": 0.0,
+   "stmts": 7,
+   "missing": 7
+  },
+  {
+   "file": "src/shared/render_diagnostics.py",
+   "pct": 96.7,
+   "stmts": 122,
+   "missing": 4
+  },
+  {
+   "file": "src/shared/tracking/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/tracking/coordinate_map.py",
+   "pct": 98.4,
+   "stmts": 62,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/tracking/corner_pin.py",
+   "pct": 46.9,
+   "stmts": 160,
+   "missing": 85
+  },
+  {
+   "file": "src/shared/tracking/feature_detector.py",
+   "pct": 94.8,
+   "stmts": 58,
+   "missing": 3
+  },
+  {
+   "file": "src/shared/tracking/frame_sampler.py",
+   "pct": 82.3,
+   "stmts": 158,
+   "missing": 28
+  },
+  {
+   "file": "src/shared/tracking/homography_stability.py",
+   "pct": 93.5,
+   "stmts": 77,
+   "missing": 5
+  },
+  {
+   "file": "src/shared/tracking/merge.py",
+   "pct": 94.7,
+   "stmts": 95,
+   "missing": 5
+  },
+  {
+   "file": "src/shared/tracking/point_manager.py",
+   "pct": 100.0,
+   "stmts": 54,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/tracking/shape_mask.py",
+   "pct": 0.0,
+   "stmts": 82,
+   "missing": 82
+  },
+  {
+   "file": "src/shared/tracking/stabilize.py",
+   "pct": 92.8,
+   "stmts": 83,
+   "missing": 6
+  },
+  {
+   "file": "src/shared/tracking/track_data.py",
+   "pct": 99.1,
+   "stmts": 115,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/tracking/tracker_2d.py",
+   "pct": 94.8,
+   "stmts": 442,
+   "missing": 23
+  },
+  {
+   "file": "src/shared/tracking/tracking_cache.py",
+   "pct": 98.2,
+   "stmts": 56,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/tracking/types.py",
+   "pct": 100.0,
+   "stmts": 92,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ui/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/__init__.py",
+   "pct": 100.0,
+   "stmts": 6,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/audio_fader.py",
+   "pct": 55.0,
+   "stmts": 462,
+   "missing": 208
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/audio_level_meter.py",
+   "pct": 41.0,
+   "stmts": 734,
+   "missing": 433
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/audio_mixer_panel.py",
+   "pct": 50.6,
+   "stmts": 437,
+   "missing": 216
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/automation_lane.py",
+   "pct": 0.0,
+   "stmts": 237,
+   "missing": 237
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/compressor_dialog.py",
+   "pct": 14.5,
+   "stmts": 165,
+   "missing": 141
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/delay_dialog.py",
+   "pct": 14.0,
+   "stmts": 179,
+   "missing": 154
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/dynamics_dialog.py",
+   "pct": 0.0,
+   "stmts": 237,
+   "missing": 237
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/eq_presets.py",
+   "pct": 50.0,
+   "stmts": 10,
+   "missing": 5
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/imager_dialog.py",
+   "pct": 15.0,
+   "stmts": 160,
+   "missing": 136
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/limiter_dialog.py",
+   "pct": 16.7,
+   "stmts": 120,
+   "missing": 100
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/mixer_feature_flags.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/mixer_separator.py",
+   "pct": 66.7,
+   "stmts": 15,
+   "missing": 5
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/noise_gate_dialog.py",
+   "pct": 14.8,
+   "stmts": 162,
+   "missing": 138
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/preset_dialog.py",
+   "pct": 0.0,
+   "stmts": 120,
+   "missing": 120
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/reverb_dialog.py",
+   "pct": 64.4,
+   "stmts": 163,
+   "missing": 58
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/routing_dialog.py",
+   "pct": 93.7,
+   "stmts": 174,
+   "missing": 11
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/routing_matrix_dialog.py",
+   "pct": 98.0,
+   "stmts": 149,
+   "missing": 3
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/saturation_dialog.py",
+   "pct": 15.4,
+   "stmts": 156,
+   "missing": 132
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/strip_eq_dialog.py",
+   "pct": 14.7,
+   "stmts": 375,
+   "missing": 320
+  },
+  {
+   "file": "src/shared/ui/audio_mixer/track_mixer_widget.py",
+   "pct": 43.8,
+   "stmts": 1004,
+   "missing": 564
+  },
+  {
+   "file": "src/shared/ui/column_grid.py",
+   "pct": 89.7,
+   "stmts": 107,
+   "missing": 11
+  },
+  {
+   "file": "src/shared/ui/dock_context_menu.py",
+   "pct": 93.8,
+   "stmts": 16,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/ui/dock_tab_style.py",
+   "pct": 35.7,
+   "stmts": 14,
+   "missing": 9
+  },
+  {
+   "file": "src/shared/ui/effect_degradation_indicator.py",
+   "pct": 49.6,
+   "stmts": 125,
+   "missing": 63
+  },
+  {
+   "file": "src/shared/ui/panel_divider.py",
+   "pct": 100.0,
+   "stmts": 36,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ui/playback_hud.py",
+   "pct": 0.0,
+   "stmts": 389,
+   "missing": 389
+  },
+  {
+   "file": "src/shared/ui/playback_hud_integration.py",
+   "pct": 0.0,
+   "stmts": 111,
+   "missing": 111
+  },
+  {
+   "file": "src/shared/ui/shortcut_manager.py",
+   "pct": 65.7,
+   "stmts": 204,
+   "missing": 70
+  },
+  {
+   "file": "src/shared/ui/shortcut_scope.py",
+   "pct": 53.8,
+   "stmts": 13,
+   "missing": 6
+  },
+  {
+   "file": "src/shared/ui/style_sheet.py",
+   "pct": 98.8,
+   "stmts": 164,
+   "missing": 2
+  },
+  {
+   "file": "src/shared/ui/video_control_panel.py",
+   "pct": 0.0,
+   "stmts": 121,
+   "missing": 121
+  },
+  {
+   "file": "src/shared/ui/widgets/__init__.py",
+   "pct": 100.0,
+   "stmts": 13,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ui/widgets/chevron_combo.py",
+   "pct": 59.0,
+   "stmts": 61,
+   "missing": 25
+  },
+  {
+   "file": "src/shared/ui/widgets/cie_scope_widget.py",
+   "pct": 42.1,
+   "stmts": 309,
+   "missing": 179
+  },
+  {
+   "file": "src/shared/ui/widgets/clickable_slider.py",
+   "pct": 42.9,
+   "stmts": 21,
+   "missing": 12
+  },
+  {
+   "file": "src/shared/ui/widgets/color_picker_control.py",
+   "pct": 100.0,
+   "stmts": 85,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ui/widgets/color_warper.py",
+   "pct": 12.8,
+   "stmts": 187,
+   "missing": 163
+  },
+  {
+   "file": "src/shared/ui/widgets/curves_widget.py",
+   "pct": 9.8,
+   "stmts": 471,
+   "missing": 425
+  },
+  {
+   "file": "src/shared/ui/widgets/drag_value.py",
+   "pct": 83.3,
+   "stmts": 245,
+   "missing": 41
+  },
+  {
+   "file": "src/shared/ui/widgets/gpu_scope_widget.py",
+   "pct": 93.5,
+   "stmts": 77,
+   "missing": 5
+  },
+  {
+   "file": "src/shared/ui/widgets/hsl_curves_widget.py",
+   "pct": 12.1,
+   "stmts": 519,
+   "missing": 456
+  },
+  {
+   "file": "src/shared/ui/widgets/lut_gallery.py",
+   "pct": 18.0,
+   "stmts": 239,
+   "missing": 196
+  },
+  {
+   "file": "src/shared/ui/widgets/param_slider_row.py",
+   "pct": 72.0,
+   "stmts": 125,
+   "missing": 35
+  },
+  {
+   "file": "src/shared/ui/widgets/pref_drag_value.py",
+   "pct": 71.4,
+   "stmts": 21,
+   "missing": 6
+  },
+  {
+   "file": "src/shared/ui/widgets/pref_form_layout.py",
+   "pct": 100.0,
+   "stmts": 19,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/ui/widgets/qualifier_range_bar.py",
+   "pct": 20.9,
+   "stmts": 201,
+   "missing": 159
+  },
+  {
+   "file": "src/shared/ui/widgets/realtime_fps_indicator.py",
+   "pct": 69.6,
+   "stmts": 115,
+   "missing": 35
+  },
+  {
+   "file": "src/shared/ui/widgets/toggle_switch.py",
+   "pct": 81.8,
+   "stmts": 44,
+   "missing": 8
+  },
+  {
+   "file": "src/shared/ui/widgets/topos_controls.py",
+   "pct": 70.9,
+   "stmts": 134,
+   "missing": 39
+  },
+  {
+   "file": "src/shared/ui/widgets/vectorscope_widget.py",
+   "pct": 47.2,
+   "stmts": 807,
+   "missing": 426
+  },
+  {
+   "file": "src/shared/ui/widgets/viewport_toolbar_base.py",
+   "pct": 73.0,
+   "stmts": 178,
+   "missing": 48
+  },
+  {
+   "file": "src/shared/utils/__init__.py",
+   "pct": 100.0,
+   "stmts": 2,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/utils/geometry_math.py",
+   "pct": 9.1,
+   "stmts": 22,
+   "missing": 20
+  },
+  {
+   "file": "src/shared/vault/__init__.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/vault/bridge.py",
+   "pct": 100.0,
+   "stmts": 52,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/vault/client.py",
+   "pct": 96.3,
+   "stmts": 54,
+   "missing": 2
+  },
+  {
+   "file": "src/shared/video/__init__.py",
+   "pct": 100.0,
+   "stmts": 12,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/video/camera_gamut_matrices.py",
+   "pct": 97.5,
+   "stmts": 81,
+   "missing": 2
+  },
+  {
+   "file": "src/shared/video/cfa_cpu_debayer.py",
+   "pct": 98.8,
+   "stmts": 82,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/video/cfa_gpu_debayer.py",
+   "pct": 23.4,
+   "stmts": 107,
+   "missing": 82
+  },
+  {
+   "file": "src/shared/video/color_frame_provider_adapter.py",
+   "pct": 93.4,
+   "stmts": 198,
+   "missing": 13
+  },
+  {
+   "file": "src/shared/video/decode_worker.py",
+   "pct": 78.2,
+   "stmts": 495,
+   "missing": 108
+  },
+  {
+   "file": "src/shared/video/denoise/__init__.py",
+   "pct": 100.0,
+   "stmts": 3,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/video/denoise/frame_types.py",
+   "pct": 86.9,
+   "stmts": 107,
+   "missing": 14
+  },
+  {
+   "file": "src/shared/video/denoise/params.py",
+   "pct": 91.5,
+   "stmts": 106,
+   "missing": 9
+  },
+  {
+   "file": "src/shared/video/denoise/window_provider.py",
+   "pct": 67.8,
+   "stmts": 180,
+   "missing": 58
+  },
+  {
+   "file": "src/shared/video/external_yuv_renderer.py",
+   "pct": 80.0,
+   "stmts": 95,
+   "missing": 19
+  },
+  {
+   "file": "src/shared/video/fallback_types.py",
+   "pct": 81.4,
+   "stmts": 215,
+   "missing": 40
+  },
+  {
+   "file": "src/shared/video/frame_provider_protocol.py",
+   "pct": 100.0,
+   "stmts": 19,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/video/frame_provider_service.py",
+   "pct": 69.2,
+   "stmts": 827,
+   "missing": 255
+  },
+  {
+   "file": "src/shared/video/frame_queue.py",
+   "pct": 77.2,
+   "stmts": 290,
+   "missing": 66
+  },
+  {
+   "file": "src/shared/video/frame_request.py",
+   "pct": 100.0,
+   "stmts": 49,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/video/frame_trace_schema.py",
+   "pct": 100.0,
+   "stmts": 31,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/video/monitor_output.py",
+   "pct": 47.0,
+   "stmts": 775,
+   "missing": 411
+  },
+  {
+   "file": "src/shared/video/performance_budgets.py",
+   "pct": 94.4,
+   "stmts": 108,
+   "missing": 6
+  },
+  {
+   "file": "src/shared/video/pipeline_decision.py",
+   "pct": 90.2,
+   "stmts": 122,
+   "missing": 12
+  },
+  {
+   "file": "src/shared/video/pixel_copy_counters.py",
+   "pct": 100.0,
+   "stmts": 30,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/video/playback_clock.py",
+   "pct": 67.3,
+   "stmts": 508,
+   "missing": 166
+  },
+  {
+   "file": "src/shared/video/playback_frame_trace.py",
+   "pct": 92.7,
+   "stmts": 262,
+   "missing": 19
+  },
+  {
+   "file": "src/shared/video/playback_state.py",
+   "pct": 34.4,
+   "stmts": 360,
+   "missing": 236
+  },
+  {
+   "file": "src/shared/video/render_commands.py",
+   "pct": 100.0,
+   "stmts": 28,
+   "missing": 0
+  },
+  {
+   "file": "src/shared/video/scrub_stride.py",
+   "pct": 95.8,
+   "stmts": 24,
+   "missing": 1
+  },
+  {
+   "file": "src/shared/video/session.py",
+   "pct": 69.9,
+   "stmts": 544,
+   "missing": 164
+  },
+  {
+   "file": "src/shared/video/video_async_renderer.py",
+   "pct": 36.4,
+   "stmts": 461,
+   "missing": 293
+  },
+  {
+   "file": "src/shared/video/video_playback.py",
+   "pct": 44.6,
+   "stmts": 2091,
+   "missing": 1158
+  },
+  {
+   "file": "src/shared/video/video_texture_pool.py",
+   "pct": 91.2,
+   "stmts": 137,
+   "missing": 12
+  },
+  {
+   "file": "src/shared/video/video_upload.py",
+   "pct": 65.8,
+   "stmts": 292,
+   "missing": 100
+  },
+  {
+   "file": "src/shared/video/yuv_gpu_self_test.py",
+   "pct": 0.0,
+   "stmts": 152,
+   "missing": 152
+  },
+  {
+   "file": "src/shared/video/yuv_gpu_upload.py",
+   "pct": 62.8,
+   "stmts": 1166,
+   "missing": 434
+  }
+ ],
+ "total_pct": 55.0
+}

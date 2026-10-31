@@ -1,0 +1,121 @@
+{
+  "schema": "topos.quality_reference.v1",
+  "environment": {
+    "git_sha": "bc120ecdb847a843b4b85a46198fd9d1a6213132",
+    "timestamp": "2026-09-29T21:05:21.374411",
+    "os": "macOS-15.3.1-x86_64-i386-64bit",
+    "gl_renderer": "AMD Radeon RX 6900 XT OpenGL Engine",
+    "gl_version": "4.1 ATI-6.1.13",
+    "r16ui_available": false,
+    "tolerances": {
+      "max_abs_444": 0.00784313725490196,
+      "mean_abs": 0.00392156862745098,
+      "rmse": 0.00392156862745098,
+      "max_abs_subsampled": 0.023529411764705882
+    }
+  },
+  "cases": [
+    {
+      "case_id": "sdr_8bit_709_limited_420",
+      "mode": "r8",
+      "max_abs": 0.019111573696136475,
+      "mean_abs": 0.00022270832038444292,
+      "rmse": 0.0005632717552494156,
+      "p99_abs": 0.0009255802631378193,
+      "alpha_max_abs": 0.0,
+      "golden_metrics": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rmse": 0.0,
+        "p99_abs": 0.0,
+        "alpha_max_abs": 0.0
+      },
+      "passed": true
+    },
+    {
+      "case_id": "sdr_8bit_601_full_444",
+      "mode": "r8",
+      "max_abs": 0.0009764432907104492,
+      "mean_abs": 0.00019565345462547445,
+      "rmse": 0.00028157192292841543,
+      "p99_abs": 0.0009000301361083984,
+      "alpha_max_abs": 0.0,
+      "golden_metrics": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rmse": 0.0,
+        "p99_abs": 0.0,
+        "alpha_max_abs": 0.0
+      },
+      "passed": true
+    },
+    {
+      "case_id": "sdr_10bit_709_limited_422",
+      "mode": "r16ui",
+      "max_abs": 0.0009765625,
+      "mean_abs": 0.00020989695877414398,
+      "rmse": 0.0002985956288998321,
+      "p99_abs": 0.0009211301803588867,
+      "alpha_max_abs": 0.0,
+      "golden_metrics": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rmse": 0.0,
+        "p99_abs": 0.0,
+        "alpha_max_abs": 0.0
+      },
+      "passed": true
+    },
+    {
+      "case_id": "sdr_12bit_709_limited_444",
+      "mode": "r16ui",
+      "max_abs": 0.0009764432907104492,
+      "mean_abs": 0.00020972523902826,
+      "rmse": 0.00029834267288482614,
+      "p99_abs": 0.0009192228317260742,
+      "alpha_max_abs": 0.0,
+      "golden_metrics": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rmse": 0.0,
+        "p99_abs": 0.0,
+        "alpha_max_abs": 0.0
+      },
+      "passed": true
+    },
+    {
+      "case_id": "wide_10bit_2020_limited_420",
+      "mode": "r16ui",
+      "max_abs": 0.0009764432907104492,
+      "mean_abs": 0.00021176437783706727,
+      "rmse": 0.0002994730581382226,
+      "p99_abs": 0.0009192228317260742,
+      "alpha_max_abs": 0.0,
+      "golden_metrics": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rmse": 0.0,
+        "p99_abs": 0.0,
+        "alpha_max_abs": 0.0
+      },
+      "passed": true
+    },
+    {
+      "case_id": "alpha_10bit_709_limited_444",
+      "mode": "r16ui",
+      "max_abs": 0.0009765625,
+      "mean_abs": 0.00020947810203926961,
+      "rmse": 0.00029813684175179544,
+      "p99_abs": 0.000919342041015625,
+      "alpha_max_abs": 5.351752042770386e-05,
+      "golden_metrics": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rmse": 0.0,
+        "p99_abs": 0.0,
+        "alpha_max_abs": 0.0
+      },
+      "passed": true
+    }
+  ]
+}

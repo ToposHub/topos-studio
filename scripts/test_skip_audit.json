@@ -1,0 +1,6173 @@
+{
+  "schema": "test_skip_audit/1",
+  "date": "2026-10-24T12:10:48",
+  "root": "tests",
+  "files_scanned": 1890,
+  "static_skip_statements": 766,
+  "by_kind": {
+    "pytest.skip": 431,
+    "mark.skipif": 238,
+    "mark.skip": 11,
+    "importorskip": 86
+  },
+  "by_category": {
+    "media_fixture_missing": 177,
+    "gl_context": 149,
+    "unclassified": 119,
+    "os_macos": 91,
+    "optional_dep_importorskip": 59,
+    "optional_tool_or_api": 57,
+    "topos_native_lib": 52,
+    "optional_dep_named": 19,
+    "qt_dep": 16,
+    "content_or_ui_conditional": 9,
+    "os_windows": 9,
+    "env_ci_gate": 8,
+    "gpu_hardware": 1
+  },
+  "distinct_files_by_category": {
+    "optional_tool_or_api": 43,
+    "env_ci_gate": 6,
+    "unclassified": 49,
+    "media_fixture_missing": 74,
+    "gl_context": 79,
+    "optional_dep_named": 13,
+    "optional_dep_importorskip": 42,
+    "os_macos": 33,
+    "topos_native_lib": 32,
+    "qt_dep": 10,
+    "content_or_ui_conditional": 4,
+    "os_windows": 7,
+    "gpu_hardware": 1
+  },
+  "entries": [
+    {
+      "file": "tests/ai/test_html_generation_protocol.py",
+      "kind": "pytest.skip",
+      "line": 284,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned headless browser unavailable (playwright/chromium not installed)"
+    },
+    {
+      "file": "tests/ai/test_html_llm_generator.py",
+      "kind": "mark.skipif",
+      "line": 145,
+      "scope": "decorator",
+      "category": "env_ci_gate",
+      "detail": "cond=os.getenv('TOPOS_RUN_REAL_LLM') != '1' reason=real LLM generation requires TOPOS_RUN_REAL_LLM=1 and an active AI profile"
+    },
+    {
+      "file": "tests/ai/test_html_llm_generator.py",
+      "kind": "pytest.skip",
+      "line": 151,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "no active AI profile/credential configured in ~/.topos/ai_profiles.json"
+    },
+    {
+      "file": "tests/ai/test_html_llm_generator.py",
+      "kind": "pytest.skip",
+      "line": 155,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned Chromium backend unavailable (run scripts/bootstrap_html_renderer.sh)"
+    },
+    {
+      "file": "tests/ai/test_real_deepseek_integration.py",
+      "kind": "mark.skip",
+      "line": 52,
+      "scope": "decorator",
+      "category": "optional_tool_or_api",
+      "detail": "reason=No DeepSeek API key in ~/.topos/ai_profiles.json"
+    },
+    {
+      "file": "tests/ai/test_real_deepseek_integration.py",
+      "kind": "pytest.skip",
+      "line": 446,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Scene compilation needs refinement: {exc}'"
+    },
+    {
+      "file": "tests/app/test_fix_w6g4_aud6.py",
+      "kind": "pytest.skip",
+      "line": 183,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "native TOPOS image codec unavailable"
+    },
+    {
+      "file": "tests/app/test_fix_w6g4_aud6.py",
+      "kind": "pytest.skip",
+      "line": 200,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "native TOPOS image codec unavailable"
+    },
+    {
+      "file": "tests/app/test_gap027_main_window.py",
+      "kind": "pytest.skip",
+      "line": 421,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "offscreen 平台下无法建立焦点"
+    },
+    {
+      "file": "tests/architecture/test_boundary_guardrails.py",
+      "kind": "pytest.skip",
+      "line": 672,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Locale file {filename} not found'"
+    },
+    {
+      "file": "tests/architecture/test_boundary_guardrails.py",
+      "kind": "pytest.skip",
+      "line": 691,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Locales directory not found"
+    },
+    {
+      "file": "tests/architecture/test_product_physical_missing.py",
+      "kind": "pytest.skip",
+      "line": 186,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'main_window import failed (env issue): {exc}'"
+    },
+    {
+      "file": "tests/benchmark/gui_benchmark.py",
+      "kind": "mark.skipif",
+      "line": 2221,
+      "scope": "decorator",
+      "category": "env_ci_gate",
+      "detail": "cond=os.environ.get('TOPOS_RUN_GUI_TESTS') != '1' reason=Set TOPOS_RUN_GUI_TESTS=1 to run real GUI tests"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "mark.skipif",
+      "line": 1258,
+      "scope": "decorator",
+      "category": "env_ci_gate",
+      "detail": "cond=not os.environ.get('TOPOS_RUN_SYNTHETIC_TESTS') reason=Set TOPOS_RUN_SYNTHETIC_TESTS=1 to run synthetic smoke tests"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "mark.skipif",
+      "line": 1319,
+      "scope": "decorator",
+      "category": "env_ci_gate",
+      "detail": "cond=not os.environ.get('TOPOS_RUN_GUI_TESTS') reason=Set TOPOS_RUN_GUI_TESTS=1 to run GUI benchmark tests"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "mark.skipif",
+      "line": 907,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.environ.get('TOPOS_VIDEO_FIXTURES_PATH') reason=Video fixtures path not configured"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "mark.skipif",
+      "line": 1403,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=True reason=Real GUI tests require display environment. QOpenGLWidget crashes in offscreen mode."
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1282,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "无法生成合成素材"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1294,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "无法生成合成素材"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1306,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "无法生成合成素材"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1355,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "无法生成合成素材"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1386,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "无法生成合成素材"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1420,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "无法生成合成素材"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1432,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "GUI 环境不可用"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1273,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "FFmpeg not available"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1331,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "gui_benchmark 模块不可用"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1348,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "必要模块不可用"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1379,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "必要模块不可用"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1413,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "必要模块不可用"
+    },
+    {
+      "file": "tests/benchmark/performance_validation.py",
+      "kind": "pytest.skip",
+      "line": 1439,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'GL context 创建失败: {e}'"
+    },
+    {
+      "file": "tests/color/test_async_renderer_pass_count.py",
+      "kind": "mark.skipif",
+      "line": 548,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=True reason=需要真实 OpenGL 上下文和 PyQt 环境"
+    },
+    {
+      "file": "tests/color/test_async_renderer_pass_count.py",
+      "kind": "mark.skipif",
+      "line": 561,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=True reason=需要真实 OpenGL 上下文"
+    },
+    {
+      "file": "tests/color/test_auto_color.py",
+      "kind": "pytest.skip",
+      "line": 336,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real material not available"
+    },
+    {
+      "file": "tests/color/test_auto_color.py",
+      "kind": "pytest.skip",
+      "line": 341,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "cv2 cannot decode this ProRes file"
+    },
+    {
+      "file": "tests/color/test_builtin_plugin_compile.py",
+      "kind": "importorskip",
+      "line": 21,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_builtin_plugin_compile.py",
+      "kind": "mark.skipif",
+      "line": 64,
+      "scope": "decorator",
+      "category": "unclassified",
+      "detail": "cond=not _GLSL_PLUGIN_IDS reason=未扫描到任何内置 GLSL 插件（目录/加载器回归）"
+    },
+    {
+      "file": "tests/color/test_cache_fix.py",
+      "kind": "pytest.skip",
+      "line": 68,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "f'OpenEXR 编解码能力不可用，跳过：\\n{proc.stderr}'"
+    },
+    {
+      "file": "tests/color/test_cache_fix.py",
+      "kind": "pytest.skip",
+      "line": 70,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "f'本机 opencv 构建的 OpenEXR 编码器随机原生崩溃 (rc={proc.returncode}，已重试 {_MAX_ATTEMPTS} 次)。属环境缺陷，应升级/更换 opencv 轮子；详见审计计划 P0-QA-01。\\n--- 崩溃现场（faulthandler） ---\\n{proc.stderr"
+    },
+    {
+      "file": "tests/color/test_color_e2e_consistency_matrix.py",
+      "kind": "importorskip",
+      "line": 37,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/color/test_color_engine_triple_golden.py",
+      "kind": "importorskip",
+      "line": 50,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_color_engine_triple_golden.py",
+      "kind": "pytest.skip",
+      "line": 145,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "OCIO not available in this environment"
+    },
+    {
+      "file": "tests/color/test_color_tools_lut_exporter.py",
+      "kind": "mark.skipif",
+      "line": 184,
+      "scope": "decorator",
+      "category": "optional_dep_named",
+      "detail": "cond=not HAS_EXPORTER reason=Requires LUT exporter"
+    },
+    {
+      "file": "tests/color/test_color_tools_lut_exporter.py",
+      "kind": "mark.skipif",
+      "line": 244,
+      "scope": "decorator",
+      "category": "optional_dep_named",
+      "detail": "cond=not HAS_EXPORTER reason=Requires LUT exporter"
+    },
+    {
+      "file": "tests/color/test_color_tools_lut_exporter.py",
+      "kind": "mark.skipif",
+      "line": 294,
+      "scope": "decorator",
+      "category": "optional_dep_named",
+      "detail": "cond=not HAS_EXPORTER reason=Requires LUT exporter"
+    },
+    {
+      "file": "tests/color/test_color_tools_scripting_api.py",
+      "kind": "mark.skipif",
+      "line": 276,
+      "scope": "decorator",
+      "category": "optional_dep_named",
+      "detail": "cond=True reason=Requires cv2 which may not be installed in test environment"
+    },
+    {
+      "file": "tests/color/test_color_tools_scripting_api.py",
+      "kind": "mark.skipif",
+      "line": 295,
+      "scope": "decorator",
+      "category": "optional_dep_named",
+      "detail": "cond=True reason=Requires cv2 which may not be installed in test environment"
+    },
+    {
+      "file": "tests/color/test_color_transform_provider_parity.py",
+      "kind": "pytest.skip",
+      "line": 44,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "OCIO not available in this environment"
+    },
+    {
+      "file": "tests/color/test_color_transform_provider_parity.py",
+      "kind": "pytest.skip",
+      "line": 163,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "OCIO not available in this environment"
+    },
+    {
+      "file": "tests/color/test_color_transform_provider_parity.py",
+      "kind": "pytest.skip",
+      "line": 199,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "OCIO not available in this environment"
+    },
+    {
+      "file": "tests/color/test_ef07_aud.py",
+      "kind": "pytest.skip",
+      "line": 762,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "scipy 不可用，decompile 校验路径不适用"
+    },
+    {
+      "file": "tests/color/test_export_denoise_bridge.py",
+      "kind": "mark.skipif",
+      "line": 94,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/color/test_fix_wd3g19_aud.py",
+      "kind": "importorskip",
+      "line": 535,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_fix_wd3g20_aud.py",
+      "kind": "importorskip",
+      "line": 254,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_fix_wd3g20_aud.py",
+      "kind": "importorskip",
+      "line": 709,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "cv2"
+    },
+    {
+      "file": "tests/color/test_fix_wd3g20_aud.py",
+      "kind": "importorskip",
+      "line": 756,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "cv2"
+    },
+    {
+      "file": "tests/color/test_fix_wd3g20_aud.py",
+      "kind": "pytest.skip",
+      "line": 261,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'standalone ModernGL context unavailable: {exc}'"
+    },
+    {
+      "file": "tests/color/test_fix_wd3g22_aud.py",
+      "kind": "importorskip",
+      "line": 272,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6.QtGui"
+    },
+    {
+      "file": "tests/color/test_hdr_transfer.py",
+      "kind": "pytest.skip",
+      "line": 226,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {e}'"
+    },
+    {
+      "file": "tests/color/test_hdr_transfer.py",
+      "kind": "pytest.skip",
+      "line": 253,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {e}'"
+    },
+    {
+      "file": "tests/color/test_lut_loader.py",
+      "kind": "importorskip",
+      "line": 215,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_metal_composition_blend_modes.py",
+      "kind": "importorskip",
+      "line": 22,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_metal_composition_blend_modes.py",
+      "kind": "mark.skipif",
+      "line": 88,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _HAS_METAL_IMPORTS or not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/color/test_metal_composition_blur_sharpen.py",
+      "kind": "importorskip",
+      "line": 29,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_metal_composition_blur_sharpen.py",
+      "kind": "mark.skipif",
+      "line": 200,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _HAS_METAL_IMPORTS or not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/color/test_metal_composition_curves_lut.py",
+      "kind": "importorskip",
+      "line": 32,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_metal_composition_curves_lut.py",
+      "kind": "mark.skipif",
+      "line": 177,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _HAS_METAL_IMPORTS or not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/color/test_metal_composition_grading.py",
+      "kind": "importorskip",
+      "line": 27,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_metal_composition_grading.py",
+      "kind": "mark.skipif",
+      "line": 43,
+      "scope": "decorator",
+      "category": "unclassified",
+      "detail": "cond=not MIGRATED_EFFECTS reason=无已迁移效果"
+    },
+    {
+      "file": "tests/color/test_metal_composition_grading.py",
+      "kind": "mark.skipif",
+      "line": 96,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _HAS_METAL_IMPORTS or not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/color/test_metal_composition_grading.py",
+      "kind": "mark.skipif",
+      "line": 329,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _HAS_METAL_IMPORTS or not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/color/test_metal_composition_grain_softclip.py",
+      "kind": "importorskip",
+      "line": 28,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_metal_composition_grain_softclip.py",
+      "kind": "mark.skipif",
+      "line": 112,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _HAS_METAL_IMPORTS or not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/color/test_metal_composition_mixer_warper.py",
+      "kind": "importorskip",
+      "line": 24,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_metal_composition_mixer_warper.py",
+      "kind": "mark.skipif",
+      "line": 127,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _HAS_METAL_IMPORTS or not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/color/test_ocio_config_load.py",
+      "kind": "pytest.skip",
+      "line": 24,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "OCIO not available in this environment"
+    },
+    {
+      "file": "tests/color/test_plugin_manifest_binding.py",
+      "kind": "importorskip",
+      "line": 18,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_presets_gallery.py",
+      "kind": "importorskip",
+      "line": 480,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "cv2"
+    },
+    {
+      "file": "tests/color/test_presets_gallery.py",
+      "kind": "pytest.skip",
+      "line": 484,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real material not available"
+    },
+    {
+      "file": "tests/color/test_presets_gallery.py",
+      "kind": "pytest.skip",
+      "line": 490,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "cv2 cannot decode this ProRes file"
+    },
+    {
+      "file": "tests/color/test_project_dependencies.py",
+      "kind": "importorskip",
+      "line": 254,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6.QtWidgets"
+    },
+    {
+      "file": "tests/color/test_shader_golden_corpus.py",
+      "kind": "importorskip",
+      "line": 34,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/color/test_shader_golden_corpus.py",
+      "kind": "pytest.skip",
+      "line": 323,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f\"基线绑定其他 GPU（{baseline.get('_meta', {}).get('gpu')}，本机 {gpu}）：{UPDATE_ENV}=1 重新归档\""
+    },
+    {
+      "file": "tests/color/test_shader_golden_corpus.py",
+      "kind": "pytest.skip",
+      "line": 347,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'已归档 {len(hashes)} 条基线 → {GOLDEN_PATH}（记得提交）'"
+    },
+    {
+      "file": "tests/color/test_shader_golden_corpus.py",
+      "kind": "pytest.skip",
+      "line": 361,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "基线未归档"
+    },
+    {
+      "file": "tests/color/test_tracking_worker_lifecycle.py",
+      "kind": "mark.skipif",
+      "line": 22,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/composite/test_advanced_plan_audit.py",
+      "kind": "pytest.skip",
+      "line": 78,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'no GL: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_advanced_plan_audit.py",
+      "kind": "pytest.skip",
+      "line": 168,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'no GL: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_advanced_plan_audit.py",
+      "kind": "pytest.skip",
+      "line": 245,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'no GL: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_advanced_plan_audit.py",
+      "kind": "pytest.skip",
+      "line": 363,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'no GL: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_advanced_plan_audit.py",
+      "kind": "pytest.skip",
+      "line": 659,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "trimesh unavailable"
+    },
+    {
+      "file": "tests/composite/test_advanced_plan_audit.py",
+      "kind": "pytest.skip",
+      "line": 713,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "cv2 unavailable"
+    },
+    {
+      "file": "tests/composite/test_advanced_plan_audit.py",
+      "kind": "pytest.skip",
+      "line": 732,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "cv2 unavailable"
+    },
+    {
+      "file": "tests/composite/test_async_present_readback.py",
+      "kind": "pytest.skip",
+      "line": 203,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "cv2 not available"
+    },
+    {
+      "file": "tests/composite/test_batch3_correctness.py",
+      "kind": "pytest.skip",
+      "line": 59,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_cache_frame_retention.py",
+      "kind": "pytest.skip",
+      "line": 171,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_cache_frame_retention.py",
+      "kind": "pytest.skip",
+      "line": 305,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'real test video missing: {_VIDEO}'"
+    },
+    {
+      "file": "tests/composite/test_chroma_keyer_gpu.py",
+      "kind": "pytest.skip",
+      "line": 47,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_color_input_color_space.py",
+      "kind": "pytest.skip",
+      "line": 389,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {e}'"
+    },
+    {
+      "file": "tests/composite/test_color_input_color_space.py",
+      "kind": "pytest.skip",
+      "line": 463,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {e}'"
+    },
+    {
+      "file": "tests/composite/test_comp_clip_gpu_handle_contract.py",
+      "kind": "pytest.skip",
+      "line": 54,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_composite_gpu_scope_handler.py",
+      "kind": "pytest.skip",
+      "line": 52,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "no standalone GL context available"
+    },
+    {
+      "file": "tests/composite/test_composite_transform_drag_render.py",
+      "kind": "mark.skipif",
+      "line": 139,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=os.environ.get('QT_QPA_PLATFORM') == 'offscreen' reason=drives the real render scheduler into GL texture work, which segfaults under the offscreen platform (QOpenGLWidget is not supported); run on a real desktop GL session (macOS release matrix)"
+    },
+    {
+      "file": "tests/composite/test_composite_transform_move.py",
+      "kind": "mark.skipif",
+      "line": 147,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=os.environ.get('QT_QPA_PLATFORM') == 'offscreen' reason=QOpenGLWidget is not supported on the offscreen platform, so the body-press → virtual-move path cannot engage; run this test on a real desktop GL session (macOS release matrix)"
+    },
+    {
+      "file": "tests/composite/test_compute_shader_manager_metal.py",
+      "kind": "mark.skipif",
+      "line": 192,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/composite/test_cp_batch1_nodes.py",
+      "kind": "importorskip",
+      "line": 580,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "OpenEXR"
+    },
+    {
+      "file": "tests/composite/test_cp_batch1_nodes.py",
+      "kind": "importorskip",
+      "line": 597,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "OpenEXR"
+    },
+    {
+      "file": "tests/composite/test_cp_batch1_nodes.py",
+      "kind": "pytest.skip",
+      "line": 77,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_cryptomatte_select.py",
+      "kind": "pytest.skip",
+      "line": 192,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_deflicker_gpu_path.py",
+      "kind": "pytest.skip",
+      "line": 95,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_deflicker_real_video_gate.py",
+      "kind": "pytest.skip",
+      "line": 97,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_deflicker_real_video_gate.py",
+      "kind": "pytest.skip",
+      "line": 106,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'real test video missing: {_VIDEO}'"
+    },
+    {
+      "file": "tests/composite/test_depth_tools.py",
+      "kind": "pytest.skip",
+      "line": 201,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_disk_cache.py",
+      "kind": "pytest.skip",
+      "line": 186,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_exr_multilayer.py",
+      "kind": "importorskip",
+      "line": 23,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "OpenEXR"
+    },
+    {
+      "file": "tests/composite/test_exr_multilayer.py",
+      "kind": "importorskip",
+      "line": 24,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "Imath"
+    },
+    {
+      "file": "tests/composite/test_exr_multilayer.py",
+      "kind": "pytest.skip",
+      "line": 136,
+      "scope": "in_callable",
+      "category": "env_ci_gate",
+      "detail": "2.x binding present; 3.x reader not exercised"
+    },
+    {
+      "file": "tests/composite/test_exr_multilayer.py",
+      "kind": "pytest.skip",
+      "line": 185,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "binding lacks MultiPartInputFile; multi-part reading stays gated (single-part fallback active)"
+    },
+    {
+      "file": "tests/composite/test_exr_multipart.py",
+      "kind": "importorskip",
+      "line": 13,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "OpenEXR"
+    },
+    {
+      "file": "tests/composite/test_fix_evaluators_aud2.py",
+      "kind": "importorskip",
+      "line": 325,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/composite/test_fix_evaluators_aud2.py",
+      "kind": "pytest.skip",
+      "line": 329,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'standalone GL context unavailable: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_fix_render_aud2.py",
+      "kind": "pytest.skip",
+      "line": 233,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_fix_shaders_sm_aud2.py",
+      "kind": "importorskip",
+      "line": 393,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/composite/test_fix_shaders_sm_aud2.py",
+      "kind": "importorskip",
+      "line": 410,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/composite/test_fix_shaders_sm_aud2.py",
+      "kind": "pytest.skip",
+      "line": 397,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'no standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_fix_shaders_sm_aud2.py",
+      "kind": "pytest.skip",
+      "line": 414,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'no standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_fix_shaders_sm_aud2.py",
+      "kind": "pytest.skip",
+      "line": 420,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'compute shader not compilable on this GL context (needs 4.3): {exc}'"
+    },
+    {
+      "file": "tests/composite/test_fix_wd6g36_aud.py",
+      "kind": "importorskip",
+      "line": 314,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PIL"
+    },
+    {
+      "file": "tests/composite/test_fix_wd7blk_aud.py",
+      "kind": "importorskip",
+      "line": 681,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/composite/test_fix_wd7blk_aud.py",
+      "kind": "pytest.skip",
+      "line": 685,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'standalone GL context unavailable: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_fix_wd7g40_aud.py",
+      "kind": "importorskip",
+      "line": 246,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "trimesh"
+    },
+    {
+      "file": "tests/composite/test_fix_wd7g40_aud.py",
+      "kind": "importorskip",
+      "line": 255,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "trimesh"
+    },
+    {
+      "file": "tests/composite/test_frame_trace.py",
+      "kind": "pytest.skip",
+      "line": 55,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_generic_mask_mix.py",
+      "kind": "pytest.skip",
+      "line": 137,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_godrays.py",
+      "kind": "pytest.skip",
+      "line": 128,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_hdr_10bit_video_encode.py",
+      "kind": "importorskip",
+      "line": 14,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/composite/test_headless_gl_negotiation.py",
+      "kind": "pytest.skip",
+      "line": 38,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_headless_gl_negotiation.py",
+      "kind": "pytest.skip",
+      "line": 59,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "macOS keeps the GL 4.1 fragment fallback"
+    },
+    {
+      "file": "tests/composite/test_histogram_manager_metal.py",
+      "kind": "mark.skipif",
+      "line": 32,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/composite/test_histogram_manager_metal.py",
+      "kind": "pytest.skip",
+      "line": 168,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "无 Metal 设备"
+    },
+    {
+      "file": "tests/composite/test_lens_kit.py",
+      "kind": "pytest.skip",
+      "line": 180,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_ml_roto.py",
+      "kind": "pytest.skip",
+      "line": 85,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "noise produced no contour"
+    },
+    {
+      "file": "tests/composite/test_model3d_material_upgrade.py",
+      "kind": "importorskip",
+      "line": 238,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PIL.Image"
+    },
+    {
+      "file": "tests/composite/test_model3d_material_upgrade.py",
+      "kind": "importorskip",
+      "line": 254,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PIL.Image"
+    },
+    {
+      "file": "tests/composite/test_nodes/test_output_nodes.py",
+      "kind": "pytest.skip",
+      "line": 104,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {e}'"
+    },
+    {
+      "file": "tests/composite/test_nodes/test_upgraded_nodes.py",
+      "kind": "pytest.skip",
+      "line": 518,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {e}'"
+    },
+    {
+      "file": "tests/composite/test_paint_node.py",
+      "kind": "pytest.skip",
+      "line": 156,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_paint_node.py",
+      "kind": "pytest.skip",
+      "line": 273,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_particle_gpu_splat.py",
+      "kind": "pytest.skip",
+      "line": 86,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_particle_gpu_splat.py",
+      "kind": "pytest.skip",
+      "line": 230,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "PyOpenGL query unavailable"
+    },
+    {
+      "file": "tests/composite/test_particle_gpu_splat.py",
+      "kind": "pytest.skip",
+      "line": 259,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_particle_node.py",
+      "kind": "pytest.skip",
+      "line": 190,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_pass_fusion_execution.py",
+      "kind": "pytest.skip",
+      "line": 93,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_pbo_async_readback.py",
+      "kind": "pytest.skip",
+      "line": 36,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_pbo_async_readback.py",
+      "kind": "pytest.skip",
+      "line": 174,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_preview_large_frame_strategy.py",
+      "kind": "pytest.skip",
+      "line": 79,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_preview_large_frame_strategy.py",
+      "kind": "pytest.skip",
+      "line": 170,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_real_footage_audit.py",
+      "kind": "mark.skipif",
+      "line": 383,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.isfile(VIDEO) reason=real test video missing"
+    },
+    {
+      "file": "tests/composite/test_real_footage_audit.py",
+      "kind": "pytest.skip",
+      "line": 54,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'no GL: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_relight_node.py",
+      "kind": "pytest.skip",
+      "line": 222,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_scene3d_motion_aov.py",
+      "kind": "pytest.skip",
+      "line": 24,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_shader_uniform_contract.py",
+      "kind": "importorskip",
+      "line": 69,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/composite/test_shader_uniform_contract.py",
+      "kind": "pytest.skip",
+      "line": 73,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'no standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/composite/test_topos_cache_payload.py",
+      "kind": "pytest.skip",
+      "line": 105,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "native TOPOS image codec not available in this environment (P1-11 fallback is exercised instead)"
+    },
+    {
+      "file": "tests/composite/test_video_frame_playback.py",
+      "kind": "importorskip",
+      "line": 22,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/composite/test_video_frame_playback.py",
+      "kind": "mark.skipif",
+      "line": 37,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.isfile(VIDEO_PATH) reason=real test video missing"
+    },
+    {
+      "file": "tests/composite/test_warp_node.py",
+      "kind": "pytest.skip",
+      "line": 126,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Cannot create standalone GL context: {exc}'"
+    },
+    {
+      "file": "tests/deliver/test_video_export_job.py",
+      "kind": "pytest.skip",
+      "line": 286,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "edit feature unavailable"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_ocr_provider.py",
+      "kind": "pytest.skip",
+      "line": 86,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "rapidocr is installed; cannot test 'missing package' path"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_ocr_provider_integration.py",
+      "kind": "pytest.skip",
+      "line": 24,
+      "scope": "module_level",
+      "category": "optional_dep_named",
+      "detail": "rapidocr not installed (pip install rapidocr onnxruntime to enable real OCR integration tests)"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_real_media_probe_matrix.py",
+      "kind": "pytest.skip",
+      "line": 38,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'real test asset is not available: {filename}'"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_real_media_probe_matrix.py",
+      "kind": "pytest.skip",
+      "line": 63,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real H.264 test asset is not available"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_runtime_capability_snapshot.py",
+      "kind": "pytest.skip",
+      "line": 61,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "release dylib 未构建"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_runtime_capability_snapshot.py",
+      "kind": "pytest.skip",
+      "line": 282,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "release dylib 未构建"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_safe_path_policy.py",
+      "kind": "pytest.skip",
+      "line": 86,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "symlink not supported on this platform"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_safe_path_policy.py",
+      "kind": "pytest.skip",
+      "line": 163,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "cannot make readonly on this platform"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_taep_contracts.py",
+      "kind": "pytest.skip",
+      "line": 796,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "manifest 无 preview_only 插件（环境插件缺失）"
+    },
+    {
+      "file": "tests/edit/ai_editing/test_transcript_provider.py",
+      "kind": "pytest.skip",
+      "line": 138,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "qwen_asr is installed; cannot test 'missing package' path"
+    },
+    {
+      "file": "tests/edit/conftest.py",
+      "kind": "pytest.skip",
+      "line": 45,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available — GPU parity tests need GL"
+    },
+    {
+      "file": "tests/edit/conftest.py",
+      "kind": "pytest.skip",
+      "line": 49,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create standalone OpenGL context: {exc}'"
+    },
+    {
+      "file": "tests/edit/test_adjustment_clip_delivery.py",
+      "kind": "pytest.skip",
+      "line": 219,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "素材缺失"
+    },
+    {
+      "file": "tests/edit/test_audio_dsp_timeline_export.py",
+      "kind": "mark.skipif",
+      "line": 36,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not SOURCE.is_file() reason=真实 H265 素材缺失"
+    },
+    {
+      "file": "tests/edit/test_audio_leftover_samples.py",
+      "kind": "mark.skipif",
+      "line": 81,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not REAL_VIDEOS reason=no test videos with audio"
+    },
+    {
+      "file": "tests/edit/test_audio_leftover_samples.py",
+      "kind": "pytest.skip",
+      "line": 182,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "no audio decoded"
+    },
+    {
+      "file": "tests/edit/test_audio_playback.py",
+      "kind": "mark.skipif",
+      "line": 691,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not hasattr(audio_playback, 'PYAV_AVAILABLE') or not audio_playback.PYAV_AVAILABLE reason=PyAV not available"
+    },
+    {
+      "file": "tests/edit/test_audio_waveform_perf_and_fx.py",
+      "kind": "pytest.skip",
+      "line": 220,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "test WAV assets unavailable"
+    },
+    {
+      "file": "tests/edit/test_audio_waveform_perf_and_fx.py",
+      "kind": "pytest.skip",
+      "line": 224,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "PyAV unavailable"
+    },
+    {
+      "file": "tests/edit/test_chapter_markers.py",
+      "kind": "mark.skipif",
+      "line": 42,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "cond=not HAS_QT reason=PyQt6 unavailable"
+    },
+    {
+      "file": "tests/edit/test_clip_blend_modes.py",
+      "kind": "mark.skipif",
+      "line": 43,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "cond=not HAS_QT reason=PyQt6 unavailable"
+    },
+    {
+      "file": "tests/edit/test_color_stack_preview_grade.py",
+      "kind": "importorskip",
+      "line": 75,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/edit/test_color_stack_preview_grade.py",
+      "kind": "pytest.skip",
+      "line": 81,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create OpenGL context: {error}'"
+    },
+    {
+      "file": "tests/edit/test_comp_clip_reset.py",
+      "kind": "mark.skipif",
+      "line": 46,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not HAS_PYQT reason=PyQt6 not available"
+    },
+    {
+      "file": "tests/edit/test_comp_clip_timeline_export.py",
+      "kind": "mark.skipif",
+      "line": 203,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not gpu_available reason=GPU modules (moderngl, cv2) not available"
+    },
+    {
+      "file": "tests/edit/test_comp_clip_timeline_preview.py",
+      "kind": "mark.skipif",
+      "line": 170,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not gpu_available reason=GPU modules (moderngl, cv2) not available"
+    },
+    {
+      "file": "tests/edit/test_consolidate.py",
+      "kind": "mark.skipif",
+      "line": 49,
+      "scope": "decorator",
+      "category": "optional_tool_or_api",
+      "detail": "cond=not _ffmpeg_available() reason=ffmpeg CLI not on PATH"
+    },
+    {
+      "file": "tests/edit/test_edit_mode_toggle.py",
+      "kind": "mark.skipif",
+      "line": 33,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "cond=not HAS_QT reason=PyQt6 unavailable"
+    },
+    {
+      "file": "tests/edit/test_effect_quality_param_lifecycle.py",
+      "kind": "mark.skipif",
+      "line": 237,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not SOURCE.is_file() reason=真实素材缺失"
+    },
+    {
+      "file": "tests/edit/test_effect_surface_precision.py",
+      "kind": "pytest.skip",
+      "line": 152,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'{effect_type} no-op at f1 — cannot assert clamp'"
+    },
+    {
+      "file": "tests/edit/test_end_to_end_playback_real_videos.py",
+      "kind": "pytest.skip",
+      "line": 30,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "test_videos 目录不存在"
+    },
+    {
+      "file": "tests/edit/test_end_to_end_playback_real_videos.py",
+      "kind": "pytest.skip",
+      "line": 41,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "无测试视频"
+    },
+    {
+      "file": "tests/edit/test_end_to_end_playback_real_videos.py",
+      "kind": "pytest.skip",
+      "line": 256,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "无 ProRes 测试视频"
+    },
+    {
+      "file": "tests/edit/test_end_to_end_playback_real_videos.py",
+      "kind": "pytest.skip",
+      "line": 49,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "PyAV 未安装"
+    },
+    {
+      "file": "tests/edit/test_export_outcome.py",
+      "kind": "mark.skipif",
+      "line": 35,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not _lib_available() reason=libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/edit/test_fix_renderers_aud3.py",
+      "kind": "mark.skipif",
+      "line": 426,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_fix_renderers_aud3.py",
+      "kind": "mark.skipif",
+      "line": 448,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_fix_round6_g14_image_sequence.py",
+      "kind": "pytest.skip",
+      "line": 205,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "tests/test_videos/2K_h264.mp4 不可用"
+    },
+    {
+      "file": "tests/edit/test_fix_round6_q01_decoder_lifecycle.py",
+      "kind": "pytest.skip",
+      "line": 34,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "tests/test_videos 真实素材不可用"
+    },
+    {
+      "file": "tests/edit/test_fix_wd11g53_aud.py",
+      "kind": "pytest.skip",
+      "line": 586,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PyAV not available"
+    },
+    {
+      "file": "tests/edit/test_fix_wd11g53_aud.py",
+      "kind": "pytest.skip",
+      "line": 596,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PyAV not available"
+    },
+    {
+      "file": "tests/edit/test_fix_wd11g58_aud.py",
+      "kind": "importorskip",
+      "line": 575,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/edit/test_fix_wd11g58_aud.py",
+      "kind": "importorskip",
+      "line": 384,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/edit/test_fix_wd11g58_aud.py",
+      "kind": "importorskip",
+      "line": 595,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/edit/test_fix_wd12g65_aud.py",
+      "kind": "pytest.skip",
+      "line": 721,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "系统字体不足 2 个，跳过下拉选择路径"
+    },
+    {
+      "file": "tests/edit/test_fix_wd8g45_aud.py",
+      "kind": "importorskip",
+      "line": 376,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "opentimelineio"
+    },
+    {
+      "file": "tests/edit/test_fix_wd8g46_aud.py",
+      "kind": "pytest.skip",
+      "line": 482,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "root 不受目录权限约束，无法构造只读场景"
+    },
+    {
+      "file": "tests/edit/test_fix_wd9g48_aud.py",
+      "kind": "importorskip",
+      "line": 585,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6"
+    },
+    {
+      "file": "tests/edit/test_gpu_transition_preview.py",
+      "kind": "mark.skipif",
+      "line": 251,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_media_pool_log_ui.py",
+      "kind": "pytest.skip",
+      "line": 321,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "ffmpeg CLI not on PATH"
+    },
+    {
+      "file": "tests/edit/test_multicam_grid_real_media.py",
+      "kind": "mark.skipif",
+      "line": 50,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not _media_available() reason=真实测试素材不存在"
+    },
+    {
+      "file": "tests/edit/test_multicam_sync.py",
+      "kind": "mark.skipif",
+      "line": 301,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not REAL_VIDEO.exists() reason=real test video missing"
+    },
+    {
+      "file": "tests/edit/test_multicam_sync_result_dialog.py",
+      "kind": "mark.skipif",
+      "line": 29,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "cond=not HAS_QT reason=PyQt6 unavailable"
+    },
+    {
+      "file": "tests/edit/test_native_gpu_bridge_eligibility.py",
+      "kind": "mark.skipif",
+      "line": 549,
+      "scope": "decorator",
+      "category": "optional_dep_named",
+      "detail": "cond=os.environ.get('TOPOS_RUN_KNOWN_X265_CRASH') != '1' reason=N06（2026-09-27，修正 C19 误诊）：崩溃不在 VT bridge，而在软件 libx265 10-bit——PyAV 17.0.1（ffmpeg 8.0.1 + libx265 4.1 十比特构建）在进程内有过任何 PyAV 媒体探测/解码后，x265 10-bit flush 必发 SIGSEGV（x265_10bit::subpelCompare/interp_8tap_hv 读已污染参考帧；topos 与 prores 源同触发，h264 与 8-bit hevc 不受影响，pools=none/frame-threads=1/bframes=0/ultrafast 均不能绕过——上游缺陷，非本项目代码，最小复现：probe_media_metadata(任意真实视频) 后 FFmpegVideoEncoder(hevc,yuv420p10le) 编 8 帧 close()）。默认跳过防击穿测试进程；设 TOPOS_RUN_KNOWN_X265_CRASH=1 显式执行（变量名与行为一致——修掉原 TOPOS_SKIP_KNOWN_VT_CRASH 设 1 反而执行的极性反转缺陷）。上游升级后移除本标记。"
+    },
+    {
+      "file": "tests/edit/test_native_gpu_bridge_eligibility.py",
+      "kind": "pytest.skip",
+      "line": 466,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "真实 TOPOS 素材缺失"
+    },
+    {
+      "file": "tests/edit/test_native_gpu_bridge_eligibility.py",
+      "kind": "pytest.skip",
+      "line": 575,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "真实 TOPOS 素材缺失"
+    },
+    {
+      "file": "tests/edit/test_nested_audio_flatten.py",
+      "kind": "mark.skipif",
+      "line": 454,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not _REAL_VIDEO.exists() reason=real test video missing"
+    },
+    {
+      "file": "tests/edit/test_p2_09_session_pool.py",
+      "kind": "pytest.skip",
+      "line": 300,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'real test video not available: {path}'"
+    },
+    {
+      "file": "tests/edit/test_plugin_identity.py",
+      "kind": "pytest.skip",
+      "line": 502,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "no DCTL plugin fixtures discovered"
+    },
+    {
+      "file": "tests/edit/test_project_archive.py",
+      "kind": "pytest.skip",
+      "line": 198,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "real test video unavailable"
+    },
+    {
+      "file": "tests/edit/test_project_archive.py",
+      "kind": "pytest.skip",
+      "line": 226,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "real test video unavailable"
+    },
+    {
+      "file": "tests/edit/test_quick_project.py",
+      "kind": "mark.skip",
+      "line": 250,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "reason=需要 QApplication，在非 GUI 环境中会崩溃"
+    },
+    {
+      "file": "tests/edit/test_quick_project.py",
+      "kind": "mark.skip",
+      "line": 342,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "reason=需要 QApplication，在非 GUI 环境中会崩溃"
+    },
+    {
+      "file": "tests/edit/test_rate_stretch.py",
+      "kind": "mark.skipif",
+      "line": 35,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "cond=not HAS_QT reason=PyQt6 unavailable"
+    },
+    {
+      "file": "tests/edit/test_real_media_edit_smoke.py",
+      "kind": "mark.skipif",
+      "line": 41,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not VIDEO.exists() reason=f'real media missing: {VIDEO}'"
+    },
+    {
+      "file": "tests/edit/test_recheck_a_cancel_projection.py",
+      "kind": "pytest.skip",
+      "line": 129,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "roll handle not materialized without tool activation"
+    },
+    {
+      "file": "tests/edit/test_round4_color_pipeline.py",
+      "kind": "pytest.skip",
+      "line": 123,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "f'{backend} backend unavailable'"
+    },
+    {
+      "file": "tests/edit/test_scene_cut_false_positive_guards.py",
+      "kind": "pytest.skip",
+      "line": 88,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Manifest not found: {manifest_path}'"
+    },
+    {
+      "file": "tests/edit/test_scene_cut_timeline_overlay_entry.py",
+      "kind": "mark.skipif",
+      "line": 38,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "cond=not HAS_QT reason=PyQt6 unavailable"
+    },
+    {
+      "file": "tests/edit/test_stem_export_dialog.py",
+      "kind": "mark.skipif",
+      "line": 150,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "cond=not HAS_QT reason=PyQt6 unavailable"
+    },
+    {
+      "file": "tests/edit/test_stem_export_dialog.py",
+      "kind": "mark.skipif",
+      "line": 181,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "cond=not HAS_QT reason=PyQt6 unavailable"
+    },
+    {
+      "file": "tests/edit/test_timeline_export.py",
+      "kind": "mark.skip",
+      "line": 695,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "reason=DeliverPage requires QApplication - run in GUI test environment"
+    },
+    {
+      "file": "tests/edit/test_timeline_export.py",
+      "kind": "mark.skip",
+      "line": 707,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "reason=DeliverPage requires QApplication - run in GUI test environment"
+    },
+    {
+      "file": "tests/edit/test_timeline_export.py",
+      "kind": "mark.skip",
+      "line": 720,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "reason=DeliverPage requires QApplication - run in GUI test environment"
+    },
+    {
+      "file": "tests/edit/test_timeline_export.py",
+      "kind": "mark.skip",
+      "line": 735,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "reason=DeliverPage requires QApplication - run in GUI test environment"
+    },
+    {
+      "file": "tests/edit/test_timeline_export.py",
+      "kind": "mark.skip",
+      "line": 748,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "reason=DeliverPage requires QApplication - run in GUI test environment"
+    },
+    {
+      "file": "tests/edit/test_timeline_gpu_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 719,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_timeline_gpu_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 755,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_timeline_gpu_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 792,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_timeline_gpu_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 835,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_timeline_gpu_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 899,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_timeline_gpu_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 953,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_timeline_gpu_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1027,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_timeline_gpu_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1137,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not _gl_available() reason=headless GL 不可用"
+    },
+    {
+      "file": "tests/edit/test_timeline_gpu_export_renderer.py",
+      "kind": "importorskip",
+      "line": 795,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 259,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 278,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 357,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 448,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 491,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 528,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 566,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 613,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 664,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 698,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 731,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 820,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 859,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 904,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 951,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 993,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1028,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1072,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1118,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1168,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1212,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1329,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1364,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1405,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1443,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1479,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1522,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1563,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1597,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1636,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1681,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1724,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1776,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1839,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "mark.skipif",
+      "line": 1917,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not TimelineMetalExportRenderer.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "pytest.skip",
+      "line": 1942,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real H.264 test material is unavailable"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "pytest.skip",
+      "line": 481,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "OpenGL standalone render context unavailable on this host"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "pytest.skip",
+      "line": 511,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "OpenGL standalone render context unavailable on this host"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "pytest.skip",
+      "line": 604,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "OpenGL standalone render context unavailable"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "pytest.skip",
+      "line": 1950,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "VideoToolbox/CoreVideo Metal texture import is unavailable"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "pytest.skip",
+      "line": 556,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "OpenGL standalone render context unavailable"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "pytest.skip",
+      "line": 2008,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "CPU reference frame could not be decoded"
+    },
+    {
+      "file": "tests/edit/test_timeline_metal_export_renderer.py",
+      "kind": "pytest.skip",
+      "line": 2013,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "ffmpeg is required to build the P010 reference"
+    },
+    {
+      "file": "tests/edit/test_timeline_occlusion_real_media.py",
+      "kind": "mark.skipif",
+      "line": 52,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not (TEST_VIDEOS / LOWER_FILE).is_file() or not (TEST_VIDEOS / UPPER_FILE).is_file() reason=真实测试素材缺失"
+    },
+    {
+      "file": "tests/edit/test_timeline_p7_regression.py",
+      "kind": "mark.skip",
+      "line": 202,
+      "scope": "decorator",
+      "category": "unclassified",
+      "detail": "reason=Y position depends on full QGraphicsScene layout; verify manually in real UI"
+    },
+    {
+      "file": "tests/edit/test_timeline_shortcuts_migration.py",
+      "kind": "mark.skipif",
+      "line": 34,
+      "scope": "decorator",
+      "category": "qt_dep",
+      "detail": "cond=not HAS_QT reason=PyQt6 unavailable"
+    },
+    {
+      "file": "tests/edit/test_timeline_ux_stopgaps.py",
+      "kind": "pytest.skip",
+      "line": 107,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "ShortcutManager unavailable"
+    },
+    {
+      "file": "tests/export/test_gpu_benchmark_report.py",
+      "kind": "mark.skipif",
+      "line": 22,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=platform.system() != 'Darwin' reason=report is macOS-only"
+    },
+    {
+      "file": "tests/export/test_topos_slice_rows_and_stage_report.py",
+      "kind": "mark.skipif",
+      "line": 154,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not (_native_available and _source_available) reason=需要 native dylib 与 2K TOPOS 源"
+    },
+    {
+      "file": "tests/file_explorer/test_meta_consistency.py",
+      "kind": "importorskip",
+      "line": 24,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6.QtWebEngineCore"
+    },
+    {
+      "file": "tests/file_explorer/test_thumb_enqueue.py",
+      "kind": "importorskip",
+      "line": 22,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6.QtWebEngineCore"
+    },
+    {
+      "file": "tests/file_explorer/test_topos_image_preview.py",
+      "kind": "mark.skipif",
+      "line": 82,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not (ROOT / 'native/topos_codec/build/intra-bench/vertical-v3.toos').exists() reason=Topos image fixture is not present"
+    },
+    {
+      "file": "tests/file_explorer/test_topos_image_preview.py",
+      "kind": "mark.skipif",
+      "line": 100,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not (ROOT / 'native/topos_codec/build/intra-bench/vertical-v3.toos').exists() reason=Topos image fixture is not present"
+    },
+    {
+      "file": "tests/integration/generation/test_real_provider_smoke.py",
+      "kind": "mark.skipif",
+      "line": 33,
+      "scope": "decorator",
+      "category": "env_ci_gate",
+      "detail": "cond=os.getenv('TOPOS_RUN_REAL_GENERATION') != '1' reason=real generation requires TOPOS_RUN_REAL_GENERATION=1"
+    },
+    {
+      "file": "tests/integration/generation/test_real_provider_smoke.py",
+      "kind": "pytest.skip",
+      "line": 41,
+      "scope": "in_callable",
+      "category": "env_ci_gate",
+      "detail": "set TOPOS_REAL_GENERATION_ENDPOINT and TOPOS_REAL_GENERATION_SECRET in an isolated test environment"
+    },
+    {
+      "file": "tests/media/test_capability_manifest.py",
+      "kind": "pytest.skip",
+      "line": 48,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_cfa_gamut_debayer.py",
+      "kind": "mark.skipif",
+      "line": 354,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not _lib_available() reason=libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_codec_probe_fix.py",
+      "kind": "pytest.skip",
+      "line": 43,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No H.264 test video found"
+    },
+    {
+      "file": "tests/media/test_codec_probe_fix.py",
+      "kind": "pytest.skip",
+      "line": 58,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No HEVC test video found"
+    },
+    {
+      "file": "tests/media/test_codec_probe_fix.py",
+      "kind": "pytest.skip",
+      "line": 73,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No H.264 test video found"
+    },
+    {
+      "file": "tests/media/test_codec_probe_fix.py",
+      "kind": "pytest.skip",
+      "line": 86,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No H.264 test video found"
+    },
+    {
+      "file": "tests/media/test_codec_probe_fix.py",
+      "kind": "pytest.skip",
+      "line": 103,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No H.264 test video found"
+    },
+    {
+      "file": "tests/media/test_codec_probe_fix.py",
+      "kind": "pytest.skip",
+      "line": 128,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No H.264 test video found"
+    },
+    {
+      "file": "tests/media/test_codec_probe_fix.py",
+      "kind": "pytest.skip",
+      "line": 143,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No ProRes test video found"
+    },
+    {
+      "file": "tests/media/test_codec_probe_fix.py",
+      "kind": "pytest.skip",
+      "line": 174,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'ProRes 素材缺失: {missing}'"
+    },
+    {
+      "file": "tests/media/test_cv_metal_bridge.py",
+      "kind": "mark.skipif",
+      "line": 274,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not (_QUARTZ_OK and _METAL_OK) reason=f'需要 macOS + Metal + Quartz（metal={_METAL_OK}: {_METAL_REASON}, quartz={_QUARTZ_OK}）'"
+    },
+    {
+      "file": "tests/media/test_cv_metal_bridge.py",
+      "kind": "pytest.skip",
+      "line": 61,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "CoreVideo FourCC constants are available only on macOS"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 193,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('h264_sdr', '')) reason=H.264 test video not available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 211,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('h265_pq', '')) reason=H.265 PQ test video not available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 230,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores', '')) reason=ProRes test video not available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 260,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 281,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 294,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 309,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 332,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 350,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 372,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 392,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 411,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 470,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores', '')) reason=ProRes test video not available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 501,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('h265_pq', '')) reason=H.265 PQ test video not available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 531,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 590,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores', '')) reason=ProRes test video not available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 646,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 669,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 698,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 734,
+      "scope": "decorator",
+      "category": "unclassified",
+      "detail": "cond=len(get_available_videos()) < 2 reason=Need at least 2 test videos"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 810,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 853,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 878,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 905,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 940,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "mark.skipif",
+      "line": 980,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not get_available_videos() reason=No test videos available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "pytest.skip",
+      "line": 108,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No test video available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "importorskip",
+      "line": 443,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "pytest.skip",
+      "line": 482,
+      "scope": "in_callable",
+      "category": "content_or_ui_conditional",
+      "detail": "This ProRes file is not 10-bit"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "pytest.skip",
+      "line": 513,
+      "scope": "in_callable",
+      "category": "content_or_ui_conditional",
+      "detail": "This file is not 10-bit"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "pytest.skip",
+      "line": 603,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Not a high resolution video"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "pytest.skip",
+      "line": 743,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Need at least 2 test videos"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "pytest.skip",
+      "line": 779,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No test video available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "pytest.skip",
+      "line": 953,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Video too short for seek test"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "pytest.skip",
+      "line": 994,
+      "scope": "in_callable",
+      "category": "content_or_ui_conditional",
+      "detail": "This video is not 10-bit"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_decode.py",
+      "kind": "pytest.skip",
+      "line": 423,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Total frames unknown"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "mark.skipif",
+      "line": 251,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not check_ffmpeg_available() reason=PyAV/FFmpeg not available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 271,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No GOP codec test video available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 285,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No GOP codec test video available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 291,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Video too short for middle frame test"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 306,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No GOP codec test video available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 312,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Video duration unknown"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 327,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No GOP codec test video available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 333,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Video too short for random seek test"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 357,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No Intra codec test video available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 363,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Video duration unknown"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 385,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No GOP codec test video available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 391,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Video duration unknown"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 409,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No GOP codec test video available"
+    },
+    {
+      "file": "tests/media/test_ffmpeg_seek.py",
+      "kind": "pytest.skip",
+      "line": 415,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Video too short for memory test"
+    },
+    {
+      "file": "tests/media/test_gop_index.py",
+      "kind": "pytest.skip",
+      "line": 42,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'real test video not available: {path}'"
+    },
+    {
+      "file": "tests/media/test_gop_index.py",
+      "kind": "pytest.skip",
+      "line": 95,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "prores build returned no keyframes"
+    },
+    {
+      "file": "tests/media/test_hevc10_source_export_passthrough.py",
+      "kind": "pytest.skip",
+      "line": 28,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'real test video not available: {HEVC10_SOURCE}'"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "mark.skipif",
+      "line": 255,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores_422', '')) reason=ProRes 422 test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "mark.skipif",
+      "line": 293,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('h265_10bit', '')) reason=H.265 10-bit test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "mark.skipif",
+      "line": 359,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores_4444', '')) reason=ProRes 4444 test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "mark.skipif",
+      "line": 374,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores_4444', '')) reason=ProRes 4444 test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "mark.skipif",
+      "line": 413,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores_4444', '')) reason=ProRes 4444 test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "mark.skipif",
+      "line": 514,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores_4444xq', '')) reason=ProRes 4444 XQ test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "mark.skipif",
+      "line": 609,
+      "scope": "decorator",
+      "category": "unclassified",
+      "detail": "cond=len(get_available_videos()) < 2 reason=Need at least 2 test videos"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "pytest.skip",
+      "line": 76,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No test video available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "pytest.skip",
+      "line": 305,
+      "scope": "in_callable",
+      "category": "content_or_ui_conditional",
+      "detail": "This file is not 10-bit"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth.py",
+      "kind": "pytest.skip",
+      "line": 526,
+      "scope": "in_callable",
+      "category": "content_or_ui_conditional",
+      "detail": "This file is not 12-bit"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth_integration.py",
+      "kind": "mark.skipif",
+      "line": 1045,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores_4444_10bit', '')) reason=ProRes 4444 10-bit test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth_integration.py",
+      "kind": "mark.skipif",
+      "line": 1134,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores_4444xq_12bit', '')) reason=ProRes 4444 XQ 12-bit test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth_integration.py",
+      "kind": "mark.skipif",
+      "line": 1188,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('h265_10bit_pq', '')) reason=H.265 10-bit PQ test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth_integration.py",
+      "kind": "mark.skipif",
+      "line": 1224,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('h265_10bit_hlg', '')) reason=H.265 10-bit HLG test video not available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth_integration.py",
+      "kind": "pytest.skip",
+      "line": 82,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No test video available"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth_integration.py",
+      "kind": "pytest.skip",
+      "line": 1093,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Backend issue: {e}'"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth_integration.py",
+      "kind": "pytest.skip",
+      "line": 1164,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Backend issue: {e}'"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth_integration.py",
+      "kind": "pytest.skip",
+      "line": 1222,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Backend issue: {e}'"
+    },
+    {
+      "file": "tests/media/test_high_bit_depth_integration.py",
+      "kind": "pytest.skip",
+      "line": 1252,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Backend issue: {e}'"
+    },
+    {
+      "file": "tests/media/test_hot_path_guards.py",
+      "kind": "pytest.skip",
+      "line": 23,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Source file not found: {full_path}'"
+    },
+    {
+      "file": "tests/media/test_hot_path_guards.py",
+      "kind": "pytest.skip",
+      "line": 68,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "_on_play_tick not found"
+    },
+    {
+      "file": "tests/media/test_hot_path_guards.py",
+      "kind": "pytest.skip",
+      "line": 78,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "_on_play_tick not found"
+    },
+    {
+      "file": "tests/media/test_hot_path_guards.py",
+      "kind": "pytest.skip",
+      "line": 91,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "_on_play_tick not found"
+    },
+    {
+      "file": "tests/media/test_hot_path_guards.py",
+      "kind": "pytest.skip",
+      "line": 105,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "_on_play_tick not found"
+    },
+    {
+      "file": "tests/media/test_hot_path_guards.py",
+      "kind": "pytest.skip",
+      "line": 129,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "_do_render_video_gpu_frame not found"
+    },
+    {
+      "file": "tests/media/test_hot_path_guards.py",
+      "kind": "pytest.skip",
+      "line": 149,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "_do_render_video_gpu_frame not found"
+    },
+    {
+      "file": "tests/media/test_hot_path_guards.py",
+      "kind": "pytest.skip",
+      "line": 162,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "_do_render_video_gpu_frame not found"
+    },
+    {
+      "file": "tests/media/test_hwaccel_vendor_routing.py",
+      "kind": "mark.skipif",
+      "line": 167,
+      "scope": "decorator",
+      "category": "os_windows",
+      "detail": "cond=platform.system() != 'Windows' reason=needs real Windows (W1-03)"
+    },
+    {
+      "file": "tests/media/test_macos_gpu_encode_surface.py",
+      "kind": "mark.skipif",
+      "line": 10,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_macos_gpu_encode_surface.py",
+      "kind": "mark.skipif",
+      "line": 39,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_macos_gpu_encode_surface.py",
+      "kind": "mark.skipif",
+      "line": 90,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_macos_gpu_encode_surface.py",
+      "kind": "pytest.skip",
+      "line": 55,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real H.264 test material is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_gpu_encode_surface.py",
+      "kind": "pytest.skip",
+      "line": 62,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "VideoToolbox NV12 Metal input is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_gpu_encode_surface.py",
+      "kind": "pytest.skip",
+      "line": 107,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real HEVC/P010 test material is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_gpu_encode_surface.py",
+      "kind": "pytest.skip",
+      "line": 114,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "VideoToolbox P010 Metal input is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "mark.skipif",
+      "line": 74,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=platform.system() != 'Darwin' reason=requires the macOS VideoToolbox runtime"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "mark.skipif",
+      "line": 149,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "mark.skipif",
+      "line": 232,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "mark.skipif",
+      "line": 394,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "mark.skipif",
+      "line": 528,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "mark.skipif",
+      "line": 632,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "mark.skipif",
+      "line": 714,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MetalComputeContext.is_supported() reason=requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 170,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real H.264 test material is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 177,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "VideoToolbox NV12 Metal input is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 275,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real H.264 test material is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 434,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real H.264 test material is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 561,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real H.264 test material is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 653,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real H.264 test material is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 660,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "VideoToolbox NV12 Metal input is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 734,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "real HEVC/P010 test material is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 741,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "VideoToolbox P010 Metal input is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 118,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "str(exc)"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 192,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "str(exc)"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 603,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "str(exc)"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 676,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "str(exc)"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 753,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "VideoToolbox P010 multi-frame input is unavailable"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 772,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "str(exc)"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 333,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "str(exc)"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 489,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "str(exc)"
+    },
+    {
+      "file": "tests/media/test_macos_vt_compression.py",
+      "kind": "pytest.skip",
+      "line": 349,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "str(exc)"
+    },
+    {
+      "file": "tests/media/test_macos_vt_zero_copy_e2e.py",
+      "kind": "mark.skipif",
+      "line": 17,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=sys.platform != 'darwin' reason=macOS VT zero-copy tests require macOS"
+    },
+    {
+      "file": "tests/media/test_macos_vt_zero_copy_source.py",
+      "kind": "mark.skipif",
+      "line": 160,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=sys.platform != 'darwin' reason=macOS VT test requires macOS"
+    },
+    {
+      "file": "tests/media/test_macos_vt_zero_copy_source.py",
+      "kind": "mark.skipif",
+      "line": 189,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=sys.platform != 'darwin' reason=macOS VT test requires macOS"
+    },
+    {
+      "file": "tests/media/test_macos_vt_zero_copy_source.py",
+      "kind": "pytest.skip",
+      "line": 172,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'missing test video: {path}'"
+    },
+    {
+      "file": "tests/media/test_macos_vt_zero_copy_source.py",
+      "kind": "pytest.skip",
+      "line": 201,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'missing test video: {path}'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 539,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Test case {case_name} not found'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 543,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'Fixture {case.fixture_id} not available'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 569,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Test case {case_name} not found'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 573,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'Fixture {case.fixture_id} not available'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 591,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Test case {case_name} not found'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 595,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'Fixture {case.fixture_id} not available'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 615,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Test case {case_name} not found'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 619,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'Fixture {case.fixture_id} not available'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 625,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Not a 10-bit source"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 645,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Test case {case_name} not found'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 649,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'Fixture {case.fixture_id} not available'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 655,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Video too short"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 679,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Test case {case_name} not found'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 683,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'Fixture {case.fixture_id} not available'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 689,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Video too short"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 717,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Test case {case_name} not found'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 721,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'Fixture {case.fixture_id} not available'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 744,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'Test case {case_name} not found'"
+    },
+    {
+      "file": "tests/media/test_matrix.py",
+      "kind": "pytest.skip",
+      "line": 748,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'Fixture {case.fixture_id} not available'"
+    },
+    {
+      "file": "tests/media/test_prores_preview_export_isolation.py",
+      "kind": "mark.skipif",
+      "line": 16,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not VIDEO.exists() reason=ProRes test fixture missing"
+    },
+    {
+      "file": "tests/media/test_proxy_generator_pyav.py",
+      "kind": "importorskip",
+      "line": 13,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_proxy_generator_pyav.py",
+      "kind": "importorskip",
+      "line": 32,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_proxy_generator_pyav.py",
+      "kind": "pytest.skip",
+      "line": 36,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "PyAV build has no ProRes encoder"
+    },
+    {
+      "file": "tests/media/test_proxy_generator_topos.py",
+      "kind": "importorskip",
+      "line": 22,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_proxy_generator_topos.py",
+      "kind": "importorskip",
+      "line": 46,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_proxy_generator_topos.py",
+      "kind": "pytest.skip",
+      "line": 42,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "native topos codec unavailable"
+    },
+    {
+      "file": "tests/media/test_pyramid_mirror.py",
+      "kind": "pytest.skip",
+      "line": 33,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "test_pyramid_transform 未构建"
+    },
+    {
+      "file": "tests/media/test_render_cache_planar_passthrough.py",
+      "kind": "pytest.skip",
+      "line": 40,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'real test video not available: {path}'"
+    },
+    {
+      "file": "tests/media/test_t03_gbr_passthrough_gl.py",
+      "kind": "pytest.skip",
+      "line": 27,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'standalone GL unavailable: {e}'"
+    },
+    {
+      "file": "tests/media/test_toos_tools.py",
+      "kind": "importorskip",
+      "line": 26,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "cv2"
+    },
+    {
+      "file": "tests/media/test_toos_tools.py",
+      "kind": "mark.skipif",
+      "line": 32,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not CLI.exists() reason=toos CLI 未构建（native/topos_codec/build/debug）"
+    },
+    {
+      "file": "tests/media/test_topos_422_surface_kernels.py",
+      "kind": "mark.skipif",
+      "line": 266,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=os.environ.get('TOPOS_METAL_KERNEL_TESTS', '0') != '1' reason=Metal kernel tests are opt-in (TOPOS_METAL_KERNEL_TESTS=1)"
+    },
+    {
+      "file": "tests/media/test_topos_422_surface_kernels.py",
+      "kind": "pytest.skip",
+      "line": 142,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "requires an available Metal device"
+    },
+    {
+      "file": "tests/media/test_topos_422_surface_kernels.py",
+      "kind": "pytest.skip",
+      "line": 299,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "Metal kernel tests are opt-in"
+    },
+    {
+      "file": "tests/media/test_topos_alpha_pipeline.py",
+      "kind": "pytest.skip",
+      "line": 61,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/run_tests.sh"
+    },
+    {
+      "file": "tests/media/test_topos_alpha_pipeline.py",
+      "kind": "pytest.skip",
+      "line": 68,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/media/test_topos_alpha_pipeline.py",
+      "kind": "pytest.skip",
+      "line": 72,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create OpenGL context: {e}'"
+    },
+    {
+      "file": "tests/media/test_topos_alpha_pipeline.py",
+      "kind": "pytest.skip",
+      "line": 319,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "R16UI self-test failed on this GL context"
+    },
+    {
+      "file": "tests/media/test_topos_alpha_pipeline.py",
+      "kind": "pytest.skip",
+      "line": 379,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "R16UI self-test failed on this GL context"
+    },
+    {
+      "file": "tests/media/test_topos_audio_container.py",
+      "kind": "importorskip",
+      "line": 288,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_topos_audio_container.py",
+      "kind": "pytest.skip",
+      "line": 46,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/scripts/build_release_repo.sh"
+    },
+    {
+      "file": "tests/media/test_topos_color_convert.py",
+      "kind": "pytest.skip",
+      "line": 91,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺 tc_convert_packed_rgb（旧构建）"
+    },
+    {
+      "file": "tests/media/test_topos_color_convert.py",
+      "kind": "pytest.skip",
+      "line": 142,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺 tc_convert_yuv444_to_422（旧构建）"
+    },
+    {
+      "file": "tests/media/test_topos_color_convert.py",
+      "kind": "pytest.skip",
+      "line": 203,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺 tc_convert_packed_rgb（旧构建）"
+    },
+    {
+      "file": "tests/media/test_topos_direct_delivery.py",
+      "kind": "mark.skipif",
+      "line": 625,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not TOPOS_4444_SOURCE.is_file() reason=真实 TOPOS 4444 素材缺失"
+    },
+    {
+      "file": "tests/media/test_topos_direct_delivery.py",
+      "kind": "mark.skipif",
+      "line": 832,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not TOPOS_4K_SOURCE.is_file() reason=真实 TOPOS 4K 素材缺失"
+    },
+    {
+      "file": "tests/media/test_topos_direct_delivery.py",
+      "kind": "mark.skipif",
+      "line": 875,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not TOPOS_4K_4444_SOURCE.is_file() reason=真实 TOPOS 4K 4444 素材缺失"
+    },
+    {
+      "file": "tests/media/test_topos_export.py",
+      "kind": "pytest.skip",
+      "line": 45,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/run_tests.sh"
+    },
+    {
+      "file": "tests/media/test_topos_export.py",
+      "kind": "pytest.skip",
+      "line": 2754,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'测试素材缺失：{self.SRC_2K}'"
+    },
+    {
+      "file": "tests/media/test_topos_export_audio.py",
+      "kind": "pytest.skip",
+      "line": 38,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_export_audio.py",
+      "kind": "importorskip",
+      "line": 215,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_topos_ffmpeg_bridge.py",
+      "kind": "mark.skipif",
+      "line": 25,
+      "scope": "decorator",
+      "category": "optional_tool_or_api",
+      "detail": "cond=shutil.which('ffmpeg') is None or shutil.which('ffprobe') is None reason=ffmpeg/ffprobe 未安装"
+    },
+    {
+      "file": "tests/media/test_topos_ffmpeg_bridge.py",
+      "kind": "mark.skipif",
+      "line": 27,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not LIB.exists() reason=libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_frame_extract.py",
+      "kind": "mark.skipif",
+      "line": 27,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not _lib_available() reason=libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_half_float.py",
+      "kind": "mark.skipif",
+      "line": 48,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not _lib_available() reason=libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_half_float.py",
+      "kind": "pytest.skip",
+      "line": 88,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "native 库无 tc_image_half_to_codes（旧构建）"
+    },
+    {
+      "file": "tests/media/test_topos_image_sequence.py",
+      "kind": "importorskip",
+      "line": 38,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "numpy"
+    },
+    {
+      "file": "tests/media/test_topos_image_sequence.py",
+      "kind": "mark.skipif",
+      "line": 46,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not (GOLDEN.exists() and _lib_ok) reason=libtopos_codec/golden 缺失"
+    },
+    {
+      "file": "tests/media/test_topos_image_sequence.py",
+      "kind": "mark.skipif",
+      "line": 119,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not _lib_ok reason=libtopos_codec 缺失"
+    },
+    {
+      "file": "tests/media/test_topos_image_sequence_export.py",
+      "kind": "mark.skipif",
+      "line": 25,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not _lib_available() reason=libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_image_sequence_export.py",
+      "kind": "pytest.skip",
+      "line": 646,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "toos CLI 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_image_source.py",
+      "kind": "importorskip",
+      "line": 34,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "numpy"
+    },
+    {
+      "file": "tests/media/test_topos_image_source.py",
+      "kind": "mark.skipif",
+      "line": 42,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not (_lib_available and GOLDEN_GBR10.exists()) reason=libtopos_codec 未构建或 golden 文件缺失"
+    },
+    {
+      "file": "tests/media/test_topos_image_source.py",
+      "kind": "pytest.skip",
+      "line": 258,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_image_source.py",
+      "kind": "pytest.skip",
+      "line": 471,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "系统无 AdobeRGB profile（非 macOS 或未装）"
+    },
+    {
+      "file": "tests/media/test_topos_iosurface.py",
+      "kind": "mark.skipif",
+      "line": 17,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MACOS_TOPOS_SURFACE_AVAILABLE reason=macOS IOSurface unavailable"
+    },
+    {
+      "file": "tests/media/test_topos_iosurface.py",
+      "kind": "mark.skipif",
+      "line": 53,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=platform.system() == 'Darwin' reason=non-macOS fallback test"
+    },
+    {
+      "file": "tests/media/test_topos_iosurface.py",
+      "kind": "mark.skipif",
+      "line": 61,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not MACOS_TOPOS_SURFACE_AVAILABLE reason=macOS IOSurface unavailable"
+    },
+    {
+      "file": "tests/media/test_topos_iosurface.py",
+      "kind": "pytest.skip",
+      "line": 25,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "str(exc)"
+    },
+    {
+      "file": "tests/media/test_topos_lossless_boundary.py",
+      "kind": "mark.skipif",
+      "line": 12,
+      "scope": "decorator",
+      "category": "optional_tool_or_api",
+      "detail": "cond=not CLI.exists() reason=toos CLI 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_multitrack_container.py",
+      "kind": "mark.skipif",
+      "line": 239,
+      "scope": "decorator",
+      "category": "optional_tool_or_api",
+      "detail": "cond=_FFPROBE is None reason=ffprobe 不可用"
+    },
+    {
+      "file": "tests/media/test_topos_multitrack_container.py",
+      "kind": "pytest.skip",
+      "line": 51,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/scripts/build_release_repo.sh"
+    },
+    {
+      "file": "tests/media/test_topos_probe_unification.py",
+      "kind": "pytest.skip",
+      "line": 125,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "H.264 素材缺失"
+    },
+    {
+      "file": "tests/media/test_topos_probe_unification.py",
+      "kind": "pytest.skip",
+      "line": 155,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "H.264 素材缺失"
+    },
+    {
+      "file": "tests/media/test_topos_probe_unification.py",
+      "kind": "pytest.skip",
+      "line": 223,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "release dylib 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_probe_unification.py",
+      "kind": "pytest.skip",
+      "line": 424,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "H.264 素材缺失"
+    },
+    {
+      "file": "tests/media/test_topos_raw_direct.py",
+      "kind": "mark.skipif",
+      "line": 292,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not _lib_available() reason=libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_raw_direct.py",
+      "kind": "mark.skipif",
+      "line": 464,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not _lib_available() reason=libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_raw_sequence.py",
+      "kind": "pytest.skip",
+      "line": 56,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "toos CLI 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_reimport_playback.py",
+      "kind": "importorskip",
+      "line": 115,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_topos_reimport_playback.py",
+      "kind": "importorskip",
+      "line": 141,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_topos_reimport_playback.py",
+      "kind": "pytest.skip",
+      "line": 44,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_source.py",
+      "kind": "pytest.skip",
+      "line": 47,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/run_tests.sh"
+    },
+    {
+      "file": "tests/media/test_topos_source.py",
+      "kind": "pytest.skip",
+      "line": 371,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "语料缺失：tests/test_videos/2K_topos_422_Proxy.mov"
+    },
+    {
+      "file": "tests/media/test_topos_source.py",
+      "kind": "pytest.skip",
+      "line": 479,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 V7-B writer 或 base range API"
+    },
+    {
+      "file": "tests/media/test_topos_source.py",
+      "kind": "pytest.skip",
+      "line": 775,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_source.py",
+      "kind": "pytest.skip",
+      "line": 1044,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 decoder worker budget setter"
+    },
+    {
+      "file": "tests/media/test_topos_source_audio.py",
+      "kind": "pytest.skip",
+      "line": 35,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_topos_source_export_passthrough.py",
+      "kind": "pytest.skip",
+      "line": 39,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'real test video not available: {TOPOS_SOURCE}'"
+    },
+    {
+      "file": "tests/media/test_topos_stems_export.py",
+      "kind": "mark.skipif",
+      "line": 187,
+      "scope": "decorator",
+      "category": "optional_tool_or_api",
+      "detail": "cond=_FFPROBE is None reason=ffprobe 不可用"
+    },
+    {
+      "file": "tests/media/test_topos_stems_export.py",
+      "kind": "pytest.skip",
+      "line": 59,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/scripts/build_release_repo.sh"
+    },
+    {
+      "file": "tests/media/test_topos_timecode_container.py",
+      "kind": "mark.skipif",
+      "line": 246,
+      "scope": "decorator",
+      "category": "optional_tool_or_api",
+      "detail": "cond=_FFPROBE is None reason=ffprobe 不可用"
+    },
+    {
+      "file": "tests/media/test_topos_timecode_container.py",
+      "kind": "mark.skipif",
+      "line": 352,
+      "scope": "decorator",
+      "category": "optional_tool_or_api",
+      "detail": "cond=_FFMPEG is None reason=ffmpeg 不可用"
+    },
+    {
+      "file": "tests/media/test_topos_timecode_container.py",
+      "kind": "pytest.skip",
+      "line": 47,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/scripts/build_release_repo.sh"
+    },
+    {
+      "file": "tests/media/test_topos_timeline_export.py",
+      "kind": "pytest.skip",
+      "line": 45,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/run_tests.sh"
+    },
+    {
+      "file": "tests/media/test_topos_timeline_export.py",
+      "kind": "importorskip",
+      "line": 568,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/media/test_topos_timeline_export.py",
+      "kind": "pytest.skip",
+      "line": 574,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "无 ProRes 编码器"
+    },
+    {
+      "file": "tests/media/test_topos_timeline_export.py",
+      "kind": "pytest.skip",
+      "line": 576,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "PyAV 编码器枚举失败"
+    },
+    {
+      "file": "tests/media/test_topos_trwm.py",
+      "kind": "mark.skipif",
+      "line": 35,
+      "scope": "decorator",
+      "category": "topos_native_lib",
+      "detail": "cond=not _lib_available() reason=libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/media/test_v3_hwaccel_policy.py",
+      "kind": "mark.skipif",
+      "line": 600,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(os.path.join(os.path.dirname(__file__), 'fixtures', 'test_h264_sdr.mp4')) reason=测试视频文件不存在"
+    },
+    {
+      "file": "tests/media/test_v3_hwaccel_policy.py",
+      "kind": "pytest.skip",
+      "line": 610,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "测试视频文件不存在"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "mark.skipif",
+      "line": 537,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('prores', '')) reason=ProRes test video not available"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "mark.skipif",
+      "line": 567,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('h265_pq', '')) reason=H.265 PQ test video not available"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "mark.skipif",
+      "line": 598,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('h265_pq', '')) reason=H.265 PQ test video not available"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "mark.skipif",
+      "line": 615,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not os.path.exists(TEST_VIDEOS.get('h265_pq_v2', '')) reason=H.265 HLG test video not available"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "pytest.skip",
+      "line": 203,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "No test video available"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "pytest.skip",
+      "line": 549,
+      "scope": "in_callable",
+      "category": "content_or_ui_conditional",
+      "detail": "This video is not 10-bit"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "pytest.skip",
+      "line": 632,
+      "scope": "in_callable",
+      "category": "content_or_ui_conditional",
+      "detail": "Test video is not HLG encoded"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "pytest.skip",
+      "line": 909,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Need at least 2 test videos"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "pytest.skip",
+      "line": 443,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Total frames unknown"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "pytest.skip",
+      "line": 470,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Not enough frames for seek test"
+    },
+    {
+      "file": "tests/media/test_video_pipeline_smoke.py",
+      "kind": "pytest.skip",
+      "line": 506,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Total frames unknown"
+    },
+    {
+      "file": "tests/media/test_video_session_shared_provider_real.py",
+      "kind": "mark.skip",
+      "line": 676,
+      "scope": "decorator",
+      "category": "unclassified",
+      "detail": "reason=需要真实视频文件"
+    },
+    {
+      "file": "tests/media/test_video_session_shared_provider_real.py",
+      "kind": "pytest.skip",
+      "line": 690,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "TEST_VIDEO_PATH not set or file not found"
+    },
+    {
+      "file": "tests/media/test_windows_hw_d3d11_device_pool.py",
+      "kind": "mark.skipif",
+      "line": 343,
+      "scope": "decorator",
+      "category": "os_windows",
+      "detail": "cond=platform.system() != 'Windows' reason=需要真机 D3D11（计划步骤 1 真机门禁）"
+    },
+    {
+      "file": "tests/media/test_windows_hw_gpu_capability.py",
+      "kind": "mark.skipif",
+      "line": 217,
+      "scope": "decorator",
+      "category": "os_windows",
+      "detail": "cond=platform.system() != 'Windows' reason=needs real Windows (W1-01)"
+    },
+    {
+      "file": "tests/media/test_windows_hw_t0_chain.py",
+      "kind": "mark.skipif",
+      "line": 270,
+      "scope": "decorator",
+      "category": "os_windows",
+      "detail": "cond=platform.system() != 'Windows' reason=需要真机 D3D11（计划步骤 2 分层 probe）"
+    },
+    {
+      "file": "tests/media/test_xtest00_asset_manifest.py",
+      "kind": "importorskip",
+      "line": 29,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/native/test_release_scripts.py",
+      "kind": "mark.skipif",
+      "line": 149,
+      "scope": "decorator",
+      "category": "os_windows",
+      "detail": "cond=sys.platform == 'win32' reason=Windows C 示例由 release workflow 验证"
+    },
+    {
+      "file": "tests/native/test_release_scripts.py",
+      "kind": "importorskip",
+      "line": 253,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "wheel"
+    },
+    {
+      "file": "tests/native/test_release_scripts.py",
+      "kind": "importorskip",
+      "line": 279,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "wheel"
+    },
+    {
+      "file": "tests/native/test_release_scripts.py",
+      "kind": "pytest.skip",
+      "line": 41,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/run_tests.sh"
+    },
+    {
+      "file": "tests/native/test_stage10_concurrency.py",
+      "kind": "pytest.skip",
+      "line": 40,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/run_tests.sh"
+    },
+    {
+      "file": "tests/native/test_stage10_concurrency.py",
+      "kind": "pytest.skip",
+      "line": 222,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "numpy 不可用（views 浸泡需要 numpy 平面）"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 33,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建；先运行 bash native/topos_codec/run_tests.sh"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 378,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 tc_frame_encode_scalable"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 400,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 V7-B writer 或 tc_movie_packet_base"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 433,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 tc_frame_decode_request"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 461,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 request-aware decoder context"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 654,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 tc_frame_decode_batch"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 679,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 tc_frame_decode_batch"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 701,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 tc_decoder_decode_batch"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 730,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 decoder context"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 759,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 tc_movie_packet_batch"
+    },
+    {
+      "file": "tests/native/test_topos_binding.py",
+      "kind": "pytest.skip",
+      "line": 484,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "dylib 缺少 tc_decoder_decode_batch_request"
+    },
+    {
+      "file": "tests/native/test_topos_float_tier_nonfinite.py",
+      "kind": "pytest.skip",
+      "line": 25,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "toos CLI 未构建"
+    },
+    {
+      "file": "tests/native/test_topos_paired_quality.py",
+      "kind": "pytest.skip",
+      "line": 24,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "TOPOS native 库未构建"
+    },
+    {
+      "file": "tests/native/test_topos_paired_quality.py",
+      "kind": "pytest.skip",
+      "line": 26,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "FFmpeg 未安装"
+    },
+    {
+      "file": "tests/native/test_topos_paired_quality.py",
+      "kind": "pytest.skip",
+      "line": 84,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "FFmpeg 未安装"
+    },
+    {
+      "file": "tests/native/test_topos_quality_gate_binding.py",
+      "kind": "pytest.skip",
+      "line": 20,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "TOPOS native 库未构建"
+    },
+    {
+      "file": "tests/native/test_topos_video_16bit.py",
+      "kind": "pytest.skip",
+      "line": 39,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "TOPOS native 库未构建"
+    },
+    {
+      "file": "tests/node_test_base.py",
+      "kind": "pytest.skip",
+      "line": 328,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'node_class not set for {self.__class__.__name__}'"
+    },
+    {
+      "file": "tests/node_test_base.py",
+      "kind": "pytest.skip",
+      "line": 364,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "f'node_type not set for {self.__class__.__name__}'"
+    },
+    {
+      "file": "tests/node_test_base.py",
+      "kind": "pytest.skip",
+      "line": 594,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "Node has no PARAM_DEFS"
+    },
+    {
+      "file": "tests/plugins/test_plugin_batch2.py",
+      "kind": "importorskip",
+      "line": 40,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/real_media.py",
+      "kind": "pytest.skip",
+      "line": 66,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "'真实素材缺失: ' + ', '.join(names)"
+    },
+    {
+      "file": "tests/render/html_spike/test_html_spike_playwright_gate.py",
+      "kind": "pytest.skip",
+      "line": 36,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned headless browser unavailable in this environment (playwright/chromium not installed). W0-A gate cannot run; see docs/adr/0001-html-renderer-offscreen-readback.md and docs/adr/0002-html-renderer-pinned-headless-backend.md."
+    },
+    {
+      "file": "tests/render/html_spike/test_html_spike_playwright_gate.py",
+      "kind": "pytest.skip",
+      "line": 51,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned headless browser unavailable in this environment (playwright/chromium not installed)."
+    },
+    {
+      "file": "tests/render/html_spike/test_html_spike_playwright_gate.py",
+      "kind": "pytest.skip",
+      "line": 81,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned headless browser unavailable in this environment."
+    },
+    {
+      "file": "tests/render/html_spike/test_html_spike_real_browser.py",
+      "kind": "pytest.skip",
+      "line": 113,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "f\"W0-A HTML renderer backend unavailable in this environment: {report.get('self_test_reason', 'unknown')}. See docs/adr/0001-html-renderer-offscreen-readback.md"
+    },
+    {
+      "file": "tests/render/test_bitrate_probe.py",
+      "kind": "mark.skipif",
+      "line": 22,
+      "scope": "decorator",
+      "category": "optional_tool_or_api",
+      "detail": "cond=not shutil.which('ffmpeg') or not shutil.which('ffprobe') reason=FFmpeg/ffprobe not installed"
+    },
+    {
+      "file": "tests/render/test_html_export_e2e.py",
+      "kind": "pytest.skip",
+      "line": 40,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned headless browser unavailable (playwright/chromium not installed); run scripts/bootstrap_html_renderer.sh"
+    },
+    {
+      "file": "tests/render/test_html_export_e2e.py",
+      "kind": "pytest.skip",
+      "line": 111,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "FFmpeg not installed"
+    },
+    {
+      "file": "tests/render/test_html_renderer_service.py",
+      "kind": "pytest.skip",
+      "line": 233,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned headless browser unavailable (playwright/chromium not installed)"
+    },
+    {
+      "file": "tests/render/test_html_renderer_service.py",
+      "kind": "pytest.skip",
+      "line": 271,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned headless browser unavailable (playwright/chromium not installed)"
+    },
+    {
+      "file": "tests/render/test_html_s0_determinism.py",
+      "kind": "pytest.skip",
+      "line": 50,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned headless browser unavailable (playwright/chromium not installed); run scripts/bootstrap_html_renderer.sh"
+    },
+    {
+      "file": "tests/render/test_html_s0_end_to_end.py",
+      "kind": "pytest.skip",
+      "line": 44,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "pinned headless browser unavailable (playwright/chromium not installed); run scripts/bootstrap_html_renderer.sh"
+    },
+    {
+      "file": "tests/render/test_motion_graphic_gpu_gate.py",
+      "kind": "importorskip",
+      "line": 25,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/render/test_motion_graphic_gpu_gate.py",
+      "kind": "pytest.skip",
+      "line": 29,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'standalone ModernGL context unavailable: {exc}'"
+    },
+    {
+      "file": "tests/shared/color/test_acescg_transforms.py",
+      "kind": "importorskip",
+      "line": 75,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyOpenColorIO"
+    },
+    {
+      "file": "tests/shared/color/test_acescg_transforms.py",
+      "kind": "importorskip",
+      "line": 87,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyOpenColorIO"
+    },
+    {
+      "file": "tests/shared/color/test_acescg_transforms.py",
+      "kind": "pytest.skip",
+      "line": 79,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "OCIO not available in this environment"
+    },
+    {
+      "file": "tests/shared/color/test_acescg_transforms.py",
+      "kind": "pytest.skip",
+      "line": 91,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "OCIO not available in this environment"
+    },
+    {
+      "file": "tests/shared/color/test_color_transform_provider.py",
+      "kind": "pytest.skip",
+      "line": 128,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "PyOpenColorIO is installed — skip the unavailable test"
+    },
+    {
+      "file": "tests/shared/color/test_color_transform_provider.py",
+      "kind": "pytest.skip",
+      "line": 136,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "PyOpenColorIO is installed — skip the unavailable test"
+    },
+    {
+      "file": "tests/shared/color/test_color_transform_provider.py",
+      "kind": "pytest.skip",
+      "line": 186,
+      "scope": "in_callable",
+      "category": "optional_dep_named",
+      "detail": "PyOpenColorIO installed — fallback path not exercised"
+    },
+    {
+      "file": "tests/shared/gpu/metal/test_metal_compute_context.py",
+      "kind": "mark.skipif",
+      "line": 398,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _REAL_OK reason=f'Metal 不可用: {_REAL_UNAVAILABLE_REASON}'"
+    },
+    {
+      "file": "tests/shared/gpu/metal/test_metal_kernels.py",
+      "kind": "mark.skipif",
+      "line": 23,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/shared/gpu/metal/test_metal_kernels_color.py",
+      "kind": "mark.skipif",
+      "line": 40,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _Ctx.is_supported() reason=无 Metal 设备"
+    },
+    {
+      "file": "tests/shared/gpu/metal/test_metal_kernels_dct.py",
+      "kind": "mark.skipif",
+      "line": 29,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _REAL_OK reason=f'Metal 不可用: {_REAL_UNAVAILABLE_REASON}'"
+    },
+    {
+      "file": "tests/shared/gpu/metal/test_metal_kernels_enc.py",
+      "kind": "mark.skipif",
+      "line": 39,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _REAL_OK reason=f'Metal 不可用: {_REAL_UNAVAILABLE_REASON}'"
+    },
+    {
+      "file": "tests/shared/gpu/metal/test_metal_kernels_idct.py",
+      "kind": "mark.skipif",
+      "line": 37,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=not _REAL_OK reason=f'Metal 不可用: {_REAL_UNAVAILABLE_REASON}'"
+    },
+    {
+      "file": "tests/shared/gpu/test_backend_selector_config.py",
+      "kind": "pytest.skip",
+      "line": 155,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "requires an available Metal device"
+    },
+    {
+      "file": "tests/shared/gpu/test_platform_capability_kinds.py",
+      "kind": "pytest.skip",
+      "line": 178,
+      "scope": "in_callable",
+      "category": "gpu_hardware",
+      "detail": "needs real hardware adapter (CI runner: basic display only)"
+    },
+    {
+      "file": "tests/shared/test_dctl_and_preview.py",
+      "kind": "pytest.skip",
+      "line": 228,
+      "scope": "in_callable",
+      "category": "env_ci_gate",
+      "detail": "no .tglsl plugins discovered in this environment"
+    },
+    {
+      "file": "tests/shared/test_fix_effect_pass_aud5b.py",
+      "kind": "pytest.skip",
+      "line": 296,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'OpenGL context unavailable: {exc}'"
+    },
+    {
+      "file": "tests/shared/test_fix_media_aud4.py",
+      "kind": "mark.skipif",
+      "line": 367,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=sys.platform != 'darwin' reason=VideoToolbox 仅 macOS"
+    },
+    {
+      "file": "tests/shared/test_fix_video2_aud5.py",
+      "kind": "pytest.skip",
+      "line": 473,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'OpenGL context unavailable: {e}'"
+    },
+    {
+      "file": "tests/shared/test_fix_wd15g79_aud.py",
+      "kind": "mark.skipif",
+      "line": 386,
+      "scope": "decorator",
+      "category": "os_windows",
+      "detail": "cond=sys.platform == 'win32' reason=X_OK 检查仅在非 Windows 平台生效"
+    },
+    {
+      "file": "tests/shared/test_fix_wd15g82_aud.py",
+      "kind": "pytest.skip",
+      "line": 218,
+      "scope": "in_callable",
+      "category": "topos_native_lib",
+      "detail": "libtopos_codec 未构建"
+    },
+    {
+      "file": "tests/shared/test_fix_wd15g83_aud.py",
+      "kind": "importorskip",
+      "line": 1201,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "psutil"
+    },
+    {
+      "file": "tests/shared/test_fix_wd16g81_aud.py",
+      "kind": "pytest.skip",
+      "line": 217,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "permission bits are irrelevant for root"
+    },
+    {
+      "file": "tests/shared/test_fix_wd16g81_aud.py",
+      "kind": "pytest.skip",
+      "line": 260,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "permission bits are irrelevant for root"
+    },
+    {
+      "file": "tests/shared/test_fix_wd16g85_aud.py",
+      "kind": "mark.skipif",
+      "line": 518,
+      "scope": "decorator",
+      "category": "unclassified",
+      "detail": "cond=_optional_module_available('OpenEXR') or _optional_module_available('imageio') reason=本机装有 EXR 后端时无法验证缺后端路径"
+    },
+    {
+      "file": "tests/shared/test_fix_wd16g85_aud.py",
+      "kind": "mark.skipif",
+      "line": 530,
+      "scope": "decorator",
+      "category": "unclassified",
+      "detail": "cond=_optional_module_available('imageio') reason=本机装有 imageio 时无法验证缺后端路径"
+    },
+    {
+      "file": "tests/shared/test_fix_wd16g85_aud.py",
+      "kind": "mark.skipif",
+      "line": 542,
+      "scope": "decorator",
+      "category": "unclassified",
+      "detail": "cond=_optional_module_available('tifffile') or _optional_module_available('imageio') reason=本机装有 TIFF 后端时无法验证缺后端路径"
+    },
+    {
+      "file": "tests/shared/test_fix_wd16g85_aud.py",
+      "kind": "pytest.skip",
+      "line": 636,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "图片档位注册表无 '422-high'"
+    },
+    {
+      "file": "tests/shared/test_fix_wd16g86_aud.py",
+      "kind": "importorskip",
+      "line": 29,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g101_aud.py",
+      "kind": "importorskip",
+      "line": 181,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g101_aud.py",
+      "kind": "importorskip",
+      "line": 332,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g101_aud.py",
+      "kind": "importorskip",
+      "line": 416,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g101_aud.py",
+      "kind": "importorskip",
+      "line": 429,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g101_aud.py",
+      "kind": "importorskip",
+      "line": 463,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g104_aud.py",
+      "kind": "mark.skipif",
+      "line": 311,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g104_aud.py",
+      "kind": "mark.skipif",
+      "line": 355,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g90_aud.py",
+      "kind": "pytest.skip",
+      "line": 899,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "PyObjC Metal 不可用"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g90_aud.py",
+      "kind": "pytest.skip",
+      "line": 922,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "PyObjC Metal 不可用"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g91_aud.py",
+      "kind": "pytest.skip",
+      "line": 563,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "CoreFoundation constants unavailable"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g92_aud.py",
+      "kind": "importorskip",
+      "line": 453,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "av"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g92_aud.py",
+      "kind": "importorskip",
+      "line": 884,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "rawpy"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g92_aud.py",
+      "kind": "importorskip",
+      "line": 885,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "cv2"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g92_aud.py",
+      "kind": "importorskip",
+      "line": 922,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "rawpy"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g92_aud.py",
+      "kind": "importorskip",
+      "line": 923,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "cv2"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g92_aud.py",
+      "kind": "pytest.skip",
+      "line": 473,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "native topos codec unavailable"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g92_aud.py",
+      "kind": "pytest.skip",
+      "line": 497,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "native topos codec unavailable"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g93_aud.py",
+      "kind": "pytest.skip",
+      "line": 600,
+      "scope": "in_callable",
+      "category": "os_macos",
+      "detail": "仅 macOS 实机验证 IOSurface 探测"
+    },
+    {
+      "file": "tests/shared/test_fix_wd17g99_aud.py",
+      "kind": "pytest.skip",
+      "line": 845,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "scipy 不可用：异常收窄验证依赖 PCHIP 主路径"
+    },
+    {
+      "file": "tests/shared/test_performance_budgets.py",
+      "kind": "pytest.skip",
+      "line": 176,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "no full baseline report available"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_2d_translation.py",
+      "kind": "mark.skipif",
+      "line": 11,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_2d_trs.py",
+      "kind": "mark.skipif",
+      "line": 10,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_bidirectional_merge.py",
+      "kind": "mark.skipif",
+      "line": 172,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_cancel_and_generation.py",
+      "kind": "mark.skipif",
+      "line": 10,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_confidence.py",
+      "kind": "mark.skipif",
+      "line": 11,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_corner_pin_export.py",
+      "kind": "mark.skipif",
+      "line": 143,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_failure_detection.py",
+      "kind": "mark.skipif",
+      "line": 15,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_homography_stability.py",
+      "kind": "mark.skipif",
+      "line": 123,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_point_manager.py",
+      "kind": "mark.skipif",
+      "line": 128,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracker_recapture.py",
+      "kind": "mark.skipif",
+      "line": 20,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not ts.TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracking_cache.py",
+      "kind": "pytest.skip",
+      "line": 134,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/shared/tracking/test_tracking_fixture_manifest.py",
+      "kind": "mark.skipif",
+      "line": 25,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not TOOLS_AVAILABLE reason=tracking fixture 工具不可用"
+    },
+    {
+      "file": "tests/teaching_animation/test_fix_wd14g75_aud.py",
+      "kind": "importorskip",
+      "line": 250,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6.QtSvg"
+    },
+    {
+      "file": "tests/test_topos_render_cli.py",
+      "kind": "mark.skipif",
+      "line": 106,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=os.environ.get('TOPOS_CLI_GL') != '1' reason=headless standalone-GL context creation is machine-state dependent on macOS (A7 spike: crashes in fresh processes while working under pytest-launched processes); run with TOPOS_CLI_GL=1 on a machine with healthy headless GL"
+    },
+    {
+      "file": "tests/ui/test_ai_edit_assistant_m5_ui.py",
+      "kind": "pytest.skip",
+      "line": 366,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "AiContextSummary 未装配（回退 QLabel）"
+    },
+    {
+      "file": "tests/ui/test_column_grid_panels.py",
+      "kind": "importorskip",
+      "line": 183,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "src.features.edit.ui.media_pool_panel"
+    },
+    {
+      "file": "tests/ui/test_panel_dividers.py",
+      "kind": "mark.skipif",
+      "line": 74,
+      "scope": "decorator",
+      "category": "os_macos",
+      "detail": "cond=sys.platform == 'darwin' reason=Qt 6.10 on macOS can segfault while re-polishing a tabified dock after other WebEngine/Metal UI tests; the same geometry contract is covered on Linux CI in the PR Qt shard."
+    },
+    {
+      "file": "tests/ui/test_playback_hud.py",
+      "kind": "mark.skipif",
+      "line": 276,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not pytest.importorskip('PyQt6', reason='PyQt6 not available') reason=PyQt6 tests skipped"
+    },
+    {
+      "file": "tests/ui/test_playback_hud.py",
+      "kind": "mark.skipif",
+      "line": 343,
+      "scope": "decorator",
+      "category": "media_fixture_missing",
+      "detail": "cond=not pytest.importorskip('PyQt6', reason='PyQt6 not available') reason=PyQt6 tests skipped"
+    },
+    {
+      "file": "tests/ui/test_playback_hud.py",
+      "kind": "importorskip",
+      "line": 277,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6"
+    },
+    {
+      "file": "tests/ui/test_playback_hud.py",
+      "kind": "importorskip",
+      "line": 344,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6"
+    },
+    {
+      "file": "tests/ui/test_workflow_gallery_form_entry.py",
+      "kind": "importorskip",
+      "line": 15,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6.QtWidgets"
+    },
+    {
+      "file": "tests/ui/test_workflow_inspector.py",
+      "kind": "pytest.skip",
+      "line": 35,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Inspector 源码尚未创建"
+    },
+    {
+      "file": "tests/ui/test_workflow_node_search.py",
+      "kind": "pytest.skip",
+      "line": 34,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "popup 源码尚未创建"
+    },
+    {
+      "file": "tests/vault/test_audio_features_step.py",
+      "kind": "pytest.skip",
+      "line": 51,
+      "scope": "in_callable",
+      "category": "optional_tool_or_api",
+      "detail": "soundfile 未安装"
+    },
+    {
+      "file": "tests/vault/test_perf_ivf.py",
+      "kind": "pytest.skip",
+      "line": 80,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "faiss 未装，跳过 IVF 性能测试"
+    },
+    {
+      "file": "tests/video/test_cfa_gpu_debayer.py",
+      "kind": "pytest.skip",
+      "line": 96,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create OpenGL context: {e}'"
+    },
+    {
+      "file": "tests/video/test_ffmpeg_encoder.py",
+      "kind": "pytest.skip",
+      "line": 1627,
+      "scope": "in_callable",
+      "category": "os_windows",
+      "detail": "需要 Windows + PyAV 带 AMF 注册"
+    },
+    {
+      "file": "tests/video/test_ffmpeg_encoder.py",
+      "kind": "pytest.skip",
+      "line": 1654,
+      "scope": "in_callable",
+      "category": "os_windows",
+      "detail": "需要 Windows + PyAV 带 AMF 注册"
+    },
+    {
+      "file": "tests/video/test_ffmpeg_encoder.py",
+      "kind": "pytest.skip",
+      "line": 1744,
+      "scope": "in_callable",
+      "category": "os_windows",
+      "detail": "需要 Windows + nvidia/amd 硬件适配器"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "mark.skipif",
+      "line": 568,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL or not HAS_PBO_MODULE reason=moderngl or PBO module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "mark.skipif",
+      "line": 973,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL or not HAS_PBO_MODULE reason=moderngl or PBO module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 62,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 115,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PBOUploader module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 126,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PBOUploader module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 68,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create OpenGL context: {e}'"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 164,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PBOUploader module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 268,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PBOUploader module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 422,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PBOUploader module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 716,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PBOUploader module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 734,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PBOUploader module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 747,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PBOUploader module not available"
+    },
+    {
+      "file": "tests/video/test_pbo_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 935,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "PBOUploader module not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "mark.skip",
+      "line": 774,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "reason=Qt/OpenGL native abort: mock GLContextManager 导致 OpenGL 资源创建失败，属于平台环境问题"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 466,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "RawDecoder module not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 497,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "GLContextManager module not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 506,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "GPUResourcePool module not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 531,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "f'Video modules not available: {e}'"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 571,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Source modules not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 834,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Video modules not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 855,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Video modules not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 874,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Video modules not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 884,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Video modules not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 1101,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "RawDecoder module not available - no RAW fixture"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 1110,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "RawDecoder module not available - no RAW fixture"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 1181,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "FileIO module not available"
+    },
+    {
+      "file": "tests/video/test_regression_image_video.py",
+      "kind": "pytest.skip",
+      "line": 792,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "Video modules not available"
+    },
+    {
+      "file": "tests/video/test_resource_cleanup_on_exception.py",
+      "kind": "mark.skipif",
+      "line": 36,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_playback_coverage.py",
+      "kind": "importorskip",
+      "line": 2253,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "cv2"
+    },
+    {
+      "file": "tests/video/test_video_texture_pool.py",
+      "kind": "mark.skipif",
+      "line": 333,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_texture_pool.py",
+      "kind": "mark.skipif",
+      "line": 536,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_texture_pool.py",
+      "kind": "pytest.skip",
+      "line": 44,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_texture_pool.py",
+      "kind": "pytest.skip",
+      "line": 53,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create OpenGL context: {e}'"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "mark.skipif",
+      "line": 927,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "pytest.skip",
+      "line": 88,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "pytest.skip",
+      "line": 96,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create OpenGL context: {e}'"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "pytest.skip",
+      "line": 1135,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "pytest.skip",
+      "line": 1790,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "pytest.skip",
+      "line": 1810,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "pytest.skip",
+      "line": 1829,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "pytest.skip",
+      "line": 1846,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "pytest.skip",
+      "line": 1864,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_video_upload_command.py",
+      "kind": "pytest.skip",
+      "line": 1882,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_yuv_chroma_sampling_pixels.py",
+      "kind": "mark.skipif",
+      "line": 77,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL or not HAS_YUV_MODULE reason=moderngl or YUV module not available"
+    },
+    {
+      "file": "tests/video/test_yuv_chroma_sampling_pixels.py",
+      "kind": "mark.skipif",
+      "line": 433,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL or not HAS_YUV_MODULE reason=moderngl or YUV module not available"
+    },
+    {
+      "file": "tests/video/test_yuv_chroma_sampling_pixels.py",
+      "kind": "pytest.skip",
+      "line": 53,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_yuv_chroma_sampling_pixels.py",
+      "kind": "pytest.skip",
+      "line": 66,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "YUVGPUUploader module not available"
+    },
+    {
+      "file": "tests/video/test_yuv_chroma_sampling_pixels.py",
+      "kind": "pytest.skip",
+      "line": 59,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create OpenGL context: {e}'"
+    },
+    {
+      "file": "tests/video/test_yuv_gpu_upload.py",
+      "kind": "mark.skipif",
+      "line": 138,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/video/test_yuv_gpu_upload.py",
+      "kind": "mark.skipif",
+      "line": 236,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL or not HAS_YUV_MODULE reason=moderngl or YUV module not available"
+    },
+    {
+      "file": "tests/video/test_yuv_gpu_upload.py",
+      "kind": "mark.skipif",
+      "line": 704,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL or not HAS_YUV_MODULE reason=moderngl or YUV module not available"
+    },
+    {
+      "file": "tests/video/test_yuv_gpu_upload.py",
+      "kind": "mark.skipif",
+      "line": 794,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL or not HAS_YUV_MODULE reason=moderngl or YUV module not available"
+    },
+    {
+      "file": "tests/video/test_yuv_gpu_upload.py",
+      "kind": "mark.skipif",
+      "line": 831,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL or not HAS_YUV_MODULE reason=moderngl or YUV module not available"
+    },
+    {
+      "file": "tests/video/test_yuv_gpu_upload.py",
+      "kind": "pytest.skip",
+      "line": 63,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_yuv_gpu_upload.py",
+      "kind": "pytest.skip",
+      "line": 76,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "YUVGPUUploader module not available"
+    },
+    {
+      "file": "tests/video/test_yuv_gpu_upload.py",
+      "kind": "pytest.skip",
+      "line": 69,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create OpenGL context: {e}'"
+    },
+    {
+      "file": "tests/video/test_yuv_gpu_upload.py",
+      "kind": "pytest.skip",
+      "line": 619,
+      "scope": "in_callable",
+      "category": "media_fixture_missing",
+      "detail": "YUV module not available"
+    },
+    {
+      "file": "tests/video/test_yuv_temp_texture_release.py",
+      "kind": "mark.skipif",
+      "line": 472,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/video/test_yuv_temp_texture_release.py",
+      "kind": "pytest.skip",
+      "line": 481,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "无法创建 OpenGL context"
+    },
+    {
+      "file": "tests/video/test_yuv_upload_api.py",
+      "kind": "mark.skipif",
+      "line": 595,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/video/test_yuv_upload_api.py",
+      "kind": "mark.skipif",
+      "line": 732,
+      "scope": "decorator",
+      "category": "gl_context",
+      "detail": "cond=not HAS_MODERNGL reason=moderngl not available"
+    },
+    {
+      "file": "tests/video/test_yuv_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 213,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_yuv_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 219,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'Failed to create OpenGL context: {e}'"
+    },
+    {
+      "file": "tests/video/test_yuv_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 784,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video/test_yuv_upload_api.py",
+      "kind": "pytest.skip",
+      "line": 816,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl not available"
+    },
+    {
+      "file": "tests/video_denoise/test_video_denoise_gpu.py",
+      "kind": "importorskip",
+      "line": 8,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "moderngl"
+    },
+    {
+      "file": "tests/video_denoise/test_video_denoise_gpu.py",
+      "kind": "pytest.skip",
+      "line": 24,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "f'standalone ModernGL context unavailable: {exc}'"
+    },
+    {
+      "file": "tests/video_denoise/test_video_denoise_integration.py",
+      "kind": "importorskip",
+      "line": 31,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6"
+    },
+    {
+      "file": "tests/video_denoise/test_video_denoise_integration.py",
+      "kind": "pytest.skip",
+      "line": 115,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "无法创建 QOpenGLContext（无 GPU/离屏支持）"
+    },
+    {
+      "file": "tests/video_denoise/test_video_denoise_integration.py",
+      "kind": "pytest.skip",
+      "line": 127,
+      "scope": "in_callable",
+      "category": "gl_context",
+      "detail": "渲染线程初始化失败（ModernGL 上下文不可用）"
+    },
+    {
+      "file": "tests/video_denoise/test_video_denoise_integration.py",
+      "kind": "pytest.skip",
+      "line": 132,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "VideoDenoisePipeline 初始化失败"
+    },
+    {
+      "file": "tests/video_denoise/test_window_provider.py",
+      "kind": "importorskip",
+      "line": 8,
+      "scope": "in_callable",
+      "category": "optional_dep_importorskip",
+      "detail": "PyQt6"
+    },
+    {
+      "file": "tests/visual/conftest.py",
+      "kind": "pytest.skip",
+      "line": 112,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No display available for visual tests"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 56,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No display available for visual tests"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 82,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No display available for visual tests"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 116,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "TimelinePanel not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 146,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "TimelinePanel not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 177,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "TimelineView not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 186,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No track header buttons found (no tracks visible)"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 203,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "TimelineView not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 207,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "Scene not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 225,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No timeline clips visible to test"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 238,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "ProgramViewerWidget not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 247,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "ProgramViewerWidget not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 262,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "MediaPoolPanel not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 273,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "MediaPoolPanel not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 284,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "MediaPoolPanel not found"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 314,
+      "scope": "in_callable",
+      "category": "content_or_ui_conditional",
+      "detail": "Screenshot capture requires full MainWindow (not test_mode)"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 341,
+      "scope": "in_callable",
+      "category": "content_or_ui_conditional",
+      "detail": "Screenshot capture requires full MainWindow (not test_mode)"
+    },
+    {
+      "file": "tests/visual/test_edit_page_visual.py",
+      "kind": "pytest.skip",
+      "line": 351,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "TimelinePanel not found"
+    },
+    {
+      "file": "tests/visual/test_visual_bootstrap.py",
+      "kind": "pytest.skip",
+      "line": 21,
+      "scope": "in_callable",
+      "category": "unclassified",
+      "detail": "No display available for visual tests"
+    }
+  ]
+}

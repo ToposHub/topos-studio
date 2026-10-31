@@ -1,0 +1,404 @@
+/* Topos Color Theme - 与 PyQt6 面板配色完美统一 */
+/* 设计理念：专业级调色软件风格，深邃、高效、橙色点缀 */
+
+:root {
+    /* --- 核心变量覆盖 - 从 PyQt6 style_sheet.py 提取 --- */
+    
+    /* 背景层级 */
+    --bg-body: #1a1a1a;           /* 最深背景（主窗口） */
+    --bg-card: #27272b;           /* 面板背景（卡片/侧边栏） */
+    --bg-input: #252525;          /* 输入框背景 */
+    --bg-hover: #333333;          /* 悬停背景 */
+    --bg-active: #2a2a2a;         /* 激活/滑槽背景 */
+    
+    /* 边框 */
+    --border-color: #3a3a3a;      /* 默认边框 */
+    --border-light: #454545;      /* 浅边框 */
+    
+    /* 文字 */
+    --text-main: #E0E0E0;         /* 主文字 */
+    --text-muted: #888888;        /* 次要/提示文字 */
+    
+    /* 强调色 - Topos 橙色 */
+    --primary: #ff8800;           /* 主题橙色 */
+    --primary-hover: #ffaa44;     /* 橙色悬停 */
+    --primary-active: #cc6600;    /* 橙色按下 */
+}
+
+/* ================= 全局设定 ================= */
+
+body {
+    background: var(--bg-body) !important;
+    color: var(--text-main) !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条：专业软件风格 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: var(--bg-active);
+}
+::-webkit-scrollbar-thumb {
+    background: #3d3d3d;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #555555;
+}
+
+/* ================= 顶部菜单栏 ================= */
+
+.app-menubar {
+    background: var(--bg-card) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    height: 34px !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    color: #cccccc !important;
+}
+
+.app-menubar .menu-item {
+    font-weight: 500;
+    font-size: 13px;
+    border-radius: 4px;
+    margin: 0 2px;
+    color: #cccccc !important;
+}
+.app-menubar .menu-item:hover {
+    background: var(--bg-hover) !important;
+}
+
+/* 下拉菜单 */
+.app-menubar .dropdown-menu {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-light) !important;
+    border-radius: 6px !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+    padding: 4px;
+    margin-top: 4px;
+}
+.app-menubar .dropdown-item {
+    border-radius: 4px;
+    color: var(--text-main) !important;
+}
+.app-menubar .dropdown-item:hover {
+    background: var(--primary) !important;
+    color: #fff !important;
+}
+.app-menubar .dropdown-item:hover .text-muted {
+    color: rgba(255, 255, 255, 0.8) !important;
+}
+.app-menubar .dropdown-divider {
+    background: var(--border-color) !important;
+}
+
+/* ================= 侧边栏 ================= */
+
+.sidebar-panel {
+    background: var(--bg-card) !important;
+    border-right: 1px solid var(--border-color) !important;
+}
+
+/* Library 面板字体统一调整 */
+.sidebar-panel .sidebar-header span,
+.sidebar-panel .smart-folder-item {
+    font-size: 13px !important;  /* 舒适的可读性尺寸 */
+    font-weight: 500 !important;
+    color: #b0b0b0 !important;  /* 稍微暗一点 */
+}
+
+/* 文件目录字体稍大 */
+.sidebar-panel .tree-header,
+.sidebar-panel .tree-children {
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: #b0b0b0 !important;  /* 稍微暗一点 */
+}
+
+.sidebar-panel .tree-toggler {
+    font-size: 14px !important;
+    color: #808080 !important;  /* 折叠图标暗一点 */
+}
+
+.sidebar-panel .add-smart-btn {
+    font-size: 14px !important;
+}
+
+.sidebar-panel .sidebar-hide-btn {
+    font-size: 14px !important;
+}
+
+.sidebar-header span {
+    color: var(--text-muted) !important;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 13px !important;
+    letter-spacing: 0.5px;
+}
+
+.tree-header {
+    border-radius: 4px;
+    margin: 2px 8px;
+    color: var(--text-main);
+    padding: 6px 10px;
+}
+.tree-header:hover {
+    background: var(--bg-hover) !important;
+    color: #fff !important;
+}
+.tree-header.active {
+    background: rgba(255, 136, 0, 0.15) !important;
+    color: var(--primary) !important;
+    font-weight: 600;
+}
+
+/* ================= 主区域 & 文件卡片 ================= */
+
+.main-panel {
+    background: var(--bg-body) !important;
+}
+
+.file-toolbar {
+    background: var(--bg-card) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+}
+
+/* 路径框与搜索框 */
+.breadcrumb-path, .search-input {
+    background: var(--bg-input) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 4px !important;
+    color: var(--text-main) !important;
+}
+.breadcrumb-path:focus, .search-input:focus {
+    background: #000 !important;
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 2px rgba(255, 136, 0, 0.25) !important;
+}
+
+/* 文件卡片 */
+.file-card {
+    background: #252526 !important;  /* 卡片专用色（与 style.css 统一） */
+    border: 1px solid transparent !important;
+    border-radius: 6px !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    transition: all 0.2s ease;
+}
+.file-card:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.file-card.selected {
+    background: rgba(255, 136, 0, 0.15) !important;
+    border: 1px solid var(--primary) !important;
+    box-shadow: 0 0 0 1px var(--primary) !important;
+}
+
+.file-info {
+    background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.55) 40%, rgba(0,0,0,0.25) 70%, rgba(0,0,0,0.05) 100%) !important;
+    border-top: none !important;
+}
+.file-name { color: #eee !important; }
+.file-meta { color: rgba(255, 255, 255, 0.85) !important; }
+
+/* ================= 属性面板 (Properties Panel) ================= */
+
+.properties-panel {
+    background: var(--bg-card) !important;
+    border-left: 1px solid var(--border-color) !important;
+}
+
+.panel-header {
+    background: var(--bg-active);
+    border-bottom: 1px solid var(--border-color) !important;
+}
+.panel-title { color: var(--text-main) !important; }
+
+.prop-group label {
+    color: var(--text-muted) !important;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+}
+
+.prop-table td {
+    color: rgba(255, 255, 255, 0.7) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+.prop-table td:first-child { 
+    color: var(--text-muted) !important;
+    font-size: 12px;
+}
+
+/* 评分星星 */
+.rating-stars i {
+    color: rgba(255, 255, 255, 0.1);
+}
+.rating-stars i.active {
+    color: var(--primary) !important; /* 使用 Topos 橙色 */
+    text-shadow: 0 0 8px rgba(255, 136, 0, 0.4);
+}
+
+/* 输入框 */
+.form-control, .form-select {
+    background: var(--bg-input) !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-main) !important;
+    border-radius: 4px !important;
+}
+.form-control:focus, .form-select:focus {
+    background: #000 !important;
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 2px rgba(255, 136, 0, 0.2) !important;
+}
+
+/* ================= 批量操作标签页 ================= */
+
+.batch-tabs {
+    background: var(--bg-active);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 3px;
+}
+.batch-tab-item {
+    color: var(--text-muted) !important;
+    border-radius: 3px !important;
+}
+.batch-tab-item:hover {
+    color: var(--text-main) !important;
+    background: var(--bg-hover);
+}
+.batch-tab-item.active {
+    background: var(--bg-card) !important;
+    color: var(--primary) !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* 按钮美化 */
+.btn-primary {
+    background: var(--primary) !important;
+    border: none !important;
+    box-shadow: 0 2px 8px rgba(255, 136, 0, 0.3);
+    font-weight: 500;
+}
+.btn-primary:hover {
+    background: var(--primary-hover) !important;
+    box-shadow: 0 4px 12px rgba(255, 136, 0, 0.4);
+}
+.btn-primary:active {
+    background: var(--primary-active) !important;
+}
+
+/* 预览条目 */
+.preview-item {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-bottom: 4px;
+}
+.preview-old { color: var(--text-muted); }
+.preview-new { color: #32D74B; font-weight: 500; } /* 保持绿色表示新增 */
+
+/* ================= 右键菜单 ================= */
+
+.context-menu {
+    background: #252526 !important;  /* 与主项目统一 */
+    border: 1px solid #454545 !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+    border-radius: 6px !important;
+    padding: 4px;
+    min-width: 160px;
+}
+.context-menu .menu-item { 
+    color: #eee !important;
+    border-radius: 4px;
+}
+.context-menu .menu-item:hover {
+    background: var(--primary) !important;
+    color: #fff !important;
+}
+.context-menu .menu-divider { 
+    background: #454545 !important;
+    margin: 4px 8px;
+}
+
+/* ================= 模态框 ================= */
+
+.modal-content {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-light) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5) !important;
+}
+.modal-header {
+    border-bottom: 1px solid var(--border-color) !important;
+}
+.modal-footer {
+    border-top: 1px solid var(--border-color) !important;
+}
+.modal-title { color: var(--text-main) !important; }
+
+/* Toast */
+.toastify {
+    background: var(--bg-card) !important;
+    color: var(--text-main) !important;
+    border: 1px solid var(--border-color) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+    border-radius: 6px !important;
+}
+
+/* ================= 列表模式优化 ================= */
+
+.layout-list .file-card {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    border-radius: 4px !important;
+    height: 40px !important;
+    margin-bottom: 1px !important;
+}
+.layout-list .file-card:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+.layout-list .file-card.selected {
+    background: rgba(255, 136, 0, 0.2) !important;
+}
+
+/* 列表模式不需要渐变背景 */
+.layout-list .file-info {
+    background: transparent !important;
+}
+.layout-list .file-name {
+    color: var(--text-main) !important;
+}
+.layout-list .file-meta {
+    color: var(--text-muted) !important;
+}
+
+/* ================= 音频卡片 ================= */
+
+.audio-card-wrapper {
+    border: 1px solid var(--border-color);
+}
+.audio-placeholder {
+    color: var(--text-muted) !important;
+}
+.audio-time-badge {
+    background: rgba(0, 0, 0, 0.7) !important;
+    color: var(--primary) !important;
+}
+
+/* ================= 复选框 ================= */
+
+.card-checkbox {
+    accent-color: var(--primary) !important;
+}
+
+/* ================= 加载动画 ================= */
+
+.loading-spinner {
+    border-color: var(--border-color) !important;
+    border-top-color: var(--primary) !important;
+}

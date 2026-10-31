@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 108 items
+
+tests/edit/test_source_viewer_gl_contract.py ......                      [  5%]
+tests/edit/test_timeline_interaction_stopgaps.py .............           [ 17%]
+tests/edit/test_track_lock_guard_and_source_range.py ........            [ 25%]
+tests/edit/test_edit_transaction_undo_integrity.py ............          [ 36%]
+tests/edit/test_transition_and_slide_transactions.py .........           [ 44%]
+tests/edit/test_linked_ripple_revision_proxy_jobs.py ..........          [ 53%]
+tests/edit/test_revision_and_source_av_routing.py ......                 [ 59%]
+tests/edit/test_source_time_domain_mapping.py ............               [ 70%]
+tests/edit/test_content_state_transactions.py ..........                 [ 79%]
+tests/edit/test_multicam_nested_timecode_truepeak.py ........            [ 87%]
+tests/edit/test_timeline_ux_stopgaps.py ..s....                          [ 93%]
+tests/edit/test_protective_hardening.py .......                          [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/pytest-fixes.xml -
+======================== 107 passed, 1 skipped in 3.66s ========================

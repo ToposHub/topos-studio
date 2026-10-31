@@ -1,0 +1,55 @@
+
+CASE: Macro resurrects explicitly removed transition or deleted owner
+TypeError: RemoveTransitionCommand.create() missing 1 required positional argument: 'track_id'
+
+CASE: Insert marker full transaction and JSON
+before clip starts: 100 100 marker frames: [('vm', 110), ('am', 110)] []
+apply clip starts: 120 120 marker frames: [('vm', 130), ('am', 130)] []
+undo clip starts: 100 100 marker frames: [('vm', 110), ('am', 90)] ['Marker am frame 90 outside owning clip ac range [100, 200)']
+redo clip starts: 120 120 marker frames: [('vm', 110), ('am', 110)] ['Marker vm frame 110 outside owning clip c range [120, 220)', 'Marker am frame 110 outside owning clip ac range [120, 220)']
+JSON undo markers: [('vm', 130), ('am', 110)] equal: False
+
+CASE: Linked ripple insert existing partner slices, markers, JSON and stable IDs
+apply clips: [('v0', 'v', 0, 40, 'a0'), ('77a1f0e3-5cbc-4087-9635-6a584e17cefe', 'v', 40, 50, '8599b489-f850-4436-b1e3-b8f0628ce259'), ('f55f59ae-fb0f-4d09-8aa2-6664ad9dc5bd', 'v', 50, 110, 'a0'), ('a0', 'a', 0, 40, 'v0'), ('8599b489-f850-4436-b1e3-b8f0628ce259', 'a', 40, 50, '77a1f0e3-5cbc-4087-9635-6a584e17cefe'), ('fef566b4-805b-4715-b9f1-0354c21cbfbc', 'a', 50, 110, 'v0')]
+validation: ['Clip f55f59ae-fb0f-4d09-8aa2-6664ad9dc5bd link to a0 is not reciprocal (partner links to v0)', 'Clip fef566b4-805b-4715-b9f1-0354c21cbfbc link to v0 is not reciprocal (partner links to a0)', 'Marker vm frame 75 outside owning clip v0 range [0, 40)', 'Marker am frame 75 outside owning clip a0 range [0, 40)']
+markers: [(75, 'v0'), (75, 'a0')]
+live undo equal: True markers: [(75, 'v0'), (75, 'a0')] []
+JSON undo equal: False clip count: 6
+redo same IDs: False
+
+CASE: Insert snapshot redo bypasses new lock guard
+locked redo accepted new clips: 3 before: 1
+
+CASE: Lock content commands beyond newly listed seven guards
+SlipClipCommand accepted content changed: True
+SlideClipCommand accepted content changed: True
+RollTrimCommand accepted content changed: True
+RippleDeleteCommand accepted content changed: True
+BatchDeleteCommand accepted content changed: True
+AppendClipCommand accepted content changed: True
+FreezeFrameAtPlayheadCommand accepted content changed: True
+
+CASE: RippleTrim target source still base formula
+left reverse source start/dur: 120 80 mismatch/max: 80 20 examples: [(0, 179, 199), (1, 178, 198), (2, 177, 197), (3, 176, 196)]
+left mixed source start/dur: 120 80 mismatch/max: 60 5 examples: [(0, 125, 120), (1, 126, 121), (2, 128, 123), (3, 129, 124)]
+left step source start/dur: 120 80 mismatch/max: 24 20 examples: [(31, 152, 151), (32, 154, 152), (33, 156, 153), (34, 158, 154)]
+right reverse source start/dur: 100 80 mismatch/max: 80 20 examples: [(0, 199, 179), (1, 198, 178), (2, 197, 177), (3, 196, 176)]
+right mixed source start/dur: 100 80 mismatch/max: 0 0 examples: []
+right step source start/dur: 100 80 mismatch/max: 0 0 examples: []
+
+CASE: Smooth slice non-fractional phase and step trim rebase
+(None, None) False cut: 49 mismatches/max: 51 22 first: [(43, 143, 144), (44, 144, 145), (45, 145, 147), (46, 146, 148)]
+(None, None) True cut: 49 mismatches/max: 51 22 first: [(43, 176, 175), (44, 175, 174), (45, 174, 172), (46, 173, 171)]
+(24, 24) False cut: 49 mismatches/max: 51 22 first: [(43, 143, 144), (44, 144, 145), (45, 145, 147), (46, 146, 148)]
+(24, 24) True cut: 49 mismatches/max: 51 22 first: [(43, 176, 175), (44, 175, 174), (45, 174, 172), (46, 173, 171)]
+(30, 24) False cut: 49 mismatches/max: 38 13 first: [(37, 146, 147), (38, 148, 149), (39, 149, 151), (40, 150, 152)]
+(30, 24) True cut: 49 mismatches/max: 38 13 first: [(37, 173, 172), (38, 171, 170), (39, 170, 168), (40, 169, 167)]
+step left trim original/cmd/helper frames50,60,70: [150, 170, 190] [150, 160, 170] [150, 160, 170]
+
+CASE: Overwrite marker/transition payload and new source FPS JSON
+after markers/validation: [(75, 'c')] ['Marker m references non-existent clip c']
+transition before/after/undo: 1 0 0 undo equal: False
+OverwriteClipCommand original/JSON duration: 24 30
+AppendClipCommand original/JSON duration: 24 30
+
+DONE

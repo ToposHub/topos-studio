@@ -1,0 +1,109 @@
+{
+  "baseline": "8330e42df",
+  "final_edit_batches": [
+    {
+      "file": "validation/final-edit-batches-v2/edit-batch-1.xml",
+      "tests": 1300,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 1299
+    },
+    {
+      "file": "validation/final-edit-batches-v2/edit-batch-2.xml",
+      "tests": 1520,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 3,
+      "passed": 1517
+    },
+    {
+      "file": "validation/final-edit-batches-v2/edit-batch-3.xml",
+      "tests": 1546,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 1545
+    },
+    {
+      "file": "validation/final-edit-batches-v2/edit-batch-4.xml",
+      "tests": 2021,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "passed": 2019
+    },
+    {
+      "file": "validation/final-edit-batches-v2/edit-batch-5.xml",
+      "tests": 1096,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 6,
+      "passed": 1090
+    },
+    {
+      "file": "validation/final-edit-batches-v2/edit-batch-6.xml",
+      "tests": 1673,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 1673
+    },
+    {
+      "file": "validation/final-edit-batches-v2/edit-batch-7.xml",
+      "tests": 1457,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 7,
+      "passed": 1450
+    }
+  ],
+  "batch_total": {
+    "tests": 10613,
+    "passed": 10593,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 20
+  },
+  "separate_decode_lifecycle": {
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "passed": 13
+  },
+  "edit_total_nonoverlapping": {
+    "tests": 10626,
+    "passed": 10606,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 20
+  },
+  "outside_edit_directory": {
+    "ui-extra-final.xml": {
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 51
+    },
+    "crossfeature-final.xml": {
+      "tests": 159,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 159
+    },
+    "package-final.xml": {
+      "tests": 93,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 93
+    }
+  },
+  "notes": [
+    "Focused checks overlap final Edit cases and are not added.",
+    "Earlier monolithic native decode teardown stalled; only isolated batches and the separate lifecycle file passed."
+  ]
+}

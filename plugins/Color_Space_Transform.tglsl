@@ -1,0 +1,665 @@
+// --- Topos Plugin Metadata ---
+// @name Color Space Transform
+// @i18n_name color_space_transform
+// @author Topos Team
+// @version 1.0
+// @description Professional color space and gamma converter with tone mapping and white point adaptation
+// @param select input_space "Input Space" 0 "sRGB" "Rec.709" "Rec.2020" "Adobe RGB" "DCI-P3" "Display P3" "ACEScg" "ARRI Wide Gamut 3" "Sony S-Gamut3" "Panasonic V-Gamut" "DaVinci Wide Gamut" "REDWideGamutRGB" "Canon Cinema Gamut" "Fujifilm F-Gamut" "BMD Film Gen5" "ProPhoto RGB"
+// @param select input_gamma "Input Gamma" 0 "Linear" "sRGB" "Rec.709" "Gamma 2.2" "Gamma 2.4" "Gamma 2.6" "HLG" "S-Log3" "ARRI LogC3" "ACEScct" "V-Log" "DaVinci Int" "RED Log3G10" "C-Log2" "C-Log3" "F-Log" "F-Log2" "Apple Log"
+// @param select output_space "Output Space" 0 "sRGB" "Rec.709" "Rec.2020" "Adobe RGB" "DCI-P3" "Display P3" "ACEScg" "ARRI Wide Gamut 3" "Sony S-Gamut3" "Panasonic V-Gamut" "DaVinci Wide Gamut" "REDWideGamutRGB" "Canon Cinema Gamut" "Fujifilm F-Gamut" "BMD Film Gen5" "ProPhoto RGB"
+// @param select output_gamma "Output Gamma" 1 "Linear" "sRGB" "Rec.709" "Gamma 2.2" "Gamma 2.4" "Gamma 2.6" "HLG" "S-Log3" "ARRI LogC3" "ACEScct" "V-Log" "DaVinci Int" "RED Log3G10" "C-Log2" "C-Log3" "F-Log" "F-Log2" "Apple Log"
+// @param checkbox enable_adaptation "Enable White Point Adaptation" 0
+// @param select tone_mapping "Tone Mapping" 0 "None" "Reinhard" "Filmic" "ACES"
+// @param slider exposure "Exposure Adjustment" 0.0 -3.0 3.0
+// @param slider contrast "Contrast" 1.0 0.0 2.0
+// @param slider saturation "Saturation" 1.0 0.0 2.0
+// -----------------------------
+
+// ============================================
+// Color Space Transform Plugin
+// ============================================
+// This plugin converts between different color spaces and gamma encodings
+// using ProPhoto RGB (D50) as the working color space.
+//
+// Conversion Pipeline:
+// 1. Input Gamma Decoding (to Linear)
+// 2. Input Color Space -> ProPhoto RGB
+// 3. (Optional) White Point Adaptation
+// 4. (Optional) Tone Mapping
+// 5. ProPhoto RGB -> Output Color Space
+// 6. Output Gamma Encoding
+// ============================================
+
+// ============================================
+// SECTION 1: Input Gamma Decoding Functions
+// Convert from various gamma/log encodings to linear
+// ============================================
+
+vec3 srgb_to_linear(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
+vec3 rec709_to_linear(vec3 c) {
+    return mix(c / 4.5, pow((c + 0.099) / 1.099, vec3(1.0/0.45)), step(0.081, c));
+}
+
+vec3 slog3_to_linear(vec3 c) {
+    vec3 lin_part = (c * 1023.0 - 95.0) / 6774.248;
+    vec3 log_part = 0.19 * pow(vec3(10.0), (c * 1023.0 - 420.0) / 261.5) - 0.01;
+    return mix(lin_part, log_part, step(0.01125, lin_part));
+}
+
+vec3 logc3_to_linear(vec3 c) {
+    float cut = 0.009010;
+    float e = 5.555556;
+    float f = 0.052272;
+    float c_val = 0.247190;
+    float d = 0.385537;
+    vec3 lin_part = (c - f) / e;
+    vec3 log_part = (pow(vec3(10.0), (c - d) / c_val) - f) / e;
+    return mix(lin_part, log_part, step(cut, c));
+}
+
+vec3 acescct_to_linear(vec3 c) {
+    float X_BRK = 0.0078125;
+    float A = 10.5402377416545;
+    float B = 0.0729055341958355;
+    vec3 lin_part = (c - B) / A;
+    vec3 log_part = pow(vec3(2.0), c * 17.52 - 9.72);
+    return mix(lin_part, log_part, step(X_BRK, c));
+}
+
+vec3 davinci_int_to_linear(vec3 c) {
+    float A = 0.00262409;
+    float B = 0.00567202;
+    float C = 7.5671;
+    float M = 15.2913;
+    vec3 lin_part = c / 16.291741;
+    vec3 log_part = pow(vec3(2.0), c * M - C) - B;
+    return mix(lin_part, log_part, step(A, c));
+}
+
+vec3 redlog3g10_to_linear(vec3 c) {
+    float a = 0.224282;
+    float b = 155.9753;
+    return (pow(vec3(10.0), c / a) - 1.0) / b;
+}
+
+vec3 clog2_to_linear(vec3 c) {
+    vec3 lin_part = (c - 0.0630735) / 10.125;
+    vec3 log_part = pow(vec3(10.0), c * 7.3704 - 3.3244);
+    return mix(lin_part, log_part, step(0.001923, lin_part));
+}
+
+vec3 clog3_to_linear(vec3 c) {
+    vec3 lin_part = (c - 0.0630735) / 10.125;
+    vec3 log_part = pow(vec3(10.0), c * 5.0272 - 2.8561);
+    return mix(lin_part, log_part, step(0.012484, lin_part));
+}
+
+vec3 flog_to_linear(vec3 c) {
+    float a = 0.555556;
+    float b = 0.009468;
+    float c_val = 0.344676;
+    float d = 0.790453;
+    float e = 8.799461;
+    float f = 0.092864;
+    float cut = 0.00089;
+    vec3 lin_part = (c - f) / e;
+    vec3 log_part = (pow(vec3(10.0), (c - d) / c_val) - b) / a;
+    return mix(lin_part, log_part, step(cut, log_part));
+}
+
+vec3 flog2_to_linear(vec3 c) {
+    float a = 0.754958;
+    float b = 0.005120;
+    float c_val = 0.201399;
+    float d = 0.443315;
+    float e = 6.273033;
+    float f = 0.106821;
+    float cut = 0.00089;
+    vec3 lin_part = (c - f) / e;
+    vec3 log_part = (pow(vec3(10.0), (c - d) / c_val) - b) / a;
+    return mix(lin_part, log_part, step(cut, log_part));
+}
+
+vec3 applelog_to_linear(vec3 c) {
+    float a = 5.555556;
+    float b = 0.052272;
+    float c_val = 0.247190;
+    float d = 0.385537;
+    float e = 5.367655;
+    float f = 0.092809;
+    float cut = 0.010591;
+    vec3 lin_part = (c - f) / e;
+    vec3 log_part = (pow(vec3(10.0), (c - d) / c_val) - b) / a;
+    return mix(lin_part, log_part, step(cut, log_part));
+}
+
+vec3 hlg_to_linear(vec3 c) {
+    float a = 0.17883277;
+    float b = 0.28466892;
+    float c_val = 0.55991073;
+    vec3 lin_part = c * c / 3.0;
+    vec3 log_part = (pow(vec3(10.0), (c - c_val) / a) + b) / 12.0;
+    return mix(lin_part, log_part, step(1.0/12.0, c));
+}
+
+vec3 vlog_to_linear(vec3 c) {
+    float cut = 0.01;
+    float a = 5.6;
+    float b = 0.125;
+    float c_val = 0.241514;
+    float d = 0.00876;
+    float e = 0.598206;
+    vec3 lin_part = (c - b) / a;
+    vec3 log_part = pow(vec3(10.0), (c - e) / c_val) - d;
+    return mix(lin_part, log_part, step(cut, log_part));
+}
+
+// Decode input gamma to linear
+vec3 decode_input_gamma(vec3 c, int gamma) {
+    if (gamma == 0) return c; // Linear
+    if (gamma == 1) return srgb_to_linear(c);
+    if (gamma == 2) return rec709_to_linear(c);
+    if (gamma == 3) return pow(c, vec3(2.2));
+    if (gamma == 4) return pow(c, vec3(2.4));
+    if (gamma == 5) return pow(c, vec3(2.6));
+    if (gamma == 6) return hlg_to_linear(c);
+    if (gamma == 7) return slog3_to_linear(c);
+    if (gamma == 8) return logc3_to_linear(c);
+    if (gamma == 9) return acescct_to_linear(c);
+    if (gamma == 10) return vlog_to_linear(c);
+    if (gamma == 11) return davinci_int_to_linear(c);
+    if (gamma == 12) return redlog3g10_to_linear(c);
+    if (gamma == 13) return clog2_to_linear(c);
+    if (gamma == 14) return clog3_to_linear(c);
+    if (gamma == 15) return flog_to_linear(c);
+    if (gamma == 16) return flog2_to_linear(c);
+    if (gamma == 17) return applelog_to_linear(c);
+    return c;
+}
+
+// ============================================
+// SECTION 2: Output Gamma Encoding Functions
+// Convert from linear to various gamma/log encodings
+// ============================================
+
+vec3 linear_to_srgb(vec3 c) {
+    return mix(vec3(12.92) * c, vec3(1.055) * pow(max(c, vec3(0.0)), vec3(1.0/2.4)) - vec3(0.055), step(vec3(0.0031308), c));
+}
+
+vec3 linear_to_rec709(vec3 c) {
+    return mix(vec3(4.5) * c, vec3(1.099) * pow(max(c, vec3(0.0)), vec3(0.45)) - vec3(0.099), step(vec3(0.018), c));
+}
+
+vec3 linear_to_slog3(vec3 c) {
+    vec3 log_part = (420.0 + 261.5 * log((max(c, vec3(0.0)) + vec3(0.01)) / vec3(0.19)) / log(vec3(10.0))) / vec3(1023.0);
+    vec3 lin_part = (c * vec3(6774.248) + vec3(95.0)) / vec3(1023.0);
+    return mix(lin_part, log_part, step(vec3(0.01125), c));
+}
+
+vec3 linear_to_logc3(vec3 c) {
+    float cut = 0.010591;
+    float a = 5.555556;
+    float b = 0.052272;
+    float c_val = 0.247190;
+    float d = 0.385537;
+    float e = 5.367655;
+    float f = 0.092809;
+    vec3 log_part = c_val * log(max(a * c + vec3(b), vec3(1e-10))) / vec3(log(10.0)) + vec3(d);
+    vec3 lin_part = e * c + f;
+    return mix(lin_part, log_part, step(cut, c));
+}
+
+vec3 linear_to_acescct(vec3 c) {
+    float X_BRK = 0.0078125;
+    float A = 10.5402377416545;
+    float B = 0.0729055341958355;
+    vec3 log_part = (log2(max(c, vec3(1e-10))) + vec3(9.72)) / vec3(17.52);
+    vec3 lin_part = vec3(A) * c + vec3(B);
+    return mix(lin_part, log_part, step(X_BRK, c));
+}
+
+vec3 linear_to_davinci_int(vec3 c) {
+    float A = 0.00262409;
+    float B = 0.00567202;
+    float C = 7.5671;
+    float M = 15.2913;
+    vec3 log_part = (log2(max(c, vec3(0.0)) + vec3(B)) + vec3(C)) / vec3(M);
+    vec3 lin_part = c * vec3(16.291741);
+    return mix(lin_part, log_part, step(A, c));
+}
+
+vec3 linear_to_redlog3g10(vec3 c) {
+    float a = 0.224282;
+    float b = 155.9753;
+    float c_val = 1.0;
+    float d = 0.0;
+    return vec3(a) * (log(max(c * b + vec3(c_val), vec3(1e-6))) / vec3(log(10.0))) + vec3(d);
+}
+
+vec3 linear_to_clog2(vec3 c) {
+    return mix(vec3(10.125) * c + vec3(0.0630735), (log(max(c, vec3(1e-5))) / vec3(log(10.0)) + vec3(3.3244)) / vec3(7.3704), step(vec3(0.001923), c));
+}
+
+vec3 linear_to_clog3(vec3 c) {
+    return mix(vec3(10.125) * c + vec3(0.0630735), (log(max(c, vec3(1e-5))) / vec3(log(10.0)) + vec3(2.8561)) / vec3(5.0272), step(vec3(0.012484), c));
+}
+
+vec3 linear_to_flog(vec3 c) {
+    float a = 0.555556;
+    float b = 0.009468;
+    float c_val = 0.344676;
+    float d = 0.790453;
+    float e = 8.799461;
+    float f = 0.092864;
+    return mix(vec3(e) * c + vec3(f), vec3(c_val) * (log(max(vec3(a) * c + vec3(b), vec3(1e-5))) / vec3(log(10.0))) + vec3(d), step(vec3(0.00089), c));
+}
+
+vec3 linear_to_flog2(vec3 c) {
+    float a = 0.754958;
+    float b = 0.005120;
+    float c_val = 0.201399;
+    float d = 0.443315;
+    float e = 6.273033;
+    float f = 0.106821;
+    float cut = 0.00089;
+    vec3 log_part = vec3(c_val) * (log(max(vec3(a) * c + vec3(b), vec3(1e-9))) / vec3(log(10.0))) + vec3(d);
+    vec3 lin_part = vec3(e) * c + vec3(f);
+    return mix(lin_part, log_part, step(cut, c));
+}
+
+vec3 linear_to_applelog(vec3 c) {
+    float a = 5.555556;
+    float b = 0.052272;
+    float c_val = 0.247190;
+    float d = 0.385537;
+    float e = 5.367655;
+    float f = 0.092809;
+    float cut = 0.010591;
+    vec3 log_part = vec3(c_val) * log(max(vec3(a) * c + vec3(b), vec3(1e-10))) / vec3(log(10.0)) + vec3(d);
+    vec3 lin_part = vec3(e) * c + vec3(f);
+    return mix(lin_part, log_part, step(cut, c));
+}
+
+vec3 linear_to_hlg(vec3 c) {
+    float a = 0.17883277;
+    float b = 0.28466892;
+    float c_val = 0.55991073;
+    return mix(sqrt(vec3(3.0) * c), vec3(a) * log(max(vec3(12.0) * c - vec3(b), vec3(1e-6))) + vec3(c_val), step(vec3(1.0/12.0), c));
+}
+
+vec3 linear_to_vlog(vec3 c) {
+    float cut = 0.01;
+    float a = 5.6;
+    float b = 0.125;
+    float c_val = 0.241514;
+    float d = 0.00876;
+    float e = 0.598206;
+    return mix(vec3(a) * c + vec3(b), vec3(c_val) * (log(max(c + vec3(d), vec3(1e-10))) / vec3(log(10.0))) + vec3(e), step(cut, c));
+}
+
+// Encode linear to output gamma
+vec3 encode_output_gamma(vec3 c, int gamma) {
+    if (gamma == 0) return c; // Linear
+    if (gamma == 1) return linear_to_srgb(c);
+    if (gamma == 2) return linear_to_rec709(c);
+    if (gamma == 3) return pow(max(c, vec3(0.0)), vec3(1.0/2.2));
+    if (gamma == 4) return pow(max(c, vec3(0.0)), vec3(1.0/2.4));
+    if (gamma == 5) return pow(max(c, vec3(0.0)), vec3(1.0/2.6));
+    if (gamma == 6) return linear_to_hlg(c);
+    if (gamma == 7) return linear_to_slog3(c);
+    if (gamma == 8) return linear_to_logc3(c);
+    if (gamma == 9) return linear_to_acescct(c);
+    if (gamma == 10) return linear_to_vlog(c);
+    if (gamma == 11) return linear_to_davinci_int(c);
+    if (gamma == 12) return linear_to_redlog3g10(c);
+    if (gamma == 13) return linear_to_clog2(c);
+    if (gamma == 14) return linear_to_clog3(c);
+    if (gamma == 15) return linear_to_flog(c);
+    if (gamma == 16) return linear_to_flog2(c);
+    if (gamma == 17) return linear_to_applelog(c);
+    return c;
+}
+
+// ============================================
+// SECTION 3: Input Color Space to ProPhoto RGB
+// ============================================
+// All matrices convert from input color space to ProPhoto RGB (D50)
+// Matrix pipeline: Input RGB -> XYZ (input WP) -> Bradford -> XYZ (D50) -> ProPhoto RGB
+
+mat3 get_input_to_prophoto_matrix(int space) {
+    // 0: sRGB / Rec.709 (D65) -> ProPhoto RGB (D50)
+    if (space == 0 || space == 1) {
+        return mat3(
+            0.5292930, 0.0983601, 0.0168761,
+            0.3301161, 0.8734699, 0.1176587,
+            0.1405909, 0.0281700, 0.8654651
+        );
+    }
+    // 2: Rec.2020 (D65) -> ProPhoto RGB (D50)
+    if (space == 2) {
+        return mat3(
+            0.8352183, 0.0540236, -0.0023407,
+            0.0488137, 0.9289202, 0.0363309,
+            0.1159680, 0.0170561, 0.9660097
+        );
+    }
+    // 3: Adobe RGB (D65) -> ProPhoto RGB (D50)
+    if (space == 3) {
+        return mat3(
+            0.7401399, 0.1375424, 0.0235988,
+            0.1132338, 0.8330783, 0.0737825,
+            0.1466263, 0.0293793, 0.9026187
+        );
+    }
+    // 4: DCI-P3 / 5: Display P3 (D65) -> ProPhoto RGB (D50)
+    if (space == 4 || space == 5) {
+        return mat3(
+            0.6317077, 0.0831965, -0.0012718,
+            0.2138851, 0.8858651, 0.0507542,
+            0.1544072, 0.0309384, 0.9505175
+        );
+    }
+    // 6: ACEScg (AP1, D60) -> ProPhoto RGB (D50)
+    if (space == 6) {
+        return mat3(
+            0.8560972, 0.0532577, -0.0073252,
+            0.0293560, 0.9316660, 0.0121141,
+            0.1145469, 0.0150762, 0.9952112
+        );
+    }
+    // 7: ARRI Wide Gamut 3 (D65) -> ProPhoto RGB (D50)
+    if (space == 7) {
+        return mat3(
+            0.8298799, 0.0968621, 0.0007312,
+            0.1242876, 1.1065035, -0.0484591,
+            0.0458324, -0.2033657, 1.0477279
+        );
+    }
+    // 8: Sony S-Gamut3 (D65) -> ProPhoto RGB (D50)
+    if (space == 8) {
+        return mat3(
+            0.9319169, 0.0295382, -0.0117871,
+            0.0047720, 1.0977620, 0.0171001,
+            0.0633111, -0.1273002, 0.9946870
+        );
+    }
+    // 9: Panasonic V-Gamut (D65) -> ProPhoto RGB (D50)
+    if (space == 9) {
+        return mat3(
+            0.8965147, 0.0284161, -0.0113394,
+            0.0411724, 1.0679324, 0.0082294,
+            0.0623129, -0.0963485, 1.0031099
+        );
+    }
+    // 10: DaVinci Wide Gamut (D65) -> ProPhoto RGB (D50)
+    if (space == 10) {
+        return mat3(
+            0.8521588, 0.0721044, -0.0072475,
+            0.0359768, 0.8847487, 0.0102911,
+            0.1118643, 0.0431469, 0.9969564
+        );
+    }
+    // 11: REDWideGamutRGB (D65) -> ProPhoto RGB (D50)
+    if (space == 11) {
+        return mat3(
+            0.9759265, 0.0364770, -0.0756129,
+           -0.0565166, 1.2069691, -0.3019044,
+            0.0805901, -0.2434461, 1.3775173
+        );
+    }
+    // 12: Canon Cinema Gamut (D65) -> ProPhoto RGB (D50)
+    if (space == 12) {
+        return mat3(
+            0.9166655, 0.0290548, -0.0115942,
+            0.0206180, 0.8559948, 0.0066978,
+            0.0627166, 0.1149504, 1.0048964
+        );
+    }
+    // 13: Fujifilm F-Gamut (D65) -> ProPhoto RGB (D50)
+    // Same as Rec.2020
+    if (space == 13) {
+        return mat3(
+            0.8352183, 0.0540236, -0.0023407,
+            0.0488137, 0.9289202, 0.0363309,
+            0.1159680, 0.0170561, 0.9660097
+        );
+    }
+    // 14: BMD Film Gen5 (D65) -> ProPhoto RGB (D50)
+    if (space == 14) {
+        return mat3(
+            0.8898333, -0.0132696, -0.0193663,
+            0.0821502, 1.1360273, 0.0624924,
+            0.0280164, -0.1227577, 0.9568739
+        );
+    }
+    // 15: ProPhoto RGB (D50) -> ProPhoto RGB (D50) - Identity
+    return mat3(
+        1.0, 0.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 1.0
+    );
+}
+
+// ============================================
+// SECTION 4: ProPhoto RGB to Output Color Space
+// ============================================
+// All matrices convert from ProPhoto RGB (D50) to output color space
+// Matrix pipeline: ProPhoto RGB -> XYZ (D50) -> Inverse Bradford -> XYZ (output WP) -> Output RGB
+
+mat3 get_prophoto_to_output_matrix(int space) {
+    // 0: ProPhoto RGB (D50) -> sRGB / Rec.709 (D65)
+    if (space == 0 || space == 1) {
+        return mat3(
+             2.0342892, -0.2288020, -0.0085623,
+            -0.7275078,  1.2317255, -0.1532653,
+            -0.3067813, -0.0029236,  1.1618276
+        );
+    }
+    // 2: ProPhoto RGB (D50) -> Rec.2020 (D65)
+    if (space == 2) {
+        return mat3(
+             1.2006095, -0.0699261,  0.0055390,
+            -0.0574933,  1.0806111, -0.0407803,
+            -0.1431162, -0.0106850,  1.0352414
+        );
+    }
+    // 3: ProPhoto RGB (D50) -> Adobe RGB (D65)
+    if (space == 3) {
+        return mat3(
+             1.3895924, -0.2288020, -0.0176278,
+            -0.1693724,  1.2317255, -0.0962564,
+            -0.2202200, -0.0029236,  1.1138841
+        );
+    }
+    // 4: ProPhoto RGB (D50) -> DCI-P3 / Display P3 (D65)
+    if (space == 4 || space == 5) {
+        return mat3(
+             1.6325044, -0.1536805,  0.0103902,
+            -0.3796694,  1.1666904, -0.0628051,
+            -0.2528350, -0.0130099,  1.0524149
+        );
+    }
+    // 6: ProPhoto RGB (D50) -> ACEScg (AP1, D60)
+    if (space == 6) {
+        return mat3(
+             1.1691282, -0.0669844,  0.0094207,
+            -0.0350954,  1.0755682, -0.0133505,
+            -0.1340327, -0.0085838,  1.0039298
+        );
+    }
+    // 7: ProPhoto RGB (D50) -> ARRI Wide Gamut 3 (D65)
+    if (space == 7) {
+        return mat3(
+             1.2214917, -0.1080029, -0.0058478,
+            -0.1407401,  0.9239401,  0.0428319,
+            -0.0807516,  0.1840628,  0.9630159
+        );
+    }
+    // 8: ProPhoto RGB (D50) -> Sony S-Gamut3 (D65)
+    if (space == 8) {
+        return mat3(
+             1.0723019, -0.0273251,  0.0131766,
+            -0.0035910,  0.9092234, -0.0156734,
+            -0.0687108,  0.1181018,  1.0024968
+        );
+    }
+    // 9: ProPhoto RGB (D50) -> Panasonic V-Gamut (D65)
+    if (space == 9) {
+        return mat3(
+             1.1158480, -0.0285319,  0.0128478,
+            -0.0424541,  0.9367819, -0.0081652,
+            -0.0733939,  0.0917501,  0.9953173
+        );
+    }
+    // 10: ProPhoto RGB (D50) -> DaVinci Wide Gamut (D65)
+    if (space == 10) {
+        return mat3(
+             1.1763040, -0.0963309,  0.0095457,
+            -0.0463205,  1.1346271, -0.0120490,
+            -0.1299835, -0.0382962,  1.0025033
+        );
+    }
+    // 11: ProPhoto RGB (D50) -> REDWideGamutRGB (D65)
+    if (space == 11) {
+        return mat3(
+             1.0192343, -0.0204216,  0.0514708,
+             0.0343281,  0.8661532,  0.1917153,
+            -0.0535624,  0.1542684,  0.7568139
+        );
+    }
+    // 12: ProPhoto RGB (D50) -> Canon Cinema Gamut (D65)
+    if (space == 12) {
+        return mat3(
+             1.0909034, -0.0387532,  0.0128448,
+            -0.0257664,  1.1701934, -0.0080968,
+            -0.0651369, -0.1314402,  0.9952519
+        );
+    }
+    // 13: ProPhoto RGB (D50) -> Fujifilm F-Gamut (D65)
+    if (space == 13) {
+        return mat3(
+             1.2006095, -0.0699261,  0.0055390,
+            -0.0574933,  1.0806111, -0.0407803,
+            -0.1431162, -0.0106850,  1.0352414
+        );
+    }
+    // 14: ProPhoto RGB (D50) -> BMD Film Gen5 (D65)
+    if (space == 14) {
+        return mat3(
+             1.1216969,  0.0154464,  0.0216934,
+            -0.0787515,  0.8730074, -0.0586091,
+            -0.0429454,  0.1115462,  1.0369157
+        );
+    }
+    // 15: ProPhoto RGB (D50) -> ProPhoto RGB (D50) - Identity
+    return mat3(
+        1.0, 0.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 1.0
+    );
+}
+
+// ============================================
+// SECTION 5: White Point Adaptation (Bradford)
+// ============================================
+
+mat3 bradford_adaptation() {
+    // Bradford adaptation from D50 to D65
+    // This matrix is applied when enable_adaptation is checked
+    // Note: The main color space matrices already include D50<->D65 adaptation
+    // This is an ADDITIONAL adaptation for fine-tuning
+    mat3 adaptation = mat3(
+         1.0478112,  0.0228866, -0.0501270,
+         0.0295424,  0.9904844, -0.0170491,
+        -0.0092345,  0.0150436,  0.7520879
+    );
+    return adaptation;
+}
+
+mat3 bradford_adaptation_inverse() {
+    // Inverse Bradford adaptation from D65 to D50
+    mat3 adaptation = mat3(
+         0.9555365, -0.0230393,  0.0631636,
+        -0.0282532,  1.0099417,  0.0210054,
+         0.0122983, -0.0204830,  1.3299099
+    );
+    return adaptation;
+}
+
+// ============================================
+// SECTION 6: Tone Mapping Algorithms
+// ============================================
+
+vec3 reinhard_tone_map(vec3 color) {
+    return color / (1.0 + color);
+}
+
+vec3 filmic_tone_map(vec3 color) {
+    vec3 x = max(vec3(0.0), color - 0.004);
+    return (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06);
+}
+
+vec3 aces_tone_map(vec3 color) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((color * (a * color + b)) / (color * (c * color + d) + e), 0.0, 1.0);
+}
+
+vec3 apply_tone_mapping(vec3 color, int method) {
+    if (method == 0) return color; // None
+    if (method == 1) return reinhard_tone_map(color);
+    if (method == 2) return filmic_tone_map(color);
+    if (method == 3) return aces_tone_map(color);
+    return color;
+}
+
+// ============================================
+// SECTION 7: Main Process Function
+// ============================================
+
+vec3 process(vec3 color, vec2 uv) {
+    // Step 1: Decode input gamma to linear
+    vec3 linear_color = decode_input_gamma(color, input_gamma);
+
+    // Step 2: Convert input color space to ProPhoto RGB
+    mat3 input_to_prophoto = get_input_to_prophoto_matrix(input_space);
+    vec3 prophoto_color = input_to_prophoto * linear_color;
+
+    // Step 3: (Optional) White point adaptation
+    // Note: This is a simplified implementation
+    // Full implementation would adapt based on specific white points of input/output spaces
+    if (enable_adaptation > 0.5) {
+        mat3 adapt = bradford_adaptation();
+        prophoto_color = adapt * prophoto_color;
+    }
+
+    // Step 4: Apply exposure and contrast adjustments
+    prophoto_color *= pow(2.0, exposure);
+    if (contrast != 1.0) {
+        prophoto_color = (prophoto_color - 0.18) * contrast + 0.18;
+    }
+
+    // Step 5: (Optional) Tone mapping
+    vec3 tone_mapped = apply_tone_mapping(prophoto_color, tone_mapping);
+
+    // Step 6: Convert ProPhoto RGB to output color space
+    mat3 prophoto_to_output = get_prophoto_to_output_matrix(output_space);
+    vec3 output_color = prophoto_to_output * tone_mapped;
+
+    // Step 7: Apply saturation adjustment
+    if (saturation != 1.0) {
+        float luminance = dot(output_color, vec3(0.2126, 0.7152, 0.0722));
+        output_color = mix(vec3(luminance), output_color, saturation);
+    }
+
+    // Step 8: Encode output gamma
+    vec3 final_color = encode_output_gamma(output_color, output_gamma);
+
+    return final_color;
+}

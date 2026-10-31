@@ -1,0 +1,167 @@
+{
+  "action": {
+    "export_srt": "字幕を書き出す (SRT)...",
+    "queue_start": "動画キューを開始",
+    "queue_stop": "動画キューを停止"
+  },
+  "panel": {
+    "deliver_video_batch": "動画一括書き出し"
+  },
+  "deliver": {
+    "export_stems": "ステムを書き出す…",
+    "export_stems_tooltip": "オーディオトラック / バス / D-M-E グループを個別の WAV ステムとして書き出します",
+    "export_chapters": "チャプターを書き出す…",
+    "export_chapters_tooltip": "タイムラインのチャプターマーカーを YouTube チャプターテキストまたは FFMetadata として書き出します",
+    "video": {
+      "settings_title": "動画納品",
+      "source_range": "ソースと範囲",
+      "video_settings": "動画",
+      "audio_delivery": "オーディオと納品",
+      "no_project": "（プロジェクトなし）",
+      "output_dir_placeholder": "出力ディレクトリ",
+      "select_output_dir": "出力ディレクトリを選択",
+      "add_to_queue": "動画キューに追加",
+      "add_and_start": "追加して開始",
+      "alpha": "アルファチャンネル",
+      "profile_default": "（デフォルト）",
+      "preflight_ok": "追加できます",
+      "project": "プロジェクト",
+      "timeline": "タイムライン",
+      "range": "範囲",
+      "frames": "フレーム",
+      "duration": "デュレーション",
+      "container": "コンテナー",
+      "codec": "コーデック",
+      "profile": "プロファイル",
+      "profile_tooltip": "エンコーダープロファイル。「自動」はコーデックのデフォルト互換プロファイルを選択します。",
+      "aspect_lock": "アスペクト比をロック",
+      "resolution": "解像度",
+      "size": "サイズ",
+      "frame_rate": "フレームレート",
+      "custom_fps": "カスタム FPS",
+      "quality_mode": "品質モード",
+      "quality": "品質",
+      "quality_crf": "品質 (CRF)",
+      "quality_crf_hint": "CRF は単位なしの指標です。値が小さいほど高品質になります。",
+      "crf_18": "CRF 18 · 高品質",
+      "crf_20": "CRF 20 · Blu-ray 品質",
+      "crf_23": "CRF 23 · 推奨",
+      "crf_28": "CRF 28 · 小さいファイル",
+      "crf_30": "CRF 30 · プレビュー",
+      "quality_bitrate_hint": "目標の平均動画ビットレート (kbps)。実際のビットレートは変動します。",
+      "quality_cbr_hint": "固定の動画ビットレート (kbps)。最小レートと最大レートは制約されます。",
+      "quality_auto_hint": "エンコーダーが品質を自動的に選択します。",
+      "estimated_size": "推定サイズ",
+      "estimated_size_hint": "出力デュレーション × 動画ビットレート ÷ 8 から推定。オーディオとコンテナーのオーバーヘッドは含まれません。",
+      "filename_placeholder": "タイムライン名",
+      "quality_auto": "自動",
+      "quality_vbr": "VBR",
+      "quality_cbr": "CBR",
+      "quality_bitrate": "ビットレート",
+      "color_space": "カラースペース",
+      "bit_depth": "ビット深度",
+      "audio_codec": "オーディオコーデック",
+      "sample_rate": "サンプルレート",
+      "audio_bitrate": "オーディオビットレート",
+      "subtitles": "字幕",
+      "output_dir": "出力先",
+      "filename": "ファイル名",
+      "if_exists": "同名ファイル時",
+      "allow_placeholders": "プレースホルダークリップを許可",
+      "allow_placeholders_hint": "通常、プレースホルダークリップは納品をブロックします。有効にするとそのまま書き出し、プレースホルダーはカラーバーとしてレンダリングされます。"
+    },
+    "preset": {
+      "web_h264": {
+        "title": "Web H.264",
+        "subtitle": "MP4 · H.264 · 1080p"
+      },
+      "mobile_h264": {
+        "title": "モバイル",
+        "subtitle": "MP4 · H.264 · 1080×1920"
+      },
+      "master_prores422": {
+        "title": "マスター",
+        "subtitle": "MOV · ProRes 422 · UHD"
+      },
+      "master_prores4444": {
+        "title": "マスター（アルファ）",
+        "subtitle": "MOV · ProRes 4444 · 4:4:4"
+      },
+      "hevc_uhd": {
+        "title": "HEVC 4K",
+        "subtitle": "MP4 · HEVC · 3840×2160"
+      },
+      "dnxhr_sq": {
+        "title": "DNxHR SQ",
+        "subtitle": "MOV · DNxHR SQ · 1080p"
+      },
+      "custom": {
+        "title": "カスタム",
+        "subtitle": "現在の設定"
+      }
+    },
+    "queue": {
+      "title": "動画レンダーキュー",
+      "start": "キューを開始",
+      "pause": "一時停止",
+      "resume": "再開",
+      "cancel_current": "現在の項目をキャンセル",
+      "clear_completed": "完了済みを消去",
+      "more": "もっと見る",
+      "float": "パネルをフロート",
+      "return_to_deliver": "デリバーに戻る",
+      "empty_title": "動画書き出しタスクはまだありません",
+      "empty_hint": "上でタイムラインと動画プリセットを選択し、「動画キューに追加」をクリックしてください。",
+      "tasks": "タスク",
+      "running": "レンダリング中",
+      "pending": "待機中",
+      "done": "完了",
+      "failed": "失敗",
+      "status_pending": "待機中",
+      "status_running": "レンダリング中",
+      "status_done": "完了",
+      "status_failed": "失敗",
+      "status_cancelled": "キャンセル済み",
+      "status_paused": "一時停止中",
+      "status_needs_relink": "再リンクが必要",
+      "no_audio": "オーディオなし",
+      "action_cancel": "キャンセル",
+      "action_open": "開く",
+      "action_retry": "再試行",
+      "action_remove": "削除",
+      "action_edit": "設定を編集",
+      "action_relink": "タイムラインを再リンク",
+      "col_status": "状態",
+      "col_source": "ソース",
+      "col_preset": "プリセット",
+      "col_output": "出力ファイル",
+      "col_video": "動画",
+      "col_audio": "オーディオ",
+      "col_progress": "進捗",
+      "col_state": "状態",
+      "col_actions": "アクション"
+    },
+    "subtitle": {
+      "off": "オフ",
+      "burn": "焼き込み",
+      "sidecar": "サイドカーファイル"
+    },
+    "conflict": {
+      "ask": "確認する",
+      "overwrite": "上書き",
+      "auto_number": "自動採番",
+      "skip": "スキップ"
+    },
+    "timeline_unnamed": "無題",
+    "frames_suffix": " フレーム",
+    "px_suffix": " px",
+    "fps_suffix": " fps",
+    "kbps_suffix": " kbps",
+    "w_label": "W",
+    "h_label": "H",
+    "colors_suffix": " 色",
+    "gif_colors_label": "GIF 色",
+    "qc_title": "マルチバージョン納品 QC",
+    "close": "閉じる"
+  }
+}

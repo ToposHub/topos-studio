@@ -1,0 +1,25 @@
+{
+  "recipe_id": "P10",
+  "name": "暖灯夜景",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合有暖光源的夜景；temperature_shift 收低保留灯暖，sky_protection 略升",
+  "component": "Day_Night_Converter（生产插件 plugins/Day_Night_Converter.tglsl）",
+  "dependencies": {
+    "plugin_id": "Day_Night_Converter",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "night_depth": 0.5,
+    "temperature_shift": 0.25,
+    "sky_protection": 0.6,
+    "exposure": -0.4
+  },
+  "notes": "弱冷移保暖灯：与 P09 同核不同参数档（配方不计新算法）；已对真实 schema 校验。"
+}

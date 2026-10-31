@@ -1,0 +1,83 @@
+{
+  "meta": {
+    "res": "4k",
+    "threads": 8,
+    "logical_cpus": 16
+  },
+  "topos_t8": {
+    "threads": 8,
+    "frames": 16,
+    "fps_runs": [
+      75.1,
+      89.8,
+      90.6
+    ],
+    "fps_median": 89.8
+  },
+  "prores_t8_slice": {
+    "threads": 8,
+    "thread_type": "SLICE",
+    "frames": 16,
+    "fps_runs": [
+      95.1,
+      89.5,
+      90.8
+    ],
+    "fps_median": 90.8
+  },
+  "prores_t8_frame": {
+    "threads": 8,
+    "thread_type": "FRAME",
+    "frames": 16,
+    "fps_runs": [
+      73.8,
+      80.1,
+      85.4
+    ],
+    "fps_median": 80.1
+  },
+  "prores_auto": {
+    "threads": 0,
+    "thread_type": "FRAME",
+    "frames": 16,
+    "fps_runs": [
+      66.0,
+      80.4,
+      91.1
+    ],
+    "fps_median": 80.4
+  },
+  "dnxhr_t8_slice": {
+    "threads": 8,
+    "thread_type": "SLICE",
+    "frames": 16,
+    "fps_runs": [
+      137.7,
+      139.2,
+      139.4
+    ],
+    "fps_median": 139.2
+  },
+  "dnxhr_t8_frame": {
+    "threads": 8,
+    "thread_type": "FRAME",
+    "frames": 16,
+    "fps_runs": [
+      129.7,
+      130.1,
+      108.2
+    ],
+    "fps_median": 129.7
+  },
+  "dnxhr_auto": {
+    "threads": 0,
+    "thread_type": "FRAME",
+    "frames": 16,
+    "fps_runs": [
+      99.7,
+      108.0,
+      105.0
+    ],
+    "fps_median": 105.0
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "recipe_id": "P12",
+  "name": "压暗晴日",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合大晴天压暗/戏剧化天空；负曝光 + 大羽化，避免硬分界",
+  "component": "Grad_Filter_Exposure（生产插件 plugins/Grad_Filter_Exposure.tglsl）",
+  "dependencies": {
+    "plugin_id": "Grad_Filter_Exposure",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "exposure": -1.0,
+    "grad_angle": 0.0,
+    "grad_center": 0.55,
+    "feather": 0.6
+  },
+  "notes": "生产插件渐变曝光路线：负档位压暗；参数已对真实插件 schema 校验。"
+}

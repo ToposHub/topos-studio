@@ -1,0 +1,32 @@
+# 阶段 3c：绑定层输出精确拷贝（2026-09-02，i9-9900K，同窗 stash A/B）
+
+## 发现
+topos_binding encode()/encode_sized()/movie packet() 三处 `out.raw[:n]`：
+ctypes .raw 先把整个 scratch 缓冲完整拷成 bytes 再切片。scratch =
+max(32MB, 输入×2) ≈ 4K 422 每帧 ~50MB → 每帧 ~60MB 冗余拷贝。
+分解实测（4K 422 qp55 t16，用户素材 1080p→4K 放大）：
+  纯 C tc_frame_encode（ctypes 直调）   15.12 ms（66.1 fps）
+  绑定层 encode_frame（修复前）        38.55 ms（25.9 fps）
+  → 23.4 ms/帧为绑定层拷贝开销（修复后归因确认即 .raw 全量拷）
+
+## 修复
+三处改为 ctypes.string_at(buf, n)：恰好一次 n 字节精确拷贝（bytes 返回
+契约不变；scratch 复用语义不变）。
+
+## 同窗 A/B
+绑定层口径：baseline 28.73 fps → fixed 44.73/44.65 fps（+56%，34.8→22.4ms）
+产品路径（ToposVideoEncoder 150 帧 4K hq RC 单遍，预热 2 帧不计）：
+  baseline 24.16/25.56 fps
+  fixed    35.62/37.68/36.37/38.45/38.67/40.56 fps（+48~60%）
+  码率贴靶不变（3933.6 KiB/frame 全程一致）
+输出确定性：双侧 24 帧导出文件 sha256 相同
+  6bc9eeb3e00c493ae0f902d1fb4237245d31f7e6dcf12345b8d53761b8da6c7d
+
+## 阶段计时佐证（TOPOS_CODEC_PROFILE=1，CPU 累计/帧，16 线程）
+fill（采样+DCT+量化+token）~84-87 ms；entropy ~54-64 ms；band CRC 2.5 ms；
+自检串行 2.24 ms；pad 0（2a 直通生效）。
+
+## 门禁
+codec C 套件 45/45（native 无改动）；tests/media topos 4 文件 158/158；
+tests/media + tests/deliver 全量 1850 passed / 8 failed（8 项均为预存
+夹具/环境失败，与 2a 基线一致）。

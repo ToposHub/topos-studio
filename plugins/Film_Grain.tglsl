@@ -1,0 +1,80 @@
+// --- Topos Plugin Metadata ---
+// @name Film Grain
+// @i18n_name Film_Grain
+// @author Topos Team
+// @version 1.0
+// @description Film-style monochrome grain: smooth hash value-noise lattice modulated by luminance, with shadow/highlight bias
+// @input_space scene-linear
+// @output_space scene-linear
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @occlusion background_independent
+// @param slider strength "Strength" 0.35 0.0 1.0
+// @param slider grain_size "Grain Size" 1.5 1.0 8.0
+// @param slider shadow_bias "Shadow Bias" 0.25 0.0 1.0
+// @param slider highlight_bias "Highlight Bias" 0.15 0.0 1.0
+// -----------------------------
+
+// Film Grain —— 胶片颗粒。
+//
+// 原理：把画面按 grain_size 像素的格子量化，在格子上做 4-tap 平滑
+// value noise（hash 噪声，无 sin/cos、无纹理采样），噪声幅度按当前
+// 像素的 scene-linear 亮度加权：中间调峰值的抛物线响应 + 用户可控的
+// 阴影/高光偏置项，模拟感光乳剂颗粒"中间调最明显"的密度响应。
+//
+// 契约：vec3 process(vec3 color, vec2 uv)。color 为 scene-linear 且可为
+// 负 / 远大于 1.0（HDR）；输出为加性增量，全程不 clamp 基色，HDR 安全
+// （soft-clip 阶段自行处理超界）。
+// 参数 ABI：头部声明的参数以裸名引用，编译期由 shader_compiler 改写为
+// 带插件索引前缀的命名空间 uniform（同插件叠多层也不冲突）。
+// 禁止引用未声明的 u_* 标识符——词边界改写不会命中 u_ 前缀，残留的
+// 未声明 uniform 会让真实 GL 编译失败、整层被渲染循环静默跳过
+// （P0-COL-01 实测事故）。本文件只使用注入 uniform u_tex_size。
+
+// Dave Hoskins 无三角函数 hash：比经典 sin-dot hash 便宜，且在大坐标
+// （4K 下格子坐标可达数千）下 fract 精度表现更好。输出 [0.0, 1.0)。
+float grain_hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 早退出：零强度直接返回（首行 bail-out 惯例）
+    if (strength < 0.001) return color;
+
+    // ====== 分辨率无关的颗粒格子 ======
+    // grain_size 单位为输出像素（采样步长）；对除数设下限守护
+    // （红线：分母必须有下限），min 1.0 = 逐像素白噪声。
+    float cell = max(grain_size, 1.0);
+    vec2 gp = uv * u_tex_size / cell;
+
+    // ====== 4-tap 平滑 value noise（手工展开，无循环） ======
+    vec2 cell_id = floor(gp);
+    vec2 f = fract(gp);
+    // smoothstep 形淡入淡出，替代 floor 格子的硬边，颗粒更接近乳剂团簇
+    vec2 fade = f * f * (3.0 - 2.0 * f);
+    float n00 = grain_hash(cell_id);
+    float n10 = grain_hash(cell_id + vec2(1.0, 0.0));
+    float n01 = grain_hash(cell_id + vec2(0.0, 1.0));
+    float n11 = grain_hash(cell_id + vec2(1.0, 1.0));
+    float noise = mix(mix(n00, n10, fade.x), mix(n01, n11, fade.x), fade.y);
+    noise = noise * 2.0 - 1.0;  // 重映射到 [-1.0, 1.0]
+
+    // ====== 亮度加权（乳剂密度响应） ======
+    // clamp 只作用于"权重调制量"，绝不触碰输出颜色：HDR 值 > 1.0 时
+    // 权重饱和在高光端、负值饱和在阴影端，颗粒幅度有界而基色不被削。
+    // Rec.709 亮度系数，scene-linear 域（近似感知响应，见规格文档）。
+    float l = clamp(dot(color, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+    float mid_w = 4.0 * l * (1.0 - l);        // 中间调峰值（抛物线）
+    float shadow_w = (1.0 - l) * (1.0 - l);   // 平方用乘法，省 pow
+    float highlight_w = l * l;                // 同上
+    float weight = mid_w + shadow_w * shadow_bias + highlight_w * highlight_bias;
+
+    // ====== 加性单色颗粒（HDR 安全：不 clamp 输出） ======
+    // 0.12 为强度上限对应的 scene-linear 峰值幅度，经 strength 缩放后
+    // 默认（0.35）在中间调约 ±0.04 linear，可见但不过火。
+    float amplitude = strength * 0.12;
+    return color + vec3(noise * amplitude * weight);
+}

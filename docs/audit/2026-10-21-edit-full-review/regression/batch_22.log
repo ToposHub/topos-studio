@@ -1,0 +1,34 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 252 items
+
+tests/edit/test_realtime_playback_telemetry.py .....................     [  8%]
+tests/edit/test_recheck_a_cancel_projection.py ..........                [ 12%]
+tests/edit/test_recheck_a_lock_trim_fade.py ..............               [ 17%]
+tests/edit/test_recheck_a_source_av_routing.py ........                  [ 21%]
+tests/edit/test_recheck_b_entries.py .......                             [ 23%]
+tests/edit/test_recheck_b_ripple_followers.py ........                   [ 26%]
+tests/edit/test_recheck_b_slice_planner.py ............................. [ 38%]
+..                                                                       [ 39%]
+tests/edit/test_recheck_b_time_map.py .......                            [ 42%]
+tests/edit/test_recheck_c_multiselect.py ....                            [ 43%]
+tests/edit/test_recheck_c_structure.py ...                               [ 44%]
+tests/edit/test_recheck_c_transitions.py ..........                      [ 48%]
+tests/edit/test_recheck_d_async_persist.py ......                        [ 51%]
+tests/edit/test_recheck_e_truepeak.py ......                             [ 53%]
+tests/edit/test_recheck_f_zoom_anchor.py .......                         [ 56%]
+tests/edit/test_record_arm_wiring.py ......                              [ 58%]
+tests/edit/test_recording_import_transaction.py .......                  [ 61%]
+tests/edit/test_recording_manager.py ................................... [ 75%]
+........                                                                 [ 78%]
+tests/edit/test_remember_active_comp_clip.py ..........                  [ 82%]
+tests/edit/test_render_cache_adapter.py ................................ [ 95%]
+.                                                                        [ 95%]
+tests/edit/test_render_cache_effect_invalidation.py ...........          [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_22.xml -
+============================= 252 passed in 28.62s =============================

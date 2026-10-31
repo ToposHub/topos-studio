@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://topos.color/video/benchmark-schema-v1.json",
+  "title": "Topos video benchmark report",
+  "type": "object",
+  "required": ["schema_version", "environment", "source", "profile", "threads", "metrics"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "environment": {"type": "object", "required": ["os", "machine", "logical_cpu_count", "build_type", "git_commit"], "additionalProperties": true},
+    "source": {"type": "object", "required": ["path", "sha256", "width", "height", "fps", "frames"], "additionalProperties": true},
+    "profile": {"type": "object", "required": ["name", "prediction", "entropy", "gop"], "additionalProperties": true},
+    "threads": {"type": "object", "required": ["requested"], "additionalProperties": true},
+    "cache_state": {"enum": ["cold", "hot", "unknown"]},
+    "metrics": {"type": "object", "required": ["file_bytes", "bits_per_frame", "quality", "encode", "decode", "first_frame_ms", "seek", "memory_peak_mb", "cpu_percent"], "additionalProperties": true}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,220 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fps": 25,
+  "frames": 96,
+  "source": "tests/test_videos/2K_prores422HQ.mov for 422; tests/test_videos/4K_prores4444.mov downscaled for 444",
+  "library": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/native/topos_codec/build/real-bench-release/topos_codec.0.1.0.dylib",
+  "tiers": [
+    {
+      "id": "proxy",
+      "domain": "422p10",
+      "topos_target_bpp": 0.60509,
+      "topos_qp_min": 63,
+      "topos_qp_max": 63,
+      "topos_packet": {
+        "bytes": 23105497,
+        "mib": 22.0351,
+        "mbps": 48.1365,
+        "bpp": 0.928558
+      },
+      "topos_mov": {
+        "bytes": 23107368,
+        "mib": 22.0369,
+        "mbps": 48.1403,
+        "bpp": 0.928633
+      },
+      "prores_profile": "proxy",
+      "prores_mov": {
+        "bytes": 6092550,
+        "mib": 5.8103,
+        "mbps": 12.6928,
+        "bpp": 0.244846
+      },
+      "prores_probe": {
+        "codec_name": "prores",
+        "profile": "Proxy",
+        "width": 1920,
+        "height": 1080,
+        "pix_fmt": "yuv422p10le",
+        "bit_rate": "12690458",
+        "nb_frames": "96"
+      }
+    },
+    {
+      "id": "lt",
+      "domain": "422p10",
+      "topos_target_bpp": 1.23239,
+      "topos_qp_min": 60,
+      "topos_qp_max": 63,
+      "topos_packet": {
+        "bytes": 28582243,
+        "mib": 27.2582,
+        "mbps": 59.5463,
+        "bpp": 1.148656
+      },
+      "topos_mov": {
+        "bytes": 28584114,
+        "mib": 27.2599,
+        "mbps": 59.5502,
+        "bpp": 1.148731
+      },
+      "prores_profile": "lt",
+      "prores_mov": {
+        "bytes": 19642758,
+        "mib": 18.7328,
+        "mbps": 40.9224,
+        "bpp": 0.789398
+      },
+      "prores_probe": {
+        "codec_name": "prores",
+        "profile": "LT",
+        "width": 1920,
+        "height": 1080,
+        "pix_fmt": "yuv422p10le",
+        "bit_rate": "40919808",
+        "nb_frames": "96"
+      }
+    },
+    {
+      "id": "standard",
+      "domain": "422p10",
+      "topos_target_bpp": 1.87491,
+      "topos_qp_min": 57,
+      "topos_qp_max": 59,
+      "topos_packet": {
+        "bytes": 44238066,
+        "mib": 42.1887,
+        "mbps": 92.1626,
+        "bpp": 1.777829
+      },
+      "topos_mov": {
+        "bytes": 44239937,
+        "mib": 42.1905,
+        "mbps": 92.1665,
+        "bpp": 1.777904
+      },
+      "prores_profile": "standard",
+      "prores_mov": {
+        "bytes": 29096484,
+        "mib": 27.7486,
+        "mbps": 60.6177,
+        "bpp": 1.169322
+      },
+      "prores_probe": {
+        "codec_name": "prores",
+        "profile": "Standard",
+        "width": 1920,
+        "height": 1080,
+        "pix_fmt": "yuv422p10le",
+        "bit_rate": "60615070",
+        "nb_frames": "96"
+      }
+    },
+    {
+      "id": "hq",
+      "domain": "422p10",
+      "topos_target_bpp": 2.75617,
+      "topos_qp_min": 54,
+      "topos_qp_max": 56,
+      "topos_packet": {
+        "bytes": 65683017,
+        "mib": 62.6402,
+        "mbps": 136.8396,
+        "bpp": 2.639653
+      },
+      "topos_mov": {
+        "bytes": 65684888,
+        "mib": 62.642,
+        "mbps": 136.8435,
+        "bpp": 2.639728
+      },
+      "prores_profile": "hq",
+      "prores_mov": {
+        "bytes": 51103406,
+        "mib": 48.736,
+        "mbps": 106.4654,
+        "bpp": 2.053731
+      },
+      "prores_probe": {
+        "codec_name": "prores",
+        "profile": "HQ",
+        "width": 1920,
+        "height": 1080,
+        "pix_fmt": "yuv422p10le",
+        "bit_rate": "106462316",
+        "nb_frames": "96"
+      }
+    },
+    {
+      "id": "pro444",
+      "domain": "444p10",
+      "topos_target_bpp": 4.11063,
+      "topos_qp_min": 63,
+      "topos_qp_max": 63,
+      "topos_packet": {
+        "bytes": 143403422,
+        "mib": 136.7602,
+        "mbps": 298.7571,
+        "bpp": 5.763062
+      },
+      "topos_mov": {
+        "bytes": 143405293,
+        "mib": 136.7619,
+        "mbps": 298.761,
+        "bpp": 5.763137
+      },
+      "prores_profile": "4444",
+      "prores_mov": {
+        "bytes": 139408890,
+        "mib": 132.9507,
+        "mbps": 290.4352,
+        "bpp": 5.602531
+      },
+      "prores_probe": {
+        "codec_name": "prores",
+        "profile": "4444",
+        "width": 1920,
+        "height": 1080,
+        "pix_fmt": "yuv444p12le",
+        "bit_rate": "290432083",
+        "nb_frames": "96"
+      }
+    },
+    {
+      "id": "extreme",
+      "domain": "444p12",
+      "topos_target_bpp": 6.76296,
+      "topos_qp_min": 63,
+      "topos_qp_max": 63,
+      "topos_packet": {
+        "bytes": 280609745,
+        "mib": 267.6103,
+        "mbps": 584.6036,
+        "bpp": 11.277076
+      },
+      "topos_mov": {
+        "bytes": 280611616,
+        "mib": 267.6121,
+        "mbps": 584.6075,
+        "bpp": 11.277151
+      },
+      "prores_profile": "4444xq",
+      "prores_mov": {
+        "bytes": 205825896,
+        "mib": 196.2909,
+        "mbps": 428.8039,
+        "bpp": 8.271681
+      },
+      "prores_probe": {
+        "codec_name": "prores",
+        "profile": "XQ",
+        "width": 1920,
+        "height": 1080,
+        "pix_fmt": "yuv444p12le",
+        "bit_rate": "428800845",
+        "nb_frames": "96"
+      }
+    }
+  ]
+}

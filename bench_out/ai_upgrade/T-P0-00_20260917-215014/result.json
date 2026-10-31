@@ -1,0 +1,77 @@
+{
+  "task_id": "T-P0-00",
+  "status": "DONE",
+  "git_revision": "1ce44f5b866b1fac95b387902f5189000f7a7b84",
+  "runtime_snapshot_id": "6c502d4eca200dcf2ae915aea4f9665afbe6aed82244ac48b01836f8224f78f2",
+  "entry_states": {
+    "codec.topos": "AVAILABLE",
+    "codec.topos.profiles": "AVAILABLE",
+    "encode.videotoolbox": "AVAILABLE",
+    "gpu.display": "AVAILABLE",
+    "gpu.metal": "AVAILABLE",
+    "media.ffmpeg.cli": "UNAVAILABLE",
+    "media.ffmpeg.pyav": "AVAILABLE",
+    "media.ffprobe.cli": "UNAVAILABLE",
+    "models.nemo_sortformer": "UNAVAILABLE",
+    "models.qwen3_align": "UNAVAILABLE",
+    "models.qwen3_asr": "UNAVAILABLE",
+    "models.qwen3_tts_customvoice": "UNAVAILABLE",
+    "models.qwen3_vl_8b_awq": "UNAVAILABLE",
+    "models.rapidocr_ocr": "UNAVAILABLE",
+    "models.siglip2_base": "UNAVAILABLE",
+    "render.gl": "FALLBACK"
+  },
+  "reason_codes": {
+    "media.ffmpeg.cli": "FFMPEG_CLI_NOT_FOUND",
+    "media.ffprobe.cli": "FFPROBE_CLI_NOT_FOUND",
+    "models.nemo_sortformer": "MODEL_MANAGER_NOT_PROVIDED",
+    "models.qwen3_align": "MODEL_MANAGER_NOT_PROVIDED",
+    "models.qwen3_asr": "MODEL_MANAGER_NOT_PROVIDED",
+    "models.qwen3_tts_customvoice": "MODEL_MANAGER_NOT_PROVIDED",
+    "models.qwen3_vl_8b_awq": "MODEL_MANAGER_NOT_PROVIDED",
+    "models.rapidocr_ocr": "MODEL_MANAGER_NOT_PROVIDED",
+    "models.siglip2_base": "MODEL_MANAGER_NOT_PROVIDED",
+    "render.gl": "GL_PROBE_DEFERRED_TO_RUNTIME"
+  },
+  "export_codecs": [
+    "h264",
+    "hevc",
+    "gif",
+    "prores_proxy",
+    "prores_lt",
+    "prores_422",
+    "prores_422hq",
+    "prores_4444",
+    "prores_4444xq",
+    "dnxhr_lb",
+    "dnxhr_sq",
+    "dnxhr_hq",
+    "dnxhr_hqx",
+    "dnxhr_444",
+    "topos_proxy",
+    "topos_lt",
+    "topos",
+    "topos_hq",
+    "topos_4444",
+    "topos_4444xq",
+    "png_sequence",
+    "tiff_sequence",
+    "topos_image_sequence"
+  ],
+  "tests": {
+    "focused": "tests/edit/ai_editing/test_runtime_capability_snapshot.py 24 passed",
+    "card_suite": "tool_facade/toposctl/toposctl_offline/capability_status/taep_contracts 117 passed",
+    "deliver_media": "video_export_preflight/video_export_formats/media_capability_manifest 48 passed",
+    "controller": "ai_edit_controller/context_service/edit_api 49 passed"
+  },
+  "injections": [
+    "capability_manifest.build_manifest(runtime_snapshot=...) → manifest.runtime + topos export 门禁",
+    "toposctl._capabilities_offline → build_manifest(runtime_snapshot=build_runtime_capability_snapshot())",
+    "AiEditHostBridgeImpl.get_capability_manifest → 进程级缓存快照 + invalidate_runtime_capability_snapshot()",
+    "PreflightContext.runtime_snapshot → _check_runtime_capability fail-closed 门禁"
+  ],
+  "known_scope_notes": [
+    "effect/node/preset 级 preview_backend/export_backend 声明属 T-P1-20（Effect Capability Contract），本卡只建立快照基础与交付门禁",
+    "GL 真实后端由渲染/导出 trail 证明（T-P0-20/T-P0-31），快照默认 FALLBACK/GL_PROBE_DEFERRED_TO_RUNTIME"
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "recipe_id": "P14",
+  "name": "粉绿分色",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合时尚/音乐录影带；粉高光 + 绿阴影，中间调近中性",
+  "component": "F04 zoned_tint（暂存组件 content_staging/library_v1/filters/zoned_tint）",
+  "dependencies": {
+    "component_id": "F04",
+    "component_slug": "zoned_tint",
+    "component_kind": "filter"
+  },
+  "params": {
+    "shadow_color": [
+      0.25,
+      0.38,
+      0.28
+    ],
+    "midtone_color": [
+      0.52,
+      0.46,
+      0.5
+    ],
+    "highlight_color": [
+      0.8,
+      0.55,
+      0.6
+    ],
+    "shadow_strength": 0.3,
+    "midtone_strength": 0.1,
+    "highlight_strength": 0.35,
+    "shadow_pivot": 0.25,
+    "highlight_pivot": 0.75,
+    "shadow_width": 0.3,
+    "highlight_width": 0.3
+  },
+  "notes": "依赖暂存组件（L10 未接缝）：绿影粉光的分色走可移动分界分区调色。"
+}

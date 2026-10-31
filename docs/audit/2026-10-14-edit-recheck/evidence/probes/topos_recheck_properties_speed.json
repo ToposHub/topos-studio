@@ -1,0 +1,46 @@
+{
+  "locked_transform": {
+    "model": {
+      "c": {
+        "duration": 96,
+        "source_duration": 120,
+        "x": 99.0,
+        "speed": 1.0,
+        "linked_id": "a"
+      },
+      "a": {
+        "duration": 96,
+        "source_duration": 120,
+        "x": 10,
+        "speed": 1.0,
+        "linked_id": "c"
+      }
+    },
+    "locked": true,
+    "undo": true,
+    "revision": 1,
+    "expected_2x_mixed_fps_duration": null
+  },
+  "linked_mixed_fps_speed": {
+    "model": {
+      "c": {
+        "duration": 60,
+        "source_duration": 120,
+        "x": 10,
+        "speed": 2.0,
+        "linked_id": "a"
+      },
+      "a": {
+        "duration": 96,
+        "source_duration": 120,
+        "x": 10,
+        "speed": 1.0,
+        "linked_id": "c"
+      }
+    },
+    "locked": false,
+    "undo": true,
+    "revision": 1,
+    "expected_2x_mixed_fps_duration": 48
+  }
+}

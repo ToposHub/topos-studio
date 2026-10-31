@@ -1,0 +1,22 @@
+{
+ "git_commit": "52a2dbf0",
+ "git_dirty": true,
+ "timestamp": "20260901_051525",
+ "threads_env": "8",
+ "library": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/libtopos_codec.dylib",
+ "library_sha256": "5c35f2d68bd60cb2a466fb8f78161194a7a2e28ebd37886e321ddf2a2df53998",
+ "sources": {
+  "1080p": {
+   "path": "tests/test_videos/2K_topos.mov",
+   "sha256": "f4c3836fddb2c52745b9e402aee3cbaf8a39c7e017f438e09d308216ec42ee55"
+  },
+  "4k": {
+   "path": "tests/test_videos/4K_topos.mov",
+   "sha256": "c774846a2a2e53089e05a5f50fd79ea228d4793913f2475b86e2674439914d22"
+  }
+ },
+ "warmup_frames": 20,
+ "effective_frames": 200,
+ "repeats": 5,
+ "cv_gate": 0.03
+}

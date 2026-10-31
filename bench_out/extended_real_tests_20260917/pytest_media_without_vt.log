@@ -1,0 +1,181 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 2941 items
+
+tests/media/test_audio_metadata.py ..................................... [  1%]
+..                                                                       [  1%]
+tests/media/test_bench_timeline_export_windows.py ...................... [  2%]
+...........                                                              [  2%]
+tests/media/test_capability_manifest.py ......................           [  3%]
+tests/media/test_codec_probe_fix.py sssssss                              [  3%]
+tests/media/test_color_convert.py ...................................... [  4%]
+.......................                                                  [  5%]
+tests/media/test_color_decode_chroma_resize.py ..                        [  5%]
+tests/media/test_color_frame_provider_adapter.py ....................... [  6%]
+..                                                                       [  6%]
+tests/media/test_color_metadata_mapping.py ............................. [  7%]
+........................................................................ [  9%]
+........................................................................ [ 12%]
+..                                                                       [ 12%]
+tests/media/test_cv_metal_bridge.py .................................... [ 13%]
+                                                                         [ 13%]
+tests/media/test_decode_policy.py ...................................... [ 14%]
+............................                                             [ 15%]
+tests/media/test_decode_surface_protocol.py ....                         [ 15%]
+tests/media/test_decode_worker.py ...............................        [ 17%]
+tests/media/test_disk_proxy.py ...................................       [ 18%]
+tests/media/test_disk_proxy_integration.py ............................. [ 19%]
+.....                                                                    [ 19%]
+tests/media/test_ffmpeg_decode.py ...................................... [ 20%]
+..........                                                               [ 21%]
+tests/media/test_ffmpeg_seek.py ..........sssssss......                  [ 21%]
+tests/media/test_ffmpeg_source_seek_math.py ..                           [ 21%]
+tests/media/test_frame_path.py ......................................... [ 23%]
+..............                                                           [ 23%]
+tests/media/test_frame_provider_vt_zero_copy.py .......F...............  [ 24%]
+tests/media/test_gop_index.py ....................                       [ 25%]
+tests/media/test_gpu_frame.py .....................................      [ 26%]
+tests/media/test_hevc10_source_export_passthrough.py ...                 [ 26%]
+tests/media/test_high_bit_depth.py ..........ss.sss..s..s                [ 27%]
+tests/media/test_high_bit_depth_integration.py ......................... [ 28%]
+.........s.s.ss.......                                                   [ 28%]
+tests/media/test_hot_path_guards.py .........                            [ 29%]
+tests/media/test_hwaccel_vendor_routing.py ...........s                  [ 29%]
+tests/media/test_matrix.py sssssssssssssssssssssss.                      [ 30%]
+tests/media/test_media_source_factory.py .........                       [ 30%]
+tests/media/test_metal_capability_report.py ..                           [ 30%]
+tests/media/test_p1_1_disk_proxy_priority.py ........................... [ 31%]
+.                                                                        [ 31%]
+tests/media/test_performance_monitor.py ................................ [ 32%]
+......................................................................   [ 35%]
+tests/media/test_pixel_format_registry.py .............................. [ 36%]
+........................................................                 [ 38%]
+tests/media/test_playback_coordinator_tick.py ..........                 [ 38%]
+tests/media/test_playback_sync_decode_guard.py ..                        [ 38%]
+tests/media/test_playback_trace_dump_tool.py ......                      [ 38%]
+tests/media/test_prores_preview_export_isolation.py ...                  [ 38%]
+tests/media/test_proxy_generator_pyav.py .                               [ 38%]
+tests/media/test_proxy_manifest.py .............................         [ 39%]
+tests/media/test_pyramid_mirror.py .                                     [ 39%]
+tests/media/test_rational.py ...................................         [ 41%]
+tests/media/test_render_cache_planar_passthrough.py ...                  [ 41%]
+tests/media/test_resource_leak.py ......                                 [ 41%]
+tests/media/test_source_manager_planar_master.py ....                    [ 41%]
+tests/media/test_source_manager_playback_sequence.py ..........          [ 41%]
+tests/media/test_t03_gbr_passthrough_gl.py ...                           [ 41%]
+tests/media/test_thumbnail_cache_key.py ................................ [ 43%]
+.....                                                                    [ 43%]
+tests/media/test_thumbnail_provider_thread_safety.py .........           [ 43%]
+tests/media/test_timecode.py ........................................... [ 45%]
+........                                                                 [ 45%]
+tests/media/test_timeline.py ........................................... [ 46%]
+............                                                             [ 47%]
+tests/media/test_toos_tools.py .................                         [ 47%]
+tests/media/test_topos_alpha_pipeline.py .............                   [ 48%]
+tests/media/test_topos_color_convert.py ................................ [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 76%]
+..............................................                           [ 77%]
+tests/media/test_topos_color_semantics.py ......                         [ 77%]
+tests/media/test_topos_export.py ....................................... [ 79%]
+........................................................................ [ 81%]
+......                                                                   [ 81%]
+tests/media/test_topos_ffmpeg_bridge.py s                                [ 81%]
+tests/media/test_topos_frame_extract.py ....                             [ 82%]
+tests/media/test_topos_image_quality.py ....                             [ 82%]
+tests/media/test_topos_image_sequence.py ........................        [ 83%]
+tests/media/test_topos_image_sequence_export.py ...                      [ 83%]
+tests/media/test_topos_image_source.py ..................                [ 83%]
+tests/media/test_topos_iosurface.py .s                                   [ 83%]
+tests/media/test_topos_lossless_boundary.py .                            [ 83%]
+tests/media/test_topos_raw_sequence.py .......                           [ 84%]
+tests/media/test_topos_source.py ............................            [ 85%]
+tests/media/test_topos_source_export_passthrough.py .....                [ 85%]
+tests/media/test_topos_surface_capability.py ........                    [ 85%]
+tests/media/test_topos_timeline_export.py ......................         [ 86%]
+tests/media/test_v3_hwaccel_policy.py .................................. [ 87%]
+.....                                                                    [ 87%]
+tests/media/test_v3_planar_playback_path.py .........................    [ 88%]
+tests/media/test_video_frame_provider_service.py ....................... [ 89%]
+............................                                             [ 90%]
+tests/media/test_video_frame_queue.py .................................. [ 91%]
+.....                                                                    [ 91%]
+tests/media/test_video_pipeline_smoke.py ......................s........ [ 92%]
+...........................                                              [ 93%]
+tests/media/test_video_playback_decoded_submit.py ....................   [ 94%]
+tests/media/test_video_playback_no_ui_copy.py ..........                 [ 94%]
+tests/media/test_video_session_master_frame.py ......................... [ 95%]
+...                                                                      [ 95%]
+tests/media/test_video_session_shared_provider_real.py ................. [ 96%]
+.s                                                                       [ 96%]
+tests/media/test_windows_hw_d3d11_contract.py .........                  [ 96%]
+tests/media/test_windows_hw_d3d11_device_pool.py ....................... [ 97%]
+ssss                                                                     [ 97%]
+tests/media/test_windows_hw_fallback_reasons.py ............             [ 97%]
+tests/media/test_windows_hw_gpu_capability.py .............ss            [ 98%]
+tests/media/test_windows_hw_native_surface_contract.py .........         [ 98%]
+tests/media/test_windows_hw_pipeline_policy.py ........                  [ 98%]
+tests/media/test_windows_hw_planar_source.py ............                [ 99%]
+tests/media/test_windows_hw_t0_chain.py ..........ss                     [ 99%]
+tests/media/test_windows_hw_zero_copy.py ...........                     [100%]
+
+=================================== FAILURES ===================================
+___________________ TestVtAttachPolicy.test_session_defaults ___________________
+tests/media/test_frame_provider_vt_zero_copy.py:112: in test_session_defaults
+    assert isinstance(session.decode_lock, type(threading.Lock()))
+E   AssertionError: assert False
+E    +  where False = isinstance(<unlocked _thread.RLock object owner=0 count=0 at 0x2fff9c840>, <class '_thread.lock'>)
+E    +    where <unlocked _thread.RLock object owner=0 count=0 at 0x2fff9c840> = ClipSession(clip_id='c', path='/v', metadata=None, master_source=None, proxy_source=None, disk_proxy_source=None, prox...ats_cache_hits=0, _stats_cache_misses=0, _stats_proxy_requests=0, _stats_master_requests=0, _stats_total_decode_ms=0.0).decode_lock
+E    +    and   <class '_thread.lock'> = type(<unlocked _thread.lock object at 0x2fff9c8c0>)
+E    +      where <unlocked _thread.lock object at 0x2fff9c8c0> = <built-in function allocate_lock>()
+E    +        where <built-in function allocate_lock> = threading.Lock
+=============================== warnings summary ===============================
+tests/media/test_matrix.py:50
+  /Users/testuser/Documents/vscode/topos_1/tests/media/test_matrix.py:50: PytestCollectionWarning: cannot collect test class 'TestCase' because it has a __init__ constructor (from: tests/media/test_matrix.py)
+    @dataclass
+
+tests/media/test_matrix.py:92
+  /Users/testuser/Documents/vscode/topos_1/tests/media/test_matrix.py:92: PytestCollectionWarning: cannot collect test class 'TestMatrix' because it has a __init__ constructor (from: tests/media/test_matrix.py)
+    class TestMatrix:
+
+tests/media/test_windows_hw_planar_source.py::TestOpenGating::test_no_decoder_raises
+tests/media/test_windows_hw_planar_source.py::TestOpenGating::test_verify_accepts_nv12_and_caches_first_frame
+tests/media/test_windows_hw_planar_source.py::TestOpenGating::test_verify_rejects_software_fallback_format
+tests/media/test_windows_hw_planar_source.py::TestOpenGating::test_verify_no_frames_raises
+tests/media/test_windows_hw_planar_source.py::TestConvertFramePlanar::test_nv12_contract
+tests/media/test_windows_hw_planar_source.py::TestConvertFramePlanar::test_p010_msbs_aligned_contract
+tests/media/test_windows_hw_planar_source.py::TestConvertFramePlanar::test_time_seconds_from_time_base
+tests/media/test_windows_hw_planar_source.py::TestConvertFramePlanar::test_unexpected_format_falls_back_to_parent
+  /Users/testuser/Documents/vscode/topos_1/.venv/lib/python3.12/site-packages/_pytest/unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored in: <function FFmpegMediaSource.__del__ at 0x2dcacca40>
+  
+  Traceback (most recent call last):
+    File "/Users/testuser/Documents/vscode/topos_1/src/shared/media/ffmpeg_source.py", line 2978, in __del__
+      self.close()
+    File "/Users/testuser/Documents/vscode/topos_1/src/shared/media/ffmpeg_source.py", line 1100, in close
+      self._close_gop_seek_session()
+    File "/Users/testuser/Documents/vscode/topos_1/src/shared/media/ffmpeg_source.py", line 1107, in _close_gop_seek_session
+      if self._gop_seek_container is not None:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  AttributeError: 'WindowsHwPlanarSource' object has no attribute '_gop_seek_container'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/media/test_frame_provider_vt_zero_copy.py::TestVtAttachPolicy::test_session_defaults
+===== 1 failed, 2879 passed, 61 skipped, 10 warnings in 122.53s (0:02:02) ======

@@ -1,0 +1,104 @@
+// --- Topos Plugin Metadata ---
+// @name Bleach Bypass
+// @i18n_name Bleach_Bypass
+// @author Topos Team
+// @version 1.0
+// @description Bleach bypass look: high-contrast, low-saturation silver film response
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider strength "Strength" 0.6 0.0 1.0
+// @param slider contrast "Contrast" 0.4 0.0 1.0
+// @param slider saturation "Saturation Retention" 0.35 0.0 1.0
+// -----------------------------
+//
+// Bleach Bypass (skip-bleach) - plan03 plugin library
+//
+// Process contract: vec3 process(vec3 color, vec2 uv). `color` is the pixel
+// AFTER upstream grading, scene-linear, and may be < 0.0 or >> 1.0 (HDR).
+// The slider params declared in the metadata header are injected as
+// uniforms under their bare names and are rewritten to a per-layer prefixed
+// form by the shader compiler, so no manual namespacing is needed.
+// Hard rule (P0-COL-01): never reference an undeclared engine uniform here -
+// a stray one fails GL compilation and the render loop silently skips the
+// whole layer. This plugin is a pure point operation: zero texture reads,
+// zero loops, therefore it uses none of the engine-provided uniforms.
+//
+// Algorithm (classic bleach-bypass approximation, HDR-safe):
+//   1. luma     = Rec.709 dot(color), computed in scene-linear. May be
+//                 negative (out-of-gamut) or >> 1.0 (HDR) - never clamped.
+//   2. silver   = pivot S-curve on luma ("overlay side"): the scene-linear
+//                 form of overlaying the luma over itself. Anchored at the
+//                 18% grey pivot so mid-tone exposure is preserved; shadows
+//                 crush, highlights expand. The signed power keeps negative
+//                 luma negative and HDR luma growing (no fold-back).
+//   3. lift     = bounded "screen side": soft-compressed luma squared,
+//                 added as an achromatic silver bloom that only rises in
+//                 highlights. Screen/multiply formulas are only
+//                 well-behaved on bounded inputs, so the *blend input* is
+//                 soft-bounded to [0, 1] while the signal path itself stays
+//                 unclamped and monotone (see clamps below - each one is a
+//                 weight/blend-key, not the color signal).
+//   4. chroma   = color - luma, scaled by `saturation` (1.0 = keep original
+//                 chroma, 0.0 = fully silver-grey response).
+//   5. strength = mix(original, result) with a perceptual slider curve
+//                 (1 - (1-s)^1.5, same shaping as bilateral_skin_smooth).
+
+// ====== SECTION 1: CONSTANTS ======
+// Rec.709 scene-linear luma weights (matches the engine luma convention).
+const vec3 LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+// S-curve anchor: 18% grey in scene-linear. Anchoring the pivot contrast
+// here leaves mid-grey exposure untouched and pushes everything else away.
+const float PIVOT = 0.18;
+// Pivot-contrast slope ceiling (contrast = 1.0). slope 2.0 doubles log
+// exposure spread: shadows crush hard, display-white grows ~6x, 10x HDR
+// input grows ~15x. Above 2.0 the effect gets uncontrollable on 10-bit HDR.
+const float SLOPE_MAX = 2.0;
+// Highlight silver-lift ceiling in scene-linear units. Bounded so the
+// screen side stays monotone for HDR input (see algorithm step 3).
+const float SILVER_LIFT_MAX = 0.25;
+
+// ====== SECTION 2: HELPERS ======
+// HDR-safe signed power: extends pivot contrast to negative (out-of-gamut)
+// and > 1.0 (HDR) values. pow() is undefined for x < 0 in GLSL, hence the
+// sign/abs split; the 1e-6 floor guards the pow domain against NaN when
+// luma is exactly 0 (sign(0) = 0 kills the payload anyway).
+float signedPow(float x, float e) {
+    return sign(x) * pow(max(abs(x), 1e-6), e);
+}
+
+// ====== SECTION 3: MAIN ======
+vec3 process(vec3 color, vec2 uv) {
+    if (strength < 0.001) return color;
+
+    // --- 1. Scene-linear luma (HDR: may be < 0.0 or >> 1.0, no clamp) ---
+    float lum = dot(color, LUMA_W);
+
+    // --- 2. Silver plate: overlay-strength S-curve on the luma ---
+    float slope = mix(1.0, SLOPE_MAX, contrast);
+    float silver = PIVOT * signedPow(lum / PIVOT, slope);
+
+    // --- 3. Screen side: bounded silver bloom in the highlights ---
+    // unit: soft-compressed luma, the blend KEY (weight domain, so the
+    // 0.0-1.0 clamp here is legitimate: it bounds a weight, not the signal;
+    // negative luma maps to 0 = no bloom below black, preserving blacks).
+    float unit = clamp(lum / (1.0 + max(lum, 0.0)), 0.0, 1.0);
+    float lift = unit * unit * SILVER_LIFT_MAX;
+
+    // --- 4. Combine: tone from the plate, chroma scaled by retention ---
+    // chroma keeps per-channel offsets (can be negative); saturation = 1.0
+    // preserves original chroma, 0.0 collapses onto the silver plate.
+    vec3 chroma = color - vec3(lum);
+    vec3 bypassed = vec3(silver + lift) + chroma * saturation;
+
+    // --- 5. Strength blend with perceptual slider curve ---
+    float amt = 1.0 - pow(1.0 - strength, 1.5);
+    return mix(color, bypassed, amt);
+}

@@ -1,0 +1,192 @@
+{
+  "head": "9e05556c3",
+  "date": "2026-10-24",
+  "shared": [
+    {
+      "id": "S01",
+      "evidence": "已复现",
+      "finding": "快照恢复丢素材 metadata/评级，正式 IO 往返丢快照表；真实 dict 形态的时间线比较也未覆盖。",
+      "path": "src/features/edit/core/project_snapshots.py",
+      "line": 108,
+      "owner_task": "M02"
+    },
+    {
+      "id": "S02",
+      "evidence": "已复现",
+      "finding": "口头语计划用伪 clip_id 且缺 track_id；真实 compiler 报错，整片删除也不能表达词区间。",
+      "path": "src/features/edit/ai_editing/filler_removal.py",
+      "line": 147,
+      "owner_task": "M11"
+    },
+    {
+      "id": "S03",
+      "evidence": "已复现",
+      "finding": "竖屏编译只写 width/height，真实 job 仍取原 resolution；离线拒绝仍返回部分 jobs。字幕/版本校验、PCM helper 未接正式消费者。",
+      "path": "src/features/deliver/core/version_compiler.py",
+      "line": 103,
+      "owner_task": "M10"
+    },
+    {
+      "id": "S04",
+      "evidence": "已复现（packet 替身）",
+      "finding": "所谓 PTS 索引读 packet.dts；重排序样例使 timeline 0 映射源帧 2。真实 VFR+B 帧仍须媒体验收。",
+      "path": "src/shared/media/ffmpeg_source.py",
+      "line": 317,
+      "owner_task": "M04"
+    },
+    {
+      "id": "S05",
+      "evidence": "静态调用链确认",
+      "finding": "外录绑定在预览仍生效，成片/Stem 遇变速或保调却跳回机内声；同一片段音源不一致。",
+      "path": "src/features/edit/core/timeline_export.py",
+      "line": 4187,
+      "owner_task": "M03"
+    },
+    {
+      "id": "S06",
+      "evidence": "局部复现＋静态确认",
+      "finding": "TC 法用 wav_tc-video_tc，方向与消费契约相反；视频/WAV 帧部分固定除 25，24fps 样例 1.48s≠1.5s。",
+      "path": "src/app/controllers/edit_controller.py",
+      "line": 7742,
+      "owner_task": "M03"
+    },
+    {
+      "id": "S07",
+      "evidence": "已复现（故障注入）",
+      "finding": "入库源 hash 读失败穿透整个批次，无法返回逐项报告；relative_to 外路径与中途取消也未闭合。",
+      "path": "src/features/edit/core/verified_ingest.py",
+      "line": 106,
+      "owner_task": "M12"
+    },
+    {
+      "id": "S08",
+      "evidence": "已复现（生产 CPU 路径）",
+      "finding": "实际 main→pre→trim→post，应 pre→main→trim→post；单像素非交换向量最大误差 0.0439084，四路顺序均需修正。",
+      "path": "src/features/edit/core/timeline_export.py",
+      "line": 9543,
+      "owner_task": "M05"
+    },
+    {
+      "id": "S09",
+      "evidence": "已复现＋静态确认",
+      "finding": "插件实际在 layer.plugins，版本清单却读根字段，输出空；缺失检查又误用内置音频 registry，并吞掉接口错误。",
+      "path": "src/features/edit/core/color_versions.py",
+      "line": 109,
+      "owner_task": "M07"
+    },
+    {
+      "id": "S10",
+      "evidence": "已复现（图数据）",
+      "finding": "RIP 签名漏连线/端口，交换 Merge A/B 后不变；启用态字段需统一，stale helper 尚未接预览/导出守卫。",
+      "path": "src/features/composite/bake_service.py",
+      "line": 43,
+      "owner_task": "M08"
+    },
+    {
+      "id": "S11",
+      "evidence": "静态调用链确认",
+      "finding": "Qualifier 动画只在 Color 引擎求值，TimelineExporter 仍只算基础 grade 白名单，不能据 helper 测试声称成片一致。",
+      "path": "src/features/edit/core/timeline_export.py",
+      "line": 9098,
+      "owner_task": "M06"
+    },
+    {
+      "id": "S12",
+      "evidence": "静态调用链确认",
+      "finding": "EXR still 写读 API 已有，但 Gallery 设为参考仍调用只读 JPEG 的 load_still_image；float 抓帧链未闭合。",
+      "path": "src/app/controllers/layer_controller.py",
+      "line": 931,
+      "owner_task": "M09"
+    }
+  ],
+  "windows": [
+    {
+      "id": "W-I01",
+      "evidence": "既有 Windows 真机报告",
+      "finding": "旧 topos_codec.dll 缺 tc_mux_add_audio；首跑 1023 error、208 fail，与旧红基线一致不能当发布通过。打包库查找只验存在，缺平台/架构/ABI 校验。",
+      "path": "docs/test_farm_first_run_windows_2026-10.md",
+      "line": 38,
+      "owner_task": "W01"
+    },
+    {
+      "id": "W-I02",
+      "evidence": "静态调用链确认",
+      "finding": "CUDA 导入失败仅 render_error→记丢帧；门闩只管新源，已有 resident 源未见下载/CPU 重建链。",
+      "path": "src/features/edit/core/timeline_preview_renderer.py",
+      "line": 11387,
+      "owner_task": "W03"
+    },
+    {
+      "id": "W-I03",
+      "evidence": "控制流确认／无 GPU 方法替身检查",
+      "finding": "私有 context 创建后 destroy 未调用 cuCtxDestroy；第二平面注册失败未回滚；32 个空闲异 key slot 仍耗尽。真机资源趋势待测。",
+      "path": "src/shared/media/windows_hw/cuda_resident.py",
+      "line": 510,
+      "owner_task": "W02"
+    },
+    {
+      "id": "W-I04",
+      "evidence": "静态能力门缺口",
+      "finding": "固定 CUDA device 0，未闭合到 GL/解码设备；仅凭 itemsize 推格式，缺 plane/shape/pitch/chroma/device 的完整验证。",
+      "path": "src/shared/media/windows_hw/cuda_resident.py",
+      "line": 286,
+      "owner_task": "W04"
+    },
+    {
+      "id": "W-I05",
+      "evidence": "既有真机缺陷＋静态消费者",
+      "finding": "快照底部陈旧纹素已登记，快照仍入 seek 缓存；L3 同帧断言容忍近 50% 字节不同，不能证明缓存正确。",
+      "path": "tests/edit/test_cuda_resident_playback_l3.py",
+      "line": 298,
+      "owner_task": "W05"
+    },
+    {
+      "id": "W-I06",
+      "evidence": "静态分发缺口",
+      "finding": "cuda-bindings 依赖来自开发环境，无 Windows CUDA extra；冻结包/运行能力检查未收口，Windows logic CI 未纳入新 L1。",
+      "path": "pyproject.toml",
+      "line": 52,
+      "owner_task": "W06"
+    },
+    {
+      "id": "W-I07",
+      "evidence": "待验收",
+      "finding": "驻留默认关闭；91s 顺序/60s seek/8 次重开不能替代窗口浸泡、长压、多轨、多屏与设备事件；AMD/Intel/A-C 矩阵仍缺。",
+      "path": "docs/c31_stress_cuda_resident_2026-10.md",
+      "line": 15,
+      "owner_task": "W08"
+    }
+  ],
+  "mac_and_governance": [
+    {
+      "id": "M-I01",
+      "evidence": "本次 pip check exit 1",
+      "finding": "pyannote-core/numpy、lightning/packaging、qwen-tts/transformers 三处冲突",
+      "owner_task": "M01"
+    },
+    {
+      "id": "M-I02",
+      "evidence": "历史实测，当前待重测",
+      "finding": "4K 同步解码与后台预取锁争用仍是 A 线后续靶点，非已完成 native 改造",
+      "owner_task": "M16"
+    },
+    {
+      "id": "M-I03",
+      "evidence": "历史实测，当前待重测",
+      "finding": "4K 监看第一刀后 48.2ms 仍超 25fps 的40ms预算，缩放/回读和设备验收未收口",
+      "owner_task": "M17"
+    },
+    {
+      "id": "O01",
+      "evidence": "计划/台账交叉核对",
+      "finding": "F 45/53勾选，8项仍开；多个勾选仅模型完成，与端到端完成定义矛盾，文件头仍写全部未开始",
+      "owner_task": "M00/W00"
+    },
+    {
+      "id": "O02",
+      "evidence": "现有 CI/Windows报告",
+      "finding": "大规模已知失败仍保留；watch suites continue-on-error 且缺当前生产闭环测试，零新增不等于可用",
+      "owner_task": "M00/W01/W07"
+    }
+  ]
+}

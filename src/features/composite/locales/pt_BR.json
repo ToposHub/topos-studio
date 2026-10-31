@@ -1,0 +1,933 @@
+{
+  "nodes": {
+    "blur": {
+      "title": "Desfoque",
+      "description": "Desfoque multítipo com controle por canal",
+      "blur_type": {
+        "box": "Desfoque de Caixa",
+        "gaussian": "Desfoque Gaussiano",
+        "bilateral": "Desfoque de Superfície (Bilateral)",
+        "motion": "Desfoque de Movimento",
+        "bokeh": "Desfoque de Lente (Bokeh)"
+      },
+      "edge_policy": {
+        "clamp": "Fixar",
+        "wrap": "Enrolar",
+        "mirror": "Espelhar"
+      },
+      "quality": {
+        "fast": "Rápida",
+        "normal": "Normal",
+        "high": "Alta"
+      },
+      "aperture_blades": {
+        "circle": "Círculo",
+        "5": "5 Pás",
+        "6": "6 Pás",
+        "8": "8 Pás"
+      },
+      "params": {
+        "blur_type": "Tipo de Desfoque",
+        "radius_x": "Raio X",
+        "radius_y": "Raio Y",
+        "radius": "Raio",
+        "angle": "Ângulo",
+        "motion_source": "Fonte de Movimento",
+        "shutter": "Obturador",
+        "edge_preserve": "Preservar Bordas",
+        "aperture_blades": "Pás da Abertura",
+        "anamorphic": "Anamórfico",
+        "highlight_gain": "Ganho de Realce",
+        "edge_policy": "Política de Borda",
+        "quality": "Qualidade",
+        "channel_r": "Canal Vermelho",
+        "channel_g": "Canal Verde",
+        "channel_b": "Canal Azul",
+        "channel_a": "Canal Alfa",
+        "mix": "Mistura",
+        "process_alpha": "Processar Alfa"
+      }
+    },
+    "transform": {
+      "title": "Transformar",
+      "pivot_mode": {
+        "center": "Centro",
+        "custom": "Personalizado"
+      },
+      "filter": {
+        "linear": "Linear (Bilinear)",
+        "nearest": "Mais Próximo (Borda Dura)"
+      },
+      "params": {
+        "translate_x": "Translação X",
+        "translate_y": "Translação Y",
+        "translate": "Translação",
+        "scale_x": "Escala X",
+        "scale_y": "Escala Y",
+        "scale": "Escala",
+        "rotation": "Rotação",
+        "pivot_mode": "Modo do Pivô",
+        "pivot_x": "Pivô X",
+        "pivot_y": "Pivô Y",
+        "pivot": "Pivô",
+        "filter": "Filtro"
+      }
+    },
+    "constant": {
+      "title": "Constante",
+      "mode": {
+        "solid": "Sólido",
+        "checker": "Xadrez",
+        "gradient": "Degradê Linear",
+        "radial": "Degradê Radial"
+      },
+      "params": {
+        "width": "Largura",
+        "height": "Altura",
+        "mode": "Modo",
+        "color_r": "Cor R",
+        "color_g": "Cor G",
+        "color_b": "Cor B",
+        "color_a": "Cor A",
+        "color2_r": "Cor 2 R",
+        "color2_g": "Cor 2 G",
+        "color2_b": "Cor 2 B",
+        "color2_a": "Cor 2 A",
+        "checker_size": "Tamanho do Xadrez",
+        "start_x": "Início X",
+        "start_y": "Início Y",
+        "start": "Início",
+        "end_x": "Fim X",
+        "end_y": "Fim Y",
+        "end": "Fim",
+        "center_x": "Centro X",
+        "center_y": "Centro Y",
+        "center": "Centro",
+        "radial_radius": "Raio Radial",
+        "feather": "Difusão",
+        "format_name": "Formato",
+        "size_preset": "Predefinição de Tamanho",
+        "color_hex": "Cor Hex",
+        "color2_hex": "Cor 2 Hex"
+      }
+    },
+    "merge": {
+      "title": "Mesclar",
+      "blend_mode": {
+        "over": "Normal (Over)",
+        "under": "Under",
+        "add": "Adição",
+        "subtract": "Subtração",
+        "multiply": "Multiplicar",
+        "screen": "Divisão",
+        "overlay": "Sobrepor",
+        "difference": "Diferença",
+        "divide": "Quociente",
+        "min": "Mín",
+        "max": "Máx",
+        "average": "Média",
+        "copy": "Copiar",
+        "stencil": "Estêncil",
+        "mask": "Máscara",
+        "in": "In",
+        "out": "Out",
+        "atop": "Atop",
+        "xor": "Xor",
+        "color-dodge": "Clareamento de Cor",
+        "color-burn": "Escurecimento de Cor",
+        "soft-light": "Luz Suave",
+        "hard-light": "Luz Direta",
+        "linear-light": "Luz Linear",
+        "hue": "Tonalidade",
+        "saturation": "Saturação",
+        "color": "Cor",
+        "luminosity": "Luminosidade"
+      },
+      "format_policy": {
+        "from_b": "De B",
+        "from_a": "De A",
+        "larger": "Maior",
+        "smaller": "Menor"
+      },
+      "bbox_policy": {
+        "union": "União",
+        "intersection": "Interseção",
+        "a": "A",
+        "b": "B"
+      },
+      "alpha_policy": {
+        "auto": "Automático",
+        "premult_force": "Forçar Pré-multiplicado",
+        "straight_force": "Forçar Direto",
+        "output_straight": "Saída Direta"
+      },
+      "mask_channel": {
+        "luma": "Luminância",
+        "red": "Vermelho",
+        "green": "Verde",
+        "blue": "Azul",
+        "alpha": "Alfa"
+      },
+      "params": {
+        "blend_mode": "Modo de Mesclagem",
+        "opacity": "Opacidade",
+        "mix": "Mistura",
+        "format_policy": "Política de Formato",
+        "bbox_policy": "Política de Caixa Delimitadora",
+        "alpha_policy": "Política de Alfa",
+        "alpha_clamp": "Fixação de Alfa",
+        "mask_channel": "Canal de Máscara",
+        "mask_invert": "Inverter Máscara"
+      }
+    },
+    "crop": {
+      "title": "Recorte",
+      "outside": {
+        "black": "Preto",
+        "transparent": "Transparente",
+        "repeat": "Repetir",
+        "mirror": "Espelhar"
+      },
+      "params": {
+        "x": "X",
+        "y": "Y",
+        "width": "Largura",
+        "height": "Altura",
+        "reformat": "Redimensionar Tela",
+        "outside": "Preenchimento Externo"
+      }
+    },
+    "cornerpin": {
+      "title": "Corner Pin",
+      "interpolation": {
+        "bilinear": "Bilinear",
+        "bicubic": "Bicúbica"
+      },
+      "params": {
+        "to1_x": "Para 1 X",
+        "to1_y": "Para 1 Y",
+        "to2_x": "Para 2 X",
+        "to2_y": "Para 2 Y",
+        "to3_x": "Para 3 X",
+        "to3_y": "Para 3 Y",
+        "to4_x": "Para 4 X",
+        "to4_y": "Para 4 Y",
+        "from1_x": "De 1 X",
+        "from1_y": "De 1 Y",
+        "from2_x": "De 2 X",
+        "from2_y": "De 2 Y",
+        "from3_x": "De 3 X",
+        "from3_y": "De 3 Y",
+        "from4_x": "De 4 X",
+        "from4_y": "De 4 Y",
+        "interpolation": "Filtro"
+      }
+    },
+    "reformat": {
+      "title": "Reformatar",
+      "format_mode": {
+        "preset": "Predefinição",
+        "custom": "Personalizado"
+      },
+      "preset": {
+        "SD NTSC": "SD NTSC",
+        "SD PAL": "SD PAL",
+        "HD 720": "HD 720",
+        "HD 1080": "HD 1080",
+        "HD 1080 Anamorphic": "HD 1080 Anamórfico",
+        "UHD 4K": "UHD 4K",
+        "DCI 4K": "DCI 4K",
+        "UHD 8K": "UHD 8K",
+        "Square 1024": "Quadrado 1024",
+        "Square 2048": "Quadrado 2048",
+        "Square 4096": "Quadrado 4096"
+      },
+      "resize_mode": {
+        "no_resize": "Sem Redimensionar",
+        "fit": "Ajustar (Letterbox)",
+        "fill": "Preencher (Recortar)",
+        "distort": "Distorcer (Esticar)",
+        "center_crop": "Recorte Central"
+      },
+      "filter": {
+        "nearest": "Mais Próximo (Borda Dura)",
+        "linear": "Linear (Bilinear)",
+        "cubic": "Cúbica (Bicúbica)",
+        "lanczos": "Lanczos (Nitidez)"
+      },
+      "params": {
+        "format_mode": "Modo",
+        "preset": "Predefinição",
+        "width": "Largura",
+        "height": "Altura",
+        "resize_mode": "Modo de Redimensionamento",
+        "filter": "Filtro",
+        "preserve_bbox": "Preservar BBox"
+      }
+    },
+    "glow": {
+      "title": "Brilho",
+      "quality": {
+        "fast": "Rápida",
+        "normal": "Normal",
+        "high": "Alta"
+      },
+      "params": {
+        "threshold": "Limite",
+        "radius": "Raio",
+        "intensity": "Intensidade",
+        "tint_r": "Tonização R",
+        "tint_g": "Tonização G",
+        "tint_b": "Tonização B",
+        "mix": "Mistura",
+        "quality": "Qualidade"
+      }
+    },
+    "shuffle": {
+      "title": "Shuffle",
+      "r_from": {
+        "r": "Vermelho",
+        "g": "Verde",
+        "b": "Azul",
+        "a": "Alfa",
+        "zero": "Zero",
+        "one": "Um",
+        "luma": "Luma"
+      },
+      "g_from": {
+        "r": "Vermelho",
+        "g": "Verde",
+        "b": "Azul",
+        "a": "Alfa",
+        "zero": "Zero",
+        "one": "Um",
+        "luma": "Luma"
+      },
+      "b_from": {
+        "r": "Vermelho",
+        "g": "Verde",
+        "b": "Azul",
+        "a": "Alfa",
+        "zero": "Zero",
+        "one": "Um",
+        "luma": "Luma"
+      },
+      "a_from": {
+        "r": "Vermelho",
+        "g": "Verde",
+        "b": "Azul",
+        "a": "Alfa",
+        "zero": "Zero",
+        "one": "Um",
+        "luma": "Luma"
+      },
+      "params": {
+        "r_from": "Vermelho De",
+        "g_from": "Verde De",
+        "b_from": "Azul De",
+        "a_from": "Alfa De"
+      }
+    },
+    "text": {
+      "title": "Texto",
+      "description": "Camada de texto (fonte, tamanho, alinhamento, contorno, sombra)",
+      "per_char_mode": {
+        "fade": "Esmaecer",
+        "slide_up": "Deslizar para Cima",
+        "slide_left": "Deslizar para a Esquerda",
+        "scale_pop": "Estalo de Escala",
+        "rotate_in": "Entrada Girando",
+        "typewriter": "Máquina de Escrever"
+      },
+      "path_direction": {
+        "up": "Arco para Cima",
+        "down": "Arco para Baixo"
+      },
+      "params": {
+        "text": "Texto",
+        "caption_input_enabled": "Entrada de Legenda",
+        "caption_input_field": "Campo de Legenda",
+        "font_family": "Fonte",
+        "font_size": "Tamanho",
+        "font_weight": "Espessura",
+        "italic": "Itálico",
+        "halign": "Alinh. H",
+        "valign": "Alinh. V",
+        "letter_spacing": "Entreletramento",
+        "line_spacing": "Entrelinha",
+        "per_char_enable": "Animação por Caractere",
+        "per_char_mode": "Modo de Animação",
+        "per_char_delay": "Escalonamento (quadros)",
+        "per_char_overlap": "Sobreposição",
+        "per_char_slide_distance": "Distância de Deslizamento",
+        "per_char_rotation": "Rotação de Entrada",
+        "per_char_scale_from": "Escala Inicial",
+        "path_enable": "Disposição em Trajeto",
+        "path_radius": "Raio do Arco",
+        "path_arc_degrees": "Ângulo do Arco (0=auto)",
+        "path_direction": "Direção do Arco",
+        "translate_x": "Translação X",
+        "translate_y": "Translação Y",
+        "scale_x": "Escala X",
+        "scale_y": "Escala Y",
+        "rotation": "Rotação",
+        "pivot_mode": "Modo do Pivô",
+        "pivot_x": "Pivô X",
+        "pivot_y": "Pivô Y",
+        "filter": "Filtro",
+        "fill_r": "Preenchimento R",
+        "fill_g": "Preenchimento G",
+        "fill_b": "Preenchimento B",
+        "fill_a": "Preenchimento A",
+        "outline_enable": "Contorno",
+        "outline_width": "Largura do Contorno",
+        "outline_r": "Contorno R",
+        "outline_g": "Contorno G",
+        "outline_b": "Contorno B",
+        "outline_a": "Contorno A",
+        "shadow_enable": "Sombra",
+        "shadow_offset_x": "Deslocamento da Sombra X",
+        "shadow_offset_y": "Deslocamento da Sombra Y",
+        "shadow_blur": "Desfoque da Sombra",
+        "shadow_r": "Sombra R",
+        "shadow_g": "Sombra G",
+        "shadow_b": "Sombra B",
+        "shadow_a": "Sombra A"
+      }
+    },
+    "paint": {
+      "title": "Pintura",
+      "description": "Camada de traços de pintura (reparo por clone, borracha, pincel sólido)",
+      "params": {
+        "strokes": "Traços"
+      }
+    },
+    "particle": {
+      "title": "Partículas",
+      "description": "Emissor de partículas 2D determinístico sem estado (gravidade/vento/turbulência)"
+    },
+    "mesh_warp": {
+      "title": "Deformação em Malha",
+      "description": "Deformação em grade: arraste os pontos da malha para deslocamento local"
+    },
+    "keyer": {
+      "title": "Keyer",
+      "keyer_mode": {
+        "auto": "Automático",
+        "chroma": "Croma",
+        "luma": "Luma",
+        "difference": "Diferença"
+      },
+      "despill_method": {
+        "none": "Nenhum",
+        "subtract": "Subtrair",
+        "scale": "Escalar"
+      },
+      "output_mode": {
+        "result": "Resultado",
+        "matte": "Matte"
+      },
+      "params": {
+        "keyer_mode": "Modo do Keyer",
+        "screen_color": "Cor do Fundo Chroma",
+        "screen_color_r": "Fundo R",
+        "screen_color_g": "Fundo G",
+        "screen_color_b": "Fundo B",
+        "screen_color_hex": "Fundo Hex",
+        "screen_balance": "Equilíbrio do Fundo",
+        "clip_black": "Corte de Preto",
+        "clip_white": "Corte de Branco",
+        "gain": "Ganho",
+        "softness": "Suavidade",
+        "alpha_offset": "Deslocamento de Alfa",
+        "despill_strength": "Intensidade do Despill",
+        "despill_method": "Método de Despill",
+        "invert": "Inverter",
+        "output_mode": "Modo de Saída"
+      }
+    },
+    "light_wrap": {
+      "title": "Light Wrap",
+      "params": {
+        "width": "Largura do Wrap",
+        "intensity": "Intensidade",
+        "brightness": "Brilho",
+        "falloff": "Atenuação",
+        "source_alpha": "Usar Alfa do Primeiro Plano"
+      }
+    },
+    "relight": {
+      "title": "Reiluminação",
+      "light_type": {
+        "point": "Luz Pontual",
+        "directional": "Direcional"
+      },
+      "params": {
+        "light_type": "Tipo de Luz",
+        "light_position_x": "Posição da Luz X",
+        "light_position_y": "Posição da Luz Y",
+        "light_position_z": "Posição da Luz Z",
+        "light_direction_x": "Direção da Luz X",
+        "light_direction_y": "Direção da Luz Y",
+        "light_direction_z": "Direção da Luz Z",
+        "intensity": "Intensidade",
+        "color": "Cor da Luz",
+        "ambient": "Ambiente",
+        "normal_decode": "Decodificação de Normal",
+        "normal_flip_y": "Inverter Y da Normal",
+        "normal_decode_options": {
+          "encoded": "Codificada [0,1]",
+          "signed": "Com Sinal (-1~1)"
+        }
+      }
+    },
+    "cryptomatte_select": {
+      "title": "Seleção Cryptomatte",
+      "id_encoding": {
+        "rgba24": "ID do Alocador RGBA24",
+        "float_r": "Float R (Cryptomatte Padrão)"
+      },
+      "output_mode": {
+        "matte": "Matte",
+        "isolate": "Isolar"
+      },
+      "params": {
+        "id_encoding": "Codificação de ID",
+        "output_mode": "Modo de Saída"
+      }
+    },
+    "zblur": {
+      "title": "ZBlur",
+      "depth_units": {
+        "normalized": "Normalizada",
+        "world": "Distância do Mundo"
+      },
+      "quality": {
+        "fast": "Rápida",
+        "normal": "Normal",
+        "high": "Alta"
+      },
+      "params": {
+        "focus_distance": "Distância de Foco",
+        "focal_range": "Faixa Focal",
+        "max_blur_radius": "Raio Máx. de Desfoque",
+        "bokeh_toggle": "Amostragem do Diafragma",
+        "depth_units": "Unidades de Profundidade",
+        "near": "Próximo",
+        "far": "Distante",
+        "quality": "Qualidade"
+      }
+    },
+    "fog": {
+      "title": "Névoa",
+      "depth_units": {
+        "normalized": "Normalizada",
+        "world": "Distância do Mundo"
+      },
+      "params": {
+        "color": "Cor da Névoa",
+        "density": "Densidade",
+        "start": "Início",
+        "end": "Fim",
+        "depth_units": "Unidades de Profundidade",
+        "near": "Próximo",
+        "far": "Distante"
+      }
+    },
+    "depth_matte": {
+      "title": "Matte de Profundidade",
+      "depth_units": {
+        "normalized": "Normalizada",
+        "world": "Distância do Mundo"
+      },
+      "params": {
+        "range_start": "Início da Faixa",
+        "range_end": "Fim da Faixa",
+        "feather": "Difusão",
+        "depth_units": "Unidades de Profundidade",
+        "near": "Próximo",
+        "far": "Distante"
+      }
+    },
+    "godrays": {
+      "title": "Raios volumétricos",
+      "params": {
+        "light_x": "Luz X",
+        "light_y": "Luz Y",
+        "color": "Cor da Luz",
+        "density": "Densidade",
+        "weight": "Peso",
+        "decay": "Decaimento",
+        "samples": "Amostras"
+      }
+    },
+    "chromatic_aberration": {
+      "title": "Aberração Cromática",
+      "params": {
+        "offset_r": "Deslocamento R",
+        "offset_b": "Deslocamento B",
+        "center_x": "Centro X",
+        "center_y": "Centro Y",
+        "edge_boost": "Realce de Borda"
+      }
+    },
+    "vignette": {
+      "title": "Vinheta",
+      "params": {
+        "amount": "Quantidade",
+        "radius": "Raio",
+        "softness": "Suavidade",
+        "roundness": "Redondeza"
+      }
+    },
+    "lens_flare": {
+      "title": "Reflexo de Lente",
+      "blend_mode": {
+        "screen": "Divisão",
+        "add": "Adição"
+      },
+      "params": {
+        "light_x": "Luz X",
+        "light_y": "Luz Y",
+        "color": "Cor da Luz",
+        "intensity": "Intensidade",
+        "ghost_count": "Número de Fantasmas",
+        "ghost_spacing": "Espaçamento dos Fantasmas",
+        "ghost_decay": "Decaimento dos Fantasmas",
+        "ghost_size": "Tamanho dos Fantasmas",
+        "halo_radius": "Raio do Halo",
+        "halo_strength": "Intensidade do Halo",
+        "streak_strength": "Intensidade do Streak",
+        "streak_width": "Largura do Streak",
+        "use_occlusion": "Com Oclusão",
+        "blend_mode": "Modo de Mesclagem"
+      }
+    },
+    "deflicker": {
+      "title": "Anti-Cintilação",
+      "window": {
+        "3": "3 quadros",
+        "5": "5 quadros",
+        "7": "7 quadros",
+        "9": "9 quadros"
+      },
+      "mode": {
+        "per_pixel": "Por pixel",
+        "global_gain": "Ganho global"
+      },
+      "params": {
+        "window": "Janela",
+        "percentile": "Percentil",
+        "luma_only": "Somente Luma",
+        "mode": "Modo"
+      }
+    },
+    "ai_gen_expand": {
+      "title": "Expansão Gen por IA",
+      "params": {
+        "prompt": "Prompt",
+        "negative_prompt": "Negativo",
+        "model": "Modelo",
+        "seed": "Semente",
+        "strength": "Intensidade",
+        "expand_left": "Expandir à Esquerda",
+        "expand_top": "Expandir para Cima",
+        "expand_right": "Expandir à Direita",
+        "expand_bottom": "Expandir para Baixo"
+      }
+    },
+    "frame_interpolate": {
+      "title": "Interpolação de Quadros",
+      "params": {
+        "t": "Interpolação t",
+        "hd_mode": "Tesselamento HD"
+      }
+    },
+    "face_track": {
+      "title": "Rastreamento Facial",
+      "params": {
+        "face_index": "Índice do Rosto"
+      }
+    },
+    "face_smooth": {
+      "title": "Suavização Facial",
+      "params": {
+        "strength": "Intensidade",
+        "radius": "Raio",
+        "luminance_only": "Somente Luma"
+      }
+    },
+    "pointcloud3d": {
+      "title": "Nuvem de Pontos",
+      "source": {
+        "file": "Arquivo",
+        "tracker": "Do Rastreador"
+      },
+      "color_mode": {
+        "flat": "Plano",
+        "vertex_color": "Cor do Vértice",
+        "depth_ramp": "Rampa de Profundidade"
+      },
+      "params": {
+        "source": "Origem",
+        "file_path": "Caminho do Arquivo",
+        "output_width": "Largura de Saída",
+        "output_height": "Altura de Saída",
+        "point_size": "Tamanho do Ponto",
+        "color_mode": "Modo de Cor",
+        "point_color": "Cor do Ponto",
+        "opacity": "Opacidade"
+      }
+    },
+    "volume3d": {
+      "title": "Volume 3D",
+      "params": {
+        "file_path": "Arquivo de Volume",
+        "density_multiplier": "Multiplicador de Densidade",
+        "absorption_color": "Cor de Absorção",
+        "step_count": "Número de Passos",
+        "output_width": "Largura de Saída",
+        "output_height": "Altura de Saída"
+      }
+    },
+    "chroma_keyer": {
+      "title": "Keyer de Croma",
+      "output_mode": {
+        "result": "Resultado",
+        "matte": "Matte"
+      },
+      "params": {
+        "screen_color_r": "Fundo R",
+        "screen_color_g": "Fundo G",
+        "screen_color_b": "Fundo B",
+        "tolerance": "Tolerância",
+        "softness": "Suavidade",
+        "despill": "Despill",
+        "edge_width": "Largura da Borda",
+        "output_mode": "Modo de Saída"
+      }
+    },
+    "luma_keyer": {
+      "title": "Keyer de Luma",
+      "output_mode": {
+        "result": "Resultado",
+        "matte": "Matte"
+      },
+      "params": {
+        "black_point": "Ponto de Preto",
+        "white_point": "Ponto de Branco",
+        "softness": "Suavidade",
+        "invert": "Inverter",
+        "output_mode": "Modo de Saída"
+      }
+    },
+    "camera3d": {
+      "title": "Câmera",
+      "params": {
+        "camera_mode": "Modo da Câmera",
+        "cam_fov": "Campo de Visão",
+        "cam_focal_length": "Distância Focal (mm)",
+        "cam_sensor_size": "Tamanho do Sensor (mm)",
+        "cam_near": "Corte Próximo",
+        "cam_far": "Corte Distante",
+        "cam_lens_shift_x": "Deslocamento da Lente X",
+        "cam_lens_shift_y": "Deslocamento da Lente Y",
+        "cam_exposure": "Exposição (EV)",
+        "cam_focus_distance": "Distância de Foco",
+        "cam_fstop": "Abertura (f-stop)",
+        "cam_dof_enable": "Profundidade de Campo",
+        "cam_show_safe_areas": "Áreas de Segurança"
+      }
+    },
+    "light3d": {
+      "title": "Luz",
+      "light_type": {
+        "directional": "Direcional",
+        "point": "Pontual",
+        "spot": "Spot",
+        "ambient": "Ambiente"
+      },
+      "params": {
+        "light_type": "Tipo de Luz",
+        "light_pos_x": "Posição X",
+        "light_pos_y": "Posição Y",
+        "light_pos_z": "Posição Z",
+        "light_dir_x": "Direção X",
+        "light_dir_y": "Direção Y",
+        "light_dir_z": "Direção Z",
+        "light_color_r": "Cor R",
+        "light_color_g": "Cor G",
+        "light_color_b": "Cor B",
+        "light_intensity": "Intensidade",
+        "light_range": "Alcance",
+        "light_inner_cone": "Cone Interno",
+        "light_outer_cone": "Cone Externo",
+        "hdri_path": "Arquivo HDRI",
+        "use_ibl": "Usar IBL",
+        "env_intensity": "Intensidade do Ambiente",
+        "icon_pos_x": "Pos. do Ícone X",
+        "icon_pos_y": "Pos. do Ícone Y",
+        "icon_pos_z": "Pos. do Ícone Z"
+      }
+    },
+    "model3d": {
+      "title": "Modelo 3D",
+      "size_mode": {
+        "fit_to_scene": "Ajustar à Cena",
+        "real_world": "Mundo Real"
+      },
+      "source_unit": {
+        "m": "Metros",
+        "cm": "Centímetros",
+        "mm": "Milímetros",
+        "in": "Polegadas",
+        "ft": "Pés",
+        "custom": "Personalizado"
+      },
+      "axis_mode": {
+        "auto": "Automático",
+        "y_up": "Y para Cima",
+        "z_up": "Z para Cima",
+        "none": "Nenhum"
+      },
+      "uv_v_mode": {
+        "auto": "Automático",
+        "original": "Original",
+        "flip": "Inverter V"
+      },
+      "anim_play_mode": {
+        "loop": "Repetir",
+        "pingpong": "Ping-Pong",
+        "once": "Uma Vez",
+        "clamp": "Fixar"
+      },
+      "material_mode": {
+        "imported": "Importado",
+        "override": "Sobrescrever",
+        "mix": "Mistura"
+      },
+      "normal_format": {
+        "OpenGL": "OpenGL",
+        "DirectX": "DirectX"
+      },
+      "orm_layout": {
+        "glTF ORM": "glTF ORM",
+        "separate": "Separado"
+      },
+      "texture_filter": {
+        "nearest": "Mais Próximo",
+        "linear": "Linear",
+        "mipmap": "Mipmap"
+      },
+      "texture_wrap": {
+        "repeat": "Repetir",
+        "clamp": "Fixar",
+        "mirror": "Espelhar"
+      },
+      "viewport_lod_mode": {
+        "auto": "Automático",
+        "force_lod0": "Forçar LOD 0",
+        "force_lod1": "Forçar LOD 1",
+        "force_lod2": "Forçar LOD 2"
+      },
+      "render_role": {
+        "solid": "Sólido",
+        "holdout": "Holdout",
+        "shadow_catcher": "Captador de Sombra",
+        "matte": "Matte"
+      },
+      "params": {
+        "model_path": "Arquivo de Modelo",
+        "use_imported_model": "Usar Modelo Importado",
+        "size_mode": "Modo de Tamanho",
+        "source_unit": "Unidade de Origem",
+        "unit_scale": "Escala de Unidade",
+        "axis_mode": "Modo de Eixo",
+        "uv_v_mode": "Modo V do UV",
+        "object_pos_x": "Posição X",
+        "object_pos_y": "Posição Y",
+        "object_pos_z": "Posição Z",
+        "object_rot_x": "Rotação X",
+        "object_rot_y": "Rotação Y",
+        "object_rot_z": "Rotação Z",
+        "mesh_scale": "Escala",
+        "anim_enabled": "Animação Ativada",
+        "anim_time": "Tempo de Animação",
+        "anim_speed": "Velocidade da Animação",
+        "anim_clip": "Clipe de Animação",
+        "anim_play_mode": "Modo de Reprodução",
+        "anim_clip_name": "Nome do Clipe",
+        "anim_time_offset": "Deslocamento de Tempo",
+        "anim_start_frame": "Quadro Inicial",
+        "anim_end_frame": "Quadro Final",
+        "anim_fps": "FPS da Animação",
+        "material_mode": "Modo de Material",
+        "normal_format": "Formato da Normal",
+        "orm_layout": "Disposição ORM",
+        "texture_filter": "Filtro de Textura",
+        "texture_wrap": "Envolvimento da Textura",
+        "emissive_intensity": "Intensidade da Emissão",
+        "viewport_lod_mode": "LOD do Visualizador",
+        "render_role": "Papel de Renderização",
+        "matte_id": "ID do Matte",
+        "shadow_intensity": "Intensidade da Sombra",
+        "shadow_softness": "Suavidade da Sombra"
+      }
+    },
+    "scene3d": {
+      "title": "Cena 3D",
+      "params": {
+        "width": "Largura",
+        "height": "Altura"
+      }
+    }
+  },
+  "param_groups": {
+    "Blur": "Desfoque",
+    "Channels": "Canais",
+    "Keying": "Keying",
+    "Screen": "Fundo Chroma",
+    "Matte": "Matte",
+    "Despill": "Despill",
+    "Output": "Saída"
+  },
+  "channels": {
+    "label": "Canais"
+  },
+  "panel": {
+    "node_graph": "Grafo de Nós",
+    "node_properties": "Propriedades do Nó",
+    "performance": "Desempenho",
+    "perf": "Desempenho",
+    "composite_scopes": "Monitores",
+    "keyframes": "Quadros-Chave",
+    "spline": "Spline",
+    "animation": "Animação",
+    "import_report": "Relatório de Importação",
+    "asset_dependency": "Dependências de Ativos",
+    "scene_outliner": "Organizador de Cena",
+    "material": "Material"
+  },
+  "keyframes": {
+    "prev_kf": "Quadro-chave anterior",
+    "next_kf": "Próximo quadro-chave",
+    "fit": "Ajustar intervalo de tempo",
+    "zoom_in": "Ampliar",
+    "expand_all": "Expandir tudo",
+    "collapse_all": "Recolher tudo",
+    "pan": "Deslocar até o cursor de reprodução",
+    "unit_time": "Tempo",
+    "unit_frame": "Quadro",
+    "unit_seconds": "Segundos",
+    "unit_timecode": "Timecode",
+    "empty": "Nenhum parâmetro animado"
+  },
+  "spline": {
+    "empty": "Nenhuma curva",
+    "fit": "Ajustar curvas",
+    "smooth": "Suave",
+    "linear": "Linear",
+    "flat": "Plana",
+    "step": "Degrau/Manter"
+  }
+}

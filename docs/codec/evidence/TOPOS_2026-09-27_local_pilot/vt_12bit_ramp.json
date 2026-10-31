@@ -1,0 +1,33 @@
+{
+  "status": "synthetic_mapping_probe_no_quality_verdict",
+  "measurement_script_sha256": "a97ab67886a83021141b39d7bfd46917fc3bbc76028e03fd4a9981e8e2dd655d",
+  "ffmpeg_version": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+  "format": "yuv444p12le",
+  "prores_input": "p416le",
+  "profile": "4444xq",
+  "allow_software_fallback": true,
+  "hardware_acceleration_confirmed": false,
+  "width": 128,
+  "height": 128,
+  "frames": 2,
+  "source_sha256": "8fc2e37934b7b7f28bf01642a91474209e50ea8c5b6f214455b30428b9e9c045",
+  "movie_sha256": "7321a052af4cae1ce6950c432e143e6b59c6d16b0ab48417826870d1159930bf",
+  "decoded_sha256": "3fb0a5cf4fc4a803144272dea465610590bd4de38c895088523a7287659e518b",
+  "per_channel": [
+    {
+      "mean_error_codes": -0.029296875,
+      "mae_codes": 0.150390625,
+      "max_abs_codes": 1
+    },
+    {
+      "mean_error_codes": 0.0,
+      "mae_codes": 0.0,
+      "max_abs_codes": 0
+    },
+    {
+      "mean_error_codes": 0.0,
+      "mae_codes": 0.0,
+      "max_abs_codes": 0
+    }
+  ]
+}

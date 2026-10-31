@@ -1,0 +1,373 @@
+{
+ "manifest": {
+  "schema": "bench_manifest.v1",
+  "topos_version": "0.1.0",
+  "dylib_commit_embedded": "c4082663-dirty",
+  "git_head": "c4082663",
+  "git_dirty": true,
+  "dylib_path": "/Users/testuser/Documents/vscode/topos/native/topos_codec/build/release/topos_codec.dylib",
+  "dylib_sha256": "0df35db5dc3d75baf65a6fda094b329712de3d8cfe26d526742c01480966a692",
+  "abi_version": 2,
+  "slice_threads": 16,
+  "simd_avx2": true,
+  "simd_neon": false,
+  "cpu": "Genuine Intel(R) 0000",
+  "os": "darwin",
+  "python": "3.12.14",
+  "threads_effective": 16
+ },
+ "cases": {
+  "4k": {
+   "case": {
+    "w": 3840,
+    "h": 2160,
+    "profile": 5,
+    "pixel_format": 1,
+    "bit_depth": 12
+   },
+   "frames": 48,
+   "rows": [
+    {
+     "entropy": "V1",
+     "qp": 25,
+     "bytes_per_frame": 36218960.229166664,
+     "mbps": 7243.792045833333,
+     "enc_ms": 128.79,
+     "dec_p50_ms": 41.344,
+     "dec_p95_ms": 44.671,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V1",
+     "qp": 30,
+     "bytes_per_frame": 32434811.875,
+     "mbps": 6486.962375,
+     "enc_ms": 115.01,
+     "dec_p50_ms": 33.662,
+     "dec_p95_ms": 38.056,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V1",
+     "qp": 35,
+     "bytes_per_frame": 27788767.791666668,
+     "mbps": 5557.753558333333,
+     "enc_ms": 91.95,
+     "dec_p50_ms": 31.714,
+     "dec_p95_ms": 36.28,
+     "psnr_y": 106.572,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 1
+    },
+    {
+     "entropy": "V1",
+     "qp": 40,
+     "bytes_per_frame": 22523730.020833332,
+     "mbps": 4504.746004166667,
+     "enc_ms": 83.0,
+     "dec_p50_ms": 27.755,
+     "dec_p95_ms": 33.903,
+     "psnr_y": 84.591,
+     "psnr_u": 103.561,
+     "psnr_v": 105.709,
+     "ssim_y": 1.0,
+     "maxerr": 2
+    },
+    {
+     "entropy": "V1",
+     "qp": 45,
+     "bytes_per_frame": 16843999.645833332,
+     "mbps": 3368.7999291666665,
+     "enc_ms": 77.66,
+     "dec_p50_ms": 23.212,
+     "dec_p95_ms": 26.111,
+     "psnr_y": 77.589,
+     "psnr_u": 84.964,
+     "psnr_v": 87.397,
+     "ssim_y": 0.99999,
+     "maxerr": 4
+    },
+    {
+     "entropy": "V1",
+     "qp": 50,
+     "bytes_per_frame": 13205958.125,
+     "mbps": 2641.191625,
+     "enc_ms": 62.14,
+     "dec_p50_ms": 21.193,
+     "dec_p95_ms": 24.488,
+     "psnr_y": 72.692,
+     "psnr_u": 79.282,
+     "psnr_v": 81.828,
+     "ssim_y": 0.99995,
+     "maxerr": 7
+    },
+    {
+     "entropy": "V1",
+     "qp": 55,
+     "bytes_per_frame": 10775364.395833334,
+     "mbps": 2155.0728791666666,
+     "enc_ms": 73.45,
+     "dec_p50_ms": 20.481,
+     "dec_p95_ms": 23.987,
+     "psnr_y": 67.236,
+     "psnr_u": 75.418,
+     "psnr_v": 78.12,
+     "ssim_y": 0.99982,
+     "maxerr": 19
+    },
+    {
+     "entropy": "V1",
+     "qp": 60,
+     "bytes_per_frame": 8802876.75,
+     "mbps": 1760.57535,
+     "enc_ms": 56.42,
+     "dec_p50_ms": 18.295,
+     "dec_p95_ms": 20.965,
+     "psnr_y": 60.476,
+     "psnr_u": 71.265,
+     "psnr_v": 74.22,
+     "ssim_y": 0.99924,
+     "maxerr": 39
+    },
+    {
+     "entropy": "V2",
+     "qp": 25,
+     "bytes_per_frame": 27594868.208333332,
+     "mbps": 5518.973641666667,
+     "enc_ms": 130.61,
+     "dec_p50_ms": 43.817,
+     "dec_p95_ms": 47.748,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V2",
+     "qp": 30,
+     "bytes_per_frame": 24198848.083333332,
+     "mbps": 4839.769616666667,
+     "enc_ms": 121.27,
+     "dec_p50_ms": 42.61,
+     "dec_p95_ms": 49.638,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V2",
+     "qp": 35,
+     "bytes_per_frame": 20575924.5625,
+     "mbps": 4115.1849125,
+     "enc_ms": 87.4,
+     "dec_p50_ms": 39.07,
+     "dec_p95_ms": 45.167,
+     "psnr_y": 106.572,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 1
+    },
+    {
+     "entropy": "V2",
+     "qp": 40,
+     "bytes_per_frame": 16721099.25,
+     "mbps": 3344.21985,
+     "enc_ms": 74.59,
+     "dec_p50_ms": 33.286,
+     "dec_p95_ms": 36.91,
+     "psnr_y": 84.591,
+     "psnr_u": 103.561,
+     "psnr_v": 105.709,
+     "ssim_y": 1.0,
+     "maxerr": 2
+    },
+    {
+     "entropy": "V2",
+     "qp": 45,
+     "bytes_per_frame": 12959789.8125,
+     "mbps": 2591.9579625,
+     "enc_ms": 66.0,
+     "dec_p50_ms": 28.387,
+     "dec_p95_ms": 31.72,
+     "psnr_y": 77.589,
+     "psnr_u": 84.964,
+     "psnr_v": 87.397,
+     "ssim_y": 0.99999,
+     "maxerr": 4
+    },
+    {
+     "entropy": "V2",
+     "qp": 50,
+     "bytes_per_frame": 10139380.833333334,
+     "mbps": 2027.8761666666667,
+     "enc_ms": 60.08,
+     "dec_p50_ms": 24.094,
+     "dec_p95_ms": 28.438,
+     "psnr_y": 72.692,
+     "psnr_u": 79.282,
+     "psnr_v": 81.828,
+     "ssim_y": 0.99995,
+     "maxerr": 7
+    },
+    {
+     "entropy": "V2",
+     "qp": 55,
+     "bytes_per_frame": 8158666.291666667,
+     "mbps": 1631.7332583333332,
+     "enc_ms": 53.15,
+     "dec_p50_ms": 22.302,
+     "dec_p95_ms": 25.016,
+     "psnr_y": 67.236,
+     "psnr_u": 75.418,
+     "psnr_v": 78.12,
+     "ssim_y": 0.99982,
+     "maxerr": 19
+    },
+    {
+     "entropy": "V2",
+     "qp": 60,
+     "bytes_per_frame": 6427347.666666667,
+     "mbps": 1285.4695333333332,
+     "enc_ms": 48.37,
+     "dec_p50_ms": 20.578,
+     "dec_p95_ms": 23.56,
+     "psnr_y": 60.476,
+     "psnr_u": 71.265,
+     "psnr_v": 74.22,
+     "ssim_y": 0.99924,
+     "maxerr": 39
+    }
+   ]
+  }
+ },
+ "generations": {
+  "4k": [
+   {
+    "entropy": "V1",
+    "qp": 45,
+    "gens": [
+     {
+      "gen": 1,
+      "psnr_y": 77.521,
+      "bytes_pf": 17128896.541666668
+     },
+     {
+      "gen": 2,
+      "psnr_y": 76.503,
+      "bytes_pf": 16924940.791666668
+     },
+     {
+      "gen": 3,
+      "psnr_y": 75.818,
+      "bytes_pf": 16842109.458333332
+     },
+     {
+      "gen": 4,
+      "psnr_y": 75.29,
+      "bytes_pf": 16797893.75
+     },
+     {
+      "gen": 5,
+      "psnr_y": 74.86,
+      "bytes_pf": 16773801.5
+     },
+     {
+      "gen": 6,
+      "psnr_y": 74.498,
+      "bytes_pf": 16761870.958333334
+     },
+     {
+      "gen": 7,
+      "psnr_y": 74.186,
+      "bytes_pf": 16753605.125
+     },
+     {
+      "gen": 8,
+      "psnr_y": 73.914,
+      "bytes_pf": 16746176.708333334
+     },
+     {
+      "gen": 9,
+      "psnr_y": 73.672,
+      "bytes_pf": 16741468.333333334
+     },
+     {
+      "gen": 10,
+      "psnr_y": 73.456,
+      "bytes_pf": 16736850.166666666
+     }
+    ]
+   },
+   {
+    "entropy": "V2",
+    "qp": 45,
+    "gens": [
+     {
+      "gen": 1,
+      "psnr_y": 77.521,
+      "bytes_pf": 13151420.583333334
+     },
+     {
+      "gen": 2,
+      "psnr_y": 76.503,
+      "bytes_pf": 13023940.375
+     },
+     {
+      "gen": 3,
+      "psnr_y": 75.818,
+      "bytes_pf": 12972608.916666666
+     },
+     {
+      "gen": 4,
+      "psnr_y": 75.29,
+      "bytes_pf": 12944688.75
+     },
+     {
+      "gen": 5,
+      "psnr_y": 74.86,
+      "bytes_pf": 12928300.75
+     },
+     {
+      "gen": 6,
+      "psnr_y": 74.498,
+      "bytes_pf": 12917427.333333334
+     },
+     {
+      "gen": 7,
+      "psnr_y": 74.186,
+      "bytes_pf": 12909528.0
+     },
+     {
+      "gen": 8,
+      "psnr_y": 73.914,
+      "bytes_pf": 12903378.583333334
+     },
+     {
+      "gen": 9,
+      "psnr_y": 73.672,
+      "bytes_pf": 12898361.5
+     },
+     {
+      "gen": 10,
+      "psnr_y": 73.456,
+      "bytes_pf": 12894147.583333334
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -1,0 +1,22 @@
+INFO: [ThumbEngine] FFmpeg found and loaded: /usr/local/bin/ffmpeg
+WARNING: [ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+INFO: Registered feature module: color
+INFO: Registered feature module: edit
+INFO: Registered page: edit (剪辑)
+INFO: Registered feature module: deliver
+INFO: Registered page: deliver (交付)
+2026-10-20 04:36:07.434 Python[15941:106822] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 224 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+2026-10-20 04:36:11.100 Python[15941:106822] +[IMKClient subclass]: chose IMKClient_Modern
+2026-10-20 04:36:11.100 Python[15941:106822] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+UNDO {"name": "initial", "counts": {"video": 1, "audio": 1}}
+UNDO {"name": "after_split", "counts": {"video": 2, "audio": 2}}
+UNDO {"name": "menu_undo_enabled", "on": false, "redo": false, "undo_text": "撤销\t⌘Z", "redo_text": "重做\t⇧⌘Z", "undo_shortcut": "Ctrl+Z"}
+UNDO {"name": "cmd_z", "counts": {"video": 2, "audio": 2}, "menu_undo_enabled": false}
+UNDO {"name": "ctrl_z", "counts": {"video": 1, "audio": 1}}
+UNDO {"name": "cmd_shift_z", "counts": {"video": 1, "audio": 1}}

@@ -1,0 +1,42 @@
+{
+ "generated_at": "2026-09-21T03:32:10.069304+00:00",
+ "variant": "v1",
+ "results": [
+  {
+   "variant": "v1",
+   "size": "2K",
+   "tier": "standard",
+   "frames": 487,
+   "video_bytes": 265017897,
+   "video_mbps": 108.84,
+   "enc_s": 20.35,
+   "enc_fps": 23.9,
+   "dec_s": 1.98,
+   "dec_fps": 245.4,
+   "y_psnr": 45.274,
+   "u_psnr": 52.069,
+   "v_psnr": 51.491,
+   "y_psnr_edge": 43.033,
+   "sharp": 0.895,
+   "grid": 1.073
+  },
+  {
+   "variant": "v1",
+   "size": "2K",
+   "tier": "proxy",
+   "frames": 487,
+   "video_bytes": 81376546,
+   "video_mbps": 33.42,
+   "enc_s": 19.3,
+   "enc_fps": 25.2,
+   "dec_s": 1.02,
+   "dec_fps": 475.5,
+   "y_psnr": 37.223,
+   "u_psnr": 45.339,
+   "v_psnr": 44.921,
+   "y_psnr_edge": 33.326,
+   "sharp": 0.794,
+   "grid": 1.172
+  }
+ ]
+}

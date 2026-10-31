@@ -1,0 +1,118 @@
+{
+  "material": {
+    "lower": {
+      "file": "4K_H264.mov",
+      "sha1_12": "c90cf62a5f99"
+    },
+    "upper": {
+      "file": "4K_prores422HQ.mov",
+      "sha1_12": "7438f4962405"
+    }
+  },
+  "params": {
+    "warmup": 10,
+    "measure": 60,
+    "runs": 2
+  },
+  "results": [
+    {
+      "group": "B0_single_track",
+      "cull_on": {
+        "median_s": 2.4749260304997733,
+        "fps": 24.24314878933328,
+        "layer_frame_requests_median": 70.0,
+        "culled_ratio": 0.0,
+        "all_runs_s": [
+          2.495924904000276,
+          2.4539271569992707
+        ],
+        "all_runs_requests": [
+          70,
+          70
+        ]
+      },
+      "cull_off": {
+        "median_s": 2.530256775500675,
+        "fps": 23.71300833217905,
+        "layer_frame_requests_median": 70.0,
+        "culled_ratio": 0.0,
+        "all_runs_s": [
+          2.5610056600016833,
+          2.4995078909996664
+        ],
+        "all_runs_requests": [
+          70,
+          70
+        ]
+      },
+      "speedup": 1.0223565247280253,
+      "request_reduction": 0.0
+    },
+    {
+      "group": "B1_two_track_full_occlusion",
+      "cull_on": {
+        "median_s": 5.204811748501015,
+        "fps": 11.52779445236996,
+        "layer_frame_requests_median": 70.0,
+        "culled_ratio": 0.5,
+        "all_runs_s": [
+          5.169774780002626,
+          5.239848716999404
+        ],
+        "all_runs_requests": [
+          70,
+          70
+        ]
+      },
+      "cull_off": {
+        "median_s": 19.11860712449925,
+        "fps": 3.1383039365411673,
+        "layer_frame_requests_median": 140.0,
+        "culled_ratio": 0.0,
+        "all_runs_s": [
+          19.09995713099852,
+          19.13725711799998
+        ],
+        "all_runs_requests": [
+          140,
+          140
+        ]
+      },
+      "speedup": 3.6732562191140543,
+      "request_reduction": 0.5
+    },
+    {
+      "group": "B2_two_track_scaled_upper",
+      "cull_on": {
+        "median_s": 28.354260851001527,
+        "fps": 2.116084080459487,
+        "layer_frame_requests_median": 140.0,
+        "culled_ratio": 0.0,
+        "all_runs_s": [
+          28.43434405500011,
+          28.274177647002944
+        ],
+        "all_runs_requests": [
+          140,
+          140
+        ]
+      },
+      "cull_off": {
+        "median_s": 28.19801412650122,
+        "fps": 2.1278094170330406,
+        "layer_frame_requests_median": 140.0,
+        "culled_ratio": 0.0,
+        "all_runs_s": [
+          28.17590171700067,
+          28.22012653600177
+        ],
+        "all_runs_requests": [
+          140,
+          140
+        ]
+      },
+      "speedup": 0.9944894798943493,
+      "request_reduction": 0.0
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Radial_Blur_Pro": {
+        "name": "径向模糊 Pro",
+        "desc": {
+          "short": "变焦径向模糊：沿可调中心向像素方向的固定步长多点采样平均，产生从中心向外发散的速度感模糊。",
+          "params": {
+            "sample_quality": "采样数分档（8/16/24/32）。每档对应着色器内一个编译期常量循环上限，档位越高越平滑也越耗时；默认 16。",
+            "strength": "模糊强度。经 ease-in 曲线映射为向中心的采样跨度（默认 0.35 ≈ 21% 跨度）。",
+            "center_x": "模糊中心 X（UV 空间 0-1，默认 0.5 为画面中心）。",
+            "center_y": "模糊中心 Y（UV 空间 0-1，默认 0.5 为画面中心）。"
+          }
+        },
+        "params": {
+          "sample_quality": "采样质量",
+          "strength": "模糊强度",
+          "center_x": "中心 X",
+          "center_y": "中心 Y"
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Radial_Blur_Pro": {
+        "name": "Radial Blur Pro",
+        "desc": {
+          "short": "Zoom/radial blur: averages fixed-step samples taken from an adjustable center toward each pixel, producing outward-radiating streaks.",
+          "params": {
+            "sample_quality": "Sample count preset (8/16/24/32). Each preset maps to one compile-time constant loop bound in the shader; higher is smoother but costlier. Default 16.",
+            "strength": "Blur strength, eased to the sampling span toward the center (default 0.35 gives roughly a 21% span).",
+            "center_x": "Blur center X in UV space (0-1, default 0.5 at frame center).",
+            "center_y": "Blur center Y in UV space (0-1, default 0.5 at frame center)."
+          }
+        },
+        "params": {
+          "sample_quality": "Sample Quality",
+          "strength": "Blur Strength",
+          "center_x": "Center X",
+          "center_y": "Center Y"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+== M10-6.3A 跨帧 qp 提示 A/B（2026-09-02，Mac-Pro 8P/16L，交错负载同环境）==
+-- 1920x1080 hint=OFF --
+== 2K_prores422HQ 1920x1080 hq sized t8，32 帧 ==
+  fps 27.12  wall/帧 36.9 ms
+  probe 编码次数: p50 7.0  p95 8  max 8  均值 7.16
+  bytes/target 误差: 中位 -2.48%  p95 -0.42%  最差 -10.50%  超 target 帧数 0/32
+  qp: min 51 中位 51 max 52
+-- 1920x1080 hint=ON --
+== 2K_prores422HQ 1920x1080 hq sized t8，32 帧 ==
+  fps 38.03  wall/帧 26.3 ms
+  probe 编码次数: p50 3.0  p95 4  max 4  均值 3.09
+  bytes/target 误差: 中位 -2.48%  p95 -0.42%  最差 -10.50%  超 target 帧数 0/32
+  qp: min 51 中位 51 max 52
+-- 3840x2160 hint=OFF --
+== 4K_prores422HQ 3840x2160 hq sized t8，32 帧 ==
+  fps 8.35  wall/帧 119.7 ms
+  probe 编码次数: p50 7.0  p95 7  max 7  均值 7.00
+  bytes/target 误差: 中位 -5.19%  p95 -1.46%  最差 -9.64%  超 target 帧数 0/32
+  qp: min 55 中位 55 max 58
+-- 3840x2160 hint=ON --
+== 4K_prores422HQ 3840x2160 hq sized t8，32 帧 ==
+  fps 12.91  wall/帧 77.5 ms
+  probe 编码次数: p50 3.0  p95 4  max 4  均值 3.12
+  bytes/target 误差: 中位 -5.19%  p95 -1.46%  最差 -9.64%  超 target 帧数 0/32
+  qp: min 55 中位 55 max 58

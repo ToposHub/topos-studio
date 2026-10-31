@@ -1,0 +1,459 @@
+/* ==========================================================================
+   1. 核心变量与全局样式 (此处控制全局色调与基础字体)
+   ========================================================================== */
+:root {
+    /* 颜色配置 - 修改此处可快速变换主题 */
+    --bg-body: #121212;      /* 页面总背景 */
+    --bg-card: #1e1e1e;      /* 卡片、面板背景 */
+    --border-color: #333;   /* 边框颜色 */
+    --text-main: #e0e0e0;    /* 主文字颜色 */
+    --text-muted: #888;      /* 次要/禁用状态文字颜色 */
+    --primary: #0d6efd;     /* 主题强调色(蓝色) */
+    
+    /* 卡片尺寸控制 - 决定文件预览图的基础大小 */
+    --card-width: 150px;     /* 默认视图下卡片的宽度 */
+    --card-height: 150px;    /* 默认视图下卡片的高度 */
+}
+
+body {
+    background: var(--bg-body); color: var(--text-main); height: 100vh; overflow: hidden; display: flex; flex-direction: column; margin: 0;
+    font-family: system-ui, -apple-system, sans-serif; /* 全局字体设置 */
+    user-select: none; /* 禁止页面文字被意外选中 */
+}
+
+/* 滚动条与辅助类 (压缩) */
+.custom-scrollbar{overflow-y:auto;overflow-x:hidden}::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-track{background:var(--bg-body)}::-webkit-scrollbar-thumb{background:#444;border-radius:4px}::-webkit-scrollbar-thumb:hover{background:#555}.text-danger{color:#ff6b6b!important}.text-danger:hover{color:#fff!important;background:#c0392b}
+
+/* ==========================================================================
+   2. 布局框架 (控制左右面板比例与缩放)
+   ========================================================================== */
+.explorer-container { display: flex; flex: 1; height: 100%; overflow: hidden; position: relative; }
+.sidebar-panel {
+    width: 260px; background: var(--bg-card); border-right: 1px solid var(--border-color);
+    display: flex; flex-direction: column; position: relative; flex-shrink: 0;
+    /* 移除 width transition 以避免拖拽时卡顿，仅保留 collapsed 状态的 transition */
+    contain: layout paint style;
+}
+.sidebar-panel.collapsed {
+    width: 0 !important; margin-left: -1px; overflow: hidden; border-right: none;
+    transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sidebar-resizer { position: absolute; right: -5px; top: 0; bottom: 0; width: 10px; cursor: col-resize; z-index: 100; }
+.sidebar-resizer:hover { background: rgba(13, 110, 253, 0.3); }
+
+#sidebarToggleMini.show { display: flex !important; }
+.sidebar-hide-btn { cursor: pointer; color: #888; font-size: 14px; transition: color 0.2s; }
+.sidebar-hide-btn:hover { color: #fff; }
+.main-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg-body); }
+
+/* ==========================================================================
+   3. 顶部组件 (菜单、工具栏、搜索)
+   ========================================================================== */
+.app-menubar{height:30px;background:var(--bg-card);border-bottom:1px solid var(--border-color);display:flex;align-items:center;padding:0 10px;gap:5px;flex-shrink:0;z-index:1000}.app-menubar .menu-item{position:relative;padding:4px 12px;cursor:pointer;color:var(--text-main);font-size:13px;border-radius:4px;transition:background .2s}.app-menubar .menu-item:hover{background:rgba(255,255,255,.1)}.app-menubar .menu-item .dropdown-menu{display:none;position:absolute;top:100%;left:0;min-width:180px;background:#2d2d2d;border:1px solid var(--border-color);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.5);padding:4px 0;margin-top:2px;z-index:9999}.app-menubar .menu-item.active .dropdown-menu{display:block}.app-menubar .dropdown-item{padding:8px 12px;cursor:pointer;color:var(--text-main);font-size:13px;display:flex;align-items:center;transition:background .2s}.app-menubar .dropdown-item:hover{background:#094771;color:#fff}.app-menubar .dropdown-divider{height:1px;background:var(--border-color);margin:4px 0}
+
+.file-toolbar{height:50px;padding:0 15px;background:var(--bg-card);border-bottom:1px solid var(--border-color);display:flex;align-items:center;flex-shrink:0;gap:10px}.nav-btn{border:none;background:transparent;color:var(--text-main);width:30px;height:30px;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer}.nav-btn:hover:not(:disabled){background:rgba(255,255,255,.1)}.nav-btn:disabled{color:#444;cursor:default}.breadcrumb-path{background:rgba(0,0,0,.2);border:1px solid transparent;border-radius:4px;color:var(--text-muted);font-size:.9rem;padding:4px 10px;flex:1;outline:none;transition:all .2s}.breadcrumb-path:focus{background:#000;border-color:var(--primary);color:#fff}.search-container{position:relative;width:200px;transition:width .3s ease}.search-container:focus-within{width:280px}.search-input{width:100%;height:32px;background:rgba(0,0,0,.2);border:1px solid transparent;border-radius:6px;padding-left:30px;padding-right:25px;color:#e0e0e0;font-size:13px;outline:none;transition:all .2s}.search-input:focus{background:#000;border-color:var(--primary);box-shadow:0 0 0 2px rgba(13,110,253,.25)}.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#888;pointer-events:none;font-size:12px}.search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);color:#888;cursor:pointer;font-size:12px}.search-clear:hover{color:#fff}
+
+/* ==========================================================================
+   4. 侧边栏树状结构 (Sidebar Tree)
+   ========================================================================== */
+.tree-header { padding: 4px 12px; cursor: pointer; color: #b0b0b0; display: flex; align-items: center; transition: 0.1s; border-radius: 4px; margin: 1px 6px; font-size: 14px; font-weight: 500; }
+.tree-header:hover { background: #252525; color: #fff; }
+.tree-header.active { background: rgba(13, 110, 253, 0.15); color: var(--primary); }
+.tree-toggler { width: 20px; text-align: center; transition: transform 0.2s; font-size: 14px; color: #808080; }
+.tree-toggler.expanded { transform: rotate(90deg); }
+.tree-children { display: none; font-size: 14px; font-weight: 500; color: #c8c8c8; }
+.tree-children.show { display: block; }
+
+.sidebar-section { margin-bottom: 8px; }
+.sidebar-header { padding: 6px 12px; cursor: default; }
+.add-smart-btn { cursor: pointer; color: var(--text-muted); transition: color 0.2s; font-size: 14px; }
+.add-smart-btn:hover { color: #fff; }
+.smart-list { margin-top: 4px; }
+.smart-folder-item {
+    padding: 8px 12px 8px 24px; cursor: pointer; color: #b0b0b0; display: flex; align-items: center;
+    transition: 0.1s; font-size: 13px; font-weight: 500; border-radius: 4px; margin: 2px 6px;
+}
+.smart-folder-item:hover { background: #252525; color: #fff; }
+.smart-folder-item.active { background: rgba(13, 110, 253, 0.15); color: var(--primary); }
+.smart-folder-item i:first-child { margin-right: 8px; font-size: 14px; }
+.smart-folder-item i.bi-x { display: none; margin-left: auto; }
+.smart-folder-item:hover i.bi-x { display: block; color: #888; }
+.smart-folder-item i.bi-x:hover { color: #ff6b6b; }
+
+/* ==========================================================================
+   5. 文件展示区域核心 (重点：预览图与卡片间距)
+   ========================================================================== */
+.file-area {
+    padding: 8px; /* 整个文件区域的内边距，控制卡片与窗口边缘的距离 */
+    flex: 1;
+}
+
+/* 核心卡片样式 - 修改此处调整卡片圆角、阴影与悬停效果 */
+.file-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px; /* 卡片圆角 */
+    overflow: hidden;
+    cursor: pointer;
+    position: relative;
+    transition: border-color 0.1s;
+    will-change: border-color;
+    /* [UX-1] 千级目录性能：视口外卡片跳过渲染布局（配合 intrinsic-size 占位） */
+    content-visibility: auto;
+    contain-intrinsic-size: 140px 180px;
+}
+
+.file-card:hover { border-color: var(--primary); }
+.layout-list .file-card:hover, .layout-waterfall .file-card:hover { z-index: 5; }
+.file-card.selected { border-color: var(--primary); background: rgba(13, 110, 253, 0.1); }
+.file-card[draggable="true"] { cursor: grab; }
+.file-card .card-checkbox { display: none !important; }
+
+/* 缩略图包装层 - 控制预览图在卡片内的缩进间距 */
+.file-thumb-wrapper {
+    position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;
+    padding: 0; /* 修改此处可调整预览图距离卡片边框的留白量 */
+    box-sizing: border-box;
+}
+
+.file-thumb {
+    width: 100%; height: 100%; object-fit: cover; /* cover 为裁剪填充，contain 为完整显示 */
+    border-radius: 0; /* 预览图本身的圆角 */
+    transition: transform 0.3s;
+}
+.file-card:hover .file-thumb { transform: scale(1.05); }
+
+/* 占位图与信息栏 (压缩) */
+.non-img-wrapper{width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#252525;color:#888}.non-img-wrapper i{font-size:3rem;margin-bottom:5px;color:#ffc107}.play-icon-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:3rem;color:rgba(255,255,255,.85);pointer-events:none;text-shadow:0 2px 5px rgba(0,0,0,.5);z-index:2}.res-badge{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;font-size:9px;padding:2px 4px;pointer-events:none;border-radius:3px}.file-info{position:absolute;bottom:0;left:0;right:0;padding:20px 8px 6px;font-size:.8rem;background:linear-gradient(to top, rgba(0,0,0,0.9), transparent);color:#fff;z-index:10;pointer-events:none}.file-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,0.8)}.file-meta{display:flex;justify-content:space-between;color:rgba(255,255,255,0.7);font-size:.75rem;margin-top:2px;text-shadow:0 1px 2px rgba(0,0,0,0.8)}
+
+/* 大/小尺寸变体 */
+body.size-large { --card-width: 220px; --card-height: 220px; }
+body.size-small { --card-width: 120px; --card-height: 120px; }
+
+/* ==========================================================================
+   6. 各种视图模式 (Layout Modes - 控制卡片间距与排列)
+   ========================================================================== */
+/* 通用视图布局 (压缩) */
+.layout-adaptive .file-card,.layout-grid .file-card,.layout-waterfall .file-card{display:flex;flex-direction:column!important;justify-content:space-between;overflow:hidden;background:#252526}.layout-adaptive .file-thumb-wrapper,.layout-grid .file-thumb-wrapper,.layout-waterfall .file-thumb-wrapper{flex:1;min-height:0;width:100%;padding:0;box-sizing:border-box;overflow:hidden}.layout-adaptive .file-thumb,.layout-grid .file-thumb,.layout-waterfall .file-thumb{width:100%;height:100%;object-fit:cover;border-radius:0}.layout-adaptive .file-name,.layout-grid .file-name,.layout-waterfall .file-name{font-weight:500;font-size:13px;margin-bottom:2px;color:#eee;text-align:left}.layout-adaptive .file-meta,.layout-grid .file-meta,.layout-waterfall .file-meta{font-size:11px;color:rgba(255,255,255,0.7);justify-content:space-between}
+
+/* 1. 自适应视图 - 重点关注 gap(间距) */
+.layout-adaptive {
+    display: flex; flex-wrap: wrap; 
+    gap: 8px; /* 修改此处调整卡片之间的间隙 */
+    padding: 10px; align-content: flex-start;
+}
+.layout-adaptive .file-card { flex-grow: 1; width: var(--card-width); height: var(--card-height); max-width: calc(var(--card-width) * 2.5); }
+.layout-adaptive .file-card.type-dir { flex-grow: 1.6; width: calc(var(--card-width) * 1.6); }
+.layout-adaptive .file-card:not(.type-dir) { flex-grow: 1.33; width: calc(var(--card-width) * 1.33); }
+
+/* 2. 网格视图 - 重点关注 gap(间距) */
+.layout-grid {
+    display: grid; 
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
+    gap: 8px; /* 修改此处调整网格间隙 */
+    padding: 10px;
+}
+.layout-grid .file-card { width: 100% !important; aspect-ratio: 1/1.2; }
+
+/* 3. 瀑布流与列表模式 (压缩) */
+.layout-waterfall {
+    column-width: calc(var(--card-width) * 1.6);
+    column-gap: 10px; /* 瀑布流列间距 */
+    padding: 10px;
+}
+.layout-waterfall .file-card{break-inside:avoid;margin-bottom:8px;width:100%}.layout-waterfall .file-thumb-wrapper{flex:none;height:auto}.layout-list{display:flex;flex-direction:column;gap:1px}.layout-list .file-card{display:flex;flex-direction:row;align-items:center;width:100%!important;height:40px!important;padding:0 10px;border:none;border-bottom:1px solid rgba(255,255,255,.05);border-radius:0;background:transparent;margin:0!important}.layout-list .file-card:hover{background:rgba(255,255,255,.08);border-color:transparent;z-index:1}.layout-list .file-card.selected{background:rgba(13,110,253,.2)}.layout-list .card-checkbox{position:static;transform:scale(.9);opacity:.3;margin-right:12px}.layout-list .card-checkbox:checked,.layout-list .file-card:hover .card-checkbox{opacity:1}.layout-list .file-thumb-wrapper,.layout-list .non-img-wrapper{width:24px!important;height:24px!important;padding:0!important;margin-right:12px;background:transparent!important;border:none;flex-shrink:0;display:flex;align-items:center;justify-content:center}.layout-list .file-thumb{border-radius:2px}.layout-list .non-img-wrapper i,.layout-list .fallback-icon i{font-size:1.1rem!important;color:#888;margin:0}.layout-list .file-info{position:relative;bottom:auto;left:auto;right:auto;background:transparent;color:inherit;text-shadow:none;padding:0;pointer-events:auto;flex:1;display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:0;opacity:1}.layout-list .file-name{width:auto;max-width:400px;font-size:14px;margin-right:20px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:none}.layout-list .file-meta{margin-top:0;font-size:12px;color:rgba(255,255,255,.4);display:flex;gap:15px;white-space:nowrap;text-shadow:none}.layout-list .play-icon-center,.layout-list .res-badge{display:none}
+
+/* ==========================================================================
+   7. 音频预览相关 (Audio Waveform Preview)
+   ========================================================================== */
+.audio-card-wrapper { width: 100%; height: 100%; position: relative; background: #1e1e1e; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.audio-placeholder { display: flex; flex-direction: column; align-items: center; color: #666; transition: opacity 0.2s; }
+.audio-placeholder i { font-size: 3rem; margin-bottom: 5px; color: var(--primary); }
+.waveform-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; opacity: 0; transition: opacity 0.3s; background: rgba(0, 0, 0, 0.3); pointer-events: none; }
+.file-card:hover .audio-placeholder { opacity: 0.2; }
+.file-card:hover .waveform-container { opacity: 1; }
+.audio-time-badge { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; padding: 2px 5px; border-radius: 3px; pointer-events: none; z-index: 15; }
+/* 列表模式下的音频修复 (压缩) */
+.layout-list .audio-card-wrapper{width:24px!important;height:24px!important;margin-right:12px!important;background:transparent!important;display:flex;align-items:center;justify-content:center;border:none!important}.layout-list .audio-placeholder{opacity:1!important;display:flex;align-items:center;justify-content:center}.layout-list .audio-placeholder i{font-size:1.1rem!important;margin:0!important;color:#888}.layout-list .waveform-container,.layout-list .audio-time-badge,.layout-list .audio-placeholder span{display:none!important}.layout-list .file-card:hover .audio-card-wrapper{background:transparent!important}
+
+/* ==========================================================================
+   8. 交互组件与弹窗 (压缩)
+   ========================================================================== */
+.context-menu{position:fixed;display:none;z-index:9999;background:#252526;border:1px solid #454545;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.5);min-width:150px;padding:4px 0;font-family:system-ui,sans-serif}.context-menu .menu-item{padding:8px 12px;cursor:pointer;color:#eee;font-size:13px;display:flex;align-items:center}.context-menu .menu-item:hover{background:#094771;color:#fff}.context-menu .menu-divider{height:1px;background:#454545;margin:4px 0}.context-menu .has-submenu { position: relative; }.context-menu .submenu { display: none; position: absolute; left: 98%; top: -4px; min-width: 200px; background: #252526; border: 1px solid #454545; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); padding: 4px 0; z-index: 10000; }.context-menu .has-submenu:hover .submenu { display: block; }#scrollContainer.drag-over{background:rgba(13,110,253,.15);border:2px dashed var(--primary);border-radius:8px;margin:-2px}.paste-progress-panel{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(100px);width:400px;background:#252526;border:1px solid #454545;border-radius:8px;padding:12px 15px;box-shadow:0 10px 30px rgba(0,0,0,.5);z-index:2000;transition:transform .3s cubic-bezier(.175,.885,.32,1.275)}.paste-progress-panel.show{transform:translateX(-50%) translateY(0)}.thumb-progress-panel { position: fixed; bottom: 20px; right: 20px; width: 280px; background: #252526; border: 1px solid #454545; border-radius: 8px; padding: 10px 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); z-index: 1500; transition: all 0.3s ease; opacity: 0; transform: translateY(20px); pointer-events: none; }.thumb-progress-panel.show { opacity: 1; transform: translateY(0); }
+#floatingPlayerContainer{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:720px;height:450px;z-index:5000;display:none;box-shadow:0 0 0 1px rgba(255,255,255,.1),0 30px 60px rgba(0,0,0,.9);border-radius:8px;overflow:hidden;background:#000}.player-header{background:rgba(30,30,30,.95);padding:0 10px;height:36px;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #333}.icon-btn{background:transparent;border:none;color:#bbb;padding:4px;cursor:pointer;transition:.2s}.icon-btn:hover{color:#fff}#cmsLightbox{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.98);z-index:6000;display:none;flex-direction:column}.cms-toolbar{height:50px;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:space-between;padding:0 20px;position:absolute;top:0;left:0;right:0;z-index:6010}.cms-viewport{flex:1;width:100%;height:100%;position:relative;overflow-y:auto;display:flex;align-items:center;justify-content:center;padding:40px 80px 100px}#cmsImg{max-width:100%;max-height:calc(100vh - 220px);object-fit:contain;transform-origin:center center;cursor:grab;transition:transform .1s ease-out;will-change:transform}#cmsImg.zoomed{cursor:grabbing}#cmsVideoInfo{display:none;padding:10px 20px;background:rgba(0,0,0,.75);border-radius:8px;backdrop-filter:blur(8px);font-size:14px;letter-spacing:1px}.nav-arrow{position:absolute;top:50%;transform:translateY(-50%);font-size:3rem;color:#fff;opacity:.1;cursor:pointer;padding:30px;z-index:6020;transition:opacity .2s}.nav-arrow:hover{opacity:1}.nav-prev{left:10px}.nav-next{right:10px}
+
+/* ==========================================================================
+   9. 插件样式 (Pro Audio Player)
+   ========================================================================== */
+.pro-audio-modal{position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(18,18,18,.95);backdrop-filter:blur(10px);z-index:9999;display:flex;flex-direction:column}.pro-audio-header{height:50px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center;padding:0 20px;color:#fff;background:#000}.pro-audio-body{flex:1;display:flex;flex-direction:column;justify-content:center;padding:20px;overflow:hidden;position:relative}.wave-minimap{height:60px;width:100%;margin-bottom:10px;background:#111;border:1px solid #333}.wave-main{height:200px;width:100%;background:#000;border-left:1px solid #333;border-right:1px solid #333}.wave-timeline{height:20px;width:100%}.wave-spectrogram{height:100px;width:100%;margin-top:10px}.pro-audio-controls{height:60px;background:#222;border-top:1px solid #333;display:flex;align-items:center;padding:0 20px;color:#fff}
+
+/* ==========================================================================
+   10. 属性面板 (Properties Panel)
+   ========================================================================== */
+.properties-panel {
+    width: 0; background: var(--bg-card); border-left: 1px solid var(--border-color); display: flex; 
+    flex-direction: column; overflow: hidden; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+    flex-shrink: 0; contain: layout paint style;
+}
+.properties-panel.active { width: 300px; }
+.panel-header {
+    height: 36px; padding: 0 10px; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--border-color); 
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.panel-content { flex: 1; padding: 15px; overflow-y: auto; color: var(--text-main); font-size: 13px; }
+.prop-row { margin-bottom: 12px; }
+.prop-label { display: block; color: var(--text-muted); font-size: 11px; margin-bottom: 2px; }
+.prop-value { word-break: break-all; line-height: 1.4; }
+
+/* ==========================================================================
+   11. 文件属性面板增强 (Enhanced Properties Panel)
+   ========================================================================== */
+.rating-stars { display: flex; gap: 4px; margin: 8px 0 16px; justify-content: center; }
+.rating-stars .bi-star-fill { color: #444; cursor: pointer; font-size: 1.2rem; transition: color 0.2s, transform 0.2s; }
+.rating-stars .bi-star-fill.active { color: #ffc107; }
+.rating-stars .bi-star-fill:hover { transform: scale(1.2); }
+
+.prop-table { width: 100%; margin-bottom: 15px; border-collapse: collapse; font-size: 12px; }
+.prop-table td { padding: 6px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.prop-table td:first-child { color: var(--text-muted); width: 35%; }
+.prop-table td:last-child { color: var(--text-main); text-align: right; font-family: monospace; }
+
+.actions-area { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color); }
+.action-btn { 
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: var(--text-main); 
+    padding: 8px 12px; border-radius: 4px; font-size: 12px; display: flex; align-items: center; 
+    justify-content: center; cursor: pointer; transition: all 0.2s; text-decoration: none;
+}
+.action-btn:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.2); color: #fff; }
+.action-btn i { margin-right: 6px; }
+
+.meta-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 15px; }
+.meta-grid.three-col { grid-template-columns: repeat(3, 1fr); }
+.meta-badge { 
+    background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 4px; 
+    padding: 6px 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; 
+}
+.meta-badge .meta-label { font-size: 10px; color: var(--text-muted); margin-bottom: 2px; text-transform: uppercase; }
+.meta-badge .meta-value { 
+    font-size: 11px; color: #fff; font-weight: 500; font-family: monospace; white-space: nowrap; 
+    overflow: hidden; text-overflow: ellipsis; max-width: 100%; 
+}
+.meta-badge.highlight .meta-value { color: var(--primary); }
+
+.camera-info-row { 
+    display: flex; align-items: center; justify-content: space-around; background: rgba(255, 255, 255, 0.03); 
+    padding: 8px; border-radius: 4px; margin-bottom: 12px; font-family: monospace; font-size: 11px; 
+}
+.camera-info-item { display: flex; align-items: center; gap: 4px; color: #ccc; }
+.camera-info-item i { color: var(--text-muted); }
+
+.dashed-border { border-style: dashed !important; opacity: 0.8; }
+.dashed-border:hover { opacity: 1; border-style: solid !important; }
+.smart-rule-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.smart-rule-row select, .smart-rule-row input { height: 32px; font-size: 13px; }
+.smart-rule-row .rule-prop { width: 120px; flex-shrink: 0; }
+.smart-rule-row .rule-val { width: 100%; }
+.smart-rule-row .rule-del { color: #888; cursor: pointer; font-size: 1.2rem; transition: color 0.2s; padding: 0 5px; }
+.smart-rule-row .rule-del:hover { color: #ff6b6b; }
+#smartRulesContainer { max-height: 300px; overflow-y: auto; padding-right: 5px; margin-bottom: 10px; }
+#smartRulesContainer::-webkit-scrollbar { width: 4px; }
+#smartRulesContainer::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+/* ==========================================================================
+   12. 批量操作面板 (Batch Operations Panel)
+   ========================================================================== */
+.batch-tabs { display: flex; border-bottom: 1px solid var(--border-color); margin: -15px -15px 15px; background: rgba(0,0,0,0.15); }
+.batch-tab-item { 
+    flex: 1; text-align: center; padding: 10px 0; font-size: 12px; color: var(--text-muted); 
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; 
+}
+.batch-tab-item:hover { color: #fff; background: rgba(255,255,255,0.05); }
+.batch-tab-item.active { color: var(--primary); border-bottom-color: var(--primary); background: rgba(13, 110, 253, 0.05); }
+.batch-tab-content { display: none; animation: fadeIn 0.2s ease-in-out; }
+.batch-tab-content.active { display: block; }
+#renamePreview { 
+    margin-top: 15px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; 
+    padding: 10px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 11px; 
+}
+#renamePreview::-webkit-scrollbar { width: 6px; }
+#renamePreview::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+.preview-item { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.preview-item:last-child { border-bottom: none; }
+.preview-arrow { color: var(--text-muted); margin: 0 5px; }
+.preview-old { color: var(--text-muted); text-decoration: line-through; opacity: 0.7; }
+.preview-new { color: #a6e22e; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ==========================================================================
+   13. Performance Optimizations for Small View (Grid/Adaptive)
+   ========================================================================== */
+/* 针对小视图下 Grid/Adaptive 布局的极致性能优化 */
+body.size-small .layout-grid .file-info,
+body.size-small .layout-adaptive .file-info { display: none !important; }
+/* [UX-1] 移除从未生效的 contain:strict（与 base 规则冲突且 size-small 变体
+   又被下方规则覆盖 transform）；跳过渲染统一由 base 的 content-visibility 承担 */
+body.size-small .layout-grid .file-card *,
+body.size-small .layout-adaptive .file-card * { pointer-events: none; }
+body.size-small .layout-grid .file-card .card-checkbox,
+body.size-small .layout-adaptive .file-card .card-checkbox { pointer-events: auto; }
+body.size-small .layout-grid .file-card,
+body.size-small .layout-adaptive .file-card { 
+    transition: border-color 0.1s !important; transform: none !important; box-shadow: none !important; 
+}
+body.size-small .layout-grid .file-card .file-thumb,
+body.size-small .layout-adaptive .file-card .file-thumb { transform: none !important; transition: none !important; }
+.layout-grid .file-card:hover,
+.layout-adaptive .file-card:hover { z-index: auto !important; }
+
+/* ==========================================================================
+   14. Bootstrap 下拉菜单深色主题覆盖 (Dropdown Dark Theme Override)
+   ========================================================================== */
+.dropdown-menu {
+    background: #2d2d2d !important;
+    border: 1px solid #454545 !important;
+    color: #e0e0e0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.dropdown-menu .dropdown-item {
+    color: #ccc;
+    transition: background 0.15s, color 0.15s;
+}
+.dropdown-menu .dropdown-item:hover,
+.dropdown-menu .dropdown-item:focus {
+    background: #094771 !important;
+    color: #fff;
+}
+.dropdown-menu .dropdown-item.active {
+    background: rgba(13, 110, 253, 0.25) !important;
+    color: #fff;
+}
+.dropdown-menu .dropdown-header {
+    color: #888 !important;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.dropdown-menu .dropdown-divider {
+    border-top-color: #454545;
+}
+
+/* [UX-7] 卡片角标：星级/标签（叠加在缩略图左上角） */
+.card-badges { position: absolute; top: 4px; left: 4px; display: flex; gap: 3px; z-index: 3; pointer-events: none; }
+.card-badges .badge-rating { background: rgba(0,0,0,.68); color: #FFC53D; font-size: 10px; line-height: 1; padding: 3px 5px; border-radius: 3px; letter-spacing: 1px; }
+.card-badges .badge-tag { background: rgba(0,0,0,.68); color: #4DACFF; font-size: 10px; line-height: 1; padding: 3px 5px; border-radius: 3px; }
+
+/* [UX-3] 缩略图失败占位内的手动重试按钮 */
+.fallback-icon { flex-direction: column; }
+.fallback-icon .thumb-retry { margin-top: 8px; font-size: 11px; color: #4DACFF; cursor: pointer; pointer-events: auto; }
+.fallback-icon .thumb-retry:hover { text-decoration: underline; }
+
+/* ============ [U5] 组织能力：颜色标记/旗标/标签编辑/搜索范围 ============ */
+.badge-color{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+.badge-color.c1{background:#FF453A}.badge-color.c2{background:#FFD60A}.badge-color.c3{background:#32D74B}.badge-color.c4{background:#0A84FF}.badge-color.c5{background:#BF5AF2}
+.color-dot{width:10px;height:10px;border-radius:50%;display:inline-block;vertical-align:middle}
+.color-dot.c1{background:#FF453A}.color-dot.c2{background:#FFD60A}.color-dot.c3{background:#32D74B}.color-dot.c4{background:#0A84FF}.color-dot.c5{background:#BF5AF2}
+.badge-flag{background:rgba(0,0,0,.68);color:#0A84FF;font-size:10px;line-height:1;padding:3px 5px;border-radius:3px;display:inline-flex;align-items:center;pointer-events:none}
+.badge-flag.badge-reject{color:#FF453A}
+.color-swatch{width:20px;height:20px;border-radius:50%;display:inline-block;cursor:pointer;border:2px solid transparent;margin:0 3px;vertical-align:middle}
+.color-swatch.active{border-color:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.6)}
+.color-swatch.c0{background:#444}.color-swatch.c1{background:#FF453A}.color-swatch.c2{background:#FFD60A}.color-swatch.c3{background:#32D74B}.color-swatch.c4{background:#0A84FF}.color-swatch.c5{background:#BF5AF2}
+.flag-btn{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;border:1px solid #555;cursor:pointer;font-size:12px;color:#ccc;margin:0 4px}
+.flag-btn.active{border-color:#0A84FF;color:#fff;background:rgba(10,132,255,.25)}
+.flag-btn.flag-reject.active{border-color:#FF453A;background:rgba(255,69,58,.25)}
+.tag-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+.tag-chip{display:inline-flex;align-items:center;gap:4px;background:rgba(77,172,255,.18);color:#4DACFF;border:1px solid rgba(77,172,255,.35);border-radius:10px;padding:2px 8px;font-size:12px}
+.tag-chip .chip-x{cursor:pointer;color:#4DACFF;opacity:.7;font-style:normal}
+.tag-chip .chip-x:hover{opacity:1;color:#fff}
+#prop-tag-input{margin-top:2px}
+.search-scope{background:#252526;color:#aaa;border:1px solid #444;border-radius:4px;font-size:11px;padding:2px 2px;margin-left:6px;outline:none;cursor:pointer}
+/* [U5 收尾/GAP-02] 搜索历史下拉 + 保存为智能文件夹按钮 */
+.search-save-btn{position:absolute;right:8px;top:50%;transform:translateY(-50%);color:#4DACFF;cursor:pointer;font-size:13px;z-index:2}
+.search-save-btn:hover{color:#fff}
+.search-history-panel{position:absolute;top:38px;left:0;right:0;background:#1e1e1e;border:1px solid #444;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:1050;max-height:260px;overflow-y:auto;padding:4px 0}
+.search-history-panel .sh-item{display:flex;align-items:center;gap:8px;padding:5px 12px;cursor:pointer;color:#ccc;font-size:12px}
+.search-history-panel .sh-item:hover{background:rgba(77,172,255,.12);color:#fff}
+.search-history-panel .sh-item .sh-text{flex:1}
+.search-history-panel .sh-item .sh-del{font-size:10px;opacity:.4;color:#999}
+.search-history-panel .sh-item .sh-del:hover{opacity:1;color:#FF453A}
+.search-history-panel .sh-empty{padding:8px 12px;color:#666;font-size:12px}
+.search-history-panel .sh-footer{padding:6px 12px;color:#888;font-size:11px;cursor:pointer;border-top:1px solid #333;margin-top:2px}
+.search-history-panel .sh-footer:hover{color:#FF453A}
+/* [U6/GAP-05] 回收站视图 + [U6/GAP-06] re-link 行 */
+.trash-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;grid-column:1/-1;border-bottom:1px solid var(--border-color);margin-bottom:6px}
+.trash-item{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:6px;cursor:default;color:#ddd;font-size:13px;width:100%}/* [U10] #fileContainer 带 layout-grid/flex 布局类：回收站条目必须占满整行，
+   否则 grid 模式下被压进 --card-width 单元格并排挤在一行 */
+.trash-item:hover{background:rgba(255,255,255,.05)}
+.trash-item .min-width-0{min-width:0}
+.relink-row{display:flex;align-items:flex-start;gap:10px;padding:7px 10px;border-radius:6px;cursor:pointer;color:#ddd}
+.relink-row:hover{background:rgba(255,255,255,.05)}
+.relink-row .relink-check{margin-top:4px}
+.relink-actions a{color:#4DACFF;font-size:12px;text-decoration:none}
+#trashSidebarItem:hover{background:rgba(255,255,255,.05)}
+.smart-folder-item .tag-count{font-size:10px;color:#666;margin-left:6px}
+.smart-folder-item .tag-color-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+/* ── [U7] 视图与工作流批 ─────────────────────────────── */
+/* [GAP-13] 面包屑 */
+.breadcrumb-bar{flex:1;display:flex;align-items:center;gap:2px;overflow:hidden;background:rgba(0,0,0,.2);border:1px solid transparent;border-radius:4px;color:var(--text-muted);font-size:.9rem;padding:4px 10px;min-width:0}
+.crumb-wrap{display:inline-flex;align-items:center;flex-shrink:0}
+.crumb-seg{cursor:pointer;color:#9aa0a6;padding:2px 4px;border-radius:3px;white-space:nowrap}
+.crumb-seg:hover{color:#fff;background:rgba(255,255,255,.08)}
+.crumb-seg.current{color:#e0e0e0;font-weight:600;cursor:default}
+.crumb-arrow{font-size:9px;color:#666;cursor:pointer;padding:2px 3px;border-radius:3px}
+.crumb-arrow:hover{color:#4DACFF;background:rgba(255,255,255,.08)}
+.crumb-sep{color:#555;margin:0 2px}
+.crumb-menu{position:fixed;z-index:2000;background:#1e1e1e;border:1px solid #444;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);min-width:180px;max-width:320px;max-height:320px;overflow-y:auto;padding:4px 0}
+.crumb-menu-item{display:flex;align-items:center;padding:5px 12px;cursor:pointer;color:#ccc;font-size:12px}
+.crumb-menu-item:hover{background:rgba(77,172,255,.12);color:#fff}
+/* [GAP-07] 时间线 */
+.layout-timeline{display:block!important;padding:0 10px}
+.tl-header{display:flex;align-items:center;gap:6px;color:#b0b0b0;font-size:14px;font-weight:600;padding:14px 4px 8px;cursor:pointer;user-select:none}
+.tl-header:hover{color:#fff}
+.tl-header i{transition:transform .15s;font-size:11px;color:#666}
+.tl-header i.collapsed{transform:rotate(-90deg)}
+.tl-group{display:grid;grid-template-columns:repeat(auto-fill,var(--card-width));gap:12px}
+/* [GAP-08] 对比视图 */
+#compareView{position:fixed;inset:0;background:rgba(0,0,0,.96);z-index:3000;display:flex;flex-direction:column}
+.cmp-toolbar{display:flex;align-items:center;gap:8px;padding:8px 14px}
+.cmp-panes{flex:1;display:flex;gap:4px;overflow:hidden;padding:0 4px 8px}
+.cmp-pane{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#111;border-radius:4px}
+.cmp-pane img{max-width:100%;max-height:100%;transform-origin:center;transition:none}
+.cmp-name{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);color:#ccc;font-size:11px;padding:3px 8px;text-align:center}
+/* [GAP-09] 重复文件 */
+.dup-group{border:1px solid #333;border-radius:6px;padding:8px 10px;margin-bottom:8px}
+.dup-group-head{margin-bottom:4px}
+.dup-row{display:flex;align-items:center;gap:8px;padding:3px 4px;color:#ccc;font-size:12px;cursor:pointer;border-radius:4px}
+.dup-row:hover{background:rgba(255,255,255,.05)}
+.dup-row span{flex:1}
+/* [GAP-10] 视频胶片条 */
+.strip-overlay{position:absolute;inset:0;background-repeat:no-repeat;background-size:600% 100%;background-position:0% 50%;pointer-events:none;z-index:2}
+.filmstrip .strip-bar{height:44px;border-radius:4px;background-repeat:no-repeat;background-size:600% 100%;cursor:crosshair}
+.filmstrip .strip-preview{height:90px;border-radius:4px;background-repeat:no-repeat;background-size:600% 100%;margin-top:4px}
+/* [GAP-11] 灯箱文本/MD 预览 */
+.cms-text-pane{max-width:80%;max-height:80%;overflow:auto;background:rgba(20,20,20,.9);color:#ddd;padding:24px 32px;border-radius:8px;white-space:pre-wrap;font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.6}
+.cms-text-pane.is-md{white-space:normal;font-family:-apple-system,'Segoe UI',sans-serif}
+.cms-text-pane.is-md pre,.cms-text-pane.is-md code{font-family:Menlo,Consolas,monospace;background:rgba(255,255,255,.06);border-radius:4px}
+.cms-text-pane.is-md pre{padding:10px;overflow-x:auto}
+.cms-text-pane.is-md h1,.cms-text-pane.is-md h2,.cms-text-pane.is-md h3{color:#fff;margin:.8em 0 .4em}
+.cms-text-pane.is-md a{color:#4DACFF}
+.cms-text-pane.is-md img{max-width:100%}
+.cms-text-pane.is-md table{border-collapse:collapse}
+.cms-text-pane.is-md td,.cms-text-pane.is-md th{border:1px solid #444;padding:4px 8px}
+
+/* [BUG-P3-51] body 禁选导致文件名/属性无法手动复制：关键区域放行 */
+.file-name,.file-meta,.prop-table,#propertiesPanel,.path-display-text,.cms-text-pane,.dup-row,.trash-item{user-select:text}
+
+/* [V1/GAP-02] 视频时长角标（res-badge 同款定位，左下避开右上的分辨率） */
+.dur-badge{position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9px;padding:2px 4px;pointer-events:none;border-radius:3px;font-family:Menlo,Consolas,monospace;z-index:2}
+.layout-list .dur-badge{display:none}
+/* [V1/GAP-01] 侧栏索引状态 */
+#scanStatusText{line-height:1.4;word-break:break-all}
+
+/* [V2/GAP-07] 堆叠封面角标（左下，避开右下时长角标） */
+.stack-badge{position:absolute;bottom:4px;left:4px;background:rgba(13,110,253,.75);color:#fff;font-size:9px;padding:2px 5px;border-radius:3px;z-index:3;cursor:pointer;display:flex;align-items:center;gap:3px}
+.stack-badge:hover{background:rgba(13,110,253,.95)}
+/* [V2/GAP-05] 集合/标签条目 drop 目标高亮 */
+.smart-folder-item{transition:background .1s}
+.smart-folder-item:has(+ .smart-folder-item:hover){}
+/* [V3/GAP-09] 自动颜色桶 dot */
+.dom-dot{width:14px;height:14px;border-radius:50%;cursor:pointer;display:inline-block;border:1px solid #555}
+.dom-dot.active{outline:2px solid #4DACFF;outline-offset:1px}

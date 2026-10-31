@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="2000" viewBox="0 0 1600 2000">
+  <title>TOPOS 优势 05：开放生态</title>
+  <defs>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#03111d" stop-opacity=".32"/><stop offset=".52" stop-color="#04101d" stop-opacity=".92"/><stop offset="1" stop-color="#020811" stop-opacity=".98"/></linearGradient>
+    <linearGradient id="cyan" x1="0" x2="1"><stop stop-color="#40d9ff"/><stop offset="1" stop-color="#7ef0d1"/></linearGradient>
+    <linearGradient id="amber" x1="0" x2="1"><stop stop-color="#ffb44a"/><stop offset="1" stop-color="#ff6d8a"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#000" flood-opacity=".46"/></filter>
+    <style>
+      .cn{font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif}.white{fill:#f2f7fb}.muted{fill:#a9bdcb}.cyan{fill:#7fe6ff}.amber{fill:#ffc56a}.card{fill:#071725;fill-opacity:.91;stroke:#2b5870;stroke-width:2}.body{font-size:29px}.small{font-size:24px}
+    </style>
+  </defs>
+  <image x="0" y="0" width="1600" height="2000" preserveAspectRatio="xMidYMid slice" xlink:href="assets/topos_codec_poster_bg.png"/>
+  <rect width="1600" height="2000" fill="url(#shade)"/>
+  <g class="cn">
+    <text x="82" y="118" class="amber" font-size="24" font-weight="800" letter-spacing="5">TOPOS CODEC / ADVANTAGE 05</text>
+    <text x="82" y="220" class="white" font-size="70" font-weight="800">体系化的开源免费生态</text>
+    <text x="86" y="280" class="muted" font-size="29">从编码内核，到 Topos Color、Topos Edit 与 Topos Composite。</text>
+    <rect x="82" y="325" width="440" height="7" rx="3" fill="url(#amber)"/>
+  </g>
+
+  <g class="cn" filter="url(#shadow)">
+    <rect x="70" y="420" width="1460" height="300" rx="28" class="card"/>
+    <rect x="70" y="420" width="11" height="300" rx="5" fill="url(#amber)"/>
+    <text x="112" y="490" class="amber" font-size="25" font-weight="800" letter-spacing="4">SYSTEMATIC ECOSYSTEM</text>
+    <text x="112" y="558" class="white" font-size="46" font-weight="800">体系化的视频 / 图片编码生态</text>
+    <text x="112" y="614" class="muted body">把视频、图片、RAW、浮点、容器、SDK 和工具链放进同一套开放体系。</text>
+    <text x="112" y="664" class="muted small">开源、免费、可审计、可扩展；产品和插件按同一套媒体语义演进。</text>
+  </g>
+
+  <g class="cn" filter="url(#shadow)">
+    <rect x="70" y="780" width="460" height="530" rx="28" class="card"/>
+    <rect x="70" y="780" width="11" height="530" rx="5" fill="url(#cyan)"/>
+    <text x="112" y="848" class="cyan" font-size="25" font-weight="800" letter-spacing="4">OPEN CORE</text>
+    <text x="112" y="920" class="white" font-size="45" font-weight="800">TOPOS Codec</text>
+    <text x="112" y="982" class="amber" font-size="29" font-weight="800">Apache License 2.0</text>
+    <text x="112" y="1040" class="white body">C ABI · CMake · Python</text>
+    <text x="112" y="1085" class="white body">MOV · .toos · RAW</text>
+    <text x="112" y="1150" class="muted small">公开规范、能力清单、测试门禁</text>
+    <text x="112" y="1190" class="muted small">开发者可以直接集成和扩展</text>
+    <text x="112" y="1250" class="cyan" font-size="26" font-weight="800">开放基础设施</text>
+
+    <rect x="570" y="780" width="460" height="530" rx="28" class="card"/>
+    <rect x="570" y="780" width="11" height="530" rx="5" fill="url(#amber)"/>
+    <text x="612" y="848" class="amber" font-size="25" font-weight="800" letter-spacing="4">COLOR WORKFLOW</text>
+    <text x="612" y="920" class="white" font-size="45" font-weight="800">Topos Color</text>
+    <text x="612" y="982" class="cyan" font-size="29" font-weight="800">当前主线产品</text>
+    <text x="612" y="1040" class="white body">调色 · Deliver · GPU 管线</text>
+    <text x="612" y="1085" class="white body">RAW / HDR / 中间片工作流</text>
+    <text x="612" y="1150" class="muted small">编码器、图片层与编辑器</text>
+    <text x="612" y="1190" class="muted small">共享同一套媒体语义</text>
+    <text x="612" y="1250" class="cyan" font-size="26" font-weight="800">面向调色师与摄影师</text>
+
+    <rect x="1070" y="780" width="460" height="530" rx="28" class="card"/>
+    <rect x="1070" y="780" width="11" height="530" rx="5" fill="url(#cyan)"/>
+    <text x="1112" y="848" class="cyan" font-size="25" font-weight="800" letter-spacing="4">EDIT WORKFLOW</text>
+    <text x="1112" y="920" class="white" font-size="45" font-weight="800">Topos Edit</text>
+    <text x="1112" y="982" class="amber" font-size="29" font-weight="800">Topos Composite：后续产品线</text>
+    <text x="1112" y="1040" class="white body">Edit · Composite · Deliver</text>
+    <text x="1112" y="1085" class="white body">Color 查看器与转换工具</text>
+    <text x="1112" y="1150" class="muted small">同源素材与同源编码能力</text>
+    <text x="1112" y="1190" class="muted small">减少应用之间的格式割裂</text>
+    <text x="1112" y="1250" class="cyan" font-size="26" font-weight="800">面向剪辑、合成与创作者</text>
+  </g>
+
+  <g class="cn">
+    <text x="82" y="1430" class="white" font-size="31" font-weight="800" letter-spacing="3">开放生态带来的实际价值</text>
+    <line x1="82" y1="1468" x2="1518" y2="1468" stroke="#2d657f" stroke-width="2"/>
+    <g transform="translate(82 1545)"><text class="cyan" font-size="28" font-weight="800">不锁定</text><text y="48" class="muted small">开发者不必依赖封闭 SDK</text></g>
+    <g transform="translate(430 1545)"><text class="cyan" font-size="28" font-weight="800">可复用</text><text y="48" class="muted small">同一套规范贯穿多个产品</text></g>
+    <g transform="translate(810 1545)"><text class="cyan" font-size="28" font-weight="800">可扩展</text><text y="48" class="muted small">新档位、新平台、新适配器</text></g>
+    <g transform="translate(1190 1545)"><text class="cyan" font-size="28" font-weight="800">可审计</text><text y="48" class="muted small">能力清单与测试证据公开</text></g>
+    <rect x="82" y="1715" width="1436" height="125" rx="22" fill="#071725" fill-opacity=".84" stroke="#2b5870"/>
+    <text x="118" y="1770" class="white body" font-weight="700">让编码器成为开放基础设施，让应用成为同一生态里的不同入口。</text>
+    <text x="118" y="1815" class="amber small">开源内核 · 免费使用 · 未来插件：DaVinci Resolve · Adobe Premiere Pro</text>
+    <text x="82" y="1935" class="muted" font-size="20">TOPOS Codec V1 Preview · 许可证与产品状态以仓库文档为准 · 05 / 05</text>
+  </g>
+</svg>

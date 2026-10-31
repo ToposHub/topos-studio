@@ -1,0 +1,24 @@
+{
+  "recipe_id": "P17",
+  "name": "微光柔化",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合柔光人像/梦境感；threshold 低、radius 大、intensity 低才柔",
+  "component": "Soft_Glow_Bloom（生产插件 plugins/Soft_Glow_Bloom.tglsl）",
+  "dependencies": {
+    "plugin_id": "Soft_Glow_Bloom",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "threshold": 0.35,
+    "radius": 0.7,
+    "intensity": 0.3
+  },
+  "notes": "生产柔光插件低强度档：大半径低增益；参数已对真实插件 schema 校验。"
+}

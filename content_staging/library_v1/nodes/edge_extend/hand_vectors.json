@@ -1,0 +1,21 @@
+{
+  "component": "C17 edge_extend",
+  "method": "手算：4-邻接逐轮扩张枚举（一轮扩 1px，radius 轮后覆盖曼哈顿距离 ≤ radius 的可达区）；前源 = alpha ≥ threshold。容差 1e-6。",
+  "params_default": {"radius": 4, "threshold": 0.5, "output_mode": "color_only"},
+  "vectors": [
+    {"desc": "线性延伸", "fixture": "1x7: alpha=[1,1,1,0,0,0,0], rgb=C(0.6,0.5,0.4) 在列0-2, 其余 0",
+     "params": {"radius": 3},
+     "expected": "rgb 列3/4/5=C（距离1/2/3 逐轮到达），列6（距离4>3）=0；alpha 原样 [1,1,1,0,0,0,0]"},
+    {"desc": "premultiplied 模式", "fixture": "1x4: alpha=[1,1,0.3,0], rgb=C 在列0-1",
+     "params": {"radius": 2, "output_mode": "premultiplied"},
+     "expected": "rgb=[C, C, (0.18,0.15,0.12), 0]（列2 = C×0.3），alpha 原样"},
+    {"desc": "钻石扩张", "fixture": "5x5: 仅中心(2,2) alpha=1 rgb=C，其余全透明",
+     "params": {"radius": 2},
+     "expected": "曼哈顿距离≤2 的 12 个像素 rgb=C（距离1×4 + 距离2×8），其余 rgb=0（(0,0) 距离4 等）"},
+    {"desc": "threshold 前源判定", "fixture": "1x2: alpha=[0.6, 0.4], rgb=[C, D]",
+     "params": {"radius": 1, "threshold": 0.6},
+     "expected": "列0 为源（0.6≥0.6）；列1 (0.4<0.6) 非源但从列0 延伸得 C——注意 0.4<0.5 默认阈值时列1 也非源，threshold 提高/降低改变源集合"},
+    {"desc": "radius=0 恒等", "params": {"radius": 0}, "expected": "任意输入比特级恒等"},
+    {"desc": "全实恒等", "fixture": "全 alpha=1", "params": {}, "expected": "恒等（无未实像素）"}
+  ]
+}

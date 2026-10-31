@@ -1,0 +1,7 @@
+# 合并时直接使用当前分支的版本，忽略另一边的更改
+config.json merge=ours
+topos.db merge=ours
+
+# cmd.exe 批处理必须使用 CRLF 换行，否则脚本会因读取位置错乱而无法执行
+*.bat text eol=crlf
+*.cmd text eol=crlf

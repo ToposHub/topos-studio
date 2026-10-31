@@ -1,0 +1,49 @@
+{
+ "tag": "interact",
+ "wall_clock_s": 1800.0,
+ "frames": 11947,
+ "interval_p50_s": 0.0109,
+ "interval_p95_s": 0.0163,
+ "interval_max_s": 0.0218,
+ "render_errors": 0,
+ "render_error_kinds": [],
+ "present_acked": 11947,
+ "rss_mib": {
+  "available": true,
+  "first": 470.4,
+  "min": 470.4,
+  "max": 732.2,
+  "p50": 705.9,
+  "last": 731.8,
+  "first_half_mean": 693.3,
+  "second_half_mean": 718.4
+ },
+ "vram_mib": {
+  "available": true,
+  "first": 2128.0,
+  "min": 2128.0,
+  "max": 2736.0,
+  "p50": 2726.0,
+  "last": 2726.0,
+  "first_half_mean": 2724.9,
+  "second_half_mean": 2726.2
+ },
+ "interop_stats": {
+  "initialized": true,
+  "destroyed": false,
+  "slots": 12,
+  "slots_in_use": 0,
+  "max_ring_size": 32,
+  "pool_bytes": 111974400,
+  "max_pool_bytes": 1073741824,
+  "ctx": "0x274C5C728E0",
+  "bind_count": 43388,
+  "fail_count": 0,
+  "device_ordinal": 0,
+  "device_name": "NVIDIA GeForce RTX 4090",
+  "device_source": "gl_context",
+  "driver_version": 13050
+ },
+ "decode_pool": null,
+ "seek_failures": 0
+}

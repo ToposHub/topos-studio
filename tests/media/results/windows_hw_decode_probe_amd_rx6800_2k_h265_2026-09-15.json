@@ -1,0 +1,121 @@
+{
+  "date": "2026-09-15T15:00:10",
+  "plan_item": "W2 hardware decoder capability probe (download path only)",
+  "os": "win32",
+  "source": {
+    "path": "tests\\test_videos\\2K_H265.mov",
+    "codec": "hevc",
+    "pix_fmt": "yuv420p10le",
+    "width": 1920,
+    "height": 1080
+  },
+  "protocol": "真实 PyAV open + 首 5 帧 decode；输出格式与耗时记录；不等于 D3D11 zero-copy",
+  "rows": [
+    {
+      "device": "none",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "p010le",
+      "elapsed_ms": 202.5
+    },
+    {
+      "device": "vdpau",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 92.0
+    },
+    {
+      "device": "cuda",
+      "status": "failed",
+      "frames": 0,
+      "output_format": null,
+      "elapsed_ms": 1.6,
+      "error": "PermissionError: [Errno 1] Operation not permitted"
+    },
+    {
+      "device": "vaapi",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 74.7
+    },
+    {
+      "device": "dxva2",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "p010le",
+      "elapsed_ms": 220.2
+    },
+    {
+      "device": "qsv",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 108.1
+    },
+    {
+      "device": "videotoolbox",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 83.1
+    },
+    {
+      "device": "d3d11va",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "p010le",
+      "elapsed_ms": 149.8
+    },
+    {
+      "device": "drm",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 112.8
+    },
+    {
+      "device": "opencl",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 98.8
+    },
+    {
+      "device": "mediacodec",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 99.3
+    },
+    {
+      "device": "vulkan",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 85.6
+    },
+    {
+      "device": "d3d12va",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "p010le",
+      "elapsed_ms": 601.9
+    },
+    {
+      "device": "amf",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 123.9
+    },
+    {
+      "device": "ohcodec",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p10le",
+      "elapsed_ms": 86.1
+    }
+  ]
+}

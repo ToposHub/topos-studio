@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "kind": "windows_timeline_export_bench",
+  "meta": {
+    "date": "2026-09-15",
+    "gpu_tag": "amd_rx6800_t1_gpu_ref_resize",
+    "os": "win32 nt",
+    "python": "3.12.14",
+    "git_rev": "98106291",
+    "bitrate_bps": 20000000,
+    "failure_artifacts_dir": "C:/Users/testuser\\Documents\\vscode\\topos-color-multitask\\topos_1\\tests\\media\\results\\failed_outputs_amd_rx6800_t1_gpu_ref_resize_20260915_164039",
+    "json_name": "windows_timeline_export_amd_rx6800_t1_gpu_ref_resize_2026-09-15.json"
+  },
+  "protocol": {
+    "frames": 30,
+    "warmup_frames": 0,
+    "runs": 1,
+    "bitrate_mode": "vbr",
+    "report": "median of runs; frame times from progress callback deltas",
+    "case_matrix": [
+      "T0",
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T6",
+      "T7",
+      "T8",
+      "T9",
+      "T10"
+    ],
+    "groups": [
+      "cpu_pipeline",
+      "hw_download",
+      "ffmpeg_gpu_ref",
+      "d3d11_gpu_surface"
+    ],
+    "input_manifest": "sha256 + PyAV video probe for every selected material",
+    "output_validation": "PyAV decoded frame count + codec/pixel format/size + SHA-256",
+    "gpu_evidence": "D3D11 requires adapter LUID, native decode/render/yuv/encode timestamps and ExportGpuTrail cpu_upload_bytes=0/cpu_download_bytes=0"
+  },
+  "inputs": {
+    "2K_H265.mov": {
+      "path": "tests\\test_videos\\2K_H265.mov",
+      "exists": true,
+      "sha256": "0aee87a9fc159d2e28bfec8286269feef72499007b9bb8422b96fb89a568970b",
+      "probe": {
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "total_frames": 487
+      },
+      "status": "ok"
+    },
+    "2K_h264.mp4": {
+      "path": "tests\\test_videos\\2K_h264.mp4",
+      "exists": true,
+      "sha256": "3d420027cb4b6afcff11e5cc7b3510ddbb019de732ee403d21f6f40b3f1af04f",
+      "probe": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "total_frames": 1572
+      },
+      "status": "ok"
+    }
+  },
+  "cases": {
+    "T1": {
+      "title": "resize + 色彩转换",
+      "purpose": "验证最常见的渲染链：解码 -> 缩放 -> 色彩转换 -> 编码。",
+      "coverage": "已接线：resize + yuv420p 色彩转换；未接线：主级调色（效果实例程序化构建属后续批次，届时在 coverage 里显式升级，不冒充完整 T1）。",
+      "status": "ok",
+      "groups": {
+        "ffmpeg_gpu_ref": {
+          "status": "error",
+          "group": "ffmpeg_gpu_ref",
+          "vendor": "amd",
+          "ref_mode": "hwaccel_download",
+          "ref_mode_fallback": true,
+          "runs": [
+            {
+              "run_index": 1,
+              "status": "failed",
+              "error": "Option vf (alias for -filter:v (apply filters to video streams)) cannot be applied to input url C:/Users/testuser\\Documents\\vscode\\topos-color-multitask\\topos_1\\tests\\test_videos\\2K_h264.mp4 -- you are trying to apply an input option to an output file or vice versa. Move this option before the file it belongs to.\nError parsing options for input file C:/Users/testuser\\Documents\\vscode\\topos-color-multitask\\topos_1\\tests\\test_videos\\2K_h264.mp4.\nError opening input files: Invalid argument"
+            }
+          ],
+          "warmup": "done (run 0)",
+          "median_fps": null,
+          "elapsed_s": 0.43
+        }
+      },
+      "ref_mode": "hwaccel_download",
+      "vendor": "amd",
+      "group_summaries": {
+        "ffmpeg_gpu_ref": {
+          "status": "error",
+          "runs_recorded": 1,
+          "runs_ok": 0,
+          "error": "Option vf (alias for -filter:v (apply filters to video streams)) cannot be applied to input url C:/Users/testuser\\Documents\\vscode\\topos-color-multitask\\topos_1\\tests\\test_videos\\2K_h264.mp4 -- you are trying to apply an input option to an output file or vice versa. Move this option before the file it belongs to.\nError parsing options for input file C:/Users/testuser\\Documents\\vscode\\topos-color-multitask\\topos_1\\tests\\test_videos\\2K_h264.mp4.\nError opening input files: Invalid argument"
+        }
+      }
+    }
+  }
+}

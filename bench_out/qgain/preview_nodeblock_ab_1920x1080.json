@@ -1,0 +1,158 @@
+{
+ "target": "1920x1080",
+ "frames": [
+  0,
+  100,
+  240,
+  300,
+  486
+ ],
+ "reps": 5,
+ "time_count": 48,
+ "files": [
+  {
+   "file": "4K_topos_422_Proxy.mov",
+   "variants": {
+    "filtered": {
+     "no_deblock": false,
+     "native_no_deblock": false,
+     "decode_path": "context",
+     "ms_per_frame": 12.217,
+     "fps": 81.9,
+     "plane": [
+      1080,
+      1920
+     ],
+     "block_h": -0.1682,
+     "block_v": -0.3014,
+     "y_psnr": 38.9265,
+     "y_psnr_edge": 31.3456,
+     "sharp": 1.7418,
+     "grid": 0.8912,
+     "stair": 0.3031
+    },
+    "no_deblock": {
+     "no_deblock": true,
+     "native_no_deblock": true,
+     "decode_path": "context",
+     "ms_per_frame": 9.279,
+     "fps": 107.8,
+     "plane": [
+      1080,
+      1920
+     ],
+     "block_h": 1.0052,
+     "block_v": 1.0184,
+     "y_psnr": 38.9254,
+     "y_psnr_edge": 31.3423,
+     "sharp": 1.7436,
+     "grid": 0.8916,
+     "stair": 0.3034
+    }
+   },
+   "frames": [
+    0,
+    100,
+    240,
+    300,
+    486
+   ]
+  },
+  {
+   "file": "4K_topos_422.mov",
+   "variants": {
+    "filtered": {
+     "no_deblock": false,
+     "native_no_deblock": false,
+     "decode_path": "context",
+     "ms_per_frame": 17.736,
+     "fps": 56.4,
+     "plane": [
+      1080,
+      1920
+     ],
+     "block_h": 0.0582,
+     "block_v": 0.1128,
+     "y_psnr": 39.0216,
+     "y_psnr_edge": 30.9781,
+     "sharp": 1.8694,
+     "grid": 0.9339,
+     "stair": 0.3032
+    },
+    "no_deblock": {
+     "no_deblock": true,
+     "native_no_deblock": true,
+     "decode_path": "context",
+     "ms_per_frame": 16.701,
+     "fps": 59.9,
+     "plane": [
+      1080,
+      1920
+     ],
+     "block_h": 0.4718,
+     "block_v": 0.5786,
+     "y_psnr": 39.0218,
+     "y_psnr_edge": 30.9781,
+     "sharp": 1.8694,
+     "grid": 0.9339,
+     "stair": 0.3032
+    }
+   },
+   "frames": [
+    0,
+    100,
+    240,
+    300,
+    486
+   ]
+  },
+  {
+   "file": "4K_topos_422_HQ.mov",
+   "variants": {
+    "filtered": {
+     "no_deblock": false,
+     "native_no_deblock": false,
+     "decode_path": "context",
+     "ms_per_frame": 19.133,
+     "fps": 52.3,
+     "plane": [
+      1080,
+      1920
+     ],
+     "block_h": 0.1224,
+     "block_v": 0.1252,
+     "y_psnr": 38.8541,
+     "y_psnr_edge": 30.869,
+     "sharp": 1.9121,
+     "grid": 0.9465,
+     "stair": 0.3053
+    },
+    "no_deblock": {
+     "no_deblock": true,
+     "native_no_deblock": true,
+     "decode_path": "context",
+     "ms_per_frame": 17.467,
+     "fps": 57.3,
+     "plane": [
+      1080,
+      1920
+     ],
+     "block_h": 0.3762,
+     "block_v": 0.4122,
+     "y_psnr": 38.8545,
+     "y_psnr_edge": 30.869,
+     "sharp": 1.9121,
+     "grid": 0.9465,
+     "stair": 0.3053
+    }
+   },
+   "frames": [
+    0,
+    100,
+    240,
+    300,
+    486
+   ]
+  }
+ ]
+}

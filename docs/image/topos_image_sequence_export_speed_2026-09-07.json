@@ -1,0 +1,63 @@
+{
+  "schema": "topos.image_sequence_export_speed.v1",
+  "date": "2026-09-07",
+  "source": "tests/test_videos/2K_h264.mp4",
+  "frames": 8,
+  "resolution": "1920x1080",
+  "profile": "Topos 422 High / profile 3 / qp 58 / qmatrix 1",
+  "threads": 8,
+  "build": "Release",
+  "encode": {
+    "legacy_single_frame_cli": {
+      "scope": "one toos CLI process per frame, TPIM write and self-check included",
+      "p50_ms": 83.14037249510875,
+      "p95_ms": 90.41223155800253,
+      "fps_p50": 12.027850850185104,
+      "fps_total": 11.83119495328951,
+      "total_ms": 676.1785290145781
+    },
+    "persistent_image_sequence": {
+      "scope": "one ToposImageSequenceEncoder context for all frames; atomic TPIM writes, per-frame fsync disabled",
+      "open_ms": 1.8132529949070886,
+      "close_ms": 0.8443300030194223,
+      "p50_ms": 9.752087498782203,
+      "p95_ms": 24.68258160006371,
+      "fps_p50": 102.54214804008635,
+      "fps_total": 77.04756356042559,
+      "total_ms": 103.83196600014344,
+      "total_with_open_close_ms": 106.48954925715995
+    },
+    "speedup_total_with_lifecycle": 6.349717276263734
+  },
+  "decode": {
+    "legacy_cold_cli": {
+      "scope": "one toos decode CLI process per frame, raw output write included",
+      "p50_ms": 57.603390006988775,
+      "p95_ms": 58.240595891402336,
+      "fps_p50": 17.360089395410135,
+      "fps_total": 17.365756037007298,
+      "total_ms": 460.6767469813349
+    },
+    "persistent_sequence_source": {
+      "scope": "ToposImageSequenceSource with direct shared binding and prefetch_depth=3",
+      "p50_ms": 11.668536993965972,
+      "p95_ms": 14.466942501167068,
+      "fps_p50": 85.70054673667482,
+      "fps_total": 109.09303692731116,
+      "total_ms": 73.33190298231784
+    },
+    "speedup_total": 6.286492607406445,
+    "speedup_p50": 4.936735687035296
+  },
+  "size": {
+    "legacy_total_bytes": 5373225,
+    "sequence_total_bytes": 5373225,
+    "average_frame_bytes": 671653.125,
+    "size_delta_percent": 0.0,
+    "payload_sizes_match": true
+  },
+  "notes": [
+    "The legacy and sequence packet payloads have identical sizes; TPIM metadata/header CRC bytes differ because the project path uses its resolved color metadata.",
+    "The decode comparison is cold CLI versus persistent sequence reading. A same-process direct image decode is already warm and should not be interpreted as a new codec-kernel gain."
+  ]
+}

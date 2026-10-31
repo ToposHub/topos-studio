@@ -1,0 +1,83 @@
+# ==============================================================================
+# Topos Color - Python Dependencies
+# ==============================================================================
+# Install:  python -m pip install -r requirements.txt
+# Upgrade:  python -m pip install -r requirements.txt --upgrade
+#
+# [R4-3] 依赖的单一事实源是 pyproject.toml [project].dependencies（核心）。
+# 本文件是开发全量安装清单（含可选系统与注释说明），核心依赖必须与
+# pyproject 保持同步；改动核心依赖时两处一起改。
+# ==============================================================================
+
+# ── Core UI Framework ────────────────────────────────────────────────────────
+PyQt6>=6.10.2
+PyQt6-Qt6>=6.10.2
+PyQt6-WebEngine>=6.10.0
+PyQt6-WebEngine-Qt6>=6.10.2
+QtAwesome>=1.4.1
+
+# ── Image / Video Processing ─────────────────────────────────────────────────
+numpy>=1.22.1
+opencv-python>=4.11.0
+pillow>=12.0.0
+pillow-heif>=1.3.0
+rawpy>=0.25.0
+scipy>=1.17.0
+av>=10.0.0
+
+# ── Color Management ─────────────────────────────────────────────────────────
+# OCIO (OpenColorIO) is a REQUIRED dependency for the color management system.
+# The pip package `opencolorio` installs the importable module `PyOpenColorIO`.
+opencolorio>=2.2.0
+
+# ── GPU / OpenGL Rendering ───────────────────────────────────────────────────
+moderngl>=5.12.0
+PyOpenGL>=3.1.10
+# Windows 加速 (仅 Windows)
+PyOpenGL_accelerate; platform_system == "Windows"
+
+# ── 3D Model Import (Scene3D 节点：glTF/FBX/OBJ 导入) ───────────────────────
+# trimesh：glTF/GLB/OBJ/STL/PLY/DAE 加载（纯 Python，无系统依赖）。
+# pyassimp：FBX/3DS/blend 加载（需系统级 libassimp；macOS: brew install assimp）。
+# 两者在 model_loader.py 中均为软依赖——缺失时清晰报错并降级到 procedural 几何。
+trimesh>=4.0.0
+pyassimp>=4.1.4
+
+# ── AI Models ─────────────────────────────────────────────────────────────────
+onnxruntime>=1.23.0
+# PyTorch 为可选依赖 — 用于 SwinIR / NAFNet 高级 AI 推理
+# 若需 AI 超分辨率模型，取消以下注释:
+# torch>=2.2.0
+# torchvision>=0.17.0
+# einops>=0.8.0
+
+# ── AI 剪辑（TAEP）模型 ──────────────────────────────────────────────────────
+# 这些是可选依赖：未安装时 AI 剪辑走确定性 stub；安装后设对应 env 开关启用真实推理。
+# 模型权重放到 models/ai_editing/<pack_id>/ 下（详见该目录的 README.md）。
+#
+# OCR（RapidOCR，CPU 可跑，Apache-2.0 商用 OK）—— R4-a 已接：
+#   pip install rapidocr onnxruntime
+#   export TOPOS_OCR_REAL=1
+#
+# ASR + 词级对齐 + 说话人分离（需 GPU，R4-c 已接）：
+#   pip install torch qwen_asr nemo_toolkit
+#   export TOPOS_ASR_REAL=1
+# 模型：Qwen3-ASR（中文最优）+ Qwen3-ForcedAligner + NVIDIA Sortformer
+
+# ── AI Editing（LLM 凭据存储）─────────────────────────────────────────────────
+# API key 存系统钥匙串（TAEP §11.4）；keyring 不可用时降级到内存
+keyring>=25.0.0
+
+# ── System / Utilities ───────────────────────────────────────────────────────
+psutil>=7.2.0
+send2trash>=2.1.0
+flask>=3.1.0
+waitress>=3.0.0
+msgpack>=1.0.0
+
+# ── macOS VideoToolbox 零拷贝支持 (仅 macOS) ─────────────────────────────────
+pyobjc-framework-VideoToolbox; platform_system == "Darwin"
+pyobjc-framework-CoreMedia; platform_system == "Darwin"
+pyobjc-framework-Quartz; platform_system == "Darwin"
+pyobjc-framework-IOSurface; platform_system == "Darwin"
+pyobjc-framework-Metal>=12.1,<13; platform_system == "Darwin"

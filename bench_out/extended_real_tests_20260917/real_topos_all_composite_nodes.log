@@ -1,0 +1,453 @@
+[1/93] ai_denoise
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+Compute shaders unavailable: OpenGL 4.1 detected, requires 4.3+. Large-radius effects will use fragment shader fallback (slower).
+Metal compute bridge available but disabled by default: fragment fallback is faster for large-radius effects (see tests/media/results/metal_compute_ab.md). Set TOPOS_METAL_COMPUTE=1 to force the Metal path.
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=11.7 export=47.7 flat=False
+[2/93] ai_expand
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.7 export=65.2 flat=False
+[3/93] ai_gen_expand
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.6 export=49.2 flat=False
+[4/93] ai_generate
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[5/93] ai_inpaint
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.1 export=56.4 flat=False
+[6/93] ai_remove
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=10.8 export=41.9 flat=False
+[7/93] blend
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.8 export=43.0 flat=False
+[8/93] blur
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.5 export=51.0 flat=False
+[9/93] camera3d
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[10/93] channel_merge
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.0 export=59.9 flat=False
+[11/93] chroma_keyer
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.2 export=38.6 flat=True
+[12/93] chromatic_aberration
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=7.0 export=53.6 flat=False
+[13/93] clamp
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.0 export=49.3 flat=False
+[14/93] color_correct
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.4 export=54.5 flat=False
+[15/93] color_input
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[16/93] compare
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.3 export=42.6 flat=False
+[17/93] constant
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=7.0 export=40.2 flat=True
+[18/93] copy_channel
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.5 export=45.9 flat=False
+[19/93] cornerpin
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.3 export=38.8 flat=False
+[20/93] crop
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.3 export=41.6 flat=False
+[21/93] cryptomatte_select
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.1 export=45.1 flat=True
+[22/93] cs_transform
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.0 export=56.4 flat=False
+[23/93] deep_merge
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.1 export=58.8 flat=False
+[24/93] deflicker
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=203.5 export=240.6 flat=False
+[25/93] defocus
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.5 export=41.7 flat=False
+[26/93] deformer3d
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[27/93] denoise
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.6 export=39.8 flat=False
+[28/93] depth_matte
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.5 export=50.5 flat=False
+[29/93] difference_keyer
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.7 export=49.8 flat=False
+[30/93] dissolve
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.5 export=59.6 flat=False
+[31/93] dot
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.6 export=40.0 flat=False
+[32/93] edge_detect
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.3 export=45.4 flat=False
+[33/93] erode_dilate
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.6 export=50.4 flat=False
+[34/93] face_smooth
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.3 export=49.1 flat=False
+[35/93] face_track
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.8 export=41.6 flat=False
+[36/93] file_output
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[37/93] fog
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.6 export=56.0 flat=False
+[38/93] frame_hold
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.7 export=48.4 flat=False
+[39/93] frame_interpolate
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=7.3 export=64.3 flat=False
+[40/93] geo3d
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[41/93] glow
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.0 export=50.2 flat=False
+[42/93] godrays
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.2 export=46.6 flat=False
+[43/93] grade
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=7.4 export=52.9 flat=False
+[44/93] group
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.2 export=52.6 flat=False
+[45/93] huecorrect
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.4 export=47.3 flat=False
+[46/93] image_input
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[47/93] invert
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.4 export=56.9 flat=False
+[48/93] keyer
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.4 export=53.9 flat=False
+[49/93] lens_distortion
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.2 export=42.4 flat=False
+[50/93] lens_flare
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.1 export=41.5 flat=False
+[51/93] light3d
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[52/93] light_wrap
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=4.9 export=45.5 flat=False
+[53/93] luma_keyer
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.4 export=48.4 flat=False
+[54/93] lut
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.3 export=50.5 flat=False
+[55/93] mask
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.0 export=41.0 flat=False
+[56/93] mask_merge
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.4 export=43.9 flat=False
+[57/93] matte
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.5 export=44.1 flat=False
+[58/93] matte_cleanup
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.0 export=49.9 flat=False
+[59/93] merge
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.7 export=46.5 flat=False
+[60/93] mesh_warp
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.0 export=49.7 flat=False
+[61/93] model3d
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[62/93] motion_graphic
+    status=error preview=None export=None flat=False
+[63/93] noise
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.2 export=50.3 flat=False
+[64/93] noop
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.0 export=41.9 flat=False
+[65/93] normalize
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.1 export=43.6 flat=False
+[66/93] output
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.4 export=42.0 flat=False
+[67/93] paint
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.3 export=46.7 flat=False
+[68/93] particle
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.8 export=47.0 flat=False
+[69/93] pointcloud3d
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[70/93] precomp
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.4 export=45.8 flat=False
+[71/93] premult
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.7 export=47.6 flat=False
+[72/93] ramp
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=4.9 export=41.4 flat=False
+[73/93] reformat
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=10.8 export=63.2 flat=False
+[74/93] relight
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.3 export=42.9 flat=False
+[75/93] remove_channels
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.3 export=42.3 flat=False
+[76/93] retime
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.4 export=42.6 flat=False
+[77/93] roto_shape
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.5 export=46.3 flat=False
+[78/93] scene3d
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.9 export=50.8 flat=False
+[79/93] set_alpha
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.3 export=40.5 flat=False
+[80/93] sharpen
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.5 export=52.2 flat=False
+[81/93] shuffle
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=7.2 export=49.0 flat=False
+[82/93] switch
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.3 export=63.7 flat=False
+[83/93] text
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=7.7 export=45.8 flat=False
+[84/93] time_offset
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=7.0 export=42.3 flat=False
+[85/93] timeline_clip_input
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[86/93] topos_color
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=4.9 export=52.3 flat=False
+[87/93] tracker
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.7 export=50.5 flat=False
+[88/93] transform
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.3 export=40.5 flat=False
+[89/93] unpremult
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.1 export=44.8 flat=False
+[90/93] video_frame
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[91/93] vignette
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=6.2 export=43.8 flat=False
+[92/93] volume3d
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+CompositeFrameRenderer: render error (graph=bench-graph, frame=0): Graph evaluation produced no output
+    status=error preview=None export=None flat=False
+[93/93] zblur
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6800 OpenGL Engine); compute-shader effects will use the fragment fallback
+    status=ok preview=5.6 export=48.7 flat=False
+results -> /Users/testuser/Documents/vscode/topos_1/bench_out/extended_real_tests_20260917/real_topos_all_composite_nodes.json
+registered=93 errors=14 flat=3

@@ -1,0 +1,133 @@
+{
+  "schema": "topos.timeline_playback_export.v1",
+  "date": "2026-09-15",
+  "git_commit": "b5f4520a",
+  "native_dylib_sha256_prefix": "fb0712a58d6706a1",
+  "host": {
+    "platform": "macOS 15.3.1",
+    "machine": "x86_64",
+    "cpu": "Intel Core i9-9900K",
+    "logical_cpus": 16
+  },
+  "playback": {
+    "config": {
+      "frames": 96,
+      "repeats": 2,
+      "threads": 16,
+      "decoder_workers": 16,
+      "read_ahead": 0
+    },
+    "boundary": "ToposMediaSource MOV packet -> CPU planar frame",
+    "excludes": [
+      "GPU upload",
+      "color grading",
+      "composition",
+      "present",
+      "Qt scheduling"
+    ],
+    "cases": [
+      {
+        "input": "2K_topos_proxy.mov",
+        "resolution": "1920x1080",
+        "tier": "Proxy",
+        "run_fps": [
+          702.3,
+          703.3
+        ],
+        "mean_fps": 702.8
+      },
+      {
+        "input": "2K_topos_hq.mov",
+        "resolution": "1920x1080",
+        "tier": "HQ",
+        "run_fps": [
+          258.6,
+          248.5
+        ],
+        "mean_fps": 253.55
+      },
+      {
+        "input": "4K_topos_proxy.mov",
+        "resolution": "3840x2160",
+        "tier": "Proxy",
+        "run_fps": [
+          204.3,
+          203.0
+        ],
+        "mean_fps": 203.65
+      },
+      {
+        "input": "4K_topos_4444xq.mov",
+        "resolution": "3840x2160",
+        "tier": "4444XQ",
+        "run_fps": [
+          42.2,
+          42.8
+        ],
+        "mean_fps": 42.5
+      }
+    ]
+  },
+  "timeline_export": {
+    "config": {
+      "backend": "Metal",
+      "source": "Topos Proxy MOV",
+      "output": "Topos HQ MOV",
+      "effects": "none",
+      "frames": 96,
+      "fps": 25.0,
+      "encoder_threads": 16
+    },
+    "boundary": "EditProject -> VideoFrameProviderService -> TimelineExporter -> Metal composite -> Topos MOV",
+    "cases": [
+      {
+        "resolution": "1920x1080",
+        "export_wall_s": 2.177128,
+        "fps": 44.095,
+        "realtime_multiple": 1.764,
+        "gpu_attempt_frames": 96,
+        "gpu_success_frames": 96,
+        "direct_planar_attempts": 96,
+        "direct_planar_success_frames": 0,
+        "render_mean_ms": 11.047,
+        "encode_mean_ms": 6.194,
+        "planar_probe_mean_ms": 0.057,
+        "output_bitrate_mbps": 134.318,
+        "output_check": {
+          "sample_count": 96,
+          "frame_count_matches": true,
+          "decoded_first_and_last_frames": true
+        }
+      },
+      {
+        "resolution": "3840x2160",
+        "export_wall_s": 5.344133,
+        "fps": 17.964,
+        "realtime_multiple": 0.719,
+        "gpu_attempt_frames": 96,
+        "gpu_success_frames": 96,
+        "direct_planar_attempts": 96,
+        "direct_planar_success_frames": 0,
+        "render_mean_ms": 40.129,
+        "encode_mean_ms": 19.403,
+        "planar_probe_mean_ms": 0.06,
+        "output_bitrate_mbps": 530.658,
+        "output_check": {
+          "sample_count": 96,
+          "frame_count_matches": true,
+          "decoded_first_and_last_frames": true
+        }
+      }
+    ],
+    "previous_baseline_same_harness": {
+      "2K_fps": 39.283,
+      "4K_fps": 17.429
+    },
+    "change": "Topos sources now skip the known-failing FFmpeg high-depth probe; normal Metal compositor remains the safe path because tier identity is not provable from current metadata."
+  },
+  "interpretation": [
+    "Playback decode is not the dominant bottleneck: 2K Proxy/HQ and 4K Proxy/4444XQ source delivery measured about 703/254/204/43 FPS.",
+    "The full export path includes timeline scheduling, Metal render/readback handoff, Topos encode, and MOV finalization, so it is not comparable to pure codec FPS.",
+    "Current Proxy-to-HQ export had 96/96 successful Metal composites but 0/96 direct planar passthrough frames; the final encoder handoff is still host-side."
+  ]
+}

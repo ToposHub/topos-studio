@@ -1,0 +1,42 @@
+[
+  {
+    "nodes": 10,
+    "tracks": 0,
+    "keys_per_track": 0,
+    "expression": false,
+    "median_ms": 0.538,
+    "max_ms": 0.669
+  },
+  {
+    "nodes": 50,
+    "tracks": 0,
+    "keys_per_track": 0,
+    "expression": false,
+    "median_ms": 2.516,
+    "max_ms": 4.076
+  },
+  {
+    "nodes": 50,
+    "tracks": 250,
+    "keys_per_track": 120,
+    "expression": false,
+    "median_ms": 118.593,
+    "max_ms": 168.117
+  },
+  {
+    "nodes": 50,
+    "tracks": 250,
+    "keys_per_track": 120,
+    "expression": true,
+    "median_ms": 126.094,
+    "max_ms": 131.037
+  },
+  {
+    "nodes": 100,
+    "tracks": 500,
+    "keys_per_track": 120,
+    "expression": false,
+    "median_ms": 247.773,
+    "max_ms": 362.762
+  }
+]

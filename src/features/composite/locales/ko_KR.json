@@ -1,0 +1,933 @@
+{
+  "nodes": {
+    "blur": {
+      "title": "블러",
+      "description": "채널별 제어가 가능한 다중 타입 블러",
+      "blur_type": {
+        "box": "박스 블러",
+        "gaussian": "가우시안 블러",
+        "bilateral": "서피스 블러(바이래터럴)",
+        "motion": "모션 블러",
+        "bokeh": "렌즈 블러(보케)"
+      },
+      "edge_policy": {
+        "clamp": "클램프",
+        "wrap": "랩",
+        "mirror": "미러"
+      },
+      "quality": {
+        "fast": "빠름",
+        "normal": "보통",
+        "high": "높음"
+      },
+      "aperture_blades": {
+        "circle": "원형",
+        "5": "5개 블레이드",
+        "6": "6개 블레이드",
+        "8": "8개 블레이드"
+      },
+      "params": {
+        "blur_type": "블러 타입",
+        "radius_x": "반경 X",
+        "radius_y": "반경 Y",
+        "radius": "반경",
+        "angle": "각도",
+        "motion_source": "모션 소스",
+        "shutter": "셔터",
+        "edge_preserve": "엣지 보존",
+        "aperture_blades": "조리개 블레이드",
+        "anamorphic": "아나모픽",
+        "highlight_gain": "하이라이트 게인",
+        "edge_policy": "엣지 정책",
+        "quality": "품질",
+        "channel_r": "레드 채널",
+        "channel_g": "그린 채널",
+        "channel_b": "블루 채널",
+        "channel_a": "알파 채널",
+        "mix": "믹스",
+        "process_alpha": "알파 처리"
+      }
+    },
+    "transform": {
+      "title": "트랜스폼",
+      "pivot_mode": {
+        "center": "중심",
+        "custom": "커스텀"
+      },
+      "filter": {
+        "linear": "리니어(바이리니어)",
+        "nearest": "니어레스트(하드 엣지)"
+      },
+      "params": {
+        "translate_x": "이동 X",
+        "translate_y": "이동 Y",
+        "translate": "이동",
+        "scale_x": "스케일 X",
+        "scale_y": "스케일 Y",
+        "scale": "스케일",
+        "rotation": "회전",
+        "pivot_mode": "피벗 모드",
+        "pivot_x": "피벗 X",
+        "pivot_y": "피벗 Y",
+        "pivot": "피벗",
+        "filter": "필터"
+      }
+    },
+    "constant": {
+      "title": "컨스턴트",
+      "mode": {
+        "solid": "솔리드",
+        "checker": "체커보드",
+        "gradient": "리니어 그라디언트",
+        "radial": "래디얼 그라디언트"
+      },
+      "params": {
+        "width": "폭",
+        "height": "높이",
+        "mode": "모드",
+        "color_r": "컬러 R",
+        "color_g": "컬러 G",
+        "color_b": "컬러 B",
+        "color_a": "컬러 A",
+        "color2_r": "컬러 2 R",
+        "color2_g": "컬러 2 G",
+        "color2_b": "컬러 2 B",
+        "color2_a": "컬러 2 A",
+        "checker_size": "체커 크기",
+        "start_x": "시작 X",
+        "start_y": "시작 Y",
+        "start": "시작",
+        "end_x": "끝 X",
+        "end_y": "끝 Y",
+        "end": "끝",
+        "center_x": "중심 X",
+        "center_y": "중심 Y",
+        "center": "중심",
+        "radial_radius": "래디얼 반경",
+        "feather": "페더",
+        "format_name": "포맷",
+        "size_preset": "크기 프리셋",
+        "color_hex": "컬러 HEX",
+        "color2_hex": "컬러 2 HEX"
+      }
+    },
+    "merge": {
+      "title": "머지",
+      "blend_mode": {
+        "over": "보통 (Over)",
+        "under": "Under",
+        "add": "더하기",
+        "subtract": "빼기",
+        "multiply": "곱하기",
+        "screen": "스크린",
+        "overlay": "오버레이",
+        "difference": "차이",
+        "divide": "나누기",
+        "min": "최솟값",
+        "max": "최댓값",
+        "average": "평균",
+        "copy": "복사",
+        "stencil": "스텐실",
+        "mask": "마스크",
+        "in": "In",
+        "out": "Out",
+        "atop": "Atop",
+        "xor": "XOR",
+        "color-dodge": "컬러 닷지",
+        "color-burn": "컬러 번",
+        "soft-light": "소프트 라이트",
+        "hard-light": "하드 라이트",
+        "linear-light": "리니어 라이트",
+        "hue": "색상",
+        "saturation": "채도",
+        "color": "컬러",
+        "luminosity": "휘도"
+      },
+      "format_policy": {
+        "from_b": "B에 맞춤",
+        "from_a": "A에 맞춤",
+        "larger": "큰 쪽",
+        "smaller": "작은 쪽"
+      },
+      "bbox_policy": {
+        "union": "합집합",
+        "intersection": "교집합",
+        "a": "A",
+        "b": "B"
+      },
+      "alpha_policy": {
+        "auto": "자동",
+        "premult_force": "프리멀티 강제",
+        "straight_force": "스트레이트 강제",
+        "output_straight": "스트레이트 출력"
+      },
+      "mask_channel": {
+        "luma": "휘도",
+        "red": "레드",
+        "green": "그린",
+        "blue": "블루",
+        "alpha": "알파"
+      },
+      "params": {
+        "blend_mode": "블렌드 모드",
+        "opacity": "불투명도",
+        "mix": "믹스",
+        "format_policy": "포맷 정책",
+        "bbox_policy": "바운딩 박스 정책",
+        "alpha_policy": "알파 정책",
+        "alpha_clamp": "알파 클램프",
+        "mask_channel": "마스크 채널",
+        "mask_invert": "마스크 반전"
+      }
+    },
+    "crop": {
+      "title": "크롭",
+      "outside": {
+        "black": "블랙",
+        "transparent": "투명",
+        "repeat": "반복",
+        "mirror": "미러"
+      },
+      "params": {
+        "x": "X",
+        "y": "Y",
+        "width": "폭",
+        "height": "높이",
+        "reformat": "캔버스 크기 조정",
+        "outside": "외부 채우기"
+      }
+    },
+    "cornerpin": {
+      "title": "코너 핀",
+      "interpolation": {
+        "bilinear": "바이리니어",
+        "bicubic": "바이큐빅"
+      },
+      "params": {
+        "to1_x": "To 1 X",
+        "to1_y": "To 1 Y",
+        "to2_x": "To 2 X",
+        "to2_y": "To 2 Y",
+        "to3_x": "To 3 X",
+        "to3_y": "To 3 Y",
+        "to4_x": "To 4 X",
+        "to4_y": "To 4 Y",
+        "from1_x": "From 1 X",
+        "from1_y": "From 1 Y",
+        "from2_x": "From 2 X",
+        "from2_y": "From 2 Y",
+        "from3_x": "From 3 X",
+        "from3_y": "From 3 Y",
+        "from4_x": "From 4 X",
+        "from4_y": "From 4 Y",
+        "interpolation": "필터"
+      }
+    },
+    "reformat": {
+      "title": "리포맷",
+      "format_mode": {
+        "preset": "프리셋",
+        "custom": "커스텀"
+      },
+      "preset": {
+        "SD NTSC": "SD NTSC",
+        "SD PAL": "SD PAL",
+        "HD 720": "HD 720",
+        "HD 1080": "HD 1080",
+        "HD 1080 Anamorphic": "HD 1080 아나모픽",
+        "UHD 4K": "UHD 4K",
+        "DCI 4K": "DCI 4K",
+        "UHD 8K": "UHD 8K",
+        "Square 1024": "정사각형 1024",
+        "Square 2048": "정사각형 2048",
+        "Square 4096": "정사각형 4096"
+      },
+      "resize_mode": {
+        "no_resize": "크기 조정 없음",
+        "fit": "맞추기(레터박스)",
+        "fill": "채우기(크롭)",
+        "distort": "왜곡(늘리기)",
+        "center_crop": "중앙 크롭"
+      },
+      "filter": {
+        "nearest": "니어레스트(하드 엣지)",
+        "linear": "리니어(바이리니어)",
+        "cubic": "큐빅(바이큐빅)",
+        "lanczos": "Lanczos (샤프)"
+      },
+      "params": {
+        "format_mode": "모드",
+        "preset": "프리셋",
+        "width": "폭",
+        "height": "높이",
+        "resize_mode": "크기 조정 모드",
+        "filter": "필터",
+        "preserve_bbox": "BBox 유지"
+      }
+    },
+    "glow": {
+      "title": "글로우",
+      "quality": {
+        "fast": "빠름",
+        "normal": "보통",
+        "high": "높음"
+      },
+      "params": {
+        "threshold": "임계값",
+        "radius": "반경",
+        "intensity": "강도",
+        "tint_r": "틴트 R",
+        "tint_g": "틴트 G",
+        "tint_b": "틴트 B",
+        "mix": "믹스",
+        "quality": "품질"
+      }
+    },
+    "shuffle": {
+      "title": "셔플",
+      "r_from": {
+        "r": "레드",
+        "g": "그린",
+        "b": "블루",
+        "a": "알파",
+        "zero": "영",
+        "one": "일",
+        "luma": "루마"
+      },
+      "g_from": {
+        "r": "레드",
+        "g": "그린",
+        "b": "블루",
+        "a": "알파",
+        "zero": "영",
+        "one": "일",
+        "luma": "루마"
+      },
+      "b_from": {
+        "r": "레드",
+        "g": "그린",
+        "b": "블루",
+        "a": "알파",
+        "zero": "영",
+        "one": "일",
+        "luma": "루마"
+      },
+      "a_from": {
+        "r": "레드",
+        "g": "그린",
+        "b": "블루",
+        "a": "알파",
+        "zero": "영",
+        "one": "일",
+        "luma": "루마"
+      },
+      "params": {
+        "r_from": "레드 출처",
+        "g_from": "그린 출처",
+        "b_from": "블루 출처",
+        "a_from": "알파 출처"
+      }
+    },
+    "text": {
+      "title": "텍스트",
+      "description": "텍스트 레이어(폰트, 크기, 정렬, 외곽선, 그림자)",
+      "per_char_mode": {
+        "fade": "페이드",
+        "slide_up": "위로 슬라이드",
+        "slide_left": "왼쪽 슬라이드",
+        "scale_pop": "스케일 팝",
+        "rotate_in": "회전 인",
+        "typewriter": "타이프라이터"
+      },
+      "path_direction": {
+        "up": "위로 호",
+        "down": "아래로 호"
+      },
+      "params": {
+        "text": "텍스트",
+        "caption_input_enabled": "캡션 입력",
+        "caption_input_field": "캡션 필드",
+        "font_family": "폰트",
+        "font_size": "크기",
+        "font_weight": "굵기",
+        "italic": "이탤릭",
+        "halign": "가로 정렬",
+        "valign": "세로 정렬",
+        "letter_spacing": "자간",
+        "line_spacing": "행간",
+        "per_char_enable": "글자별 애니메이션",
+        "per_char_mode": "애니메이션 모드",
+        "per_char_delay": "시차(프레임)",
+        "per_char_overlap": "겹침",
+        "per_char_slide_distance": "슬라이드 거리",
+        "per_char_rotation": "회전 인",
+        "per_char_scale_from": "시작 스케일",
+        "path_enable": "경로 배치",
+        "path_radius": "호 반경",
+        "path_arc_degrees": "호 각도(0=자동)",
+        "path_direction": "호 방향",
+        "translate_x": "이동 X",
+        "translate_y": "이동 Y",
+        "scale_x": "스케일 X",
+        "scale_y": "스케일 Y",
+        "rotation": "회전",
+        "pivot_mode": "피벗 모드",
+        "pivot_x": "피벗 X",
+        "pivot_y": "피벗 Y",
+        "filter": "필터",
+        "fill_r": "채우기 R",
+        "fill_g": "채우기 G",
+        "fill_b": "채우기 B",
+        "fill_a": "채우기 A",
+        "outline_enable": "외곽선",
+        "outline_width": "외곽선 폭",
+        "outline_r": "외곽선 R",
+        "outline_g": "외곽선 G",
+        "outline_b": "외곽선 B",
+        "outline_a": "외곽선 A",
+        "shadow_enable": "그림자",
+        "shadow_offset_x": "그림자 오프셋 X",
+        "shadow_offset_y": "그림자 오프셋 Y",
+        "shadow_blur": "그림자 블러",
+        "shadow_r": "그림자 R",
+        "shadow_g": "그림자 G",
+        "shadow_b": "그림자 B",
+        "shadow_a": "그림자 A"
+      }
+    },
+    "paint": {
+      "title": "페인트",
+      "description": "페인트 스트로크 레이어(클론 수복, 지우기, 솔리드 브러시)",
+      "params": {
+        "strokes": "스트로크"
+      }
+    },
+    "particle": {
+      "title": "파티클",
+      "description": "스테이트리스 결정론적 2D 파티클 이미터(중력/바람/난류)"
+    },
+    "mesh_warp": {
+      "title": "메시 워프",
+      "description": "그리드 워프: 격자점을 드래그해 국소 변위 생성"
+    },
+    "keyer": {
+      "title": "키어",
+      "keyer_mode": {
+        "auto": "자동",
+        "chroma": "크로마",
+        "luma": "루마",
+        "difference": "디퍼런스"
+      },
+      "despill_method": {
+        "none": "없음",
+        "subtract": "빼기",
+        "scale": "스케일"
+      },
+      "output_mode": {
+        "result": "결과",
+        "matte": "매트"
+      },
+      "params": {
+        "keyer_mode": "키어 모드",
+        "screen_color": "스크린 컬러",
+        "screen_color_r": "스크린 R",
+        "screen_color_g": "스크린 G",
+        "screen_color_b": "스크린 B",
+        "screen_color_hex": "스크린 HEX",
+        "screen_balance": "스크린 밸런스",
+        "clip_black": "클립 블랙",
+        "clip_white": "클립 화이트",
+        "gain": "게인",
+        "softness": "소프트니스",
+        "alpha_offset": "알파 오프셋",
+        "despill_strength": "디스필 강도",
+        "despill_method": "디스필 방식",
+        "invert": "반전",
+        "output_mode": "출력 모드"
+      }
+    },
+    "light_wrap": {
+      "title": "라이트 랩",
+      "params": {
+        "width": "랩 폭",
+        "intensity": "강도",
+        "brightness": "밝기",
+        "falloff": "폴오프",
+        "source_alpha": "포그라운드 알파 사용"
+      }
+    },
+    "relight": {
+      "title": "릴라이트",
+      "light_type": {
+        "point": "포인트 라이트",
+        "directional": "디렉셔널"
+      },
+      "params": {
+        "light_type": "라이트 타입",
+        "light_position_x": "라이트 위치 X",
+        "light_position_y": "라이트 위치 Y",
+        "light_position_z": "라이트 위치 Z",
+        "light_direction_x": "라이트 방향 X",
+        "light_direction_y": "라이트 방향 Y",
+        "light_direction_z": "라이트 방향 Z",
+        "intensity": "강도",
+        "color": "라이트 컬러",
+        "ambient": "앰비언트",
+        "normal_decode": "노말 디코드",
+        "normal_flip_y": "노말 Y 뒤집기",
+        "normal_decode_options": {
+          "encoded": "인코딩됨 [0,1]",
+          "signed": "부호 있음 (-1~1)"
+        }
+      }
+    },
+    "cryptomatte_select": {
+      "title": "크립토매트 선택",
+      "id_encoding": {
+        "rgba24": "RGBA24 얼로케이터 ID",
+        "float_r": "Float R (표준 크립토매트)"
+      },
+      "output_mode": {
+        "matte": "매트",
+        "isolate": "분리"
+      },
+      "params": {
+        "id_encoding": "ID 인코딩",
+        "output_mode": "출력 모드"
+      }
+    },
+    "zblur": {
+      "title": "Z 블러",
+      "depth_units": {
+        "normalized": "정규화",
+        "world": "월드 거리"
+      },
+      "quality": {
+        "fast": "빠름",
+        "normal": "보통",
+        "high": "높음"
+      },
+      "params": {
+        "focus_distance": "포커스 거리",
+        "focal_range": "초점 범위",
+        "max_blur_radius": "최대 블러 반경",
+        "bokeh_toggle": "조리개 원형 샘플링",
+        "depth_units": "깊이 단위",
+        "near": "근거리",
+        "far": "원거리",
+        "quality": "품질"
+      }
+    },
+    "fog": {
+      "title": "포그",
+      "depth_units": {
+        "normalized": "정규화",
+        "world": "월드 거리"
+      },
+      "params": {
+        "color": "포그 컬러",
+        "density": "밀도",
+        "start": "시작",
+        "end": "끝",
+        "depth_units": "깊이 단위",
+        "near": "니어",
+        "far": "패"
+      }
+    },
+    "depth_matte": {
+      "title": "뎁스 매트",
+      "depth_units": {
+        "normalized": "정규화",
+        "world": "월드 거리"
+      },
+      "params": {
+        "range_start": "범위 시작",
+        "range_end": "범위 끝",
+        "feather": "페더",
+        "depth_units": "깊이 단위",
+        "near": "니어",
+        "far": "패"
+      }
+    },
+    "godrays": {
+      "title": "갓 레이",
+      "params": {
+        "light_x": "라이트 X",
+        "light_y": "라이트 Y",
+        "color": "라이트 컬러",
+        "density": "밀도",
+        "weight": "가중치",
+        "decay": "감쇠",
+        "samples": "샘플 수"
+      }
+    },
+    "chromatic_aberration": {
+      "title": "색수차",
+      "params": {
+        "offset_r": "R 오프셋",
+        "offset_b": "B 오프셋",
+        "center_x": "중심 X",
+        "center_y": "중심 Y",
+        "edge_boost": "엣지 부스트"
+      }
+    },
+    "vignette": {
+      "title": "비네트",
+      "params": {
+        "amount": "양",
+        "radius": "반경",
+        "softness": "소프트니스",
+        "roundness": "둥글기"
+      }
+    },
+    "lens_flare": {
+      "title": "렌즈 플레어",
+      "blend_mode": {
+        "screen": "스크린",
+        "add": "더하기"
+      },
+      "params": {
+        "light_x": "라이트 X",
+        "light_y": "라이트 Y",
+        "color": "라이트 컬러",
+        "intensity": "강도",
+        "ghost_count": "고스트 수",
+        "ghost_spacing": "고스트 간격",
+        "ghost_decay": "고스트 감쇠",
+        "ghost_size": "고스트 크기",
+        "halo_radius": "할로 반경",
+        "halo_strength": "할로 강도",
+        "streak_strength": "스트릭 강도",
+        "streak_width": "스트릭 폭",
+        "use_occlusion": "오클루전 인식",
+        "blend_mode": "블렌드 모드"
+      }
+    },
+    "deflicker": {
+      "title": "디플리커",
+      "window": {
+        "3": "3 프레임",
+        "5": "5 프레임",
+        "7": "7 프레임",
+        "9": "9 프레임"
+      },
+      "mode": {
+        "per_pixel": "픽셀별",
+        "global_gain": "글로벌 게인"
+      },
+      "params": {
+        "window": "윈도우",
+        "percentile": "백분위",
+        "luma_only": "루마만",
+        "mode": "모드"
+      }
+    },
+    "ai_gen_expand": {
+      "title": "AI 생성 확장",
+      "params": {
+        "prompt": "프롬프트",
+        "negative_prompt": "네거티브",
+        "model": "모델",
+        "seed": "시드",
+        "strength": "강도",
+        "expand_left": "왼쪽 확장",
+        "expand_top": "위 확장",
+        "expand_right": "오른쪽 확장",
+        "expand_bottom": "아래 확장"
+      }
+    },
+    "frame_interpolate": {
+      "title": "프레임 보간",
+      "params": {
+        "t": "보간 t",
+        "hd_mode": "HD 타일링"
+      }
+    },
+    "face_track": {
+      "title": "페이스 트랙",
+      "params": {
+        "face_index": "얼굴 인덱스"
+      }
+    },
+    "face_smooth": {
+      "title": "페이스 스무딩",
+      "params": {
+        "strength": "강도",
+        "radius": "반경",
+        "luminance_only": "루마만"
+      }
+    },
+    "pointcloud3d": {
+      "title": "포인트 클라우드",
+      "source": {
+        "file": "파일",
+        "tracker": "트래커에서"
+      },
+      "color_mode": {
+        "flat": "플랫",
+        "vertex_color": "버텍스 컬러",
+        "depth_ramp": "뎁스 램프"
+      },
+      "params": {
+        "source": "소스",
+        "file_path": "파일 경로",
+        "output_width": "출력 폭",
+        "output_height": "출력 높이",
+        "point_size": "포인트 크기",
+        "color_mode": "컬러 모드",
+        "point_color": "포인트 컬러",
+        "opacity": "불투명도"
+      }
+    },
+    "volume3d": {
+      "title": "볼륨 3D",
+      "params": {
+        "file_path": "볼륨 파일",
+        "density_multiplier": "밀도 배율",
+        "absorption_color": "흡수 컬러",
+        "step_count": "스텝 수",
+        "output_width": "출력 폭",
+        "output_height": "출력 높이"
+      }
+    },
+    "chroma_keyer": {
+      "title": "크로마 키어",
+      "output_mode": {
+        "result": "결과",
+        "matte": "매트"
+      },
+      "params": {
+        "screen_color_r": "스크린 R",
+        "screen_color_g": "스크린 G",
+        "screen_color_b": "스크린 B",
+        "tolerance": "허용 오차",
+        "softness": "소프트니스",
+        "despill": "디스필",
+        "edge_width": "엣지 폭",
+        "output_mode": "출력 모드"
+      }
+    },
+    "luma_keyer": {
+      "title": "루마 키어",
+      "output_mode": {
+        "result": "결과",
+        "matte": "매트"
+      },
+      "params": {
+        "black_point": "블랙 포인트",
+        "white_point": "화이트 포인트",
+        "softness": "소프트니스",
+        "invert": "반전",
+        "output_mode": "출력 모드"
+      }
+    },
+    "camera3d": {
+      "title": "카메라",
+      "params": {
+        "camera_mode": "카메라 모드",
+        "cam_fov": "시야각",
+        "cam_focal_length": "초점 거리 (mm)",
+        "cam_sensor_size": "센서 크기 (mm)",
+        "cam_near": "니어 클립",
+        "cam_far": "패 클립",
+        "cam_lens_shift_x": "렌즈 시프트 X",
+        "cam_lens_shift_y": "렌즈 시프트 Y",
+        "cam_exposure": "노출 (EV)",
+        "cam_focus_distance": "포커스 거리",
+        "cam_fstop": "조리개 (f값)",
+        "cam_dof_enable": "피사계 심도",
+        "cam_show_safe_areas": "세이프 에어리어"
+      }
+    },
+    "light3d": {
+      "title": "라이트",
+      "light_type": {
+        "directional": "디렉셔널",
+        "point": "포인트",
+        "spot": "스팟",
+        "ambient": "앰비언트"
+      },
+      "params": {
+        "light_type": "라이트 타입",
+        "light_pos_x": "위치 X",
+        "light_pos_y": "위치 Y",
+        "light_pos_z": "위치 Z",
+        "light_dir_x": "방향 X",
+        "light_dir_y": "방향 Y",
+        "light_dir_z": "방향 Z",
+        "light_color_r": "컬러 R",
+        "light_color_g": "컬러 G",
+        "light_color_b": "컬러 B",
+        "light_intensity": "강도",
+        "light_range": "범위",
+        "light_inner_cone": "내부 콘",
+        "light_outer_cone": "외부 콘",
+        "hdri_path": "HDRI 파일",
+        "use_ibl": "IBL 사용",
+        "env_intensity": "환경 강도",
+        "icon_pos_x": "아이콘 위치 X",
+        "icon_pos_y": "아이콘 위치 Y",
+        "icon_pos_z": "아이콘 위치 Z"
+      }
+    },
+    "model3d": {
+      "title": "Model3D",
+      "size_mode": {
+        "fit_to_scene": "장면에 맞추기",
+        "real_world": "실제 크기"
+      },
+      "source_unit": {
+        "m": "미터",
+        "cm": "센티미터",
+        "mm": "밀리미터",
+        "in": "인치",
+        "ft": "피트",
+        "custom": "커스텀"
+      },
+      "axis_mode": {
+        "auto": "자동",
+        "y_up": "Y 업",
+        "z_up": "Z 업",
+        "none": "없음"
+      },
+      "uv_v_mode": {
+        "auto": "자동",
+        "original": "원본",
+        "flip": "V 뒤집기"
+      },
+      "anim_play_mode": {
+        "loop": "루프",
+        "pingpong": "핑퐁",
+        "once": "한 번",
+        "clamp": "클램프"
+      },
+      "material_mode": {
+        "imported": "가져옴",
+        "override": "오버라이드",
+        "mix": "믹스"
+      },
+      "normal_format": {
+        "OpenGL": "OpenGL",
+        "DirectX": "DirectX"
+      },
+      "orm_layout": {
+        "glTF ORM": "glTF ORM",
+        "separate": "분리"
+      },
+      "texture_filter": {
+        "nearest": "니어레스트",
+        "linear": "리니어",
+        "mipmap": "밉맵"
+      },
+      "texture_wrap": {
+        "repeat": "반복",
+        "clamp": "클램프",
+        "mirror": "미러"
+      },
+      "viewport_lod_mode": {
+        "auto": "자동",
+        "force_lod0": "LOD 0 강제",
+        "force_lod1": "LOD 1 강제",
+        "force_lod2": "LOD 2 강제"
+      },
+      "render_role": {
+        "solid": "솔리드",
+        "holdout": "홀드아웃",
+        "shadow_catcher": "섀도 캐처",
+        "matte": "매트"
+      },
+      "params": {
+        "model_path": "모델 파일",
+        "use_imported_model": "가져온 모델 사용",
+        "size_mode": "크기 모드",
+        "source_unit": "소스 단위",
+        "unit_scale": "단위 스케일",
+        "axis_mode": "축 모드",
+        "uv_v_mode": "UV V 모드",
+        "object_pos_x": "위치 X",
+        "object_pos_y": "위치 Y",
+        "object_pos_z": "위치 Z",
+        "object_rot_x": "회전 X",
+        "object_rot_y": "회전 Y",
+        "object_rot_z": "회전 Z",
+        "mesh_scale": "스케일",
+        "anim_enabled": "애니메이션 사용",
+        "anim_time": "애니메이션 시간",
+        "anim_speed": "애니메이션 속도",
+        "anim_clip": "애니메이션 클립",
+        "anim_play_mode": "재생 모드",
+        "anim_clip_name": "클립 이름",
+        "anim_time_offset": "시간 오프셋",
+        "anim_start_frame": "시작 프레임",
+        "anim_end_frame": "끝 프레임",
+        "anim_fps": "애니메이션 FPS",
+        "material_mode": "머티리얼 모드",
+        "normal_format": "노말 포맷",
+        "orm_layout": "ORM 레이아웃",
+        "texture_filter": "텍스처 필터",
+        "texture_wrap": "텍스처 랩",
+        "emissive_intensity": "이미시브 강도",
+        "viewport_lod_mode": "뷰포트 LOD",
+        "render_role": "렌더 역할",
+        "matte_id": "매트 ID",
+        "shadow_intensity": "섀도 강도",
+        "shadow_softness": "섀도 소프트니스"
+      }
+    },
+    "scene3d": {
+      "title": "Scene3D",
+      "params": {
+        "width": "폭",
+        "height": "높이"
+      }
+    }
+  },
+  "param_groups": {
+    "Blur": "블러",
+    "Channels": "채널",
+    "Keying": "키잉",
+    "Screen": "스크린",
+    "Matte": "매트",
+    "Despill": "디스필",
+    "Output": "출력"
+  },
+  "channels": {
+    "label": "채널"
+  },
+  "panel": {
+    "node_graph": "노드 그래프",
+    "node_properties": "노드 속성",
+    "performance": "성능",
+    "perf": "성능",
+    "composite_scopes": "스코프",
+    "keyframes": "키프레임",
+    "spline": "스프라인",
+    "animation": "애니메이션",
+    "import_report": "가져오기 리포트",
+    "asset_dependency": "에셋 의존성",
+    "scene_outliner": "장면 아웃라이너",
+    "material": "머티리얼"
+  },
+  "keyframes": {
+    "prev_kf": "이전 키프레임",
+    "next_kf": "다음 키프레임",
+    "fit": "시간 범위 맞추기",
+    "zoom_in": "확대",
+    "expand_all": "모두 펼치기",
+    "collapse_all": "모두 접기",
+    "pan": "플레이헤드로 패닝",
+    "unit_time": "시간",
+    "unit_frame": "프레임",
+    "unit_seconds": "초",
+    "unit_timecode": "타임코드",
+    "empty": "애니메이션 파라미터 없음"
+  },
+  "spline": {
+    "empty": "커브 없음",
+    "fit": "커브 맞추기",
+    "smooth": "스무스",
+    "linear": "리니어",
+    "flat": "플랫",
+    "step": "스텝/홀드"
+  }
+}

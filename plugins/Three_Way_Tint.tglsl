@@ -1,0 +1,92 @@
+// --- Topos Plugin Metadata ---
+// @name Three-Way Tint
+// @i18n_name Three_Way_Tint
+// @author Topos Team
+// @version 1.0
+// @description Separate tint grading for shadows, midtones and highlights with smooth luminance zone blending and HDR-safe multiplicative color gains
+// @input_space scene-linear
+// @output_space scene-linear
+// @determinism deterministic
+// @export_support opengl
+// @preview_cost low
+// @param color shadow_color "Shadow Color" 0.38 0.46 0.60
+// @param slider shadow_strength "Shadow Strength" 0.30 0.0 1.0
+// @param separator
+// @param color midtone_color "Midtone Color" 0.52 0.50 0.47
+// @param slider midtone_strength "Midtone Strength" 0.25 0.0 1.0
+// @param separator
+// @param color highlight_color "Highlight Color" 0.60 0.53 0.42
+// @param slider highlight_strength "Highlight Strength" 0.30 0.0 1.0
+// -----------------------------
+
+// ============================================
+// Three-Way Tint Plugin
+// ============================================
+// 按亮度把画面分成阴影 / 中间调 / 高光三个连续分区，各自独立着色。
+//
+// 契约：vec3 process(vec3 color, vec2 uv)。color 为已含上游调色的
+// scene-linear RGB，可 < 0.0 也可 >> 1.0（HDR）。纯逐像素数学、零纹理
+// 采样、零循环，因此不读 u_input_tex，直接变换 color 本身而非走 delta
+// 输出模式（那是空间采样类插件的惯例，见 HighPass_Retouch）。
+//
+// 参数 ABI：头部声明的参数以裸名引用（编译期由 shader_compiler 改写为
+// u_P<n>_<name> 命名空间 uniform）。禁止引用未声明的 u_* 标识符——改写的
+// 词边界匹配不会命中 u_ 前缀，残留会让真实 GL 编译失败，该效果层随即被
+// 渲染循环整体跳过（P0-COL-01 实测事故）。
+//
+// 算法总览（推导详见 docs/plugins/2026-09-28/specs/Three_Way_Tint.md）：
+// 1. luma = dot(color, Rec.709 权重)
+// 2. 色调坐标 t = luma / (luma + 0.18)（Reinhard 型软压缩，中灰 0.18 -> 0.5）
+// 3. 三区权重：两段 smoothstep 互斥过渡 + 中间调补集（和恒为 1，无硬边）
+// 4. 每区归一化乘性增益 mix(1.0, tint * 2.0, w * strength) 连乘后乘回 color
+// ============================================
+
+// ====== CONSTANTS（选型理由见行尾注释） ======
+const vec3 LUMA_WEIGHTS = vec3(0.2126, 0.7152, 0.0722); // Rec.709 luma，与 Color_Space_Transform 的饱和度控制同源
+const float TONE_PIVOT = 0.18;          // scene-linear 中灰锚点：t = l/(l+0.18) 使 0.18 -> 0.5，luma 4.0 -> 0.957
+const float SHADOW_FADE_START = 0.25;   // 色调坐标边界；换算回线性 luma：
+const float SHADOW_FADE_END   = 0.55;   // 0.25 / 0.55 / 0.85 <-> 0.060 / 0.220 / 1.020
+const float HIGHLIGHT_RAMP_START = 0.55;
+const float HIGHLIGHT_RAMP_END   = 0.85;
+
+// ====== UTILITY FUNCTIONS ======
+
+// 单区归一化增益：tint 0.5 = 中性锚点（增益 1.0），黑位白位不动。
+// tint_color * 2.0 相当于"无界 overlay"：保留经典 overlay 以 0.5 为支点、
+// 0.25 -> x0.5 / 0.75 -> x1.5 的对称手感，但不把输出压回 [0,1] 显示边界，
+// 因此 HDR 高值（如 10.0）与负值（out-of-gamut）都按原比例缩放，符号不翻转。
+vec3 zone_gain(vec3 tint_color, float weight, float strength) {
+    return mix(vec3(1.0), tint_color * 2.0, weight * strength);
+}
+
+// ====== MAIN PROCESS FUNCTION ======
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：三路强度全 0 时严格恒等，不做任何计算
+    if (shadow_strength < 0.001 && midtone_strength < 0.001
+        && highlight_strength < 0.001) return color;
+
+    // ====== HDR 安全的色调坐标 ======
+    // max(luma, 0.0)：负 luma（out-of-gamut 像素）按纯阴影分区（t = 0）。
+    // 该 max 只作用于分区坐标，不触碰颜色本身；分母恒 >= 0.18，除法安全。
+    float luma = max(dot(color, LUMA_WEIGHTS), 0.0);
+    float t = luma / (luma + TONE_PIVOT);
+
+    // ====== 三区权重（partition of unity，全程平滑无硬边） ======
+    // 两段 smoothstep 区间 [0.25, 0.55] 与 [0.55, 0.85] 不重叠（仅在
+    // 0.55 相接），故 w_shadow + w_highlight <= 1.0 恒成立；midtone 的
+    // clamp 仅防浮点累加误差的保险，不是对颜色的 clamp（STYLE_NOTES 红线 3）。
+    float w_shadow    = 1.0 - smoothstep(SHADOW_FADE_START, SHADOW_FADE_END, t);
+    float w_highlight = smoothstep(HIGHLIGHT_RAMP_START, HIGHLIGHT_RAMP_END, t);
+    float w_midtone   = clamp(1.0 - w_shadow - w_highlight, 0.0, 1.0);
+
+    // ====== 乘性着色：三区增益连乘 ======
+    // 权重互斥（和为 1），连乘等价于各区域只受本区 tint 影响；
+    // tint 全 0.5 或 strength 全 0 时增益恒为 1.0。
+    vec3 gain = zone_gain(shadow_color, w_shadow, shadow_strength)
+              * zone_gain(midtone_color, w_midtone, midtone_strength)
+              * zone_gain(highlight_color, w_highlight, highlight_strength);
+
+    // 不 clamp：保留 HDR 与负值，交给下游 soft-clip 阶段处理
+    return color * gain;
+}

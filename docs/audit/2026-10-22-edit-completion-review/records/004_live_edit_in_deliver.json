@@ -1,0 +1,328 @@
+{
+  "ok": true,
+  "result": {
+    "before": {
+      "live": {
+        "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "name": "Timeline 1",
+        "rev": 1,
+        "frames": 100,
+        "tracks": [
+          {
+            "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          },
+          {
+            "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          }
+        ]
+      },
+      "draft": {
+        "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "name": "Timeline 1",
+        "rev": 1,
+        "frames": 100,
+        "tracks": [
+          {
+            "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          },
+          {
+            "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          }
+        ]
+      },
+      "preflight": {
+        "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "name": "Timeline 1",
+        "rev": 1,
+        "frames": 100,
+        "tracks": [
+          {
+            "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          },
+          {
+            "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          }
+        ]
+      },
+      "controller": {
+        "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "name": "Timeline 1",
+        "rev": 1,
+        "frames": 100,
+        "tracks": [
+          {
+            "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          },
+          {
+            "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "queue_before": [
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_custom_h264.mp4"
+      }
+    ],
+    "after_shortcut": {
+      "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+      "name": "Timeline 1",
+      "rev": 2,
+      "frames": 100,
+      "tracks": [
+        {
+          "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+          "clips": [
+            {
+              "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+              "start": 0,
+              "end": 50
+            },
+            {
+              "id": "c113e34d-1278-404f-8b2f-aa3580476b65",
+              "start": 50,
+              "end": 100
+            }
+          ]
+        },
+        {
+          "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+          "clips": [
+            {
+              "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+              "start": 0,
+              "end": 50
+            },
+            {
+              "id": "60e5f8b2-a1d2-45f7-8711-aeb42635bf69",
+              "start": 50,
+              "end": 100
+            }
+          ]
+        }
+      ]
+    },
+    "split": {
+      "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+      "name": "Timeline 1",
+      "rev": 2,
+      "frames": 100,
+      "tracks": [
+        {
+          "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+          "clips": [
+            {
+              "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+              "start": 0,
+              "end": 50
+            },
+            {
+              "id": "c113e34d-1278-404f-8b2f-aa3580476b65",
+              "start": 50,
+              "end": 100
+            }
+          ]
+        },
+        {
+          "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+          "clips": [
+            {
+              "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+              "start": 0,
+              "end": 50
+            },
+            {
+              "id": "60e5f8b2-a1d2-45f7-8711-aeb42635bf69",
+              "start": 50,
+              "end": 100
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "live": {
+        "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "name": "Timeline 1",
+        "rev": 3,
+        "frames": 50,
+        "tracks": [
+          {
+            "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 50
+              }
+            ]
+          },
+          {
+            "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 50
+              }
+            ]
+          }
+        ]
+      },
+      "draft": {
+        "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "name": "Timeline 1",
+        "rev": 3,
+        "frames": 50,
+        "tracks": [
+          {
+            "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 50
+              }
+            ]
+          },
+          {
+            "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 50
+              }
+            ]
+          }
+        ]
+      },
+      "preflight": {
+        "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "name": "Timeline 1",
+        "rev": 1,
+        "frames": 100,
+        "tracks": [
+          {
+            "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          },
+          {
+            "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          }
+        ]
+      },
+      "controller": {
+        "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "name": "Timeline 1",
+        "rev": 1,
+        "frames": 100,
+        "tracks": [
+          {
+            "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          },
+          {
+            "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 100
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "jobs": [
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_custom_h264.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_after_edit.mp4"
+      }
+    ]
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "benchmark": "real_media_topos_4k_422_hq_thread_count_comparison",
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_prores422HQ.mov",
+  "frames": 120,
+  "sample_duration_s": 4.8,
+  "format": "yuv422p10le",
+  "width": 3840,
+  "height": 2160,
+  "fps": 25.0,
+  "tier": "hq",
+  "slice_rows": 16,
+  "entropy_mode": "rans2",
+  "initial_native_slice_threads": 16,
+  "trial_order": [
+    8,
+    16,
+    16,
+    8,
+    8,
+    16
+  ],
+  "results": [
+    {
+      "trial": 1,
+      "requested_slice_threads": 8,
+      "effective_slice_threads": 8,
+      "encode_fps": 29.883657460206013,
+      "decode_fps": 38.281510028880945,
+      "mbps": 531.4304483333334,
+      "bpp": 2.562839739261831,
+      "qp0": 64,
+      "qp_mean": 61.541666666666664,
+      "trial_wall_seconds_including_python_setup": 11.266322816998581
+    },
+    {
+      "trial": 2,
+      "requested_slice_threads": 16,
+      "effective_slice_threads": 16,
+      "encode_fps": 49.915106113423654,
+      "decode_fps": 68.74571045744757,
+      "mbps": 531.4304483333334,
+      "bpp": 2.562839739261831,
+      "qp0": 64,
+      "qp_mean": 61.541666666666664,
+      "trial_wall_seconds_including_python_setup": 5.917979092999303
+    },
+    {
+      "trial": 3,
+      "requested_slice_threads": 16,
+      "effective_slice_threads": 16,
+      "encode_fps": 51.06833071046982,
+      "decode_fps": 68.79651275612498,
+      "mbps": 531.4304483333334,
+      "bpp": 2.562839739261831,
+      "qp0": 64,
+      "qp_mean": 61.541666666666664,
+      "trial_wall_seconds_including_python_setup": 5.315766865998739
+    },
+    {
+      "trial": 4,
+      "requested_slice_threads": 8,
+      "effective_slice_threads": 8,
+      "encode_fps": 33.605405562331235,
+      "decode_fps": 40.50993088091985,
+      "mbps": 531.4304483333334,
+      "bpp": 2.562839739261831,
+      "qp0": 64,
+      "qp_mean": 61.541666666666664,
+      "trial_wall_seconds_including_python_setup": 7.653785011996661
+    },
+    {
+      "trial": 5,
+      "requested_slice_threads": 8,
+      "effective_slice_threads": 8,
+      "encode_fps": 33.73311437607675,
+      "decode_fps": 40.641261903470934,
+      "mbps": 531.4304483333334,
+      "bpp": 2.562839739261831,
+      "qp0": 64,
+      "qp_mean": 61.541666666666664,
+      "trial_wall_seconds_including_python_setup": 7.688780765998672
+    },
+    {
+      "trial": 6,
+      "requested_slice_threads": 16,
+      "effective_slice_threads": 16,
+      "encode_fps": 53.89664218546083,
+      "decode_fps": 71.95776735298418,
+      "mbps": 531.4304483333334,
+      "bpp": 2.562839739261831,
+      "qp0": 64,
+      "qp_mean": 61.541666666666664,
+      "trial_wall_seconds_including_python_setup": 5.032976233997033
+    }
+  ]
+}

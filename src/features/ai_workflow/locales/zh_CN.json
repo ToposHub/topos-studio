@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "AI 工作流"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "在上方选择模板，或将素材拖入画布",
+      "zoom": "缩放：{percent}%"
+    },
+    "toolbar": {
+      "template": "模板",
+      "load": "加载",
+      "clear": "清空",
+      "form": "表单",
+      "canvas": "画布",
+      "run": "运行",
+      "cancel": "取消"
+    },
+    "gallery": {
+      "title": "选择一个工作流模板",
+      "use": "使用"
+    },
+    "form": {
+      "title": "参数",
+      "title_with_name": "{name} · 参数",
+      "node_section": "节点：{node}",
+      "no_params": "该模板没有可调参数，直接运行即可",
+      "advanced_edit": "高级编辑（画布）",
+      "back_to_gallery": "返回模板库",
+      "back_to_gallery_tooltip": "回到模板库选择其他模板；当前工作流会保留（清空才会丢弃）"
+    },
+    "status": {
+      "idle": "空闲",
+      "queued": "排队中",
+      "running": "运行中",
+      "cached": "已缓存",
+      "succeeded": "成功",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "waiting_input": "等待输入",
+      "skipped": "已跳过",
+      "not_assembled": "状态: 未装配",
+      "no_plan": "暂无计划"
+    },
+    "actions": {
+      "preview_plan": "预览计划",
+      "request_approval": "请求审批",
+      "apply_approved_plan": "应用已批准计划"
+    },
+    "inspector": {
+      "no_selection": "<b>（未选中）</b>"
+    },
+    "node_search": {
+      "placeholder": "搜索节点…"
+    }
+  }
+}

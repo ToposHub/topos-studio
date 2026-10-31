@@ -1,0 +1,83 @@
+// --- Topos Plugin Metadata ---
+// @name Subtractive Density
+// @i18n_name LIB1_Subtractive_Density
+// @author Topos Library v1
+// @version 0.1.0
+// @description Film-style subtractive density: per-channel dye absorption exp(-d*sigma) with dye crosstalk matrix, exact Rec.709 luma compensation and amount blend; exact identity at density 0 or amount 0
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider density "Density" 0.0 -1.0 2.0
+// @param slider dye_coupling "Dye Coupling" 0.35 0.0 1.0
+// @param slider luma_protection "Luma Protection" 0.0 0.0 1.0
+// @param slider amount "Amount" 1.0 0.0 1.0
+// -----------------------------
+//
+// Subtractive Density —— 减色密度/染料串扰（L 计划 F02，LIB1）。
+//
+// 差量（对最近似项，见 L00 台账 F02 行）：Cross_Process 是每通道有理
+// 曲线 + 染料雾**加性**串扰；本件是**减色密度模型**——Beer-Lambert 型
+// 每通道吸收 exp(-D) 与染料层**吸收串扰矩阵**，密度域耦合而非雾加性。
+// σ/C 为玩具常数，不宣称任何商业胶片的精确光谱仿真（显式声明）。
+//
+// 设计要点：
+// - 染料层密度 δ = density·σ（σ=(0.85,0.95,1.10)，蓝层吸收最强的胶片
+//   手感）；吸收矩阵 A = (1-k)·I + k·C（C 行和 1：每层染料密度在通道间
+//   重新分配权重，k=0 退化为纯对角；透射率经 exp 非线性，通道间为
+//   重排非守恒）；通道有效密度 D = A·δ；
+// - 透射 τ = exp(-D)，raw = color·τ：乘性模型对 HDR 线性外推无 clamp；
+//   density<0 为负密度（提亮/去雾），exp 单调无奇点；
+// - luma_protection：精确 Rec.709 亮度代数补偿
+//   raw += W·(luma_in - dot(raw,W)) / dot(W,W) —— 除以 dot(W,W)
+//   （≈0.5619）才是精确补偿；不带除数的 W·Δ 只回补约 56% 亮度
+//   （常见笔误，本库显式修正）；
+// - density=0（任意 coupling/protection/amount）或 amount=0 → 首行
+//   早退精确恒等；
+// - 纯逐像素数学：零采样/零循环，唯一超越函数 exp；
+// - 参数 ABI 裸名引用；mix 为 GLSL 内建名（AUD-0832 黑名单），
+//   总滑杆命名 amount（与 F16/F19 先例一致）。
+
+const vec3 SD_LUMA_W = vec3(0.2126, 0.7152, 0.0722);   // Rec.709 luma
+const vec3 SD_SIGMA = vec3(0.85, 0.95, 1.10);          // 染料层强度 σ（玩具常数）
+
+// 染料串扰 C（行主序数学矩阵，行和=1；列主序构造传入）：
+//   行 = 颜色通道，列 = 染料层。对角为主吸收，非对角为邻层泄漏。
+const mat3 SD_CROSS = mat3(
+    0.88, 0.10, 0.05,
+    0.08, 0.84, 0.15,
+    0.04, 0.06, 0.80);
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零密度或零强度纯直通
+    if (amount < 0.001 || abs(density) < 0.001) return color;
+
+    // 吸收矩阵 A = (1-k)·I + k·C（逐元素展开，无循环）
+    float k = clamp(dye_coupling, 0.0, 1.0);
+    mat3 absorb = mat3(
+        1.0 - k + k * 0.88, k * 0.10, k * 0.05,
+        k * 0.08, 1.0 - k + k * 0.84, k * 0.15,
+        k * 0.04, k * 0.06, 1.0 - k + k * 0.80);
+
+    // 通道有效密度 D = A·(density·σ) → Beer-Lambert 透射
+    vec3 dye = density * SD_SIGMA;
+    vec3 trans = exp(-(absorb * dye));
+
+    vec3 raw = color * trans;
+
+    // 精确 709 亮度补偿（luma_protection 缩放补偿量，1=完全保持）
+    if (luma_protection > 0.001) {
+        float luma_in = dot(color, SD_LUMA_W);
+        float luma_raw = dot(raw, SD_LUMA_W);
+        raw += SD_LUMA_W * ((luma_in - luma_raw) / dot(SD_LUMA_W, SD_LUMA_W))
+               * luma_protection;
+    }
+
+    return mix(color, raw, amount);
+}

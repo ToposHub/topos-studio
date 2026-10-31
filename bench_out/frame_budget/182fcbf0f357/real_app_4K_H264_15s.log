@@ -1,0 +1,53 @@
+[ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+2026-10-22 21:55:44.641 Python[55635:1263189] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 220 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+2026-10-22 21:55:47.900 Python[55635:1263189] +[IMKClient subclass]: chose IMKClient_Modern
+2026-10-22 21:55:47.900 Python[55635:1263189] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+OpenCV: Couldn't read video stream from file "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_topos.mov"
+[DRIVER] auto-dismiss dialog: ProjectManagerDialog
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+[DRIVER] booted page=Edit videos=['4K_H264.mov'] seconds=15.0
+[DRIVER] asset 4K_H264.mov: fps=25.0 frames=743
+[WARNING] src.shared.media.proxy_generator: Topos proxy: 未知色彩标签 '1' 回退默认码 1 （HDR 源请确认代理色彩标签）
+[DRIVER] timeline ready: fps=25.0 video_tracks=1 tracks_with_clips=1 total_clips=1 first_clip_ok=True
+
+===== RESULTS =====
+BLOCKING processEvents calls (>25ms): n=151
+  +0.26s 254.6ms
+  +0.37s 103.9ms
+  +0.43s 56.4ms
+  +0.56s 127.8ms
+  +0.67s 82.0ms
+  +0.79s 115.7ms
+  +0.87s 76.4ms
+  +0.97s 88.7ms
+  +1.06s 89.8ms
+  +1.19s 125.1ms
+  +1.27s 71.0ms
+  +1.39s 120.0ms
+  +1.47s 69.0ms
+  +1.57s 101.2ms
+  +1.67s 95.9ms
+videos=['4K_H264.mov']
+timeline_fps=25.0 duration=15.1s still_playing_at_end=True
+playhead: start=5 end=374 advanced=369 expected≈376
+EFFECTIVE_FPS=24.48 (timeline 25fps target, 98% realtime)
+presented: 147 emissions, distinct=147, rate=9.8/s
+DROPPED_FRAMES=222 (playhead advanced 369, presented distinct 147)
+[DRIVER] controller.dropped_frames=22
+STEADY_FPS=25.00 (after 3s warmup, 12.0s window)
+STEADY_PRESENTED_RATE=10.2/s
+STALL_EVENTS(>=0.5s)=0
+presented interval ms: p50=105.5 p95=194.3 max=241.4 (budget 40.0)
+TELEMETRY={'frames': 120, 'window': 120, 'total_ms_mean': 36.567, 'total_ms_p50': 37.578, 'total_ms_p95': 65.051, 'total_ms_max': 82.61, 'decode_ms_mean': 36.666, 'decode_ms_p50': 38.198, 'decode_ms_p95': 65.261, 'composite_ms_mean': 1.441, 'composite_ms_p50': 1.332, 'composite_ms_p95': 3.841, 'upload_ms_mean': 0.0, 'upload_ms_p50': 0.0, 'upload_ms_p95': 0.0, 'present_ms_mean': 0.0, 'present_ms_p50': 0.0, 'present_ms_p95': 0.0, 'effective_fps': 27.35, 'master_requests': 0, 'realtime_master_requests': 0, 'cpu_qimage_frames': 0, 'wrong_source_frame': 0, 'stale_generation': 0, 'ring_hit_rate': 0.0, 'gpu_composite_frames': 0, 'miss_count': 0, 'source_kinds': {'placeholder': 1.3333}, 'session_total_frames': 160, 'wall_elapsed_s': 14.825, 'coverage': {'decode': {'samples': 115, 'coverage': 0.9583}, 'import_upload': {'samples': 0, 'coverage': 0.0}, 'composite': {'samples': 115, 'coverage': 0.9583}, 'present': {'samples': 0, 'coverage': 0.0}, 'total': {'samples': 120, 'coverage': 1.0}}, 'enrich_misses': 0, 'present_outcome_counts': {'submitted': 148}}
+ENGINE_STATS={'state': 'paused', 'mode': 'paused', 'generation': 4, 'total_requests': 160, 'total_presented': 160, 'total_misses': 0, 'total_holds': 0, 'total_source_resolutions': 160, 'has_source_resolver': True, 'has_layer_query_provider': True, 'has_decode_scheduler': True, 'has_scheduler_config_provider': True, 'decode_scheduler': {'layers': 0, 'streams': 0, 'generation': 4, 'bundle_hits': 0, 'bundle_misses': 0, 'bundle_hit_rate': 0.0, 'seek_flushes': 0, 'prefetch_submitted': 160, 'prefetch_completed': 160, 'prefetch_dropped': 0, 'prefetch_active': False, 'rings': {}}, 'consecutive_misses': 0, 'telemetry': {'frames': 120, 'window': 120, 'total_ms_mean': 36.567, 'total_ms_p50': 37.578, 'total_ms_p95': 65.051, 'total_ms_max': 82.61, 'decode_ms_mean': 36.666, 'decode_ms_p50': 38.198, 'decode_ms_p95': 65.261, 'composite_ms_mean': 1.441, 'composite_ms_p50': 1.332, 'composite_ms_p95': 3.841, 'upload_ms_mean': 0.0, 'upload_ms_p50': 0.0, 'upload_ms_p95': 0.0, 'present_ms_mean': 0.0, 'present_ms_p50': 0.0, 'present_ms_p95': 0.0, 'effective_fps': 27.35, 'master_requests': 0, 'realtime_master_requests': 0, 'cpu_qimage_frames': 0, 'wrong_source_frame': 0, 'stale_generation': 0, 'ring_hit_rate': 0.0, 'gpu_composite_frames': 0, 'miss_count': 0, 'source_kinds': {'placeholder': 1.3333}, 'session_total_frames': 160, 'wall_elapsed_s': 14.825, 'coverage': {'decode': {'samples': 115, 'coverage': 0.9583}, 'import_upload': {'samples': 0, 'coverage': 0.0}, 'composite': {'samples': 115, 'coverage': 0.9583}, 'present': {'samples': 0, 'coverage': 0.0}, 'total': {'samples': 120, 'coverage': 1.0}}, 'enrich_misses': 0, 'present_outcome_counts': {'submitted': 148}}}
+TRACE_COLLECTOR_SUMMARY={'page': '', 'total_frames': 120, 'gpu_frames': 120, 'cpu_fallback_frames': 0, 'cpu_to_ndarray_frames': 0, 'qimage_upload_frames': 0, 'sync_seek_frames': 0, 'stale_frame_emitted': 0, 'texture_slot_reuse_without_ack': 0, 'fallback_frames': 0, 'fallback_reasons': {}, 'decode_path_counts': {'macos_vt_zero_copy': 120}, 'render_path_counts': {'gpu_composite': 120}, 'decode_avg_ms': 36.3567536416061, 'render_avg_ms': 1.4570201586442029, 'total_avg_ms': 37.813773800250296, 'ui_thread_sync_decode_frames': 0, 'gl_tex_image_upload_frames': 0, 'decode_saturation': {'budget_ms': 33.3, 'buckets': {'1': {'frames': 120, 'decode_ms_p50': 38.2, 'decode_ms_p95': 64.78, 'decode_ms_max': 81.33, 'over_budget': 67}}}, 'transition_frames': {'transition': {'frames': 0}, 'non_transition': {'frames': 120, 'total_ms_p50': 38.74, 'total_ms_p95': 64.96, 'over_budget': 68}}, 'gpu_time': {'measured_frames': 117, 'unavailable_frames': 3, 'gpu_submit_ms_p50': 0.13, 'gpu_submit_ms_p95': 0.149, 'gpu_submit_ms_max': 0.16}, 'pixel_copy_bytes': {'cpu_upload': 0, 'cpu_download': 0, 'surface_map': 0, 'texture_write': 0, 'cross_device': 0}, 'deadline': {'frames_with_deadline': 0, 'miss_frames': 0, 'miss_by_segment': {}}, 'present_status_counts': {'displayed': 96, 'slot_released': 23}, 'readback_kind_counts': {}, 'annotate': {'merged': 707, 'missed': 0}, 'import_upload_coverage': {'measured_frames': 0, 'not_applicable_frames': 119, 'unavailable_frames': 0, 'unset_frames': 1}, 'gc': {'pause_count': 0, 'pause_ms_total': 0.0, 'pause_ms_max': 0.0, 'deadline_miss_frames_overlapping_gc': 0}}
+DECODE_MANAGER={'_sources': [('42c24206-ee5e-46bd-8963-4aba937024d7', '/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_H264.mov', '/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_H264.mov', (1920, 1080), 'auto', False)]}
+===== END =====
+[DRIVER] auto-dismiss dialog: QMessageBox
+[EXIT] mw.close() returned
+[EXIT] driver done

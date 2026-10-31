@@ -1,0 +1,1038 @@
+【勘误 2026-09-21——本计划书为历史档案，以下事项以现行真相源为准】
+1. 档位体系：现行七档帧内 + LP 帧间档（ADR-C056）+ 图片 22 档
+   （整数/浮点/RAW），命名规则见两份白皮书"命名规则"章节。
+2. profile 3（图片域）已改派 Image RAW（TRAW），原 reserved 语义作废。
+3. 位流/容器规范以 `native/topos_codec/docs/` 现行版本为准。
+# Topos Video Codec V2.0
+
+## AI 分阶段工程实施计划
+
+> 文档性质：工程实施路线与验收规范  
+> 适用项目：Topos Color（PyQt6 + ModernGL + GLSL）  
+> 核心目标：开发面向剪辑、调色、合成和缓存场景的高质量帧内中间片编解码器
+
+---
+
+> ## ⚠️ 状态纠偏（2026-08-30，效力覆盖本文此前所有"已完成"标记）
+>
+> 本文档 §12 曾把阶段 0–10 全部标记为完成。经独立审计复核
+> （`docs/codec/Topos_V2.0_完成度审计与整改计划_2026-08-30.md`），该标记与实现
+> 和报告中的证据不一致：12-bit、YUV/GBR 4:4:4、六个独立 native profile、Alpha
+> 预算的自动执行、时间线透明度端到端导出、premultiplied Alpha 编码语义、HDR 浮点
+> 高光不裁剪导出、原计划 1080p/4K 实时性能门槛与跨平台发布门禁均未闭合。
+>
+> - 当前真实能力定义为 **Topos Codec V1 Preview（10-bit 4:2:2 帧内）**——稳定的
+>   受限核心 + Topos Color 部分接入；在整改完成前不得把任何二进制或 UI 选项称为
+>   完整 V2.0；
+> - 阶段状态以 §12 的审计重分类表为准（0–10 已按证据重标）；
+> - 整改路线 R0–R8 严格串行（审计 §4）；R8 独立复审通过前不得恢复"V2.0 完成"
+>   标记，不得启动 V2.1 Micro-GOP；
+> - Proxy/LT/Standard/HQ 是同一 v1 码流 profile 之上的**质量预设**（目标码率与
+>   Alpha 策略不同），不是六个独立 bitstream profile（审计 P1-5，R0 冻结）。
+
+---
+
+## 0. 文档使用原则
+
+本文档用于指导 AI 和开发者按依赖顺序逐步实施 Topos Video Codec。它不是现成的位流标准，也不包含可以直接复制到生产环境的示例代码。
+
+实施时必须遵守以下原则：
+
+1. 一次只推进一个阶段，不跨阶段同时修改多个核心模块。
+2. 每个阶段先完成规范和测试，再实现代码。
+3. 标量参考实现通过一致性测试前，不得开始 SIMD 优化。
+4. Elementary bitstream 稳定前，不得把 MOV、UI、导出和性能优化混入核心算法。
+5. 所有新行为必须有自动化测试，失败、取消、损坏输入和资源释放路径与正常路径同等重要。
+6. 所有 OpenGL/ModernGL 操作继续由 Topos Color 现有渲染线程执行。
+7. 不新建与现有 DecodeWorker、FrameProvider、缓存和渲染队列冲突的全局线程调度系统。
+8. 每完成一个阶段，AI 必须输出变更文件、测试结果、未解决问题和下一阶段的前置条件。
+
+---
+
+## 1. 产品定义
+
+### 1.1 产品定位
+
+Topos Video Codec 是一套私有帧内中间片编解码方案，优先服务于 Topos Color 内部工作流：
+
+- 时间线实时剪辑与随机拖拽；
+- 高位深调色和 HDR 中间缓存；
+- 动态图形、字幕和透明素材；
+- 代理文件、渲染缓存和中间母版；
+- 可控环境下的跨平台文件交换。
+
+编码器使用 QuickTime MOV 作为主要容器，并使用私有 FourCC 标识 Topos elementary stream。MOV 容器合规不代表其他 NLE 会自动支持该编码；第三方互操作需要另行开发插件或解码组件。
+
+### 1.2 核心设计目标
+
+按优先级排序：
+
+1. 码流可解析、可验证、不会因损坏输入越界或无限循环；
+2. 10-bit / 12-bit 图像和 Alpha 的语义明确且可重复还原；
+3. 帧独立、支持快速随机访问和帧级并行；
+4. 画质适合多代编解码及专业调色；
+5. 与 Topos Color 现有媒体、色彩、GPU 和导出架构一致；
+6. 标量、AVX2 和 NEON 路径输出一致；
+7. 在正确性稳定后逐步提高吞吐量和降低尾延迟；
+8. 提供稳定、可版本化的 C ABI 和 Python 集成层。
+
+### 1.3 非目标
+
+首个可用版本不承诺：
+
+- 与 Apple ProRes 位流兼容；
+- 输出码率与 ProRes 精确一致；
+- 所有第三方 NLE 或播放器直接识别；
+- 任意硬件上固定达到某个 FPS；
+- CPU 解码数据天然实现 GPU 零拷贝；
+- 所有损坏文件均可恢复画面；
+- 首版同时支持所有容器、音频和高级元数据。
+
+---
+
+## 2. 档位与码率策略
+
+### 2.1 档位定义
+
+ProRes 只用于描述大致的市场档位和存储区间，不作为精确码率验收标准。
+
+以下数据以 1920×1080、25fps、无 Alpha 为参考。实际码率允许根据画面复杂度、分辨率、帧率和编码器版本变化。
+
+| Topos 档位 | 颜色格式 | 位深 | 参考数据率 | 主要用途 |
+| --- | --- | --- | --- | --- |
+| Topos Proxy | YUV 4:2:2 | 10-bit | 约 4–7 MB/s | 离线代理、远程剪辑 |
+| Topos LT | YUV 4:2:2 | 10-bit | 约 9–13 MB/s | 轻量中间缓存、粗剪 |
+| Topos Standard | YUV 4:2:2 | 10-bit | 约 14–19 MB/s | 常规剪辑和渲染缓存 |
+| Topos HQ | YUV 4:2:2 | 10/12-bit | 约 20–28 MB/s | 调色、中间母版 |
+| Topos Pro 444 | YUV/GBR 4:4:4 | 10/12-bit | 约 30–44 MB/s | VFX、动态图形、合成 |
+| Topos Extreme | YUV/GBR 4:4:4 | 12-bit | 约 45–68 MB/s | 高宽容度 HDR 和多代制作 |
+
+这些区间是调参目标，不是格式定义。版本升级后允许改进量化矩阵和码率控制，但必须通过 codec configuration 和 bitstream version 保持解码兼容。
+
+### 2.2 Alpha 策略
+
+所有档位可以选择携带 Alpha。首版默认采用“受限近似 Alpha”模式，目标是在保持透明边缘可用的前提下控制文件增长。
+
+| Topos 档位 | Alpha 目标占颜色主码流比例 | Alpha 硬上限 | 默认策略 |
+| --- | ---: | ---: | --- |
+| Proxy | 约 20% | 25% | 受限近似，优先节省空间 |
+| LT | 约 20% | 25% | 受限近似 |
+| Standard | 约 25% | 30% | 受限近似，平衡质量和空间 |
+| HQ | 约 25% | 30% | 高质量受限近似 |
+| Pro 444 | 约 25% | 30% | 高质量受限近似 |
+| Extreme | 约 30% | 30% | 最高 Alpha 预算 |
+
+比例的分母是当前帧压缩后的颜色主码流大小，不是 RGB 未压缩数据大小。编码器必须分别统计颜色 payload、Alpha payload 和总 payload。
+
+必须遵守：
+
+- Alpha 是独立、全分辨率平面，不进行色度式 4:2:2 降采样；
+- 无 Alpha 时不分配、不编码、不解码 Alpha 平面；
+- 默认存储 straight alpha，并在元数据中明确标记；
+- 如输入为 premultiplied alpha，必须明确转换或保留标志，禁止静默猜测；
+- Alpha 使用独立预测、游程和熵编码参数，不经过颜色 DCT 的死区量化；
+- 编码器先尝试无损或近无损压缩，达到 Alpha 目标比例后停止增加码率；
+- 如果复杂 Alpha 无法在硬上限内表示，必须执行显式的近似策略并记录最大误差；
+- 如果调用方要求 Alpha 无损，则允许超出比例、提示空间增长或直接返回可诊断错误，不能静默破坏无损承诺；
+- 文件头必须记录 Alpha 模式、目标比例、实际比例和最大误差；
+- 任何单帧 Alpha payload 都不得无提示地超过颜色主码流的硬上限。
+
+### 2.3 码率控制原则
+
+编码器采用帧内 VBR：
+
+- profile 决定基础量化矩阵和目标 bits-per-pixel 区间；
+- 帧级分析决定该帧的初始量化尺度；
+- slice 级预算用于减少局部爆码；
+- Alpha 使用独立的目标比例和硬上限，默认不超过颜色主码流的 25%–30%；
+- 最大帧大小必须有明确限制；
+- Raw/near-raw escape mode 只能作为有界的格式能力，不能同时声称严格锁定总码率；
+- 画质优先档允许为复杂帧适度增加码率；
+- 代理档允许更强量化，但不得破坏解码安全和时间线稳定性。
+
+---
+
+## 3. 总体架构
+
+### 3.1 分层设计
+
+~~~text
+Topos Color
+  ├─ MediaSource / DecodedFrame / VideoMetadata
+  ├─ FrameProvider / DecodeWorker / Cache
+  ├─ AsyncRenderer / YUV(A) GPU Upload / HDR Color Pipeline
+  └─ Export / Proxy / Deliver
+              │
+              ▼
+Topos Python Binding
+              │
+              ▼
+Stable Topos C ABI
+              │
+              ▼
+Native Codec Core
+  ├─ bitstream syntax and validation
+  ├─ scalar transform / quantization / entropy
+  ├─ encoder / decoder
+  ├─ profile and rate control
+  ├─ AVX2 / NEON runtime dispatch
+  ├─ optional GPU compute backends
+  └─ MOV integration through a mature container library
+~~~
+
+V2.0 的规范性路径是 CPU scalar；GPU、SIMD 和混合数据流都属于可替换的执行后端，不能改变
+码流语义、重建结果和错误模型。后续增加 GPU 时，优先加在 transform、quantization、Alpha
+预测等规则明确且数据并行度高的环节，避免把 GPU 设备句柄或驱动依赖写入基础码流格式。
+
+### 3.2 推荐代码布局
+
+~~~text
+native/topos_codec/
+  CMakeLists.txt
+  include/
+    topos_codec.h
+    topos_codec_version.h
+  src/
+    common/
+    bitstream/
+    transform/
+    entropy/
+    encoder/
+    decoder/
+    profiles/
+    simd/
+    gpu/                 # 可选后端，不影响 CPU 基础 ABI
+    container/
+  tests/
+    unit/
+    conformance/
+    fuzz/
+  tools/
+    topos_encoder_cli
+    topos_decoder_cli
+    topos_inspect_cli
+
+src/shared/media/
+  topos_source.py
+
+src/shared/export/
+  topos_encoder.py
+
+tests/media/
+  test_topos_source.py
+  test_topos_roundtrip.py
+  test_topos_alpha_pipeline.py
+  test_topos_export.py
+~~~
+
+最终路径可在阶段 0 根据仓库现状调整，但 native codec、绑定层和应用集成层必须保持分离。
+
+### 3.3 容器策略
+
+首选使用 libavformat 或经过验证的等价库完成 MOV mux/demux，不在首版手写完整 MOV parser。
+
+容器要求：
+
+- 私有视频 FourCC，暂定 TPIC；
+- 独立 codec configuration atom，暂定 tpcC；
+- 使用标准 stsd、stts、stsc、stsz、stco/co64 等 sample table；
+- 每个视频 sample 对应一帧 Topos frame packet；
+- 写入完整的 time base、duration、色彩、像素比例和场序信息；
+- FastStart 作为封装完成后的重排步骤，不要求编码开始前就知道 moov；
+- 大文件必须支持 64-bit chunk offset；
+- 未识别的私有扩展必须能够按 atom size 安全跳过；
+- 首版只保证 Topos 自有解码器可读，第三方兼容性单独验收。
+
+---
+
+## 4. Elementary Bitstream 规范要求
+
+### 4.1 版本化
+
+码流至少包含：
+
+- magic；
+- major/minor version；
+- header size；
+- frame size；
+- profile；
+- pixel format；
+- bit depth；
+- coded width/height；
+- visible width/height；
+- plane count；
+- Alpha mode；
+- frame type 和 GOP/reference 标识（V2.0 固定为独立 I 帧，字段为可扩展项）；
+- slice count；
+- quantization matrix ID；
+- flags；
+- header checksum 或等价完整性校验。
+
+Major version 表示不兼容变更；Minor version 只能增加旧解码器可安全忽略的能力。
+
+### 4.2 帧与 Slice
+
+- V2.0 Intra profile 的每帧独立，不依赖其他帧；
+- 未来 Inter profile 只允许在闭合 GOP 内引用前向参考帧，并在 frame header 中声明 frame type、
+  GOP 标识和 reference distance；
+- 任何 profile 都不得跨 GOP 引用，也不得使用 B 帧或隐式的长期参考帧；
+- 每帧分为多个可独立验证的 slice；
+- slice header 必须提供 byte size、block range、plane、quant scale 和 entropy restart state；
+- slice 之间不得共享无法重建的自适应状态；Inter profile 的参考帧只作为显式输入，不改变 slice 独立性；
+- slice 可独立并行解码；
+- 任意 size、offset、count 在使用前都必须验证；
+- 解码器必须设置最大分辨率、最大帧大小、最大 slice 数和最大系数长度；
+- 损坏 slice 可以返回明确错误或受控 concealment，禁止越界继续解析。
+
+### 4.3 颜色平面编码
+
+第一版颜色压缩路径：
+
+1. 按位深进行 level shift；
+2. 对边界 block 做确定性 padding；
+3. 执行规范化的 8×8 整数 DCT；
+4. 使用 profile 和 plane 对应的量化矩阵；
+5. 对 DC 和 AC 系数进行明确的预测与扫描；
+6. 对零游程和幅值进行统一的熵编码；
+7. 在 slice 边界重置所有预测状态。
+
+必须在规范中固定：
+
+- 每一步的整数位宽；
+- 舍入方式；
+- 右移行为；
+- 饱和或错误策略；
+- 最大中间值证明；
+- 量化与反量化公式；
+- block 扫描顺序；
+- 负数符号映射；
+- 标量和 SIMD 的一致性要求。
+
+### 4.4 熵编码
+
+正文只保留一种正式方案，建议使用：
+
+- 零游程编码；
+- Zigzag/plane-specific scan；
+- 有符号映射；
+- 有上限的 Golomb-Rice 或等价低复杂度码；
+- Escape code 处理大幅值；
+- slice 级 restart。
+
+禁止无界 Unary 解码。编码器和解码器都必须检查剩余位数和输出系数数量。
+
+### 4.5 Alpha 编码
+
+Alpha 不经过颜色 DCT 路径。根据 Alpha 模式，分别使用无损或受限近似路径：
+
+- 行内或二维预测；
+- residual zigzag mapping；
+- 零游程；
+- 有上限的 Rice/escape 编码；
+- slice 级独立重启；
+- 无损模式执行 bit-exact 对比；
+- 受限近似模式记录最大绝对误差和实际 payload 比例。
+
+必须测试全透明、全不透明、硬边、羽化边缘、噪声 Alpha、动画遮罩和随机数据。
+
+---
+
+## 5. 像素与色彩规范
+
+每个文件和解码帧必须明确以下信息：
+
+- YUV、YUVA、GBR 或 GBRA；
+- 4:2:2 或 4:4:4；
+- 10-bit、12-bit 或 16-bit Alpha；
+- 内存字节序和有效位位置；
+- full/limited range；
+- color primaries；
+- transfer characteristics；
+- matrix coefficients；
+- chroma siting；
+- sample aspect ratio；
+- progressive/interlaced 和 field order；
+- straight/premultiplied Alpha；
+- coded size、visible size 和边界 padding。
+
+Topos Color 内部继续使用现有 VideoMetadata、DecodedFrame 和 PlaneInfo 表达这些信息，禁止新建不兼容的重复模型。
+
+---
+
+## 6. C ABI 设计要求
+
+最终 C API 同时覆盖 decoder 和 encoder，并使用 opaque context。
+
+所有公开 struct 必须包含：
+
+- struct_size；
+- abi_version；
+- 保留字段；
+- 明确的所有权说明。
+
+### 6.1 Decoder 能力
+
+- 从文件路径或 IO callbacks 打开；
+- 查询 stream info；
+- 按帧号或时间戳请求；
+- 解码到调用方提供的 CPU plane buffer；
+- 查询所需 plane size、stride 和 alignment；
+- 支持取消；
+- 支持 flush/close；
+- 返回稳定状态码和可读错误详情；
+- 明确 context 是否可重入，以及哪些函数可并发调用。
+
+### 6.2 Encoder 能力
+
+- 配置 profile、pixel format、bit depth、色彩和 Alpha；
+- 提交带 PTS/duration 的帧；
+- 输出 packet 或写入 IO callbacks；
+- flush；
+- 查询实际颜色、Alpha 和总码率；
+- 取消并释放未完成任务；
+- 支持编码器版本和 codec configuration 导出。
+
+### 6.3 Frame Buffer
+
+每个 plane 独立描述：
+
+- data pointer；
+- capacity；
+- stride；
+- width/height；
+- sample type；
+- bit depth；
+- byte order；
+- alignment；
+- ownership/lifetime。
+
+不得只提供一个共享 stride_uv，也不得仅用 uint8 pointer 暗示 10/12-bit 的具体存储方式。
+
+### 6.4 可选加速扩展
+
+基础 ABI 首版只要求 CPU plane buffer，保证在没有 GPU、驱动或特定运行时的环境中仍可工作。
+为后续升级预留独立 extension/capability API，不修改既有函数和 struct 的含义：
+
+- 使用 opaque device context、GPU buffer 和 fence/同步对象，不在基础 ABI 中暴露厂商私有结构；
+- 每个 GPU buffer 必须声明设备归属、字节容量、读写方向、同步状态和释放责任；
+- GPU 路径失败、设备丢失或不支持时，能够回退到 CPU，并返回可诊断状态；
+- CPU↔GPU 拷贝、等待和生命周期必须显式计时，禁止把“零拷贝”作为默认承诺；
+- 扩展通过 capability query 和新版本号启用，旧调用方仍可只使用 CPU API。
+
+---
+
+## 7. AI 分阶段实施路线
+
+以下阶段按依赖顺序执行，不对应固定日历周期。
+
+### 阶段 0：决策冻结与基线建立
+
+目标：在写核心代码前消除格式歧义。
+
+任务：
+
+- 检查 AGENTS.md、.clinerules 和相关媒体架构；
+- 建立受影响文件和调用链清单；
+- 冻结首版支持矩阵；
+- 决定 native language、build system、binding 和 MOV library；
+- 编写 bitstream specification v0 草案；
+- 建立 ProRes、DNxHR、无压缩序列的现有性能和画质基线；
+- 明确基准硬件、编译器、线程数、缓存状态和测试素材。
+- 冻结后端边界：CPU scalar 是规范性参考，SIMD/GPU 是可替换实现；记录允许的 GPU 扩展点、
+  同步规则、回退行为和内存上限。
+- 记录未来 Inter profile 的兼容边界：闭合 GOP、仅前向参考、无 B 帧、I/P frame header 预留字段，
+  以及随机访问索引的扩展方式；V2.0 仍只实现 Intra。
+- 冻结数据流原则：中间系数不作为 GPU↔CPU 往返的常规接口；若采用混合路径，优先只回读
+  最终压缩 packet。
+
+首版建议范围：
+
+- 10-bit YUV 4:2:2；
+- Standard 一个颜色 profile；
+- 可选无损 Alpha；
+- progressive CFR；
+- CPU planar output；
+- MOV + CLI；
+- macOS 当前开发机和一个可移植标量路径。
+
+交付物：
+
+- architecture decision record；
+- bitstream_spec_v0.md；
+- benchmark_protocol.md；
+- test_vector_manifest.json；
+- 风险清单。
+
+完成门槛：
+
+- 所有字段、整数范围、Alpha 语义和错误模型均有书面定义；
+- 不存在两套互相冲突的熵编码方案；
+- CPU 规范性路径与未来 SIMD/GPU 扩展的边界、回退和兼容策略已写入文档；
+- 下一阶段不需要靠猜测补齐格式。
+
+### 阶段 1：Native 工程骨架与安全基础设施
+
+目标：建立可持续编译、测试和模糊测试的原生工程。
+
+任务：
+
+- 创建 native 目录、CMake 配置和最小动态库；
+- 建立公开/私有 header 边界；
+- 建立 status、error、checked arithmetic 和 buffer view；
+- 配置 Debug、ASan、UBSan；
+- 建立跨平台 endian helpers；
+- 建立 unit test 和 fuzz target；
+- 提供 runtime CPU feature detection 骨架，但暂不实现 SIMD。
+
+交付物：
+
+- 可构建的 libtopos_codec；
+- 最小 C ABI version/query API；
+- CI 或本地一键测试命令。
+
+完成门槛：
+
+- Debug 和 sanitizer 构建通过；
+- 无未检查的外部 size/offset 算术；
+- 空输入、超大尺寸和非法版本测试通过。
+
+### 阶段 2：标量整数变换与量化
+
+目标：获得唯一、确定、可证明范围的数学参考实现。
+
+任务：
+
+- 实现 forward/inverse 8×8 integer transform；
+- 明确 rounding 和 saturation；
+- 为 10-bit 和 12-bit 建立中间值上界测试；
+- 实现 luma/chroma 独立量化矩阵；
+- 实现 deadzone、quantize 和 dequantize；
+- 处理非 8 倍数尺寸的 padding/cropping；
+- 生成 golden vectors。
+
+交付物：
+
+- scalar transform module；
+- overflow proof 或穷举/边界验证报告；
+- transform golden vectors。
+
+完成门槛：
+
+- scalar encode/decode 在所有支持平台输出 bit-exact；
+- 常量、脉冲、渐变、棋盘格和随机 block 测试通过；
+- sanitizer 无错误；
+- 不存在 float 参数参与规范性整数路径。
+
+### 阶段 3：正式 Bitstream 与熵编解码
+
+目标：完成可安全往返的 elementary frame packet。
+
+任务：
+
+- 实现 checked bit reader/writer；
+- 实现 frame/slice header；
+- 实现零游程、Rice、escape 和 restart；
+- 实现 DC/AC 扫描与预测；
+- 实现所有边界检查；
+- 为截断、翻转、伪造长度和超长码字建立 fuzz corpus；
+- 编写 inspect/dump 工具。
+
+交付物：
+
+- bitstream encoder/decoder；
+- topos_inspect_cli；
+- conformance vectors；
+- 更新后的 bitstream_spec_v1.md。
+
+完成门槛：
+
+- 任意截断位置均不会越界；
+- 随机输入不会无限循环或超大分配；
+- encode→decode 系数完全一致；
+- v1 golden stream 可被后续提交持续解码。
+
+### 阶段 4：完整标量图像编解码与 Profiles
+
+目标：形成不依赖 MOV 的可用 codec core。
+
+任务：
+
+- 串联 plane split、transform、quantization、entropy 和 reconstruction；
+- 实现 Profile 配置表；
+- 实现帧级/slice 级码率调节；
+- 实现无损 Alpha 与受限近似 Alpha 两种模式；
+- 统计颜色、Alpha 和总 packet size；
+- 建立多代编解码测试；
+- 实现 encoder/decoder C ABI。
+
+交付物：
+
+- elementary encoder/decoder；
+- Standard profile；
+- Alpha round-trip；
+- quality_report_scalar.md。
+
+完成门槛：
+
+- Alpha 在无损模式 bit-exact；
+- 颜色画质达到阶段 0 定义的基线；
+- 多代编解码退化曲线可解释且无明显色偏；
+- 单帧损坏不会污染下一帧；
+- encoder/decoder 的失败路径无泄漏。
+
+### 阶段 5：MOV 封装与 CLI
+
+目标：生成和读取结构合规、可随机访问的 Topos MOV。
+
+任务：
+
+- 使用成熟容器库实现 mux/demux；
+- 定义 TPIC sample entry 和 tpcC；
+- 写入标准 sample tables；
+- 支持 co64 和大文件；
+- 完成 FastStart 后处理；
+- 保留颜色、帧率、SAR、场序和 Alpha 元数据；
+- CLI 支持 encode、decode、probe、verify；
+- 验证损坏 atom、错误 offset 和截断 mdat。
+
+交付物：
+
+- topos_encoder_cli；
+- topos_decoder_cli；
+- topos_probe_cli；
+- MOV conformance fixtures。
+
+完成门槛：
+
+- 随机读取任意帧得到正确 frame index 和 PTS；
+- 长文件索引内存占用可测量；
+- hot index lookup 与 cold first-frame latency 分开报告；
+- FastStart 和非 FastStart 文件均可打开；
+- 非 Topos reader 能安全跳过未知 codec，而不是把文件解析崩溃。
+
+### 阶段 6：Topos Color 解码接入 ✅ 完成（受限格式：TPIC 10-bit 4:2:2）（2026-08-30 审计重分类，ADR-C006）
+
+完成情况：src/shared/media/topos_source.py（ToposMediaSource：恒 planar
+uint16 满刻度输出 + read_next_frame；is_topos_movie 结构化内容探测）；
+factory topos 后端注册 + auto 内容路由 + MediaBackend.TOPOS（R-17 关闭，
+同步修复 error_handling 顺序硬编码）；tpcC → VideoMetadata 全字段映射
+（色彩码复用 color_metadata，color_range 语义差异单点翻译）；无 Alpha
+复用 'yuv422p10le' 注册名、Alpha 登记 topos_yuva422p10a{8,10,12,16}；
+proxy 缩小 = 纯 numpy 分离 box 滤波；18 项集成测试（含损坏隔离/随机访问
+bit-exact/close 重开）；门禁 run_tests.sh Python 段纳入（13 绑定 + 18
+接入 = 31 项），tests/media+tests/native 回归 1587 通过。零新增调度器；
+磁盘代理生成对 TPIC 源留阶段 8（ffmpeg 无法直读，需经解码→编码链）。
+
+目标：把 Topos MOV 作为新的 MediaSource 接入现有播放架构。
+
+任务：
+
+- 实现 ToposMediaSource；
+- 扩展 MediaSourceFactory 的 backend 注册和自动选择；
+- 映射到现有 VideoMetadata；
+- 输出 DecodedFrame、PlaneInfo 和 10/12-bit planar planes；
+- 复用现有 FrameProvider、DecodeWorker、缓存、generation 和取消机制；
+- 建立 close、seek、cancel、proxy/source switching 测试；
+- 禁止从 UI 或 Python 工作线程直接操作 OpenGL。
+
+交付物：
+
+- topos_source.py；
+- factory 注册；
+- 媒体解码和拖拽测试。
+
+完成门槛：
+
+- 可以导入、探测、逐帧播放和随机拖拽；
+- 不新增第二套全局播放调度器；
+- 关闭、换片和取消后无 native context 泄漏；
+- 预览与导出使用一致的色彩元数据。
+
+### 阶段 7：Alpha 与 HDR 渲染链补齐 ⚠️ 部分完成（显示链 ADR-C007；R2 缺陷 P0-02/P0-04/P1-04 已由 O1 修复并测试钉死——按复验 §7 重验后回填状态）（2026-08-31 复验降级，O1 修复在案）
+
+完成情况：YUVGPUUploader 四套 YUV→RGB shader 可选采样第四平面（float/
+r16ui/r8 三上传路径，'a' 池槽，Alpha 位深独立 uniform——a8/a16 不再被
+luma 位深错误归一化）；三页消费点贯通（Color 页 RGBA16F alpha 通道 +
+外部 GPU 帧四元组；Edit 页分类显式登记 yuva*/topos* + planar 上传；
+Composite 页 _PlanarFrameData.a + GPU/CPU 双分支）；全程 straight alpha
+约定（预乘源在 YUV→RGB 边界 unpremultiply，含除零保护）；CPU fallback
+修复错误归一化并改 f2 保留 10/12/16-bit Alpha（R-05 关闭）；R-23 决策
+Edit 页保持 RGBA8 文档化限制（背景不透明、导出全精度不受影响）；R-24
+定案 R16UI Alpha NEAREST 与 Y 一致。13 项 alpha 管线测试（decode→GPU 读回
+精确一致、硬边缘无黑边/白边、straight/premultiplied、a8 独立位深、池
+释放）；门禁 STAGE-7（ctest 29/29×4 + Python 44 项）；回归 video/media/
+native 2250 通过（9 失败均经 stash 对照证实为 HEAD 既有环境问题）。
+交付物 alpha_pipeline_report.md。Color 页调色链 alpha 审计与 Edit 页 HDR
+预览位深留阶段 9/10；导出端到端 alpha 留阶段 8（ToposVideoEncoder 接入后）。
+
+目标：确保 YUVA 从解码到 GPU、合成和导出不丢失。
+
+任务：
+
+- 为第四平面增加 R16UI 或等价上传路径；
+- 在 shader 中实现明确的 straight/premultiplied 处理；
+- 保持 RGBA16F HDR 工作纹理；
+- 检查混合、字幕、转场、调色和输出 Alpha；
+- 修复会把 10/12-bit Alpha 降为 8-bit 的 fallback；
+- 建立透明边缘、HDR 高光和多层合成测试；
+- 按现有 deferred release 机制释放 GPU 资源。
+
+交付物：
+
+- YUVA GPU upload；
+- RGBA 合成和导出路径；
+- alpha_pipeline_report.md。
+
+完成门槛：
+
+- decode→GPU→composite→encode→decode 的 Alpha 结果符合定义；
+- straight/premultiplied 测试均无黑边或白边；
+- 失败、取消和窗口关闭路径不泄漏纹理或 native frame。
+
+### 阶段 8：编码、代理、缓存与 Deliver 接入 ⚠️ 部分完成（UI 四档实为质量预设 P1-5；编码器边界六项数据正确性缺陷已随 R1 修复；Alpha 预算闭环待 R3）（2026-08-30 审计重分类，ADR-C008/C012）
+
+完成情况：ToposVideoEncoder（duck-type FFmpegVideoEncoder：packed BGR→
+YUV422p10 numpy 正向转换 + planar YUVA 免转换直通；temp+原子替换+abort
+——取消/失败/0 帧均不留伪成功文件；v1 纯视频容器音频显式警告忽略；
+色彩未知显式失败）；六档 profile capability schema（proxy/lt/standard/hq
+按计划 §2.1 参考数据率定标 bpp→encode_sized 帧级码控，pro444/extreme
+如实标注不可用）；8 处登记点全落地 + 逐项断言（R-16 关闭：无静默回退）；
+timeline_export 分派 + 取消 abort 路径 + has_alpha 转发补齐（Deliver 页
+Alpha 复选框首次生效）；TPIC 磁盘代理自研 decode→box 缩小→encode 链
+（输出同为 TPIC，播放零改动；测试抓出并修复 probe 尺寸静默错配真 bug）；
+渲染缓存 topos 档；持久化走 schema v3 codec 字符串（不 bump）。29 项
+导出测试（roundtrip/取消原子性/alpha 不压平/直通导出双重生成/持久化/
+代理）；门禁 STAGE-8 全绿（ctest 29/29×4 + Python 73 项）；回归五套件
+media/native/deliver/video/edit 9580 通过（失败与 tests/edit 既有段错误
+均经 stash 对照证实与本次无关）。
+
+目标：让 Topos Codec 成为项目内正式输出格式。
+
+任务：
+
+- 建立 encoder protocol/factory；
+- 实现 ToposVideoEncoder；
+- 接入 ExportFrameProvider 和时间线导出；
+- 接入 ProxyGenerator、render cache 和 Deliver；
+- 添加六档 profile capability schema；
+- 更新 UI、preset、项目持久化和版本迁移；
+- 支持进度、取消、临时文件和原子替换；
+- 失败时输出明确诊断，禁止静默回退到其他 codec。
+
+交付物：
+
+- Topos 导出；
+- Topos 代理和渲染缓存；
+- preset/schema/UI 集成；
+- end-to-end export tests。
+
+完成门槛：
+
+- 预览和导出颜色一致；
+- 取消不会留下被误识别为成功的文件；
+- Alpha profile 不会被非 Alpha 输出路径静默压平；
+- 工程重开后 profile 和 codec 参数完整保留。
+
+### 阶段 9：SIMD、GPU 与并行优化 ⚠️ 部分完成（优化有效 1080p 编码 2.26×/sized 2.34×/4K 2.13× 全 bit-exact，ADR-C022；P1-15–17 并发缺陷已由 O4 修复、perf 门禁已数值化（ADR-C024）；产品实时口径如实标注=基准达标+应用路径离线/代理策略（benchmark_protocol §9）——按复验 §7 重验后回填）（2026-08-31 复验降级，O4 修复在案）
+
+> **交付摘要**：测量先行（`topos_quality perf`：内核 cycles/块 + 帧级 p50/p95/p99 矩阵，
+> 基线归因熵编码 40,942 cycles/块为绝对热点）→ C 级熵优化（64 位累加器位写器 + unary
+> 批量/融合 + 8 字节窗口读 + 内联快速路径，熵编码 8.6×/解码 4.6×）→ fastdiv 精确魔数
+> 除法 + 量化上下文预建（量化 1.5×、反量化 3.3×）→ AVX2 正变换（epi32 值域证明精确，
+> 3.4×）+ NEON 正变换（arm64 交叉编译门禁）+ 运行时分发（三态原子发布，dev 强制模式
+> 供差分）→ slice 级有界线程并行（tpool 按调用 spawn + 静态条带，编码 band 任务化/
+> 解码按 plane 分组，位流与单线程逐字节 parity；encode_sized 迭代间共享缓冲）。
+> 帧级收益：1080p 编码 252→62.6ms（4.0×）/ 解码 190→27.8ms（6.8×）；4K 编码
+> 1016→222ms（4.6×）/ 解码 760→110ms（6.9×）。bit-exact 门禁：golden 三集在 4 线程 +
+> AVX2 分发下逐字节通过；test_stage9 差分/parity 项；四配置 ctest 30/30。GPU 后端经
+> 测量否决（变换+量化仅占帧 ~12%、熵串行依赖强，R-10/R-11/R-12 按预案关闭，重评条件
+> 在案）；AVX-512 否决（正变换已非瓶颈）。阶段 0 实时门槛未全达（1080p25 解码 p95 差
+> ~6×），如实记录于 perf_report_stage9.md §4；下一杠杆为熵符号层重构与 sized 迭代削减。
+> CPU plane pool 核查：Python 侧单次 bytes 拷贝 ~0.1ms/帧（<0.5%），池化需帧所有权协议，
+> 记为不做（ADR-C009 C-76）。
+
+目标：在不改变码流和画质的前提下优化吞吐与尾延迟；所有加速均不得反向绑死基础 ABI。
+
+优化顺序：
+
+1. 测量 scalar cycles/pixel；
+2. 优化内存布局和无效拷贝；
+3. AVX2；
+4. ARM NEON；
+5. slice 级有界线程并行；
+6. 可选 AVX-512；
+7. 针对 Topos Color 的 CPU plane pool 和低拷贝上传；
+8. 可选 GPU transform/quantization/Alpha；
+9. 仅在基准证明有收益时启用 GPU 熵编码或混合数据流。
+
+任务：
+
+- runtime dispatch；
+- scalar/SIMD differential tests；
+- benchmark 10/12-bit、422/444、无 Alpha/有 Alpha；
+- 测量 p50/p95/p99，而非只报告平均 FPS；
+- 测量编码、解码、上传和首帧呈现；
+- 避免与应用层线程池重复并行；
+- 加入回压和 generation cancellation。
+- 在性能基线稳定后，再实现可选 GPU transform/quantization/Alpha 后端；DirectCompute、
+  CUDA 或 Vulkan 作为独立适配层，不进入 bitstream 规范；
+- 如实测证明熵编码值得 GPU 化，再采用“两阶段熵编码”：第一阶段计算每个 block/slice
+  的编码长度，第二阶段做有界 prefix-sum 并写入最终 packet；临时 buffer、峰值内存和失败
+  回退必须有上限；
+- 混合数据流优先采用“GPU 变换/量化 → GPU 或 CPU 熵编码 → 只回读最终 packet”，禁止将
+  大量中间系数来回拷贝作为默认路径；
+- 增加 GPU buffer/fence 生命周期、异步取消、超时、device lost/TDR 和 CPU fallback 测试；
+- 只有在 GPU 路径的 p95/p99、功耗和峰值内存均优于 CPU/SIMD 基线时，才将其列为推荐后端。
+
+完成门槛：
+
+- 所有优化路径与 scalar reconstruction 一致；
+- 不以固定“提升百分比”作为唯一验收；
+- 每个 profile 至少达到阶段 0 设定的实时门槛；
+- 性能回归测试能在相同硬件和构建配置上重复；
+- 峰值内存和尾延迟没有因吞吐优化失控。
+- GPU 后端与 CPU scalar 输出通过同一套 conformance/golden vectors；GPU 不可用时功能和
+  码流兼容性不受影响。
+
+### 阶段 10：健壮性、分发与 SDK ⚠️ 部分完成（R7 已交付 CI/发布闭环机器与本地验证：windows required 化、跨平台符号/DLL/发布清单、Python 测试入 CI、fuzz 持续任务、产品包坏包修复——ADR-C025；正式公证与 CI 首绿缺真实凭据/runner 运行时证据，R-26/R-27/R-33 登记，stage_status R7=conditional）（2026-08-30 审计重分类，ADR-C010/C025）
+
+目标：达到可长期维护和受控商业部署的质量。
+
+交付摘要：内部分配路由 + OOM 逐点穷举（test_oom，并修复"分配失败伪装成
+concealment"的真 bug C-79）；IO 故障注入（权限/磁盘满/取消/逐前缀截断 sweep）
++ 并发只读共享契约实测（test_robust_io）；TSan 成为第五门禁配置（库内零
+竞争）；播放/拖拽/随机损坏压力浸泡（test_stress，规模可 env 放大）；ABI 钉死
+（9 结构体布局 + 18 错误码 + 23 公共符号 nm 断言 + C++ TU）与能力协商
+tc_query_support；编码器侧 fuzz（fuzz_encode：合法域必成/确定性/自家解码）；
+Windows/MSVC 就绪（tpool Win32/cpuid/懒初始化/per-TU /arch:AVX2）+ CI 构建
+矩阵（codec-matrix.yml，windows 引导期）；macOS universal dylib SDK 打包 +
+ad-hoc/正式签名/公证管线（build_sdk.sh）+ PyInstaller 自动收集（R-15 关闭）；
+SDK.md + C/Python 双示例入 gate。R-14/R-15 关闭、R-22 缓解，新增 R-26/R-27。
+
+任务：
+
+- ASan、UBSan、TSan 和持续 fuzz；
+- OOM、磁盘满、权限、取消、并发 seek/close 测试；
+- 长时间播放、拖拽、编码和多轨压力测试；
+- ABI compatibility tests；
+- Windows、macOS、Linux 构建矩阵；
+- x86_64、arm64 分发；
+- macOS signing/notarization 和 Windows runtime 打包；
+- SDK header、示例、错误码和迁移文档；
+- codec/version capability negotiation；
+- 建立旧 golden streams 的永久回归测试。
+
+完成门槛：
+
+- 旧 v1 码流可由新 decoder 解码；
+- sanitizer、fuzz 和资源泄漏门禁通过；
+- 安装包不依赖开发机绝对路径；
+- SDK 文档能由独立示例完成 encode/decode；
+- 发布包包含版本、许可证、构建信息和已知限制。
+
+### 后续开发备注：V2.1 Micro-GOP（不纳入 V2.0 首版完成条件）
+
+目标：在不破坏 V2.0 Intra 解码、剪辑 Seek 和 Alpha 语义的前提下，增加轻量帧间压缩。
+
+前置条件：V2.0 的 scalar encoder/decoder、bitstream golden vectors、MOV 随机访问、Topos
+Color 端到端 Alpha round-trip 和资源生命周期门禁全部通过后，才能开始本节。
+
+#### V2.1 Profile
+
+- `Topos IP-2`：固定闭合 GOP，结构为 `I P`，GOP 长度 N=2，作为首个实现目标；
+- `Topos IP-4`：固定闭合 GOP，结构为 `I P P P`，GOP 长度 N=4，在 IP-2 稳定后实现；
+- 不使用 B 帧、开放 GOP 或跨 GOP 长期参考帧；
+- P 帧只参考同一 GOP 中紧邻的前一张已重建帧；
+- V2.0 Intra、V2.1 IP-2 和 V2.1 IP-4 必须是明确可查询的 profile capability，不能靠隐式参数猜测。
+
+#### 运动估计与运动矢量编码
+
+- 首版只支持整像素、固定块大小和有界搜索；先检查零运动矢量，再执行小范围搜索；
+- 搜索范围、块大小、SAD/失真阈值必须写入 profile 和 bitstream specification，不允许运行时无界扩大；
+- 运动矢量使用有符号、定长或有界熵编码，并在 slice 边界重置预测状态；
+- Skip 判定必须在重建误差、量化参数和位深约束下验证，不能只依据未经标定的 SAD 阈值；
+- 运动估计失败、矢量超界或残差过大时，必须安全回退到合法的 I 帧编码。
+
+#### P 帧残差与 I 帧回退
+
+- P 帧使用“参考帧预测 → 残差 → 现有 transform/quantization/entropy → 重建”的独立路径；
+- P 帧必须保存完整重建结果作为下一帧参考，不能使用未量化或未验证的中间结果；
+- 当 P 帧 packet 大小、失真或累计误差超过 profile 门槛时，编码器自动改写为 I 帧；
+- 场景切换、高噪声、快速运动、参考帧缺失和编码取消都必须触发受控回退；
+- I/P frame header、GOP 标识、reference distance 和随机访问索引必须能被 decoder 直接验证。
+
+#### Micro-GOP Alpha 预测
+
+- Alpha 必须拥有独立的参考帧、预测状态、错误上限和 payload 统计；不能强制与颜色通道共享运动矢量；
+- 支持 Alpha 无损模式和受限近似模式；近似模式继续遵守对应 profile 的 20%–30% 颜色码流预算；
+- Alpha 残差过大、遮罩突变或参考帧不可用时，Alpha 平面单独回退为 I/无损编码；
+- Alpha 的 P 帧错误不得污染颜色平面，也不得跨 GOP 累积；
+- 必须覆盖透明度动画、硬边、羽化、噪声 Alpha、随机 Alpha 和 Alpha 场景切换。
+
+#### V2.1 完整测试门槛
+
+- **码流正确性**：IP-2/IP-4 编解码 round-trip、I/P 重建、截断/损坏 P 帧、超界运动矢量和非法 reference distance 均有 conformance vectors；
+- **随机访问**：从任意 GOP 起点开始解码，目标帧最多顺序解码 3 个 P 帧；seek index、PTS/DTS 和 MOV sample flags 一致；
+- **剪辑行为**：GOP 边界裁切、精确出入点、反向播放缓存、并发 seek 和取消不会出现花帧、死锁或错误引用；
+- **码率与画质**：静止、微动、高运动、镜头切换、颗粒和随机噪声分别测试；不得把 40%–55% 体积下降作为保证，P 帧变大时必须回退 I 帧；
+- **性能**：分别报告编码、解码、seek、CPU、内存和文件大小的 p50/p95/p99；覆盖 1080p/4K、10/12-bit、无 Alpha/有 Alpha、cold/warm cache；
+- **Alpha**：无损模式 bit-exact，近似模式满足最大误差和码率上限，完成 decode→GPU→composite→encode→decode round-trip；
+- **兼容性**：V2.0 Intra 码流和 CPU API 行为不改变；不支持 Inter profile 的 decoder 必须返回明确状态，不能静默输出错误画面；
+- **验收原则**：只有在 CPU 消耗、Seek 尾延迟、峰值内存和画质均不劣于既定基线时，才将 IP-4 标记为推荐 profile；否则保留 IP-2 或 Intra。
+
+---
+
+## 8. 测试与验收矩阵
+
+### 8.1 素材类型
+
+- 纯色和接近纯色；
+- 1-LSB 与低幅渐变；
+- 高频棋盘格、文字、线条和 UI；
+- 胶片颗粒、传感器噪声和随机噪声；
+- 肤色、天空、霓虹灯和高饱和颜色；
+- SDR、PQ、HLG 和线性工作流；
+- 全透明、全不透明、硬边和羽化 Alpha；
+- 奇数宽高、非 8 倍数尺寸；
+- 大分辨率和极短/极长文件；
+- 损坏、截断和恶意构造输入。
+
+### 8.2 画质指标
+
+不得只使用单一 PSNR 门槛。至少记录：
+
+- Y/U/V 或 RGB 各通道 PSNR；
+- SSIM；
+- 必要时的感知指标；
+- 色差和灰阶/渐变检查；
+- Alpha bit-exact 或最大绝对误差；
+- 1、3、5、10 代编解码曲线；
+- 相同大致码率下与现有 ProRes/DNxHR 的参考对比。
+
+### 8.3 性能指标
+
+所有报告必须写明：
+
+- CPU/GPU/内存/存储；
+- 操作系统；
+- 编译器和优化选项；
+- codec/profile/pixel format；
+- 分辨率、帧率和 Alpha；
+- 线程数；
+- cold/warm cache；
+- p50/p95/p99 和最大值；
+- 输入读取、解码、GPU 上传和呈现是否分别计时。
+
+Seek 至少拆成：
+
+1. index lookup；
+2. packet read；
+3. decoded frame ready；
+4. GPU frame ready；
+5. first frame presented。
+
+### 8.4 安全与资源
+
+- bit reader/writer 边界；
+- size/offset/count checked arithmetic；
+- 最大分辨率和帧大小；
+- 超长 Rice/Unary 防护；
+- 失败和取消释放；
+- context close 与并发调用；
+- native buffer 与 Python object 生命周期；
+- GPU deferred release；
+- 临时输出的原子提交。
+
+---
+
+## 9. 风险与处理策略
+
+| 风险 | 处理策略 |
+| --- | --- |
+| 位流在实现中频繁变化 | 先冻结 spec 和 golden vectors；不兼容变化提升 major version |
+| AI 直接从 SIMD 开始 | 阶段门禁禁止；scalar conformance 未通过不得优化 |
+| 高噪声导致爆码 | 有界 escape、最大帧大小、profile 质量策略；明确 VBR |
+| Alpha 增大码率 | 默认按档位限制在颜色主码流的 25%–30% 内；无损模式超限时提示空间增长或返回错误 |
+| Alpha 在渲染/导出中丢失 | 独立端到端 Alpha 阶段和 round-trip gate |
+| MOV 结构不合规 | 使用成熟 mux/demux 库；建立 atom 和大文件测试 |
+| 私有 FourCC 无第三方支持 | 明确受控生态定位；第三方插件单独立项 |
+| 应用层与 codec 重复并行 | codec 只做有界 slice 并行，服从现有任务调度 |
+| SIMD 与 scalar 输出不同 | 每个优化路径运行 differential conformance |
+| GPU 同步或回读抵消收益 | 先测量端到端 p50/p95/p99；默认只回读最终 packet，收益不足时保留 CPU/SIMD 路径 |
+| GPU buffer/fence 生命周期复杂 | 使用 opaque extension API、显式所有权和 deferred release；device lost 时回退 CPU |
+| 两阶段熵编码增加内存和实现复杂度 | 仅作为可选优化；限定临时 buffer 上限，并与单阶段 CPU 熵编码做基准对比 |
+| HDR 色彩解释错误 | 完整传递 H.273 元数据，不允许缺省猜测掩盖错误 |
+| 损坏流触发越界或 DoS | 全面边界验证、上限、fuzz 和 sanitizer |
+| 原生库难以打包 | 在早期建立 CMake、ABI、CI 和最小 Python binding |
+
+---
+
+## 10. AI 单阶段执行模板
+
+每次只向 AI 下发一个阶段，使用以下模板：
+
+~~~text
+你正在 Topos Color 项目中实施 Topos Video Codec 的“阶段 N”。
+
+开始前：
+1. 完整阅读 AGENTS.md、.clinerules 和本计划的阶段 N。
+2. 只读分析涉及的现有文件、调用方和测试。
+3. 输出本阶段最小实现范围，不扩展到后续阶段。
+
+实现约束：
+- 遵循现有 products → features → shared → app 分层。
+- UI 不直接解码或操作 GPU。
+- OpenGL/ModernGL 只在现有渲染线程执行。
+- 所有 native buffer、context、texture 的失败和取消路径必须释放。
+- 不复制现有 MediaSource、DecodedFrame、VideoMetadata、FrameProvider 或渲染调度逻辑。
+- 先补测试，再完成最小实现。
+
+完成时输出：
+1. 修改文件列表；
+2. 关键设计决定；
+3. 执行的测试和结果；
+4. sanitizer/fuzz/benchmark 结果（本阶段适用时）；
+5. 未解决问题；
+6. 是否达到阶段完成门槛；
+7. 下一阶段是否具备前置条件。
+~~~
+
+---
+
+## 11. 全项目完成定义
+
+Topos Video Codec 只有同时满足以下条件才视为完成：
+
+- bitstream specification、C ABI 和 MOV mapping 已版本化；
+- scalar encoder/decoder 有永久 golden vectors；
+- 10/12-bit 颜色和声明的 Alpha 模式符合质量目标；
+- 损坏输入不会越界、无限循环或触发无界分配；
+- Topos Color 可以导入、播放、拖拽、调色、合成、导出和生成代理；
+- Alpha 从解码到最终输出没有静默丢失或降位深；
+- scalar、AVX2、NEON 路径通过一致性测试；
+- 性能按 profile 和完整测试环境报告；
+- 已实现的 native/GPU 后端资源在正常、失败、取消和关闭路径正确释放；V2.0 不因未启用
+  GPU 后端而视为未完成；
+- 旧版本码流兼容策略和迁移规则明确；
+- 构建、打包、SDK 和已知限制文档齐全。
+
+---
+
+## 12. 当前状态
+
+| 阶段 | 状态 | 备注 |
+| --- | --- | --- |
+| 0. 决策冻结与基线 | ⚠️ 部分完成（2026-08-30 重分类） | 初始范围冻结为 Standard 10-bit 4:2:2，但后续文档仍以六档/10-12-bit/4:4:4 作为全项目完成定义，范围未统一；范围重冻结见审计 §4 R0 与 ADR-C011。交付物：ADR-C001、bitstream_spec v1、benchmark_protocol、test_vector_manifest、risk_register、baseline_encode_2026-08-29 |
+| 1. Native 工程骨架 | ✅ 完成（受限范围） | CMake/C11 多配置门禁（Debug/ASan/UBSan/TSan/Fuzz）；ctypes 绑定 + R-18 守卫；记录见 ADR-C002 §1 |
+| 2. 标量变换与量化 | ✅ 完成（受限范围） | 精确正交整数 DCT-8；golden 1380 条；12-bit 仅做数值域验证，不等于 12-bit codec（审计 §2） |
+| 3. Bitstream 与熵编码 | ✅ 完成（v1 受限语法） | spec v1 冻结；v1 只接受 Standard/YUV422/10-bit |
+| 4. 完整标量 Codec | ⚠️ 部分完成 | ~~native 仅支持 profile=3/422/10~~（R4.1–R4.4 后 native 已支持 10/12-bit 422/444/GBR + profile 3/5/6，本行历史描述未随更新——2026-08-31 复验 P2-07 证据）；Pro444/Extreme 独立量化矩阵未实现（复验 P1-06：六档 qmatrix 恒 1，profile 5/6 主要是 header 标签），Alpha 预算矩阵未扩至六档（P1-11） |
+| 5. MOV 与 CLI | ⚠️ 条件完成 | 自研最小 MOV 通过当前测试，但与原计划"成熟容器库"冲突；最终决策、支持 atom 边界与非目标已由 ADR-C011 冻结（R0），互操作证据扩围在 R5 |
+| 6. Topos Color 解码接入 | ✅ 完成（受限格式） | TPIC 10-bit 4:2:2 可探测、播放、seek；不能代表 12-bit/4:4:4/全部 profile（ADR-C006） |
+| 7. Alpha/HDR 渲染链 | ⚠️ 部分完成（R2 复验重开） | 显示/上传链贯通（ADR-C007）；R2 曾标交付，**2026-08-31 复验降级**（P0-02/P0-04/P1-04/P1-05）：时间线 RGBA→BGRA 仍用 np.flip 把 Alpha 翻到首通道；Topos premultiplied 源 CPU 合成前未 unpremultiply；普通 float 层 >1.0 HDR 值被 _normalise_bgr_frame/_quantize_export_frame 无条件裁到 [0,1]；效果/转场/调整层/Comp Clip/GPU 释放矩阵未闭合。整改路线 O1 |
+| 8. 编码、代理与 Deliver | ⚠️ 部分完成 | UI 四档为共享 native Standard 的质量预设（P1-5，R0 定名）；R1 已修：BGRA/RGBA 通道映射、未知 color range 拒绝、planar 位深/码值严格校验、premultiplied 传递与一致性、代理链 alpha 位深（ADR-C012）；Alpha 预算闭环待 R3 |
+| 9. SIMD、GPU 与并行优化 | ⚠️ 部分完成（优化有效，产品性能门未闭合） | SIMD/并行交付（ADR-C009）；R6 优化实测有效且 bit-exact（1080p 编码 2.26×、sized 2.34×、4K 2.13×，ADR-C022），**但 2026-08-31 复验降级（P0-05/P1-15–P1-18）**：应用实际路径走 encode_sized（1080p p50 108.8ms ≈ 9.2fps）与 4K plain（8.2fps），未达原「各 profile 实时」完成定义，门槛 v2 只能构成受限产品策略；线程池首次并发初始化有竞争、槽位 realloc OOM 可能泄漏、进程级线程数保存/恢复非线程安全；perf 门禁 grep 文本不设阈值。整改路线 O4 |
+| 10. 健壮性、分发与 SDK | ⚠️ 部分完成 | 健壮性/ABI/SDK 交付（ADR-C010）；R7 已交付 CI/发布闭环机器+本地验证（ADR-C025，含产品包坏包修复）；运行时证据缺口（CI 首绿/真公证/四产品干净机）R-26/R-27/R-33 登记 |
+| V2.1 Micro-GOP | 🚫 禁止启动 | R8 独立复审通过前不得启动（审计 §4/§7） |
+| **O0–O5 复验整改** | ✅ O0–O5 全部完成（2026-08-31） | O0 状态纠偏（542324dc）→ O1 数据语义链 P0-01~04 全修（ac3d9bd4）→ O2 profile 协商 + ADR-C023 矩阵定案（30d4849d）→ O3 容器边界 mdat/co64/nested/probe（14c02129）→ O4 并发正确性 + perf 数值门禁 ADR-C024（dbca8ca8）→ O5 单一真相源（capability_manifest + stage_status + ADR-INDEX + SDK/BUILDINFO/i18n）。**阶段状态唯一真相源 = docs/codec/stage_status.json**（前置门机器强制）；能力声明唯一真相源 = capability_manifest.json（14 项一致性测试常驻） |
+| R0–R8 整改 | **2026-08-31 独立复验结论（docs/codec/Topos_V2.0_R0-R6_复验与优化计划_2026-08-31.md）：R0 部分完成（一致性门复发，R-28 重开）、R1 部分完成（P0-01）、R2 未完成（P0-02/03/04）、R3 条件完成（P1-11）、R4 部分完成（P1-06/08/09/10）、R5 部分完成（P1-12/13/14）、R6 部分完成（P0-05/P1-15–18）——各轮历史交付仍有效，但整轮完成声明作废，按复验 §5 O0–O5 重新整改后逐轮重验。** 各轮交付历史存档：R0/R1/R2/R3 已交付（2026-08-30，ADR-C011/C012/C013/C014；R3=Alpha 预算统计闭环：tpcB 元数据 v1.1 + mode2 自适应 + 超限三态策略 + ABI v2）。R4.1 已交付（ADR-C015：12-bit YUV 4:2:2 v1.2 枚举扩展全链 + golden v1_bd12 + qp 等效偏移）。R4.2 已交付（ADR-C016：YUV 4:4:4 10/12-bit v1.3 枚举扩展全链 + 几何三镜像分派 + golden v1_pf444）。R4.3 已交付（ADR-C017：GBR 4:4:4 v1.4 枚举扩展全链 + matrix=0 恒等契约 + golden v1_gbr）。R4.4 已交付（ADR-C018：profile 5/6 激活 + 六档 capability 全可用 + 档位格式交叉 + quality CLI depth12 报表）。R4.5 已交付（ADR-C019：SIMD 差分一致性扩展——pf×bd×profile 格式矩阵 + 解码端双后端差分 + Alpha 钉入门禁；验证扩展轮，零运行时变更）。R4.6 已交付（ADR-C020：ExportCodec/deliver 矩阵/UI 列表六档收口 + GPU 路由回归钉住）——**R4 整轮完成**（审计完成门槛达成：六档 capability 无占位，header/query/UI/SDK 一致）。R5 已交付（2026-08-30，ADR-C021：MOV 支持矩阵冻结 container_spec v1.2 + 确定性 fixtures（手工 co64 双布局/未知 atom 四级/损坏表六类/VFR/SAR 权威/2000 帧长文件）+ probe --verify 升级 packet_scan 级 + 三方互操作 oracle（独立 parser/PyAV demux/ffprobe 包级）接入门禁 + 音频定案 V2.0 非目标（TOPOS_MOVIE_CAPS + preflight 编码前 topos.video_only 告警）；R6 已交付（2026-08-30，ADR-C022：性能门槛 v2 全项达标——①熵符号层 zigzag 序融合（tc_quant_block_zigzag/tc_block_encode_zigzag，双遍顺序化，bit-exact）②sized 搜索自检终包化 + 回收插值跳步（升阶梯精确复刻 legacy、回收边界 ~2-3 探定位，14 语料差分逐字节一致；实测迭代 bench 4=4、深度欠用 10→6、极端欠用 21→5）③槽位缓冲常驻（含 bitwriter 扩容回写回归固化）④常驻有界线程池（静态条带不变、批次双条件释放、fork/atexit、Win32 镜像、TSAN 干净）⑤调度回压（绑定 set_slice_threads + 导出 min(8,cpu)/渲染缓存 1 线程 + 池上限结构性回压）⑥GPU 复核维持不做；基准 T0/T1 交替 A/B（bench_perf_r6_2026-08-30）：1080p 编码 72→31.9ms（2.26×，31.3fps 达 25fps 门槛）、1080p sized 254→109ms、4K 编码 261→123ms、解码持平（p95 尾部稳定化：轮次 72/74/85→32/32/32）；门槛 v2 先改协议（benchmark_protocol §6：发布默认 threads=4 口径，1080p 编码 ≥25fps/解码 p95 ≤36ms、4K 编码 p50 ≤160ms/解码 p95 ≤130ms+代理策略）后出报告，全项达标，无「未达仍标完成」——**复验注记：本段「全项达标」指 benchmark 基准口径；产品应用路径（sized/4K）未达原实时完成定义，见 P0-05**） | O0–O5 已完成（见上）；R7 已交付（conditional，ADR-C025：机器全交付+本地验证——windows required 化/四脚本/三 workflow/pix_fmt 选择器+alpha_budget_policy UI/产品包坏包修复；运行时证据缺口 R-33）；R8 已执行（conditional，docs/codec/Topos_V2.0_R8_独立复审报告_2026-08-31.md：独立复跑全过 + 3 Critical 修复钉死；翻转 v2_0_complete 前置=R-33 运行时证据（CI 首绿/真公证/四产品包）+ R-25 固定机口径 + macos-arm64 NEON 运行时差分）；顺序见复验 §7 与 stage_status.json |

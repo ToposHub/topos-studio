@@ -1,0 +1,145 @@
+{
+  "meta": {
+    "generated": "2026-09-15 23:21:22",
+    "gl": {
+      "version": "4.6.0 Core Profile Context 26.8.1.260806",
+      "renderer": "AMD Radeon RX 6800"
+    },
+    "gl_require": 460,
+    "preview_frames": 5,
+    "export_frames": 2
+  },
+  "cases": [
+    {
+      "name": "blur@hd",
+      "cold_ms": 407.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.23,
+        "std": 59.4776
+      },
+      "preview_ms": 16.1,
+      "preview_p90_ms": 17.8,
+      "export_ms": 47.2,
+      "res": "hd",
+      "node_type": "blur",
+      "exec_class": "gpu",
+      "total_wall_s": 1.86
+    },
+    {
+      "name": "denoise@hd",
+      "cold_ms": 312.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 11.0,
+      "preview_p90_ms": 12.6,
+      "export_ms": 50.2,
+      "res": "hd",
+      "node_type": "denoise",
+      "exec_class": "gpu",
+      "total_wall_s": 1.43
+    },
+    {
+      "name": "sharpen@hd",
+      "cold_ms": 301.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 108.9636,
+        "std": 59.9806
+      },
+      "preview_ms": 12.9,
+      "preview_p90_ms": 16.1,
+      "export_ms": 52.5,
+      "res": "hd",
+      "node_type": "sharpen",
+      "exec_class": "gpu",
+      "total_wall_s": 1.43
+    },
+    {
+      "name": "erode_dilate@hd",
+      "cold_ms": 353.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 25.9,
+      "preview_p90_ms": 28.4,
+      "export_ms": 49.8,
+      "res": "hd",
+      "node_type": "erode_dilate",
+      "exec_class": "gpu",
+      "total_wall_s": 1.62
+    },
+    {
+      "name": "defocus@hd",
+      "cold_ms": 310.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.5993,
+        "std": 58.9179
+      },
+      "preview_ms": 11.0,
+      "preview_p90_ms": 16.2,
+      "export_ms": 42.7,
+      "res": "hd",
+      "node_type": "defocus",
+      "exec_class": "gpu",
+      "total_wall_s": 1.41
+    }
+  ],
+  "video": [],
+  "baseline": {
+    "hd": {
+      "name": "baseline_hd",
+      "cold_ms": 564.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 9.6,
+      "preview_p90_ms": 12.3,
+      "export_ms": 49.9
+    }
+  }
+}

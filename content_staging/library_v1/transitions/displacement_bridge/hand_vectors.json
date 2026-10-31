@@ -1,0 +1,74 @@
+{
+  "component": "X14 displacement_bridge",
+  "method": "手算独立脚本（纯 Python 标量逐像素）：d=scale·w(p)·(nx,ny)，w=1-|2p-1|；Wave=4-tap value noise（gp=uv·freq，seed/seed+1001 双相位）、Cell=逐格常量；A 采样 u+(1-p)d、B 采样 u+p·d、(1-p)A+p·B 混合。容差 1e-6。",
+  "params_default": {
+    "scale": 0.1,
+    "frequency": 4.0,
+    "seed": 0,
+    "mode": "Wave"
+  },
+  "vectors": [
+    {
+      "desc": "Wave scale=0.25 freq=4 seed=0 p=0.5（w=1 峰值位移）（8x4 ramp）",
+      "params": {
+        "scale": 0.25,
+        "frequency": 4.0,
+        "seed": 0,
+        "mode": "Wave"
+      },
+      "progress": 0.5,
+      "fixture": "8x4 A=i/7 B=10+i",
+      "expected_row0": [
+        5.0,
+        5.284329,
+        5.928887,
+        6.731451,
+        7.375097,
+        8.033151,
+        8.552114,
+        8.806066
+      ],
+      "note": "p=0.5：A 位移 0.5d、B 位移 0.5d、混合 50/50"
+    },
+    {
+      "desc": "Cell scale=0.25 freq=2 seed=5 p=0.5",
+      "params": {
+        "scale": 0.25,
+        "frequency": 2.0,
+        "seed": 5,
+        "mode": "Cell"
+      },
+      "progress": 0.5,
+      "fixture": "同上",
+      "expected_row0": [
+        5.066991,
+        5.63842,
+        6.209849,
+        6.781277,
+        7.477202,
+        8.048631,
+        8.620059,
+        9.0
+      ],
+      "note": "2x2 格常量位移（同格内位移相同 → 块状错位）"
+    },
+    {
+      "desc": "端点 p=0",
+      "progress": 0.0,
+      "expected": "A 比特级拷贝（w=0 位移 0）",
+      "note": ""
+    },
+    {
+      "desc": "端点 p=1",
+      "progress": 1.0,
+      "expected": "B 比特级拷贝（w=0 位移 0）",
+      "note": ""
+    }
+  ],
+  "conflicts": [
+    {
+      "desc": "任务原文『A 位移 (1-p)·d』在 p=0 位移=d≠0，与『端点 p=0=A 位移 0=A 原位』自相矛盾",
+      "resolution": "按 X16（任务自述与 X14 同构）的三角窗结构补回：d(p)=scale·noise·w(p)，w=1-|2p-1| 两端 0 → 端点位移精确 0；A/B 各乘 (1-p)/p 份额"
+    }
+  ]
+}

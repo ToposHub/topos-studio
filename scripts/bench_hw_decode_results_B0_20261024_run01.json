@@ -1,0 +1,595 @@
+{
+  "date": "2026-10-24T12:06:57",
+  "os": "Windows 11 build 26200",
+  "python": "3.13.12",
+  "pyav": "18.1.0",
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900K",
+  "cpu_logical": 32,
+  "gpu_hint": "NVIDIA GeForce RTX 4090",
+  "gpu_driver": "621.01",
+  "warmup_frames": 12,
+  "hw_backend": "d3d11va",
+  "manifest": {
+    "git_commit": "8782b4eec308cb07dd677d095e75035d20b8c4af",
+    "git_branch": "feature",
+    "git_dirty_files": 3,
+    "args": {
+      "frames_2k": 240,
+      "frames_4k": 120,
+      "only": null,
+      "hw_backend": null,
+      "tag": "B0_20261024_run01",
+      "include_topos": false
+    }
+  },
+  "timing_semantics": {
+    "open_ms": "容器打开+解码会话建立；prod 路径含 probe（生产语义），raw 路径不含",
+    "first_frame_ms": "open 完成后首帧取回耗时（含解码器首帧 JIT）",
+    "warmup_ms": "首帧起至 warmup 完成的累计墙钟",
+    "steady_ms": "计时段墙钟；fps/ms_per_frame 由此段计算（与旧 JSON 同口径）",
+    "setup_ms": "整个 bench 调用墙钟（open+warmup+steady+close），非初始化耗时，仅历史对照",
+    "frame_budget": "warmup 后的目标计时帧数；实际测量见 frames（EOF 早停为 ok_partial）"
+  },
+  "sources": {
+    "2K_h264.mp4": {
+      "kind": "std",
+      "hw_applicable": true,
+      "meta": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "size": "1920x1080",
+        "total_frames": 1572,
+        "fps": 25.0
+      },
+      "frame_budget": 240,
+      "raw_sw_decode": {
+        "frames": 240,
+        "fps": 2762.4,
+        "ms_per_frame": 0.36,
+        "mb_read": 0.0,
+        "first_frame_ms": 20.65,
+        "warmup_frames_done": 12,
+        "warmup_ms": 24.5,
+        "steady_ms": 86.9,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 132.8,
+        "threads": {
+          "thread_type": "AUTO",
+          "thread_count": 16,
+          "cpu_logical": 32
+        },
+        "setup_ms": 143.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "raw_hw_decode": {
+        "frames": 240,
+        "fps": 515.6,
+        "ms_per_frame": 1.94,
+        "mb_read": 0.0,
+        "first_frame_ms": 31.02,
+        "warmup_frames_done": 12,
+        "warmup_ms": 54.6,
+        "steady_ms": 465.5,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 649.3,
+        "threads": {
+          "note": "ffmpeg hwaccel 内部默认",
+          "cpu_logical": 32
+        },
+        "out_fmt": "nv12",
+        "setup_ms": 678.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_cpu_planar": {
+        "frames": 240,
+        "fps": 2970.3,
+        "ms_per_frame": 0.34,
+        "mb_read": 0.0,
+        "first_frame_ms": 61.23,
+        "warmup_frames_done": 12,
+        "warmup_ms": 65.2,
+        "steady_ms": 80.8,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 167.8,
+        "pix_fmt": "yuv420p",
+        "threads": {
+          "note": "FFmpegMediaSource 内部默认",
+          "cpu_logical": 32
+        },
+        "setup_ms": 168.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_hw_planar": {
+        "frames": 240,
+        "fps": 524.6,
+        "ms_per_frame": 1.91,
+        "mb_read": 0.0,
+        "first_frame_ms": 0.19,
+        "warmup_frames_done": 12,
+        "warmup_ms": 22.0,
+        "steady_ms": 457.5,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 608.0,
+        "out_fmt": "nv12",
+        "hw_active": true,
+        "setup_ms": 608.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "status": "ok"
+    },
+    "4K_H264.mov": {
+      "kind": "std",
+      "hw_applicable": true,
+      "meta": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "size": "3840x2160",
+        "total_frames": 743,
+        "fps": 25.0
+      },
+      "frame_budget": 120,
+      "raw_sw_decode": {
+        "frames": 120,
+        "fps": 1097.6,
+        "ms_per_frame": 0.91,
+        "mb_read": 0.0,
+        "first_frame_ms": 55.96,
+        "warmup_frames_done": 12,
+        "warmup_ms": 75.5,
+        "steady_ms": 109.3,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 199.8,
+        "threads": {
+          "thread_type": "AUTO",
+          "thread_count": 16,
+          "cpu_logical": 32
+        },
+        "setup_ms": 226.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "raw_hw_decode": {
+        "frames": 120,
+        "fps": 135.6,
+        "ms_per_frame": 7.38,
+        "mb_read": 0.0,
+        "first_frame_ms": 34.34,
+        "warmup_frames_done": 12,
+        "warmup_ms": 113.1,
+        "steady_ms": 885.2,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 1099.2,
+        "threads": {
+          "note": "ffmpeg hwaccel 内部默认",
+          "cpu_logical": 32
+        },
+        "out_fmt": "nv12",
+        "setup_ms": 1161.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_cpu_planar": {
+        "frames": 120,
+        "fps": 833.1,
+        "ms_per_frame": 1.2,
+        "mb_read": 0.0,
+        "first_frame_ms": 68.9,
+        "warmup_frames_done": 12,
+        "warmup_ms": 89.3,
+        "steady_ms": 144.0,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 249.7,
+        "pix_fmt": "yuv420p",
+        "threads": {
+          "note": "FFmpegMediaSource 内部默认",
+          "cpu_logical": 32
+        },
+        "setup_ms": 250.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_hw_planar": {
+        "frames": 120,
+        "fps": 141.2,
+        "ms_per_frame": 7.08,
+        "mb_read": 0.0,
+        "first_frame_ms": 0.75,
+        "warmup_frames_done": 12,
+        "warmup_ms": 72.1,
+        "steady_ms": 849.6,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 1061.2,
+        "out_fmt": "nv12",
+        "hw_active": true,
+        "setup_ms": 1061.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "status": "ok"
+    },
+    "2K_H265.mov": {
+      "kind": "std",
+      "hw_applicable": true,
+      "meta": {
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "size": "1920x1080",
+        "total_frames": 487,
+        "fps": 25.0
+      },
+      "frame_budget": 240,
+      "raw_sw_decode": {
+        "frames": 240,
+        "fps": 390.7,
+        "ms_per_frame": 2.56,
+        "mb_read": 0.0,
+        "first_frame_ms": 74.18,
+        "warmup_frames_done": 12,
+        "warmup_ms": 94.9,
+        "steady_ms": 614.2,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 709.9,
+        "threads": {
+          "thread_type": "AUTO",
+          "thread_count": 16,
+          "cpu_logical": 32
+        },
+        "setup_ms": 756.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "raw_hw_decode": {
+        "frames": 240,
+        "fps": 343.3,
+        "ms_per_frame": 2.91,
+        "mb_read": 0.0,
+        "first_frame_ms": 44.17,
+        "warmup_frames_done": 12,
+        "warmup_ms": 78.3,
+        "steady_ms": 699.1,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 913.3,
+        "threads": {
+          "note": "ffmpeg hwaccel 内部默认",
+          "cpu_logical": 32
+        },
+        "out_fmt": "p010le",
+        "setup_ms": 936.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_cpu_planar": {
+        "frames": 240,
+        "fps": 392.0,
+        "ms_per_frame": 2.55,
+        "mb_read": 0.0,
+        "first_frame_ms": 78.82,
+        "warmup_frames_done": 12,
+        "warmup_ms": 101.1,
+        "steady_ms": 612.2,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 714.6,
+        "pix_fmt": "yuv420p10le",
+        "threads": {
+          "note": "FFmpegMediaSource 内部默认",
+          "cpu_logical": 32
+        },
+        "setup_ms": 715.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_hw_planar": {
+        "frames": 240,
+        "fps": 548.3,
+        "ms_per_frame": 1.82,
+        "mb_read": 0.0,
+        "first_frame_ms": 0.38,
+        "warmup_frames_done": 12,
+        "warmup_ms": 21.4,
+        "steady_ms": 437.7,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 568.5,
+        "out_fmt": "p010le",
+        "hw_active": true,
+        "setup_ms": 569.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "status": "ok"
+    },
+    "4K_H265.mov": {
+      "kind": "std",
+      "hw_applicable": true,
+      "meta": {
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "size": "3840x2160",
+        "total_frames": 487,
+        "fps": 25.0
+      },
+      "frame_budget": 120,
+      "raw_sw_decode": {
+        "frames": 120,
+        "fps": 123.8,
+        "ms_per_frame": 8.07,
+        "mb_read": 0.0,
+        "first_frame_ms": 189.24,
+        "warmup_frames_done": 12,
+        "warmup_ms": 227.8,
+        "steady_ms": 969.0,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 1197.5,
+        "threads": {
+          "thread_type": "AUTO",
+          "thread_count": 16,
+          "cpu_logical": 32
+        },
+        "setup_ms": 1385.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "raw_hw_decode": {
+        "frames": 120,
+        "fps": 89.6,
+        "ms_per_frame": 11.16,
+        "mb_read": 0.0,
+        "first_frame_ms": 61.84,
+        "warmup_frames_done": 12,
+        "warmup_ms": 180.2,
+        "steady_ms": 1338.8,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 1696.1,
+        "threads": {
+          "note": "ffmpeg hwaccel 内部默认",
+          "cpu_logical": 32
+        },
+        "out_fmt": "p010le",
+        "setup_ms": 1784.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_cpu_planar": {
+        "frames": 120,
+        "fps": 124.3,
+        "ms_per_frame": 8.04,
+        "mb_read": 0.0,
+        "first_frame_ms": 186.98,
+        "warmup_frames_done": 12,
+        "warmup_ms": 224.1,
+        "steady_ms": 965.1,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 1190.4,
+        "pix_fmt": "yuv420p10le",
+        "threads": {
+          "note": "FFmpegMediaSource 内部默认",
+          "cpu_logical": 32
+        },
+        "setup_ms": 1191.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_hw_planar": {
+        "frames": 120,
+        "fps": 170.5,
+        "ms_per_frame": 5.86,
+        "mb_read": 0.0,
+        "first_frame_ms": 0.74,
+        "warmup_frames_done": 12,
+        "warmup_ms": 64.3,
+        "steady_ms": 703.7,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 1010.3,
+        "out_fmt": "p010le",
+        "hw_active": true,
+        "setup_ms": 1011.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "status": "ok"
+    },
+    "2K_prores422HQ.mov": {
+      "kind": "std",
+      "hw_applicable": false,
+      "meta": {
+        "codec": "prores",
+        "pix_fmt": "yuv422p10le",
+        "size": "1920x1080",
+        "total_frames": 487,
+        "fps": 25.0
+      },
+      "frame_budget": 240,
+      "raw_sw_decode": {
+        "frames": 240,
+        "fps": 568.9,
+        "ms_per_frame": 1.76,
+        "mb_read": 0.0,
+        "first_frame_ms": 6.35,
+        "warmup_frames_done": 12,
+        "warmup_ms": 33.2,
+        "steady_ms": 421.9,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 458.2,
+        "threads": {
+          "thread_type": "SLICE",
+          "thread_count": 16,
+          "cpu_logical": 32
+        },
+        "setup_ms": 460.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_cpu_planar": {
+        "frames": 240,
+        "fps": 529.3,
+        "ms_per_frame": 1.89,
+        "mb_read": 0.0,
+        "first_frame_ms": 4.85,
+        "warmup_frames_done": 12,
+        "warmup_ms": 22.5,
+        "steady_ms": 453.4,
+        "frame_size": "1920x1080",
+        "eof_hit": false,
+        "open_ms": 479.1,
+        "pix_fmt": "yuv422p10le",
+        "threads": {
+          "note": "FFmpegMediaSource 内部默认",
+          "cpu_logical": 32
+        },
+        "setup_ms": 479.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "status": "ok"
+    },
+    "4K_prores422HQ.mov": {
+      "kind": "std",
+      "hw_applicable": false,
+      "meta": {
+        "codec": "prores",
+        "pix_fmt": "yuv422p10le",
+        "size": "3840x2160",
+        "total_frames": 743,
+        "fps": 25.0
+      },
+      "frame_budget": 120,
+      "raw_sw_decode": {
+        "frames": 120,
+        "fps": 149.1,
+        "ms_per_frame": 6.71,
+        "mb_read": 0.0,
+        "first_frame_ms": 12.46,
+        "warmup_frames_done": 12,
+        "warmup_ms": 79.4,
+        "steady_ms": 804.7,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 886.6,
+        "threads": {
+          "thread_type": "SLICE",
+          "thread_count": 16,
+          "cpu_logical": 32
+        },
+        "setup_ms": 890.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_cpu_planar": {
+        "frames": 120,
+        "fps": 141.9,
+        "ms_per_frame": 7.05,
+        "mb_read": 0.0,
+        "first_frame_ms": 13.03,
+        "warmup_frames_done": 12,
+        "warmup_ms": 84.3,
+        "steady_ms": 845.5,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 933.5,
+        "pix_fmt": "yuv422p10le",
+        "threads": {
+          "note": "FFmpegMediaSource 内部默认",
+          "cpu_logical": 32
+        },
+        "setup_ms": 934.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "status": "ok"
+    },
+    "4K_prores4444.mov": {
+      "kind": "std",
+      "hw_applicable": false,
+      "meta": {
+        "codec": "prores",
+        "pix_fmt": "yuv444p12le",
+        "size": "3840x2160",
+        "total_frames": 487,
+        "fps": 25.0
+      },
+      "frame_budget": 120,
+      "raw_sw_decode": {
+        "frames": 120,
+        "fps": 93.9,
+        "ms_per_frame": 10.65,
+        "mb_read": 0.0,
+        "first_frame_ms": 17.29,
+        "warmup_frames_done": 12,
+        "warmup_ms": 118.7,
+        "steady_ms": 1277.4,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 1398.0,
+        "threads": {
+          "thread_type": "SLICE",
+          "thread_count": 16,
+          "cpu_logical": 32
+        },
+        "setup_ms": 1403.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "prod_cpu_planar": {
+        "frames": 120,
+        "fps": 92.9,
+        "ms_per_frame": 10.77,
+        "mb_read": 0.0,
+        "first_frame_ms": 18.03,
+        "warmup_frames_done": 12,
+        "warmup_ms": 119.8,
+        "steady_ms": 1292.2,
+        "frame_size": "3840x2160",
+        "eof_hit": false,
+        "open_ms": 1415.0,
+        "pix_fmt": "yuv444p12le",
+        "threads": {
+          "note": "FFmpegMediaSource 内部默认",
+          "cpu_logical": 32
+        },
+        "setup_ms": 1416.0,
+        "scaled": null,
+        "status": "ok"
+      },
+      "status": "ok"
+    },
+    "2K_DNxHR HQX 12-bit.mov": {
+      "status": "missing"
+    },
+    "4K_DNxHR HQX 12-bit.mov": {
+      "status": "missing"
+    }
+  },
+  "summary": {
+    "missing": 2,
+    "probe_error": 0,
+    "ok": 7,
+    "partial": 0,
+    "all_failed": 0,
+    "modes": {
+      "ok": 22,
+      "ok_partial": 0,
+      "eof_before_measure": 0,
+      "error": 0
+    }
+  }
+}

@@ -1,0 +1,179 @@
+{
+  "date": "2026-09-12T12:11:58",
+  "os": "Windows 11 build 26200",
+  "python": "3.13.12",
+  "pyav": "18.1.0",
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900K",
+  "gpu_hint": "NVIDIA GeForce RTX 4090",
+  "warmup_frames": 12,
+  "sources": {
+    "2K_h264.mp4": {
+      "hw_applicable": true,
+      "meta": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "size": "1920x1080",
+        "total_frames": 1572,
+        "fps": 25.0
+      },
+      "raw_sw_decode": {
+        "frames": 240,
+        "fps": 3039.9,
+        "ms_per_frame": 0.33,
+        "mb_read": 0.0,
+        "setup_ms": 138.0
+      },
+      "raw_hw_decode": {
+        "frames": 240,
+        "fps": 538.5,
+        "ms_per_frame": 1.86,
+        "mb_read": 0.0,
+        "out_fmt": "nv12",
+        "setup_ms": 612.0
+      },
+      "prod_cpu_planar": {
+        "frames": 240,
+        "fps": 3004.4,
+        "ms_per_frame": 0.33,
+        "mb_read": 0.0,
+        "pix_fmt": "yuv420p",
+        "setup_ms": 165.0
+      },
+      "prod_hw_planar": {
+        "frames": 240,
+        "fps": 527.7,
+        "ms_per_frame": 1.9,
+        "mb_read": 0.0,
+        "out_fmt": "nv12",
+        "hw_active": true,
+        "setup_ms": 632.0
+      }
+    },
+    "4K_H264.mov": {
+      "hw_applicable": true,
+      "meta": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "size": "3840x2160",
+        "total_frames": 743,
+        "fps": 25.0
+      },
+      "raw_sw_decode": {
+        "frames": 120,
+        "fps": 1040.1,
+        "ms_per_frame": 0.96,
+        "mb_read": 0.0,
+        "setup_ms": 233.0
+      },
+      "raw_hw_decode": {
+        "frames": 120,
+        "fps": 162.6,
+        "ms_per_frame": 6.15,
+        "mb_read": 0.0,
+        "out_fmt": "nv12",
+        "setup_ms": 925.0
+      },
+      "prod_cpu_planar": {
+        "frames": 120,
+        "fps": 945.1,
+        "ms_per_frame": 1.06,
+        "mb_read": 0.0,
+        "pix_fmt": "yuv420p",
+        "setup_ms": 249.0
+      },
+      "prod_hw_planar": {
+        "frames": 120,
+        "fps": 162.7,
+        "ms_per_frame": 6.15,
+        "mb_read": 0.0,
+        "out_fmt": "nv12",
+        "hw_active": true,
+        "setup_ms": 928.0
+      }
+    },
+    "2K_H265.mov": {
+      "hw_applicable": true,
+      "meta": {
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "size": "1920x1080",
+        "total_frames": 743,
+        "fps": 25.0
+      },
+      "raw_sw_decode": {
+        "frames": 240,
+        "fps": 860.8,
+        "ms_per_frame": 1.16,
+        "mb_read": 0.0,
+        "setup_ms": 340.0
+      },
+      "raw_hw_decode": {
+        "frames": 240,
+        "fps": 710.3,
+        "ms_per_frame": 1.41,
+        "mb_read": 0.0,
+        "out_fmt": "p010le",
+        "setup_ms": 436.0
+      },
+      "prod_cpu_planar": {
+        "frames": 240,
+        "fps": 863.1,
+        "ms_per_frame": 1.16,
+        "mb_read": 0.0,
+        "pix_fmt": "yuv420p10le",
+        "setup_ms": 341.0
+      },
+      "prod_hw_planar": {
+        "frames": 240,
+        "fps": 685.1,
+        "ms_per_frame": 1.46,
+        "mb_read": 0.0,
+        "out_fmt": "p010le",
+        "hw_active": true,
+        "setup_ms": 449.0
+      }
+    },
+    "4K_H265.mov": {
+      "hw_applicable": true,
+      "meta": {
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "size": "3840x2160",
+        "total_frames": 743,
+        "fps": 25.0
+      },
+      "raw_sw_decode": {
+        "frames": 120,
+        "fps": 329.7,
+        "ms_per_frame": 3.03,
+        "mb_read": 0.0,
+        "setup_ms": 566.0
+      },
+      "raw_hw_decode": {
+        "frames": 120,
+        "fps": 205.3,
+        "ms_per_frame": 4.87,
+        "mb_read": 0.0,
+        "out_fmt": "p010le",
+        "setup_ms": 749.0
+      },
+      "prod_cpu_planar": {
+        "frames": 120,
+        "fps": 320.1,
+        "ms_per_frame": 3.12,
+        "mb_read": 0.0,
+        "pix_fmt": "yuv420p10le",
+        "setup_ms": 589.0
+      },
+      "prod_hw_planar": {
+        "frames": 120,
+        "fps": 196.0,
+        "ms_per_frame": 5.1,
+        "mb_read": 0.0,
+        "out_fmt": "p010le",
+        "hw_active": true,
+        "setup_ms": 777.0
+      }
+    }
+  }
+}

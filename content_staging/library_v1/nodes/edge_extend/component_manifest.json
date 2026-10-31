@@ -1,0 +1,156 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "C17",
+  "dedup": "erode_dilate edge_mode extend 是采样钳制非 RGB 延伸；light_wrap 是叠背景光（L00 台账 C17 行）",
+  "host_min_contract": "node_type lib1_edge_extend；乒乓 FBO 每轮扩张 pass + tile_padding=radius（patches/proposal_l04_node_seams.md §C17）",
+  "image": {
+    "alpha": "straight",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-index",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "node",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": 4.0,
+      "maximum": 8.0,
+      "minimum": 0.0,
+      "name": "radius",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "px",
+      "validation": "整数语义；上限 8=GPU 常量循环上限"
+    },
+    {
+      "animatable": false,
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "threshold",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "alpha",
+      "validation": "alpha≥threshold 视为前景源"
+    },
+    {
+      "animatable": false,
+      "default": "color_only",
+      "maximum": null,
+      "minimum": null,
+      "name": "output_mode",
+      "neutral": false,
+      "options": [
+        "color_only",
+        "premultiplied"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": ""
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "rgba"
+    },
+    {
+      "data_type": "image",
+      "direction": "output",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "rgba"
+    }
+  ],
+  "resources": [],
+  "slug": "edge_extend",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_c17_edge_extend.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "content_staging/library_v1/nodes/edge_extend/hand_vectors.json",
+    "known_limits": "color_only 默认保留原 alpha；premultiplied 模式=延伸 RGB×原 alpha；节点 marker 未接 dispatch（L04）；GPU 乒乓 pass 未验",
+    "oracle": "content_staging/library_v1/references/edge_extend_ref.py"
+  },
+  "version": "0.1.0"
+}

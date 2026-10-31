@@ -1,0 +1,173 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "C18",
+  "dedup": "无距离变换（depth_matte 用 depth AOV 非距离场）——新算法差量；不等同 erode/dilate（matte_cleanup 仅结构元腐蚀/膨胀，本节点开关在到对类最近像素的度量距离）（L00 台账 C18 行）",
+  "host_min_contract": "node_type lib1_distance_matte；marker dispatch（base_evaluator lib1_ 分支）+ GLSL 未接线（L17 草案）；全帧声明子门未开——生产接线待集成者开全帧预算/取消子门，不宣称 tile-safe",
+  "image": {
+    "alpha": "straight",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "node",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": "Euclid",
+      "maximum": null,
+      "minimum": null,
+      "name": "metric",
+      "neutral": false,
+      "options": [
+        "Euclid",
+        "Chebyshev",
+        "Manhattan"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": "到对类最近像素的度量（像素单位）"
+    },
+    {
+      "animatable": false,
+      "default": 8.0,
+      "maximum": 64.0,
+      "minimum": 1.0,
+      "name": "radius",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "px",
+      "validation": "归一化长度（dn=clip(s/radius,−1,1)）"
+    },
+    {
+      "animatable": false,
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "threshold",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "level",
+      "validation": "α ≥ threshold → FG（HDR α 合法）"
+    },
+    {
+      "animatable": false,
+      "default": "DistanceField",
+      "maximum": null,
+      "minimum": null,
+      "name": "output_mode",
+      "neutral": false,
+      "options": [
+        "DistanceField",
+        "EdgeBand",
+        "Matte"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": "α 通道输出表示（距离场/边缘带/软重建）"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "no-op：返回空输出（marker 协议）；输入必须含 α 通道",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    },
+    {
+      "data_type": "image",
+      "direction": "output",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "distance_matte",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_c18_distance_matte.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "tests/content_library_v1/test_c18_distance_matte.py（≥3 独立手算向量：1×4 三模式/3×3 三 metric 分辨/threshold 分界）",
+    "known_limits": "节点类+marker 草案；dispatch/GLSL/registry/capability 未接线（L04/L17 集成）——仅声明不是完成。全帧声明：精确暴力距离（分块广播），分块 halo 收益不证明前不分块；距离上界=画幅对角线（2204 @1920×1080）但按整帧计算。像素网格离散 SDF：边界像素 |s|≥1、零穿越在异类像素间（非插值连续 SDF）；无对类饱和 dn=±1；缺 α 显式 ValueError",
+    "oracle": "content_staging/library_v1/references/distance_matte_ref.py"
+  },
+  "version": "0.1.0"
+}

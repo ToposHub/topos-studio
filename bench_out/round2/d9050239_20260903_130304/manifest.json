@@ -1,0 +1,18 @@
+{
+ "git_commit": "d9050239",
+ "git_dirty": false,
+ "timestamp": "20260903_130304",
+ "threads_env": "default",
+ "library": "/Users/testuser/Documents/vscode/topos/native/topos_codec/build/release/topos_codec.dylib",
+ "library_sha256": "c9e31afc15b736c98b094a5d3570e5dbf0b5cd33b9fa990fbd7c8ea8c22e9b6f",
+ "sources": {
+  "4k": {
+   "path": "tests/test_videos/4K_topos.mov",
+   "sha256": "1f34308b560c4f0f5c45253f9f16bed9a8d2b0f61c2708fa7ebdd575a58850c6"
+  }
+ },
+ "warmup_frames": 20,
+ "effective_frames": 200,
+ "repeats": 5,
+ "cv_gate": 0.03
+}

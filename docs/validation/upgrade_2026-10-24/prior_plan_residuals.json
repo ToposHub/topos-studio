@@ -1,0 +1,396 @@
+[
+  {
+    "path": "docs/validation/feature_F/F0.1/0b57c322d/manifest_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 后续执行安排（登记，非本 manifest 交付物）",
+        "body": "机器 B 侧可执行的重验/长跑项：F2.5 Windows 多轨重验、F6.6 代理性能\n重验、C3.1 10h soak + TDR 人工项、B2.2 A/C 侧矩阵、快照回读缺陷修复。\n均不阻塞 F0.1 关闭与既有已验收结论。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F0.3/c2c0a841c/manifest_2026-10-22.md",
+    "sections": [
+      {
+        "heading": "5. 未验证项（如实登记）",
+        "body": "- Adjustment Clip 的 GPU↔CPU↔导出**像素级三方对拍**未建（现有测试文件头自认留给 GL fixture）；需要像素级对拍的任务（F2.4/F4 相关）开工时基于 `gl_context` fixture 补。\n- 嵌套序列在 G 级驱动中未端到端播放验证（模型级结构已锁定）；播放语义归 F3.1 嵌套复核。\n- 反相立体声/脉冲向量的**读回验证**已在生成器内提供校验函数（`pcm_channel_sum_is_silent`/`dominant_freq`），音频任务的 PCM 级验收在 F3.x 使用时补齐证据链。\n- BRAW/R3D 真实原片存在于 `tests/test_videos/`（F5.3 可用），本轮未解码验证。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F0.4/ef91445f2/adr_timebase_identity_migration_2026-10-22.md",
+    "sections": [
+      {
+        "heading": "5. 验证与未验证",
+        "body": "- 已验证（本 ADR 随附）：`tests/edit/test_timebase_precision_vectors.py` 全绿；既有 `test_mixed_fps_playback_cadence`、`test_multicam_nested_timecode_truepeak`、`test_project_module_preservation` 通过。\n- 未验证/边界：VFR PTS 索引的 float 精度（`source_pts_index: tuple[float,...]` 为秒的 float 表示——PTS 源头即 float 秒，映射内部仍 Fraction 比较；VFR 长片的 PTS 表精度受容器时基限制，登记为已知边界，非本 ADR 引入）；子帧/采样级位置 schema 属 F3.3，本 ADR 只冻结整数帧契约。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F1.3/0023acb4c/capability_consistency_ledger_2026-10-23.md",
+    "sections": [
+      {
+        "heading": "4. 未验证/边界",
+        "body": "- Windows/DeckLink/Metal 行＝注册表既有 UNVERIFIED/评估条目，本批未改（B 线延期口径，见 F0.1 manifest §3）。\n- 「即将推出」文案全量清点：U07（F1.1）已锁 linked_selection/show_markers；其余 UI 文案随 F2.x 各任务入口变化时同步。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F1.4/a50417ec2/efficiency_acceptance_ledger_2026-10-23.md",
+    "sections": [
+      {
+        "heading": "4. 未验证/已知缺口（如实登记）",
+        "body": "- **Tangent 真机（H 级）**：本机无 Tangent Hub/硬件——桥接/协议/手势单元测试全绿（29+4 用例），真机反馈时序/轮感未验证。\n- **DPI 变化**：全仓无 screenChanged/logicalDotsPerInch 处理代码，仅靠尺寸钳制间接兜底——登记为已知缺口（新增 DPI 处理属新功能，另行立项，不在本验收包）。\n- **运行时拔屏监听**（screenAdded/removed）：未实现；恢复时回落已验证（§2）。\n- **双屏真实布局（H 级）**：单机单屏，仅逻辑级钳制验证。\n- LayoutProfile.floating_panels 死字段：登记（清理属 F6.x 归档包顺手项）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.1/39abcfa01/source_patching_ledger_2026-10-23.md",
+    "sections": [
+      {
+        "heading": "5. 登记的后续片（不阻塞本任务验收）",
+        "body": "1. **完整 patch matrix**：逐源声道→逐目标轨（ch→A1/A3 分轨）需要轨道级映射\n   模型扩展（当前为轨内通道映射）；建议随 F2.5 多机位音频策略一并设计。\n2. **timeline_panel 入口**：轨道头 patch 引脚 UI（DaVinci 形态）；当前入口为\n   源监视器 V/A 按钮（计划入口三选一已满足）。\n3. **混合值提示增强**：对话框提示为文本级；轨头/检视器内联图形化提示后续随\n   timeline_panel 入口做。\n4. **file_controller.open_asset 映射透传**：媒体池双击打开源监视器路径暂未带\n   map（EditPage 内打开路径已带）；影响面=scrub 试听声道选择，不影响时间线。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.10/ba6da523f/audio_sync_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "5. 登记的后续片",
+        "body": "1. keep_camera_audio=True 的双源混音（混音图域）。\n2. 波形法后台 worker（复用 MulticamSyncWorker 模式）+ 分析中途取消。\n3. 时间线波形图取绑定源（timeline_items → audio_waveform 路径）。\n4. retime/保调片段的绑定支持（需 reader 位置数学接受基偏移）。\n5. 长录制漂移矫正（条件依赖 F3.3，与 F2.6 共享）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.2/aec4f2c15/three_four_point_ledger_2026-10-23.md",
+    "sections": [
+      {
+        "heading": "5. 登记的后续项",
+        "body": "1. fit-to-fill 实时保调（条件依赖 F3.2 WSOLA 实时化）。\n2. Alt+X 清除时间线 range 的键盘入口（调研发现注释声称存在但未实现——\n   目前清除走标尺右键菜单；属快捷键补全，登记至 F1.4 后续或顺手片）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.3/21767814a/trim_viewer_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "5. 登记的后续片",
+        "body": "1. **连续速度形态 JKL**：按住 L/J 以播放速度连续修 cut + 音频预听\n  （`preview_scrub_audio` 同源）——需要 trim 会话与播放态集成。\n2. **预/后卷循环**：cut±N range + `set_playback_range + set_loop` 组合\n  （控制器 API 齐备，缺会话级入口与退出恢复）。\n3. **普通/波纹 trim 的左半帧**：当前 update_trim 清右半；左半显示被修\n  片边界帧可复用同一 provider（entry 未接）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.4/2b8036309/transform_animation_ledger_2026-10-23.md",
+    "sections": [
+      {
+        "heading": "3. 登记的后续片（不阻塞本任务验收）",
+        "body": "1. **前后关键帧导航（◀◆/◆▶）**：edit 页无入口；可移植 composite\n   keyframes_panel `_goto_prev/_goto_next_keyframe` + J/K 方案。\n2. **插值/曲线编辑 UI**：`SetKeyframeInterpolationCommand` 完整且经测试\n   但 src 内零 UI 调用；共享 SplinePanel 只接 composite node graph，接\n   edit clip animated_params 是主要开发量。\n3. 次要：UI rotation ParamDef ±180 与数据域 ±3600 不一致（>180° 仅可经\n   命令/API 写入）；`transform.pivot_*` 为静态值无动画入口。\n4. 拆分：绝对帧域下两半段共享完整轨道各自 span 内求值正确（无丢失）；\n   如需按半段局部化关键帧另行登记。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.5/00db7c172/multicam_grid_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "5. 登记的后续片（不阻塞本期验收）",
+        "body": "1. 九路网格实测 + 每角度 fps 减半/代理强制策略（§4 评估落地）。\n2. In-app 四路播放 + Program 同跑的 VT session_pool 驱逐实测（kVT 重试\n   已有 hardware_capability.py:216；网格用 CPU 不触 VT，但整包负载曲线\n   需真机 GUI 跑一次记录）。\n3. GUI 端到端联验（真实播放中四格可见、切角、缺路徽标目验）——headless\n   已覆盖组件契约与路由，交互目验待真机。\n4. seek 过程中的网格静帧补齐（当前暂停回落静帧路径已覆盖；播放中大跳\n   依赖 latest-wins，可再加\"seek 结束补一帧全角度\"优化）。\n5. F2.5 九宫评估的 per-angle 独立线程池（若单线程吞吐成瓶颈再评估）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.6/6fad632a2/multicam_sync_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "6. 登记的后续片",
+        "body": "1. 速率漂移**矫正**（条件依赖 F3.3 采样级矫正）：需 MulticamAngle 速率\n   字段 + 已放置片段影响面预览。\n2. 素材级 marker 同步（需先定义素材级 marker 模型——现只有时间线级）。\n3. TC fps/drop_frame 持久化补全（探测侧已有三字段，project.py 落盘侧\n   只存字符串）。\n4. 同步方式/置信度/漂移诊断的组级持久化（现状态栏即焚；载体\n   UpdateMulticamSyncCommand 可扩）。\n5. 重同步后\"已放置片段相对新偏移过期\"的差异预览。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.7/c2b568a88/interpretation_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "5. 登记的后续片",
+        "body": "1. 属性面板多素材混合值批量编辑（复用 clip 级 tristate/-1 索引机制）；\n   production info（Reel/Scene/Shot/Take）批量命令。\n2. render cache 指纹纳入解释覆盖（现 fingerprint 读 asset.metadata，\n   覆盖层变化不触发；`invalidate_render_cache_for_asset` 扩展到时间线\n   clip 遍历）。\n3. 色彩解释覆盖（color_metadata 用户覆盖层）。\n4. 换源预检 fps 拒绝与解释路径的协调提示（解释≠换源的用户文案）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.8/7045b41d6/retime_quality_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "6. 登记的后续项",
+        "body": "1. 受控光流 provider（F7.2）：RifeInterpolator + (a,b,w) 的\"RIFE 版\n   frame_blend\"，仅导出/缓存路径先接，`has_model()` 解锁 UI 第三项。\n2. 实时预览音频反放/速度曲线（F3.2 域）。\n3. frame_blend 遮挡/切镜/快速运动质量样片（随 F7.2 光流对比夹具一起产）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F2.9/193b4bc00/title_lifecycle_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "5. 登记的后续片（不阻塞核心验收）",
+        "body": "1. **滚动片尾真实 roll 动画**：credit_roll 现为静态样式（无爬升/滚动），\n   需图形动画域的 offset-over-time 支持。\n2. **原生标题 cue 级入出场动画**：`cue_animation_envelope`（graphics.py\n   :786-868，含 AUD-15900 修复）是零消费死代码；不 promote 的标题无动画。\n3. **restore/同步 flag UI**：`SyncCaptionGraphicCommand` 零接线；detach 后\n   无法重新挂接（只能 undo）；sync flag 三开关无 UI。\n4. **9:16/1:1 时间线预设 + 绝对字号画幅自适应**（font_size=200 不随 9:16\n   缩放）+ 跨画幅/跨平台（Qt vs PIL 断行）最终像素锁定测试。\n5. **缺字体替代的用户明确选择 UI**（现在 preflight 报告 + 自动替换）与\n   工程字体依赖清单（衔接 F6.2）。\n6. **批选批量样式 / 预设变更回推**：build_batch_style_override 与\n   propagate_preset_change 零生产调用。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F3.1/203e239ec/nested_semantics_ledger_2026-10-23.md",
+    "sections": [
+      {
+        "heading": "3. 登记的后续差量（带设计约束，不在本批实施）",
+        "body": "| 差量 | 现状 | 约束/路径 |\n|---|---|---|\n| 父 retime 子音频重采样混入（时长对齐视频） | 整实例跳过（现在三处可见：预览信号/入队 BLOCKING/渲染 strict） | 自然路径＝复用 stem_export WSOLA 保调通道 + AudioDecoder 重采样；触及共享 flatten/渲染管线，属可审查大包，建议随 F3.2（实时保调）一并设计 |\n| 子序列混合 fps 帧域重映射 | 跳过 + BLOCKING | **视频侧对 mixed fps 无守卫（子帧直读）**——音频单侧修会加剧声画不同步，须 AV 两侧一致设计 |\n| 子音轨 crossfade 完整平移/等效渲染 | 丢弃 + WARNING | 依赖父 retime 语义先定 |\n| Ref-only 孙序列 resolver 缺失 | BLOCKING（入队显式化，本批已覆盖其可见性） | 加载时全量 promote 或 U03 扩展——归 F6.2 重连域 |"
+      },
+      {
+        "heading": "5. 未验证",
+        "body": "- 真实对白素材的父 retime 嵌套听感——当前语义为\"显式拒绝\"，无可听结果（见 §3 第一项实现后补）。\n- NTSC 相邻样本边界：F0.4 精确向量 + D06 既有测试覆盖非嵌套路径；嵌套路径在 mixed-fps 实现前不涉及。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F3.2/streaming_preserve_pitch_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. 真机人工监听确认（headless 无法执行；listening/ WAV 已备，客观指标先行）。\n2. 速度曲线（speed_points）的实时保调（分段常量 WSOLA + 曲线插值），当前与导出\n   一致地回退变调并留痕。\n3. J/K/L 全局倍率（transport speed，非 clip speed）的保调——transport 层目前不涉\n   clip 伸缩语义，另立条目评估。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F3.3/sample_time_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. 子帧 crossfade（转场模型帧级边界升级）。\n2. retime/保调片段的子帧精确对齐（当前 gate 在解码端，速度数学不感知）。\n3. split 时 offset 归属策略（当前继承左片；可选右片/按比例）。\n4. UI：波形/属性面板显示与拖拽采样级偏移（模型/命令已就绪）。\n5. 工程级 `audio_sample_rate` 声明字段（当前固定 48k 参考率，渲染端\n   有理换算已预留）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F3.4/routing_loudness_stems_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "5. 登记的后续片（不阻塞验收）",
+        "body": "1. GROUP/TRACK stem 的 bus 链保留语义统一（M-B8 容器路径已对齐，\n   render_stem_pcm 路径 GROUP stem 仍绕过 bus——语义分歧已在 sidecar\n   声明外，待统一为\"被排除轨贡献恒零\"）。\n2. 全静音+target 的导出端到端（analyzer+delivery 层守卫已覆盖；e2e 待补）。\n3. 录音设备热切换 API（当前为声明：停录重建）与监听输出设备选择。\n4. 实时 LUFS 表 scipy 缺失的 UI 降级提示（is_backend_available 消费）。\n5. surround/auto-duck：实际消费者核验后按需接入（计划原文允许）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F4.1/ef0993564/color_group_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. Color 页 UI：组标签页（Pre-clip/Clip/Post-clip 视图切换）与组管理面板\n   （模型/命令已就绪；本轮交付渲染链与数据层）。\n2. 链段高级操作（curves/LUT/soft-clip）的逐段成片支持（当前 primary 域\n   显式标记 + 告警跳过，与 has_advanced_operations 同语义不静默）。\n3. 组栈的 `trackings`（蒙版跟踪）链段语义。\n4. Composite 页 color_evaluator 链消费（当前 Edit 预览/成片/Metal 已接；\n   Composite 经 clip_stack 解析未带组——登记差异）。\n5. 分裂新片段的组归属策略（当前不自动入组，与 multicam 显式语义一致）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F4.2/color_versions_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. Color 页 UI：版本列表/一键比较/锁定徽标（模型/命令已就绪）。\n2. `edit_controller._on_use_shared_grade_requested` 分享后自动 lock（当前\n   需显式 lock_shared_stacks；一行接线，随 UI 片落地）。\n3. 工程内其余显式 EditProject 构造器的 replace 化清理（40 处，审计后统一）。\n4. 工程级快照版本（F8.1 联动，计划原文即如此划分）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F4.3/hdr_still_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "登记的后续片（不阻塞验收）",
+        "body": "1. 抓帧端 float 读回：Color 页 `render_cached_image` 在 AUD-0604 处 clip uint8——\n   EXR 生产路径需 float readback 分叉（存储/消费已就绪，抓帧仍出 JPEG+EXR 需\n   该片）；当前 EXR 可由外部 float 帧写入（API 就绪有测试）。\n2. 参考侧显示变换锁定执行：schema 已声明 display_transform；shader 侧参考\n   纹理应用锁定 ODT（复用 pq_hdr_to_display 三模式）待片。\n3. Lightbox 对话框（多选 2-N 张全精度对比 UI）；difference 模式菜单项接线。\n4. alpha 通道 EXR（当前 3/4 通道均可写；4 通道端到端参考上传联验待片）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F4.4/shot_match_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. UI：批量预览面板（建议列表+逐镜头勾选+确认提交）、参考版本/源解释锁定控件。\n2. 建议批量预览的字节级\"预览渲染\"（当前报告可解释文本+参数；帧级预览待 UI）。\n3. 分布匹配升级（直方图规格化）与模型路径（ShotMatchWorkflow 契约已留位）。\n4. `GradeDiffReport`（CG-09）联动：提交后自动 before/after 度量。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F4.5/qualifier_keyframes_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. qualifier_panel UI：lum_low/lum_high ◆ 标记（用 is_qualifier_animatable\n   判据）与记录/清除入口（核心五环已就绪）。\n2. sat/hue 区间按证据扩展（白名单登记制，默认静态）。\n3. 跟踪与用户动画组合顺序（F7.1 跟踪联验后声明）。\n4. 点集（points/grad_points）拓扑与插值兼容定义。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F4.6/hdr_zones_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "1. 核验结论（计划允许\"现有工具覆盖/条件延期\"收口）",
+        "body": "既有 ``GradingMath.apply_soft_clip``（CPU）即\"最少几区\"的 HDR 高光塑形\n实现：scene-linear 域 **Toe 区**（low/black_point/toe_strength，含逐通道\n与 RGB 通道平衡）+ **Shoulder 区**（high/white_point/shoulder_strength\n比例压缩）+ 区内 exposure/contrast 预调整；CPU 与 GPU 权威文本\n（shader_nodes.py SOFT_CLIP_SNIPPET / shader_nodes_msl.py MSL_SOFT_CLIP）\n**逐条等价**（AUD-0911/0912 修复对齐，含此前缺失的 toe 分支与通道平衡\n块）。预览 GPU/CPU/成片共用该阶段（color_stack_render_service 消费\nsoft_clip_params）。"
+      },
+      {
+        "heading": "3. 条件延期（不宣称已实现）",
+        "body": "- **分区轮（zone wheel：N 区独立 exposure/saturation 旋钮 UI）**：无对应\n  实际 HDR 镜头需求登记——按计划原文记录\"现有工具覆盖（两区 toe/\n  shoulder + 区内曝光）\"，多区 UI 待真实需求后建设，不宣称已实现分区轮。\n- 监看设备联验（F5.2 条件依赖）维持延期。"
+      },
+      {
+        "heading": "4. 后续片登记",
+        "body": "1. 分区轮 UI（≥3 区独立调整）待真实 HDR 镜头需求。\n2. HDR zone 与 F4.5 qualifier 动画联动（亮度分区参数随帧动画）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F5.1/43e00f850/color_pipeline_ledger_2026-10-23.md",
+    "sections": [
+      {
+        "heading": "4. 登记的债务/后续（不阻塞闭环声明）",
+        "body": "- **约 20 份 OETF 拷贝清单**（审计 §7）：本批收口 CPU 热点外三份 + GPU 四处合同锁定；其余（topos_source 缩略图近似、node_thumbnail、color_space.py 等）保留各自缓存/缩略图语义，待触碰时迁移（合同测试保证不漂移）。\n- **HDR 预览统一（Edit/Color 的 IDT+tonemap）**：F5.2 候选——抽 composite_viewport 的 bake/upload/process_display GLSL chunk 到 shared，为 Edit/Color 预览加可选 IDT+ODT；`color.preview.*` 偏好驱动三页。审计已确认复用耦合面（私有方法+raw context，需抽模块）。\n- PQ/HLG 输入在 Edit 预览按 SDR 显示——现状语义已显式声明（上表），非静默（本台账即声明）；修正归上述 F5.2 候选。\n- 真实相机素材验证：scope 锚点测试（PQ 100nits↔0.508、HLG 75%→203nits、code10 64/940/502）已在显示域合同内；真实 PQ 文件端到端预览对拍归 F5.3（RAW/媒体矩阵，有 test_h265_pq.mp4 素材）。"
+      },
+      {
+        "heading": "6. 未验证",
+        "body": "- Metal（A3 延期）/D3D11（B 延期）路径对拍——按 F0.1 阻塞映射保留待验证行。\n- DeckLink 监看输出色彩（F5.2 设备延期）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F5.3/media_matrix_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "3. 登记的后续片（不阻塞验收）",
+        "body": "1. BRAW/R3D SDK 引入（先核许可证/分发/平台 ABI 与取消/释放——计划原文\n   门槛；真实原片已在库可作验收素材）。\n2. CinemaDNG 序列（F5.4 图像序列链联动）。\n3. `diagnose_media_path` 接入媒体导入入口（导入失败路径给诊断而非\n   通用错误——UI 接线一片）。\n4. 矩阵入 capability_registry 条目（payload 已就绪）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F5.4/input_interpretation_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "3. 登记的后续片（不阻塞验收）",
+        "body": "1. 序列资产→时间线插入链（image_sequence clip 的帧映射/alpha/trim 全链，\n   模型与诊断已就绪，消费端接线）。\n2. 90°/隔行/非方像素的 Source→Edit→代理→导出**端到端几何对拍**\n   （metadata 与守卫已核验；合成 rotated/interlaced 素材的全链测试）。\n3. EXR/DPX 序列（位深/alpha/AOV 按需求验证后开）。\n4. reverse 素材策略声明（速度反放既有；源级 reverse 素材导入未见需求）。\n5. 媒体池 UI：目录导入对话框的序列候选选择界面（classify_directory 已就绪）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F6.1/interchange_roundtrip_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. Resolve/FCP 实机生成样本回传后的逐位复验（本批为方言级黄金工程）。\n2. F3.3 子帧 schema 映射 / F4.2 调色版本映射（计划条件依赖，受支持子集\n   已可往返验收——计划原文允许）。\n3. AAF（F6.3 独立条目）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F6.2/relink_archive_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. 归档收集调色栈 LUT（lut_path 外部依赖进 media/luts/ + 重写）——\n   既有 collect 只收素材媒体；LUT 依赖面登记后补。\n2. 匹配器接入 relink_media_dialog 的目录批量路径（替换现 basename-only\n   逻辑；核心已就绪 + 测试锁定）。\n3. 外部 NLE reconform（F6.1 条件依赖——实机样本后）。\n4. 变速/嵌套工程的重套端到端（映射语义由 F2.4/F1.1 既有；专测登记）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F6.4/frame_manifest_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. DELIVER job UI 的\"恢复导出\"按钮接 manifest（核心已就绪）。\n2. 外部合成软件（Nuke/AE）实机回导逐帧对拍（仓外环节；位深/alpha\n   基础设施在，逐像素对拍登记实机后补）。\n3. EXR/DPX 的 AOV/颜色标签扩展（F5.3 矩阵联动，按需求开）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F6.5/verified_ingest_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. 媒体池 UI 的\"受控入库\"入口（核心已就绪；报告面板）。\n2. 多目的地并行备份（单目的地先行，计划原文允许）。\n3. F2.10 外录素材组织联动 / F5.4 序列素材 ingest。\n4. 摄影卡现场备份需求实例化后的真卡验收（计划原文：按真实需求立项）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F6.6/proxy_cache_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. 媒体池 UI：清理入口（按工程/选中/失效/孤儿四档）+ 占用面板。\n2. 目录迁移/低磁盘策略的设置面板接线（DiskProxyConfig 既有键）。\n3. F6.2 代理/原片重连与 purge 的 UI 联动。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F7.1/tracking_quality_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "5. 登记的后续片（不阻塞验收）",
+        "body": "1. 发丝/半透明合成镜头 + keyer 边缘 1px 带内 alpha 过渡指标。\n2. COMP 页 TrackerNode 增量 retrack/手动修正入口。\n3. 人脸检测器生产接线（或 UI 明示不可用）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F7.2/denoise_interpolate_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. RIFE 模型文件随仓/随装后的遮挡场景专项评估（模型在位后补客观\n   指标）。\n2. 主观质量观察记录（无观察环境——客观指标先行，登记人工环节）。\n3. 降噪缓存键的\"源解释\"因子补充（现键含参数/素材/世代；F2.7 解释\n   覆盖变化经 clip 层指纹已有联动）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F7.3/rip_cache_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. 过期检测的 UI 呈现（bake 节点徽标/求值警告日志——核心检测已就绪）。\n2. 大型真实节点图的交互性能基准（dirty cone/缓存命中率实测——计划\n   \"用现有典型复杂图测\"，测试图覆盖语义，性能数字待真实工程）。\n3. 嵌套 comp/alpha/AOV 的 RIP 支持说明文档（能力边界声明）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F8.1/project_snapshots_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "3. 登记的后续片（不阻塞验收）",
+        "body": "1. 工程管理 UI：快照列表/比较面板/恢复入口（模型已就绪）。\n2. 自动备份的定时策略（auto_backup 标记已有，调度归 UI 片）。\n3. 三方合并（计划明文\"不急做\"）。\n4. IO 序列化接线（快照表随工程保存/重开——字段已挂，settings 键接线一片）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F8.2/review_comments_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "3. 登记的后续片（不阻塞验收）",
+        "body": "1. 审片面板 UI（导入/导出/状态流转/重定位报告展示——模型已就绪）。\n2. 评论→timeline marker 的命令级接线（marker 载荷生成已就绪）。\n3. AI 工件接口消费（F0.2 消费者清单再核）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F8.3/audition_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. UI：片段右键\"转为 Audition\"/take 切换面板/拆平入口（模型已就绪）。\n2. 工程 ``auditions`` 字段 + IO settings 接线（模型序列化已就绪）。\n3. 预览行为（take 预览时临时替换解码源）经渲染层消费接线。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F9.1/filler_removal_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. UI：字幕 workspace 按词选中→生成删除计划（审批链入口）。\n2. review_hits 的人工排除界面（检测已分离）。\n3. 跨 split/retime/嵌套片段的区间映射（F3.3 采样级联动）。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F9.2/subtitle_quality_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. 16:9→9:16 画布变换字幕自动重排/缩放适配函数（safe-area profile\n   已有，适配函数+像素级验证一片）。\n2. 翻译后自动断行（warning 级跨语言差异的自动处理——现保留人工）。\n3. DeliveryQualityResult 接入 workflow run_summary 可见载荷。"
+      }
+    ]
+  },
+  {
+    "path": "docs/validation/feature_F/F9.3/multiversion_delivery_ledger_2026-10-24.md",
+    "sections": [
+      {
+        "heading": "4. 登记的后续片（不阻塞验收）",
+        "body": "1. 版本编译器接 DELIVER 队列 UI 入口（linked_version_id 分组展示）。\n2. PCM 计数写入 export_manifest（函数已就绪，manifest 字段接线）。\n3. 响度按版本差异对照表（LoudnessReport.to_dict 可序列化，per-version\n   汇总归 UI/manifest 片）。\n4. 黑帧/静帧 probe 计数通路（DeliveryQualityInput 已有字段，帧级\n   探测归后续）。"
+      }
+    ]
+  }
+]

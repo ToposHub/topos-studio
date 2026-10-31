@@ -1,0 +1,43 @@
+{
+  "ok": true,
+  "result": {
+    "find": {
+      "selected": [
+        "44b525ba-ce25-4cfb-8bec-89ca8b984b01"
+      ],
+      "status": "1 match(es) for 'Hello'.",
+      "playhead": 59
+    },
+    "replace": [
+      "Hi, world",
+      "Second caption",
+      "world"
+    ],
+    "split": {
+      "before": 3,
+      "after": 4,
+      "status": "Split cue at frame 30."
+    },
+    "undo_split": 3,
+    "ruler_seek": [
+      {
+        "requested": 25,
+        "view": 25,
+        "controller": 25,
+        "page": 25
+      },
+      {
+        "requested": 120,
+        "view": 120,
+        "controller": 120,
+        "page": 120
+      },
+      {
+        "requested": 250,
+        "view": 250,
+        "controller": 250,
+        "page": 250
+      }
+    ]
+  }
+}

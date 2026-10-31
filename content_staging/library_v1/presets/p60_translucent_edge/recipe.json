@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P60",
+  "name": "半透明边缘整理",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "半透明边缘整理：premultiplied 输出模式收口；radius 1–3",
+  "component": "C17 edge_extend（暂存节点 lib1_edge_extend，premultiplied）＋生产 keyer",
+  "dependencies": {
+    "component_id": "C17",
+    "component_slug": "edge_extend",
+    "component_kind": "node",
+    "node_type": "lib1_edge_extend",
+    "aux_node_types": [
+      "keyer"
+    ]
+  },
+  "params": {
+    "radius": 2.0,
+    "threshold": 0.3,
+    "output_mode": "premultiplied"
+  },
+  "notes": "C17 edge_extend premultiplied 输出模式整理半透明边缘宏模板（暂存，宿主图导入未接线，未接 L05 白名单）。"
+}

@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P57",
+  "name": "去白边前景",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "白边/白溢色抑制：keyer 出前景 → despill Subtract 压白溢；limit 0.5–0.8",
+  "component": "C03 despill（暂存节点 lib1_despill）＋生产 keyer",
+  "dependencies": {
+    "component_id": "C03",
+    "component_slug": "despill",
+    "component_kind": "node",
+    "node_type": "lib1_despill",
+    "aux_node_types": [
+      "keyer"
+    ]
+  },
+  "params": {
+    "method": "Subtract",
+    "limit": 0.6,
+    "strength": 1.0
+  },
+  "notes": "C03 despill 暂存组件＋生产 keyer 组成去白边宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；Subtract 法压除键边白溢，键控本身走生产 keyer 节点。"
+}

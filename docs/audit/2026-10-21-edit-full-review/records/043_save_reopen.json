@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "result": {
+    "open_return": true,
+    "expected": {
+      "assets": 12,
+      "timelines": 3,
+      "duration": 500,
+      "active": "5fc82fea-f2cb-48f7-ab46-8ab419cdb1f4"
+    },
+    "actual": {
+      "assets": 12,
+      "timelines": 3,
+      "duration": 500,
+      "active": "5fc82fea-f2cb-48f7-ab46-8ab419cdb1f4"
+    },
+    "page": "Edit"
+  }
+}

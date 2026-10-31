@@ -1,0 +1,263 @@
+{
+  "component": "X03 checker_reveal",
+  "method": "手算（语义修正版）：4x4 像素 → 格 (r,c)（r=floor(y·rows), c=floor(x·columns)，x=(i+0.5)/W）→ 触发点 trig = mod(((r+c)%2)·0.5 + phase, 1)（棋盘奇偶两波）→ mask = clamp((p − trig)/max(soft,1e-6))。softness=0 时 mask=1 当 trig < p。独立枚举推演（纯 Python/math，不复用核代码），容差 1e-6。冲突记录：初版 trig=(r/rows+c/columns)/2 为反对角波次场，同行单调推进、非棋盘交错（p=0.45 中间行仅 1 次翻转）；修正为奇偶两波，相邻格恒错相。",
+  "params_default": {
+    "rows": 4,
+    "columns": 4,
+    "phase": 0.0,
+    "softness": 0.05
+  },
+  "vectors": [
+    {
+      "fixture": "4x4",
+      "progress": 0.125,
+      "params": {
+        "rows": 2,
+        "columns": 2,
+        "softness": 0.0
+      },
+      "expected_grid_rows": [
+        [
+          1,
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          1
+        ],
+        [
+          0,
+          0,
+          1,
+          1
+        ]
+      ],
+      "note": "仅 parity-0 格：trig 场 = [[0,0.5],[0.5,0]]，p=0.125 只揭示 (r+c) 偶格——棋盘交错（同行 0/1 交替）"
+    },
+    {
+      "fixture": "4x4",
+      "progress": 0.6,
+      "params": {
+        "rows": 2,
+        "columns": 2,
+        "softness": 0.25
+      },
+      "expected_grid_rows": [
+        [
+          1,
+          1,
+          0.4,
+          0.4
+        ],
+        [
+          1,
+          1,
+          0.4,
+          0.4
+        ],
+        [
+          0.4,
+          0.4,
+          1,
+          1
+        ],
+        [
+          0.4,
+          0.4,
+          1,
+          1
+        ]
+      ],
+      "note": "parity-1 波过半：(0.6−0.5)/0.25 = 0.4 精确，parity-0 已全 1——两波先后、波间有中间态"
+    },
+    {
+      "fixture": "4x4",
+      "progress": 0.125,
+      "params": {
+        "rows": 2,
+        "columns": 2,
+        "softness": 0.25
+      },
+      "expected_grid_rows": [
+        [
+          0.5,
+          0.5,
+          0,
+          0
+        ],
+        [
+          0.5,
+          0.5,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0.5,
+          0.5
+        ],
+        [
+          0,
+          0,
+          0.5,
+          0.5
+        ]
+      ],
+      "note": "羽化向量：parity-0 格 (0.125−0)/0.25 = 0.5 精确；parity-1 格 0"
+    },
+    {
+      "fixture": "4x4",
+      "progress": 0.3,
+      "params": {
+        "rows": 2,
+        "columns": 2,
+        "phase": 0.5,
+        "softness": 0.0
+      },
+      "expected_grid_rows": [
+        [
+          0,
+          0,
+          1,
+          1
+        ],
+        [
+          0,
+          0,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          1,
+          0,
+          0
+        ]
+      ],
+      "note": "相位可辨：phase=0.5 交换奇偶两波 → 图案与无 phase 精确互补"
+    },
+    {
+      "fixture": "4x4",
+      "progress": 0.3,
+      "params": {
+        "rows": 4,
+        "columns": 1,
+        "softness": 0.0
+      },
+      "expected_grid_rows": [
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "note": "非方格 rows=4/columns=1：c 恒 0，parity=r%2 → 奇偶行带交错（行波）"
+    },
+    {
+      "fixture": "4x4",
+      "progress": 0.0,
+      "params": {
+        "rows": 2,
+        "columns": 2
+      },
+      "expected_grid_rows": [
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "note": "端点精确：全 0"
+    },
+    {
+      "fixture": "4x4",
+      "progress": 1.0,
+      "params": {
+        "rows": 2,
+        "columns": 2
+      },
+      "expected_grid_rows": [
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ]
+      ],
+      "note": "端点精确：全 1"
+    }
+  ]
+}

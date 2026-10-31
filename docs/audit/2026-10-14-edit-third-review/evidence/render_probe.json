@@ -1,0 +1,39 @@
+Export color grade failed for clip clip: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+Export color grade failed for clip clip: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+{
+  "numpy": "1.26.4",
+  "identity": [
+    {
+      "call": 1,
+      "lut": true,
+      "cache_entries": 1
+    },
+    {
+      "call": 2,
+      "error": "ValueError",
+      "message": "The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()"
+    },
+    {
+      "call": 3,
+      "error": "ValueError",
+      "message": "The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()"
+    }
+  ],
+  "gain": [
+    {
+      "call": 1,
+      "lut": true,
+      "cache_entries": 1
+    },
+    {
+      "call": 2,
+      "error": "ValueError",
+      "message": "The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()"
+    },
+    {
+      "call": 3,
+      "error": "ValueError",
+      "message": "The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()"
+    }
+  ]
+}

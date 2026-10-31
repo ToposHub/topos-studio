@@ -1,0 +1,246 @@
+--- a/libavcodec/codec_id.h
++++ b/libavcodec/codec_id.h
+@@ -605,6 +605,7 @@
+     AV_CODEC_ID_LCEVC,
+     AV_CODEC_ID_SMPTE_436M_ANC,
+ 
++    AV_CODEC_ID_LIBTOPOS,
+ 
+     AV_CODEC_ID_PROBE = 0x19000, ///< codec_id is not known (like AV_CODEC_ID_NONE) but lavf should attempt to identify it
+ 
+--- a/libavcodec/codec_desc.c
++++ b/libavcodec/codec_desc.c
+@@ -3777,6 +3777,13 @@
+         .long_name = NULL_IF_CONFIG_SMALL("MXF SMPTE-436M ANC"),
+     },
+     {
++        .id        = AV_CODEC_ID_LIBTOPOS,
++        .type      = AVMEDIA_TYPE_VIDEO,
++        .name      = "libtopos",
++        .long_name = NULL_IF_CONFIG_SMALL("Topos Video Codec 2.0 (libtopos_codec)"),
++        .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSY,
++    },
++    {
+         .id        = AV_CODEC_ID_MPEG2TS,
+         .type      = AVMEDIA_TYPE_DATA,
+         .name      = "mpegts",
+--- a/libavcodec/allcodecs.c
++++ b/libavcodec/allcodecs.c
+@@ -857,6 +857,7 @@
+ extern const FFCodec ff_av1_vulkan_encoder;
+ extern const FFCodec ff_libopenh264_encoder;
+ extern const FFCodec ff_libopenh264_decoder;
++extern const FFCodec ff_libtopos_decoder;
+ extern const FFCodec ff_h264_amf_encoder;
+ extern const FFCodec ff_h264_amf_decoder;
+ extern const FFCodec ff_h264_cuvid_decoder;
+--- a/libavcodec/Makefile
++++ b/libavcodec/Makefile
+@@ -1173,6 +1173,7 @@
+ OBJS-$(CONFIG_LIBOPENCORE_AMRWB_DECODER)  += libopencore-amr.o
+ OBJS-$(CONFIG_LIBOPENH264_DECODER)        += libopenh264dec.o libopenh264.o
+ OBJS-$(CONFIG_LIBOPENH264_ENCODER)        += libopenh264enc.o libopenh264.o
++OBJS-$(CONFIG_LIBTOPOS_DECODER)           += libtoposdec.o
+ OBJS-$(CONFIG_LIBOPENJPEG_ENCODER)        += libopenjpegenc.o
+ OBJS-$(CONFIG_LIBOPUS_DECODER)            += libopusdec.o libopus.o     \
+                                              vorbis_data.o
+--- a/configure
++++ b/configure
+@@ -254,6 +254,7 @@
+   --enable-libopencore-amrwb enable AMR-WB decoding via libopencore-amrwb [no]
+   --enable-libopencv       enable video filtering via libopencv [no]
+   --enable-libopenh264     enable H.264 encoding via OpenH264 [no]
++  --enable-libtopos        enable Topos Video Codec decoding via libtopos_codec [no]
+   --enable-libopenjpeg     enable JPEG 2000 encoding via OpenJPEG [no]
+   --enable-libopenmpt      enable decoding tracked files via libopenmpt [no]
+   --enable-libopenvino     enable OpenVINO as a DNN module backend
+@@ -1957,6 +1958,7 @@
+     liboapv
+     libopencv
+     libopenh264
++    libtopos
+     libopenjpeg
+     libopenmpt
+     libopenvino
+@@ -3633,6 +3635,7 @@
+ libopenh264_decoder_deps="libopenh264"
+ libopenh264_decoder_select="h264_mp4toannexb_bsf"
+ libopenh264_encoder_deps="libopenh264"
++libtopos_decoder_deps="libtopos"
+ libopenjpeg_encoder_deps="libopenjpeg"
+ libopenmpt_demuxer_deps="libopenmpt"
+ libopus_decoder_deps="libopus"
+@@ -7120,6 +7123,7 @@
+                                  require libopencv opencv2/core/core_c.h cvCreateImageHeader -lopencv_core -lopencv_imgproc; } ||
+                                require_pkg_config libopencv opencv opencv/cxcore.h cvCreateImageHeader; }
+ enabled libopenh264       && require_pkg_config libopenh264 "openh264 >= 1.3.0" wels/codec_api.h WelsGetCodecVersion
++enabled libtopos          && require libtopos topos_codec.h tc_frame_decode
+ enabled libopenjpeg       && { check_pkg_config libopenjpeg "libopenjp2 >= 2.1.0" openjpeg.h opj_version ||
+                                { require_pkg_config libopenjpeg "libopenjp2 >= 2.1.0" openjpeg.h opj_version -DOPJ_STATIC && add_cppflags -DOPJ_STATIC; } }
+ enabled libopenmpt        && require_pkg_config libopenmpt "libopenmpt >= 0.2.6557" libopenmpt/libopenmpt.h openmpt_module_create -lstdc++ && append libopenmpt_extralibs "-lstdc++"
+--- a/libavformat/isom_tags.c
++++ b/libavformat/isom_tags.c
+@@ -71,6 +71,8 @@
+     { AV_CODEC_ID_Y41P,   MKTAG('Y', '4', '1', 'P') }, /* uncompressed 12-bit 4:1:1 */
+     { AV_CODEC_ID_YUV4,   MKTAG('y', 'u', 'v', '4') }, /* libquicktime packed yuv420p */
+     { AV_CODEC_ID_TARGA_Y216, MKTAG('Y', '2', '1', '6') },
++
++    { AV_CODEC_ID_LIBTOPOS, MKTAG('T', 'P', 'I', 'C') }, /* Topos Video Codec (all-intra) */
+ 
+     { AV_CODEC_ID_MJPEG,  MKTAG('j', 'p', 'e', 'g') }, /* PhotoJPEG */
+     { AV_CODEC_ID_MJPEG,  MKTAG('m', 'j', 'p', 'a') }, /* Motion-JPEG (format A) */
+--- a/libavcodec/libtoposdec.c
++++ b/libavcodec/libtoposdec.c
+@@ -0,0 +1,152 @@
++/*
++ * Topos Video Codec decoder (libtopos_codec wrapper)
++ * Copyright (C) 2026 Topos Color project
++ *
++ * This file is part of FFmpeg.
++ *
++ * FFmpeg is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * FFmpeg is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with FFmpeg; if not, write to the GNU Lesser General
++ * Public License along with FFmpeg; if not, write to the Free
++ * Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++/**
++ * @file
++ * Topos Video Codec decoder wrapping the external libtopos_codec
++ * (all-intra frame codec; packets are self-contained frames).
++ *
++ * tc_frame_decode is a stateless pure function (spec §11.1): the two-phase
++ * entry (planes_out == NULL for geometry query) fills topos_frame_output,
++ * the second call decodes straight into the caller's planes.  Output samples
++ * are right-justified uint16 in the declared bit depth, which maps directly
++ * onto FFmpeg's planar 10/12-bit YUV pixel formats.
++ */
++
++#include "libavutil/imgutils.h"
++#include "libavutil/intreadwrite.h"
++#include "libavutil/mem.h"
++
++#include "avcodec.h"
++#include "codec_internal.h"
++#include "decode.h"
++
++#include "topos_codec.h"
++
++static av_cold int libtopos_decode_init(AVCodecContext *avctx)
++{
++    avctx->color_range = AVCOL_RANGE_MPEG;
++    return 0;
++}
++
++static int libtopos_pick_pix_fmt(const topos_frame_output *info)
++{
++    /* 4:2:2 = pixel_format 0（R4.2），4:4:4 = 1；样本右对齐 uint16 */
++    const int is_444 = info->pixel_format == 1;
++
++    if (info->bit_depth > 8 && info->bit_depth <= 10)
++        return is_444 ? AV_PIX_FMT_YUV444P10LE : AV_PIX_FMT_YUV422P10LE;
++    if (info->bit_depth > 10 && info->bit_depth <= 12)
++        return is_444 ? AV_PIX_FMT_YUV444P12LE : AV_PIX_FMT_YUV422P12LE;
++    return AV_PIX_FMT_NONE;
++}
++
++static int libtopos_decode_frame(AVCodecContext *avctx, AVFrame *frame,
++                                 int *got_frame, AVPacket *avpkt)
++{
++    topos_frame_output info;
++    uint16_t *planes_out[TC_FRAME_MAX_PLANES];
++    size_t strides[TC_FRAME_MAX_PLANES];
++    int32_t st;
++    int ret;
++
++    memset(&info, 0, sizeof(info));
++    info.struct_size = sizeof(info);
++    info.abi_version = TOPOS_CODEC_ABI_VERSION;
++
++    /* Phase 1: 结构解析 + 几何查询（不做 payload CRC）。 */
++    st = tc_frame_decode(avpkt->data, avpkt->size, NULL, NULL, &info);
++    if (st < 0) {
++        av_log(avctx, AV_LOG_ERROR, "libtopos: frame header rejected (%d)\n", st);
++        return AVERROR_INVALIDDATA;
++    }
++
++    ret = ff_set_dimensions(avctx, info.visible_width, info.visible_height);
++    if (ret < 0)
++        return ret;
++
++    ret = libtopos_pick_pix_fmt(&info);
++    if (ret == AV_PIX_FMT_NONE) {
++        av_log(avctx, AV_LOG_ERROR,
++               "libtopos: unsupported geometry (bd=%u pf=%u planes=%u alpha=%u)\n",
++               info.bit_depth, info.pixel_format, info.plane_count, info.alpha_mode);
++        return AVERROR_PATCHWELCOME;
++    }
++    avctx->pix_fmt = ret;
++
++    /* H.273 码值与 AVCodecContext 枚举同源，直接透传（界内才写）。 */
++    avctx->color_range = info.color_range ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
++    if (info.color_primaries < AVCOL_PRI_NB)
++        avctx->color_primaries = info.color_primaries;
++    if (info.color_transfer < AVCOL_TRC_NB)
++        avctx->color_trc = info.color_transfer;
++    if (info.color_matrix < AVCOL_SPC_NB)
++        avctx->colorspace = info.color_matrix;
++    if (info.chroma_siting == 1)
++        avctx->chroma_sample_location = AVCHROMA_LOC_LEFT;
++    else if (info.chroma_siting == 2)
++        avctx->chroma_sample_location = AVCHROMA_LOC_CENTER;
++    else
++        avctx->chroma_sample_location = AVCHROMA_LOC_UNSPECIFIED;
++    if (info.sar_num && info.sar_den)
++        avctx->sample_aspect_ratio = (AVRational){ info.sar_num, info.sar_den };
++
++    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
++        return ret;
++
++    for (int p = 0; p < info.plane_count && p < TC_FRAME_MAX_PLANES; p++) {
++        planes_out[p] = (uint16_t *)frame->data[p];
++        strides[p]    = frame->linesize[p] / sizeof(uint16_t);
++    }
++
++    /* Phase 2: 整帧解码直写 AVFrame 平面（slice 损坏按 §9 conceal 仍交付）。 */
++    st = tc_frame_decode(avpkt->data, avpkt->size, planes_out, strides, &info);
++    if (st < 0) {
++        av_log(avctx, AV_LOG_ERROR, "libtopos: decode failed (%d)\n", st);
++        av_frame_unref(frame);
++        return AVERROR_INVALIDDATA;
++    }
++    if (st == TC_WARN_CONCEALED)
++        av_log(avctx, AV_LOG_WARNING,
++               "libtopos: concealed %u/%u slices\n",
++               info.concealed_slices, info.slice_count);
++
++    frame->pict_type = AV_PICTURE_TYPE_I;
++    *got_frame = 1;
++    return avpkt->size;
++}
++
++const FFCodec ff_libtopos_decoder = {
++    .p.name          = "libtopos",
++    CODEC_LONG_NAME("Topos Video Codec 2.0 (libtopos_codec)"),
++    .p.type          = AVMEDIA_TYPE_VIDEO,
++    .p.id            = AV_CODEC_ID_LIBTOPOS,
++    .init            = libtopos_decode_init,
++    FF_CODEC_DECODE_CB(libtopos_decode_frame),
++    .p.capabilities  = AV_CODEC_CAP_DR1,
++    .p.pix_fmts      = (const enum AVPixelFormat[]) {
++        AV_PIX_FMT_YUV422P10LE, AV_PIX_FMT_YUV444P10LE,
++        AV_PIX_FMT_YUV422P12LE, AV_PIX_FMT_YUV444P12LE,
++        AV_PIX_FMT_NONE
++    },
++    .p.wrapper_name  = "libtopos",
++};

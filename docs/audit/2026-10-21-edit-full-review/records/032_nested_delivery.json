@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "result": {
+    "child": "0cc49115-9c98-4728-8412-59e7e83f8f12",
+    "parent_duration": 300,
+    "resolver_types": {
+      "5fc82fea-f2cb-48f7-ab46-8ab419cdb1f4": "TimelineSequenceRef",
+      "437fc843-1651-426c-af17-0295c5b4a4c3": "TimelineSequenceRef",
+      "0cc49115-9c98-4728-8412-59e7e83f8f12": "TimelineSequenceRef"
+    },
+    "has_workspace_set_timeline_sequences": false,
+    "jobs": [
+      {
+        "name": "audit_gui_h264.mp4",
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-edit-audit-20261021/exports/audit_gui_h264.mp4"
+      },
+      {
+        "name": "audit_gui_nested.mp4",
+        "status": "failed",
+        "error": "Nested audio preflight failed: nested audio: clip 59f4bdab-fd2b-4009-bad5-ef3740453b72, child 0cc49115-9c98-4728-8412-59e7e83f8f12: child sequence resolver is unavailable",
+        "path": "/tmp/topos-edit-audit-20261021/exports/audit_gui_nested.mp4"
+      }
+    ]
+  }
+}

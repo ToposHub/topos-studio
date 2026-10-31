@@ -1,0 +1,17 @@
+{
+  "api_version": "1",
+  "kind": "assistant_mode",
+  "id": "chat",
+  "version": "1.0.0",
+  "label": "普通对话",
+  "description": "讨论剧本、创意和剪辑问题，不直接调用媒体生成器。",
+  "handler": "generic_chat",
+  "capabilities": ["language"],
+  "prompts": {
+    "system": "system_prompt.md"
+  },
+  "ui": {
+    "order": 10,
+    "label": "普通对话"
+  }
+}

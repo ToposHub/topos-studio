@@ -1,0 +1,142 @@
+{
+  "fps_subtitle": {
+    "cue": [
+      48,
+      48
+    ],
+    "word": [
+      24,
+      48
+    ],
+    "expected_cue": [
+      48,
+      48
+    ],
+    "expected_word": [
+      48,
+      96
+    ]
+  },
+  "fps_bezier": {
+    "before": 0.033993653436816755,
+    "scaled_equivalent": 0.033993653436816755,
+    "scaled_handle": [
+      40.0,
+      0
+    ],
+    "expected_handle": [
+      40,
+      0
+    ]
+  },
+  "multicam_mixedfps": {
+    "target_source_start": 24,
+    "target_source_fps": 24,
+    "target_source_duration": 72,
+    "expected_for_48fps": [
+      48,
+      48,
+      144
+    ]
+  },
+  "nest_bus": {
+    "child_tracks": [
+      "child-a0",
+      "child-bus0"
+    ],
+    "route": "child-bus0",
+    "send": "child-bus0"
+  },
+  "source_insert_mixedfps": {
+    "v_duration": 24,
+    "a_duration": 24,
+    "expected": 24
+  },
+  "source_append_align": {
+    "video_start": 96,
+    "audio_start": 96,
+    "expected_common_start": 96
+  },
+  "source_overwrite_overlap": {
+    "exception": null
+  },
+  "source_insert_inside": {
+    "video_count": 3,
+    "audio_count": 3,
+    "new_audio_source_count": 1
+  },
+  "truepeak_partitions": {
+    "1": 2.3133719308522536,
+    "2": 2.3133719308522536,
+    "3": 2.3133719308522536,
+    "4": 2.3133719308522536,
+    "8": 2.3133719308522536,
+    "97": 2.3133719308522536,
+    "512": 2.3133719308522536
+  },
+  "truepeak_tail": {
+    "short": 1.2070468891644022,
+    "explicit_zero_flush": 1.2224738004383862,
+    "reported_short_dbtp": 1.6344828221595722
+  },
+  "truepeak_edge_partitions": {
+    "1": 1.2224738004383862,
+    "2": 1.2224738004383862,
+    "3": 1.2224738004383862,
+    "4": 1.2224738004383862,
+    "5": 1.2224738004383862,
+    "8": 1.2224738004383862,
+    "64": 1.2224738004383862
+  },
+  "truepeak_ones": {
+    "1": 1.0002726629253538,
+    "2": 1.0002726629253538,
+    "64": 1.0002726629253538
+  },
+  "truepeak_late": {
+    "estimator": 1.2224738004383862,
+    "report_dbtp": 1.7447912054515764,
+    "after_zero_flush": 1.23790071171237
+  },
+  "unknown_roundtrip": {
+    "sequence_preserved": true,
+    "track_preserved": true,
+    "clip_preserved": true,
+    "clip_after_edit_preserved": true
+  },
+  "proxy_switch_project": {
+    "project_id": "p2",
+    "proxy_status": "none",
+    "proxy_path": null,
+    "old_job_accepted": false
+  },
+  "proxy_late_resolution": {
+    "cache_mark_ready_calls": 1,
+    "project_checked": false
+  },
+  "project_replace_revision_probe": {
+    "revisions": [
+      7,
+      8,
+      9,
+      10,
+      8
+    ],
+    "media_type": "video",
+    "fps": 24,
+    "duration": null,
+    "metadata_preserved": true
+  },
+  "legacy_json_revision": {
+    "before": 7,
+    "after": 7
+  },
+  "multicam_resync_existing": {
+    "unchanged_clip_source_start": 30,
+    "old_active_offset": 10,
+    "new_active_offset": 20,
+    "back_to_A_source": 30,
+    "before_resync_expected": 40,
+    "revision_after_sync": 0
+  }
+}

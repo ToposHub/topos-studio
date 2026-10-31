@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "result": {
+    "analysis": {
+      "type": "SceneCutAnalysis",
+      "candidates": 2,
+      "frames": null,
+      "total_frames": 487
+    },
+    "errors": [],
+    "elapsed_wait": 1.0032021540000642
+  }
+}

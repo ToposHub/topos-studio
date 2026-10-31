@@ -1,0 +1,14 @@
+{
+  "review_version": "v2",
+  "mac_parent_tasks": 25,
+  "windows_parent_tasks": 11,
+  "plan_omission_items": 14,
+  "additional_readonly_probes": 4,
+  "all_four_observed_gaps": true,
+  "hard_start_dependencies_acyclic": true,
+  "task_references_and_local_links_valid": true,
+  "portable_source_index_entries": 75,
+  "product_code_modified": false,
+  "prior_142_tests_rerun": false,
+  "gui_gpu_windows_tested_this_review": false
+}

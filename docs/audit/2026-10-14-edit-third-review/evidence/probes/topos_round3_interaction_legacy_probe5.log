@@ -1,0 +1,23 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 496 ms. Replace uses of missing font family "SF Mono" with one that exists to avoid this cost. 
+{
+  "speed_2_trim_left": {
+    "timeline_start": 110,
+    "timeline_duration": 90,
+    "source_start": 120,
+    "source_duration": 180,
+    "speed": 2.0,
+    "source_last_frame": 298
+  },
+  "speed_2_trim_right": {
+    "timeline_start": 100,
+    "timeline_duration": 90,
+    "source_start": 100,
+    "source_duration": 180,
+    "speed": 2.0,
+    "source_last_frame": 278
+  }
+}

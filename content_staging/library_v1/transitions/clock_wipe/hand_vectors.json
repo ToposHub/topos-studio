@@ -1,0 +1,24 @@
+{
+  "component": "X01 clock_wipe",
+  "method": "手算：4x4（或 8x4）像素中心归一坐标 → aspect 校正 → atan2(dx,dy) 极角 → rel=mod(±(θ-start)) → sweep=p·360°前沿判定。softness=0 时 mask=1 当 rel<sweep；独立枚举，容差 1e-6。",
+  "params_default": {"center_x": 0.5, "center_y": 0.5, "start_angle": 0.0, "clockwise": true, "softness": 0.0},
+  "vectors": [
+    {"fixture": "4x4", "params": {}, "progress": 0.25,
+     "expected_grid_rows": [[0,0,1,1],[0,0,1,1],[0,0,0,0],[0,0,0,0]],
+     "note": "顺时针自北扫 90°：东北象限（rel<90）揭示"},
+    {"fixture": "4x4", "params": {"clockwise": false}, "progress": 0.25,
+     "expected_grid_rows": [[1,1,0,0],[1,1,0,0],[0,0,0,0],[0,0,0,0]],
+     "note": "逆时针镜像：西北象限揭示"},
+    {"fixture": "4x4", "params": {"start_angle": 90.0}, "progress": 0.25,
+     "expected_grid_rows": [[0,0,0,0],[0,0,0,0],[0,0,1,1],[0,0,1,1]],
+     "note": "起始边转 90°（东）：东南象限揭示"},
+    {"fixture": "4x4", "params": {"softness": 0.1}, "progress": 0.25,
+     "pixel": [3, 1], "expected_value": 0.512082,
+     "note": "羽化向量：rel=71.565051°，feather=36° → (90-71.565051)/36"},
+    {"fixture": "8x4", "params": {}, "progress": 0.2,
+     "pixel": [6, 1], "expected_value": 0.0,
+     "note": "aspect=2 校正：rel=78.690068° > sweep 72° → 0（无校正会误判 68.20°<72°→1，此向量钉住校正存在）"},
+    {"fixture": "4x4", "params": {}, "progress": 0.0, "expected_all": 0.0, "note": "端点精确：全 0"},
+    {"fixture": "4x4", "params": {}, "progress": 1.0, "expected_all": 1.0, "note": "端点精确：全 1"}
+  ]
+}

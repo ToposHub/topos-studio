@@ -1,0 +1,571 @@
+{
+  "schema": "topos.export_manifest.v1",
+  "created_at": "2026-09-19T03:09:35.513231+00:00",
+  "project": {
+    "project_id": "c6ae70ee-2257-4403-a90a-b12e41c02641",
+    "name": "h265-mem",
+    "revision": 0,
+    "modified_at": 1789787374.898004
+  },
+  "timeline": {
+    "timeline_id": "tl",
+    "name": "Mem",
+    "revision": 0,
+    "fps": {
+      "num": 25,
+      "den": 1,
+      "float": 25.0
+    },
+    "width": 1920,
+    "height": 1080,
+    "sample_rate": 48000,
+    "duration_frames": 24,
+    "range_start": null,
+    "range_end": null
+  },
+  "assets": [
+    {
+      "asset_id": "a",
+      "display_name": "mem",
+      "path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "status": "ok",
+      "file_size": 7244641,
+      "mtime": 1789517631.7969685,
+      "sha256": "4d348e8cf71b094aab600a738a12e3db31dd3efa904c645e57acb810413fabf2"
+    }
+  ],
+  "asset_warnings": [],
+  "config": {
+    "codec": "ExportCodec.HEVC",
+    "include_audio": false,
+    "burn_subtitles": true,
+    "render_mode": "single_clip",
+    "range_type": "ExportRangeType.ENTIRE",
+    "audio_codec": "aac",
+    "audio_sample_rate": 48000,
+    "audio_channels": 2,
+    "pixel_format": "yuv420p"
+  },
+  "asset_usage": {
+    "used_assets": {
+      "a": [
+        {
+          "timeline_id": "tl",
+          "timeline_name": "Mem",
+          "track_id": "v1",
+          "track_name": "V1",
+          "track_type": "video",
+          "clip_id": "c",
+          "timeline_start": 0,
+          "timeline_end": 24
+        }
+      ]
+    },
+    "unused_asset_ids": []
+  },
+  "capabilities": {
+    "schema": "topos.capability_registry.v1",
+    "generated_at": "2026-09-19T03:09:35.507279+00:00",
+    "capabilities": [
+      {
+        "capability_id": "edit.timecode.drop_frame",
+        "title": "SMPTE drop-frame 时间码往返",
+        "status": "available",
+        "evidence": [
+          "src/features/edit/core/interchange.py (frames_to_timecode/timecode_to_frames)",
+          "tests/edit/test_interchange.py (TestDropFrameTimecode)"
+        ],
+        "notes": "29.97/59.94 有理数 timebase，边界分钟/十分钟/小时 round-trip 全覆盖。"
+      },
+      {
+        "capability_id": "edit.interchange.bwf",
+        "title": "BWF (Broadcast Wave) 录音/交付",
+        "status": "available",
+        "evidence": [
+          "src/features/edit/core/bwf.py",
+          "src/features/edit/core/recording_manager.py",
+          "tests/edit/test_bwf.py"
+        ],
+        "notes": "EBU Tech 3285 bext（TimeReference/coding history），writer 默认注入。"
+      },
+      {
+        "capability_id": "edit.interchange.csv_cue_sheet",
+        "title": "CSV Cue Sheet",
+        "status": "available",
+        "evidence": [
+          "src/features/edit/core/interchange.py (build_cue_sheet_from_sequence)",
+          "tests/edit/test_interchange.py (TestCueSheet)"
+        ],
+        "notes": ""
+      },
+      {
+        "capability_id": "edit.interchange.audio_stems",
+        "title": "音频分轨 Stem 导出",
+        "status": "dormant",
+        "evidence": [
+          "src/features/edit/core/stem_export.py (DORMANT 头注释)",
+          "tests/edit/test_stem_export.py"
+        ],
+        "notes": "共享 AudioGraphRenderer 已验证，但暂无 UI 生产入口。"
+      },
+      {
+        "capability_id": "edit.interchange.fcpxml",
+        "title": "FCPXML 导入/导出",
+        "status": "partial",
+        "evidence": [
+          "src/features/edit/adapters/fcpxml_adapter.py",
+          "src/features/edit/adapters/import_builder.py",
+          "src/app/controllers/file_controller.py (import_interchange_timeline/export_timeline_fcpxml)",
+          "tests/edit/ai_editing/test_fcpxml_adapter.py",
+          "tests/edit/ai_editing/test_import_builder.py"
+        ],
+        "notes": "受控子集已接入生产入口（P1-16）：导入带预览确认/映射报告/缺失媒体转离线素材；导出显式列出丢弃项。multicam/audition/第三方 effect/精细音频 routing 等明确降级。"
+      },
+      {
+        "capability_id": "edit.interchange.otio",
+        "title": "OpenTimelineIO 导入/导出",
+        "status": "partial",
+        "evidence": [
+          "src/features/edit/adapters/otio_adapter.py",
+          "src/app/controllers/file_controller.py (import_interchange_timeline/export_timeline_otio)",
+          "tests/edit/ai_editing/test_otio_adapter.py",
+          "tests/edit/ai_editing/test_import_builder.py"
+        ],
+        "notes": "可选依赖 opentimelineio 未安装：入口预检禁用并提示安装（graceful degrade）。"
+      },
+      {
+        "capability_id": "edit.interchange.aaf",
+        "title": "AAF 交换",
+        "status": "unavailable",
+        "evidence": [
+          "src/features/edit/core/interchange.py (INTERCHANGE_CAPABILITIES 评估)"
+        ],
+        "notes": "需 aaf2（BSD-3），评估优先级低于 FCPXML。"
+      },
+      {
+        "capability_id": "edit.interchange.omf",
+        "title": "OMF 交换",
+        "status": "unavailable",
+        "evidence": [
+          "src/features/edit/core/interchange.py (INTERCHANGE_CAPABILITIES 评估)"
+        ],
+        "notes": "评估不实现，建议导出 AAF 或 CSV。"
+      },
+      {
+        "capability_id": "edit.audio_effects",
+        "title": "内置音频混音效果（EQ/压缩/限制/混响等）",
+        "status": "available",
+        "evidence": [
+          "src/features/edit/core/effect_registry.py (get_effect_registry_health)",
+          "src/features/edit/core/audio_dsp.py (_ensure_effect_registry)",
+          "tests/edit/test_audio_effect_registry_health.py"
+        ],
+        "notes": ""
+      },
+      {
+        "capability_id": "edit.audio.preserve_pitch",
+        "title": "保持音调变速（preserve-pitch）",
+        "status": "partial",
+        "evidence": [
+          "src/features/edit/core/audio_timestretch.py (wsola_time_stretch)",
+          "src/features/edit/core/timeline_export.py (_build_preserved_pitch_audio)",
+          "tests/edit/test_audio_timestretch.py"
+        ],
+        "notes": "离线导出走 WSOLA 保调；实时路径仍为变调 resample，待接流式伸缩。"
+      },
+      {
+        "capability_id": "edit.multicam",
+        "title": "多机位（Multicam）",
+        "status": "partial",
+        "evidence": [
+          "src/features/edit/core/multicam.py (build_multicam_group_from_assets / stamp_multicam_group_on_assets)",
+          "src/features/edit/core/multicam_sync.py (compute_sync_alignments / MulticamSyncWorker)",
+          "src/features/edit/core/commands.py (SwitchMulticamAngleCommand / UpdateClipSourceCommand)",
+          "src/features/edit/ui/multicam_panel.py (MulticamPanel 角度网格 + 波形同步)",
+          "src/app/controllers/edit_controller.py (_on_create_multicam_group / _switch_multicam_angle / _on_multicam_sync_requested)",
+          "src/features/edit/ui/timeline_view.py (数字键 1-9 切换)",
+          "tests/edit/test_multicam.py",
+          "tests/edit/test_multicam_production.py",
+          "tests/edit/test_multicam_sync.py"
+        ],
+        "notes": "P1-01 已接线：媒体池多选创建组（定义挂成员素材 metadata，时间线片段始终指向真实角度素材——渲染零改动、split/trim 天然保持组归属）、角度面板 + 键盘 1-9 回放中实时切换、切换点经 SwitchMulticamAngleCommand（split+换源）可编辑/可撤销/保存重开保持；波形自动同步（互相关各角度音频起始段，后台 worker，偏移写回组并作用于后续切换）；角度网格监看（各角度在 playhead 的静帧，映射与切换命令一致，250ms 去抖）。限制：网格为静帧而非多路实时解码、无时间码/标记同步、音频不跟随切换、重同步不追溯平移已放置片段。"
+      },
+      {
+        "capability_id": "edit.nested_sequence",
+        "title": "嵌套序列 / Compound Clip",
+        "status": "partial",
+        "evidence": [
+          "src/features/edit/core/nested_sequence.py (build_nested_from_selection / flatten_nested_audio_tracks)",
+          "src/features/edit/core/timeline_preview_renderer.py (_render_nested_sequence_frame + set_sequence_resolver)",
+          "src/features/edit/core/timeline_export.py (_render_nested_sequence_layer / expand_sequence_audio_for_render)",
+          "src/features/edit/ui/edit_page.py (set_audio_sequence_resolver + 嵌套音频展开)",
+          "src/app/controllers/edit_controller.py (_on_create_nested_from_selection/_on_enter_nested_sequence)",
+          "src/app/controllers/file_controller.py (音频 resolver 注入)",
+          "tests/edit/test_nested_sequence.py",
+          "tests/edit/test_nested_sequence_production.py",
+          "tests/edit/test_nested_audio_flatten.py"
+        ],
+        "notes": "P1-02 已接线：右键'从选择创建嵌套序列'/双击进入/退出（时间线下拉）、循环嵌套阻断、预览 resolver 实时更新、导出递归渲染、保存重开 round-trip；嵌套音频参与父时间线混音（实时/导出/Stem 共用 flatten 纯函数：子序列音频轨平移进父坐标、源窗口钳制、轨参数/自动化/Bus 拓扑保留）。限制：嵌套片段速度≠1x 时音频跳过、子轨转场不映射、创建无命令栈Undo（与 comp_clip 同构的直接事务）。"
+      }
+    ],
+    "probe_errors": []
+  },
+  "delivery_qc": {
+    "schema": "topos.delivery_qc.v1",
+    "checked_at": "2026-09-19T03:09:34.903098+00:00",
+    "passed": true,
+    "counts": {
+      "blocking": 0,
+      "warning": 0,
+      "info": 0
+    },
+    "findings": []
+  },
+  "preflight": {
+    "ok": true,
+    "blocking": [],
+    "degraded": []
+  },
+  "output": {
+    "path": "/Users/testuser/Documents/vscode/topos_1/bench_out/ai_upgrade/T-P1-71_20260919-110914/round_20.mp4",
+    "present": true,
+    "size": 1046750,
+    "sha256": "7e6c472f2392345fd0b36e43d69607ffde5ec11082ec17e0b9fd66d82323aed3"
+  },
+  "output_probe": {
+    "present": true,
+    "container": "mov,mp4,m4a,3gp,3g2,mj2",
+    "video": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "width": 1920,
+      "height": 1080,
+      "fps": 25.0
+    },
+    "audio_streams": [],
+    "frame_count": 24,
+    "first_frame_decodes": true,
+    "last_frame_decodes": true,
+    "duration_seconds": 0.96
+  },
+  "stage_telemetry": {
+    "schema": "topos-export-stage-telemetry/1",
+    "schema_version": 1,
+    "export_id": "timeline:/Users/testuser/Documents/vscode/topos_1/bench_out/ai_upgrade/T-P1-71_20260919-110914/round_20.mp4:19176997058594",
+    "pipeline": "timeline",
+    "delivery_path": "",
+    "stages": [
+      {
+        "name": "probe",
+        "backend": "none",
+        "sample_count": 0,
+        "wall_p50_ms": null,
+        "wall_p95_ms": null,
+        "gpu_submit_ms": null,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_reason": null
+      },
+      {
+        "name": "decode",
+        "backend": "provider_session",
+        "sample_count": 24,
+        "wall_p50_ms": 4.6630680008092895,
+        "wall_p95_ms": 6.765535999875283,
+        "gpu_submit_ms": null,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_reason": null
+      },
+      {
+        "name": "cpu_to_gpu_upload",
+        "backend": "none",
+        "sample_count": 0,
+        "wall_p50_ms": null,
+        "wall_p95_ms": null,
+        "gpu_submit_ms": null,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_reason": null
+      },
+      {
+        "name": "render",
+        "backend": "opengl",
+        "sample_count": 24,
+        "wall_p50_ms": 13.620199999422766,
+        "wall_p95_ms": 17.74606600156403,
+        "gpu_submit_ms": null,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_reason": null
+      },
+      {
+        "name": "gpu_to_cpu_download",
+        "backend": "none",
+        "sample_count": 0,
+        "wall_p50_ms": null,
+        "wall_p95_ms": null,
+        "gpu_submit_ms": null,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_reason": null
+      },
+      {
+        "name": "encode_submit",
+        "backend": "cpu_encoder",
+        "sample_count": 24,
+        "wall_p50_ms": null,
+        "wall_p95_ms": null,
+        "gpu_submit_ms": null,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_reason": null
+      },
+      {
+        "name": "encode",
+        "backend": "hevc",
+        "sample_count": 24,
+        "wall_p50_ms": 3.5913930005335715,
+        "wall_p95_ms": 6.330275002255803,
+        "gpu_submit_ms": null,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_reason": null
+      },
+      {
+        "name": "mux",
+        "backend": "container_writer",
+        "sample_count": 1,
+        "wall_p50_ms": 35.94876200077124,
+        "wall_p95_ms": 35.94876200077124,
+        "gpu_submit_ms": null,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_reason": null
+      },
+      {
+        "name": "queue_wait",
+        "backend": "none",
+        "sample_count": 0,
+        "wall_p50_ms": null,
+        "wall_p95_ms": null,
+        "gpu_submit_ms": null,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_reason": null
+      }
+    ],
+    "cpu_upload_bytes": 0,
+    "cpu_download_bytes": 0,
+    "fallback_root_cause": "cpu_encoder_surface_path",
+    "native_encode_stage_stats": null,
+    "frame_attributions": [
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 0,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 1,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 2,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 3,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 4,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 5,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 6,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 7,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 8,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 9,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 10,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 11,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 12,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 13,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 14,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 15,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 16,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 17,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 18,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 19,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 20,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 21,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 22,
+        "origin": ""
+      },
+      {
+        "reason": "cpu_encoder_surface_path",
+        "stage": "",
+        "frame_index": 23,
+        "origin": ""
+      }
+    ],
+    "full_gpu": false,
+    "full_gpu_blockers": [
+      "stage_backend_cpu:decode:provider_session",
+      "stage_backend_cpu:render:opengl",
+      "stage_backend_cpu:encode_submit:cpu_encoder",
+      "encode_backend_cpu:hevc",
+      "cpu_path_marker:cpu_encoder_surface_path"
+    ]
+  },
+  "degradations": [
+    {
+      "code": "gpu_blocker",
+      "detail": "stage_backend_cpu:decode:provider_session"
+    },
+    {
+      "code": "gpu_blocker",
+      "detail": "stage_backend_cpu:render:opengl"
+    },
+    {
+      "code": "gpu_blocker",
+      "detail": "stage_backend_cpu:encode_submit:cpu_encoder"
+    },
+    {
+      "code": "gpu_blocker",
+      "detail": "encode_backend_cpu:hevc"
+    },
+    {
+      "code": "gpu_blocker",
+      "detail": "cpu_path_marker:cpu_encoder_surface_path"
+    },
+    {
+      "code": "fallback_root_cause",
+      "detail": "cpu_encoder_surface_path"
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+[
+  {
+    "id": "S01",
+    "issue_present": false,
+    "restored_metadata": {
+      "fps": 25
+    },
+    "restored_rating": 5,
+    "roundtrip_snapshot_names": [
+      "v1"
+    ]
+  },
+  {
+    "id": "S02",
+    "issue_present": false,
+    "compile_error": ""
+  },
+  {
+    "id": "S03",
+    "issue_present": false,
+    "actual_resolution": [
+      1080,
+      1920
+    ],
+    "expected_resolution": [
+      1080,
+      1920
+    ],
+    "offline_ok": false,
+    "offline_job_count": 0
+  },
+  {
+    "id": "S04",
+    "issue_present": false,
+    "packet_index_seconds": [
+      0.0,
+      0.04,
+      0.12,
+      0.16
+    ],
+    "actual_first_source_frame": 0,
+    "expected_first_source_frame": 0,
+    "scope": "packet stand-in, not real-media proof"
+  },
+  {
+    "id": "S06",
+    "issue_present": false,
+    "actual_seconds_at_24fps": 1.5,
+    "expected_seconds": 1.5,
+    "scope": "helper fps only; controller offset sign checked statically"
+  },
+  {
+    "id": "S07",
+    "issue_present": false,
+    "uncaught_source_read_error": ""
+  },
+  {
+    "id": "S08",
+    "issue_present": false,
+    "actual_bgr": [
+      [
+        [
+          0.3312232196331024,
+          0.5216673016548157,
+          0.7323837280273438
+        ]
+      ]
+    ],
+    "expected_bgr": [
+      [
+        [
+          0.3312232196331024,
+          0.5216673016548157,
+          0.7323837280273438
+        ]
+      ]
+    ],
+    "max_abs_error": 0.0,
+    "scope": "production CPU exporter with injected resolved chain"
+  },
+  {
+    "id": "S09",
+    "issue_present": false,
+    "actual_plugin_manifest": {
+      "example_plugin": "unknown"
+    }
+  },
+  {
+    "id": "S10",
+    "issue_present": false,
+    "signature_unchanged_after_port_swap": false
+  }
+]

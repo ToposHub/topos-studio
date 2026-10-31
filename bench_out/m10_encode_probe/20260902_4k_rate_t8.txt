@@ -1,0 +1,8 @@
+== 3840x2160 rate(sized) t8，12 帧 ==
+  wall avg 195.6 ms  (5.11 fps)
+  产品拆分: python输入 8.2  native 181.4  mux 3.09  其它 3.0 ms
+  native闭合: prep 11.8 + probe 117.0 + final 17.9 + 自检 1.4 = 148.1 ms
+  CPU/帧: fill 71.5  probe量化 778.5  DCT 48.2  entropy 42.0  crc 1.36  | 串行: pad 4.82 copy 0.40 asm 0.29  合计 947.0 ms
+  占比: probe量化 82%  fill 8%  DCT 5%  entropy 4%  crc 0%  串行 1%
+  sized: probe 编码 10.00 次/帧（calls 12）
+  有效并行: 4.8x（CPU 合计/产品墙钟）

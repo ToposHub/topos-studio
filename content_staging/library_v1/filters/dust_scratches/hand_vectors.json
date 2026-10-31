@@ -1,0 +1,80 @@
+{
+  "component": "F09 dust_scratches",
+  "method": "手算：按 README 公式独立脚本推导（uint32 murmur3 格点散列 → 尘点概率/斑心/深度 → 椭圆 SDF spot → 列散列选中划痕列 → 线位/宽度/纵向带/端部羽化 → atten=min(dust+scratch,0.9) → out=1·(1-atten)），与 oracle/GLSL 无代码复用；容差 1e-6。夹具：16×16 全 1.0 白图（RGB 同值），输出即 (1-atten)。",
+  "params": {
+    "density": 0.35,
+    "scratch_length": 0.6,
+    "opacity": 0.6,
+    "seed": 7,
+    "size": 3.0
+  },
+  "vectors": [
+    {
+      "pos": [7, 7],
+      "expected": 0.5233602,
+      "note": "尘点满斑：格(2,2) h0=0.0873<0.35，spot=1.0，depth=0.7944 → atten=0.6·0.7944=0.4766398"
+    },
+    {
+      "pos": [1, 0],
+      "expected": 0.6963104,
+      "note": "尘点满斑（另一深度）：格(0,0) h0=0.2362，spot=1.0，depth=0.5061 → atten=0.3036896"
+    },
+    {
+      "pos": [3, 0],
+      "expected": 1.0,
+      "note": "净格：该像素无尘斑重叠亦无划痕 → atten=0 精确（白图直通）"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "params": {
+        "density": 1.0,
+        "seed": 5
+      },
+      "pos": [8, 7],
+      "expected": 0.9144823,
+      "note": "纯划痕像素：列 2 hx=0.03257<0.05，xs=0.7432 w=0.1603，fx=0.8333→prof=0.4072，yn=0.46875 带内 edge=1 → atten=0.6·0.35·0.4072=0.0855177"
+    },
+    {
+      "params": {
+        "density": 1.0,
+        "seed": 5
+      },
+      "pos": [7, 7],
+      "expected": 0.6396504,
+      "note": "划痕列内尘点：格(2,2) spot=1 depth=0.6006 → 0.3603496；fx=0.5 距 xs=0.7432 > w → prof=0"
+    },
+    {
+      "params": {
+        "seed": 8
+      },
+      "pos": [7, 7],
+      "expected": 1.0,
+      "note": "seed 改变全部格点散列 → 该像素变净格（图案整体改变）"
+    },
+    {
+      "params": {
+        "opacity": 0.3
+      },
+      "pos": [7, 7],
+      "expected": 0.7616801,
+      "note": "opacity 线性缩放衰减：atten=0.3·0.7944=0.2383199"
+    },
+    {
+      "params": {
+        "density": 0.0
+      },
+      "pos": [7, 7],
+      "expected": null,
+      "note": "density=0 恒等（密度门同时管尘点与划痕，含 HDR 透传）"
+    },
+    {
+      "params": {
+        "opacity": 0.0
+      },
+      "pos": [7, 7],
+      "expected": 1.0,
+      "note": "opacity=0 → atten·0 精确恒等（乘性，白图回 1.0）"
+    }
+  ]
+}

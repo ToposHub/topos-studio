@@ -1,0 +1,269 @@
+INFO: [ThumbEngine] FFmpeg found and loaded: /usr/local/bin/ffmpeg
+WARNING: [ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+INFO: Registered feature module: color
+INFO: Color module registered (core feature)
+INFO: Registered feature module: composite
+INFO: Registered page: composite (合成)
+INFO: composite module registered
+INFO: Scanning plugin directory: /Users/testuser/.topos/plugins/node_plugins
+INFO: Scanning plugin directory: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins
+INFO: Registered node type 'vintage_tone' from plugin 'vintage_film'
+INFO: Registered node type 'film_grain' from plugin 'vintage_film'
+INFO: Plugin 'vintage_film' v1.0.0 loaded successfully
+INFO: Registered node type 'posterize' from plugin 'posterize'
+INFO: Plugin 'posterize' v1.0.0 loaded successfully
+INFO: Plugin discovery complete: 2 plugins loaded
+INFO: Registered node type 'vintage_tone' in category 'Film'
+INFO: Registered node type 'film_grain' in category 'Film'
+INFO: Registered node type 'posterize' in category 'Filter'
+INFO: Registered 3 node types from plugins
+INFO: Plugin discovery complete: 2 plugins loaded, 3 node types registered
+INFO: Composite: loaded 3 node plugins
+INFO: Loaded 3 node plugins
+INFO: Registered feature module: edit
+INFO: Registered page: edit (剪辑)
+INFO: edit module registered
+INFO: Registered feature module: deliver
+INFO: Registered page: deliver (交付)
+INFO: deliver module registered
+INFO: Registered feature module: teaching_animation
+INFO: Registered Composite node provider: teaching_animation
+INFO: Registered node type 'motion_graphic' in category 'Input'
+INFO: teaching_animation module registered
+INFO: Registered feature module: ai_workflow
+INFO: ai_workflow module registered
+INFO: Optional feature modules registered: ['ai_workflow', 'composite', 'deliver', 'edit', 'teaching_animation']
+2026-10-22 09:19:12.956 Python[8188:89576] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 208 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+ROUND7 startup
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+2026-10-22 09:19:16.456 Python[8188:89576] +[IMKClient subclass]: chose IMKClient_Modern
+2026-10-22 09:19:16.456 Python[8188:89576] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.shared.media.proxy_generator: Topos proxy: 未知色彩标签 '1' 回退默认码 1 （HDR 源请确认代理色彩标签）
+[WARNING] src.shared.media.proxy_generator: Topos proxy: 未知色彩标签 '1' 回退默认码 1 （HDR 源请确认代理色彩标签）
+ROUND7 001_import
+ROUND7 002_source_edit
+[WARNING] src.shared.media.proxy_generator: Topos proxy: 未知色彩标签 '1' 回退默认码 1 （HDR 源请确认代理色彩标签）
+[WARNING] src.shared.media.proxy_generator: Topos proxy: 源色彩量程未声明，按 limited 回退（full-range 源的代理预览可能偏灰，请确认源标签）
+[WARNING] src.shared.media.proxy_generator: Topos proxy: 未知色彩标签 '1' 回退默认码 1 （HDR 源请确认代理色彩标签）
+[WARNING] src.shared.media.proxy_generator: Topos proxy: 源色彩量程未声明，按 limited 回退（full-range 源的代理预览可能偏灰，请确认源标签）
+[WARNING] src.features.edit.core.timeline_export: Failed to decode audio for clip be44bb59-56cb-4d11-b39b-8ce055712f34: operands could not be broadcast together with shapes (2,1764) (2,1748) (2,1764) 
+ROUND7 003_transport_delivery
+[WARNING] src.features.edit.core.timeline_export: Failed to decode audio for clip be44bb59-56cb-4d11-b39b-8ce055712f34: operands could not be broadcast together with shapes (2,1764) (2,1748) (2,1764) 
+ROUND7 004_live_edit_in_deliver
+[WARNING] src.features.edit.core.timeline_export: Failed to decode audio for clip nest:2c68b659-7941-48cd-a8fe-12568d92fb89:be44bb59-56cb-4d11-b39b-8ce055712f34: operands could not be broadcast together with shapes (2,1764) (2,1748) (2,1764) 
+ROUND7 005_nested_export
+ROUND7 006_g16_animation
+[ERROR] src.features.edit.core.edit_gpu_preview_renderer: EditGpuPreviewRenderer: task error frame=0: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glUseProgram,
+	cArguments = (36,)
+)
+[WARNING] src.shared.gpu.present_frame: TextureLease 0: force release from WRITING (frame=0)
+[WARNING] src.shared.media.gpu_frame: GpuDecodedFrame.__del__: frame=0 leaked (not released before GC). Call safe_release_gpu_frame() from the render thread.
+[WARNING] src.app.controllers.file_controller: Source GPU render error frame=0: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glUseProgram,
+	cArguments = (36,)
+)
+[ERROR] src.features.edit.core.edit_gpu_preview_renderer: EditGpuPreviewRenderer: task error frame=0: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glUseProgram,
+	cArguments = (36,)
+)
+[WARNING] src.shared.gpu.present_frame: TextureLease 0: force release from WRITING (frame=0)
+[WARNING] src.shared.media.gpu_frame: GpuDecodedFrame.__del__: frame=0 leaked (not released before GC). Call safe_release_gpu_frame() from the render thread.
+[WARNING] src.app.controllers.file_controller: Source GPU render error frame=0: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glUseProgram,
+	cArguments = (36,)
+)
+[ERROR] src.features.edit.core.edit_gpu_preview_renderer: EditGpuPreviewRenderer: task error frame=0: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glUseProgram,
+	cArguments = (36,)
+)
+[WARNING] src.shared.gpu.present_frame: TextureLease 0: force release from WRITING (frame=0)
+[WARNING] src.shared.media.gpu_frame: GpuDecodedFrame.__del__: frame=0 leaked (not released before GC). Call safe_release_gpu_frame() from the render thread.
+[WARNING] src.app.controllers.file_controller: Source GPU render error frame=0: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glUseProgram,
+	cArguments = (36,)
+)
+ROUND7 007_switch_sources
+[ERROR] src.features.edit.core.edit_gpu_preview_renderer: EditGpuPreviewRenderer: task error frame=0: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glUseProgram,
+	cArguments = (36,)
+)
+[WARNING] src.shared.gpu.present_frame: TextureLease 0: force release from WRITING (frame=0)
+[WARNING] src.shared.media.gpu_frame: GpuDecodedFrame.__del__: frame=0 leaked (not released before GC). Call safe_release_gpu_frame() from the render thread.
+[WARNING] src.app.controllers.file_controller: Source GPU render error frame=0: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glUseProgram,
+	cArguments = (36,)
+)
+[WARNING] src.features.edit.core.timeline_export: Failed to decode audio for clip be44bb59-56cb-4d11-b39b-8ce055712f34: operands could not be broadcast together with shapes (2,1764) (2,1748) (2,1764) 
+ROUND7 008_other_timeline
+ROUND7 009_image_sequence_ui
+ROUND7 010_image_sequence_ui_fixed
+[WARNING] src.features.edit.core.timeline_export: Failed to add audio stream: 'StandardImageSequenceEncoder' object has no attribute 'add_audio_stream'
+ROUND7 011_png_export
+ROUND7 012_save_reopen
+ROUND7 013_close
+INFO: [ThumbEngine] FFmpeg found and loaded: /usr/local/bin/ffmpeg
+WARNING: [ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+INFO: Registered feature module: color
+INFO: Color module registered (core feature)
+INFO: Registered feature module: composite
+INFO: Registered page: composite (合成)
+INFO: composite module registered
+INFO: Scanning plugin directory: /Users/testuser/.topos/plugins/node_plugins
+INFO: Scanning plugin directory: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins
+INFO: Registered node type 'vintage_tone' from plugin 'vintage_film'
+INFO: Registered node type 'film_grain' from plugin 'vintage_film'
+INFO: Plugin 'vintage_film' v1.0.0 loaded successfully
+INFO: Registered node type 'posterize' from plugin 'posterize'
+INFO: Plugin 'posterize' v1.0.0 loaded successfully
+INFO: Plugin discovery complete: 2 plugins loaded
+INFO: Registered node type 'vintage_tone' in category 'Film'
+INFO: Registered node type 'film_grain' in category 'Film'
+INFO: Registered node type 'posterize' in category 'Filter'
+INFO: Registered 3 node types from plugins
+INFO: Plugin discovery complete: 2 plugins loaded, 3 node types registered
+INFO: Composite: loaded 3 node plugins
+INFO: Loaded 3 node plugins
+INFO: Registered feature module: edit
+INFO: Registered page: edit (剪辑)
+INFO: edit module registered
+INFO: Registered feature module: deliver
+INFO: Registered page: deliver (交付)
+INFO: deliver module registered
+INFO: Registered feature module: teaching_animation
+INFO: Registered Composite node provider: teaching_animation
+INFO: Registered node type 'motion_graphic' in category 'Input'
+INFO: teaching_animation module registered
+INFO: Registered feature module: ai_workflow
+INFO: ai_workflow module registered
+INFO: Optional feature modules registered: ['ai_workflow', 'composite', 'deliver', 'edit', 'teaching_animation']
+2026-10-22 09:26:33.938 Python[9333:137425] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 218 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+ROUND7 startup
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+2026-10-22 09:26:37.623 Python[9333:137425] +[IMKClient subclass]: chose IMKClient_Modern
+2026-10-22 09:26:37.623 Python[9333:137425] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+ROUND7 014_reopen_actual_saved
+ROUND7 015_close_reopened

@@ -1,0 +1,98 @@
+// --- Topos Plugin Metadata ---
+// @name Day-Night Converter
+// @i18n_name Day_Night_Converter
+// @author Topos Team
+// @version 1.0
+// @description Heuristic day-for-night look: luminance-weighted exposure pull-down, cool temperature shift, sky highlight protection and a slight moonlight blue lift; HDR-safe with no output clamping
+// @input_space scene-linear
+// @output_space scene-linear
+// @determinism deterministic
+// @export_support opengl
+// @preview_cost low
+// @param slider night_depth "Night Depth" 0.55 0.0 1.0
+// @param slider temperature_shift "Cool Shift" 0.45 0.0 1.0
+// @param separator
+// @param slider sky_protection "Sky Protection" 0.50 0.0 1.0
+// @param slider exposure "Exposure" 0.0 -3.0 3.0
+// -----------------------------
+
+// ============================================
+// Day-Night Converter Plugin（日转夜启发式）
+// ============================================
+// 启发式 day-for-night：不是真实日夜替换（不检测天空语义、不合成光源/
+// 街灯），仅用色调关系模拟夜景观感，四个成分全部是乘性增益：
+//   1. 曝光下压：夜景深度驱动最多 -2.3 档乘性下压（exp2，单条硬件指令）；
+//   2. 亮度加权：暗区/中间调吃满夜景深度，亮区（≈天空）按 Sky Protection
+//      衰减下压与冷移，保住高光层次不糊；
+//   3. 冷色温偏移：R 下沉 / G 锚 / B 抬升的冷调增益，0 为中性锚点；
+//   4. 轻微蓝移高光：受保护的天空仍带一点月光蓝，避免"只压暗不加色"。
+//
+// 契约：vec3 process(vec3 color, vec2 uv)。color 为已含上游调色的
+// scene-linear RGB，可 < 0.0 也可 >> 1.0（HDR）。纯逐像素数学、零纹理
+// 采样、零循环，不读 u_input_tex，直接变换 color 本身而非走 delta
+// 输出模式（那是空间采样类插件的惯例，见 HighPass_Retouch）。
+//
+// 参数 ABI：头部声明的参数以裸名引用（编译期由 shader_compiler 改写为
+// u_P<n>_<name> 命名空间 uniform）。禁止引用未声明的 u_* 标识符——改写的
+// 词边界匹配不会命中 u_ 前缀，残留会让真实 GL 编译失败，该效果层随即被
+// 渲染循环整体跳过（P0-COL-01 实测事故）。
+//
+// 算法总览（推导详见 docs/plugins/2026-09-28/specs/Day_Night_Converter.md）：
+// 1. luma = dot(color, Rec.709 权重)
+// 2. 色调坐标 t = luma / (luma + 0.18)（Reinhard 型软压缩，中灰 0.18 -> 0.5）
+// 3. w_sky = smoothstep(0.55, 0.85, t) * sky_protection；night = depth * (1 - w_sky)
+// 4. 总增益 = exp2(exposure - 2.3 * night) * 冷调 * 月光蓝，一次乘回 color
+// ============================================
+
+// ====== CONSTANTS（选型理由见行尾注释） ======
+const vec3 LUMA_WEIGHTS = vec3(0.2126, 0.7152, 0.0722); // Rec.709 luma，与 Three_Way_Tint 同源
+const float TONE_PIVOT = 0.18;          // scene-linear 中灰锚点：t = l/(l+0.18) 使 0.18 -> 0.5，luma 4.0 -> 0.957
+const float SKY_RAMP_START = 0.55;      // 天空保护过渡带（色调坐标）：
+const float SKY_RAMP_END   = 0.85;      // 0.55 / 0.85 <-> 线性 luma 0.220 / 1.020
+const float DEPTH_MAX_STOPS = 2.3;      // 满深度、无保护时的最大下压档位（约 x0.203）
+const vec3 COOL_GAIN = vec3(0.78, 0.94, 1.16); // 经典夜景冷调：R 下沉 / G 锚 / B 抬升
+const float MOON_RAMP_START = 0.60;     // 高光蓝移过渡带，略宽于天空带：
+const float MOON_RAMP_END   = 0.90;     // 0.60 / 0.90 <-> 线性 luma 0.270 / 1.620
+const vec3 MOON_GAIN = vec3(0.94, 0.98, 1.06); // 轻微月光蓝：只给高光一点色温情绪，不过饱和
+
+// ====== MAIN PROCESS FUNCTION ======
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：夜景深度与冷移全 0、曝光微调为 0 时严格恒等
+    //（sky_protection 单独不起作用：夜景量与月光蓝都以 night_depth 为门）
+    if (night_depth < 0.001 && temperature_shift < 0.001
+        && abs(exposure) < 0.001) return color;
+
+    // ====== HDR 安全的色调坐标 ======
+    // max(luma, 0.0)：负 luma（out-of-gamut 像素）按最暗档处理（t = 0）。
+    // 该 max 只作用于权重坐标，不触碰颜色本身；分母恒 >= 0.18，除法安全。
+    float luma = max(dot(color, LUMA_WEIGHTS), 0.0);
+    float t = luma / (luma + TONE_PIVOT);
+
+    // ====== 亮度加权：亮区（≈天空）受保护，暗区吃满夜景 ======
+    // 满保护时亮区 night -> 0：不吃下压也不吃冷移，只剩月光蓝；
+    // 暗区（t <= 0.55）完全不受 sky_protection 影响。
+    float w_sky = smoothstep(SKY_RAMP_START, SKY_RAMP_END, t) * sky_protection;
+    float night = night_depth * (1.0 - w_sky);
+
+    // ====== 1) 曝光下压（乘性，保 HDR） ======
+    // stops = 用户曝光微调（档）- 深度驱动的下压（档）。
+    // exp2 是单条硬件指令（EX2），比 pow/exp 便宜；整档换算精确
+    // （-1 档 = x0.5，+1 档 = x2.0）。
+    float stops = exposure - DEPTH_MAX_STOPS * night;
+
+    // ====== 2) 冷色温偏移 + 3) 高光月光蓝（同为乘性增益） ======
+    // 冷移跟随 night（受天空保护衰减）；月光蓝只看 night_depth 与亮度，
+    // 不被 sky_protection 衰减——受保护的天空也要有夜的色温。
+    float cool = temperature_shift * night;
+    float moon = smoothstep(MOON_RAMP_START, MOON_RAMP_END, t) * night_depth;
+
+    // ====== 合成总增益并一次乘回 ======
+    // 全乘性：HDR 高值按比例缩放不被压回 [0,1]，负值符号不翻转。
+    vec3 gain = vec3(exp2(stops))
+              * mix(vec3(1.0), COOL_GAIN, cool)
+              * mix(vec3(1.0), MOON_GAIN, moon);
+
+    // 不 clamp：保留 HDR 与负值，交给下游 soft-clip 阶段处理
+    return color * gain;
+}

@@ -1,0 +1,37 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 283 items
+
+tests/edit/ai_editing/test_provider_plugin_host.py ...                   [  1%]
+tests/edit/ai_editing/test_quality_gate.py ...............               [  6%]
+tests/edit/ai_editing/test_real_media_probe_matrix.py s...s.....         [  9%]
+tests/edit/ai_editing/test_release_evidence.py ...                       [ 10%]
+tests/edit/ai_editing/test_release_gate.py ..........                    [ 14%]
+tests/edit/ai_editing/test_release_manifest.py ....                      [ 15%]
+tests/edit/ai_editing/test_release_test_matrix.py .....                  [ 17%]
+tests/edit/ai_editing/test_render_diagnostics.py ....................... [ 25%]
+                                                                         [ 25%]
+tests/edit/ai_editing/test_request_recovery.py ...                       [ 26%]
+tests/edit/ai_editing/test_rollout_metrics.py ..                         [ 27%]
+tests/edit/ai_editing/test_runtime_capability_snapshot.py .............. [ 32%]
+..........                                                               [ 36%]
+tests/edit/ai_editing/test_safe_path_policy.py ...............           [ 41%]
+tests/edit/ai_editing/test_scene_cut_ingest.py .....                     [ 43%]
+tests/edit/ai_editing/test_session_catalog.py .......................... [ 52%]
+....                                                                     [ 53%]
+tests/edit/ai_editing/test_skill_manifest.py ........................... [ 63%]
+                                                                         [ 63%]
+tests/edit/ai_editing/test_skill_registry.py ........................... [ 72%]
+..                                                                       [ 73%]
+tests/edit/ai_editing/test_skill_runtime.py .................            [ 79%]
+tests/edit/ai_editing/test_subtitle_draft.py ..............              [ 84%]
+tests/edit/ai_editing/test_subtitle_placement.py ..                      [ 85%]
+tests/edit/ai_editing/test_taep_contracts.py ........................... [ 94%]
+...............                                                          [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_05.xml -
+======================= 281 passed, 2 skipped in 12.12s ========================

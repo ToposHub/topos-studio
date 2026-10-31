@@ -1,0 +1,55 @@
+[
+  {
+    "id": "R01",
+    "scope": "OCIO shape handling; no display/GPU proof",
+    "issue_present": false,
+    "flat_rgb": [
+      [
+        0.21403686702251434,
+        0.21403686702251434,
+        0.21403686702251434
+      ],
+      [
+        0.21403686702251434,
+        0.21403686702251434,
+        0.21403686702251434
+      ]
+    ],
+    "hwc_rgb": [
+      [
+        0.21403686702251434,
+        0.21403686702251434,
+        0.21403686702251434
+      ],
+      [
+        0.21403686702251434,
+        0.21403686702251434,
+        0.21403686702251434
+      ]
+    ]
+  },
+  {
+    "id": "R03",
+    "scope": "production usage index, not full archive copy",
+    "issue_present": false,
+    "bound_wav_marked_unused": false
+  },
+  {
+    "id": "R10",
+    "scope": "repeated source occurrence in pure model",
+    "issue_present": false,
+    "actual_clip": "original",
+    "actual_frame": 105,
+    "reason": "exact",
+    "confidence": 1.0
+  },
+  {
+    "id": "R11",
+    "scope": "report helper only; no product consumer asserted",
+    "issue_present": false,
+    "cancelled_statuses": [
+      "skipped_not_started"
+    ],
+    "all_passed": false
+  }
+]

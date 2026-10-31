@@ -1,0 +1,89 @@
+{
+  "video_path": "tests/media/fixtures/p52/prores_422_hq_4k.mov",
+  "video_info": {
+    "codec": "prores",
+    "pix_fmt": "yuv422p10le",
+    "width": 3840,
+    "height": 2160,
+    "fps": 24.0,
+    "frames": 240,
+    "duration_s": 10.0
+  },
+  "timestamp": "2026-09-11T07:23:20.453524",
+  "git_sha": "7c147ac97c9eb49ec32bc8e06d04de597c326c9a",
+  "config": {
+    "num_frames": 120,
+    "warmup_frames": 20,
+    "force_mode": "auto"
+  },
+  "sizes": {
+    "3840x2160": {
+      "decode_ms": {
+        "avg": 0.1008874834648547,
+        "p50": 0.09446299918636214,
+        "p95": 0.1446880014555063,
+        "max": 0.1644469975872198
+      },
+      "plane_prepare_ms": {
+        "avg": 0.0007239417148715196,
+        "p50": 0.0006880000000819564,
+        "p95": 0.0009610012057237327,
+        "max": 0.001257998519577086
+      },
+      "texture_write_ms": {
+        "avg": 10.299657883297186,
+        "p50": 10.31950099968526,
+        "p95": 10.75704300092184,
+        "max": 10.908764001214877
+      },
+      "render_ms": {
+        "avg": 0.28195851668897376,
+        "p50": 0.26140000045415945,
+        "p95": 0.4105749994778307,
+        "max": 0.49666999984765425
+      },
+      "total_ms": {
+        "avg": 10.919280675110107,
+        "p50": 10.917568999502691,
+        "p95": 11.440254998888122,
+        "max": 11.647073002677644
+      },
+      "estimated_fps": 91.58112422913025,
+      "effective_fps": 87.41063901960139,
+      "pixel_format": "yuv422p10le",
+      "bit_depth": 10,
+      "subsampling": "422",
+      "frame_path": "r16ui_direct",
+      "render_path": {
+        "graphics_api": "opengl_4.1",
+        "compute_api": "glsl_fragment",
+        "decode_api": "cpu_ffmpeg_sw",
+        "interop_api": "none_numpy_handoff"
+      },
+      "frames_tested": 120,
+      "wall_ms": 1891.291033998641,
+      "wall_effective_fps": 63.44872250903201
+    }
+  },
+  "gpu_self_test": {
+    "passed": true,
+    "reason": "all_pixels_within_tolerance",
+    "max_error": 0.0018485447603698857
+  },
+  "environment": {
+    "os": "macOS-15.3.1-x86_64-i386-64bit",
+    "machine": "x86_64",
+    "gl_version": "4.1 ATI-6.1.13",
+    "gl_renderer": "AMD Radeon RX 6800 OpenGL Engine",
+    "render_path": {
+      "graphics_api": "opengl_4.1",
+      "compute_api": "glsl_fragment",
+      "decode_api": "cpu_ffmpeg_sw",
+      "interop_api": "none_numpy_handoff"
+    }
+  },
+  "r16ui_self_test": {
+    "passed": true,
+    "reason": "all_pixels_within_tolerance"
+  }
+}

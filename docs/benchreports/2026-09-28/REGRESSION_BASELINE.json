@@ -1,0 +1,142 @@
+[
+  {
+    "name": "ANC-01 D1 2K proxy 顺序解码 fps（readahead-off）",
+    "value": "702-716 fps（p50 1.345-1.363 ms）",
+    "tolerance": "fps >= 620（-12%）且 p50 <= 1.55 ms；超带先排负载再按 clean+CI 复测",
+    "source": "bench_out/d1_playback/b5f4520a/fb0712a5/b98ca792/20260915T052659309166Z/result.json; bench_out/d1_playback/b61cabf4/9a36f61b/a17fde9f/20260915T051544736733Z/result.json",
+    "note": "口径：ToposMediaSource→CPU planar，threads=16、read_ahead=0、repeats=2、random_seeks=0、96 帧。复测：tools/bench_topos_playback_path.py --frames 96 --repeats 2 --threads 16 --read-ahead 0 --random-seeks 0。基准机 i9-9900K 类；跨机器须先重建本机基线。"
+  },
+  {
+    "name": "ANC-02 D1 2K hq 顺序解码 fps（readahead-off）",
+    "value": "248-277 fps（p50 3.530-3.716 ms）",
+    "tolerance": "fps >= 220 且 p50 <= 4.3 ms",
+    "source": "bench_out/d1_playback/b5f4520a/fb0712a5/802c3a7b/20260915T052713822871Z/result.json; bench_out/d1_playback/b61cabf4/9a36f61b/23a984a1/20260915T051546347499Z/result.json",
+    "note": "同 ANC-01 口径与脚本；两 clean 构建间自然波动约 ±6%。"
+  },
+  {
+    "name": "ANC-03 D1 4K proxy 顺序解码 fps（readahead-off）",
+    "value": "171-204 fps（p50 4.887-5.252 ms）",
+    "tolerance": "fps >= 150；单跑 p99 尖峰至 25.7 ms 属已知调度噪声，不单独判回归",
+    "source": "bench_out/d1_playback/b5f4520a/fb0712a5/db53552b/20260915T052722129114Z/result.json; bench_out/d1_playback/b61cabf4/9a36f61b/17ee5b38/20260915T051548268191Z/result.json",
+    "note": "同 ANC-01 口径与脚本；两构建波动上界 172→203 fps。"
+  },
+  {
+    "name": "ANC-04 D1 4K 4444xq 顺序解码（p50/p99/fps）",
+    "value": "39.5-42.8 fps；p50 23.24-24.61 ms；p99 29.2-36.6 ms",
+    "tolerance": "fps >= 35 且 p50 <= 27 ms 且 p99 <= 40 ms（4K25 预算 40 ms，p99 越线即风险）",
+    "source": "bench_out/d1_playback/b5f4520a/fb0712a5/a0314c95/20260915T052735146059Z/result.json; bench_out/d1_playback/b61cabf4/9a36f61b/8fedcb41/20260915T051555356217Z/result.json",
+    "note": "同 ANC-01 口径与脚本；30fps 时间线（33.3 ms 预算）下 p99 已有轮次击穿，是重点监控对象（RECOMMENDATIONS BENCH-0002）。"
+  },
+  {
+    "name": "ANC-05 D1 4K 4444xq RSS 峰值",
+    "value": "730-746 MiB（其余素材 83-146 MiB）",
+    "tolerance": "<= 800 MiB；其余素材超出 160 MiB 即查",
+    "source": "bench_out/d1_playback/b5f4520a/fb0712a5/a0314c95/20260915T052735146059Z/result.json; bench_out/d1_playback/b61cabf4/9a36f61b/8fedcb41/20260915T051555356217Z/result.json",
+    "note": "12-bit 444 4K 平面体量所致，结构性量级；repeats 内两轮持平无增长。"
+  },
+  {
+    "name": "ANC-06 2K 真实素材全片解码 fps",
+    "value": "380.69 fps（2.627 ms/帧，1572 帧）；120 帧对照 native 335.6 / wrapper 135.6 fps",
+    "tolerance": ">= 320 fps（-15%）；弱锚点：首次复测偏差 >15% 先重建基线",
+    "source": "bench_out/real_2k_h264_20260907/result.json（decode / decode_comparison 段）",
+    "note": "⚠ 旧 topos-color02 工作树构建、无 commit/dylib SHA。复测脚本缺位：tools/bench_playback_decode_compare.py 仅 VT vs FFmpeg 两臂，与原 4 臂不符——建议补基准脚本并纳入 manifest 树。"
+  },
+  {
+    "name": "ANC-07 readahead/arena 成对增益",
+    "value": "2K +10.5% [+7.8,+15.8]；4K +11.7% [+7.4,+14.9]（官方空机窗口）",
+    "tolerance": "任一分辨率增益 < +5% 即判回归（3% 为历史回退门）",
+    "source": "bench_out/readahead/20260902_stage4_arena_batch_read.txt; bench_out/readahead/20260902_stage4_product_readahead.txt",
+    "note": "复测：tools/bench_topos_readahead.py --pairs 12（官方复现脚本，on 臂已含 arena 语义）。静机口径；跨会话漂移 ±5%，只信同窗成对。"
+  },
+  {
+    "name": "ANC-08 native raw12-2（合成 128×128）",
+    "value": "压缩比 1.55×；PSNR_min 108.4 dB；max_abs 1 code",
+    "tolerance": "max_abs <= 1 code、PSNR ±1 dB、压缩比 ±5%",
+    "source": "bench_out/topos_native_domain_matrix/raw12/native_domains_raw12.json",
+    "note": "复测：tools/measure_topos_native_domains.py；JSON 自带 encode/decode 命令行与源/CLI/脚本 SHA。注意 toos CLI 三代 SHA（06508c5c/4b8e5366/333b7df3），先固定版本。"
+  },
+  {
+    "name": "ANC-09 native raw16-2（合成 128×128）",
+    "value": "压缩比 1.48×；PSNR_min 96.8 dB；max_abs 3 code",
+    "tolerance": "max_abs <= 4 code、PSNR ±1.5 dB、压缩比 ±5%",
+    "source": "bench_out/topos_native_domain_matrix/raw16/native_domains_raw16.json",
+    "note": "同 ANC-08。raw16-16 高档（5.85×/849 code）波动大，不作锚点，只作趋势参考。"
+  },
+  {
+    "name": "ANC-10 native float16-ultra",
+    "value": "压缩比 2.84×；max_half_ulp 2",
+    "tolerance": "max_half_ulp <= 3、压缩比 ±3%",
+    "source": "bench_out/topos_native_domain_matrix/float16/native_domains_float16.json",
+    "note": "float16 与 float16-finite 编码字节逐档相同（确定性）；有损档（high/medium/low）ULP 漂移大（5/199/1102），只作趋势不作锚点。"
+  },
+  {
+    "name": "ANC-11 float16 零/特殊类语义（audit）",
+    "value": "全档 source_nonzero_to_zero=0、special_class_changes=0；ultra 档 zero_sign_changes=1（负零→正零，已知预期）",
+    "tolerance": "两个 0 恒等：任何非 0 即语义回归；ultra=1 保持，high/medium/low 档 source_zero_to_nonzero=1 保持",
+    "source": "bench_out/topos_native_domain_float_zero_audit/native_domains_float16.json",
+    "note": "行为语义锚点（无 Inf/NaN 类变化、无非零塌缩为零、无新负零）。与 matrix finite 版编码字节逐档一致可交叉验证。产品侧已改为写盘前拒绝非有限值。"
+  },
+  {
+    "name": "ANC-12 真实 CFA raw16 六档（2048×2048 RGGB）",
+    "value": "raw16-2 2.54×/96.9 dB/max_abs 5；raw16-16 102.4×/60.8 dB/max_abs 889",
+    "tolerance": "压缩比与 PSNR ±15%（素材熵敏感，仅同 crop SHA 03961f03… 可比）",
+    "source": "bench_out/topos_raw_real_cfa_probe/raw16_six_tiers/native_domains_raw16.json; bench_out/topos_raw_real_cfa_probe/crop_manifest.json",
+    "note": "真实素材版与合成矩阵（ANC-08/09）必须分组呈现，绝对压缩比差一个量级（102× vs 5.85×）。"
+  },
+  {
+    "name": "ANC-13 timeline_occlusion 4K B1（双轨全遮挡）",
+    "value": "speedup 3.67×（cull_on 11.53 vs cull_off 3.14 fps）；帧请求 140→70；culled_ratio 0.5",
+    "tolerance": "speedup >= 2.5×；帧请求比精确 2:1、culled_ratio=0.5（确定性结构量，偏离即功能回归）",
+    "source": "benchmarks/timeline_occlusion_bench_result_4k.json",
+    "note": "runs=2 无 CI，3.67× 按观察值表述。复测：tests/benchmark/benchmark_timeline_occlusion.py。2K 版无有效剔除组，不作 2K 锚点。B2（上层缩放 0.994×）应为 ~1.0，剔除保持不介入。"
+  },
+  {
+    "name": "ANC-14 codec 六档体积比 T/P 与 QP63 地板",
+    "value": "体积比 proxy 3.79 / lt 1.46 / standard 1.52 / hq 1.29 / 4444 1.03 / xq 1.36；QP63 地板超支 proxy 1.53× / pro444 1.40× / extreme 1.67×",
+    "tolerance": "体积比 ±10%；QP63 地板为结构性表现——地板消失（qp<63 或超支<1.2×）= 熵内核代际变更，更新锚点而非报回归",
+    "source": "bench_out/real_codec_bitrate_20260907/report.md; bench_out/real_codec_bitrate_20260907/result.json",
+    "note": "复测：tools/bench_real_bitrates.py --frames 96（report.md 附完整命令）。⚠ target_bpp 历史多次重定档（0.89→0.6019→0.64483→0.7448），retier 落地后必须重建本锚点；QP 量纲跨代不可对齐。98% 体积帽验收线当前不满足（BENCH-0004）。"
+  },
+  {
+    "name": "ANC-15 paired q01 码率配平画质差（真实素材 30 帧）",
+    "value": "Δ(Topos−prores_ks)：proxy +7.53 / lt +11.04 / standard +13.63 / hq +17.88 / 4444-vt-12bit +20.60 / 4444xq-vt-12bit +27.21 dB；码流比 0.988-1.004",
+    "tolerance": "全档 Δ >= +5 dB；码流比 ±3%",
+    "source": "bench_out/topos_paired_q01_real_source/{proxy,lt,standard,hq,4444-vt-12bit,4444xq-vt-12bit}-match/paired_*.json",
+    "note": "只取 rate_matched_2pct=true 与 VT 12-bit 组；非 match 的 4444xq 自标 invalid_reference_encoder_format（ProRes 侧 12-bit 静默降 10-bit）禁用。限定：参照为 ffmpeg prores_ks 非 Apple VT；源为有损解码素材。复测：tools/measure_topos_paired_quality.py。"
+  },
+  {
+    "name": "ANC-16 4K XQ 线程 16T 逐帧 p95",
+    "value": "16T p95 41.63 ms；12T 43.49；8T 48.23（mean_wall 33.86/34.37/39.43 ms）",
+    "tolerance": "16T p95 <= 50 ms（轮间 p95 自然范围 35.40-47.95）；12→16 收益应 <5%（当前 +1.5%，>5% = 调度结构变化）",
+    "source": "bench_out/topos_perf_thread_refine_3rounds.json; bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+    "note": "E1 分段口径、构建 1d30609f（dirty）/dylib 7b0cc4d4。4K25 预算 40 ms，当前 p95 距预算差约 4%——本锚点守住不击穿。复测：tools/bench_encode_stages.py。禁止与 5 轮扫描构建（c1245ec6/d5fb9ad5）绝对值对账。"
+  },
+  {
+    "name": "ANC-17 12-bit ramp 码值映射",
+    "value": "Y MAE 0.150 / max_abs 1 code；U/V 精确 0；v1=v2 三个 SHA 逐位一致",
+    "tolerance": "逐位复现（SHA 一致）；不一致时 Y MAE <= 0.2 且 max <= 1 code 才可接受为口径内变化",
+    "source": "bench_out/topos_vt_12bit_ramp_probe_v2/vt_12bit_ramp.json（引用以 v2 为准：脚本 SHA a97ab678…、ffmpeg 9.0.2）",
+    "note": "全库最强回归锚点之一（逐位可复现）。复测：tools/probe_prores_vt_12bit_ramp.py。软件编码器路径（hardware_acceleration_confirmed=false），无 release 判定语义。"
+  },
+  {
+    "name": "ANC-18 RD 确定性位流（2K V2@qp45）",
+    "value": "245.7 Mbps / PSNR-Y 74.76 dB（5bc83bef 与 6b3dfe9d 两目录逐位一致）",
+    "tolerance": "逐位一致；任何漂移 = 位流语义变更（非噪声），触发人工判读",
+    "source": "bench_out/6b3dfe9d/24421afb/e5250099/20260903T110654Z/rd_result.json; bench_out/5bc83bef/8e335ef7/318dbea5/20260903T133743Z/rd_result.json",
+    "note": "确定性编码器证据。复测脚本疑似 tools/bench_rd_baseline.py（名称对应，原始产物未内嵌命令行——建议补基准脚本确认参数）。PSNR=Infinity 为非标准 JSON 字面量，机器解析需处理。"
+  },
+  {
+    "name": "ANC-19 质量阶梯（recal-p5，对 4K_prores4444 母版）",
+    "value": "4K hq 55.26 / 4444 60.32 / 4444xq 65.81 dB；2K hq 43.01 dB（2K proxy 35.68）",
+    "tolerance": "±0.5 dB；档位重校准（retier）会整体移位，须随 retier 更新",
+    "source": "bench_out/topos_quality/quality_recal-p5.json",
+    "note": "复测：tools/measure_topos_baseline_quality.py。⚠ 2K 4444xq 行 MAE≈14.3 为已知无效字段（疑参考口径缺陷）禁引；p0→p2 曾因重校准 proxy +4.29 dB，跨重校准不可比。"
+  },
+  {
+    "name": "ANC-20 E1 编码边界 4K hq（clean 构建）",
+    "value": "t16 wall 15.87 ms/帧（native 13.71 + mux 1.53）；t1 110.6（t1→t16 约 6.5-7×）",
+    "tolerance": "±15%；mux 段维持 1.4-4.9 ms/帧区间",
+    "source": "bench_out/e1_encode/44784357/d052edae/2709a8be/20260927T120446882365Z/result.json",
+    "note": "绑定 clean 构建 44784357/d052edae；e1_encode 7 构建中 5 个 dirty，跨构建绝对值不可比，复测后以新 clean 构建重建基线。复测：tools/bench_encode_stages.py。"
+  }
+]

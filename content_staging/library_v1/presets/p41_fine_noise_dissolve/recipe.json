@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P41",
+  "name": "细噪溶解",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "细腻颗粒感溶解；scale 24–40 更细，softness ≤0.08 保持颗粒可辨",
+  "component": "X06 noise_dissolve（生产 lib1_noise_dissolve，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/noise_dissolve）",
+  "dependencies": {
+    "component_id": "X06",
+    "component_slug": "noise_dissolve",
+    "component_kind": "transition",
+    "transition_type": "lib1_noise_dissolve",
+    "user_json_base": false
+  },
+  "params": {
+    "noise_mode": "Value",
+    "scale": 32,
+    "seed": 0,
+    "softness": 0.05
+  },
+  "notes": "X06 生产 base lib1_noise_dissolve（transition_catalog 已注册）；base 不在 custom_transitions._BASE_TYPES 白名单（仅 lib1_clock_wipe/lib1_true_push，未接入），不产出用户转场 JSON。P41–P44 为同一 X06 rank-field 核的具名参数配方。"
+}

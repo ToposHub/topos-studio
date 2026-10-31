@@ -1,0 +1,39 @@
+{
+  "recipe_id": "P08",
+  "name": "冷影暖高光",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合人物近景/室内混合光；影/高光强度 0.2–0.35，中间调保持中性",
+  "component": "Three_Way_Tint（生产插件 plugins/Three_Way_Tint.tglsl）",
+  "dependencies": {
+    "plugin_id": "Three_Way_Tint",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "shadow_color": [
+      0.3,
+      0.38,
+      0.52
+    ],
+    "shadow_strength": 0.35,
+    "midtone_color": [
+      0.5,
+      0.48,
+      0.45
+    ],
+    "midtone_strength": 0.1,
+    "highlight_color": [
+      0.62,
+      0.5,
+      0.38
+    ],
+    "highlight_strength": 0.3
+  },
+  "notes": "生产插件三分区调色：冷影暖高光经典对比；参数已对真实插件 schema 校验。"
+}

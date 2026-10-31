@@ -1,0 +1,26 @@
+{
+ "tag": "renderer_restart",
+ "cycles": 100,
+ "failures": [],
+ "failure_count": 0,
+ "vram_mib": {
+  "available": true,
+  "first": 2583.0,
+  "min": 2583.0,
+  "max": 2591.0,
+  "p50": 2585.0,
+  "last": 2585.0,
+  "first_half_mean": 2587.0,
+  "second_half_mean": 2585.0
+ },
+ "rss_mib": {
+  "available": true,
+  "first": 707.7,
+  "min": 705.9,
+  "max": 727.9,
+  "p50": 716.1,
+  "last": 727.9,
+  "first_half_mean": 711.9,
+  "second_half_mean": 719.4
+ }
+}

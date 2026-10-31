@@ -1,0 +1,172 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "F13",
+  "dedup": "Halftone_Print 单张网屏（4 档角度 select），无 CMYK 分离/套印偏移/纸底（L00 台账 F13 行）；差量三项参数全缺，pitch 固定 8px 不重复 dot_pitch",
+  "host_min_contract": ".tglsl ABI（select×1+slider×4）；u_input_tex 邻域采样（3 版各 1 tap）；发布名 LIB1_Print_Registration",
+  "image": {
+    "alpha": "premultiplied",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "filter",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": "CMY approx",
+      "maximum": null,
+      "minimum": null,
+      "name": "cmyk_separation",
+      "neutral": false,
+      "options": [
+        "Luma",
+        "CMY approx"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": "Luma=三版同源 Rec.709 luma；CMY approx=C←R、M←G、Y←B 互补通道"
+    },
+    {
+      "animatable": false,
+      "default": 1.0,
+      "maximum": 4.0,
+      "minimum": -4.0,
+      "name": "reg_offset_x",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "pixel",
+      "validation": "NaN 拒绝；套印偏移：M 版基准、C 版 -off、Y 版 +off（对称错位）"
+    },
+    {
+      "animatable": false,
+      "default": 0.0,
+      "maximum": 4.0,
+      "minimum": -4.0,
+      "name": "reg_offset_y",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "pixel",
+      "validation": "NaN 拒绝；同 reg_offset_x"
+    },
+    {
+      "animatable": false,
+      "default": 0.9,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "paper_base",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "NaN 拒绝；向白纸的混合量（仅在 ink>0 时参与，ink=0 恒等不被破坏）"
+    },
+    {
+      "animatable": false,
+      "default": 0.8,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "ink_amount",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "NaN 拒绝；ink_amount=0 精确恒等（bypass，任意 paper_base）"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "print_registration",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_f13_print_registration.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "content_staging/library_v1/filters/print_registration/hand_vectors.json",
+    "known_limits": "输出域：clamp 仅网点几何参数（超白→全露白/负值→满墨），内容色不钳制——HDR 按 (1-paper_base*ink) 线性衰减混入纸底（SDR 输出 ≤1）；不替代印刷 ICC 流程；网屏频率 vs 输出分辨率的高频走样未验；位置+邻域依赖 LUT 不可表达；ROI padding = |offset|+1 ≤5px；CPU/Metal 导出未验",
+    "oracle": "content_staging/library_v1/references/print_registration_ref.py"
+  },
+  "version": "0.1.0"
+}

@@ -1,0 +1,3 @@
+TOPOS_CODEC_LIB=... TOPOS_HEADLESS_GL=1 QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/bench_all_composite_nodes_real_topos.py
+# registered=93 by_status={"blocked_missing_model": 1, "blocked_missing_resource": 13, "failed": 2, "passed_nonflat": 77}
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/composite/test_node_contract_classification.py -q   # 20 passed

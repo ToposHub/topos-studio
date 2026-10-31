@@ -1,0 +1,29 @@
+{
+  "recipe_id": "P75",
+  "name": "UV 贴图替换",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "UV 贴图替换：换 map 插槽即换重映射；TopLeft 原点+越界 Passthrough",
+  "component": "C13 stmap（暂存节点 lib1_stmap）＋生产 merge",
+  "dependencies": {
+    "component_id": "C13",
+    "component_slug": "stmap",
+    "component_kind": "node",
+    "node_type": "lib1_stmap",
+    "aux_node_types": [
+      "merge"
+    ]
+  },
+  "params": {
+    "channels": "RG",
+    "origin": "TopLeft",
+    "invalid": "Passthrough",
+    "filter": "Linear"
+  },
+  "notes": "C13 stmap 暂存组件＋生产 merge 组成 UV 贴图替换宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；替换语义=换 uv_map 插槽资源，map hash/许可在应用期登记。"
+}

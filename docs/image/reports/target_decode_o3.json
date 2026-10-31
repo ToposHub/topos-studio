@@ -1,0 +1,34 @@
+{
+  "schema": "topos-image-target-decode-benchmark/1",
+  "date": "2026-09-08",
+  "host": "macOS arm64 release build",
+  "input": {
+    "width": 4096,
+    "height": 2160,
+    "pixel_format": "YUV422",
+    "bit_depth": 12,
+    "entropy": "VLC",
+    "packet_bytes": 7706698
+  },
+  "method": "same ToposImageCodec binding and native library; full decode versus tc_image_decode_preview target-size reconstruction",
+  "results": [
+    {
+      "mode": "full",
+      "target": [4096, 2160],
+      "median_ms": 37.6,
+      "peak_rss_mb": 79.3
+    },
+    {
+      "mode": "target-size",
+      "target": [1024, 540],
+      "median_ms": 35.7,
+      "peak_rss_mb": 47.8
+    }
+  ],
+  "interpretation": [
+    "The 1024x540 target path reduced measured subprocess peak RSS by about 40% versus full decode.",
+    "Target-size decode still parses and CRC-checks every compressed slice.",
+    "A 2048x1080 target is not guaranteed to be faster because sampled scalar reconstruction can lose to full-block SIMD at modest reduction factors; a separate in-process sweep measured about 31.9 ms at 512x270.",
+    "This is a 4K proxy measurement; it is not evidence of a specific 8K or 12K FPS."
+  ]
+}

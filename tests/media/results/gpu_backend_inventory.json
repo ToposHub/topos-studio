@@ -1,0 +1,151 @@
+{
+  "schema": "topos.gpu_backend_inventory.v1",
+  "generated_at": "2026-09-10T22:44:04.951943+00:00",
+  "git_sha": "69ebfe1cc8db19057ab9b67c31b4e7407d07c2b1",
+  "opengl_footprint": {
+    "gl_import_files": 53,
+    "gl_import_lines": 82096,
+    "by_tree": {
+      "src": 53,
+      "external": 0,
+      "native": 0
+    },
+    "glo_handoff_sites": 227,
+    "glo_handoff_files": 42,
+    "glo_top_files": {
+      "src/features/composite/evaluators/filter_evaluator.py": 31,
+      "src/features/edit/core/edit_gpu_preview_renderer.py": 20,
+      "src/features/composite/render/gpu_resource_pool.py": 18,
+      "src/features/color/core/async_renderer.py": 17,
+      "src/features/composite/evaluators/color_evaluator.py": 13,
+      "src/features/shared/effects/effect_pass_runner.py": 10,
+      "src/features/composite/evaluators/base_evaluator.py": 10,
+      "src/features/edit/core/timeline_clip_frame_provider.py": 9,
+      "src/shared/gpu/gpu_scope_engine.py": 9,
+      "src/features/composite/nodes/scene3d_node.py": 8,
+      "src/features/composite/evaluators/channel_evaluator.py": 8,
+      "src/features/composite/evaluators/keyer_evaluator.py": 7,
+      "src/features/composite/nodes/output_node.py": 6,
+      "src/features/composite/render/gl_utils.py": 6,
+      "src/features/composite/evaluators/transform_evaluator.py": 6
+    },
+    "qopenglwidget_refs": 42,
+    "qopenglwidget_files": 16,
+    "qopenglwidget_subclasses": [
+      "src/features/color/ui/gl_viewport.py:class GLCanvasViewport(QOpenGLWidget)",
+      "src/features/composite/ui/composite_viewport.py:class CompositeViewer(QOpenGLWidget)",
+      "src/features/edit/ui/program_viewer.py:class ProgramViewer(QOpenGLWidget)",
+      "src/features/edit/ui/source_viewer.py:class SourceViewer(QOpenGLWidget)",
+      "src/shared/ui/widgets/gpu_scope_widget.py:class GpuScopeWidget(QOpenGLWidget)"
+    ],
+    "qopenglwidget_subclass2": [
+      "src/shared/ui/widgets/cie_scope_widget.py:class CieGpuScopeWidget(GpuScopeWidget)"
+    ],
+    "ctypes_cdll_none_sites": 5,
+    "ctypes_cdll_none_files": {
+      "src/features/composite/render/gpu_resource_pool.py": 5
+    },
+    "from_opengl_import_gl_files": {
+      "src/app/controllers/file_controller.py": 6,
+      "src/features/composite/nodes/scene3d_node.py": 3,
+      "src/features/composite/render/pbo_readback.py": 3,
+      "src/features/composite/ui/composite_viewport.py": 2,
+      "src/features/composite/render3d/hdri.py": 1,
+      "src/features/composite/render3d/material_texture_loader.py": 1,
+      "src/shared/gpu/gl_context_hub.py": 1
+    },
+    "aa_share_opengl_contexts": {
+      "src/main.py": 1,
+      "src/features/shared/effects/effect_spec.py": 1
+    }
+  },
+  "shader_corpus": {
+    "glsl_files": 10,
+    "glsl_lines": 2826,
+    "version_directives": {
+      "330": 228,
+      "330 core": 1,
+      "430": 13,
+      "410 core": 10,
+      "330 fragment shader": 1
+    },
+    "version_files": 37,
+    "program_compile_sites": 90,
+    "usampler2d_sites": 45,
+    "imagestore_sites": 9,
+    "compute_constants_composite": [
+      "_BLUR_H_COMPUTE",
+      "_BLUR_H_COMPUTE_SHARED",
+      "_BLUR_H_COMPUTE_SSBO",
+      "_BLUR_V_COMPUTE",
+      "_BLUR_V_COMPUTE_SHARED",
+      "_BLUR_V_COMPUTE_SSBO",
+      "_CDF_COMPUTE",
+      "_ERODE_DILATE_COMPUTE",
+      "_ERODE_DILATE_COMPUTE_SHARED",
+      "_HISTOGRAM_COMPUTE"
+    ],
+    "compute_constants_referenced": [
+      "_BLUR_H_COMPUTE_SHARED",
+      "_BLUR_H_COMPUTE_SSBO",
+      "_BLUR_V_COMPUTE_SHARED",
+      "_BLUR_V_COMPUTE_SSBO",
+      "_ERODE_DILATE_COMPUTE",
+      "_ERODE_DILATE_COMPUTE_SHARED",
+      "_HISTOGRAM_COMPUTE"
+    ],
+    "compute_registered_in_manager": [
+      "blur_h",
+      "blur_v",
+      "blur_h_shared",
+      "blur_v_shared",
+      "erode_dilate",
+      "erode_dilate_shared",
+      "histogram"
+    ],
+    "local_size_x_in_composite_shaders": 10,
+    "local_size_probe_stubs": 2
+  },
+  "metal_footprint": {
+    "py_symbol_hits": {},
+    "metal_files": []
+  },
+  "existing_abstractions": {
+    "GpuPresentFrame": "src/shared/gpu/present_frame.py",
+    "TextureLease": "src/shared/gpu/present_frame.py",
+    "OutputSlotPool": "src/shared/gpu/present_frame.py",
+    "EffectSpec": "src/features/shared/effects/effect_spec.py",
+    "EffectCapability": "src/features/shared/effects/effect_capability.py",
+    "DecoderBackend": "external/file_explorer/plugins/video_pro/base_player.py",
+    "playback_should_prefer_ffmpeg": "src/shared/media/macos_vt/hardware_capability.py",
+    "gpu_frame_gpu_api_literal": "src/shared/media/gpu_frame.py"
+  },
+  "key_file_lines": {
+    "src/features/color/core/async_renderer.py": 6012,
+    "src/shared/video/video_async_renderer.py": 1047,
+    "src/features/edit/core/edit_gpu_preview_renderer.py": 4088,
+    "src/features/color/core/shader_compiler.py": 1083,
+    "src/features/color/core/shader_nodes.py": 931,
+    "src/features/color/core/video_denoise_shaders.py": 560,
+    "src/shared/video/yuv_gpu_upload.py": 3244,
+    "src/shared/gpu/gpu_scope_engine.py": 663,
+    "src/shared/gpu/present_frame.py": 429,
+    "src/shared/gpu/gl_backend.py": 122,
+    "src/shared/gpu/gl_context_hub.py": 121,
+    "src/features/composite/core/shaders.py": 7338,
+    "src/features/composite/render/compute_shader_manager.py": 584,
+    "src/features/composite/evaluators/histogram_manager.py": 580,
+    "src/features/composite/ui/composite_viewport.py": 11492,
+    "src/features/edit/ui/program_viewer.py": 3279,
+    "src/features/edit/ui/source_viewer.py": 2314,
+    "src/features/color/ui/gl_viewport.py": 191,
+    "src/shared/ui/widgets/gpu_scope_widget.py": 510,
+    "src/shared/ui/widgets/cie_scope_widget.py": 556
+  },
+  "platform_decode_baseline": {
+    "macos_vt_files": 10,
+    "macos_vt_lines": 6580,
+    "windows_hw_files": 6,
+    "windows_hw_lines": 615
+  }
+}

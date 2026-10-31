@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Darkroom Editor</title>
+    <style>
+        /* ============================
+           1. 基础环境
+           ============================ */
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden !important;
+            background-color: #18181b !important; /* Zinc-950 */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        #editor-container {
+            width: 100vw; height: 100vh;
+            background-color: #18181b !important;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* ============================
+           2. Filerobot 主题基调 (CSS 变量)
+           ============================ */
+        [class*="Filerobot"] {
+            /* 重新定义基础变量，但不强制覆盖所有细节 */
+            --Filerobot-colors-primaryBg: #18181b;
+            --Filerobot-colors-secondaryBg: #27272a; 
+            --Filerobot-colors-text-primary: #e4e4e7;   /* 亮灰，比纯白更柔和 */
+            --Filerobot-colors-text-secondary: #a1a1aa; /* 次要文字保留灰色 */
+            --Filerobot-colors-border: #3f3f46;
+            --Filerobot-colors-accent-primary: #0d6efd; /* 品牌蓝 */
+            
+            /* 全局文字颜色兜底，但不加 !important，允许组件自定义 */
+            color: #e4e4e7;
+        }
+
+        /* ============================
+           3. 关键组件修正
+           ============================ */
+        
+        /* 去除讨厌的底部白色渐变/阴影 */
+        [class*="Filerobot"] *::after, 
+        [class*="Filerobot"] *::before {
+            background-image: none !important;
+            box-shadow: none !important;
+        }
+
+        /* 选中状态：背景变深，文字变蓝 (利用 CSS 选择器而非 JS) */
+        [aria-selected="true"] {
+            background-color: #27272a !important;
+        }
+        [aria-selected="true"] label, 
+        [aria-selected="true"] svg {
+            /* 这里可以加 !important 确保选中项高亮，其他项保持原样 */
+            color: #0d6efd !important;
+            fill: #0d6efd !important;
+        }
+
+        /* 画布背景 */
+        .konvajs-content, [class*="canvas-container"] {
+            background-color: #18181b !important;
+        }
+
+        /* 输入框适配 */
+        input {
+            background-color: #27272a !important;
+            border: 1px solid #3f3f46 !important;
+            color: #fff !important;
+        }
+
+        /* 隐藏水印 */
+        a[href*="scaleflex"], [class*="Watermark"] { display: none !important; }
+    </style>
+</head>
+<body>
+    <div id="editor-container"></div>
+    
+    <script src="filerobot-image-editor.min.js"></script>
+
+    <script>
+        let EditorClass = window.FilerobotImageEditor;
+        if (EditorClass && EditorClass.T_FilerobotImageEditor) {
+            EditorClass = EditorClass.T_FilerobotImageEditor;
+        }
+
+        let editorInstance = null;
+        
+        const config = {
+            source: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+            onSave: (img) => {
+                window.parent.postMessage({ type: 'SAVE_DATA', payload: img.imageBase64 }, '*');
+            },
+            tabsIds: ['Adjust', 'Finetune', 'Filters', 'Watermark', 'Annotate', 'Resize'],
+            defaultTabId: 'Adjust',
+            defaultToolId: 'Crop',
+            theme: {
+                palette: {
+                    'bg-primary': '#18181b',
+                    'bg-secondary': '#18181b', 
+                    'bg-primary-active': '#27272a',
+                    'accent-primary': '#0d6efd',
+                    'icons-primary': '#e4e4e7',
+                    'text-primary': '#e4e4e7',
+                    'text-secondary': '#a1a1aa', // 恢复次要文本的灰色
+                    'borders-primary': '#3f3f46',
+                }
+            }
+        };
+
+        function init(url) {
+            const el = document.getElementById('editor-container');
+            if (editorInstance) editorInstance.terminate();
+            config.source = url;
+            try {
+                editorInstance = new EditorClass(el, config);
+                editorInstance.render();
+                startBackgroundWatcher();
+            } catch(e) { console.error(e); }
+        }
+
+        // --- 温和版守护脚本 ---
+        // 只负责把白背景涂黑，不再干涉文字和图标颜色
+        function startBackgroundWatcher() {
+            setInterval(() => {
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+                let node;
+                while (node = walker.nextNode()) {
+                    if (node.id === 'editor-container' || node.tagName === 'SCRIPT' || node.tagName === 'STYLE') continue;
+
+                    const style = window.getComputedStyle(node);
+                    
+                    // 1. 仅处理背景色 (Background Correction Only)
+                    const bg = style.backgroundColor;
+                    const bgMatch = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+                    if (bgMatch) {
+                        const r = parseInt(bgMatch[1]), g = parseInt(bgMatch[2]), b = parseInt(bgMatch[3]);
+                        // 如果背景非常亮 (接近纯白)，强制染黑
+                        if (r > 220 && g > 220 && b > 220) {
+                            node.style.setProperty('background-color', '#18181b', 'important');
+                            node.style.setProperty('background-image', 'none', 'important'); // 顺手去渐变
+                            
+                            // 给大块容器加个边框，区分层次
+                            if (node.clientWidth > 50 && node.clientHeight > 50) {
+                                node.style.setProperty('border-color', '#27272a', 'important');
+                            }
+                        }
+                    }
+                    
+                    // 2. 按钮特殊处理 (Save 按钮保持蓝色背景)
+                    if (node.tagName === 'BUTTON' && (node.innerText === 'Save' || node.classList.contains('Button-primary'))) {
+                        node.style.setProperty('background-color', '#0d6efd', 'important');
+                        node.style.setProperty('color', '#ffffff', 'important');
+                    }
+                }
+            }, 500); 
+        }
+
+        window.addEventListener('message', (e) => {
+            if (e.data.type === 'LOAD_IMAGE') init(e.data.payload);
+            else if (e.data.type === 'GET_DATA') {
+                const t = document.createElement('div');
+                t.innerText = "请点击右上角的 Save 按钮保存";
+                Object.assign(t.style, {
+                    position:'fixed', top:'20px', left:'50%', transform:'translateX(-50%)',
+                    background:'#0d6efd', color:'white', padding:'8px 16px', borderRadius:'4px',
+                    zIndex:99999, fontSize:'14px', boxShadow:'0 4px 12px rgba(0,0,0,0.3)'
+                });
+                document.body.appendChild(t);
+                setTimeout(() => t.remove(), 2000);
+            }
+        });
+    </script>
+</body>
+</html>

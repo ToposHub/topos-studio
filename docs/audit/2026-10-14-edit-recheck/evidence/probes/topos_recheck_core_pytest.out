@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 150 items
+
+tests/edit/test_edit_transaction_undo_integrity.py ............          [  8%]
+tests/edit/test_transition_and_slide_transactions.py .........           [ 14%]
+tests/edit/test_source_time_domain_mapping.py ............               [ 22%]
+tests/edit/test_clip_field_preservation.py ...........                   [ 29%]
+tests/edit/test_track_lock_guard_and_source_range.py ........            [ 34%]
+tests/edit/test_protective_hardening.py .......                          [ 39%]
+tests/edit/test_timeline_command_regressions.py ........................ [ 55%]
+.......................                                                  [ 70%]
+tests/edit/test_timeline_ops.py ........................................ [ 97%]
+....                                                                     [100%]
+
+============================= 150 passed in 2.26s ==============================

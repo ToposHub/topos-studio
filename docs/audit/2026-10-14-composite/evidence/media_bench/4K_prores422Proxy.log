@@ -1,0 +1,5 @@
+4K_prores422Proxy.mov {"preview_sequential": {"n": 12, "median_ms": 28.606093001144473, "p95_ms": 49.860573999467306, "max_ms": 49.860573999467306, "render_throughput_fps": 30.83076161744645}, "preview_seek": {"n": 4, "median_ms": 35.921432503528195, "p95_ms": 821.6111110014026, "max_ms": 821.6111110014026, "render_throughput_fps": 4.3437328505267825}, "export_sequential": {"n": 4, "median_ms": 467.19113050130545, "p95_ms": 521.2247300005401, "max_ms": 521.2247300005401, "render_throughput_fps": 2.192747904238008}}
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6900 XT OpenGL Engine); compute-shader effects will use the fragment fallback
+Compute shaders unavailable: OpenGL 4.1 detected, requires 4.3+. Large-radius effects will use fragment shader fallback (slower).
+Metal compute bridge available but disabled by default: fragment fallback is faster for large-radius effects (see tests/media/results/metal_compute_ab.md). Set TOPOS_METAL_COMPUTE=1 to force the Metal path.
+Could only free 0 bytes, needed 42237952

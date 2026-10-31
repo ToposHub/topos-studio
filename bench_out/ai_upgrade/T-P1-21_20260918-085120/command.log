@@ -1,0 +1,9 @@
+# T-P1-21 evidence command log (2026-09-18)
+# 1) baseline anchor matrix (pre-fix) — output-dir cleaned on rerun; summary in baseline_summary.json
+TOPOS_CODEC_LIB=... .venv/bin/python scripts/bench_topos_anchor_matrix.py --output-dir bench_out/ai_upgrade/T-P1-21_baseline
+# 2) after-fix anchor matrix (final, with dispatch gating + shader loops + deep bridge)
+TOPOS_CODEC_LIB=... .venv/bin/python scripts/bench_topos_anchor_matrix.py --output-dir bench_out/ai_upgrade/T-P1-21_20260918-085120
+# 3) in-process profiles: stage telemetry (blur render 238ms -> opengl chain), CPU/GPU pixel parity runs
+TOPOS_CODEC_LIB=... TOPOS_EXPORT_GPU_RENDER=1/0 .venv/bin/python (inline grade/blur export + ToposMediaSource plane compare)
+# 4) items 5/6: 8-frame cold runs erode_dilate/edge_detect/denoise/defocus (topos_proxy, GPU)
+# 5) regression: tests/edit/test_gpu_render_dispatch_gating.py + GPU/Metal renderer suites (177 pass; 2 pre-existing Metal sobel failures reproduce on clean HEAD)

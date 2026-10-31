@@ -1,0 +1,34 @@
+============================= test session starts ==============================
+collected 219 items
+
+tests/edit/test_m02_snapshot_io_fidelity.py ........................     [ 10%]
+tests/edit/test_m03_bound_audio_retime.py ...................            [ 19%]
+tests/edit/test_m03_sync_diagnostics.py ......                           [ 22%]
+tests/edit/test_m04_interpretation_matrix.py .......                     [ 25%]
+tests/edit/test_m04_sequence_classify.py .......                         [ 28%]
+tests/edit/test_m05_color_chain_order.py .........                       [ 32%]
+tests/edit/test_m06_qualifier_export.py .......                          [ 36%]
+tests/edit/test_m07_plugin_manifest.py .........                         [ 40%]
+tests/edit/test_m07_share_autolock.py ......                             [ 42%]
+tests/edit/test_m07_version_tools_panel.py ..                            [ 43%]
+tests/edit/test_m11_filler_panel.py .....                                [ 46%]
+tests/edit/test_m12_proxy_cleanup_panel.py ......                        [ 48%]
+tests/edit/test_m13_cue_animation_wiring.py .....                        [ 51%]
+tests/edit/test_m13_multicam_adaptive.py ............                    [ 56%]
+tests/edit/test_m13_page_entries.py ....                                 [ 58%]
+tests/edit/test_m13_patch_matrix_dialog.py ....                          [ 60%]
+tests/edit/test_m13_patch_matrix_nav.py ...........                      [ 65%]
+tests/edit/test_m13_title_animation.py .......                           [ 68%]
+tests/edit/test_m14_crossfade_stem.py ......                             [ 71%]
+tests/edit/test_m14_nested_retime_audio.py ......                        [ 73%]
+tests/edit/test_m14_project_sample_rate.py ...........                   [ 78%]
+tests/edit/test_m15_snapshot_compare_panel.py ..                         [ 79%]
+tests/edit/test_m16_decode_metrics_lifecycle.py ........                 [ 83%]
+tests/edit/test_m16_responsiveness_baseline.py ..                        [ 84%]
+tests/edit/test_m18_golden_chain3.py ...                                 [ 85%]
+tests/edit/test_project_archive_w10.py ...s.....s.                       [ 90%]
+tests/edit/test_resident_failure_recovery_w03.py .................       [ 98%]
+tests/edit/test_snapshot_strict_w05.py sss                               [100%]
+
+======================== 214 passed, 5 skipped in 8.97s ========================
+

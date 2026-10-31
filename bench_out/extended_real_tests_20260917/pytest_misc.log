@@ -1,0 +1,29 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 202 items
+
+tests/scripting/test_script_api_versioning.py ....................       [  9%]
+tests/motion/test_easing.py ...........................                  [ 23%]
+tests/motion/test_expression_cross_process_golden.py ..                  [ 24%]
+tests/motion/test_interpolate.py .....................                   [ 34%]
+tests/motion/test_presets.py .................                           [ 43%]
+tests/motion/test_sequence.py ...............                            [ 50%]
+tests/motion/test_spring.py .............                                [ 56%]
+tests/motion/test_time_range.py ..............                           [ 63%]
+tests/motion/test_w1_s1_vertical_slice.py ..............                 [ 70%]
+tests/motion/test_w6_expression.py ..........................            [ 83%]
+tests/motion/test_w6_expression_runtime.py .....                         [ 86%]
+tests/integration/generation/test_provider_pack_e2e.py .                 [ 86%]
+tests/integration/generation/test_real_provider_smoke.py s               [ 87%]
+tests/integration/mcp/test_local_ipc_host.py ..                          [ 88%]
+tests/integration/mcp/test_stdio_server.py .....                         [ 90%]
+tests/integration/test_teaching_animation_phase4.py ....                 [ 92%]
+tests/feature_availability/test_teaching_animation_phase0.py .......     [ 96%]
+tests/feature_availability/test_teaching_animation_phase1.py .......     [ 99%]
+tests/feature_availability/test_teaching_animation_webengine.py .        [100%]
+
+======================= 201 passed, 1 skipped in 14.16s ========================

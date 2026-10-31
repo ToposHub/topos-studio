@@ -1,0 +1,57 @@
+{
+  "meta": {
+    "generated": "2026-09-16 10:05:37",
+    "gl": {
+      "version": "3.3.0 Core Profile Context 26.8.1.260806",
+      "renderer": "AMD Radeon RX 6800"
+    },
+    "gl_require": 0,
+    "preview_frames": 5,
+    "export_frames": 3
+  },
+  "cases": [
+    {
+      "name": "particle@hd",
+      "cold_ms": 222.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 0.012,
+        "std": 1.2125
+      },
+      "preview_ms": 6.6,
+      "preview_p90_ms": 9.8,
+      "export_ms": 43.6,
+      "res": "hd",
+      "node_type": "particle",
+      "exec_class": "cpu_raster",
+      "total_wall_s": 1.21
+    }
+  ],
+  "video": [],
+  "baseline": {
+    "hd": {
+      "name": "baseline_hd",
+      "cold_ms": 594.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 9.3,
+      "preview_p90_ms": 11.6,
+      "export_ms": 41.6
+    }
+  }
+}

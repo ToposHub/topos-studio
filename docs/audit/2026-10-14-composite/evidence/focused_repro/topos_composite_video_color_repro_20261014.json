@@ -1,0 +1,51 @@
+{
+  "composite_double_limited_range": {
+    "actual": [
+      {
+        "linear_value": 0.0,
+        "rgb_signal": 16,
+        "encoded_y": 29
+      },
+      {
+        "linear_value": 1.0,
+        "rgb_signal": 235,
+        "encoded_y": 217
+      }
+    ],
+    "expected_black_white_y": [
+      16,
+      235
+    ]
+  },
+  "hdr_bt2020_bgr_swap": {
+    "actual_red_y10": 116,
+    "correct_red_y10": 294
+  },
+  "wide_gamut_sdr_truncates_before_encode": {
+    "result": {
+      "success": true,
+      "output_path": "/tmp/not-created-wg.mp4",
+      "frames_written": 1,
+      "error": "",
+      "frames_dropped": 0
+    },
+    "configured_pix_fmt": "yuv420p10le",
+    "submitted_dtype": "uint8",
+    "submitted_format": "bgr24",
+    "unique_values": 237
+  },
+  "all_render_failed_black_video_success": {
+    "result": {
+      "success": true,
+      "output_path": "/tmp/not-created-all-black.mp4",
+      "frames_written": 3,
+      "error": "",
+      "frames_dropped": 3
+    },
+    "frame_values": [
+      0,
+      0,
+      0
+    ]
+  }
+}

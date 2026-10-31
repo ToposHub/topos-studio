@@ -1,0 +1,87 @@
+// --- Topos Plugin Metadata ---
+// @name Zoned Tint
+// @i18n_name LIB1_Zoned_Tint
+// @author Topos Library v1
+// @version 0.1.0
+// @description Shadow/midtone/highlight tinting with movable zone pivots and adjustable cross-fade widths in Reinhard tone coordinates; neutral 0.5 tint colors or zero strengths are exact identity
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param color shadow_color "Shadow Color" 0.5 0.5 0.5
+// @param slider shadow_strength "Shadow Strength" 0.35 0.0 1.0
+// @param separator
+// @param color midtone_color "Midtone Color" 0.5 0.5 0.5
+// @param slider midtone_strength "Midtone Strength" 0.30 0.0 1.0
+// @param separator
+// @param color highlight_color "Highlight Color" 0.5 0.5 0.5
+// @param slider highlight_strength "Highlight Strength" 0.35 0.0 1.0
+// @param separator
+// @param slider shadow_pivot "Shadow Pivot" 0.25 0.1 0.4
+// @param slider highlight_pivot "Highlight Pivot" 0.75 0.5 0.9
+// @param slider shadow_width "Shadow Width" 0.30 0.0 0.5
+// @param slider highlight_width "Highlight Width" 0.30 0.0 0.5
+// -----------------------------
+//
+// Zoned Tint —— 可移动分界的三区着色（L 计划 F04，LIB1）。
+//
+// 差量（对 Three_Way_Tint，见 L00 台账 F04 行）：旧插件分界是编译期
+// 常量（[0.25,0.55]/[0.55,0.85] 固定两段），本件 shadow/highlight
+// pivot 滑杆 + 交叉 width 滑杆可动；乘性 zone_gain 语义与中性恒等
+// 保留（tint 0.5 灰=增益 1.0，黑位白位不动）。
+//
+// 设计要点：
+// - 色调坐标 t = luma/(luma+0.18)（Reinhard 软压缩，中灰 0.18→0.5，
+//   与 Three_Way_Tint 同源）；max(luma,0) 只作用于分区坐标（负 luma
+//   按纯阴影分区），不触碰颜色本身；
+// - 分区权重 partition of unity：s_mid=smoothstep(sp-w/2, sp+w/2, t)，
+//   s_high 同式于 hp；w_shadow=1-s_mid，w_mid=补集 clamp，
+//   w_high=s_high。默认 pivot/width 下两过渡带不重叠→和恒 1；
+//   极端设置重叠时 w_mid clamp 守护（有界、连续，非 unity 区间
+//   如实声明）；width 下限 1e-4（GLSL smoothstep 等界未定义），
+//   width=0 近似硬分界（用户选择，非默认）；
+// - 乘性增益 mix(1.0, tint*2.0, w*strength) 三区连乘：tint 0.5=
+//   增益 1（无界 overlay 语义，HDR 高值/负值按原比例缩放符号不翻，
+//   与 Three_Way_Tint 相同的 HDR 安全设计）；
+// - tint 全 0.5 灰或三强度全 0 → 增益恒 1（前者乘法路径精确恒等
+//   0.5*2.0=1.0 无舍入，后者首行早退）；默认参数即恒等；
+// - 纯逐像素：零采样/零循环；参数 ABI 裸名引用。
+
+const vec3 ZT_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+const float ZT_TONE_PIVOT = 0.18;   // 中灰锚点：t = l/(l+0.18)，0.18→0.5
+
+vec3 zt_zone_gain(vec3 tint_color, float weight, float zone_strength) {
+    return mix(vec3(1.0), tint_color * 2.0, weight * zone_strength);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：三路强度全 0 时严格恒等
+    if (shadow_strength < 0.001 && midtone_strength < 0.001
+        && highlight_strength < 0.001) return color;
+
+    float luma = max(dot(color, ZT_LUMA_W), 0.0);
+    float t = luma / (luma + ZT_TONE_PIVOT);
+
+    // 可移动分界 + 可调交叉宽度（smoothstep 中心= pivot，全宽= width）
+    float sw = max(shadow_width, 1e-4);
+    float hw = max(highlight_width, 1e-4);
+    float s_mid  = smoothstep(shadow_pivot - 0.5 * sw, shadow_pivot + 0.5 * sw, t);
+    float s_high = smoothstep(highlight_pivot - 0.5 * hw, highlight_pivot + 0.5 * hw, t);
+
+    float w_shadow = 1.0 - s_mid;
+    float w_highlight = s_high;
+    float w_midtone = clamp(1.0 - w_shadow - w_highlight, 0.0, 1.0);
+
+    vec3 gain = zt_zone_gain(shadow_color, w_shadow, shadow_strength)
+              * zt_zone_gain(midtone_color, w_midtone, midtone_strength)
+              * zt_zone_gain(highlight_color, w_highlight, highlight_strength);
+
+    // 不 clamp：保留 HDR 与负值，交给下游处理
+    return color * gain;
+}

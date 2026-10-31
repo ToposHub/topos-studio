@@ -1,0 +1,21 @@
+{
+  "client_date": "2026-10-22",
+  "client_timezone": "Asia/Shanghai",
+  "python": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 17.0.0 (clang-1700.6.3.2)]",
+  "platform": "macOS-15.3.1-x86_64-i386-64bit",
+  "head": "d11615bb85d057f92735dbfcbfdc0debb127fc13",
+  "branch": "fix-ui",
+  "application_sessions": [
+    {
+      "exec_session": 32720,
+      "exit_code": 0
+    },
+    {
+      "exec_session": 44162,
+      "exit_code": 0
+    }
+  ],
+  "actual_project": "/tmp/topos-round7-gui/Round7Audit20261022.topos",
+  "source_media_read_only": true,
+  "product_code_modified": false
+}

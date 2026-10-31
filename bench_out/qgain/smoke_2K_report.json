@@ -1,0 +1,55 @@
+{
+ "generated_at": "2026-09-21T16:12:31.495857+00:00",
+ "master": "tests/test_videos/4K_prores4444.mov",
+ "patch": [],
+ "reference": "母版 reformat（bicubic）→ YUV 4:2:2 10-bit limited",
+ "note": "grid>1.2 = 误差在 8×8 块界（色块）；stair>0.6 = 残差轴向化（锯齿）；sharp<1 = 高频能量损失（颗粒掩蔽变弱）。",
+ "results": [
+  {
+   "tag": "smoke",
+   "size": "2K",
+   "tier": "proxy",
+   "frames": 24,
+   "threads": null,
+   "profile": {
+    "target_bpp": 0.64483,
+    "chroma_qp_offset": 0,
+    "qmatrix_id": 4
+   },
+   "file_bytes": 3964855,
+   "video_bytes": 3963804,
+   "video_mbps": 33.03,
+   "enc_fps": 25.5,
+   "dec_fps": 176.8,
+   "to_pos": false,
+   "y_psnr": 42.13,
+   "u_psnr": 47.686,
+   "v_psnr": 45.542,
+   "y_psnr_edge": 37.44,
+   "y_mae_edge": 10.647,
+   "sharp": 0.882,
+   "grid": 1.289,
+   "stair": 0.367,
+   "rgb_psnr": 38.591,
+   "rgb_mae": 2.107,
+   "prores": {
+    "file": "2K_prores422Proxy.mov",
+    "bytes": 95714182,
+    "video_bytes": 90098672,
+    "video_mbps": 750.82,
+    "y_psnr": 42.022,
+    "u_psnr": 47.75,
+    "v_psnr": 44.75,
+    "y_psnr_edge": 36.728,
+    "y_mae_edge": 11.316,
+    "sharp": 1.422,
+    "grid": 1.304,
+    "stair": 0.324,
+    "rgb_psnr": 38.236,
+    "rgb_mae": 2.116
+   },
+   "video_bytes_ratio": 0.044,
+   "file_bytes_ratio": 0.0414
+  }
+ ]
+}

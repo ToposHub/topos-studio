@@ -1,0 +1,36 @@
+== 2026-09-02 M10-6.3 内核提速批次总收益（Mac-Pro i9-9900K 8P/16L）==
+
+剖析依据（sample 函数级，qp55 产品形态）：
+  编码 = 量化 26% + 带扫描 28% + 熵发射 27% + DCT 11%
+  解码 = Rice 扫描 42% + 反量化IDCT 36% + 驱动 12%（CRC 已 slicing8）
+
+四项优化（各自单独提交 + A/B + 差分钉死输出不变性）：
+  A e919d9c5 跨帧 qp 提示    strict 首探种子=上帧 q*（输出逐字节不变）
+  B 2eb2b720 AVX2 量化+掩码  gather 内核 + tzcnt 跳扫（fastdiv 恒等分解）
+  C 83188271 熵融合发射      put64 通道 + run/level 对单写
+  D 4a60c640 解码扫描微优化  refill 条件化 + 域校验死码消除
+
+-- 编码 sized（产品口径，低负载窗口）--
+  4K: 4.70(批次前) → 12.60 fps（t16 13.69）；2K: 18.65 → 40.61
+  分项：A probe 7→3（4K +55%）；B 4K +17%；C hq 档 +1~3%（qp20 内核 +21%）
+-- 编码单遍 qp20（重码流内核）--
+  4K: 17.51 → 21.18 fps（+21%）
+-- 解码（同线程 t8 SLICE 口径）--
+  4K: 72.9 → 89.8 fps（+23%）；2K: 278 → 332（+19%）
+
+== 对 ProRes/DNxHR 终局（Mac 同机同窗口，FFmpeg 8.1，内核口径 raw 输入）==
+  编码 4K:  topos hq 12.60  > ProRes 10.68（+18%）> DNxHR 10.90 —— 反超
+            t16 13.69（+28%）；proxy 17.17 / standard 14.49 全档反超
+  编码 2K:  topos hq 40.61  vs ProRes 43.17（−6%）/ DNxHR 43.97（−8%）
+            standard 44.36 / proxy 52.67 反超（hq 目标码率 196.8Mbps
+            为 ProRes 的 1.84 倍；2K 剩余差距=并行效率+每帧固定开销）
+  解码 4K:  topos 89.8 ≈ ProRes slice 90.8（打平）> ProRes frame 80.1
+            DNxHR 139.2 仍领先
+  解码 2K:  topos 332 vs ProRes 418 / DNxHR 548
+  画质：PSNR 与优化前逐位一致（62.84/67.98 dB）——全部为纯提速
+
+剩余差距与后续：2K 编码 hq 档 −6~8%、2K 解码 −21%、DNxHR 解码；
+候选：VLC/alpha emit 融合（C 基础设施已备）、2K slice_rows 调优、
+解码 context 复用、产品路径 ctypes 批量化。
+门禁：release + ASan + TSan 全量测试全绿；golden/差分测试证明位流与
+重建逐位不变。

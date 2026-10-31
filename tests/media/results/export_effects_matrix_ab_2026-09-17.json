@@ -1,0 +1,444 @@
+{
+ "kind": "export_effects_matrix_ab",
+ "generated_at": "2026-09-17 07:39:02",
+ "baseline_rev": "c0ccc208",
+ "dev_rev": "05e40e30",
+ "protocol": "240 帧计时 ×2 取中位（30 帧预热丢弃）；2K 源 20Mbps VBR；AMD RX 6800 + AMF",
+ "rows": [
+  {
+   "config": "h264/h264/identity/adaptive",
+   "baseline_fps": 130.462,
+   "dev_fps": 131.71,
+   "ratio": 1.01,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/resize/adaptive",
+   "baseline_fps": 221.214,
+   "dev_fps": 204.252,
+   "ratio": 0.923,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/opacity_fade/adaptive",
+   "baseline_fps": 67.55,
+   "dev_fps": 62.768,
+   "ratio": 0.929,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/hevc8/identity/adaptive",
+   "baseline_fps": 22.361,
+   "dev_fps": 35.548,
+   "ratio": 1.59,
+   "dev_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/hevc8/resize/adaptive",
+   "baseline_fps": 26.408,
+   "dev_fps": 35.589,
+   "ratio": 1.348,
+   "dev_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/hevc8/opacity_fade/adaptive",
+   "baseline_fps": 21.307,
+   "dev_fps": 19.272,
+   "ratio": 0.904,
+   "dev_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/hevc10/identity/adaptive",
+   "baseline_fps": 20.841,
+   "dev_fps": 38.883,
+   "ratio": 1.866,
+   "dev_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/hevc10/resize/adaptive",
+   "baseline_fps": 24.052,
+   "dev_fps": 37.954,
+   "ratio": 1.578,
+   "dev_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/hevc10/opacity_fade/adaptive",
+   "baseline_fps": 19.767,
+   "dev_fps": 19.721,
+   "ratio": 0.998,
+   "dev_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "hevc8/h264/identity/adaptive",
+   "baseline_fps": 25.58,
+   "dev_fps": 37.106,
+   "ratio": 1.451,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "hevc8/h264/resize/adaptive",
+   "baseline_fps": 25.227,
+   "dev_fps": 35.671,
+   "ratio": 1.414,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "hevc8/hevc8/identity/adaptive",
+   "baseline_fps": 21.057,
+   "dev_fps": 190.077,
+   "ratio": 9.027,
+   "dev_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "hevc8/hevc8/resize/adaptive",
+   "baseline_fps": 26.769,
+   "dev_fps": 276.387,
+   "ratio": 10.325,
+   "dev_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "hevc10/hevc8/identity/adaptive",
+   "baseline_fps": 21.652,
+   "dev_fps": 19.793,
+   "ratio": 0.914,
+   "dev_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/resize/adaptive",
+   "baseline_fps": 221.214,
+   "dev_fps": 204.252,
+   "ratio": 0.923,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/resize/forced_gpu",
+   "baseline_fps": 205.089,
+   "dev_fps": 206.164,
+   "ratio": 1.005,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/resize/cpu_render",
+   "baseline_fps": 213.706,
+   "dev_fps": 212.215,
+   "ratio": 0.993,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/grade/adaptive",
+   "baseline_fps": 24.053,
+   "dev_fps": 23.881,
+   "ratio": 0.993,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/grade/forced_gpu",
+   "baseline_fps": 23.928,
+   "dev_fps": 25.89,
+   "ratio": 1.082,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/grade/cpu_render",
+   "baseline_fps": 1.737,
+   "dev_fps": 1.748,
+   "ratio": 1.006,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/blur/adaptive",
+   "baseline_fps": 9.427,
+   "dev_fps": 9.119,
+   "ratio": 0.967,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/blur/forced_gpu",
+   "baseline_fps": 9.561,
+   "dev_fps": 9.389,
+   "ratio": 0.982,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/blur/cpu_render",
+   "baseline_fps": 9.59,
+   "dev_fps": 9.109,
+   "ratio": 0.95,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/two_layer/adaptive",
+   "baseline_fps": 14.235,
+   "dev_fps": 14.485,
+   "ratio": 1.018,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/two_layer/forced_gpu",
+   "baseline_fps": 14.654,
+   "dev_fps": 14.384,
+   "ratio": 0.982,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/two_layer/cpu_render",
+   "baseline_fps": 5.199,
+   "dev_fps": 5.181,
+   "ratio": 0.997,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/transition/adaptive",
+   "baseline_fps": 66.965,
+   "dev_fps": 67.225,
+   "ratio": 1.004,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/transition/forced_gpu",
+   "baseline_fps": 66.671,
+   "dev_fps": 66.593,
+   "ratio": 0.999,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  },
+  {
+   "config": "h264/h264/transition/cpu_render",
+   "baseline_fps": 37.828,
+   "dev_fps": 37.721,
+   "ratio": 0.997,
+   "dev_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "dev_trail": "cpu_encoder_surface_path"
+  }
+ ]
+}

@@ -1,0 +1,65 @@
+# M11 阶段4 产品侧兑现 II：批量包聚读 arena 证据（2026-09-02，i9-9900K 8C16T）
+
+## 机制
+- 新增原生 API tc_movie_packet_batch(movie, start, count, arena, cap,
+  offsets_out, sizes_out, need_total)（ABI 追加）：一次调用读连续 sample
+  区间进调用方 arena，各 sample 紧凑排列。区间在文件内逐包连续（本库
+  写入器恒连续）→ 合并单次 io 读（一次系统调用取整批）；非连续（外来
+  交错布局）逐包读入。探测语义同 tc_movie_packet（BUFFER_TOO_SMALL +
+  精确总量 + 布局）；count==0 → TC_OK；区间越过文件尾 MALFORMED 不读
+  任何字节。
+- 绑定层 ToposMovieFile.packets_into_batch（实例 grow-only arena，探测
+  仅索引运算）+ decode_views_batch 接受 (地址, 字节数) 指针对——批量
+  解码直读 arena 槽位，零 bytes 物化拷贝（旧路径每帧 string_at 全包拷
+  贝：4K hq ≈3.7MB/帧）。顺带修复旧实现 bytes 仅被循环变量暂持的
+  use-after-free 隐患（keepalive 列表显式持有）。
+- topos_source._read_ahead：有符号走聚读（旧 dylib 回退逐包 packet()），
+  其余逻辑（缓存/失效/回退语义）位不变。
+
+## 测量方法论备注（本机噪声治理）
+- 本机成对差分内的槽位顺序有偏：持续满载下固定排在后的槽位被系统性
+  惩罚（热/内存状态）——固定 off→on 顺序的官方口径在 4K 三次复现
+  +12.1/+12.5/+12.9% 一致；但"固定第三槽"的三路测量会把 arena 测成
+  负值。已用槽位轮转 + 顺序平衡复核关键结论。
+- 跨会话机器漂移 ±5%（同代码同素材 bytes 路径昨日 +24.3%、今日
+  +15.8%）——只信同窗成对与同窗多路对比。
+
+## 结果（产品路径 ToposMediaSource，阶段4 同源 hq rate 素材，hold=2）
+- 4K（3840×2160×24f，depth 4）：**off 83.3 → arena 93.5 fps，+12.5%**
+  （同窗轮转三路，12 圈）；官方成对 +12.9% [+9.8,+19.8] 12 对 11 正、
+  顺序平衡 +12.1% [+6.4,+18.2] 14/16 正——三窗复现。
+  同窗 bytes（物化路径）83.2 ≈ off（−0.6%）：4K 上逐帧 string_at 拷贝
+  吃光批量解码内核收益；arena/bytes 成对 **+10.6%**——本项的全部增益。
+- 2K（1920×1080×36f，depth 8）：arena vs off **+11.8~13.0%**（轮转三路
+  12 圈 +11.8%、顺序平衡 15/16 +12.2%）；同窗 bytes +15.8%——arena 比
+  bytes 慢 ~3%（两窗复现 −2.9/−3.4%）。分相计时定位在 IO+prepare 相
+  （解码相两路持平）；纯 IO 隔离（无解码交错）arena 反而快 1.15×，
+  即"解码后紧邻大批量单读"的交错效应，幅度小于日常漂移且 2K 对基线
+  仍两位数增益 → 统一 arena 单路径，不为 2K 保留双路径复杂度。
+- IO/物化层隔离（无解码）：2K 全片 arena 13.6ms vs bytes 15.7ms（1.15×）；
+  4K 全片 28.7ms vs 63.7ms（**2.22×**，省 1.46ms/帧 ≈ 4K 全部差额）。
+- 最终官方窗口（tools/bench_topos_readahead.py，12 对，空机）：
+  - 2K：324.0 → 362.4 fps，+10.5% [+7.8, +15.8]，12/12 正
+  - 4K：86.6 → **98.3 fps**，+11.7% [+7.4, +14.9]，10/12 正——产品路径
+    已逼近纯内核 103.4 口径（差额为装配/pts/ctypes 往返）
+  （教训备查：一次与 ASan 编译并发的窗口 2K 基线被砸到 211fps，作废；
+  基准必须空机跑。）
+
+## 门禁
+- C 差分（test_mov 新增 test_movie_packet_batch）：全区间/子区间批量 ==
+  逐包 tc_movie_packet 逐位一致；探测语义（NULL/cap 不足 → 总量+布局）；
+  连续布局合并为单次 io 读（计数 shim 断言 =1）、子区间同；count==0；
+  区间越界 INVALID_ARGUMENT；插缝+stco 平移构造的非连续布局（单帧读
+  回仍正确自证补丁）→ 逐包分支（读次数 = count）且缝后子区间恢复单读。
+- release 45/45 ✓；ASan 45/45 ✓（184.7s）；TSan 45/45 ✓（506.5s）。
+- Python：test_topos_binding 新增 test_movie_packets_into_batch（arena
+  字节 == 逐包 packet() 逐位一致 + 紧凑布局 + 复用 + 越界 + 指针对批量
+  解码 == 逐帧参考）18/18；test_topos_source 的 engagement 测试追加
+  聚读计数断言（每批一次 packets_into_batch）22/22；关联套件共 77 过。
+
+## 复现
+- .venv/bin/python tools/bench_topos_readahead.py --pairs 12 --loops 3
+  （空机；off=read_ahead 0，on=arena 自动深度）
+- 三路轮转隔离（off/bytes/arena 槽位轮转 + force_bytes 标志保存恢复）：
+  脚本口径见本文件"测量方法论"段，关键在不可让 force_bytes 污染共享
+  codec 单例标志、不可固定槽位顺序。

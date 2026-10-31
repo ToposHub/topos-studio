@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-09-17T04:34:10.229489+00:00",
+  "platform": "macOS Intel x86_64",
+  "source": "2K_h264.mp4",
+  "frames": 480,
+  "results": [
+    {
+      "case": "h264_yuv420p",
+      "codec": "h264",
+      "source_frames": 480,
+      "success": true,
+      "wall_s": 3.212,
+      "export_fps": 149.43,
+      "error": null,
+      "output_bytes": 18724700
+    },
+    {
+      "case": "prores_422",
+      "codec": "prores_422",
+      "source_frames": 480,
+      "success": true,
+      "wall_s": 30.754,
+      "export_fps": 15.61,
+      "error": null,
+      "output_bytes": 437001915
+    },
+    {
+      "case": "dnxhr_lb",
+      "codec": "dnxhr_lb",
+      "source_frames": 480,
+      "success": true,
+      "wall_s": 8.035,
+      "export_fps": 59.74,
+      "error": null,
+      "output_bytes": 90440853
+    },
+    {
+      "case": "topos_proxy",
+      "codec": "topos_proxy",
+      "source_frames": 480,
+      "success": true,
+      "wall_s": 7.165,
+      "export_fps": 66.99,
+      "error": null,
+      "output_bytes": 36311143
+    }
+  ]
+}

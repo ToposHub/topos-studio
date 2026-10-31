@@ -1,0 +1,104 @@
+{
+  "component": "X04 staggered_tiles",
+  "method": "手算独立脚本（纯 Python 标量逐像素）：块时序 pi=clamp((p-delay_i)/(1-delay_max))，delay_i=delay·rank_i（Row: rank=k/(m-1) 行主序；Random: hash 排序名次/m）；块内 A 窗 s=1-scale_amt·pi / B 窗 1/(1-scale_amt·(1-pi)) 双线性重采样后 (1-pi)A+pi·B 混合。初算与独立重算容差 1e-6。",
+  "params_default": {
+    "grid": 4,
+    "delay": 0.2,
+    "order": "Row",
+    "seed": 0,
+    "scale_amt": 0.25
+  },
+  "vectors": [
+    {
+      "desc": "错峰时序 p=0.5 grid=2 delay=0.5 Row scale=0：左上块(pi=1)=B 常色、右上块(pi=2/3)混合",
+      "params": {
+        "grid": 2,
+        "delay": 0.5,
+        "order": "Row",
+        "seed": 0,
+        "scale_amt": 0.0
+      },
+      "progress": 0.5,
+      "a": 0.1,
+      "b": 0.9,
+      "fixture": "4x4 常色",
+      "expected_row0": [
+        0.9,
+        0.9,
+        0.633333,
+        0.633333
+      ],
+      "expected_row3": [
+        0.366667,
+        0.366667,
+        0.1,
+        0.1
+      ],
+      "note": "delays=[0,1/6,1/3,1/2]·0.5→[0,1/12,1/6,0.25]，denom=0.5；pi=[1,2/3,1/3,0]——同帧四块四个相位"
+    },
+    {
+      "desc": "块内 A 窗收缩采样（scale_amt=0.5 p=0.25 delay=0）",
+      "params": {
+        "grid": 2,
+        "delay": 0.0,
+        "order": "Row",
+        "seed": 0,
+        "scale_amt": 0.5
+      },
+      "progress": 0.25,
+      "fixture": "4x4 行0 ramp A=[0,1,2,3] B=[10..13]（ch0）",
+      "expected_row0_ch0": [
+        2.543945,
+        3.48418,
+        4.375195,
+        5.31543
+      ],
+      "note": "块(0,0) 像素(0,0)：pi=0.25，A 窗 0.875→采样 (0.140625,0.140625)→xf=yf=0.0625 双线性；B 窗 1.6→(0.05,0.05) 钳到 (0,0)=10"
+    },
+    {
+      "desc": "Random 档 seed=13 全帧（8x4 ramp 双源）",
+      "params": {
+        "grid": 4,
+        "delay": 0.25,
+        "order": "Random",
+        "seed": 13,
+        "scale_amt": 0.25
+      },
+      "progress": 0.4,
+      "fixture": "8x4 ramp A=i/7 B=1-i/7",
+      "expected_row0": [
+        0.342776,
+        0.376047,
+        0.448655,
+        0.470879,
+        0.515105,
+        0.507052,
+        0.551793,
+        0.554782
+      ],
+      "note": "Random 名次由 hash(seed,k) 排序决定（与 Row 不同帧）"
+    },
+    {
+      "desc": "端点 p=0",
+      "progress": 0.0,
+      "expected": "A 比特级拷贝",
+      "note": ""
+    },
+    {
+      "desc": "端点 p=1",
+      "progress": 1.0,
+      "expected": "B 比特级拷贝",
+      "note": ""
+    }
+  ],
+  "conflicts": [
+    {
+      "desc": "初算 V2 只做了 x 轴双线性（漏 y 轴同小数 0.0625），得 2.546875；独立 2D 标量重算得 2.5439453125（va=0.0625·0.9375=0.05859375）→ 采纳重算值",
+      "resolution": "hand 向量以独立标量 2D 重算为准；核与之一致"
+    },
+    {
+      "desc": "初算 V1 期望表把行主序块 k 的 pi 排错位（k=1 写成 1）；重排后 [1,2/3,1/3,0] 正确",
+      "resolution": "按 rank=k/(m-1) 行主序重排；核与重算一致"
+    }
+  ]
+}

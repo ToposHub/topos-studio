@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 159 items
+
+tests/app/test_edit_controller_timeline_management.py .....              [  3%]
+tests/app/test_edit_controller_timeline_metadata.py ...                  [  5%]
+tests/app/test_color_timeline_clip_playback_mapping.py ................. [ 15%]
+..........................                                               [ 32%]
+tests/app/test_color_entry_playback_and_timeline_refresh.py ......       [ 35%]
+tests/app/test_project_save_routing.py .....                             [ 38%]
+tests/composite/test_drag_value_widget.py ....................           [ 51%]
+tests/composite/test_drag_value_math.py .........                        [ 57%]
+tests/color/test_grade_keyframes.py .................................... [ 79%]
+.......                                                                  [ 84%]
+tests/color/test_grade_clipboard.py .........................            [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/validation/crossfeature-final.xml -
+============================= 159 passed in 4.18s ==============================

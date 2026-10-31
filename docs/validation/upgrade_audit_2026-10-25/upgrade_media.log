@@ -1,0 +1,18 @@
+============================= test session starts ==============================
+collected 56 items
+
+tests/media/test_cuda_extras_w06.py ..Fs.                                [  8%]
+tests/media/test_cuda_resident_capability_w04.py .................       [ 39%]
+tests/media/test_cuda_resident_format_matrix_w04.py ssss                 [ 46%]
+tests/media/test_cuda_resident_lifecycle_w02.py ....................     [ 82%]
+tests/media/test_topos_codec_loader_w01.py ...s..ss.s                    [100%]
+
+=================================== FAILURES ===================================
+__________ TestCapabilityReport.test_report_reason_chain_fail_closed ___________
+tests/media/test_cuda_extras_w06.py:75: in test_report_reason_chain_fail_closed
+    monkeypatch.setattr(cr.ctypes, "WinDLL", _no_dll)
+E   AttributeError: <module 'ctypes' from '/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/ctypes/__init__.py'> has no attribute 'WinDLL'
+=========================== short test summary info ============================
+FAILED tests/media/test_cuda_extras_w06.py::TestCapabilityReport::test_report_reason_chain_fail_closed
+=================== 1 failed, 46 passed, 9 skipped in 0.84s ====================
+

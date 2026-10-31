@@ -1,0 +1,2011 @@
+{
+ "kind": "export_effects_matrix_bench",
+ "schema_version": 1,
+ "side": "baseline",
+ "git_rev": "c0ccc208",
+ "frames": 240,
+ "warmup": 30,
+ "runs": [
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 1.8396,
+   "status": "ok",
+   "fps": 130.462,
+   "frame_ms_p50": 6.074,
+   "frame_ms_p95": 6.527,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 1.8678,
+     "status": "ok",
+     "fps": 128.494,
+     "frame_ms_p50": 6.103,
+     "frame_ms_p95": 6.6,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 1.8396,
+     "status": "ok",
+     "fps": 130.462,
+     "frame_ms_p50": 6.074,
+     "frame_ms_p95": 6.527,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 130.462,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "identity",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 1.1542,
+   "status": "ok",
+   "fps": 207.929,
+   "frame_ms_p50": 2.978,
+   "frame_ms_p95": 3.868,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 1.1272,
+     "status": "ok",
+     "fps": 212.922,
+     "frame_ms_p50": 2.923,
+     "frame_ms_p95": 3.639,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 1.1542,
+     "status": "ok",
+     "fps": 207.929,
+     "frame_ms_p50": 2.978,
+     "frame_ms_p95": 3.868,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    }
+   ],
+   "median_fps": 212.922,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "resize",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "failed: ValueError: fade_in_duration (36) exceeds clip duration (30)",
+   "frames_requested": 240,
+   "wall_s": 3.5529,
+   "status": "ok",
+   "fps": 67.55,
+   "frame_ms_p50": 6.236,
+   "frame_ms_p95": 32.039,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 4.651,
+     "status": "ok",
+     "fps": 51.602,
+     "frame_ms_p50": 6.201,
+     "frame_ms_p95": 30.988,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 3.5529,
+     "status": "ok",
+     "fps": 67.55,
+     "frame_ms_p50": 6.236,
+     "frame_ms_p95": 32.039,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 67.55,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "opacity_fade",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 10.7328,
+   "status": "ok",
+   "fps": 22.361,
+   "frame_ms_p50": 41.257,
+   "frame_ms_p95": 52.047,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 10.8568,
+     "status": "ok",
+     "fps": 22.106,
+     "frame_ms_p50": 42.628,
+     "frame_ms_p95": 52.414,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 10.7328,
+     "status": "ok",
+     "fps": 22.361,
+     "frame_ms_p50": 41.257,
+     "frame_ms_p95": 52.047,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 22.361,
+   "config": {
+    "source": "h264",
+    "codec": "hevc8",
+    "scenario": "identity",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 9.9842,
+   "status": "ok",
+   "fps": 24.038,
+   "frame_ms_p50": 38.771,
+   "frame_ms_p95": 51.29,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 9.0882,
+     "status": "ok",
+     "fps": 26.408,
+     "frame_ms_p50": 34.099,
+     "frame_ms_p95": 48.695,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 9.9842,
+     "status": "ok",
+     "fps": 24.038,
+     "frame_ms_p50": 38.771,
+     "frame_ms_p95": 51.29,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    }
+   ],
+   "median_fps": 26.408,
+   "config": {
+    "source": "h264",
+    "codec": "hevc8",
+    "scenario": "resize",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "failed: ValueError: fade_in_duration (36) exceeds clip duration (30)",
+   "frames_requested": 240,
+   "wall_s": 11.2637,
+   "status": "ok",
+   "fps": 21.307,
+   "frame_ms_p50": 42.77,
+   "frame_ms_p95": 56.672,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 13.3666,
+     "status": "ok",
+     "fps": 17.955,
+     "frame_ms_p50": 48.343,
+     "frame_ms_p95": 58.357,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 11.2637,
+     "status": "ok",
+     "fps": 21.307,
+     "frame_ms_p50": 42.77,
+     "frame_ms_p95": 56.672,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 21.307,
+   "config": {
+    "source": "h264",
+    "codec": "hevc8",
+    "scenario": "opacity_fade",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 11.5156,
+   "status": "ok",
+   "fps": 20.841,
+   "frame_ms_p50": 44.738,
+   "frame_ms_p95": 56.489,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 12.023,
+     "status": "ok",
+     "fps": 19.962,
+     "frame_ms_p50": 47.007,
+     "frame_ms_p95": 58.422,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 11.5156,
+     "status": "ok",
+     "fps": 20.841,
+     "frame_ms_p50": 44.738,
+     "frame_ms_p95": 56.489,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 20.841,
+   "config": {
+    "source": "h264",
+    "codec": "hevc10",
+    "scenario": "identity",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 10.0297,
+   "status": "ok",
+   "fps": 23.929,
+   "frame_ms_p50": 38.782,
+   "frame_ms_p95": 53.364,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 9.9784,
+     "status": "ok",
+     "fps": 24.052,
+     "frame_ms_p50": 38.701,
+     "frame_ms_p95": 50.688,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 10.0297,
+     "status": "ok",
+     "fps": 23.929,
+     "frame_ms_p50": 38.782,
+     "frame_ms_p95": 53.364,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    }
+   ],
+   "median_fps": 24.052,
+   "config": {
+    "source": "h264",
+    "codec": "hevc10",
+    "scenario": "resize",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "failed: ValueError: fade_in_duration (36) exceeds clip duration (30)",
+   "frames_requested": 240,
+   "wall_s": 12.1413,
+   "status": "ok",
+   "fps": 19.767,
+   "frame_ms_p50": 47.644,
+   "frame_ms_p95": 58.614,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 12.4473,
+     "status": "ok",
+     "fps": 19.281,
+     "frame_ms_p50": 43.492,
+     "frame_ms_p95": 56.499,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 12.1413,
+     "status": "ok",
+     "fps": 19.767,
+     "frame_ms_p50": 47.644,
+     "frame_ms_p95": 58.614,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 19.767,
+   "config": {
+    "source": "h264",
+    "codec": "hevc10",
+    "scenario": "opacity_fade",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 9.3824,
+   "status": "ok",
+   "fps": 25.58,
+   "frame_ms_p50": 35.314,
+   "frame_ms_p95": 46.246,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 10.7241,
+     "status": "ok",
+     "fps": 22.38,
+     "frame_ms_p50": 41.5,
+     "frame_ms_p95": 54.356,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 9.3824,
+     "status": "ok",
+     "fps": 25.58,
+     "frame_ms_p50": 35.314,
+     "frame_ms_p95": 46.246,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 25.58,
+   "config": {
+    "source": "hevc8",
+    "codec": "h264",
+    "scenario": "identity",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 9.5136,
+   "status": "ok",
+   "fps": 25.227,
+   "frame_ms_p50": 36.063,
+   "frame_ms_p95": 49.113,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 9.6912,
+     "status": "ok",
+     "fps": 24.765,
+     "frame_ms_p50": 37.241,
+     "frame_ms_p95": 50.493,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 9.5136,
+     "status": "ok",
+     "fps": 25.227,
+     "frame_ms_p50": 36.063,
+     "frame_ms_p95": 49.113,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    }
+   ],
+   "median_fps": 25.227,
+   "config": {
+    "source": "hevc8",
+    "codec": "h264",
+    "scenario": "resize",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 12.1803,
+   "status": "ok",
+   "fps": 19.704,
+   "frame_ms_p50": 48.662,
+   "frame_ms_p95": 59.449,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 11.3978,
+     "status": "ok",
+     "fps": 21.057,
+     "frame_ms_p50": 44.298,
+     "frame_ms_p95": 56.289,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 12.1803,
+     "status": "ok",
+     "fps": 19.704,
+     "frame_ms_p50": 48.662,
+     "frame_ms_p95": 59.449,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 21.057,
+   "config": {
+    "source": "hevc8",
+    "codec": "hevc8",
+    "scenario": "identity",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 8.9657,
+   "status": "ok",
+   "fps": 26.769,
+   "frame_ms_p50": 34.022,
+   "frame_ms_p95": 46.247,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 9.8638,
+     "status": "ok",
+     "fps": 24.331,
+     "frame_ms_p50": 38.585,
+     "frame_ms_p95": 51.565,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 8.9657,
+     "status": "ok",
+     "fps": 26.769,
+     "frame_ms_p50": 34.022,
+     "frame_ms_p95": 46.247,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    }
+   ],
+   "median_fps": 26.769,
+   "config": {
+    "source": "hevc8",
+    "codec": "hevc8",
+    "scenario": "resize",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 11.0844,
+   "status": "ok",
+   "fps": 21.652,
+   "frame_ms_p50": 42.814,
+   "frame_ms_p95": 56.159,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p10le",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 11.0911,
+     "status": "ok",
+     "fps": 21.639,
+     "frame_ms_p50": 42.968,
+     "frame_ms_p95": 54.052,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 11.0844,
+     "status": "ok",
+     "fps": 21.652,
+     "frame_ms_p50": 42.814,
+     "frame_ms_p95": 56.159,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p10le",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 21.652,
+   "config": {
+    "source": "hevc10",
+    "codec": "hevc8",
+    "scenario": "identity",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 1.0849,
+   "status": "ok",
+   "fps": 221.214,
+   "frame_ms_p50": 2.94,
+   "frame_ms_p95": 3.403,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 1.1039,
+     "status": "ok",
+     "fps": 217.416,
+     "frame_ms_p50": 2.898,
+     "frame_ms_p95": 3.466,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 1.0849,
+     "status": "ok",
+     "fps": 221.214,
+     "frame_ms_p50": 2.94,
+     "frame_ms_p95": 3.403,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    }
+   ],
+   "median_fps": 221.214,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "resize",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 1.1702,
+   "status": "ok",
+   "fps": 205.089,
+   "frame_ms_p50": 3.013,
+   "frame_ms_p95": 3.722,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 1.1709,
+     "status": "ok",
+     "fps": 204.979,
+     "frame_ms_p50": 2.993,
+     "frame_ms_p95": 3.926,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 1.1702,
+     "status": "ok",
+     "fps": 205.089,
+     "frame_ms_p50": 3.013,
+     "frame_ms_p95": 3.722,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    }
+   ],
+   "median_fps": 205.089,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "resize",
+    "group": "forced_gpu"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "1",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 1.1816,
+   "status": "ok",
+   "fps": 203.108,
+   "frame_ms_p50": 3.059,
+   "frame_ms_p95": 3.985,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1280,
+    "height": 720
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 1.123,
+     "status": "ok",
+     "fps": 213.706,
+     "frame_ms_p50": 2.944,
+     "frame_ms_p95": 4.189,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 1.1816,
+     "status": "ok",
+     "fps": 203.108,
+     "frame_ms_p50": 3.059,
+     "frame_ms_p95": 3.985,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1280,
+      "height": 720
+     }
+    }
+   ],
+   "median_fps": 213.706,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "resize",
+    "group": "cpu_render"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "0",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 10.0609,
+   "status": "ok",
+   "fps": 23.855,
+   "frame_ms_p50": 38.674,
+   "frame_ms_p95": 52.261,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 9.9779,
+     "status": "ok",
+     "fps": 24.053,
+     "frame_ms_p50": 38.94,
+     "frame_ms_p95": 50.295,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 10.0609,
+     "status": "ok",
+     "fps": 23.855,
+     "frame_ms_p50": 38.674,
+     "frame_ms_p95": 52.261,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 24.053,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "grade",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 10.0302,
+   "status": "ok",
+   "fps": 23.928,
+   "frame_ms_p50": 39.43,
+   "frame_ms_p95": 50.845,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 10.0385,
+     "status": "ok",
+     "fps": 23.908,
+     "frame_ms_p50": 38.614,
+     "frame_ms_p95": 51.836,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 10.0302,
+     "status": "ok",
+     "fps": 23.928,
+     "frame_ms_p50": 39.43,
+     "frame_ms_p95": 50.845,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 23.928,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "grade",
+    "group": "forced_gpu"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "1",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 140.7539,
+   "status": "ok",
+   "fps": 1.705,
+   "frame_ms_p50": 576.621,
+   "frame_ms_p95": 650.967,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 138.1724,
+     "status": "ok",
+     "fps": 1.737,
+     "frame_ms_p50": 563.933,
+     "frame_ms_p95": 645.401,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 140.7539,
+     "status": "ok",
+     "fps": 1.705,
+     "frame_ms_p50": 576.621,
+     "frame_ms_p95": 650.967,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 1.737,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "grade",
+    "group": "cpu_render"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "0",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 25.4596,
+   "status": "ok",
+   "fps": 9.427,
+   "frame_ms_p50": 103.31,
+   "frame_ms_p95": 118.459,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 26.5255,
+     "status": "ok",
+     "fps": 9.048,
+     "frame_ms_p50": 107.021,
+     "frame_ms_p95": 124.752,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 25.4596,
+     "status": "ok",
+     "fps": 9.427,
+     "frame_ms_p50": 103.31,
+     "frame_ms_p95": 118.459,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 9.427,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "blur",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 26.4719,
+   "status": "ok",
+   "fps": 9.066,
+   "frame_ms_p50": 107.43,
+   "frame_ms_p95": 125.66,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 25.1014,
+     "status": "ok",
+     "fps": 9.561,
+     "frame_ms_p50": 101.641,
+     "frame_ms_p95": 119.183,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 26.4719,
+     "status": "ok",
+     "fps": 9.066,
+     "frame_ms_p50": 107.43,
+     "frame_ms_p95": 125.66,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 9.561,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "blur",
+    "group": "forced_gpu"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "1",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 25.6585,
+   "status": "ok",
+   "fps": 9.354,
+   "frame_ms_p50": 103.162,
+   "frame_ms_p95": 124.5,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 25.0264,
+     "status": "ok",
+     "fps": 9.59,
+     "frame_ms_p50": 101.705,
+     "frame_ms_p95": 117.48,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 25.6585,
+     "status": "ok",
+     "fps": 9.354,
+     "frame_ms_p50": 103.162,
+     "frame_ms_p95": 124.5,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 9.59,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "blur",
+    "group": "cpu_render"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "0",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 16.8596,
+   "status": "ok",
+   "fps": 14.235,
+   "frame_ms_p50": 66.479,
+   "frame_ms_p95": 85.278,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 17.1023,
+     "status": "ok",
+     "fps": 14.033,
+     "frame_ms_p50": 67.386,
+     "frame_ms_p95": 84.072,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 16.8596,
+     "status": "ok",
+     "fps": 14.235,
+     "frame_ms_p50": 66.479,
+     "frame_ms_p95": 85.278,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 14.235,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "two_layer",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 16.3778,
+   "status": "ok",
+   "fps": 14.654,
+   "frame_ms_p50": 64.288,
+   "frame_ms_p95": 81.193,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 16.6452,
+     "status": "ok",
+     "fps": 14.419,
+     "frame_ms_p50": 65.461,
+     "frame_ms_p95": 83.476,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 16.3778,
+     "status": "ok",
+     "fps": 14.654,
+     "frame_ms_p50": 64.288,
+     "frame_ms_p95": 81.193,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 14.654,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "two_layer",
+    "group": "forced_gpu"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "1",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 46.1632,
+   "status": "ok",
+   "fps": 5.199,
+   "frame_ms_p50": 186.783,
+   "frame_ms_p95": 212.702,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 46.7057,
+     "status": "ok",
+     "fps": 5.139,
+     "frame_ms_p50": 190.233,
+     "frame_ms_p95": 215.906,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 46.1632,
+     "status": "ok",
+     "fps": 5.199,
+     "frame_ms_p50": 186.783,
+     "frame_ms_p95": 212.702,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 5.199,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "two_layer",
+    "group": "cpu_render"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "0",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 3.584,
+   "status": "ok",
+   "fps": 66.965,
+   "frame_ms_p50": 6.158,
+   "frame_ms_p95": 54.434,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 3.6387,
+     "status": "ok",
+     "fps": 65.958,
+     "frame_ms_p50": 6.161,
+     "frame_ms_p95": 55.423,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 3.584,
+     "status": "ok",
+     "fps": 66.965,
+     "frame_ms_p50": 6.158,
+     "frame_ms_p95": 54.434,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 66.965,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "transition",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 6.8274,
+   "status": "ok",
+   "fps": 35.153,
+   "frame_ms_p50": 6.181,
+   "frame_ms_p95": 55.967,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 3.5997,
+     "status": "ok",
+     "fps": 66.671,
+     "frame_ms_p50": 6.137,
+     "frame_ms_p95": 52.631,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 6.8274,
+     "status": "ok",
+     "fps": 35.153,
+     "frame_ms_p50": 6.181,
+     "frame_ms_p95": 55.967,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 66.671,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "transition",
+    "group": "forced_gpu"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "1",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  },
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 6.393,
+   "status": "ok",
+   "fps": 37.541,
+   "frame_ms_p50": 6.142,
+   "frame_ms_p95": 173.254,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "h264",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 6.3444,
+     "status": "ok",
+     "fps": 37.828,
+     "frame_ms_p50": 6.166,
+     "frame_ms_p95": 172.627,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 6.393,
+     "status": "ok",
+     "fps": 37.541,
+     "frame_ms_p50": 6.142,
+     "frame_ms_p95": 173.254,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "h264",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 37.828,
+   "config": {
+    "source": "h264",
+    "codec": "h264",
+    "scenario": "transition",
+    "group": "cpu_render"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "0",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  }
+ ]
+}

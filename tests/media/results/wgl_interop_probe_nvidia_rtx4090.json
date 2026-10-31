@@ -1,0 +1,62 @@
+{
+  "date": "2026-09-12T11:31:50",
+  "purpose": "W1-02 WGL_NV_DX_interop probe (K-W2 evidence)",
+  "dxgi": {
+    "probe_ok": true,
+    "reason": "ok",
+    "primary_vendor": "nvidia",
+    "adapters": [
+      {
+        "description": "NVIDIA GeForce RTX 4090",
+        "vendor_id": "0x10DE",
+        "device_id": "0x2684",
+        "dedicated_video_memory_mb": 24138,
+        "vendor_name": "nvidia",
+        "adapter_luid": "00011A8E-00000000"
+      },
+      {
+        "description": "Intel(R) UHD Graphics 770",
+        "vendor_id": "0x8086",
+        "device_id": "0xA780",
+        "dedicated_video_memory_mb": 128,
+        "vendor_name": "intel",
+        "adapter_luid": "00012C3B-00000000"
+      },
+      {
+        "description": "NVIDIA GeForce RTX 4090",
+        "vendor_id": "0x10DE",
+        "device_id": "0x2684",
+        "dedicated_video_memory_mb": 24138,
+        "vendor_name": "nvidia",
+        "adapter_luid": "0001CF5A-00000000"
+      },
+      {
+        "description": "Microsoft Basic Render Driver",
+        "vendor_id": "0x1414",
+        "device_id": "0x008C",
+        "dedicated_video_memory_mb": 0,
+        "vendor_name": "unknown",
+        "adapter_luid": "00012BCD-00000000"
+      }
+    ]
+  },
+  "gl_context": {
+    "gl_version": "3.3.0 NVIDIA 610.88",
+    "gl_renderer": "NVIDIA GeForce RTX 4090/PCIe/SSE2",
+    "gl_vendor": "NVIDIA Corporation",
+    "requested_version": [
+      4,
+      6
+    ]
+  },
+  "wgl_extensions": {
+    "nv_dx_interop_any": true,
+    "count": 32
+  },
+  "wgl_dx_interop": {
+    "open_device_fn_ptr": true,
+    "d3d11_create_device_hr": "0x00000000",
+    "dx_open_device_nv": true
+  },
+  "verdict": "interop_open_ok"
+}

@@ -1,0 +1,933 @@
+{
+  "nodes": {
+    "blur": {
+      "title": "Sfocatura",
+      "description": "Sfocatura multi-tipo con controllo per canale",
+      "blur_type": {
+        "box": "Sfocatura quadrata",
+        "gaussian": "Sfocatura gaussiana",
+        "bilateral": "Sfocatura superficie (bilaterale)",
+        "motion": "Sfocatura movimento",
+        "bokeh": "Sfocatura lente (bokeh)"
+      },
+      "edge_policy": {
+        "clamp": "Limita",
+        "wrap": "Avvolgi",
+        "mirror": "Specchia"
+      },
+      "quality": {
+        "fast": "Veloce",
+        "normal": "Normale",
+        "high": "Alta"
+      },
+      "aperture_blades": {
+        "circle": "Cerchio",
+        "5": "5 lame",
+        "6": "6 lame",
+        "8": "8 lame"
+      },
+      "params": {
+        "blur_type": "Tipo sfocatura",
+        "radius_x": "Raggio X",
+        "radius_y": "Raggio Y",
+        "radius": "Raggio",
+        "angle": "Angolo",
+        "motion_source": "Sorgente movimento",
+        "shutter": "Otturatore",
+        "edge_preserve": "Conservazione bordi",
+        "aperture_blades": "Lame del diaframma",
+        "anamorphic": "Anamorfica",
+        "highlight_gain": "Guadagno alte luci",
+        "edge_policy": "Politica bordi",
+        "quality": "Qualità",
+        "channel_r": "Canale rosso",
+        "channel_g": "Canale verde",
+        "channel_b": "Canale blu",
+        "channel_a": "Canale alfa",
+        "mix": "Miscela",
+        "process_alpha": "Elabora alfa"
+      }
+    },
+    "transform": {
+      "title": "Trasforma",
+      "pivot_mode": {
+        "center": "Centro",
+        "custom": "Personalizzato"
+      },
+      "filter": {
+        "linear": "Lineare (bilineare)",
+        "nearest": "Vicino (bordo duro)"
+      },
+      "params": {
+        "translate_x": "Trasla X",
+        "translate_y": "Trasla Y",
+        "translate": "Traslazione",
+        "scale_x": "Scala X",
+        "scale_y": "Scala Y",
+        "scale": "Scala",
+        "rotation": "Rotazione",
+        "pivot_mode": "Modalità perno",
+        "pivot_x": "Perno X",
+        "pivot_y": "Perno Y",
+        "pivot": "Perno",
+        "filter": "Filtro"
+      }
+    },
+    "constant": {
+      "title": "Costante",
+      "mode": {
+        "solid": "Tinta unita",
+        "checker": "Scacchiera",
+        "gradient": "Gradiente lineare",
+        "radial": "Gradiente radiale"
+      },
+      "params": {
+        "width": "Larghezza",
+        "height": "Altezza",
+        "mode": "Modalità",
+        "color_r": "Colore R",
+        "color_g": "Colore G",
+        "color_b": "Colore B",
+        "color_a": "Colore A",
+        "color2_r": "Colore 2 R",
+        "color2_g": "Colore 2 G",
+        "color2_b": "Colore 2 B",
+        "color2_a": "Colore 2 A",
+        "checker_size": "Dimensione casella",
+        "start_x": "Inizio X",
+        "start_y": "Inizio Y",
+        "start": "Inizio",
+        "end_x": "Fine X",
+        "end_y": "Fine Y",
+        "end": "Fine",
+        "center_x": "Centro X",
+        "center_y": "Centro Y",
+        "center": "Centro",
+        "radial_radius": "Raggio radiale",
+        "feather": "Sfumatura",
+        "format_name": "Formato",
+        "size_preset": "Preset dimensione",
+        "color_hex": "Colore hex",
+        "color2_hex": "Colore 2 hex"
+      }
+    },
+    "merge": {
+      "title": "Unisci",
+      "blend_mode": {
+        "over": "Normale (Over)",
+        "under": "Under",
+        "add": "Somma",
+        "subtract": "Sottrazione",
+        "multiply": "Moltiplica",
+        "screen": "Schermo",
+        "overlay": "Sovrapposizione",
+        "difference": "Differenza",
+        "divide": "Divisione",
+        "min": "Min",
+        "max": "Max",
+        "average": "Media",
+        "copy": "Copia",
+        "stencil": "Stencil",
+        "mask": "Maschera",
+        "in": "In",
+        "out": "Out",
+        "atop": "Atop",
+        "xor": "Xor",
+        "color-dodge": "Scherma colore",
+        "color-burn": "Brucia colore",
+        "soft-light": "Luce soffusa",
+        "hard-light": "Luce diretta",
+        "linear-light": "Luce lineare",
+        "hue": "Tonalità",
+        "saturation": "Saturazione",
+        "color": "Colore",
+        "luminosity": "Luminosità"
+      },
+      "format_policy": {
+        "from_b": "Da B",
+        "from_a": "Da A",
+        "larger": "Maggiore",
+        "smaller": "Minore"
+      },
+      "bbox_policy": {
+        "union": "Unione",
+        "intersection": "Intersezione",
+        "a": "A",
+        "b": "B"
+      },
+      "alpha_policy": {
+        "auto": "Auto",
+        "premult_force": "Forza premoltiplicata",
+        "straight_force": "Forza dritta",
+        "output_straight": "Uscita dritta"
+      },
+      "mask_channel": {
+        "luma": "Luminanza",
+        "red": "Rosso",
+        "green": "Verde",
+        "blue": "Blu",
+        "alpha": "Alfa"
+      },
+      "params": {
+        "blend_mode": "Modalità fusione",
+        "opacity": "Opacità",
+        "mix": "Miscela",
+        "format_policy": "Politica formato",
+        "bbox_policy": "Politica riquadro di delimitazione",
+        "alpha_policy": "Politica alfa",
+        "alpha_clamp": "Limitazione alfa",
+        "mask_channel": "Canale maschera",
+        "mask_invert": "Inverti maschera"
+      }
+    },
+    "crop": {
+      "title": "Ritaglio",
+      "outside": {
+        "black": "Nero",
+        "transparent": "Trasparente",
+        "repeat": "Ripeti",
+        "mirror": "Specchia"
+      },
+      "params": {
+        "x": "X",
+        "y": "Y",
+        "width": "Larghezza",
+        "height": "Altezza",
+        "reformat": "Ridimensiona area di disegno",
+        "outside": "Riempimento esterno"
+      }
+    },
+    "cornerpin": {
+      "title": "Corner Pin",
+      "interpolation": {
+        "bilinear": "Bilineare",
+        "bicubic": "Bicubica"
+      },
+      "params": {
+        "to1_x": "Verso 1 X",
+        "to1_y": "Verso 1 Y",
+        "to2_x": "Verso 2 X",
+        "to2_y": "Verso 2 Y",
+        "to3_x": "Verso 3 X",
+        "to3_y": "Verso 3 Y",
+        "to4_x": "Verso 4 X",
+        "to4_y": "Verso 4 Y",
+        "from1_x": "Da 1 X",
+        "from1_y": "Da 1 Y",
+        "from2_x": "Da 2 X",
+        "from2_y": "Da 2 Y",
+        "from3_x": "Da 3 X",
+        "from3_y": "Da 3 Y",
+        "from4_x": "Da 4 X",
+        "from4_y": "Da 4 Y",
+        "interpolation": "Filtro"
+      }
+    },
+    "reformat": {
+      "title": "Riformatta",
+      "format_mode": {
+        "preset": "Preset",
+        "custom": "Personalizzato"
+      },
+      "preset": {
+        "SD NTSC": "SD NTSC",
+        "SD PAL": "SD PAL",
+        "HD 720": "HD 720",
+        "HD 1080": "HD 1080",
+        "HD 1080 Anamorphic": "HD 1080 anamorfico",
+        "UHD 4K": "UHD 4K",
+        "DCI 4K": "DCI 4K",
+        "UHD 8K": "UHD 8K",
+        "Square 1024": "Quadrato 1024",
+        "Square 2048": "Quadrato 2048",
+        "Square 4096": "Quadrato 4096"
+      },
+      "resize_mode": {
+        "no_resize": "Nessun ridimensionamento",
+        "fit": "Adatta (letterbox)",
+        "fill": "Riempi (ritaglio)",
+        "distort": "Distorci (stira)",
+        "center_crop": "Ritaglio centrato"
+      },
+      "filter": {
+        "nearest": "Vicino (bordo duro)",
+        "linear": "Lineare (bilineare)",
+        "cubic": "Cubica (bicubica)",
+        "lanczos": "Lanczos (nitida)"
+      },
+      "params": {
+        "format_mode": "Modalità",
+        "preset": "Preset",
+        "width": "Larghezza",
+        "height": "Altezza",
+        "resize_mode": "Modalità ridimensionamento",
+        "filter": "Filtro",
+        "preserve_bbox": "Conserva riquadro"
+      }
+    },
+    "glow": {
+      "title": "Bagliore",
+      "quality": {
+        "fast": "Veloce",
+        "normal": "Normale",
+        "high": "Alta"
+      },
+      "params": {
+        "threshold": "Soglia",
+        "radius": "Raggio",
+        "intensity": "Intensità",
+        "tint_r": "Tinta R",
+        "tint_g": "Tinta G",
+        "tint_b": "Tinta B",
+        "mix": "Miscela",
+        "quality": "Qualità"
+      }
+    },
+    "shuffle": {
+      "title": "Rimappa canali",
+      "r_from": {
+        "r": "Rosso",
+        "g": "Verde",
+        "b": "Blu",
+        "a": "Alfa",
+        "zero": "Zero",
+        "one": "Uno",
+        "luma": "Luma"
+      },
+      "g_from": {
+        "r": "Rosso",
+        "g": "Verde",
+        "b": "Blu",
+        "a": "Alfa",
+        "zero": "Zero",
+        "one": "Uno",
+        "luma": "Luma"
+      },
+      "b_from": {
+        "r": "Rosso",
+        "g": "Verde",
+        "b": "Blu",
+        "a": "Alfa",
+        "zero": "Zero",
+        "one": "Uno",
+        "luma": "Luma"
+      },
+      "a_from": {
+        "r": "Rosso",
+        "g": "Verde",
+        "b": "Blu",
+        "a": "Alfa",
+        "zero": "Zero",
+        "one": "Uno",
+        "luma": "Luma"
+      },
+      "params": {
+        "r_from": "Rosso da",
+        "g_from": "Verde da",
+        "b_from": "Blu da",
+        "a_from": "Alfa da"
+      }
+    },
+    "text": {
+      "title": "Testo",
+      "description": "Livello di testo (carattere, dimensione, allineamento, contorno, ombra)",
+      "per_char_mode": {
+        "fade": "Dissolvenza",
+        "slide_up": "Scorrimento verso l'alto",
+        "slide_left": "Scorrimento a sinistra",
+        "scale_pop": "Scatto di scala",
+        "rotate_in": "Entrata con rotazione",
+        "typewriter": "Macchina da scrivere"
+      },
+      "path_direction": {
+        "up": "Arco verso l'alto",
+        "down": "Arco verso il basso"
+      },
+      "params": {
+        "text": "Testo",
+        "caption_input_enabled": "Ingresso sottotitoli",
+        "caption_input_field": "Campo sottotitoli",
+        "font_family": "Carattere",
+        "font_size": "Dimensione",
+        "font_weight": "Peso",
+        "italic": "Corsivo",
+        "halign": "Allineam. orizz.",
+        "valign": "Allineam. vert.",
+        "letter_spacing": "Spaziatura caratteri",
+        "line_spacing": "Interlinea",
+        "per_char_enable": "Animazione per carattere",
+        "per_char_mode": "Modalità animazione",
+        "per_char_delay": "Sfasamento (fotogrammi)",
+        "per_char_overlap": "Sovrapposizione",
+        "per_char_slide_distance": "Distanza scorrimento",
+        "per_char_rotation": "Rotazione d'ingresso",
+        "per_char_scale_from": "Scala iniziale",
+        "path_enable": "Disponi sul tracciato",
+        "path_radius": "Raggio arco",
+        "path_arc_degrees": "Angolo arco (0=auto)",
+        "path_direction": "Direzione arco",
+        "translate_x": "Trasla X",
+        "translate_y": "Trasla Y",
+        "scale_x": "Scala X",
+        "scale_y": "Scala Y",
+        "rotation": "Rotazione",
+        "pivot_mode": "Modalità perno",
+        "pivot_x": "Perno X",
+        "pivot_y": "Perno Y",
+        "filter": "Filtro",
+        "fill_r": "Riempimento R",
+        "fill_g": "Riempimento G",
+        "fill_b": "Riempimento B",
+        "fill_a": "Riempimento A",
+        "outline_enable": "Contorno",
+        "outline_width": "Spessore contorno",
+        "outline_r": "Contorno R",
+        "outline_g": "Contorno G",
+        "outline_b": "Contorno B",
+        "outline_a": "Contorno A",
+        "shadow_enable": "Ombra",
+        "shadow_offset_x": "Scostamento ombra X",
+        "shadow_offset_y": "Scostamento ombra Y",
+        "shadow_blur": "Sfocatura ombra",
+        "shadow_r": "Ombra R",
+        "shadow_g": "Ombra G",
+        "shadow_b": "Ombra B",
+        "shadow_a": "Ombra A"
+      }
+    },
+    "paint": {
+      "title": "Pittura",
+      "description": "Livello di pennellate (rifinitura clone, gomma, pennello pieno)",
+      "params": {
+        "strokes": "Pennellate"
+      }
+    },
+    "particle": {
+      "title": "Particelle",
+      "description": "Emettitore di particelle 2D deterministico e senza stato (gravità/vento/turbolenza)"
+    },
+    "mesh_warp": {
+      "title": "Deformazione a rete",
+      "description": "Deformazione a griglia: trascina i punti del reticolo per uno spostamento locale"
+    },
+    "keyer": {
+      "title": "Keyer",
+      "keyer_mode": {
+        "auto": "Auto",
+        "chroma": "Croma",
+        "luma": "Luma",
+        "difference": "Differenza"
+      },
+      "despill_method": {
+        "none": "Nessuno",
+        "subtract": "Sottrazione",
+        "scale": "Riduzione"
+      },
+      "output_mode": {
+        "result": "Risultato",
+        "matte": "Matte"
+      },
+      "params": {
+        "keyer_mode": "Modalità keyer",
+        "screen_color": "Colore schermo",
+        "screen_color_r": "Schermo R",
+        "screen_color_g": "Schermo G",
+        "screen_color_b": "Schermo B",
+        "screen_color_hex": "Schermo hex",
+        "screen_balance": "Bilanciamento schermo",
+        "clip_black": "Clip nero",
+        "clip_white": "Clip bianco",
+        "gain": "Guadagno",
+        "softness": "Morbidezza",
+        "alpha_offset": "Scostamento alfa",
+        "despill_strength": "Intensità despill",
+        "despill_method": "Metodo despill",
+        "invert": "Inverti",
+        "output_mode": "Modalità uscita"
+      }
+    },
+    "light_wrap": {
+      "title": "Light Wrap",
+      "params": {
+        "width": "Larghezza wrap",
+        "intensity": "Intensità",
+        "brightness": "Luminosità",
+        "falloff": "Attenuazione",
+        "source_alpha": "Usa alfa del primo piano"
+      }
+    },
+    "relight": {
+      "title": "Riilluminazione",
+      "light_type": {
+        "point": "Luce puntuale",
+        "directional": "Direzionale"
+      },
+      "params": {
+        "light_type": "Tipo di luce",
+        "light_position_x": "Posizione luce X",
+        "light_position_y": "Posizione luce Y",
+        "light_position_z": "Posizione luce Z",
+        "light_direction_x": "Direzione luce X",
+        "light_direction_y": "Direzione luce Y",
+        "light_direction_z": "Direzione luce Z",
+        "intensity": "Intensità",
+        "color": "Colore luce",
+        "ambient": "Ambiente",
+        "normal_decode": "Decodifica normali",
+        "normal_flip_y": "Capovolgi Y normali",
+        "normal_decode_options": {
+          "encoded": "Codificate [0,1]",
+          "signed": "Con segno (-1~1)"
+        }
+      }
+    },
+    "cryptomatte_select": {
+      "title": "Selezione Cryptomatte",
+      "id_encoding": {
+        "rgba24": "ID allocatore RGBA24",
+        "float_r": "Float R (Cryptomatte standard)"
+      },
+      "output_mode": {
+        "matte": "Matte",
+        "isolate": "Isola"
+      },
+      "params": {
+        "id_encoding": "Codifica ID",
+        "output_mode": "Modalità uscita"
+      }
+    },
+    "zblur": {
+      "title": "ZBlur",
+      "depth_units": {
+        "normalized": "Normalizzate",
+        "world": "Distanza nel mondo"
+      },
+      "quality": {
+        "fast": "Veloce",
+        "normal": "Normale",
+        "high": "Alta"
+      },
+      "params": {
+        "focus_distance": "Distanza messa a fuoco",
+        "focal_range": "Intervallo focale",
+        "max_blur_radius": "Raggio massimo sfocatura",
+        "bokeh_toggle": "Campionamento diaframma",
+        "depth_units": "Unità profondità",
+        "near": "Vicino",
+        "far": "Lontano",
+        "quality": "Qualità"
+      }
+    },
+    "fog": {
+      "title": "Nebbia",
+      "depth_units": {
+        "normalized": "Normalizzate",
+        "world": "Distanza nel mondo"
+      },
+      "params": {
+        "color": "Colore nebbia",
+        "density": "Densità",
+        "start": "Inizio",
+        "end": "Fine",
+        "depth_units": "Unità profondità",
+        "near": "Vicino",
+        "far": "Lontano"
+      }
+    },
+    "depth_matte": {
+      "title": "Matte di profondità",
+      "depth_units": {
+        "normalized": "Normalizzate",
+        "world": "Distanza nel mondo"
+      },
+      "params": {
+        "range_start": "Inizio intervallo",
+        "range_end": "Fine intervallo",
+        "feather": "Sfumatura",
+        "depth_units": "Unità profondità",
+        "near": "Vicino",
+        "far": "Lontano"
+      }
+    },
+    "godrays": {
+      "title": "Raggi volumetrici",
+      "params": {
+        "light_x": "Luce X",
+        "light_y": "Luce Y",
+        "color": "Colore luce",
+        "density": "Densità",
+        "weight": "Peso",
+        "decay": "Attenuazione",
+        "samples": "Campioni"
+      }
+    },
+    "chromatic_aberration": {
+      "title": "Aberrazione cromatica",
+      "params": {
+        "offset_r": "Scostamento R",
+        "offset_b": "Scostamento B",
+        "center_x": "Centro X",
+        "center_y": "Centro Y",
+        "edge_boost": "Potenziamento bordi"
+      }
+    },
+    "vignette": {
+      "title": "Vignettatura",
+      "params": {
+        "amount": "Quantità",
+        "radius": "Raggio",
+        "softness": "Morbidezza",
+        "roundness": "Rotondità"
+      }
+    },
+    "lens_flare": {
+      "title": "riflesso dell'obiettivo",
+      "blend_mode": {
+        "screen": "Schermo",
+        "add": "Somma"
+      },
+      "params": {
+        "light_x": "Luce X",
+        "light_y": "Luce Y",
+        "color": "Colore luce",
+        "intensity": "Intensità",
+        "ghost_count": "Numero fantasmi",
+        "ghost_spacing": "Spaziatura fantasmi",
+        "ghost_decay": "Attenuazione fantasmi",
+        "ghost_size": "Dimensione fantasmi",
+        "halo_radius": "Raggio alone",
+        "halo_strength": "Intensità alone",
+        "streak_strength": "Intensità striatura",
+        "streak_width": "Larghezza striatura",
+        "use_occlusion": "Consapevole dell'occlusione",
+        "blend_mode": "Modalità fusione"
+      }
+    },
+    "deflicker": {
+      "title": "Anti-sfarfallio",
+      "window": {
+        "3": "3 fotogrammi",
+        "5": "5 fotogrammi",
+        "7": "7 fotogrammi",
+        "9": "9 fotogrammi"
+      },
+      "mode": {
+        "per_pixel": "Per pixel",
+        "global_gain": "Guadagno globale"
+      },
+      "params": {
+        "window": "Finestra",
+        "percentile": "Percentile",
+        "luma_only": "Solo luma",
+        "mode": "Modalità"
+      }
+    },
+    "ai_gen_expand": {
+      "title": "Espansione gen IA",
+      "params": {
+        "prompt": "Prompt",
+        "negative_prompt": "Negativo",
+        "model": "Modello",
+        "seed": "Seme",
+        "strength": "Intensità",
+        "expand_left": "Espandi a sinistra",
+        "expand_top": "Espandi in alto",
+        "expand_right": "Espandi a destra",
+        "expand_bottom": "Espandi in basso"
+      }
+    },
+    "frame_interpolate": {
+      "title": "Interpolazione fotogrammi",
+      "params": {
+        "t": "Interpolazione t",
+        "hd_mode": "Tiling HD"
+      }
+    },
+    "face_track": {
+      "title": "Tracking volto",
+      "params": {
+        "face_index": "Indice volto"
+      }
+    },
+    "face_smooth": {
+      "title": "Levigatura volto",
+      "params": {
+        "strength": "Intensità",
+        "radius": "Raggio",
+        "luminance_only": "Solo luma"
+      }
+    },
+    "pointcloud3d": {
+      "title": "Nuvola di punti",
+      "source": {
+        "file": "File",
+        "tracker": "Dal tracker"
+      },
+      "color_mode": {
+        "flat": "Piatto",
+        "vertex_color": "Colore vertice",
+        "depth_ramp": "Rampa di profondità"
+      },
+      "params": {
+        "source": "Sorgente",
+        "file_path": "Percorso file",
+        "output_width": "Larghezza uscita",
+        "output_height": "Altezza uscita",
+        "point_size": "Dimensione punto",
+        "color_mode": "Modalità colore",
+        "point_color": "Colore punto",
+        "opacity": "Opacità"
+      }
+    },
+    "volume3d": {
+      "title": "Volume 3D",
+      "params": {
+        "file_path": "File volume",
+        "density_multiplier": "Moltiplicatore densità",
+        "absorption_color": "Colore assorbimento",
+        "step_count": "Numero passi",
+        "output_width": "Larghezza uscita",
+        "output_height": "Altezza uscita"
+      }
+    },
+    "chroma_keyer": {
+      "title": "Keyer croma",
+      "output_mode": {
+        "result": "Risultato",
+        "matte": "Matte"
+      },
+      "params": {
+        "screen_color_r": "Schermo R",
+        "screen_color_g": "Schermo G",
+        "screen_color_b": "Schermo B",
+        "tolerance": "Tolleranza",
+        "softness": "Morbidezza",
+        "despill": "Despill",
+        "edge_width": "Larghezza bordo",
+        "output_mode": "Modalità uscita"
+      }
+    },
+    "luma_keyer": {
+      "title": "Keyer luma",
+      "output_mode": {
+        "result": "Risultato",
+        "matte": "Matte"
+      },
+      "params": {
+        "black_point": "Punto nero",
+        "white_point": "Punto bianco",
+        "softness": "Morbidezza",
+        "invert": "Inverti",
+        "output_mode": "Modalità uscita"
+      }
+    },
+    "camera3d": {
+      "title": "Fotocamera",
+      "params": {
+        "camera_mode": "Modalità fotocamera",
+        "cam_fov": "Campo visivo",
+        "cam_focal_length": "Lunghezza focale (mm)",
+        "cam_sensor_size": "Dimensione sensore (mm)",
+        "cam_near": "Clip vicino",
+        "cam_far": "Clip lontano",
+        "cam_lens_shift_x": "Spostamento lente X",
+        "cam_lens_shift_y": "Spostamento lente Y",
+        "cam_exposure": "Esposizione (EV)",
+        "cam_focus_distance": "Distanza messa a fuoco",
+        "cam_fstop": "Diaframma (f-stop)",
+        "cam_dof_enable": "Profondità di campo",
+        "cam_show_safe_areas": "Aree di sicurezza"
+      }
+    },
+    "light3d": {
+      "title": "Luce",
+      "light_type": {
+        "directional": "Direzionale",
+        "point": "Puntuale",
+        "spot": "Conica",
+        "ambient": "Ambiente"
+      },
+      "params": {
+        "light_type": "Tipo di luce",
+        "light_pos_x": "Posizione X",
+        "light_pos_y": "Posizione Y",
+        "light_pos_z": "Posizione Z",
+        "light_dir_x": "Direzione X",
+        "light_dir_y": "Direzione Y",
+        "light_dir_z": "Direzione Z",
+        "light_color_r": "Colore R",
+        "light_color_g": "Colore G",
+        "light_color_b": "Colore B",
+        "light_intensity": "Intensità",
+        "light_range": "Portata",
+        "light_inner_cone": "Cono interno",
+        "light_outer_cone": "Cono esterno",
+        "hdri_path": "File HDRI",
+        "use_ibl": "Usa IBL",
+        "env_intensity": "Intensità ambiente",
+        "icon_pos_x": "Pos. icona X",
+        "icon_pos_y": "Pos. icona Y",
+        "icon_pos_z": "Pos. icona Z"
+      }
+    },
+    "model3d": {
+      "title": "Modello 3D",
+      "size_mode": {
+        "fit_to_scene": "Adatta alla scena",
+        "real_world": "Scala reale"
+      },
+      "source_unit": {
+        "m": "Metri",
+        "cm": "Centimetri",
+        "mm": "Millimetri",
+        "in": "Pollici",
+        "ft": "Piedi",
+        "custom": "Personalizzata"
+      },
+      "axis_mode": {
+        "auto": "Auto",
+        "y_up": "Y in alto",
+        "z_up": "Z in alto",
+        "none": "Nessuna"
+      },
+      "uv_v_mode": {
+        "auto": "Auto",
+        "original": "Originale",
+        "flip": "Capovolgi V"
+      },
+      "anim_play_mode": {
+        "loop": "Ciclo",
+        "pingpong": "Ping-pong",
+        "once": "Una volta",
+        "clamp": "Blocca"
+      },
+      "material_mode": {
+        "imported": "Importato",
+        "override": "Sostituito",
+        "mix": "Miscela"
+      },
+      "normal_format": {
+        "OpenGL": "OpenGL",
+        "DirectX": "DirectX"
+      },
+      "orm_layout": {
+        "glTF ORM": "glTF ORM",
+        "separate": "Separate"
+      },
+      "texture_filter": {
+        "nearest": "Vicino",
+        "linear": "Lineare",
+        "mipmap": "Mipmap"
+      },
+      "texture_wrap": {
+        "repeat": "Ripeti",
+        "clamp": "Blocca",
+        "mirror": "Specchia"
+      },
+      "viewport_lod_mode": {
+        "auto": "Auto",
+        "force_lod0": "Forza LOD 0",
+        "force_lod1": "Forza LOD 1",
+        "force_lod2": "Forza LOD 2"
+      },
+      "render_role": {
+        "solid": "Tinta unita",
+        "holdout": "Holdout",
+        "shadow_catcher": "Ricevitore ombre",
+        "matte": "Matte"
+      },
+      "params": {
+        "model_path": "File modello",
+        "use_imported_model": "Usa modello importato",
+        "size_mode": "Modalità dimensione",
+        "source_unit": "Unità sorgente",
+        "unit_scale": "Scala unità",
+        "axis_mode": "Modalità assi",
+        "uv_v_mode": "Modalità V UV",
+        "object_pos_x": "Posizione X",
+        "object_pos_y": "Posizione Y",
+        "object_pos_z": "Posizione Z",
+        "object_rot_x": "Rotazione X",
+        "object_rot_y": "Rotazione Y",
+        "object_rot_z": "Rotazione Z",
+        "mesh_scale": "Scala",
+        "anim_enabled": "Animazione abilitata",
+        "anim_time": "Tempo animazione",
+        "anim_speed": "Velocità animazione",
+        "anim_clip": "Clip animazione",
+        "anim_play_mode": "Modalità riproduzione",
+        "anim_clip_name": "Nome clip",
+        "anim_time_offset": "Scostamento temporale",
+        "anim_start_frame": "Fotogramma iniziale",
+        "anim_end_frame": "Fotogramma finale",
+        "anim_fps": "FPS animazione",
+        "material_mode": "Modalità materiale",
+        "normal_format": "Formato normali",
+        "orm_layout": "Disposizione ORM",
+        "texture_filter": "Filtro texture",
+        "texture_wrap": "Avvolgimento texture",
+        "emissive_intensity": "Intensità emissiva",
+        "viewport_lod_mode": "LOD viewport",
+        "render_role": "Ruolo di rendering",
+        "matte_id": "ID matte",
+        "shadow_intensity": "Intensità ombra",
+        "shadow_softness": "Morbidezza ombra"
+      }
+    },
+    "scene3d": {
+      "title": "Scena 3D",
+      "params": {
+        "width": "Larghezza",
+        "height": "Altezza"
+      }
+    }
+  },
+  "param_groups": {
+    "Blur": "Sfocatura",
+    "Channels": "Canali",
+    "Keying": "Keying",
+    "Screen": "Schermo",
+    "Matte": "Matte",
+    "Despill": "Despill",
+    "Output": "Uscita"
+  },
+  "channels": {
+    "label": "Canali"
+  },
+  "panel": {
+    "node_graph": "Grafo nodi",
+    "node_properties": "Proprietà nodo",
+    "performance": "Prestazioni",
+    "perf": "Prestazioni",
+    "composite_scopes": "Monitor",
+    "keyframes": "Keyframe",
+    "spline": "Spline",
+    "animation": "Animazione",
+    "import_report": "Report importazione",
+    "asset_dependency": "Dipendenze asset",
+    "scene_outliner": "Struttura scena",
+    "material": "Materiale"
+  },
+  "keyframes": {
+    "prev_kf": "Keyframe precedente",
+    "next_kf": "Keyframe successivo",
+    "fit": "Adatta intervallo temporale",
+    "zoom_in": "Zoom avanti",
+    "expand_all": "Espandi tutto",
+    "collapse_all": "Comprimi tutto",
+    "pan": "Sposta sull'indicatore di riproduzione",
+    "unit_time": "Tempo",
+    "unit_frame": "Fotogramma",
+    "unit_seconds": "Secondi",
+    "unit_timecode": "Timecode",
+    "empty": "Nessun parametro animato"
+  },
+  "spline": {
+    "empty": "Nessuna curva",
+    "fit": "Adatta curve",
+    "smooth": "Morbida",
+    "linear": "Lineare",
+    "flat": "Piatta",
+    "step": "Gradino/Blocco"
+  }
+}

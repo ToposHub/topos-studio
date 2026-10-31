@@ -1,0 +1,53 @@
+{
+  "date": "2026-09-08",
+  "build": "native/topos_codec/build/release",
+  "host": "macOS 15.3.1 x86_64",
+  "codec": {
+    "profile": "Image Preview",
+    "pixel_format": "YUV422",
+    "bit_depth": 10,
+    "entropy": "VLC",
+    "qp": 58,
+    "rdo": "off",
+    "target": [2048, 1080],
+    "warmup": 2,
+    "samples": 6,
+    "comparison": "same packet, same process, old target-size vs fixed-ratio reduced"
+  },
+  "results": [
+    {
+      "source": [4096, 2160],
+      "scale": "1/2",
+      "packet_bytes": 12272005,
+      "old_target_ms_p50": 92.15984000184108,
+      "old_target_fps_p50": 10.850713282271574,
+      "old_target_ms_p95": 98.71319500962272,
+      "reduced_ms_p50": 75.18490200163797,
+      "reduced_fps_p50": 13.300542707074543,
+      "reduced_ms_p95": 76.5956380055286,
+      "speedup": 1.2258
+    },
+    {
+      "source": [6144, 3240],
+      "scale": "1/3",
+      "packet_bytes": 27610930,
+      "old_target_ms_p50": 118.31346100370865,
+      "old_target_fps_p50": 8.452123634255395,
+      "old_target_ms_p95": 118.54031799884979,
+      "reduced_ms_p50": 117.24610000965185,
+      "reduced_fps_p50": 8.529068343343425,
+      "reduced_ms_p95": 117.44410199753474,
+      "speedup": 1.0091
+    }
+  ],
+  "interpretation": {
+    "implemented": [
+      "fixed-ratio 1/2, 1/3, 1/4, 1/8 output geometry",
+      "low-frequency coefficient materialization and inverse-transform pruning",
+      "AVX2/NEON sampled inverse entry points",
+      "cross-frame reduced batch API",
+      "caller-owned host-visible GPU surface contract"
+    ],
+    "remaining_bottleneck": "The current variable-length bitstream still consumes high-frequency run/level codewords for validation. A true entropy-skip path needs a versioned progressive/layered block syntax or independently length-delimited coefficient bands."
+  }
+}

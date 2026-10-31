@@ -1,0 +1,105 @@
+{
+  "component": "F14 hatching",
+  "method": "独立脚本（纯 math 模块，与 oracle/GLSL 无代码复用）+ 退化位手算（平坦黑白/密度端点/胞心位）；容差 1e-6。带几何：D=1-clamp(luma,0,1)，h=-0.06+(0.5+0.12)D，cov=1-smoothstep(h±0.06, |fract(b)-0.5|)，层 2 正交半密度概率并。",
+  "params_default": {
+    "line_spacing": 8.0,
+    "angle": 45.0,
+    "layers": "2",
+    "ink_color": [0.05, 0.05, 0.08],
+    "paper": 0.9,
+    "amount": 1.0
+  },
+  "vectors": [
+    {
+      "fixture": "flatwhite_8x8",
+      "pos": [3, 3],
+      "params": {},
+      "expected": [0.9, 0.9, 0.9],
+      "note": "平坦白（手算，位置无关）：D=0 → h=-0.06 → 全露白 cov=0 → out=paper"
+    },
+    {
+      "fixture": "flatblack_8x8",
+      "pos": [5, 5],
+      "params": {},
+      "expected": [0.05, 0.05, 0.08],
+      "note": "平坦黑（手算，位置无关）：D=1 → h=0.56 > 0.5+AA → 满幅墨 cov=1（两层并仍 1）→ out=ink_color"
+    },
+    {
+      "fixture": "flat018_8x8_s3a0",
+      "pos": [1, 1],
+      "params": {"line_spacing": 3.0, "angle": 0.0},
+      "expected": [0.05, 0.05, 0.08],
+      "note": "平坦灰 0.18、spacing 3、angle 0（手算）：D=0.82 → h=0.4484；(1,1) 双层 b=1.5/3=0.5 → cell=0 < h-AA → cov1=cov2=1 → 满墨——平坦灰阶也产生排线（区别 Edge_Ink_Outline 的钉住位）"
+    },
+    {
+      "fixture": "flat06_16x16",
+      "pos": [3, 7],
+      "params": {"angle": 0.0},
+      "expected": [0.45906582, 0.45906582, 0.4746282],
+      "note": "平坦灰 0.6、angle 0（半手算）：D=0.4 → h1=0.188，x=7 → cell1=0.4375 → cov1=0；层 2 D/2=0.2 → h2=0.064，y=3 → cell2=0.0625 → cov2=1-smoothstep(0.004,0.124,0.0625)=0.51875；并 cov=0.51875 → out=mix(paper, ink, 0.51875)"
+    },
+    {
+      "fixture": "vgrad16",
+      "pos": [5, 3],
+      "params": {"angle": 45.0},
+      "expected": [0.05081763, 0.05081763, 0.08078878],
+      "note": "垂直灰梯度（y/15）、angle 45：值 0.3333 → D=0.6667；双层部分覆盖率（脚本枚举）"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "desc": "layers=1 同位置无第二层 → 纯纸底",
+      "fixture": "flat06_16x16",
+      "pos": [3, 7],
+      "params": {"angle": 0.0, "layers": "1"},
+      "expected": [0.9, 0.9, 0.9],
+      "note": "手算：层 1 cov1=0（见主向量 4）→ out=paper——层数差量钉住（L2 同位=0.45906582）"
+    },
+    {
+      "desc": "amount=0.5 半强度（手算）",
+      "fixture": "flatwhite_8x8",
+      "pos": [3, 3],
+      "params": {"amount": 0.5},
+      "expected": [0.95, 0.95, 0.95],
+      "note": "out = 1.0 + (0.9-1.0)*0.5"
+    },
+    {
+      "desc": "paper 域参数（手算）",
+      "fixture": "flatwhite_8x8",
+      "pos": [3, 3],
+      "params": {"paper": 0.3},
+      "expected": [0.3, 0.3, 0.3],
+      "note": "平坦白输出 = paper 亮度域"
+    },
+    {
+      "desc": "ink_color 域参数（手算）",
+      "fixture": "flatblack_8x8",
+      "pos": [3, 3],
+      "params": {"ink_color": [0.6, 0.1, 0.1]},
+      "expected": [0.6, 0.1, 0.1],
+      "note": "平坦黑输出 = ink_color"
+    },
+    {
+      "desc": "HDR 超白端点（手算）",
+      "fixture": "flathdr12_8x8",
+      "pos": [3, 3],
+      "params": {},
+      "expected": [0.9, 0.9, 0.9],
+      "note": "luma 12 → clamp 1（仅几何参数域）→ D=0 → 全露白=纸底"
+    },
+    {
+      "desc": "负值端点（手算）",
+      "fixture": "flatneg_8x8",
+      "pos": [3, 3],
+      "params": {},
+      "expected": [0.05, 0.05, 0.08],
+      "note": "luma -0.25 → clamp 0 → D=1 → 满墨=ink_color"
+    },
+    {
+      "desc": "amount=0 恒等",
+      "params": {"amount": 0.0},
+      "expected": null,
+      "note": "任意输入（含 HDR/负值）精确恒等"
+    }
+  ]
+}

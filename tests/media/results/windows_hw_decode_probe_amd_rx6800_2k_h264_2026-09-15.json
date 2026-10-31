@@ -1,0 +1,121 @@
+{
+  "date": "2026-09-15T14:59:56",
+  "plan_item": "W2 hardware decoder capability probe (download path only)",
+  "os": "win32",
+  "source": {
+    "path": "tests\\test_videos\\2K_h264.mp4",
+    "codec": "h264",
+    "pix_fmt": "yuv420p",
+    "width": 1920,
+    "height": 1080
+  },
+  "protocol": "真实 PyAV open + 首 5 帧 decode；输出格式与耗时记录；不等于 D3D11 zero-copy",
+  "rows": [
+    {
+      "device": "none",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "nv12",
+      "elapsed_ms": 233.8
+    },
+    {
+      "device": "vdpau",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 98.3
+    },
+    {
+      "device": "cuda",
+      "status": "failed",
+      "frames": 0,
+      "output_format": null,
+      "elapsed_ms": 39.0,
+      "error": "PermissionError: [Errno 1] Operation not permitted"
+    },
+    {
+      "device": "vaapi",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 68.9
+    },
+    {
+      "device": "dxva2",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "nv12",
+      "elapsed_ms": 220.1
+    },
+    {
+      "device": "qsv",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 93.4
+    },
+    {
+      "device": "videotoolbox",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 67.1
+    },
+    {
+      "device": "d3d11va",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "nv12",
+      "elapsed_ms": 184.6
+    },
+    {
+      "device": "drm",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 95.8
+    },
+    {
+      "device": "opencl",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 67.5
+    },
+    {
+      "device": "mediacodec",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 69.6
+    },
+    {
+      "device": "vulkan",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 71.2
+    },
+    {
+      "device": "d3d12va",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "nv12",
+      "elapsed_ms": 576.8
+    },
+    {
+      "device": "amf",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 92.1
+    },
+    {
+      "device": "ohcodec",
+      "status": "ok",
+      "frames": 5,
+      "output_format": "yuv420p",
+      "elapsed_ms": 71.5
+    }
+  ]
+}

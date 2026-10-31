@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<TangentWave fileType="PanelMap" fileVersion="3.0">
+    <Panels>
+        <Panel type="Element-Mf">
+            <Mode id="0x00010004">
+                <ControlBank id="Trackerball">
+                    <Bank>
+                        <Control type="Encoder" number="0"><Mapping mode="Std"><Key>0x00310031</Key><Display>Number</Display><Sensitivity>2</Sensitivity></Mapping></Control>
+                        <Control type="Encoder" number="1"><Mapping mode="Std"><Key>0x00310033</Key><Display>Number</Display><Sensitivity>2</Sensitivity></Mapping></Control>
+                        <Control type="Encoder" number="2"><Mapping mode="Std"><Key>0x00310034</Key><Display>Number</Display><Sensitivity>3</Sensitivity></Mapping></Control>
+                    </Bank>
+                </ControlBank>
+            </Mode>
+        </Panel>
+    </Panels>
+</TangentWave>

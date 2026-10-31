@@ -1,0 +1,558 @@
+{
+ "ladder": [
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "topos-444-high",
+   "bytes": 1430274,
+   "psnr_db": 52.16,
+   "enc_ms": 18.96751199819846,
+   "dec_ms": 9.99404100002721
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "topos-444-ultra",
+   "bytes": 1589328,
+   "psnr_db": 52.22,
+   "enc_ms": 11.65844099887181,
+   "dec_ms": 9.574684001563583
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "jpeg-q95-444",
+   "bytes": 263192,
+   "psnr_db": 51.77,
+   "enc_ms": 45.36667500360636,
+   "dec_ms": 24.847014996339567
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "jpeg-q100-444",
+   "bytes": 723752,
+   "psnr_db": 58.15,
+   "enc_ms": 37.931389997538645,
+   "dec_ms": 28.674544002569746
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "png8-lossless",
+   "bytes": 1047890,
+   "psnr_db": null,
+   "enc_ms": 129.34783400123706,
+   "dec_ms": 24.216147998231463
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "png16-lossless(12bit)",
+   "bytes": 1252671,
+   "psnr_db": null,
+   "enc_ms": 389.2145900026662,
+   "dec_ms": 47.83213100017747
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "topos-444-high",
+   "bytes": 1413562,
+   "psnr_db": 52.17,
+   "enc_ms": 9.569853005814366,
+   "dec_ms": 10.258935995807406
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "topos-444-ultra",
+   "bytes": 1571907,
+   "psnr_db": 52.23,
+   "enc_ms": 11.81613199878484,
+   "dec_ms": 10.400636005215347
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "jpeg-q95-444",
+   "bytes": 263453,
+   "psnr_db": 51.83,
+   "enc_ms": 32.18671400099993,
+   "dec_ms": 20.415898005012423
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "jpeg-q100-444",
+   "bytes": 719579,
+   "psnr_db": 58.18,
+   "enc_ms": 38.60269999859156,
+   "dec_ms": 26.372828004241455
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "png8-lossless",
+   "bytes": 1041765,
+   "psnr_db": null,
+   "enc_ms": 128.35824899957515,
+   "dec_ms": 23.789079998095986
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "png16-lossless(12bit)",
+   "bytes": 1246049,
+   "psnr_db": null,
+   "enc_ms": 384.68802999705076,
+   "dec_ms": 48.208984997472726
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "topos-444-high",
+   "bytes": 5986779,
+   "psnr_db": 51.95,
+   "enc_ms": 111.00319000252057,
+   "dec_ms": 40.99403799773427
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "topos-444-ultra",
+   "bytes": 6670682,
+   "psnr_db": 52.05,
+   "enc_ms": 43.718579996493645,
+   "dec_ms": 30.954462999943644
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "jpeg-q95-444",
+   "bytes": 998497,
+   "psnr_db": 50.94,
+   "enc_ms": 123.41840500448598,
+   "dec_ms": 76.48211400373839
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "jpeg-q100-444",
+   "bytes": 3029707,
+   "psnr_db": 58.28,
+   "enc_ms": 156.02214499813272,
+   "dec_ms": 97.283275994414
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "png8-lossless",
+   "bytes": 4461018,
+   "psnr_db": null,
+   "enc_ms": 521.3550230037072,
+   "dec_ms": 92.12596799625317
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "png16-lossless(12bit)",
+   "bytes": 5312906,
+   "psnr_db": null,
+   "enc_ms": 1684.9544509968837,
+   "dec_ms": 184.00128099892754
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "topos-444-high",
+   "bytes": 5865942,
+   "psnr_db": 51.97,
+   "enc_ms": 40.80380799859995,
+   "dec_ms": 32.29959600139409
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "topos-444-ultra",
+   "bytes": 6541124,
+   "psnr_db": 52.06,
+   "enc_ms": 40.65420499682659,
+   "dec_ms": 31.389971998578403
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "jpeg-q95-444",
+   "bytes": 988864,
+   "psnr_db": 51.12,
+   "enc_ms": 124.38681800267659,
+   "dec_ms": 77.23877699754667
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "jpeg-q100-444",
+   "bytes": 2990369,
+   "psnr_db": 58.33,
+   "enc_ms": 155.00803300528787,
+   "dec_ms": 103.43584899965208
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "png8-lossless",
+   "bytes": 4409460,
+   "psnr_db": null,
+   "enc_ms": 522.3856970042107,
+   "dec_ms": 94.93371400458273
+  },
+  {
+   "source": "prores422HQ",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "png16-lossless(12bit)",
+   "bytes": 5244699,
+   "psnr_db": null,
+   "enc_ms": 1706.9056690015714,
+   "dec_ms": 189.77113499568077
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "topos-444-high",
+   "bytes": 2705450,
+   "psnr_db": 51.3,
+   "enc_ms": 16.685973998392,
+   "dec_ms": 15.892160998191684
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "topos-444-ultra",
+   "bytes": 2884838,
+   "psnr_db": 51.42,
+   "enc_ms": 16.82414599781623,
+   "dec_ms": 15.567508999083657
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "jpeg-q95-444",
+   "bytes": 656063,
+   "psnr_db": 46.29,
+   "enc_ms": 35.094348997517955,
+   "dec_ms": 23.00900399859529
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "jpeg-q100-444",
+   "bytes": 1587069,
+   "psnr_db": 56.02,
+   "enc_ms": 47.76699499780079,
+   "dec_ms": 33.36339300585678
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "png8-lossless",
+   "bytes": 2160386,
+   "psnr_db": null,
+   "enc_ms": 187.82163399737328,
+   "dec_ms": 35.42817600100534
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 10,
+   "codec": "png16-lossless(12bit)",
+   "bytes": 2603162,
+   "psnr_db": null,
+   "enc_ms": 737.3934379938873,
+   "dec_ms": 61.28629200247815
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "topos-444-high",
+   "bytes": 2710610,
+   "psnr_db": 51.29,
+   "enc_ms": 16.82580199849326,
+   "dec_ms": 10.27368700306397
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "topos-444-ultra",
+   "bytes": 2891196,
+   "psnr_db": 51.42,
+   "enc_ms": 17.030625000188593,
+   "dec_ms": 11.797020997619256
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "jpeg-q95-444",
+   "bytes": 657906,
+   "psnr_db": 46.24,
+   "enc_ms": 37.38659599912353,
+   "dec_ms": 22.066878002078738
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "jpeg-q100-444",
+   "bytes": 1594015,
+   "psnr_db": 56.03,
+   "enc_ms": 47.295010001107585,
+   "dec_ms": 31.63859800406499
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "png8-lossless",
+   "bytes": 2168917,
+   "psnr_db": null,
+   "enc_ms": 185.7578420022037,
+   "dec_ms": 35.30048300308408
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "2K",
+   "frame": 11,
+   "codec": "png16-lossless(12bit)",
+   "bytes": 2613326,
+   "psnr_db": null,
+   "enc_ms": 739.3902030016761,
+   "dec_ms": 59.08909699792275
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "topos-444-high",
+   "bytes": 8576471,
+   "psnr_db": 51.51,
+   "enc_ms": 45.954811001138296,
+   "dec_ms": 35.299349001434166
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "topos-444-ultra",
+   "bytes": 9154092,
+   "psnr_db": 51.56,
+   "enc_ms": 46.43480900267605,
+   "dec_ms": 37.74450700439047
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "jpeg-q95-444",
+   "bytes": 2199281,
+   "psnr_db": 49.45,
+   "enc_ms": 134.21301799826324,
+   "dec_ms": 88.67326799372677
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "jpeg-q100-444",
+   "bytes": 4707660,
+   "psnr_db": 57.52,
+   "enc_ms": 165.83664300560486,
+   "dec_ms": 118.19251799897756
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "png8-lossless",
+   "bytes": 7358392,
+   "psnr_db": null,
+   "enc_ms": 737.5696590024745,
+   "dec_ms": 128.8298239960568
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 10,
+   "codec": "png16-lossless(12bit)",
+   "bytes": 8795453,
+   "psnr_db": null,
+   "enc_ms": 2853.9558820048114,
+   "dec_ms": 215.67168299952755
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "topos-444-high",
+   "bytes": 8628785,
+   "psnr_db": 51.51,
+   "enc_ms": 45.58510600327281,
+   "dec_ms": 33.41517700027907
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "topos-444-ultra",
+   "bytes": 9202531,
+   "psnr_db": 51.56,
+   "enc_ms": 47.377132999827154,
+   "dec_ms": 34.696308997808956
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "jpeg-q95-444",
+   "bytes": 2213263,
+   "psnr_db": 49.3,
+   "enc_ms": 137.41382800071733,
+   "dec_ms": 90.25593399564968
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "jpeg-q100-444",
+   "bytes": 4755807,
+   "psnr_db": 57.47,
+   "enc_ms": 169.72820599767147,
+   "dec_ms": 118.12790800468065
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "png8-lossless",
+   "bytes": 7422095,
+   "psnr_db": null,
+   "enc_ms": 731.0842920051073,
+   "dec_ms": 128.0890440029907
+  },
+  {
+   "source": "dnxhrhqx",
+   "spec": "4K",
+   "frame": 11,
+   "codec": "png16-lossless(12bit)",
+   "bytes": 8871732,
+   "psnr_db": null,
+   "enc_ms": 2772.659725000267,
+   "dec_ms": 217.64197199809132
+  }
+ ],
+ "twelvebit": [
+  {
+   "source": "prores422HQ",
+   "tier": "444-high",
+   "plane": "G",
+   "psnr_db": 56.97
+  },
+  {
+   "source": "prores422HQ",
+   "tier": "444-high",
+   "plane": "B",
+   "psnr_db": 60.3
+  },
+  {
+   "source": "prores422HQ",
+   "tier": "444-high",
+   "plane": "R",
+   "psnr_db": 60.37
+  },
+  {
+   "source": "prores422HQ",
+   "tier": "444-ultra",
+   "plane": "G",
+   "psnr_db": 57.62
+  },
+  {
+   "source": "prores422HQ",
+   "tier": "444-ultra",
+   "plane": "B",
+   "psnr_db": 61.38
+  },
+  {
+   "source": "prores422HQ",
+   "tier": "444-ultra",
+   "plane": "R",
+   "psnr_db": 61.44
+  },
+  {
+   "source": "dnxhrhqx",
+   "tier": "444-high",
+   "plane": "G",
+   "psnr_db": 57.92
+  },
+  {
+   "source": "dnxhrhqx",
+   "tier": "444-high",
+   "plane": "B",
+   "psnr_db": 60.35
+  },
+  {
+   "source": "dnxhrhqx",
+   "tier": "444-high",
+   "plane": "R",
+   "psnr_db": 60.23
+  },
+  {
+   "source": "dnxhrhqx",
+   "tier": "444-ultra",
+   "plane": "G",
+   "psnr_db": 58.56
+  },
+  {
+   "source": "dnxhrhqx",
+   "tier": "444-ultra",
+   "plane": "B",
+   "psnr_db": 61.01
+  },
+  {
+   "source": "dnxhrhqx",
+   "tier": "444-ultra",
+   "plane": "R",
+   "psnr_db": 60.84
+  }
+ ]
+}

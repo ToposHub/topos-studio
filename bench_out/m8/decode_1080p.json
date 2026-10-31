@@ -1,0 +1,79 @@
+{
+  "res": "1080p",
+  "threads": 8,
+  "frames_seq": 100,
+  "topos": {
+    "sequential": {
+      "n": 100,
+      "avg_ms": 3.339,
+      "p50_ms": 3.215,
+      "p95_ms": 4.449,
+      "p99_ms": 5.014,
+      "max_ms": 5.014
+    },
+    "random": {
+      "n": 100,
+      "avg_ms": 3.761,
+      "p50_ms": 3.327,
+      "p95_ms": 5.186,
+      "p99_ms": 9.865,
+      "max_ms": 22.85
+    },
+    "rss_after_warm_mb": 87.7,
+    "rss_p50_mb": 89.2,
+    "rss_max_mb": 99.8,
+    "rss_drift_last80_mb": 12.14,
+    "rss_drift_late_half_mb": 10.59,
+    "cpu_cores_avg": 4.45
+  },
+  "prores": {
+    "sequential": {
+      "n": 100,
+      "avg_ms": 1.689,
+      "p50_ms": 0.801,
+      "p95_ms": 5.332,
+      "p99_ms": 6.921,
+      "max_ms": 7.926
+    },
+    "random": {
+      "n": 100,
+      "avg_ms": 14.915,
+      "p50_ms": 14.384,
+      "p95_ms": 19.531,
+      "p99_ms": 20.746,
+      "max_ms": 26.616
+    },
+    "rss_after_warm_mb": 184.6,
+    "rss_p50_mb": 187.8,
+    "rss_max_mb": 194.2,
+    "rss_drift_last80_mb": 9.58,
+    "rss_drift_late_half_mb": 6.4,
+    "cpu_cores_avg": 7.66,
+    "random_seek_pts_mismatch": 0
+  },
+  "dnxhr": {
+    "sequential": {
+      "n": 100,
+      "avg_ms": 1.238,
+      "p50_ms": 0.727,
+      "p95_ms": 3.711,
+      "p99_ms": 4.586,
+      "max_ms": 4.691
+    },
+    "random": {
+      "n": 100,
+      "avg_ms": 11.339,
+      "p50_ms": 10.12,
+      "p95_ms": 16.453,
+      "p99_ms": 18.28,
+      "max_ms": 18.286
+    },
+    "rss_after_warm_mb": 278.4,
+    "rss_p50_mb": 291.4,
+    "rss_max_mb": 295.1,
+    "rss_drift_last80_mb": 16.71,
+    "rss_drift_late_half_mb": 3.72,
+    "cpu_cores_avg": 7.6,
+    "random_seek_pts_mismatch": 0
+  }
+}

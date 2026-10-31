@@ -1,0 +1,70 @@
+// --- Topos Plugin Metadata ---
+// @name White Balance Advanced
+// @i18n_name White_Balance_Advanced
+// @author Topos Team
+// @version 1.0
+// @description Temperature/tint white balance in scene-linear with channel-gain or exact luma-preserving correction modes
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider temperature "Temperature" 0.0 -1.0 1.0
+// @param slider tint "Tint" 0.0 -1.0 1.0
+// @param separator
+// @param select wb_method "Method" 1 "Channel Gains" "Luma Preserving"
+// @param slider strength "Strength" 1.0 0.0 1.0
+// -----------------------------
+//
+// White Balance Advanced —— 色温 / 色调白平衡。
+//
+// 原理：scene-linear 域的通道增益模型——temperature 正值抬 R 压 B
+// （偏暖），负值反之；tint 正值压 G（偏品红），负值抬 G（偏绿），
+// R/B 各分摊一半 tint 的反向补偿以保持总能量近似中性。提供两种
+// 校正模式：通道增益（经典手感）与亮度保持（校正后 709 亮度精确
+// 回到调整前，只动色相不动明暗）。
+//
+// 与现有工具的差异：warm_tint 是无 tintColor 域的粗略 R+/B-；
+// Three_Way_Tint 按亮度分区着色。本插件是标准双轴白平衡工具。
+//
+// 设计要点：
+// - 纯逐像素数学，零采样、零循环、零三角/超越函数；
+// - 增益在 scene-linear 域施加，HDR 单调外推，不 clamp 内容色；
+// - 亮度保持分支仅在 luma_after > 0.0001 时修正（分母下限守护，
+//   纯黑/负亮度帧自然跳过），修正为精确代数补偿而非近似；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+const vec3 WB_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：双轴归零为纯直通
+    if (abs(temperature) < 0.001 && abs(tint) < 0.001) return color;
+
+    // 线性通道增益：0.30 / 0.22 / 0.10 为 ±1 满行程时的最大偏移系数
+    vec3 gains = vec3(
+        1.0 + 0.30 * temperature + 0.10 * tint,
+        1.0 - 0.22 * tint,
+        1.0 - 0.30 * temperature + 0.10 * tint
+    );
+    // strength 把增益回插到恒等（可逆滑杆手感）
+    gains = mix(vec3(1.0), gains, strength);
+
+    vec3 result = color * gains;
+
+    if (wb_method == 1) {
+        // 亮度保持：把校正后的 709 亮度拉回调整前（只换色相不动明暗）
+        float luma_before = dot(color, WB_LUMA_W);
+        float luma_after = dot(result, WB_LUMA_W);
+        if (luma_after > 0.0001) {
+            result *= luma_before / luma_after;
+        }
+    }
+
+    return result;
+}

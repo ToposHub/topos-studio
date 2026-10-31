@@ -1,0 +1,96 @@
+[
+  {
+    "name": "initial",
+    "summary": {
+      "rev": 1,
+      "counts": {
+        "video": 1,
+        "audio": 1
+      },
+      "markers": 0,
+      "transitions": 0
+    }
+  },
+  {
+    "name": "split_ctrl_b",
+    "summary": {
+      "rev": 2,
+      "counts": {
+        "video": 2,
+        "audio": 2
+      },
+      "markers": 0,
+      "transitions": 0
+    },
+    "links_ok": true
+  },
+  {
+    "name": "undo_split",
+    "summary": {
+      "rev": 3,
+      "counts": {
+        "video": 1,
+        "audio": 1
+      },
+      "markers": 0,
+      "transitions": 0
+    },
+    "restored": null
+  },
+  {
+    "name": "redo_split",
+    "summary": {
+      "rev": 4,
+      "counts": {
+        "video": 2,
+        "audio": 2
+      },
+      "markers": 0,
+      "transitions": 0
+    }
+  },
+  {
+    "name": "copy_paste",
+    "before": {
+      "video": 2,
+      "audio": 2
+    },
+    "after": {
+      "video": 3,
+      "audio": 2
+    }
+  },
+  {
+    "name": "marker",
+    "ok": true,
+    "markers": 1
+  },
+  {
+    "name": "transition_add",
+    "ok": true,
+    "count": 1,
+    "types": [
+      "cross_dissolve"
+    ]
+  },
+  {
+    "name": "transition_undo",
+    "count": 0
+  },
+  {
+    "name": "clip_item_double_click_receivers",
+    "receivers": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "name": "property_transform",
+    "before": 0.0,
+    "after": 55.0,
+    "undo": 0.0
+  }
+]

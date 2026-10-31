@@ -1,0 +1,51 @@
+{
+  "started": 1792941279.391693,
+  "workdir": "/var/folders/j2/m4dcthbx3h5086ywnnplqwmc0000gn/T/desk08b_z4odo5rj",
+  "steps": {
+    "fixture": {
+      "status": "ok",
+      "detail": "phone_project.topos"
+    },
+    "app_stack": {
+      "status": "ok",
+      "detail": "MainWindow ok（模块失败: 无）"
+    },
+    "open_and_route": {
+      "status": "ok",
+      "detail": "current_page=Edit"
+    },
+    "active_timeline": {
+      "status": "ok",
+      "detail": "golden-timeline-main"
+    },
+    "capability_report": {
+      "status": "ok",
+      "detail": "grade=X"
+    },
+    "trim_edit": {
+      "status": "ok",
+      "detail": "clip duration 48→40"
+    },
+    "subtitle_edit": {
+      "status": "warn",
+      "detail": "黄金夹具无字幕轨——真实手机包字幕项随 06D 联调补"
+    },
+    "color_edit": {
+      "status": "warn",
+      "detail": "黄金包无预置调色栈——随 06C 真实素材联调补"
+    },
+    "save_as": {
+      "status": "ok",
+      "detail": "desktop_edit.topos"
+    },
+    "reopen_verify": {
+      "status": "ok",
+      "detail": "trim=40, resource_uri 随行, 未知模块随行"
+    }
+  },
+  "result": "PASS",
+  "duration_s": 11.15,
+  "dialogs": [
+    "<src.app.main_window.MainWindow object at 0x3018e6670>: 工程兼容性受限"
+  ]
+}

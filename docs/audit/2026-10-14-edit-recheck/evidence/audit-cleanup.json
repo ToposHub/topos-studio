@@ -1,0 +1,8 @@
+{
+  "pid": 19655,
+  "verified_command": "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python docs/audit/2026-10-14-edit-recheck/interactive_driver.py",
+  "normal_close_completed": false,
+  "observation": "sample shows MainWindow closeEvent waiting in QMessageBox.question/QDialog.exec; one-shot audit dialog handler did not finish all close prompts",
+  "cleanup": "SIGTERM of this audit-only process; no user process targeted",
+  "product_bug_confirmed": false
+}

@@ -1,0 +1,1413 @@
+[
+  {
+    "name": "initial_layout",
+    "window": [
+      1440,
+      1000
+    ],
+    "timeline_dock": 102,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/01-normal-empty.png"
+  },
+  {
+    "name": "startup",
+    "page": "Edit",
+    "platform": "cocoa",
+    "qt": "6.10.0",
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/01-empty.png"
+  },
+  {
+    "name": "real_media_import",
+    "drop": true,
+    "asset_count": 3,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/02-media.png"
+  },
+  {
+    "name": "source_first_frame",
+    "loaded": "95ecb1f0-c13b-4e70-93c5-a937690877db",
+    "viewer_type": "SourceViewer",
+    "paint_failed": false,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/03-source-first-frame.png"
+  },
+  {
+    "name": "source_valid_range",
+    "range": [
+      0,
+      100
+    ],
+    "buttons": [
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "name": "source_clear_range",
+    "range": [
+      null,
+      null
+    ],
+    "buttons": [
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "name": "source_single_frame_range",
+    "range": [
+      100,
+      100
+    ],
+    "buttons": [
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "name": "linked_drop",
+    "accepted": true,
+    "state": {
+      "revision": 1,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "84d98ca3-7b53-4cc8-b886-1327961117e0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "87bbee93-a0ea-41ba-b757-0148ebedf9b1",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "77d35e7a-4dea-4d74-97d0-19c73a43f9af"
+            }
+          ]
+        },
+        {
+          "id": "efa0f723-0ba1-410e-a7f4-3f3ace6101b0",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "77d35e7a-4dea-4d74-97d0-19c73a43f9af",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "87bbee93-a0ea-41ba-b757-0148ebedf9b1"
+            }
+          ]
+        }
+      ]
+    },
+    "project_revision": 1,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/04-linked.png"
+  },
+  {
+    "name": "source_visible",
+    "visible": true,
+    "paint_failed": false,
+    "texture": "21",
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/05-source-visible.png"
+  },
+  {
+    "name": "source_playback",
+    "before": 100,
+    "after": 123,
+    "paint_failed": false
+  },
+  {
+    "name": "runtime",
+    "runtime": "6.10.2",
+    "compiled": "6.10.0"
+  },
+  {
+    "name": "source_append_existing",
+    "state": {
+      "revision": 2,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "84d98ca3-7b53-4cc8-b886-1327961117e0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "87bbee93-a0ea-41ba-b757-0148ebedf9b1",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "77d35e7a-4dea-4d74-97d0-19c73a43f9af"
+            },
+            {
+              "id": "964e7579-32dd-4951-9406-2e387285052e",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "e71e1dcf-7a93-4755-9c50-2b8967322bc6"
+            }
+          ]
+        },
+        {
+          "id": "efa0f723-0ba1-410e-a7f4-3f3ace6101b0",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "77d35e7a-4dea-4d74-97d0-19c73a43f9af",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "87bbee93-a0ea-41ba-b757-0148ebedf9b1"
+            },
+            {
+              "id": "e71e1dcf-7a93-4755-9c50-2b8967322bc6",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "964e7579-32dd-4951-9406-2e387285052e"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "source_append_next",
+    "state": {
+      "revision": 3,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "84d98ca3-7b53-4cc8-b886-1327961117e0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "87bbee93-a0ea-41ba-b757-0148ebedf9b1",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "77d35e7a-4dea-4d74-97d0-19c73a43f9af"
+            },
+            {
+              "id": "964e7579-32dd-4951-9406-2e387285052e",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "e71e1dcf-7a93-4755-9c50-2b8967322bc6"
+            },
+            {
+              "id": "36b4a245-29b7-4211-ac92-20de968b9278",
+              "start": 1622,
+              "end": 1672,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9"
+            }
+          ]
+        },
+        {
+          "id": "efa0f723-0ba1-410e-a7f4-3f3ace6101b0",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "77d35e7a-4dea-4d74-97d0-19c73a43f9af",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "87bbee93-a0ea-41ba-b757-0148ebedf9b1"
+            },
+            {
+              "id": "e71e1dcf-7a93-4755-9c50-2b8967322bc6",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "964e7579-32dd-4951-9406-2e387285052e"
+            },
+            {
+              "id": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9",
+              "start": 1622,
+              "end": 1672,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "36b4a245-29b7-4211-ac92-20de968b9278"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/17-source-appended-av.png"
+  },
+  {
+    "name": "source_overwrite_occupied",
+    "before": {
+      "revision": 3,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "84d98ca3-7b53-4cc8-b886-1327961117e0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "87bbee93-a0ea-41ba-b757-0148ebedf9b1",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "77d35e7a-4dea-4d74-97d0-19c73a43f9af"
+            },
+            {
+              "id": "964e7579-32dd-4951-9406-2e387285052e",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "e71e1dcf-7a93-4755-9c50-2b8967322bc6"
+            },
+            {
+              "id": "36b4a245-29b7-4211-ac92-20de968b9278",
+              "start": 1622,
+              "end": 1672,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9"
+            }
+          ]
+        },
+        {
+          "id": "efa0f723-0ba1-410e-a7f4-3f3ace6101b0",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "77d35e7a-4dea-4d74-97d0-19c73a43f9af",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "87bbee93-a0ea-41ba-b757-0148ebedf9b1"
+            },
+            {
+              "id": "e71e1dcf-7a93-4755-9c50-2b8967322bc6",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "964e7579-32dd-4951-9406-2e387285052e"
+            },
+            {
+              "id": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9",
+              "start": 1622,
+              "end": 1672,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "36b4a245-29b7-4211-ac92-20de968b9278"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 4,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "84d98ca3-7b53-4cc8-b886-1327961117e0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "87bbee93-a0ea-41ba-b757-0148ebedf9b1",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "77d35e7a-4dea-4d74-97d0-19c73a43f9af"
+            },
+            {
+              "id": "d4a26456-287b-4e24-91e3-b256cc127912",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "ed511b9c-a4c2-4f18-9141-b8f732c987b8"
+            },
+            {
+              "id": "18b620f6-0d65-4288-bad8-402995ac5648",
+              "start": 29,
+              "end": 1572,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "d8d9ba33-c6c9-4518-ac6a-ec793109191c"
+            },
+            {
+              "id": "964e7579-32dd-4951-9406-2e387285052e",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "e71e1dcf-7a93-4755-9c50-2b8967322bc6"
+            },
+            {
+              "id": "36b4a245-29b7-4211-ac92-20de968b9278",
+              "start": 1622,
+              "end": 1672,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9"
+            }
+          ]
+        },
+        {
+          "id": "efa0f723-0ba1-410e-a7f4-3f3ace6101b0",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "77d35e7a-4dea-4d74-97d0-19c73a43f9af",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "87bbee93-a0ea-41ba-b757-0148ebedf9b1"
+            },
+            {
+              "id": "ed511b9c-a4c2-4f18-9141-b8f732c987b8",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "d4a26456-287b-4e24-91e3-b256cc127912"
+            },
+            {
+              "id": "d8d9ba33-c6c9-4518-ac6a-ec793109191c",
+              "start": 29,
+              "end": 1572,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "18b620f6-0d65-4288-bad8-402995ac5648"
+            },
+            {
+              "id": "e71e1dcf-7a93-4755-9c50-2b8967322bc6",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "964e7579-32dd-4951-9406-2e387285052e"
+            },
+            {
+              "id": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9",
+              "start": 1622,
+              "end": 1672,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "36b4a245-29b7-4211-ac92-20de968b9278"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/18-overwrite-success.png"
+  },
+  {
+    "name": "source_insert_internal",
+    "before": {
+      "revision": 4,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "84d98ca3-7b53-4cc8-b886-1327961117e0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "87bbee93-a0ea-41ba-b757-0148ebedf9b1",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "77d35e7a-4dea-4d74-97d0-19c73a43f9af"
+            },
+            {
+              "id": "d4a26456-287b-4e24-91e3-b256cc127912",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "ed511b9c-a4c2-4f18-9141-b8f732c987b8"
+            },
+            {
+              "id": "18b620f6-0d65-4288-bad8-402995ac5648",
+              "start": 29,
+              "end": 1572,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "d8d9ba33-c6c9-4518-ac6a-ec793109191c"
+            },
+            {
+              "id": "964e7579-32dd-4951-9406-2e387285052e",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "e71e1dcf-7a93-4755-9c50-2b8967322bc6"
+            },
+            {
+              "id": "36b4a245-29b7-4211-ac92-20de968b9278",
+              "start": 1622,
+              "end": 1672,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9"
+            }
+          ]
+        },
+        {
+          "id": "efa0f723-0ba1-410e-a7f4-3f3ace6101b0",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "77d35e7a-4dea-4d74-97d0-19c73a43f9af",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "87bbee93-a0ea-41ba-b757-0148ebedf9b1"
+            },
+            {
+              "id": "ed511b9c-a4c2-4f18-9141-b8f732c987b8",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "d4a26456-287b-4e24-91e3-b256cc127912"
+            },
+            {
+              "id": "d8d9ba33-c6c9-4518-ac6a-ec793109191c",
+              "start": 29,
+              "end": 1572,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "18b620f6-0d65-4288-bad8-402995ac5648"
+            },
+            {
+              "id": "e71e1dcf-7a93-4755-9c50-2b8967322bc6",
+              "start": 1572,
+              "end": 1622,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "964e7579-32dd-4951-9406-2e387285052e"
+            },
+            {
+              "id": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9",
+              "start": 1622,
+              "end": 1672,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "36b4a245-29b7-4211-ac92-20de968b9278"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 5,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "84d98ca3-7b53-4cc8-b886-1327961117e0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "87bbee93-a0ea-41ba-b757-0148ebedf9b1",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "77d35e7a-4dea-4d74-97d0-19c73a43f9af"
+            },
+            {
+              "id": "5326acb9-ee92-4933-b4f5-c371e1e67c59",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "3809d772-1a7b-4dda-b83d-df3ad50dc307"
+            },
+            {
+              "id": "d4a26456-287b-4e24-91e3-b256cc127912",
+              "start": 29,
+              "end": 39,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "ed511b9c-a4c2-4f18-9141-b8f732c987b8"
+            },
+            {
+              "id": "18b620f6-0d65-4288-bad8-402995ac5648",
+              "start": 39,
+              "end": 1582,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "d8d9ba33-c6c9-4518-ac6a-ec793109191c"
+            },
+            {
+              "id": "964e7579-32dd-4951-9406-2e387285052e",
+              "start": 1582,
+              "end": 1632,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "e71e1dcf-7a93-4755-9c50-2b8967322bc6"
+            },
+            {
+              "id": "36b4a245-29b7-4211-ac92-20de968b9278",
+              "start": 1632,
+              "end": 1682,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9"
+            }
+          ]
+        },
+        {
+          "id": "efa0f723-0ba1-410e-a7f4-3f3ace6101b0",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "77d35e7a-4dea-4d74-97d0-19c73a43f9af",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "87bbee93-a0ea-41ba-b757-0148ebedf9b1"
+            },
+            {
+              "id": "3809d772-1a7b-4dda-b83d-df3ad50dc307",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "5326acb9-ee92-4933-b4f5-c371e1e67c59"
+            },
+            {
+              "id": "ed511b9c-a4c2-4f18-9141-b8f732c987b8",
+              "start": 29,
+              "end": 39,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "d4a26456-287b-4e24-91e3-b256cc127912"
+            },
+            {
+              "id": "d8d9ba33-c6c9-4518-ac6a-ec793109191c",
+              "start": 39,
+              "end": 1582,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "18b620f6-0d65-4288-bad8-402995ac5648"
+            },
+            {
+              "id": "e71e1dcf-7a93-4755-9c50-2b8967322bc6",
+              "start": 1582,
+              "end": 1632,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "964e7579-32dd-4951-9406-2e387285052e"
+            },
+            {
+              "id": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9",
+              "start": 1632,
+              "end": 1682,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "36b4a245-29b7-4211-ac92-20de968b9278"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/19-insert-av.png"
+  },
+  {
+    "name": "source_final",
+    "state": {
+      "revision": 5,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "84d98ca3-7b53-4cc8-b886-1327961117e0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "87bbee93-a0ea-41ba-b757-0148ebedf9b1",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "77d35e7a-4dea-4d74-97d0-19c73a43f9af"
+            },
+            {
+              "id": "5326acb9-ee92-4933-b4f5-c371e1e67c59",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "3809d772-1a7b-4dda-b83d-df3ad50dc307"
+            },
+            {
+              "id": "d4a26456-287b-4e24-91e3-b256cc127912",
+              "start": 29,
+              "end": 39,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "ed511b9c-a4c2-4f18-9141-b8f732c987b8"
+            },
+            {
+              "id": "18b620f6-0d65-4288-bad8-402995ac5648",
+              "start": 39,
+              "end": 1582,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "d8d9ba33-c6c9-4518-ac6a-ec793109191c"
+            },
+            {
+              "id": "964e7579-32dd-4951-9406-2e387285052e",
+              "start": 1582,
+              "end": 1632,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "e71e1dcf-7a93-4755-9c50-2b8967322bc6"
+            },
+            {
+              "id": "36b4a245-29b7-4211-ac92-20de968b9278",
+              "start": 1632,
+              "end": 1682,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9"
+            }
+          ]
+        },
+        {
+          "id": "efa0f723-0ba1-410e-a7f4-3f3ace6101b0",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "77d35e7a-4dea-4d74-97d0-19c73a43f9af",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "87bbee93-a0ea-41ba-b757-0148ebedf9b1"
+            },
+            {
+              "id": "3809d772-1a7b-4dda-b83d-df3ad50dc307",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "5326acb9-ee92-4933-b4f5-c371e1e67c59"
+            },
+            {
+              "id": "ed511b9c-a4c2-4f18-9141-b8f732c987b8",
+              "start": 29,
+              "end": 39,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "d4a26456-287b-4e24-91e3-b256cc127912"
+            },
+            {
+              "id": "d8d9ba33-c6c9-4518-ac6a-ec793109191c",
+              "start": 39,
+              "end": 1582,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "18b620f6-0d65-4288-bad8-402995ac5648"
+            },
+            {
+              "id": "e71e1dcf-7a93-4755-9c50-2b8967322bc6",
+              "start": 1582,
+              "end": 1632,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "964e7579-32dd-4951-9406-2e387285052e"
+            },
+            {
+              "id": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9",
+              "start": 1632,
+              "end": 1682,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "36b4a245-29b7-4211-ac92-20de968b9278"
+            }
+          ]
+        }
+      ]
+    },
+    "project_revision": 5
+  },
+  {
+    "name": "source_av_relations_validated",
+    "clip_count": 12,
+    "issues": [],
+    "all_reciprocal": true
+  },
+  {
+    "name": "source_validation",
+    "issues": []
+  },
+  {
+    "name": "inspect_wait",
+    "windows": [
+      {
+        "class": "MainWindow",
+        "title": "Topos - Untitled Project *",
+        "visible": true
+      }
+    ],
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/inspect-wait.png"
+  },
+  {
+    "name": "inspect_short_setup",
+    "windows": [
+      {
+        "class": "MainWindow",
+        "title": "Topos - Untitled Project *",
+        "visible": true
+      }
+    ],
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/inspect-short.png"
+  },
+  {
+    "name": "inspect_command_progress",
+    "stack": "  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/interactive_driver.py\", line 187, in <module>\n    app.exec()\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/interactive_driver.py\", line 163, in poll\n    exec(compile(code, str(command), \"exec\"), globals())\n  File \"/tmp/topos-edit-fourth-review-final3-20261016/command-03.py\", line 11, in <module>\n    import os\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/edit_controller.py\", line 1030, in _on_timeline_create_requested\n    if dialog.exec() != QDialog.DialogCode.Accepted:\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/interactive_driver.py\", line 183, in rescue_poll\n    try:exec(compile(code,str(cmd),'exec'),globals())\n  File \"/tmp/topos-edit-fourth-review-final3-20261016/rescue.py\", line 1, in <module>\n    \"\"\"Visible, full-app Qt event recheck after implementation. Uses an isolated config and scratch project.\n",
+    "state": {
+      "revision": 5,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "84d98ca3-7b53-4cc8-b886-1327961117e0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "87bbee93-a0ea-41ba-b757-0148ebedf9b1",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "77d35e7a-4dea-4d74-97d0-19c73a43f9af"
+            },
+            {
+              "id": "5326acb9-ee92-4933-b4f5-c371e1e67c59",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "3809d772-1a7b-4dda-b83d-df3ad50dc307"
+            },
+            {
+              "id": "d4a26456-287b-4e24-91e3-b256cc127912",
+              "start": 29,
+              "end": 39,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "ed511b9c-a4c2-4f18-9141-b8f732c987b8"
+            },
+            {
+              "id": "18b620f6-0d65-4288-bad8-402995ac5648",
+              "start": 39,
+              "end": 1582,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "d8d9ba33-c6c9-4518-ac6a-ec793109191c"
+            },
+            {
+              "id": "964e7579-32dd-4951-9406-2e387285052e",
+              "start": 1582,
+              "end": 1632,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "e71e1dcf-7a93-4755-9c50-2b8967322bc6"
+            },
+            {
+              "id": "36b4a245-29b7-4211-ac92-20de968b9278",
+              "start": 1632,
+              "end": 1682,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9"
+            }
+          ]
+        },
+        {
+          "id": "efa0f723-0ba1-410e-a7f4-3f3ace6101b0",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "77d35e7a-4dea-4d74-97d0-19c73a43f9af",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "87bbee93-a0ea-41ba-b757-0148ebedf9b1"
+            },
+            {
+              "id": "3809d772-1a7b-4dda-b83d-df3ad50dc307",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "5326acb9-ee92-4933-b4f5-c371e1e67c59"
+            },
+            {
+              "id": "ed511b9c-a4c2-4f18-9141-b8f732c987b8",
+              "start": 29,
+              "end": 39,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": "d4a26456-287b-4e24-91e3-b256cc127912"
+            },
+            {
+              "id": "d8d9ba33-c6c9-4518-ac6a-ec793109191c",
+              "start": 39,
+              "end": 1582,
+              "in": 29,
+              "source_duration": 1543,
+              "speed": 1.0,
+              "link": "18b620f6-0d65-4288-bad8-402995ac5648"
+            },
+            {
+              "id": "e71e1dcf-7a93-4755-9c50-2b8967322bc6",
+              "start": 1582,
+              "end": 1632,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "964e7579-32dd-4951-9406-2e387285052e"
+            },
+            {
+              "id": "8ccbc902-4a25-4eee-a3d0-dcf9c8127aa9",
+              "start": 1632,
+              "end": 1682,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "36b4a245-29b7-4211-ac92-20de968b9278"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/inspect-progress.png"
+  },
+  {
+    "name": "modal_inspect",
+    "active": null,
+    "create_active": false,
+    "widgets": [
+      [
+        "NewTimelineDialog",
+        false,
+        "New Timeline"
+      ]
+    ]
+  },
+  {
+    "name": "fixture_modal_exit_recovery",
+    "result": 1,
+    "visible": false
+  },
+  {
+    "name": "linked_roll_real_drag",
+    "aligned": [
+      [
+        0,
+        52,
+        0,
+        52
+      ],
+      [
+        52,
+        100,
+        52,
+        48
+      ],
+      [
+        100,
+        150,
+        100,
+        50
+      ]
+    ],
+    "state": {
+      "revision": 4,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "cae7fd35-8394-4d96-9ade-4a41db9dc8b0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d2591a98-1734-4b57-8c46-a27504b0b561",
+              "start": 0,
+              "end": 52,
+              "in": 0,
+              "source_duration": 52,
+              "speed": 1.0,
+              "link": "23a4fe99-b2f2-4e14-a30e-fba8d48ea373"
+            },
+            {
+              "id": "01632bab-1ff8-415e-a54e-bd3ba57dfc96",
+              "start": 52,
+              "end": 100,
+              "in": 52,
+              "source_duration": 48,
+              "speed": 1.0,
+              "link": "4045ea5b-c135-4672-96cc-cd41e67176cb"
+            },
+            {
+              "id": "ec6b1fd5-dc69-4482-ad4d-14a24efa1a60",
+              "start": 100,
+              "end": 150,
+              "in": 100,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "b28bc258-4409-4ab5-a69f-f4b60db8b0c8"
+            }
+          ]
+        },
+        {
+          "id": "6109fe1d-adae-40be-b169-27ef932b8a9d",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "23a4fe99-b2f2-4e14-a30e-fba8d48ea373",
+              "start": 0,
+              "end": 52,
+              "in": 0,
+              "source_duration": 52,
+              "speed": 1.0,
+              "link": "d2591a98-1734-4b57-8c46-a27504b0b561"
+            },
+            {
+              "id": "4045ea5b-c135-4672-96cc-cd41e67176cb",
+              "start": 52,
+              "end": 100,
+              "in": 52,
+              "source_duration": 48,
+              "speed": 1.0,
+              "link": "01632bab-1ff8-415e-a54e-bd3ba57dfc96"
+            },
+            {
+              "id": "b28bc258-4409-4ab5-a69f-f4b60db8b0c8",
+              "start": 100,
+              "end": 150,
+              "in": 100,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "ec6b1fd5-dc69-4482-ad4d-14a24efa1a60"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/31-roll-linked.png"
+  },
+  {
+    "name": "linked_roll_one_undo",
+    "exact": true
+  },
+  {
+    "name": "linked_slip_real_drag",
+    "aligned": [
+      [
+        0,
+        50,
+        0,
+        50
+      ],
+      [
+        50,
+        100,
+        53,
+        50
+      ],
+      [
+        100,
+        150,
+        100,
+        50
+      ]
+    ],
+    "state": {
+      "revision": 6,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "cae7fd35-8394-4d96-9ade-4a41db9dc8b0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d2591a98-1734-4b57-8c46-a27504b0b561",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "23a4fe99-b2f2-4e14-a30e-fba8d48ea373"
+            },
+            {
+              "id": "01632bab-1ff8-415e-a54e-bd3ba57dfc96",
+              "start": 50,
+              "end": 100,
+              "in": 53,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "4045ea5b-c135-4672-96cc-cd41e67176cb"
+            },
+            {
+              "id": "ec6b1fd5-dc69-4482-ad4d-14a24efa1a60",
+              "start": 100,
+              "end": 150,
+              "in": 100,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "b28bc258-4409-4ab5-a69f-f4b60db8b0c8"
+            }
+          ]
+        },
+        {
+          "id": "6109fe1d-adae-40be-b169-27ef932b8a9d",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "23a4fe99-b2f2-4e14-a30e-fba8d48ea373",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "d2591a98-1734-4b57-8c46-a27504b0b561"
+            },
+            {
+              "id": "4045ea5b-c135-4672-96cc-cd41e67176cb",
+              "start": 50,
+              "end": 100,
+              "in": 53,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "01632bab-1ff8-415e-a54e-bd3ba57dfc96"
+            },
+            {
+              "id": "b28bc258-4409-4ab5-a69f-f4b60db8b0c8",
+              "start": 100,
+              "end": 150,
+              "in": 100,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "ec6b1fd5-dc69-4482-ad4d-14a24efa1a60"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/32-slip-linked.png"
+  },
+  {
+    "name": "linked_slip_one_undo",
+    "exact": true
+  },
+  {
+    "name": "linked_slide_real_drag",
+    "aligned": [
+      [
+        0,
+        53,
+        0,
+        53
+      ],
+      [
+        53,
+        103,
+        50,
+        50
+      ],
+      [
+        103,
+        150,
+        103,
+        47
+      ]
+    ],
+    "state": {
+      "revision": 8,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "cae7fd35-8394-4d96-9ade-4a41db9dc8b0",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d2591a98-1734-4b57-8c46-a27504b0b561",
+              "start": 0,
+              "end": 53,
+              "in": 0,
+              "source_duration": 53,
+              "speed": 1.0,
+              "link": "23a4fe99-b2f2-4e14-a30e-fba8d48ea373"
+            },
+            {
+              "id": "01632bab-1ff8-415e-a54e-bd3ba57dfc96",
+              "start": 53,
+              "end": 103,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "4045ea5b-c135-4672-96cc-cd41e67176cb"
+            },
+            {
+              "id": "ec6b1fd5-dc69-4482-ad4d-14a24efa1a60",
+              "start": 103,
+              "end": 150,
+              "in": 103,
+              "source_duration": 47,
+              "speed": 1.0,
+              "link": "b28bc258-4409-4ab5-a69f-f4b60db8b0c8"
+            }
+          ]
+        },
+        {
+          "id": "6109fe1d-adae-40be-b169-27ef932b8a9d",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "23a4fe99-b2f2-4e14-a30e-fba8d48ea373",
+              "start": 0,
+              "end": 53,
+              "in": 0,
+              "source_duration": 53,
+              "speed": 1.0,
+              "link": "d2591a98-1734-4b57-8c46-a27504b0b561"
+            },
+            {
+              "id": "4045ea5b-c135-4672-96cc-cd41e67176cb",
+              "start": 53,
+              "end": 103,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "01632bab-1ff8-415e-a54e-bd3ba57dfc96"
+            },
+            {
+              "id": "b28bc258-4409-4ab5-a69f-f4b60db8b0c8",
+              "start": 103,
+              "end": 150,
+              "in": 103,
+              "source_duration": 47,
+              "speed": 1.0,
+              "link": "ec6b1fd5-dc69-4482-ad4d-14a24efa1a60"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/32-slide-linked.png"
+  },
+  {
+    "name": "linked_slide_one_undo",
+    "exact": true
+  },
+  {
+    "name": "linked_slip_escape_late_release",
+    "exact": true
+  },
+  {
+    "name": "multi_xy_explicit_editor",
+    "state": [
+      [
+        "d2591a98-1734-4b57-8c46-a27504b0b561",
+        55.0,
+        66.0
+      ],
+      [
+        "ec6b1fd5-dc69-4482-ad4d-14a24efa1a60",
+        55.0,
+        66.0
+      ]
+    ],
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/29-multi-xy-confirmed.png"
+  },
+  {
+    "name": "multi_undo_then_field_confirmed",
+    "state": [
+      [
+        "d2591a98-1734-4b57-8c46-a27504b0b561",
+        55.0,
+        88.0
+      ],
+      [
+        "ec6b1fd5-dc69-4482-ad4d-14a24efa1a60",
+        55.0,
+        88.0
+      ]
+    ],
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/30-undo-field-confirmed.png"
+  },
+  {
+    "name": "command_exception",
+    "command": "command-05.py",
+    "error": "Traceback (most recent call last):\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/interactive_driver.py\", line 163, in poll\n    exec(compile(code, str(command), \"exec\"), globals())\n  File \"/tmp/topos-edit-fourth-review-final3-20261016/command-05.py\", line 13, in <module>\n    import time\n           ^^^^^\nAssertionError\n"
+  },
+  {
+    "name": "settings_fixture_lookup",
+    "previous_requested_text": "50",
+    "actual_fps": "25/1"
+  },
+  {
+    "name": "settings_edit_undo_order",
+    "fps_after_undo": "25/1",
+    "exact": true,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/41-settings-undo.png"
+  },
+  {
+    "name": "timeline_undo_isolation",
+    "exact": true
+  },
+  {
+    "name": "nest_context_action_atomic_history",
+    "before": [
+      3,
+      2,
+      2
+    ],
+    "after": [
+      4,
+      3,
+      3
+    ],
+    "exact": true,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/42-nest-redo.png"
+  },
+  {
+    "name": "save_reload",
+    "saved": true,
+    "sequence_count": 3,
+    "payload_equal": true,
+    "project_revision": [
+      26,
+      26
+    ]
+  },
+  {
+    "name": "normal_audit_close",
+    "window_visible": false
+  }
+]

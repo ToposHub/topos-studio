@@ -1,0 +1,77 @@
+{
+  "ok": true,
+  "result": [
+    {
+      "file": "4K_prores422Proxy.mov",
+      "opened": true,
+      "source_frame": 0,
+      "next": 1,
+      "prev": 0,
+      "seek": 100
+    },
+    {
+      "file": "4K_H265.mov",
+      "opened": true,
+      "source_frame": 0,
+      "next": 1,
+      "prev": 0,
+      "seek": 100
+    },
+    {
+      "file": "4K_H264.mov",
+      "opened": true,
+      "source_frame": 0,
+      "next": 1,
+      "prev": 0,
+      "seek": 100
+    },
+    {
+      "file": "2K_topos_422_LT.mov",
+      "opened": true,
+      "source_frame": 0,
+      "next": 1,
+      "prev": 0,
+      "seek": 100
+    },
+    {
+      "file": "2K_Prores4444_Alpha.mov",
+      "opened": true,
+      "source_frame": 0,
+      "next": 1,
+      "prev": 0,
+      "seek": 100
+    },
+    {
+      "file": "2K_prores422.mov",
+      "opened": true,
+      "source_frame": 0,
+      "next": 1,
+      "prev": 0,
+      "seek": 100
+    },
+    {
+      "file": "2K_H265.mov",
+      "opened": true,
+      "source_frame": 0,
+      "next": 1,
+      "prev": 0,
+      "seek": 100
+    },
+    {
+      "file": "2K_h264.mp4",
+      "opened": true,
+      "source_frame": 0,
+      "next": 1,
+      "prev": 0,
+      "seek": 100
+    },
+    {
+      "file": "2K_DNxHR HQX 10bit.mov",
+      "opened": true,
+      "source_frame": 0,
+      "next": 1,
+      "prev": 0,
+      "seek": 100
+    }
+  ]
+}

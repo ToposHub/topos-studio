@@ -1,0 +1,53 @@
+{
+  "continuous_frames": [
+    {
+      "call": 1,
+      "actual": [
+        [
+          [
+            43,
+            153,
+            131
+          ]
+        ]
+      ]
+    },
+    {
+      "call": 2,
+      "error": "ValueError",
+      "message": "color grade failed for clip clip: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()"
+    },
+    {
+      "call": 3,
+      "error": "ValueError",
+      "message": "color grade failed for clip clip: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()"
+    }
+  ],
+  "safety_actual_rgb": [
+    255,
+    86,
+    244
+  ],
+  "safety_reference_rgb": [
+    255,
+    86,
+    252
+  ],
+  "safety_params": {
+    "lift": [
+      271.6186690578128,
+      0.19411276782870046,
+      -0.5892569835578423
+    ],
+    "gamma": [
+      71.73376380027234,
+      0.316113852565303,
+      0.12122455594011261
+    ],
+    "gain": [
+      275.51972102495455,
+      0.8444802110074772,
+      0.47807158906166936
+    ]
+  }
+}

@@ -1,0 +1,710 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 214 ms. Replace uses of missing font family "SF Mono" with one that exists to avoid this cost. 
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support propagateSizeHints()
+Mouse event "MouseRelease" not accepted by receiving widget
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support propagateSizeHints()
+{
+  "move_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "move_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "move_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "alt_move_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "alt_move_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "alt_move_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "multi_move_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "multi_move_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "multi_move_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "alt_multi_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "alt_multi_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "alt_multi_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "linked_move_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "linked_move_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "linked_move_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_CLIP",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "trim_left_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "trim_left_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "trim_left_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "trim_right_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "trim_right_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "trim_right_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "linked_trim_left_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "a": {
+        "start": [
+          100,
+          110
+        ],
+        "duration": [
+          100,
+          90
+        ],
+        "source_start": [
+          100,
+          110
+        ],
+        "source_duration": [
+          100,
+          90
+        ],
+        "x": [
+          520.0,
+          550.0
+        ]
+      }
+    },
+    "state_during": "TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "linked_trim_left_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "a": {
+        "start": [
+          100,
+          110
+        ],
+        "duration": [
+          100,
+          90
+        ],
+        "source_start": [
+          100,
+          110
+        ],
+        "source_duration": [
+          100,
+          90
+        ],
+        "x": [
+          520.0,
+          550.0
+        ]
+      }
+    },
+    "state_during": "TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "linked_trim_left_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "a": {
+        "start": [
+          100,
+          110
+        ],
+        "duration": [
+          100,
+          90
+        ],
+        "source_start": [
+          100,
+          110
+        ],
+        "source_duration": [
+          100,
+          90
+        ],
+        "x": [
+          520.0,
+          550.0
+        ]
+      }
+    },
+    "state_during": "TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "linked_trim_right_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "a": {
+        "duration": [
+          100,
+          90
+        ],
+        "source_duration": [
+          100,
+          90
+        ]
+      }
+    },
+    "state_during": "TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "linked_trim_right_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "a": {
+        "duration": [
+          100,
+          90
+        ],
+        "source_duration": [
+          100,
+          90
+        ]
+      }
+    },
+    "state_during": "TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "linked_trim_right_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "a": {
+        "duration": [
+          100,
+          90
+        ],
+        "source_duration": [
+          100,
+          90
+        ]
+      }
+    },
+    "state_during": "TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "ripple_left_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "RIPPLE_TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "ripple_left_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "RIPPLE_TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "ripple_left_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "RIPPLE_TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "ripple_right_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "RIPPLE_TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "ripple_right_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "RIPPLE_TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "ripple_right_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "RIPPLE_TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "slip_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "SLIPPING",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "slip_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "SLIPPING",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "slip_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "SLIPPING",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "slide_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "l": {
+        "duration": [
+          100,
+          110
+        ]
+      },
+      "r": {
+        "start": [
+          200,
+          210
+        ],
+        "duration": [
+          100,
+          90
+        ]
+      }
+    },
+    "state_during": "SLIDING",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "slide_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "l": {
+        "duration": [
+          100,
+          110
+        ]
+      },
+      "r": {
+        "start": [
+          200,
+          210
+        ],
+        "duration": [
+          100,
+          90
+        ]
+      }
+    },
+    "state_during": "SLIDING",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "slide_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "l": {
+        "duration": [
+          100,
+          110
+        ]
+      },
+      "r": {
+        "start": [
+          200,
+          210
+        ],
+        "duration": [
+          100,
+          90
+        ]
+      }
+    },
+    "state_during": "SLIDING",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "fade_in_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_FADE_IN",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "fade_in_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_FADE_IN",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "fade_in_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_FADE_IN",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "fade_out_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_FADE_OUT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "fade_out_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_FADE_OUT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "fade_out_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "DRAGGING_FADE_OUT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "rate_left_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "rate_left_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "rate_left_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_LEFT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "rate_right_esc": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "rate_right_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "rate_right_focus": {
+    "model_unchanged": true,
+    "visual_mismatch": {},
+    "state_during": "TRIMMING_RIGHT",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": false
+  },
+  "roll_seam_esc": {
+    "model_unchanged": false,
+    "visual_mismatch": {
+      "l": {
+        "duration": [
+          100,
+          110
+        ],
+        "source_duration": [
+          100,
+          110
+        ]
+      },
+      "c": {
+        "start": [
+          100,
+          110
+        ],
+        "duration": [
+          100,
+          90
+        ],
+        "source_start": [
+          100,
+          110
+        ],
+        "source_duration": [
+          100,
+          90
+        ],
+        "x": [
+          520.0,
+          550.0
+        ]
+      }
+    },
+    "state_during": "IDLE",
+    "state_after": "IDLE",
+    "undo": true,
+    "roll_preview": false
+  },
+  "roll_seam_tool": {
+    "model_unchanged": true,
+    "visual_mismatch": {
+      "l": {
+        "duration": [
+          100,
+          110
+        ],
+        "source_duration": [
+          100,
+          110
+        ],
+        "preview_active": [
+          false,
+          true
+        ]
+      },
+      "c": {
+        "start": [
+          100,
+          110
+        ],
+        "duration": [
+          100,
+          90
+        ],
+        "source_start": [
+          100,
+          110
+        ],
+        "source_duration": [
+          100,
+          90
+        ],
+        "preview_active": [
+          false,
+          true
+        ],
+        "x": [
+          520.0,
+          550.0
+        ]
+      }
+    },
+    "state_during": "IDLE",
+    "state_after": "IDLE",
+    "undo": false,
+    "roll_preview": true
+  },
+  "roll_seam_focus": {
+    "model_unchanged": false,
+    "visual_mismatch": {
+      "l": {
+        "duration": [
+          100,
+          110
+        ],
+        "source_duration": [
+          100,
+          110
+        ]
+      },
+      "c": {
+        "start": [
+          100,
+          110
+        ],
+        "duration": [
+          100,
+          90
+        ],
+        "source_start": [
+          100,
+          110
+        ],
+        "source_duration": [
+          100,
+          90
+        ],
+        "x": [
+          520.0,
+          550.0
+        ]
+      }
+    },
+    "state_during": "IDLE",
+    "state_after": "IDLE",
+    "undo": true,
+    "roll_preview": false
+  }
+}
+UNCAUGHT 0

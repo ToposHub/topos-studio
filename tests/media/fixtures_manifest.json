@@ -1,0 +1,2675 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "description": "Topos Color 视频测试素材库清单",
+  "config": {
+    "base_path": "${TOPOS_VIDEO_FIXTURES_PATH}",
+    "fallback_paths": [
+      "~/VideoTestFixtures",
+      "/mnt/video_fixtures",
+      "./tests/media/fixtures"
+    ],
+    "download_base_url": "https://example.com/topos-fixtures"
+  },
+  "fixtures": {
+    "prores_422_hq_10bit": {
+      "id": "prores_422_hq_10bit",
+      "name": "ProRes 422 HQ 10-bit MOV",
+      "description": "Apple ProRes 422 HQ 编码，10-bit 色深，标准 Rec.709",
+      "file_path": "prores/prores_422_hq_10bit.mov",
+      "file_size_mb": 500,
+      "codec": {
+        "name": "prores",
+        "profile": "422 HQ",
+        "long_name": "Apple ProRes 422 HQ"
+      },
+      "pix_fmt": "yuv422p10le",
+      "bit_depth": 10,
+      "resolution": {
+        "width": 1920,
+        "height": 1080
+      },
+      "fps": {
+        "numerator": 24000,
+        "denominator": 1001,
+        "value": 23.976
+      },
+      "duration": {
+        "seconds": 10.0,
+        "frames": 240
+      },
+      "color_metadata": {
+        "color_space": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "color_range": "tv"
+      },
+      "timecode": {
+        "start": "00:00:00:00",
+        "drop_frame": false
+      },
+      "checksum": {
+        "md5": null,
+        "sha256": null
+      },
+      "tags": [
+        "professional",
+        "10bit",
+        "rec709",
+        "mov"
+      ]
+    },
+    "prores_4444_alpha": {
+      "id": "prores_4444_alpha",
+      "name": "ProRes 4444 with Alpha MOV",
+      "description": "Apple ProRes 4444 编码，包含 Alpha 通道，12-bit",
+      "file_path": "prores/prores_4444_alpha.mov",
+      "file_size_mb": 800,
+      "codec": {
+        "name": "prores",
+        "profile": "4444",
+        "long_name": "Apple ProRes 4444"
+      },
+      "pix_fmt": "yuv444p12le",
+      "bit_depth": 12,
+      "resolution": {
+        "width": 1920,
+        "height": 1080
+      },
+      "fps": {
+        "numerator": 24,
+        "denominator": 1,
+        "value": 24.0
+      },
+      "duration": {
+        "seconds": 5.0,
+        "frames": 120
+      },
+      "color_metadata": {
+        "color_space": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "color_range": "tv",
+        "alpha_mode": "straight"
+      },
+      "timecode": {
+        "start": "01:00:00:00",
+        "drop_frame": false
+      },
+      "checksum": {
+        "md5": null,
+        "sha256": null
+      },
+      "tags": [
+        "professional",
+        "alpha",
+        "12bit",
+        "rec709",
+        "mov"
+      ]
+    },
+    "dnxhr_hqx_10bit": {
+      "id": "dnxhr_hqx_10bit",
+      "name": "DNxHR HQX 10-bit MXF",
+      "description": "Avid DNxHR HQX 编码，10-bit 色深，MXF 容器",
+      "file_path": "dnxhr/dnxhr_hqx_10bit.mxf",
+      "file_size_mb": 600,
+      "codec": {
+        "name": "dnxhr",
+        "profile": "HQX",
+        "long_name": "Avid DNxHR HQX"
+      },
+      "pix_fmt": "yuv422p10le",
+      "bit_depth": 10,
+      "resolution": {
+        "width": 3840,
+        "height": 2160
+      },
+      "fps": {
+        "numerator": 25,
+        "denominator": 1,
+        "value": 25.0
+      },
+      "duration": {
+        "seconds": 8.0,
+        "frames": 200
+      },
+      "color_metadata": {
+        "color_space": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "color_range": "tv"
+      },
+      "timecode": {
+        "start": "00:00:00:00",
+        "drop_frame": false
+      },
+      "checksum": {
+        "md5": null,
+        "sha256": null
+      },
+      "tags": [
+        "professional",
+        "10bit",
+        "4k",
+        "mxf",
+        "rec709"
+      ]
+    },
+    "h264_long_gop": {
+      "id": "h264_long_gop",
+      "name": "H.264 Long GOP MP4",
+      "description": "H.264/AVC 编码，长 GOP 结构，消费级格式",
+      "file_path": "h264/h264_long_gop.mp4",
+      "file_size_mb": 50,
+      "codec": {
+        "name": "h264",
+        "profile": "High",
+        "level": "4.1",
+        "long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"
+      },
+      "pix_fmt": "yuv420p",
+      "bit_depth": 8,
+      "resolution": {
+        "width": 1920,
+        "height": 1080
+      },
+      "fps": {
+        "numerator": 30000,
+        "denominator": 1001,
+        "value": 29.97
+      },
+      "duration": {
+        "seconds": 30.0,
+        "frames": 900
+      },
+      "gop_structure": {
+        "gop_size": 30,
+        "b_frames": 3,
+        "ref_frames": 4
+      },
+      "color_metadata": {
+        "color_space": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "color_range": "tv"
+      },
+      "timecode": {
+        "start": "00:00:00:00",
+        "drop_frame": true
+      },
+      "checksum": {
+        "md5": null,
+        "sha256": null
+      },
+      "tags": [
+        "consumer",
+        "8bit",
+        "long-gop",
+        "rec709",
+        "mp4"
+      ]
+    },
+    "h265_10bit_pq": {
+      "id": "h265_10bit_pq",
+      "name": "H.265 10-bit Rec.2020 PQ",
+      "description": "H.265/HEVC 编码，10-bit，Rec.2020 色域，PQ 传输函数，HDR 样本",
+      "file_path": "h265/h265_10bit_pq.mp4",
+      "file_size_mb": 200,
+      "codec": {
+        "name": "hevc",
+        "profile": "Main10",
+        "level": "5.1",
+        "long_name": "H.265 / HEVC / MPEG-H HEVC"
+      },
+      "pix_fmt": "yuv420p10le",
+      "bit_depth": 10,
+      "resolution": {
+        "width": 3840,
+        "height": 2160
+      },
+      "fps": {
+        "numerator": 60000,
+        "denominator": 1001,
+        "value": 59.94
+      },
+      "duration": {
+        "seconds": 15.0,
+        "frames": 900
+      },
+      "color_metadata": {
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "smpte2084",
+        "color_range": "tv",
+        "hdr_format": "HDR10",
+        "max_cll": 1000,
+        "max_fall": 400
+      },
+      "timecode": {
+        "start": "00:00:00:00",
+        "drop_frame": true
+      },
+      "checksum": {
+        "md5": null,
+        "sha256": null
+      },
+      "tags": [
+        "hdr",
+        "10bit",
+        "4k",
+        "pq",
+        "rec2020",
+        "hevc",
+        "mp4"
+      ]
+    },
+    "h265_10bit_hlg": {
+      "id": "h265_10bit_hlg",
+      "name": "H.265 10-bit HLG",
+      "description": "H.265/HEVC 编码，10-bit，Hybrid Log-Gamma 传输函数，HDR 样本",
+      "file_path": "h265/h265_10bit_hlg.mp4",
+      "file_size_mb": 180,
+      "codec": {
+        "name": "hevc",
+        "profile": "Main10",
+        "level": "5.0",
+        "long_name": "H.265 / HEVC / MPEG-H HEVC"
+      },
+      "pix_fmt": "yuv420p10le",
+      "bit_depth": 10,
+      "resolution": {
+        "width": 3840,
+        "height": 2160
+      },
+      "fps": {
+        "numerator": 50,
+        "denominator": 1,
+        "value": 50.0
+      },
+      "duration": {
+        "seconds": 12.0,
+        "frames": 600
+      },
+      "color_metadata": {
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "arib-std-b67",
+        "color_range": "tv",
+        "hdr_format": "HLG"
+      },
+      "timecode": {
+        "start": "00:00:00:00",
+        "drop_frame": false
+      },
+      "checksum": {
+        "md5": null,
+        "sha256": null
+      },
+      "tags": [
+        "hdr",
+        "10bit",
+        "4k",
+        "hlg",
+        "rec2020",
+        "hevc",
+        "mp4"
+      ]
+    },
+    "fps_variations": {
+      "description": "不同帧率测试素材集",
+      "fixtures": {
+        "fps_23_976": {
+          "id": "fps_23_976",
+          "name": "23.976 fps Test",
+          "file_path": "fps/fps_23_976.mp4",
+          "file_size_mb": 30,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 24000,
+            "denominator": 1001,
+            "value": 23.976
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 120
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "fps-test",
+            "ntsc-film"
+          ]
+        },
+        "fps_24": {
+          "id": "fps_24",
+          "name": "24 fps Test",
+          "file_path": "fps/fps_24.mp4",
+          "file_size_mb": 30,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 24,
+            "denominator": 1,
+            "value": 24.0
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 120
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "fps-test",
+            "cinema"
+          ]
+        },
+        "fps_25": {
+          "id": "fps_25",
+          "name": "25 fps Test",
+          "file_path": "fps/fps_25.mp4",
+          "file_size_mb": 30,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 25,
+            "denominator": 1,
+            "value": 25.0
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 125
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "fps-test",
+            "pal"
+          ]
+        },
+        "fps_29_97": {
+          "id": "fps_29_97",
+          "name": "29.97 fps Test",
+          "file_path": "fps/fps_29_97.mp4",
+          "file_size_mb": 30,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 30000,
+            "denominator": 1001,
+            "value": 29.97
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 150
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "fps-test",
+            "ntsc"
+          ]
+        },
+        "fps_30": {
+          "id": "fps_30",
+          "name": "30 fps Test",
+          "file_path": "fps/fps_30.mp4",
+          "file_size_mb": 30,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 30,
+            "denominator": 1,
+            "value": 30.0
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 150
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "fps-test",
+            "standard"
+          ]
+        },
+        "fps_50": {
+          "id": "fps_50",
+          "name": "50 fps Test",
+          "file_path": "fps/fps_50.mp4",
+          "file_size_mb": 50,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 50,
+            "denominator": 1,
+            "value": 50.0
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 250
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "fps-test",
+            "pal-hfr"
+          ]
+        },
+        "fps_60": {
+          "id": "fps_60",
+          "name": "60 fps Test",
+          "file_path": "fps/fps_60.mp4",
+          "file_size_mb": 60,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 60,
+            "denominator": 1,
+            "value": 60.0
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 300
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "fps-test",
+            "hfr"
+          ]
+        }
+      }
+    },
+    "color_range_test": {
+      "description": "色彩范围测试素材",
+      "fixtures": {
+        "full_range": {
+          "id": "full_range",
+          "name": "Full Range (0-255) Test",
+          "file_path": "color_range/full_range.mp4",
+          "file_size_mb": 20,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuvj420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 24,
+            "denominator": 1,
+            "value": 24.0
+          },
+          "duration": {
+            "seconds": 3.0,
+            "frames": 72
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "pc"
+          },
+          "test_patterns": [
+            "color_bars",
+            "gradient",
+            "sweep"
+          ],
+          "tags": [
+            "color-range",
+            "full-range"
+          ]
+        },
+        "limited_range": {
+          "id": "limited_range",
+          "name": "Limited Range (16-235) Test",
+          "file_path": "color_range/limited_range.mp4",
+          "file_size_mb": 20,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 24,
+            "denominator": 1,
+            "value": 24.0
+          },
+          "duration": {
+            "seconds": 3.0,
+            "frames": 72
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "test_patterns": [
+            "color_bars",
+            "gradient",
+            "sweep"
+          ],
+          "tags": [
+            "color-range",
+            "limited-range"
+          ]
+        }
+      }
+    },
+    "color_space_test": {
+      "description": "色彩空间测试素材",
+      "fixtures": {
+        "rec709": {
+          "id": "rec709",
+          "name": "Rec.709 SDR Test",
+          "file_path": "color_space/rec709.mp4",
+          "file_size_mb": 25,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 24,
+            "denominator": 1,
+            "value": 24.0
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 120
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "test_patterns": [
+            "color_checker",
+            "gray_ramp",
+            "skin_tones"
+          ],
+          "tags": [
+            "color-space",
+            "rec709",
+            "sdr"
+          ]
+        },
+        "rec2020_sdr": {
+          "id": "rec2020_sdr",
+          "name": "Rec.2020 SDR Test",
+          "file_path": "color_space/rec2020_sdr.mp4",
+          "file_size_mb": 100,
+          "codec": {
+            "name": "hevc",
+            "profile": "Main10"
+          },
+          "pix_fmt": "yuv420p10le",
+          "bit_depth": 10,
+          "resolution": {
+            "width": 3840,
+            "height": 2160
+          },
+          "fps": {
+            "numerator": 24,
+            "denominator": 1,
+            "value": 24.0
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 120
+          },
+          "color_metadata": {
+            "color_space": "bt2020nc",
+            "color_primaries": "bt2020",
+            "color_transfer": "bt2020-10",
+            "color_range": "tv"
+          },
+          "tags": [
+            "color-space",
+            "rec2020",
+            "wide-gamut"
+          ]
+        },
+        "pq_hdr": {
+          "id": "pq_hdr",
+          "name": "PQ HDR Test",
+          "file_path": "color_space/pq_hdr.mp4",
+          "file_size_mb": 150,
+          "codec": {
+            "name": "hevc",
+            "profile": "Main10"
+          },
+          "pix_fmt": "yuv420p10le",
+          "bit_depth": 10,
+          "resolution": {
+            "width": 3840,
+            "height": 2160
+          },
+          "fps": {
+            "numerator": 24,
+            "denominator": 1,
+            "value": 24.0
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 120
+          },
+          "color_metadata": {
+            "color_space": "bt2020nc",
+            "color_primaries": "bt2020",
+            "color_transfer": "smpte2084",
+            "color_range": "tv",
+            "hdr_format": "HDR10",
+            "max_cll": 4000,
+            "max_fall": 1000
+          },
+          "test_patterns": [
+            "highlight_recovery",
+            "shadow_detail",
+            "color_volume"
+          ],
+          "tags": [
+            "color-space",
+            "pq",
+            "hdr10",
+            "4k"
+          ]
+        },
+        "hlg_hdr": {
+          "id": "hlg_hdr",
+          "name": "HLG HDR Test",
+          "file_path": "color_space/hlg_hdr.mp4",
+          "file_size_mb": 120,
+          "codec": {
+            "name": "hevc",
+            "profile": "Main10"
+          },
+          "pix_fmt": "yuv420p10le",
+          "bit_depth": 10,
+          "resolution": {
+            "width": 3840,
+            "height": 2160
+          },
+          "fps": {
+            "numerator": 50,
+            "denominator": 1,
+            "value": 50.0
+          },
+          "duration": {
+            "seconds": 5.0,
+            "frames": 250
+          },
+          "color_metadata": {
+            "color_space": "bt2020nc",
+            "color_primaries": "bt2020",
+            "color_transfer": "arib-std-b67",
+            "color_range": "tv",
+            "hdr_format": "HLG"
+          },
+          "tags": [
+            "color-space",
+            "hlg",
+            "hdr",
+            "4k"
+          ]
+        }
+      }
+    },
+    "stress_test": {
+      "description": "压力测试素材",
+      "fixtures": {
+        "4k_60fps": {
+          "id": "stress_4k_60fps",
+          "name": "4K 60fps High Bitrate",
+          "file_path": "stress/4k_60fps_high_br.mp4",
+          "file_size_mb": 500,
+          "codec": {
+            "name": "h264",
+            "profile": "High",
+            "level": "5.2"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 3840,
+            "height": 2160
+          },
+          "fps": {
+            "numerator": 60,
+            "denominator": 1,
+            "value": 60.0
+          },
+          "duration": {
+            "seconds": 30.0,
+            "frames": 1800
+          },
+          "bitrate_kbps": 50000,
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "stress",
+            "4k",
+            "high-fps"
+          ]
+        },
+        "long_duration": {
+          "id": "stress_long_duration",
+          "name": "10 Minute Duration Test",
+          "file_path": "stress/long_duration.mp4",
+          "file_size_mb": 300,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 24,
+            "denominator": 1,
+            "value": 24.0
+          },
+          "duration": {
+            "seconds": 600.0,
+            "frames": 14400
+          },
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "stress",
+            "long-duration"
+          ]
+        },
+        "variable_bitrate": {
+          "id": "stress_vbr",
+          "name": "Variable Bitrate Stress Test",
+          "file_path": "stress/variable_bitrate.mp4",
+          "file_size_mb": 200,
+          "codec": {
+            "name": "h264",
+            "profile": "High"
+          },
+          "pix_fmt": "yuv420p",
+          "bit_depth": 8,
+          "resolution": {
+            "width": 1920,
+            "height": 1080
+          },
+          "fps": {
+            "numerator": 30,
+            "denominator": 1,
+            "value": 30.0
+          },
+          "duration": {
+            "seconds": 60.0,
+            "frames": 1800
+          },
+          "bitrate_mode": "vbr",
+          "min_bitrate_kbps": 1000,
+          "max_bitrate_kbps": 50000,
+          "color_metadata": {
+            "color_space": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "color_range": "tv"
+          },
+          "tags": [
+            "stress",
+            "vbr"
+          ]
+        }
+      }
+    }
+  },
+  "p10a_required_fixtures": {
+    "h264_4k": {
+      "id": "h264_4k",
+      "name": "4K H.264 SDR MP4",
+      "description": "P10.A 验收素材：4K H.264/AVC 编码，8-bit SDR",
+      "file_path": "h264/h264_4k.mp4",
+      "file_size_mb": 200,
+      "codec": {
+        "name": "h264",
+        "profile": "High",
+        "level": "5.1",
+        "long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"
+      },
+      "pix_fmt": "yuv420p",
+      "bit_depth": 8,
+      "resolution": {
+        "width": 3840,
+        "height": 2160
+      },
+      "fps": {
+        "numerator": 30,
+        "denominator": 1,
+        "value": 30.0
+      },
+      "duration": {
+        "seconds": 10.0,
+        "frames": 300
+      },
+      "gop_structure": {
+        "gop_size": 30,
+        "b_frames": 2,
+        "ref_frames": 4
+      },
+      "color_metadata": {
+        "color_space": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "color_range": "tv"
+      },
+      "tags": [
+        "p10a",
+        "4k",
+        "h264",
+        "sdr",
+        "mp4"
+      ]
+    },
+    "prores_422_4k": {
+      "id": "prores_422_4k",
+      "name": "4K ProRes 422 MOV",
+      "description": "P10.A 验收素材：4K ProRes 422 编码，10-bit",
+      "file_path": "prores/prores_422_4k.mov",
+      "file_size_mb": 800,
+      "codec": {
+        "name": "prores",
+        "profile": "422",
+        "long_name": "Apple ProRes 422"
+      },
+      "pix_fmt": "yuv422p10le",
+      "bit_depth": 10,
+      "resolution": {
+        "width": 3840,
+        "height": 2160
+      },
+      "fps": {
+        "numerator": 24,
+        "denominator": 1,
+        "value": 24.0
+      },
+      "duration": {
+        "seconds": 10.0,
+        "frames": 240
+      },
+      "color_metadata": {
+        "color_space": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "color_range": "tv"
+      },
+      "tags": [
+        "p10a",
+        "4k",
+        "prores",
+        "10bit",
+        "mov"
+      ]
+    }
+  },
+  "davinci_level_validation": {
+    "description": "达芬奇级验收素材集（完整验收矩阵）",
+    "minimum_test_fixtures": {
+      "1080p_h264_sdr_30fps": {
+        "id": "validation_1080p_h264_sdr_30fps",
+        "name": "1080p H.264 SDR 30fps",
+        "description": "验收基础素材：1080p H.264/AVC 编码，8-bit SDR，30fps",
+        "file_path": "validation/1080p_h264_sdr_30fps.mp4",
+        "codec": {
+          "name": "h264",
+          "profile": "High"
+        },
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 30000,
+          "denominator": 1001,
+          "value": 29.97
+        },
+        "duration": {
+          "seconds": 30.0,
+          "frames": 900
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "tags": [
+          "validation",
+          "1080p",
+          "h264",
+          "sdr",
+          "30fps"
+        ]
+      },
+      "4k_h264_sdr_30fps": {
+        "id": "validation_4k_h264_sdr_30fps",
+        "name": "4K H.264 SDR 30fps",
+        "description": "验收素材：4K H.264/AVC 编码，8-bit SDR，30fps",
+        "file_path": "validation/4k_h264_sdr_30fps.mp4",
+        "codec": {
+          "name": "h264",
+          "profile": "High",
+          "level": "5.1"
+        },
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 30000,
+          "denominator": 1001,
+          "value": 29.97
+        },
+        "duration": {
+          "seconds": 30.0,
+          "frames": 900
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "tags": [
+          "validation",
+          "4k",
+          "h264",
+          "sdr",
+          "30fps"
+        ]
+      },
+      "4k_h265_10bit_hdr_30fps": {
+        "id": "validation_4k_h265_10bit_hdr_30fps",
+        "name": "4K H.265 10-bit HDR 30fps",
+        "description": "验收素材：4K H.265/HEVC 编码，10-bit PQ HDR，30fps",
+        "file_path": "validation/4k_h265_10bit_hdr_30fps.mp4",
+        "codec": {
+          "name": "hevc",
+          "profile": "Main10",
+          "level": "5.1"
+        },
+        "pix_fmt": "yuv420p10le",
+        "bit_depth": 10,
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 30000,
+          "denominator": 1001,
+          "value": 29.97
+        },
+        "duration": {
+          "seconds": 30.0,
+          "frames": 900
+        },
+        "color_metadata": {
+          "color_space": "bt2020nc",
+          "color_primaries": "bt2020",
+          "color_transfer": "smpte2084",
+          "color_range": "tv",
+          "hdr_format": "HDR10"
+        },
+        "tags": [
+          "validation",
+          "4k",
+          "h265",
+          "10bit",
+          "hdr",
+          "30fps"
+        ]
+      },
+      "4k_prores_422_hq_24fps": {
+        "id": "validation_4k_prores_422_hq_24fps",
+        "name": "4K ProRes 422 HQ 24fps",
+        "description": "验收素材：4K ProRes 422 HQ 编码，10-bit，24fps",
+        "file_path": "validation/4k_prores_422_hq_24fps.mov",
+        "codec": {
+          "name": "prores",
+          "profile": "422 HQ"
+        },
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 24000,
+          "denominator": 1001,
+          "value": 23.976
+        },
+        "duration": {
+          "seconds": 30.0,
+          "frames": 720
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "tags": [
+          "validation",
+          "4k",
+          "prores",
+          "10bit",
+          "24fps"
+        ]
+      },
+      "4k_prores_422_hq_30fps": {
+        "id": "validation_4k_prores_422_hq_30fps",
+        "name": "4K ProRes 422 HQ 30fps",
+        "description": "验收素材：4K ProRes 422 HQ 编码，10-bit，30fps",
+        "file_path": "validation/4k_prores_422_hq_30fps.mov",
+        "codec": {
+          "name": "prores",
+          "profile": "422 HQ"
+        },
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 30000,
+          "denominator": 1001,
+          "value": 29.97
+        },
+        "duration": {
+          "seconds": 30.0,
+          "frames": 900
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "tags": [
+          "validation",
+          "4k",
+          "prores",
+          "10bit",
+          "30fps"
+        ]
+      },
+      "prores_4444_alpha": {
+        "id": "validation_prores_4444_alpha",
+        "name": "ProRes 4444 with Alpha",
+        "description": "验收素材：ProRes 4444 编码，含 Alpha 通道，12-bit",
+        "file_path": "validation/prores_4444_alpha.mov",
+        "codec": {
+          "name": "prores",
+          "profile": "4444"
+        },
+        "pix_fmt": "yuva444p12le",
+        "bit_depth": 12,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 24000,
+          "denominator": 1001,
+          "value": 23.976
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 240
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv",
+          "alpha_mode": "straight"
+        },
+        "tags": [
+          "validation",
+          "prores",
+          "alpha",
+          "12bit"
+        ]
+      },
+      "dnxhr_hqx_10bit": {
+        "id": "validation_dnxhr_hqx_10bit",
+        "name": "DNxHR HQX 10-bit",
+        "description": "验收素材：DNxHR HQX 编码，10-bit，MXF 容器",
+        "file_path": "validation/dnxhr_hqx_10bit.mxf",
+        "codec": {
+          "name": "dnxhr",
+          "profile": "HQX"
+        },
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 25,
+          "denominator": 1,
+          "value": 25.0
+        },
+        "duration": {
+          "seconds": 30.0,
+          "frames": 750
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "tags": [
+          "validation",
+          "dnxhr",
+          "10bit",
+          "mxf"
+        ]
+      },
+      "long_gop_2min": {
+        "id": "validation_long_gop_2min",
+        "name": "Long GOP 2+ minutes",
+        "description": "验收素材：长 GOP 结构（GOP 60+），2+分钟时长",
+        "file_path": "validation/long_gop_2min.mp4",
+        "codec": {
+          "name": "h264",
+          "profile": "High"
+        },
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 30000,
+          "denominator": 1001,
+          "value": 29.97
+        },
+        "duration": {
+          "seconds": 120.0,
+          "frames": 3600
+        },
+        "gop_structure": {
+          "gop_size": 60,
+          "b_frames": 4,
+          "ref_frames": 6
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "tags": [
+          "validation",
+          "long-gop",
+          "2min"
+        ]
+      },
+      "long_playback_10min": {
+        "id": "validation_long_playback_10min",
+        "name": "Long Playback 10 minutes",
+        "description": "验收素材：长播放测试，10分钟时长，验证内存/GPU纹理稳定性",
+        "file_path": "validation/long_playback_10min.mp4",
+        "codec": {
+          "name": "h264",
+          "profile": "High"
+        },
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 24000,
+          "denominator": 1001,
+          "value": 23.976
+        },
+        "duration": {
+          "seconds": 600.0,
+          "frames": 14400
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "tags": [
+          "validation",
+          "long-playback",
+          "10min",
+          "memory-test"
+        ]
+      }
+    },
+    "thresholds": {
+      "ui_tick_p95_ms": {
+        "1080p": 2.0,
+        "4k_proxy": 3.0
+      },
+      "displayed_fps_ratio": 0.95,
+      "dropped_frames_stable_percent": 1.0,
+      "render_queue_p95": 2,
+      "seek_median_ms": 300.0,
+      "seek_p95_ms": 600.0,
+      "texture_count_no_growth_minutes": 10,
+      "memory_rss_no_growth_minutes": 10,
+      "first_frame_ms": 500.0
+    }
+  },
+  "p52_standard_material_matrix": {
+    "description": "P5-2 标准素材矩阵（视频优化方案验收素材集）",
+    "fixtures": {
+      "h264_8bit_420_1080p": {
+        "id": "h264_8bit_420_1080p",
+        "name": "H.264 8-bit 4:2:0 1080p",
+        "description": "P5-2: H.264/AVC 8-bit 4:2:0 1080p，用于硬解 + proxy 测试",
+        "file_path": "p52/h264_8bit_420_1080p.mp4",
+        "file_size_mb": 100,
+        "codec": {
+          "name": "h264",
+          "profile": "High",
+          "level": "4.1",
+          "long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"
+        },
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "chroma_subsampling": "4:2:0",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 30000,
+          "denominator": 1001,
+          "value": 29.97
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 300
+        },
+        "gop_structure": {
+          "gop_size": 30,
+          "b_frames": 3,
+          "ref_frames": 4
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "test_patterns": [
+          "color_bars",
+          "gradient",
+          "checkerboard"
+        ],
+        "performance_targets": {
+          "hw_decode_fps": {
+            "min": 60.0,
+            "description": "硬件解码帧率"
+          },
+          "proxy_decode_fps": {
+            "min": 120.0,
+            "scale": 0.5,
+            "description": "Proxy 解码帧率（50% 缩放）"
+          },
+          "seek_ms": {
+            "max": 50.0,
+            "description": "随机 seek 时间"
+          },
+          "open_ms": {
+            "max": 200.0,
+            "description": "打开时间"
+          }
+        },
+        "tags": [
+          "p52",
+          "h264",
+          "8bit",
+          "420",
+          "1080p",
+          "hw-decode",
+          "proxy"
+        ]
+      },
+      "h264_8bit_420_4k": {
+        "id": "h264_8bit_420_4k",
+        "name": "H.264 8-bit 4:2:0 4K",
+        "description": "P5-2: H.264/AVC 8-bit 4:2:0 4K，用于硬解 + proxy 测试",
+        "file_path": "p52/h264_8bit_420_4k.mp4",
+        "file_size_mb": 300,
+        "codec": {
+          "name": "h264",
+          "profile": "High",
+          "level": "5.1",
+          "long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"
+        },
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "chroma_subsampling": "4:2:0",
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 30,
+          "denominator": 1,
+          "value": 30.0
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 300
+        },
+        "gop_structure": {
+          "gop_size": 30,
+          "b_frames": 2,
+          "ref_frames": 4
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "test_patterns": [
+          "color_bars",
+          "gradient",
+          "checkerboard"
+        ],
+        "performance_targets": {
+          "hw_decode_fps": {
+            "min": 30.0,
+            "description": "硬件解码帧率"
+          },
+          "proxy_decode_fps": {
+            "min": 60.0,
+            "scale": 0.5,
+            "description": "Proxy 解码帧率"
+          },
+          "cpu_decode_fps": {
+            "min": 12.0,
+            "description": "CPU 解码帧率（fallback）"
+          },
+          "seek_ms": {
+            "max": 100.0,
+            "description": "随机 seek 时间"
+          },
+          "open_ms": {
+            "max": 300.0,
+            "description": "打开时间"
+          }
+        },
+        "tags": [
+          "p52",
+          "h264",
+          "8bit",
+          "420",
+          "4k",
+          "hw-decode",
+          "proxy"
+        ]
+      },
+      "h265_10bit_420_4k": {
+        "id": "h265_10bit_420_4k",
+        "name": "H.265 10-bit 4:2:0 4K",
+        "description": "P5-2: H.265/HEVC 10-bit 4:2:0 4K，用于硬解/CPU fallback 测试",
+        "file_path": "p52/h265_10bit_420_4k.mp4",
+        "file_size_mb": 250,
+        "codec": {
+          "name": "hevc",
+          "profile": "Main10",
+          "level": "5.1",
+          "long_name": "H.265 / HEVC / MPEG-H HEVC"
+        },
+        "pix_fmt": "yuv420p10le",
+        "bit_depth": 10,
+        "chroma_subsampling": "4:2:0",
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 240
+        },
+        "gop_structure": {
+          "gop_size": 48,
+          "b_frames": 4,
+          "ref_frames": 5
+        },
+        "color_metadata": {
+          "color_space": "bt2020nc",
+          "color_primaries": "bt2020",
+          "color_transfer": "smpte2084",
+          "color_range": "tv",
+          "hdr_format": "HDR10"
+        },
+        "test_patterns": [
+          "color_bars",
+          "gradient",
+          "hdr_test_patterns"
+        ],
+        "performance_targets": {
+          "hw_decode_fps": {
+            "min": 24.0,
+            "description": "硬件解码帧率（HDR）"
+          },
+          "cpu_decode_fps": {
+            "min": 6.0,
+            "description": "CPU 解码帧率（fallback）"
+          },
+          "proxy_decode_fps": {
+            "min": 30.0,
+            "scale": 0.25,
+            "description": "Proxy 解码帧率（25% 缩放）"
+          },
+          "seek_ms": {
+            "max": 150.0,
+            "description": "随机 seek 时间（Long GOP）"
+          },
+          "open_ms": {
+            "max": 400.0,
+            "description": "打开时间"
+          }
+        },
+        "tags": [
+          "p52",
+          "h265",
+          "10bit",
+          "420",
+          "4k",
+          "hdr",
+          "hw-decode",
+          "fallback"
+        ]
+      },
+      "prores_422_hq_1080p": {
+        "id": "prores_422_hq_1080p",
+        "name": "ProRes 422 HQ 1080p",
+        "description": "P5-2: ProRes 422 HQ 1080p，用于 CPU/proxy 测试，v3 不降",
+        "file_path": "p52/prores_422_hq_1080p.mov",
+        "file_size_mb": 400,
+        "codec": {
+          "name": "prores",
+          "profile": "422 HQ",
+          "long_name": "Apple ProRes 422 HQ"
+        },
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "chroma_subsampling": "4:2:2",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 240
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "test_patterns": [
+          "color_checker",
+          "gray_ramp",
+          "skin_tones"
+        ],
+        "performance_targets": {
+          "cpu_decode_fps": {
+            "min": 60.0,
+            "description": "CPU 解码帧率（I-frame only）"
+          },
+          "proxy_decode_fps": {
+            "min": 120.0,
+            "scale": 0.5,
+            "description": "Proxy 解码帧率"
+          },
+          "v3_full_decode_fps": {
+            "min": 24.0,
+            "description": "v3 全分辨率解码帧率"
+          },
+          "seek_ms": {
+            "max": 30.0,
+            "description": "随机 seek 时间（I-frame only）"
+          },
+          "open_ms": {
+            "max": 150.0,
+            "description": "打开时间"
+          }
+        },
+        "tags": [
+          "p52",
+          "prores",
+          "422hq",
+          "10bit",
+          "422",
+          "1080p",
+          "cpu-decode",
+          "v3"
+        ]
+      },
+      "prores_422_hq_4k": {
+        "id": "prores_422_hq_4k",
+        "name": "ProRes 422 HQ 4K",
+        "description": "P5-2: ProRes 422 HQ 4K，用于 CPU/proxy 测试",
+        "file_path": "p52/prores_422_hq_4k.mov",
+        "file_size_mb": 1200,
+        "codec": {
+          "name": "prores",
+          "profile": "422 HQ",
+          "long_name": "Apple ProRes 422 HQ"
+        },
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "chroma_subsampling": "4:2:2",
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 240
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "test_patterns": [
+          "color_checker",
+          "gray_ramp",
+          "skin_tones"
+        ],
+        "performance_targets": {
+          "cpu_decode_fps": {
+            "min": 24.0,
+            "description": "CPU 解码帧率"
+          },
+          "proxy_decode_fps": {
+            "min": 48.0,
+            "scale": 0.5,
+            "description": "Proxy 解码帧率"
+          },
+          "v3_full_decode_fps": {
+            "min": 12.0,
+            "description": "v3 全分辨率解码帧率"
+          },
+          "seek_ms": {
+            "max": 50.0,
+            "description": "随机 seek 时间"
+          },
+          "open_ms": {
+            "max": 200.0,
+            "description": "打开时间"
+          }
+        },
+        "tags": [
+          "p52",
+          "prores",
+          "422hq",
+          "10bit",
+          "422",
+          "4k",
+          "cpu-decode"
+        ]
+      },
+      "prores_4444_1080p": {
+        "id": "prores_4444_1080p",
+        "name": "ProRes 4444 with Alpha 1080p",
+        "description": "P5-2: ProRes 4444 含 Alpha 通道，用于 alpha/高位深 fallback 策略测试",
+        "file_path": "p52/prores_4444_1080p.mov",
+        "file_size_mb": 600,
+        "codec": {
+          "name": "prores",
+          "profile": "4444",
+          "long_name": "Apple ProRes 4444"
+        },
+        "pix_fmt": "yuva444p12le",
+        "bit_depth": 12,
+        "chroma_subsampling": "4:4:4",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 5.0,
+          "frames": 120
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv",
+          "alpha_mode": "straight"
+        },
+        "test_patterns": [
+          "alpha_checkerboard",
+          "gradient_alpha",
+          "color_checker"
+        ],
+        "performance_targets": {
+          "cpu_decode_fps": {
+            "min": 24.0,
+            "description": "CPU 解码帧率（含 alpha）"
+          },
+          "proxy_decode_fps": {
+            "min": 48.0,
+            "scale": 0.5,
+            "description": "Proxy 解码帧率"
+          },
+          "alpha_channel_test": {
+            "required": true,
+            "description": "Alpha 通道正确性验证"
+          },
+          "seek_ms": {
+            "max": 40.0,
+            "description": "随机 seek 时间"
+          },
+          "open_ms": {
+            "max": 180.0,
+            "description": "打开时间"
+          }
+        },
+        "tags": [
+          "p52",
+          "prores",
+          "4444",
+          "12bit",
+          "444",
+          "alpha",
+          "1080p",
+          "fallback"
+        ]
+      },
+      "prores_4444_4k": {
+        "id": "prores_4444_4k",
+        "name": "ProRes 4444 with Alpha 4K",
+        "description": "P5-2: ProRes 4444 4K 含 Alpha，用于高位深 fallback 策略测试",
+        "file_path": "p52/prores_4444_4k.mov",
+        "file_size_mb": 1800,
+        "codec": {
+          "name": "prores",
+          "profile": "4444",
+          "long_name": "Apple ProRes 4444"
+        },
+        "pix_fmt": "yuva444p12le",
+        "bit_depth": 12,
+        "chroma_subsampling": "4:4:4",
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 5.0,
+          "frames": 120
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv",
+          "alpha_mode": "straight"
+        },
+        "test_patterns": [
+          "alpha_checkerboard",
+          "gradient_alpha",
+          "color_checker"
+        ],
+        "performance_targets": {
+          "cpu_decode_fps": {
+            "min": 12.0,
+            "description": "CPU 解码帧率"
+          },
+          "proxy_decode_fps": {
+            "min": 24.0,
+            "scale": 0.25,
+            "description": "Proxy 解码帧率（25% 缩放）"
+          },
+          "alpha_channel_test": {
+            "required": true,
+            "description": "Alpha 通道正确性验证"
+          },
+          "seek_ms": {
+            "max": 80.0,
+            "description": "随机 seek 时间"
+          },
+          "open_ms": {
+            "max": 300.0,
+            "description": "打开时间"
+          }
+        },
+        "tags": [
+          "p52",
+          "prores",
+          "4444",
+          "12bit",
+          "444",
+          "alpha",
+          "4k",
+          "fallback"
+        ]
+      },
+      "dnxhr_hqx_4k": {
+        "id": "dnxhr_hqx_4k",
+        "name": "DNxHR HQX 4K",
+        "description": "P5-2: DNxHR HQX 4K，用于 intra CPU/proxy 测试",
+        "file_path": "p52/dnxhr_hqx_4k.mxf",
+        "file_size_mb": 1000,
+        "codec": {
+          "name": "dnxhr",
+          "profile": "HQX",
+          "long_name": "Avid DNxHR HQX"
+        },
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "chroma_subsampling": "4:2:2",
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 25,
+          "denominator": 1,
+          "value": 25.0
+        },
+        "duration": {
+          "seconds": 8.0,
+          "frames": 200
+        },
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "test_patterns": [
+          "color_checker",
+          "gray_ramp",
+          "skin_tones"
+        ],
+        "performance_targets": {
+          "cpu_decode_fps": {
+            "min": 30.0,
+            "description": "CPU 解码帧率（I-frame only）"
+          },
+          "proxy_decode_fps": {
+            "min": 60.0,
+            "scale": 0.5,
+            "description": "Proxy 解码帧率"
+          },
+          "seek_ms": {
+            "max": 40.0,
+            "description": "随机 seek 时间（I-frame only）"
+          },
+          "open_ms": {
+            "max": 180.0,
+            "description": "打开时间"
+          }
+        },
+        "tags": [
+          "p52",
+          "dnxhr",
+          "hqx",
+          "10bit",
+          "422",
+          "4k",
+          "intra",
+          "cpu-decode"
+        ]
+      },
+      "nv12_sample_1080p": {
+        "id": "nv12_sample_1080p",
+        "name": "NV12 Sample 1080p",
+        "description": "P5-2: NV12 原始样本，用于 YUV shader 正确性测试（硬件解码输出格式）",
+        "file_path": "p52/nv12_sample_1080p.nv12",
+        "file_size_mb": 8,
+        "pix_fmt": "nv12",
+        "bit_depth": 8,
+        "chroma_subsampling": "4:2:0",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_count": 1,
+        "test_patterns": [
+          "color_bars",
+          "gradient",
+          "sweep"
+        ],
+        "shader_tests": {
+          "yuv_to_rgb_conversion": {
+            "test_points": [
+              {
+                "y": 16,
+                "u": 128,
+                "v": 128,
+                "expected_r": 0,
+                "expected_g": 0,
+                "expected_b": 0
+              },
+              {
+                "y": 235,
+                "u": 128,
+                "v": 128,
+                "expected_r": 255,
+                "expected_g": 255,
+                "expected_b": 255
+              },
+              {
+                "y": 126,
+                "u": 128,
+                "v": 128,
+                "expected_r": 126,
+                "expected_g": 126,
+                "expected_b": 126
+              },
+              {
+                "y": 82,
+                "u": 90,
+                "v": 240,
+                "expected_r": 255,
+                "expected_g": 0,
+                "expected_b": 0
+              },
+              {
+                "y": 144,
+                "u": 54,
+                "v": 34,
+                "expected_r": 0,
+                "expected_g": 255,
+                "expected_b": 0
+              },
+              {
+                "y": 41,
+                "u": 240,
+                "v": 110,
+                "expected_r": 0,
+                "expected_g": 0,
+                "expected_b": 255
+              }
+            ],
+            "tolerance": 2,
+            "description": "BT.709 YUV to RGB 转换正确性验证"
+          },
+          "chroma_interpolation": {
+            "test_method": "visual_inspection",
+            "description": "色度插值正确性（半像素偏移）"
+          },
+          "color_range_handling": {
+            "test_method": "range_check",
+            "description": "TV Range (16-235) vs Full Range 处理"
+          }
+        },
+        "tags": [
+          "p52",
+          "nv12",
+          "8bit",
+          "420",
+          "1080p",
+          "shader-test",
+          "yuv"
+        ]
+      },
+      "p010_sample_1080p": {
+        "id": "p010_sample_1080p",
+        "name": "P010 Sample 1080p",
+        "description": "P5-2: P010 (NV12 10-bit) 原始样本，用于 YUV shader 正确性测试（HDR 硬解输出格式）",
+        "file_path": "p52/p010_sample_1080p.p010",
+        "file_size_mb": 12,
+        "pix_fmt": "p010le",
+        "bit_depth": 10,
+        "chroma_subsampling": "4:2:0",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "frame_count": 1,
+        "test_patterns": [
+          "color_bars",
+          "gradient",
+          "hdr_test_patterns"
+        ],
+        "shader_tests": {
+          "yuv_to_rgb_conversion_10bit": {
+            "test_points": [
+              {
+                "y": 64,
+                "u": 512,
+                "v": 512,
+                "expected_r": 0,
+                "expected_g": 0,
+                "expected_b": 0
+              },
+              {
+                "y": 940,
+                "u": 512,
+                "v": 512,
+                "expected_r": 1023,
+                "expected_g": 1023,
+                "expected_b": 1023
+              },
+              {
+                "y": 512,
+                "u": 512,
+                "v": 512,
+                "expected_r": 512,
+                "expected_g": 512,
+                "expected_b": 512
+              }
+            ],
+            "tolerance": 4,
+            "description": "10-bit BT.709 YUV to RGB 转换正确性验证"
+          },
+          "pq_transfer_function": {
+            "test_points": [
+              {
+                "input": 0,
+                "expected": 0
+              },
+              {
+                "input": 0.01,
+                "expected_approx": 0.08
+              },
+              {
+                "input": 0.5,
+                "expected_approx": 0.52
+              },
+              {
+                "input": 1.0,
+                "expected": 1.0
+              }
+            ],
+            "description": "PQ EOTF 曲线正确性验证"
+          },
+          "bt2020_to_bt709_gamut_mapping": {
+            "test_method": "gamut_check",
+            "description": "BT.2020 色域映射到 BT.709 正确性"
+          }
+        },
+        "tags": [
+          "p52",
+          "p010",
+          "10bit",
+          "420",
+          "1080p",
+          "shader-test",
+          "yuv",
+          "hdr"
+        ]
+      }
+    },
+    "test_scenarios": {
+      "hw_acceleration": {
+        "description": "硬件加速场景测试",
+        "fixtures": [
+          "h264_8bit_420_1080p",
+          "h264_8bit_420_4k",
+          "h265_10bit_420_4k"
+        ],
+        "requirements": {
+          "hw_decode_available": "检测硬件解码器可用性",
+          "hw_decode_fps": "验证硬件解码帧率达标",
+          "fallback_on_failure": "验证 fallback 到 CPU 解码路径"
+        }
+      },
+      "proxy_playback": {
+        "description": "Proxy 播放场景测试",
+        "fixtures": [
+          "h264_8bit_420_1080p",
+          "h264_8bit_420_4k",
+          "prores_422_hq_1080p",
+          "prores_422_hq_4k"
+        ],
+        "requirements": {
+          "proxy_decode_fps": "验证 Proxy 解码帧率达标",
+          "proxy_scale_factor": "验证 Proxy 缩放因子正确",
+          "v3_no_downgrade": "验证 v3 不降级规则"
+        }
+      },
+      "alpha_handling": {
+        "description": "Alpha 通道处理测试",
+        "fixtures": [
+          "prores_4444_1080p",
+          "prores_4444_4k"
+        ],
+        "requirements": {
+          "alpha_channel_detected": "检测 Alpha 通道存在",
+          "alpha_blend_correct": "验证 Alpha 混合正确性",
+          "fallback_strategy": "验证高位深 fallback 策略"
+        }
+      },
+      "intra_codec": {
+        "description": "I-frame 编码测试",
+        "fixtures": [
+          "prores_422_hq_1080p",
+          "prores_422_hq_4k",
+          "dnxhr_hqx_4k"
+        ],
+        "requirements": {
+          "seek_performance": "验证 seek 性能（I-frame only 应快）",
+          "decode_fps": "验证解码帧率"
+        }
+      },
+      "yuv_shader_correctness": {
+        "description": "YUV Shader 正确性测试",
+        "fixtures": [
+          "nv12_sample_1080p",
+          "p010_sample_1080p"
+        ],
+        "requirements": {
+          "yuv_to_rgb_conversion": "YUV to RGB 转换正确性",
+          "chroma_interpolation": "色度插值正确性",
+          "color_range_handling": "色彩范围处理正确性",
+          "hdr_transfer_function": "HDR 传输函数正确性"
+        }
+      }
+    }
+  },
+  "fixture_groups": {
+    "basic": [
+      "prores_422_hq_10bit",
+      "h264_long_gop"
+    ],
+    "professional": [
+      "prores_422_hq_10bit",
+      "prores_4444_alpha",
+      "dnxhr_hqx_10bit"
+    ],
+    "hdr": [
+      "h265_10bit_pq",
+      "h265_10bit_hlg"
+    ],
+    "fps_test": [
+      "fps_23_976",
+      "fps_24",
+      "fps_25",
+      "fps_29_97",
+      "fps_30",
+      "fps_50",
+      "fps_60"
+    ],
+    "color_test": [
+      "rec709",
+      "rec2020_sdr",
+      "pq_hdr",
+      "hlg_hdr",
+      "full_range",
+      "limited_range"
+    ],
+    "stress": [
+      "stress_4k_60fps",
+      "stress_long_duration",
+      "stress_vbr"
+    ],
+    "p10a_validation": [
+      "h264_long_gop",
+      "h264_4k",
+      "h265_10bit_pq",
+      "prores_422_4k",
+      "prores_4444_alpha",
+      "dnxhr_hqx_10bit"
+    ],
+    "davinci_validation": [
+      "validation_1080p_h264_sdr_30fps",
+      "validation_4k_h264_sdr_30fps",
+      "validation_4k_h265_10bit_hdr_30fps",
+      "validation_4k_prores_422_hq_24fps",
+      "validation_4k_prores_422_hq_30fps",
+      "validation_prores_4444_alpha",
+      "validation_dnxhr_hqx_10bit",
+      "validation_long_gop_2min",
+      "validation_long_playback_10min"
+    ],
+    "p52_standard_matrix": [
+      "h264_8bit_420_1080p",
+      "h264_8bit_420_4k",
+      "h265_10bit_420_4k",
+      "prores_422_hq_1080p",
+      "prores_422_hq_4k",
+      "prores_4444_1080p",
+      "prores_4444_4k",
+      "dnxhr_hqx_4k",
+      "nv12_sample_1080p",
+      "p010_sample_1080p"
+    ],
+    "p52_shader_test": [
+      "nv12_sample_1080p",
+      "p010_sample_1080p"
+    ],
+    "p52_hw_accel": [
+      "h264_8bit_420_1080p",
+      "h264_8bit_420_4k",
+      "h265_10bit_420_4k"
+    ],
+    "p52_proxy": [
+      "h264_8bit_420_1080p",
+      "h264_8bit_420_4k",
+      "prores_422_hq_1080p",
+      "prores_422_hq_4k"
+    ],
+    "p52_alpha": [
+      "prores_4444_1080p",
+      "prores_4444_4k"
+    ],
+    "p52_intra": [
+      "prores_422_hq_1080p",
+      "prores_422_hq_4k",
+      "dnxhr_hqx_4k"
+    ],
+    "win_hw_decode_matrix": [
+      "h264_8bit_420_1080p",
+      "h264_8bit_420_4k",
+      "h265_10bit_420_4k",
+      "av1_8bit_420_1080p",
+      "av1_10bit_420_4k",
+      "h264_422_10bit_1080p",
+      "h265_422_10bit_1080p"
+    ],
+    "win_hw_decode_diag": [
+      "h264_422_8bit_1080p",
+      "h264_422_10bit_1080p",
+      "h265_422_10bit_1080p"
+    ]
+  },
+  "download_sources": {
+    "description": "公开测试素材下载源",
+    "sources": [
+      {
+        "name": "Xiph.org Test Media",
+        "url": "https://media.xiph.org/video/derf/",
+        "description": "标准测试视频序列（不含专业编码格式）",
+        "available_formats": [
+          "h264",
+          "y4m"
+        ]
+      },
+      {
+        "name": "Netflix Test Patterns",
+        "url": "https://www.netflix.com/blog/",
+        "description": "Netflix HDR 测试图案",
+        "available_formats": [
+          "hevc",
+          "prores"
+        ]
+      },
+      {
+        "name": "Apple ProRes Samples",
+        "url": "https://support.apple.com/",
+        "description": "Apple 官方 ProRes 示例",
+        "available_formats": [
+          "prores"
+        ]
+      },
+      {
+        "name": "Avid DNxHR Samples",
+        "url": "https://www.avid.com/",
+        "description": "Avid DNxHR 示例素材",
+        "available_formats": [
+          "dnxhr",
+          "mxf"
+        ]
+      },
+      {
+        "name": "FFmpeg Generated Synthetic",
+        "url": "local://synthetic",
+        "description": "本地 FFmpeg 生成合成素材",
+        "available_formats": [
+          "h264",
+          "h265",
+          "prores",
+          "dnxhr",
+          "nv12",
+          "p010"
+        ]
+      }
+    ],
+    "fallback_strategy": {
+      "primary": "download_from_source",
+      "fallback_1": "generate_with_ffmpeg",
+      "fallback_2": "use_existing_fixture",
+      "fallback_3": "skip_test_with_warning"
+    }
+  },
+  "windows_hw_decode_matrix": {
+    "description": "W0-01 Windows 解码素材矩阵（H.264/HEVC/AV1 × 8/10-bit × 4:2:0/4:2:2；4:2:2 10-bit 必含——NVDEC/D3D11VA 均不支持的诊断用例）。可由 tests/media/generate_test_fixtures.py --group win_hw_decode_matrix 复现；真实拍摄素材另见 tests/test_videos。",
+    "fixtures": {
+      "av1_8bit_420_1080p": {
+        "id": "av1_8bit_420_1080p",
+        "name": "AV1 8-bit 4:2:0 1080p",
+        "description": "AV1 硬解 vendor 依赖（AMD RDNA2+/NVIDIA Ampere+/Intel DG+）",
+        "file_path": "p52/av1_8bit_420_1080p.mp4",
+        "codec": {
+          "name": "av1",
+          "profile": "Main",
+          "long_name": "AOM Alliance for Open Media AV1"
+        },
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "chroma_subsampling": "4:2:0",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 240
+        },
+        "encoder_used": "libaom-av1",
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "checksum": {
+          "md5": null,
+          "sha256": null
+        },
+        "windows_hw_decode": {
+          "expectation": "vendor_dependent"
+        },
+        "tags": [
+          "w0",
+          "av1",
+          "8bit",
+          "420",
+          "1080p",
+          "hw-decode"
+        ]
+      },
+      "av1_10bit_420_4k": {
+        "id": "av1_10bit_420_4k",
+        "name": "AV1 10-bit 4:2:0 4K",
+        "description": "AV1 10-bit 4K，硬解 vendor 依赖",
+        "file_path": "p52/av1_10bit_420_4k.mp4",
+        "codec": {
+          "name": "av1",
+          "profile": "Main",
+          "long_name": "AOM Alliance for Open Media AV1"
+        },
+        "pix_fmt": "yuv420p10le",
+        "bit_depth": 10,
+        "chroma_subsampling": "4:2:0",
+        "resolution": {
+          "width": 3840,
+          "height": 2160
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 5.0,
+          "frames": 120
+        },
+        "encoder_used": "libaom-av1",
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "checksum": {
+          "md5": null,
+          "sha256": null
+        },
+        "windows_hw_decode": {
+          "expectation": "vendor_dependent"
+        },
+        "tags": [
+          "w0",
+          "av1",
+          "10bit",
+          "420",
+          "4k",
+          "hw-decode"
+        ]
+      },
+      "h264_422_8bit_1080p": {
+        "id": "h264_422_8bit_1080p",
+        "name": "H.264 4:2:2 8-bit 1080p",
+        "description": "诊断用例：NVDEC/D3D11VA 均不支持 4:2:2，验证显式诊断回退（禁静默软解伪装硬解）",
+        "file_path": "p52/h264_422_8bit_1080p.mp4",
+        "codec": {
+          "name": "h264",
+          "profile": "High 4:2:2",
+          "long_name": "H.264 / AVC High 4:2:2 Profile"
+        },
+        "pix_fmt": "yuv422p",
+        "bit_depth": 8,
+        "chroma_subsampling": "4:2:2",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 240
+        },
+        "encoder_used": "libx264",
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "checksum": {
+          "md5": null,
+          "sha256": null
+        },
+        "windows_hw_decode": {
+          "expectation": "unsupported_diag"
+        },
+        "tags": [
+          "w0",
+          "h264",
+          "8bit",
+          "422",
+          "1080p",
+          "diag",
+          "cpu-decode"
+        ]
+      },
+      "h264_422_10bit_1080p": {
+        "id": "h264_422_10bit_1080p",
+        "name": "H.264 4:2:2 10-bit 1080p",
+        "description": "必含诊断用例（计划 W0-01 验收标准）：硬解 session 可能成功打开但输出 yuv422p10le，open() 首帧验证必须拒绝（MediaOpenError + codec_unsupported_by_hw）",
+        "file_path": "p52/h264_422_10bit_1080p.mp4",
+        "codec": {
+          "name": "h264",
+          "profile": "High 4:2:2",
+          "long_name": "H.264 / AVC High 4:2:2 10-bit Profile"
+        },
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "chroma_subsampling": "4:2:2",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 240
+        },
+        "encoder_used": "libx264",
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "checksum": {
+          "md5": null,
+          "sha256": null
+        },
+        "windows_hw_decode": {
+          "expectation": "unsupported_diag"
+        },
+        "tags": [
+          "w0",
+          "h264",
+          "10bit",
+          "422",
+          "1080p",
+          "diag",
+          "cpu-decode"
+        ]
+      },
+      "h265_422_10bit_1080p": {
+        "id": "h265_422_10bit_1080p",
+        "name": "H.265 4:2:2 10-bit 1080p",
+        "description": "诊断用例：HEVC Main 4:2:2 10 硬解不可用，验证显式诊断回退",
+        "file_path": "p52/h265_422_10bit_1080p.mp4",
+        "codec": {
+          "name": "hevc",
+          "profile": "Main 4:2:2 10",
+          "long_name": "H.265 / HEVC Main 4:2:2 10 Profile"
+        },
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "chroma_subsampling": "4:2:2",
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "fps": {
+          "numerator": 24,
+          "denominator": 1,
+          "value": 24.0
+        },
+        "duration": {
+          "seconds": 10.0,
+          "frames": 240
+        },
+        "encoder_used": "libx265",
+        "color_metadata": {
+          "color_space": "bt709",
+          "color_primaries": "bt709",
+          "color_transfer": "bt709",
+          "color_range": "tv"
+        },
+        "checksum": {
+          "md5": null,
+          "sha256": null
+        },
+        "windows_hw_decode": {
+          "expectation": "unsupported_diag"
+        },
+        "tags": [
+          "w0",
+          "h265",
+          "10bit",
+          "422",
+          "1080p",
+          "diag",
+          "cpu-decode"
+        ]
+      }
+    },
+    "hw_decode_expectations": {
+      "required": "目标平台硬解必须可用（本矩阵暂无；NVIDIA 真机素材见 bench 记录）",
+      "vendor_dependent": "按 vendor × 型号矩阵判定（W1-04 归档）",
+      "unsupported_diag": "NVDEC/D3D11VA 均不支持；专用于验证 codec_unsupported_by_hw 显式诊断与 CPU planar 回退"
+    },
+    "test_scenarios": {
+      "hw_decode_supported_set": {
+        "description": "硬解可用集：NV12/P010 产出契约验证",
+        "fixtures": [
+          "h264_8bit_420_1080p",
+          "h264_8bit_420_4k",
+          "h265_10bit_420_4k"
+        ]
+      },
+      "hw_decode_vendor_dependent": {
+        "description": "AV1 硬解 vendor 依赖集",
+        "fixtures": [
+          "av1_8bit_420_1080p",
+          "av1_10bit_420_4k"
+        ]
+      },
+      "hw_decode_explicit_fallback": {
+        "description": "显式回退诊断集：MediaOpenError + reason，禁静默软解",
+        "fixtures": [
+          "h264_422_8bit_1080p",
+          "h264_422_10bit_1080p",
+          "h265_422_10bit_1080p"
+        ]
+      }
+    }
+  }
+}

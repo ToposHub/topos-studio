@@ -1,0 +1,71 @@
+{
+  "ok": true,
+  "result": {
+    "assets": [
+      [
+        "audit.srt",
+        "subtitle"
+      ],
+      [
+        "audit.ass",
+        "subtitle"
+      ]
+    ],
+    ".srt": {
+      "accepted": true,
+      "tracks": [
+        {
+          "name": "audit",
+          "clips": [
+            {
+              "id": "44b525ba-ce25-4cfb-8bec-89ca8b984b01",
+              "text": "Hello, world",
+              "start": 10,
+              "duration": 40
+            },
+            {
+              "id": "6978fea2-5452-40db-823d-c033e1b10308",
+              "text": "Second caption",
+              "start": 53,
+              "duration": 35
+            }
+          ]
+        }
+      ]
+    },
+    ".ass": {
+      "accepted": true,
+      "tracks": [
+        {
+          "name": "audit",
+          "clips": [
+            {
+              "id": "44b525ba-ce25-4cfb-8bec-89ca8b984b01",
+              "text": "Hello, world",
+              "start": 10,
+              "duration": 40
+            },
+            {
+              "id": "6978fea2-5452-40db-823d-c033e1b10308",
+              "text": "Second caption",
+              "start": 53,
+              "duration": 35
+            }
+          ]
+        },
+        {
+          "name": "audit",
+          "clips": [
+            {
+              "id": "4c921d72-9045-4556-ae6c-e4362e2760b7",
+              "text": "world",
+              "start": 10,
+              "duration": 40
+            }
+          ]
+        }
+      ]
+    },
+    "caption_rows": 3
+  }
+}

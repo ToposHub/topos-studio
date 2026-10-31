@@ -1,0 +1,843 @@
+{
+ "meta": {
+  "purpose": "ProRes/DNxHR 解码基线静机同窗重测（候选①：钉公平比值）",
+  "res": "4k",
+  "frames": 24,
+  "bs": 4,
+  "pairs": 12,
+  "passes": 5,
+  "arms": [
+   "topos_kernel",
+   "topos_product",
+   "prores_slice",
+   "prores_frame",
+   "dnxhr_slice"
+  ],
+  "threads_topos": 8,
+  "threads_ref": 8,
+  "anchor": "prores_slice",
+  "python": "3.12.13"
+ },
+ "pairs": [
+  {
+   "order": true,
+   "load": "2.06 2.27 3.17",
+   "topos_kernel": {
+    "fps_runs": [
+     106.2,
+     99.3,
+     107.7,
+     107.2,
+     104.3
+    ],
+    "fps_median": 106.2,
+    "spawn_s": 2.0
+   },
+   "topos_product": {
+    "fps_runs": [
+     89.0,
+     91.5,
+     92.9,
+     89.0,
+     78.5
+    ],
+    "fps_median": 89.0,
+    "spawn_s": 1.91
+   },
+   "prores_slice": {
+    "fps_runs": [
+     92.8,
+     92.2,
+     94.6,
+     93.8,
+     97.1
+    ],
+    "fps_median": 93.8,
+    "spawn_s": 2.22
+   },
+   "prores_frame": {
+    "fps_runs": [
+     88.4,
+     91.8,
+     88.5,
+     92.2,
+     88.5
+    ],
+    "fps_median": 88.5,
+    "spawn_s": 2.9
+   },
+   "dnxhr_slice": {
+    "fps_runs": [
+     125.8,
+     155.5,
+     153.0,
+     154.9,
+     154.8
+    ],
+    "fps_median": 154.8,
+    "spawn_s": 1.61
+   }
+  },
+  {
+   "order": false,
+   "load": "5.06 2.89 3.38",
+   "dnxhr_slice": {
+    "fps_runs": [
+     152.0,
+     150.5,
+     152.3,
+     154.4,
+     153.1
+    ],
+    "fps_median": 152.3,
+    "spawn_s": 1.56
+   },
+   "prores_frame": {
+    "fps_runs": [
+     85.9,
+     87.9,
+     92.8,
+     93.5,
+     86.8
+    ],
+    "fps_median": 87.9,
+    "spawn_s": 2.93
+   },
+   "prores_slice": {
+    "fps_runs": [
+     93.2,
+     91.1,
+     91.8,
+     94.1,
+     93.0
+    ],
+    "fps_median": 93.0,
+    "spawn_s": 2.24
+   },
+   "topos_product": {
+    "fps_runs": [
+     91.3,
+     89.4,
+     89.1,
+     91.2,
+     90.0
+    ],
+    "fps_median": 90.0,
+    "spawn_s": 1.9
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     97.6,
+     81.5,
+     92.6,
+     101.8,
+     101.2
+    ],
+    "fps_median": 97.6,
+    "spawn_s": 2.12
+   }
+  },
+  {
+   "order": true,
+   "load": "6.47 3.27 3.50",
+   "topos_kernel": {
+    "fps_runs": [
+     108.3,
+     108.8,
+     104.2,
+     108.6,
+     108.8
+    ],
+    "fps_median": 108.6,
+    "spawn_s": 1.99
+   },
+   "topos_product": {
+    "fps_runs": [
+     87.0,
+     86.7,
+     81.9,
+     91.6,
+     88.8
+    ],
+    "fps_median": 87.0,
+    "spawn_s": 1.94
+   },
+   "prores_slice": {
+    "fps_runs": [
+     94.0,
+     96.3,
+     93.6,
+     96.4,
+     95.0
+    ],
+    "fps_median": 95.0,
+    "spawn_s": 2.2
+   },
+   "prores_frame": {
+    "fps_runs": [
+     83.3,
+     91.7,
+     90.6,
+     91.9,
+     86.5
+    ],
+    "fps_median": 90.6,
+    "spawn_s": 2.91
+   },
+   "dnxhr_slice": {
+    "fps_runs": [
+     139.8,
+     143.2,
+     154.5,
+     148.1,
+     149.4
+    ],
+    "fps_median": 148.1,
+    "spawn_s": 1.61
+   }
+  },
+  {
+   "order": false,
+   "load": "6.86 3.45 3.57",
+   "dnxhr_slice": {
+    "fps_runs": [
+     148.1,
+     155.0,
+     151.1,
+     148.0,
+     131.4
+    ],
+    "fps_median": 148.1,
+    "spawn_s": 1.59
+   },
+   "prores_frame": {
+    "fps_runs": [
+     91.7,
+     92.9,
+     91.2,
+     91.3,
+     87.4
+    ],
+    "fps_median": 91.3,
+    "spawn_s": 2.85
+   },
+   "prores_slice": {
+    "fps_runs": [
+     92.7,
+     91.8,
+     94.1,
+     96.3,
+     94.4
+    ],
+    "fps_median": 94.1,
+    "spawn_s": 2.25
+   },
+   "topos_product": {
+    "fps_runs": [
+     88.3,
+     73.5,
+     89.5,
+     83.2,
+     81.3
+    ],
+    "fps_median": 83.2,
+    "spawn_s": 2.01
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     103.8,
+     109.2,
+     108.1,
+     100.4,
+     96.2
+    ],
+    "fps_median": 103.8,
+    "spawn_s": 2.0
+   }
+  },
+  {
+   "order": true,
+   "load": "7.27 3.65 3.64",
+   "topos_kernel": {
+    "fps_runs": [
+     104.8,
+     104.9,
+     106.0,
+     100.2,
+     103.9
+    ],
+    "fps_median": 104.8,
+    "spawn_s": 1.98
+   },
+   "topos_product": {
+    "fps_runs": [
+     79.8,
+     91.8,
+     91.5,
+     91.4,
+     90.1
+    ],
+    "fps_median": 91.4,
+    "spawn_s": 1.93
+   },
+   "prores_slice": {
+    "fps_runs": [
+     91.7,
+     93.4,
+     90.3,
+     85.9,
+     94.8
+    ],
+    "fps_median": 91.7,
+    "spawn_s": 2.24
+   },
+   "prores_frame": {
+    "fps_runs": [
+     88.3,
+     92.6,
+     90.4,
+     87.1,
+     82.3
+    ],
+    "fps_median": 88.3,
+    "spawn_s": 2.93
+   },
+   "dnxhr_slice": {
+    "fps_runs": [
+     123.4,
+     146.9,
+     148.8,
+     149.8,
+     153.0
+    ],
+    "fps_median": 148.8,
+    "spawn_s": 1.62
+   }
+  },
+  {
+   "order": false,
+   "load": "7.17 3.75 3.67",
+   "dnxhr_slice": {
+    "fps_runs": [
+     143.2,
+     138.7,
+     128.9,
+     155.3,
+     156.9
+    ],
+    "fps_median": 143.2,
+    "spawn_s": 1.59
+   },
+   "prores_frame": {
+    "fps_runs": [
+     85.4,
+     84.7,
+     90.2,
+     86.9,
+     91.9
+    ],
+    "fps_median": 86.9,
+    "spawn_s": 2.93
+   },
+   "prores_slice": {
+    "fps_runs": [
+     94.2,
+     95.9,
+     91.2,
+     93.2,
+     92.2
+    ],
+    "fps_median": 93.2,
+    "spawn_s": 2.22
+   },
+   "topos_product": {
+    "fps_runs": [
+     86.1,
+     91.2,
+     88.2,
+     92.1,
+     91.3
+    ],
+    "fps_median": 91.2,
+    "spawn_s": 1.92
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     107.9,
+     102.9,
+     93.3,
+     105.2,
+     106.0
+    ],
+    "fps_median": 105.2,
+    "spawn_s": 2.0
+   }
+  },
+  {
+   "order": true,
+   "load": "7.54 3.94 3.74",
+   "topos_kernel": {
+    "fps_runs": [
+     96.6,
+     96.5,
+     95.1,
+     109.2,
+     107.7
+    ],
+    "fps_median": 96.6,
+    "spawn_s": 2.05
+   },
+   "topos_product": {
+    "fps_runs": [
+     89.4,
+     91.2,
+     89.5,
+     90.0,
+     89.9
+    ],
+    "fps_median": 89.9,
+    "spawn_s": 1.91
+   },
+   "prores_slice": {
+    "fps_runs": [
+     92.5,
+     91.4,
+     81.5,
+     91.9,
+     94.5
+    ],
+    "fps_median": 91.9,
+    "spawn_s": 2.28
+   },
+   "prores_frame": {
+    "fps_runs": [
+     87.0,
+     90.0,
+     88.1,
+     89.4,
+     91.3
+    ],
+    "fps_median": 89.4,
+    "spawn_s": 2.92
+   },
+   "dnxhr_slice": {
+    "fps_runs": [
+     154.1,
+     148.4,
+     153.5,
+     151.0,
+     151.8
+    ],
+    "fps_median": 151.8,
+    "spawn_s": 1.55
+   }
+  },
+  {
+   "order": false,
+   "load": "7.66 4.14 3.81",
+   "dnxhr_slice": {
+    "fps_runs": [
+     127.6,
+     146.9,
+     150.1,
+     150.6,
+     152.6
+    ],
+    "fps_median": 150.1,
+    "spawn_s": 1.6
+   },
+   "prores_frame": {
+    "fps_runs": [
+     85.8,
+     92.4,
+     91.9,
+     90.3,
+     90.3
+    ],
+    "fps_median": 90.3,
+    "spawn_s": 2.9
+   },
+   "prores_slice": {
+    "fps_runs": [
+     91.8,
+     91.7,
+     92.0,
+     92.3,
+     82.4
+    ],
+    "fps_median": 91.8,
+    "spawn_s": 2.28
+   },
+   "topos_product": {
+    "fps_runs": [
+     88.8,
+     90.7,
+     91.8,
+     92.3,
+     86.2
+    ],
+    "fps_median": 90.7,
+    "spawn_s": 1.88
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     85.4,
+     86.8,
+     100.1,
+     107.3,
+     103.2
+    ],
+    "fps_median": 100.1,
+    "spawn_s": 2.1
+   }
+  },
+  {
+   "order": true,
+   "load": "8.25 4.38 3.90",
+   "topos_kernel": {
+    "fps_runs": [
+     92.4,
+     108.5,
+     106.2,
+     105.3,
+     100.9
+    ],
+    "fps_median": 105.3,
+    "spawn_s": 2.01
+   },
+   "topos_product": {
+    "fps_runs": [
+     86.9,
+     89.8,
+     86.3,
+     88.3,
+     88.9
+    ],
+    "fps_median": 88.3,
+    "spawn_s": 1.92
+   },
+   "prores_slice": {
+    "fps_runs": [
+     87.4,
+     94.1,
+     94.1,
+     93.0,
+     92.5
+    ],
+    "fps_median": 93.0,
+    "spawn_s": 2.27
+   },
+   "prores_frame": {
+    "fps_runs": [
+     88.8,
+     89.0,
+     91.6,
+     93.1,
+     91.7
+    ],
+    "fps_median": 91.6,
+    "spawn_s": 2.91
+   },
+   "dnxhr_slice": {
+    "fps_runs": [
+     144.2,
+     147.9,
+     151.4,
+     146.6,
+     131.3
+    ],
+    "fps_median": 146.6,
+    "spawn_s": 1.6
+   }
+  },
+  {
+   "order": false,
+   "load": "7.69 4.38 3.91",
+   "dnxhr_slice": {
+    "fps_runs": [
+     145.8,
+     148.8,
+     152.0,
+     149.3,
+     154.5
+    ],
+    "fps_median": 149.3,
+    "spawn_s": 1.57
+   },
+   "prores_frame": {
+    "fps_runs": [
+     88.7,
+     89.8,
+     90.5,
+     92.4,
+     91.6
+    ],
+    "fps_median": 90.5,
+    "spawn_s": 2.9
+   },
+   "prores_slice": {
+    "fps_runs": [
+     92.7,
+     92.1,
+     92.7,
+     93.2,
+     95.9
+    ],
+    "fps_median": 92.7,
+    "spawn_s": 2.25
+   },
+   "topos_product": {
+    "fps_runs": [
+     90.6,
+     89.5,
+     81.2,
+     91.0,
+     88.8
+    ],
+    "fps_median": 89.5,
+    "spawn_s": 1.95
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     108.0,
+     108.3,
+     106.3,
+     98.6,
+     108.8
+    ],
+    "fps_median": 108.0,
+    "spawn_s": 1.98
+   }
+  },
+  {
+   "order": true,
+   "load": "8.48 4.66 4.01",
+   "topos_kernel": {
+    "fps_runs": [
+     104.2,
+     104.4,
+     103.4,
+     103.9,
+     106.3
+    ],
+    "fps_median": 104.2,
+    "spawn_s": 2.0
+   },
+   "topos_product": {
+    "fps_runs": [
+     92.4,
+     91.8,
+     90.5,
+     83.5,
+     89.2
+    ],
+    "fps_median": 90.5,
+    "spawn_s": 1.9
+   },
+   "prores_slice": {
+    "fps_runs": [
+     94.0,
+     95.2,
+     93.7,
+     93.7,
+     94.3
+    ],
+    "fps_median": 94.0,
+    "spawn_s": 2.22
+   },
+   "prores_frame": {
+    "fps_runs": [
+     89.5,
+     89.6,
+     86.9,
+     83.3,
+     91.6
+    ],
+    "fps_median": 89.5,
+    "spawn_s": 2.93
+   },
+   "dnxhr_slice": {
+    "fps_runs": [
+     132.4,
+     143.6,
+     152.0,
+     151.9,
+     152.3
+    ],
+    "fps_median": 151.9,
+    "spawn_s": 1.62
+   }
+  },
+  {
+   "order": false,
+   "load": "8.14 4.72 4.04",
+   "dnxhr_slice": {
+    "fps_runs": [
+     146.9,
+     152.3,
+     152.6,
+     154.4,
+     154.2
+    ],
+    "fps_median": 152.6,
+    "spawn_s": 1.55
+   },
+   "prores_frame": {
+    "fps_runs": [
+     89.0,
+     84.1,
+     92.1,
+     92.3,
+     92.4
+    ],
+    "fps_median": 92.1,
+    "spawn_s": 2.89
+   },
+   "prores_slice": {
+    "fps_runs": [
+     92.3,
+     93.3,
+     91.6,
+     94.7,
+     93.5
+    ],
+    "fps_median": 93.3,
+    "spawn_s": 2.25
+   },
+   "topos_product": {
+    "fps_runs": [
+     90.4,
+     78.7,
+     90.8,
+     89.4,
+     90.7
+    ],
+    "fps_median": 90.4,
+    "spawn_s": 1.92
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     108.1,
+     104.7,
+     105.8,
+     107.4,
+     107.4
+    ],
+    "fps_median": 107.4,
+    "spawn_s": 1.96
+   }
+  }
+ ],
+ "summary": {
+  "topos_kernel": {
+   "fps_median": 105.0,
+   "fps_iqr": [
+    103.8,
+    107.4
+   ],
+   "vs_anchor_median": 1.13,
+   "vs_anchor_per_pair": [
+    1.132,
+    1.049,
+    1.143,
+    1.103,
+    1.143,
+    1.129,
+    1.051,
+    1.09,
+    1.132,
+    1.165,
+    1.109,
+    1.151
+   ]
+  },
+  "topos_product": {
+   "fps_median": 90.0,
+   "fps_iqr": [
+    89.0,
+    90.7
+   ],
+   "vs_anchor_median": 0.967,
+   "vs_anchor_per_pair": [
+    0.949,
+    0.968,
+    0.916,
+    0.884,
+    0.997,
+    0.979,
+    0.978,
+    0.988,
+    0.949,
+    0.965,
+    0.963,
+    0.969
+   ]
+  },
+  "prores_slice": {
+   "fps_median": 93.1,
+   "fps_iqr": [
+    92.7,
+    94.0
+   ],
+   "vs_anchor_median": 1.0,
+   "vs_anchor_per_pair": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  "prores_frame": {
+   "fps_median": 89.9,
+   "fps_iqr": [
+    88.5,
+    91.3
+   ],
+   "vs_anchor_median": 0.967,
+   "vs_anchor_per_pair": [
+    0.943,
+    0.945,
+    0.954,
+    0.97,
+    0.963,
+    0.932,
+    0.973,
+    0.984,
+    0.985,
+    0.976,
+    0.952,
+    0.987
+   ]
+  },
+  "dnxhr_slice": {
+   "fps_median": 149.7,
+   "fps_iqr": [
+    148.1,
+    152.3
+   ],
+   "vs_anchor_median": 1.619,
+   "vs_anchor_per_pair": [
+    1.65,
+    1.638,
+    1.559,
+    1.574,
+    1.623,
+    1.536,
+    1.652,
+    1.635,
+    1.576,
+    1.611,
+    1.616,
+    1.636
+   ]
+  }
+ }
+}

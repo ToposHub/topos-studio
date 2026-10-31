@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "root": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01",
+  "commit": "439a8cc15f40cdaa19edd86410399c0210d97089",
+  "branch": "fix-ui",
+  "python": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+  "platform": "macOS-15.3.1-x86_64-i386-64bit",
+  "QtRuntime": "6.10.2",
+  "QtBuilt": "6.10.0",
+  "PyQt": "6.10.2",
+  "window": [
+    1440,
+    1000
+  ],
+  "entry": "src.main.main --product studio --no-startup-dialog",
+  "config": "/tmp/topos-edit-audit-20261021/config.json",
+  "render_mocks": false
+}

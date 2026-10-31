@@ -1,0 +1,96 @@
+{
+  "initial": {
+    "in_point": null,
+    "out_point": null,
+    "can_edit": false,
+    "buttons": [
+      false,
+      false,
+      false
+    ],
+    "get_source_edit_params": [
+      null,
+      null,
+      null
+    ]
+  },
+  "single_frame": {
+    "in_point": 15,
+    "out_point": 15,
+    "can_edit": true,
+    "buttons": [
+      true,
+      true,
+      true
+    ],
+    "get_source_edit_params": [
+      "synthetic_range",
+      15,
+      15
+    ]
+  },
+  "clear": {
+    "in_point": null,
+    "out_point": null,
+    "can_edit": false,
+    "buttons": [
+      false,
+      false,
+      false
+    ],
+    "get_source_edit_params": [
+      null,
+      null,
+      null
+    ]
+  },
+  "close": {
+    "in_point": null,
+    "out_point": null,
+    "can_edit": false,
+    "buttons": [
+      false,
+      false,
+      false
+    ],
+    "get_source_edit_params": [
+      null,
+      null,
+      null
+    ]
+  },
+  "range_changed": [
+    [
+      15,
+      null
+    ],
+    [
+      15,
+      15
+    ],
+    [
+      null,
+      null
+    ],
+    [
+      15,
+      null
+    ],
+    [
+      15,
+      15
+    ],
+    [
+      null,
+      null
+    ]
+  ],
+  "gl_facade": {
+    "used_apis": 37,
+    "missing": [],
+    "contract_errors": [],
+    "uniform1f_callable": true,
+    "uniform4f_callable": true,
+    "actual_gpu_pixels_tested": false
+  }
+}

@@ -1,0 +1,16 @@
+== M10-6.3B AVX2 量化+掩码跳扫 A/B（2026-09-02，Mac-Pro 8P/16L）==
+-- 改动前（e919d9c5 worktree，TOPOS_CODEC_LIB）--
+  fps 10.91  wall/帧 91.6 ms
+  probe 编码次数: p50 3.0  p95 4  max 4  均值 3.12
+  fps 10.55  wall/帧 94.7 ms
+  probe 编码次数: p50 3.0  p95 4  max 4  均值 3.12
+-- 改动后（工作区 HEAD+内核）--
+  fps 12.55  wall/帧 79.7 ms
+  probe 编码次数: p50 3.0  p95 4  max 4  均值 3.12
+  fps 12.55  wall/帧 79.7 ms
+  probe 编码次数: p50 3.0  p95 4  max 4  均值 3.12
+-- 2K 对照 --
+before:
+  fps 33.47  wall/帧 29.9 ms
+after:
+  fps 37.68  wall/帧 26.5 ms

@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 201 items
+
+tests/media/test_topos_source.py ............................            [ 13%]
+tests/media/test_topos_export.py ....................................... [ 33%]
+........................................................................ [ 69%]
+......                                                                   [ 72%]
+tests/media/test_topos_timeline_export.py ......................         [ 83%]
+tests/media/test_topos_frame_extract.py ....                             [ 85%]
+tests/media/test_topos_source_export_passthrough.py ....F                [ 87%]
+tests/media/test_topos_image_sequence.py ........................        [ 99%]
+tests/media/test_topos_ffmpeg_bridge.py .                                [100%]

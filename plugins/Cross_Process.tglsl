@@ -1,0 +1,157 @@
+// --- Topos Plugin Metadata ---
+// @name Cross Process
+// @i18n_name Cross_Process
+// @author Topos Team
+// @version 1.0
+// @description Cross-process film look family: crossed rational channel curves with dye-fog crosstalk between channels
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param select preset "Preset" 0 "Classic" "Green Shift" "Warm"
+// @param slider strength "Strength" 0.7 0.0 1.0
+// -----------------------------
+//
+// Cross Process - plan03 plugin library
+//
+// Process contract: vec3 process(vec3 color, vec2 uv). `color` is the pixel
+// AFTER upstream grading, scene-linear, and may be < 0.0 or >> 1.0 (HDR).
+// The params declared in the metadata header are injected as uniforms under
+// their bare names (the shader compiler rewrites them to a per-layer
+// prefixed form, so no manual namespacing is needed). Hard rule (P0-COL-01):
+// never reference an undeclared engine uniform here - a stray u_* fails GL
+// compilation and the render loop silently skips the whole layer. This
+// plugin is a pure point operation: zero texture reads, zero loops, and it
+// uses none of the engine-provided uniforms.
+//
+// Look: cross processing (film developed in the wrong chemistry) crosses
+// the per-channel density curves, so shadows and highlights drift toward
+// opposite hues while midtones stay recognisable. Three presets ship:
+//   Classic     - cyan-blue shadows, yellow-green highlights (archetypal)
+//   Green Shift - sickly green mids/highs, muted reds and blues
+//   Warm        - amber shadows and highlights, bleached blues
+//
+// Math (full derivation + coefficient tables in
+// docs/plugins/2026-09-28/specs/Cross_Process.md):
+//   1. Channel curves: each channel runs through the rational curve
+//          f(x) = x * (a + m*x*x) / (1.0 + v*x*x),   a, m, v > 0
+//      a rational approximation of the crossed density response (no LUT).
+//      f(0) = 0 exactly, so black keeps its anchor and the shadow tint
+//      comes from the DIFFERENT per-channel black gains a; the gain then
+//      transitions toward the asymptote m/v around x ~ 1/sqrt(v), giving
+//      each channel its highlight tint. Outside 0-1 the curve keeps
+//      extrapolating monotonically instead of clamping: it is a single
+//      rational expression whose denominator (1 + v*x*x) is always >= 1
+//      (no pole, no division hazard), asymptotically linear with slope
+//      m/v, and provably monotone on all of R:
+//          f'(x) * (1 + v*x*x)^2 = a + (3m - a*v)*x^2 + m*v*x^4,
+//      a quadratic in y = x*x, non-negative for all y >= 0 exactly when
+//      a > 0, m > 0, v > 0 and a*v <= 9*m. Every coefficient triple below
+//      satisfies a*v <= 9*m with a wide margin (asserted by the validator).
+//   2. Dye-fog crosstalk: the developed dye of one channel re-exposes
+//      another (the marquee case is the G->R leak in the Classic preset):
+//          out = curved + vec3(dot(curved, TO_R), dot(curved, TO_G),
+//                              dot(curved, TO_B))
+//      with small non-negative weights (diagonal 0). Additive fog stays
+//      linear for HDR input (no fold-back, no explosion) and keeps
+//      negative values negative (fog on sub-black only deepens it).
+//   3. Strength: mix(original, crossed, 1 - (1-s)^1.5), the same
+//      perceptual slider shaping as bilateral_skin_smooth. strength = 0 is
+//      an exact identity and hits the first-line early exit.
+
+// ====== SECTION 1: rational channel curve kernel ======
+// f(x) = x * (a + m*x*x) / (1.0 + v*x*x): black gain a, asymptotic gain
+// m/v, gain transition centred near x ~ 1/sqrt(v). Provably monotone on
+// all of R when (a, m, v) > 0 and a*v <= 9*m - see the certificate in the
+// file header. Only mul/add/div: cheaper than any pow-based S-curve.
+float cp_curve(float x, float a, float m, float v) {
+    float x2 = x * x;
+    return x * (a + m * x2) / (1.0 + v * x2);
+}
+
+// ====== SECTION 2: preset curve families ======
+// Scene-linear response at full strength (validator-verified):
+//   18% grey (0.18) -> (0.186, 0.190, 0.233): cyan-blue cast
+//   display white    -> (1.197, 1.076, 0.947): yellow-green cast
+// R: black gain 0.85 -> high gain 1.10 (R contrast up, the channel crushes
+//    in shadow); G: near-neutral spine 0.96 -> 1.02; B: black gain 1.32 ->
+//    high gain 0.82 (blue-lifted shadows, compressed blue highlights).
+vec3 cross_classic(vec3 c) {
+    vec3 curved = vec3(
+        cp_curve(c.x, 0.85, 4.40, 4.00),
+        cp_curve(c.y, 0.96, 2.295, 2.25),
+        cp_curve(c.z, 1.32, 4.51, 5.50)
+    );
+    // Dye fog: G->R 0.12 (the signature G-into-R leak), B->R 0.03,
+    // R->G 0.02, B->G 0.06, G->B 0.05. Small, non-negative, HDR-linear.
+    return curved + vec3(
+        dot(curved, vec3(0.0, 0.12, 0.03)),
+        dot(curved, vec3(0.02, 0.0, 0.06)),
+        dot(curved, vec3(0.0, 0.05, 0.0))
+    );
+}
+
+// Green Shift: 18% grey -> (0.179, 0.204, 0.161), white ->
+// (1.027, 1.158, 0.939). G runs hot at both ends (1.08 black gain ->
+// 1.12 asymptote) while R and B are pulled down (0.90->0.95 and
+// 0.78->0.84), producing the sickly green wash over mids and highs.
+vec3 cross_green_shift(vec3 c) {
+    vec3 curved = vec3(
+        cp_curve(c.x, 0.90, 3.325, 3.50),
+        cp_curve(c.y, 1.08, 2.016, 1.80),
+        cp_curve(c.z, 0.78, 3.528, 4.20)
+    );
+    // Dye fog: G re-exposes both R (0.08) and B (0.10) so green-rich areas
+    // drift yellow-green instead of staying pure green; B->G 0.04, R->G 0.02.
+    return curved + vec3(
+        dot(curved, vec3(0.0, 0.08, 0.0)),
+        dot(curved, vec3(0.02, 0.0, 0.04)),
+        dot(curved, vec3(0.0, 0.10, 0.0))
+    );
+}
+
+// Warm: 18% grey -> (0.221, 0.179, 0.127), white -> (1.206, 1.043, 0.747).
+// R lifted at both ends (1.14 -> 1.10 asymptote), B double-crushed
+// (0.68 -> 0.74): amber shadows and highlights with bleached blues.
+vec3 cross_warm(vec3 c) {
+    vec3 curved = vec3(
+        cp_curve(c.x, 1.14, 2.86, 2.60),
+        cp_curve(c.y, 0.92, 3.168, 3.20),
+        cp_curve(c.z, 0.68, 2.812, 3.80)
+    );
+    // Dye fog: G->R 0.06 + B->R 0.05 warm the fog itself, R->G 0.05
+    // yellows the mids, G->B 0.02 trace keeps blacks from going magenta.
+    return curved + vec3(
+        dot(curved, vec3(0.0, 0.06, 0.05)),
+        dot(curved, vec3(0.05, 0.0, 0.02)),
+        dot(curved, vec3(0.0, 0.02, 0.0))
+    );
+}
+
+// ====== SECTION 3: main ======
+// Select dispatch follows the early-return/fallback-if-chain convention
+// (see Color_Space_Transform / Radial_Blur_Pro). The int compares below
+// are the sanctioned integer context (select indices 0..2).
+vec3 process(vec3 color, vec2 uv) {
+    if (strength < 0.001) return color;
+
+    vec3 crossed;
+    if (preset == 0) {
+        crossed = cross_classic(color);
+    } else if (preset == 1) {
+        crossed = cross_green_shift(color);
+    } else {
+        crossed = cross_warm(color);
+    }
+
+    // Perceptual strength blend back toward the graded original; the only
+    // pow in the file, on a guaranteed [0, 1] operand.
+    float amt = 1.0 - pow(1.0 - strength, 1.5);
+    return mix(color, crossed, amt);
+}

@@ -1,0 +1,32 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 262 items
+
+tests/edit/ai_editing/test_variant_planner.py ........                   [  3%]
+tests/edit/ai_editing/test_visual_semantics.py .........                 [  6%]
+tests/edit/ai_editing/test_volcengine_generation_provider.py ....        [  8%]
+tests/edit/ai_editing/test_workflow_runner.py .........................  [ 17%]
+tests/edit/ai_editing/test_workflow_stage_events.py .......              [ 20%]
+tests/edit/ai_editing/test_workflow_transaction.py .............         [ 25%]
+tests/edit/test_adaptive_playback_quality.py ........................... [ 35%]
+.                                                                        [ 35%]
+tests/edit/test_adjustment_clip_cpu_export_application.py ...            [ 37%]
+tests/edit/test_adjustment_clip_delivery.py ........                     [ 40%]
+tests/edit/test_adjustment_clip_scope.py ....                            [ 41%]
+tests/edit/test_adjustment_transform_opacity.py ..                       [ 42%]
+tests/edit/test_adr_take_chain.py ...................................    [ 55%]
+tests/edit/test_adr_take_sheet_ui.py ....................                [ 63%]
+tests/edit/test_ai_assistant_wiring.py ........                          [ 66%]
+tests/edit/test_asset_log_commands.py ................                   [ 72%]
+tests/edit/test_asset_usage_index.py ......                              [ 74%]
+tests/edit/test_audio_automation.py ........................             [ 83%]
+tests/edit/test_audio_automation_recording.py .......                    [ 86%]
+tests/edit/test_audio_bus_registration.py ..........                     [ 90%]
+tests/edit/test_audio_bus_routing.py .........................           [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_07.xml -
+============================= 262 passed in 9.33s ==============================

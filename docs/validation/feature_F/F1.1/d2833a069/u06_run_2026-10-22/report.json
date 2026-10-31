@@ -1,0 +1,49 @@
+{
+  "checks": {
+    "import_both_sources": {
+      "ok": true,
+      "detail": ""
+    },
+    "no_iteration_exceptions": {
+      "ok": true,
+      "detail": "crashes=0"
+    },
+    "no_gl_1282_logs": {
+      "ok": true,
+      "detail": "hits=[]"
+    },
+    "app_alive_after_stress": {
+      "ok": true,
+      "detail": ""
+    },
+    "rss_growth_bounded": {
+      "ok": true,
+      "detail": "start=835MB end=873MB growth=38MB"
+    }
+  },
+  "samples": [
+    {
+      "i": 0,
+      "rss_mb": 837.8
+    },
+    {
+      "i": 6,
+      "rss_mb": 872.7
+    },
+    {
+      "i": 12,
+      "rss_mb": 872.9
+    },
+    {
+      "i": 18,
+      "rss_mb": 873.2
+    },
+    {
+      "i": 24,
+      "rss_mb": 873.3
+    }
+  ],
+  "failures": [],
+  "passed": true,
+  "switches": 30
+}

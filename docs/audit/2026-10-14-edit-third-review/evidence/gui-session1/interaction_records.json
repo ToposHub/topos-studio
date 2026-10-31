@@ -1,0 +1,130 @@
+[
+  {
+    "name": "startup",
+    "page": "Edit",
+    "platform": "cocoa",
+    "qt": "6.10.0",
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-third-review/evidence/01-empty.png"
+  },
+  {
+    "name": "initial_layout",
+    "window": [
+      1440,
+      1000
+    ],
+    "timeline_dock": 102,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-third-review/evidence/01-normal-empty.png"
+  },
+  {
+    "name": "real_media_import",
+    "drop": true,
+    "asset_count": 3,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-third-review/evidence/02-media.png"
+  },
+  {
+    "name": "source_first_frame",
+    "loaded": "f61679bb-0c91-4543-8f21-d928ab74980e",
+    "viewer_type": "SourceViewer",
+    "paint_failed": false,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-third-review/evidence/03-source-first-frame.png"
+  },
+  {
+    "name": "source_valid_range",
+    "range": [
+      0,
+      100
+    ],
+    "buttons": [
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "name": "source_clear_range",
+    "range": [
+      null,
+      null
+    ],
+    "buttons": [
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "name": "source_single_frame_range",
+    "range": [
+      100,
+      100
+    ],
+    "buttons": [
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "name": "linked_drop",
+    "accepted": true,
+    "state": {
+      "revision": 1,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "ea2d3df0-1d0e-41fa-b11e-8d54546a83b6",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "c285d4e3-fb12-4fed-b48e-5244f8f356b6",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "39f0a368-7c9f-4ef2-aa63-c3d2cf643ad8"
+            }
+          ]
+        },
+        {
+          "id": "6aed1929-b9ff-4894-8cd5-556bf20bc87d",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "39f0a368-7c9f-4ef2-aa63-c3d2cf643ad8",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "c285d4e3-fb12-4fed-b48e-5244f8f356b6"
+            }
+          ]
+        }
+      ]
+    },
+    "project_revision": 1,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-third-review/evidence/04-linked.png"
+  },
+  {
+    "name": "source_visible",
+    "visible": true,
+    "paint_failed": false,
+    "texture": "3",
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-third-review/evidence/05-source-visible.png"
+  },
+  {
+    "name": "source_playback",
+    "before": 100,
+    "after": 123,
+    "paint_failed": false
+  },
+  {
+    "name": "runtime",
+    "runtime": "6.10.2",
+    "compiled": "6.10.0"
+  }
+]

@@ -1,0 +1,42 @@
+{
+  "scenarios": {
+    "h265_4k:single_stream": {
+      "frames": 48,
+      "fps": 39.90131825501454,
+      "p50_ms": 8.519485498254653,
+      "p95_ms": 29.649719996086787,
+      "frame_type": "vt_pixel_buffer"
+    },
+    "h265_4k:rotation_16_streams": {
+      "streams_opened": 16,
+      "cap": 12,
+      "evictions": 4,
+      "live_after_rotation": 12,
+      "hot_stream_p50_ms": 0.15197900211205706,
+      "hot_stream_p95_ms": 34.40057799889473,
+      "hot_stream_fps": 128.2720928052261,
+      "cold_first_frame_p50_ms": 35.226770996814594,
+      "evicted_stream_rebuild_ok": true
+    },
+    "prores_4k:single_stream": {
+      "frames": 48,
+      "fps": 44.50116389821563,
+      "p50_ms": 15.862737000134075,
+      "p95_ms": 18.698004001635127,
+      "frame_type": "vt_pixel_buffer"
+    },
+    "prores_4k:rotation_16_streams": {
+      "streams_opened": 16,
+      "cap": 12,
+      "evictions": 4,
+      "live_after_rotation": 12,
+      "hot_stream_p50_ms": 8.222468499297975,
+      "hot_stream_p95_ms": 162.4677910003811,
+      "hot_stream_fps": 46.9439355187633,
+      "cold_first_frame_p50_ms": 165.26206350317807,
+      "evicted_stream_rebuild_ok": true
+    }
+  },
+  "machine": "macos_intel_x86_64",
+  "note": "P2-09 session pool: LRU cap=12 + lease; probe script in commit message"
+}

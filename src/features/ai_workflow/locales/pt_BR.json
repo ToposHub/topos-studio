@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "Fluxo de Trabalho de IA"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "Selecione um modelo acima ou solte ativos aqui",
+      "zoom": "Zoom: {percent}%"
+    },
+    "toolbar": {
+      "template": "Modelo",
+      "load": "Carregar",
+      "clear": "Limpar",
+      "form": "Formulário",
+      "canvas": "Tela",
+      "run": "Executar",
+      "cancel": "Cancelar"
+    },
+    "gallery": {
+      "title": "Escolha um modelo de fluxo de trabalho",
+      "use": "Usar"
+    },
+    "form": {
+      "title": "Parâmetros",
+      "title_with_name": "{name} · Parâmetros",
+      "node_section": "Nó: {node}",
+      "no_params": "Este modelo não tem parâmetros ajustáveis — apenas Execute",
+      "advanced_edit": "Edição avançada (tela)",
+      "back_to_gallery": "Voltar aos modelos",
+      "back_to_gallery_tooltip": "Volta à galeria de modelos; o fluxo de trabalho atual é mantido (Limpar o descarta)"
+    },
+    "status": {
+      "idle": "Ocioso",
+      "queued": "Na fila",
+      "running": "Em execução",
+      "cached": "Em cache",
+      "succeeded": "Concluído",
+      "failed": "Falhou",
+      "cancelled": "Cancelado",
+      "waiting_input": "Aguardando",
+      "skipped": "Ignorado",
+      "not_assembled": "Status: não montado",
+      "no_plan": "Ainda sem plano"
+    },
+    "actions": {
+      "preview_plan": "Visualizar plano",
+      "request_approval": "Solicitar aprovação",
+      "apply_approved_plan": "Aplicar plano aprovado"
+    },
+    "inspector": {
+      "no_selection": "<b>(sem seleção)</b>"
+    },
+    "node_search": {
+      "placeholder": "Pesquisar nós…"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/edit_controller.py", line 2408, in _on_edit_clip_param_changed
+    new_timeline = self._execute_timeline_edit_command(command, timeline)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/edit_controller.py", line 6037, in _execute_timeline_edit_command
+    view.execute_command(command)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py", line 5555, in execute_command
+    self._execute_command(command)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py", line 5583, in _execute_command
+    new_timeline = self._command_stack.execute(command, self._timeline)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 4294, in execute
+    result = command.apply(timeline)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 3206, in apply
+    assert_track_editable(timeline, self.track_id, "Update clip param")
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 152, in assert_track_editable
+    raise ValueError(
+ValueError: Update clip param rejected: track 'V1' is locked

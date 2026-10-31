@@ -1,0 +1,29 @@
+{
+  "recipe_id": "P63",
+  "name": "柔纹理重组",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "高频软化重组：大 radius 分离，高频轻模糊后加回（柔化不糊）",
+  "component": "C21 frequency_separation（暂存节点 lib1_frequency_separation）＋生产 blur/merge",
+  "dependencies": {
+    "component_id": "C21",
+    "component_slug": "frequency_separation",
+    "component_kind": "node",
+    "node_type": "lib1_frequency_separation",
+    "aux_node_types": [
+      "blur",
+      "merge"
+    ]
+  },
+  "params": {
+    "radius": 16.0,
+    "filter": "Gaussian",
+    "mode": "LowHigh"
+  },
+  "notes": "C21 frequency_separation 暂存组件＋生产 blur/merge 组成柔纹理宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；重组经 merge(add) 为暂存级近似，精确重建以 C21 Reconstruct 模式与 L04/L05 接缝为准。"
+}

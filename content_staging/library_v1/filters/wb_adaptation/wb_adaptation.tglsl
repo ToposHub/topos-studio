@@ -1,0 +1,110 @@
+// --- Topos Plugin Metadata ---
+// @name WB Adaptation
+// @i18n_name LIB1_WB_Adaptation
+// @author Topos Library v1
+// @version 0.1.0
+// @description Chromatic adaptation between explicit source/target white points via xy chromaticity (Bradford or XYZ Scaling) with strength blend; exact identity when whites match or strength is zero
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param color source_white "Source White" 1.0 1.0 1.0
+// @param color target_white "Target White" 1.0 1.0 1.0
+// @param select adapt_model "Adaptation Model" 0 "Bradford" "XYZ Scaling"
+// @param slider strength "Strength" 1.0 0.0 1.0
+// -----------------------------
+//
+// WB Adaptation —— 显式白点色适应（L 计划 F01，LIB1）。
+//
+// 差量（对 White_Balance_Advanced，见 L00 台账 F01 行）：旧插件是
+// temp/tint 固定系数**通道增益**（R=1+0.30t+0.10g…），不是物理色适应；
+// 本插件给定 source/target 白点（color 参数取其色度）与可解释色适应
+// 模型（Bradford 锥响应 / XYZ Scaling），在线性 RGB↔XYZ 固定矩阵下
+// 构造 3×3 适应变换。旧插件不动，本件为版本化新入口。
+//
+// 设计要点：
+// - 工作空间冻结：Rec.709/sRGB 线性原色（D65 基）的 RGB↔XYZ 固定
+//   矩阵（Lindbloom 常数）；白点用 xy 色度坐标近似（Y=1 归一），
+//   不做完整光谱加权——这是显式声明的一阶近似；
+// - 白点 color 参数 → XYZ → 归一 xy → (x/y, 1, (1-x-y)/y)；参数和
+//   或 y 非物理（黑/负和）时回退 D65 xy=(0.3127,0.3290)（守护，
+//   非艺术选择）；
+// - Bradford：M_adapt = A⁻¹·diag(ρt/ρs)·A，A 为 Bradford 锥响应；
+//   XYZ Scaling：M_adapt = diag(Wt/Ws)（von Kries 对角模型下界）；
+// - source==target 白点（Y=1 XYZ 距离 < 1e-6）→ 首行早退精确恒等；
+//   strength=0 同样精确恒等；
+// - 纯线性代数逐像素：零采样/零循环/无 clamp——HDR 与负值按同一
+//   3×3 线性外推（负值可能被负增益翻转符号，线性代数如实行为）；
+// - 参数 ABI 裸名引用（编译期命名空间改写），仅允许引擎注入的
+//   u_input_tex/u_tex_size/u_aspect_ratio。
+
+// 列主序构造（GLSL mat3 前三成分为第 0 列）：M * v 与行主序数学矩阵一致
+const mat3 WB_RGB2XYZ = mat3(
+    0.4124564, 0.2126729, 0.0193339,
+    0.3575761, 0.7151522, 0.1191920,
+    0.1804375, 0.0721750, 0.9503041);
+
+const mat3 WB_XYZ2RGB = mat3(
+     3.2404542, -0.9692660,  0.0556434,
+    -1.5371385,  1.8760108, -0.2040259,
+    -0.4985314,  0.0415560,  1.0572252);
+
+const mat3 WB_BRADFORD = mat3(
+    0.8951, -0.7502,  0.0389,
+    0.2664,  1.7135, -0.0685,
+   -0.1614,  0.0367,  1.0296);
+
+const mat3 WB_BRADFORD_INV = mat3(
+    0.9869929,  0.4323053, -0.0085287,
+   -0.1470543,  0.5183603,  0.0400428,
+    0.1599627,  0.0492912,  0.9684867);
+
+vec3 wb_white_xyz(vec3 rgb) {
+    // color 白点参数 → xy 色度 → Y=1 白点 XYZ
+    vec3 xyz = WB_RGB2XYZ * rgb;
+    float s = xyz.x + xyz.y + xyz.z;
+    if (s < 1e-6 || xyz.y < 1e-6) {
+        // 非物理白点（黑/负和）回退 D65
+        return vec3(0.3127 / 0.3290, 1.0, (1.0 - 0.3127 - 0.3290) / 0.3290);
+    }
+    float x = xyz.x / s;
+    float y = xyz.y / s;
+    return vec3(x / y, 1.0, (1.0 - x - y) / y);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (strength < 0.001) return color;
+
+    vec3 ws = wb_white_xyz(source_white);
+    vec3 wt = wb_white_xyz(target_white);
+    // source==target 白点：精确恒等（不做 A⁻¹·A 的浮点往返）
+    if (distance(ws, wt) < 1e-6) return color;
+
+    mat3 adapt;
+    if (adapt_model == 0) {
+        // Bradford：锥响应域对角缩放后回投
+        vec3 rs = WB_BRADFORD * ws;
+        vec3 rt = WB_BRADFORD * wt;
+        mat3 diag = mat3(
+            rt.x / rs.x, 0.0, 0.0,
+            0.0, rt.y / rs.y, 0.0,
+            0.0, 0.0, rt.z / rs.z);
+        adapt = WB_BRADFORD_INV * diag * WB_BRADFORD;
+    } else {
+        // XYZ Scaling：XYZ 域对角缩放
+        adapt = mat3(
+            wt.x / ws.x, 0.0, 0.0,
+            0.0, wt.y / ws.y, 0.0,
+            0.0, 0.0, wt.z / ws.z);
+    }
+
+    vec3 adapted = WB_XYZ2RGB * (adapt * (WB_RGB2XYZ * color));
+    return mix(color, adapted, strength);
+}

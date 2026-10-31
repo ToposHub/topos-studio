@@ -1,0 +1,21 @@
+{
+  "api_version": "1",
+  "kind": "assistant_mode",
+  "id": "motion_graphic",
+  "version": "1.0.0",
+  "label": "Motion Graphic",
+  "description": "生成网页式演示动画，并显示确认执行卡片。",
+  "handler": "builtin:teaching_animation",
+  "capabilities": ["language", "teaching_animation"],
+  "prompts": {
+    "system": "html_build_prompt.md",
+    "html_build": "html_build_prompt.md",
+    "legacy_scene": "legacy_scene_prompt.md",
+    "creative_brief": "creative_brief_prompt.md",
+    "proposal": "proposal_prompt.md"
+  },
+  "ui": {
+    "order": 20,
+    "label": "Motion Graphic"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "date": "2026-09-12T07:53:30",
+  "plan_item": "W4-03 前置 / 开放问题 6：onnxruntime-directml 决策证据",
+  "environment": {
+    "python": "3.12.10",
+    "ort_version": "1.24.4",
+    "available_providers": [
+      "DmlExecutionProvider",
+      "CPUExecutionProvider"
+    ]
+  },
+  "model": {
+    "shape": "1x3x720x1280",
+    "topology": "Conv+Relu x2 + Conv"
+  },
+  "cpu_ep": {
+    "requested_providers": [
+      "CPUExecutionProvider"
+    ],
+    "active_providers": [
+      "CPUExecutionProvider"
+    ],
+    "session_create_s": 0.02,
+    "iters": 10,
+    "mean_ms": 17.78,
+    "p50_ms": 17.79,
+    "min_ms": 16.81
+  },
+  "dml_ep": {
+    "requested_providers": [
+      "DmlExecutionProvider"
+    ],
+    "active_providers": [
+      "DmlExecutionProvider",
+      "CPUExecutionProvider"
+    ],
+    "session_create_s": 0.36,
+    "iters": 30,
+    "mean_ms": 17.26,
+    "p50_ms": 16.82,
+    "min_ms": 12.75
+  },
+  "output_consistency": {
+    "max_abs_diff": 0.0,
+    "relative_to_peak": 0.0,
+    "note": "DML 为 GPU float 路径，1e-2 级相对差属正常"
+  },
+  "package_footprint": {
+    "onnxruntime-directml": {
+      "version": "1.24.4",
+      "size_mb": 70.9,
+      "license": "MIT License"
+    },
+    "onnx": {
+      "version": "1.22.0",
+      "size_mb": 106.6,
+      "license": "Apache-2.0"
+    },
+    "numpy": {
+      "version": "2.5.3",
+      "size_mb": 51.4,
+      "license": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+    }
+  },
+  "dml_available": true
+}

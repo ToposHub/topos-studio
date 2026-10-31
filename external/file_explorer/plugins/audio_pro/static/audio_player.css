@@ -1,0 +1,124 @@
+
+
+/* =========================================================
+   AssetDeck Pro Audio Player - 终极专业版样式 (苹果深色系)
+   ========================================================= */
+
+.pro-audio-modal {
+    background: #000 !important;
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    display: flex; flex-direction: column; z-index: 9999;
+}
+
+.pro-audio-header {
+    height: 50px; background: #111; border-bottom: 1px solid #222;
+    display: flex; justify-content: space-between; align-items: center; padding: 0 25px;
+}
+
+/* 核心显示区：解决遮挡问题 */
+.pro-audio-body {
+    flex: 1; display: flex; flex-direction: column;
+    padding: 20px 50px 140px 50px !important; /* 🟢 底部留出 140px 给控制栏 */
+    overflow-y: auto;
+}
+
+/* 1. 确保波形容器严格限制高度并处理溢出 */
+.wave-main {
+    height: 200px !important; /* 强制固定高度 */
+    width: 100%;
+    background: #000;
+    border: 1px solid #333;
+    overflow: hidden; /* 🔴 关键：裁剪掉任何可能的溢出内容 */
+    position: relative;
+}
+/* 3. 时间轴样式 */
+.wave-timeline {
+    height: 25px !important;
+    width: 100%;
+    opacity: 0.8;
+    color: #888;
+    font-size: 10px;
+}
+.wave-spectrogram { border-radius: 12px; overflow: hidden; margin-top: 15px; border: 1px solid #333; min-height: 120px; }
+
+/* 🔵 底部控制栏：物理居中逻辑 */
+.pro-audio-controls-grid {
+    position: fixed; bottom: 35px; left: 50%; transform: translateX(-50%);
+    width: 90%; height: 95px;
+    background: rgba(35, 35, 35, 0.85); backdrop-filter: blur(25px);
+    border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 48px;
+    display: grid;
+    /* 🔴 分为左(1份)、中(自动)、右(1份) */
+    grid-template-columns: 1fr auto 1fr; 
+    align-items: center; padding: 0 45px;
+}
+
+.ctrl-group { display: flex; align-items: center; }
+.ctrl-left { justify-content: flex-start; }
+.ctrl-center { justify-content: center; }
+.ctrl-right { justify-content: flex-end; }
+
+/* 蓝色按钮与图标 */
+.btn-audio-play { color: #007aff !important; font-size: 3.8rem !important; background: none; border: none; padding: 0; }
+.btn-audio-nav { color: #fff !important; font-size: 2.2rem !important; background: none; border: none; opacity: 0.7; }
+.btn-audio-nav:hover { opacity: 1; color: #007aff !important; }
+
+/* 蓝色滑块 */
+.apple-slider { -webkit-appearance: none; width: 100px; height: 4px; background: #444; border-radius: 2px; }
+.apple-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; background: #007aff; border-radius: 50%; cursor: pointer; border: none;
+}
+
+/* 时间显示 */
+.pro-time-display { text-align: right; font-family: 'JetBrains Mono', 'Monaco', monospace; }
+.time-current { color: #007aff; font-size: 1.5rem; font-weight: 600; display: block; line-height: 1; }
+.time-total { color: #666; font-size: 0.85rem; }
+
+/* 蓝色截取按钮 */
+.apple-blue-btn {
+    background: #007aff !important; color: #fff !important; border: none; border-radius: 20px;
+    padding: 8px 22px; font-weight: 500; font-size: 0.95rem;
+}
+
+/* audio_player.css 新增段落 */
+
+/* 1. 顶部工具栏容器 */
+.wave-top-toolbar {
+    padding: 0 10px;
+    height: 24px;
+}
+
+/* 2. 顶部专用缩放滑块 (极简蓝色风格) */
+.zoom-slider-top {
+    -webkit-appearance: none;
+    width: 120px;
+    height: 2px; /* 极细轨道 */
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 1px;
+    outline: none;
+    transition: background 0.2s;
+}
+
+.zoom-slider-top:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.zoom-slider-top::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 10px;
+    height: 10px;
+    background: #007aff; /* 🔵 苹果蓝点 */
+    border-radius: 50%;
+    cursor: ew-resize;
+    border: none;
+    box-shadow: 0 0 5px rgba(0, 122, 255, 0.5);
+}
+
+/* 3. 调整主体内边距 */
+.pro-audio-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start; /* 改为靠顶对齐，而非居中，防止挤压 */
+    padding: 20px 40px 140px 40px; 
+}

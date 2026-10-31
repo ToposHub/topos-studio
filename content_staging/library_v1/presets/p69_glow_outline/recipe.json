@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P69",
+  "name": "发光轮廓",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "发光轮廓：edge_detect sobel → glow 增亮 → merge 叠回源",
+  "component": "生产 edge_detect/glow/merge（node_engine 注册表内置节点）",
+  "dependencies": {
+    "node_type": "edge_detect",
+    "aux_node_types": [
+      "glow",
+      "merge"
+    ]
+  },
+  "params": {
+    "method": "sobel",
+    "channel": "luminance",
+    "output_strength": 2.0,
+    "threshold": 0.15
+  },
+  "notes": "生产内置节点宏模板（edge_detect/glow/merge 均在 node_engine 注册表，可 create_node_by_type 实例化）；暂存级图模板，宿主图导入未接线，未接 L05 白名单。"
+}

@@ -1,0 +1,22 @@
+{
+  "task": "RD3-05",
+  "date": "2026-09-08",
+  "test": "native/topos_codec/tests/unit/test_m10.c",
+  "path": "tc_decoder_decode_batch(count=1)",
+  "warmup_batches": 2,
+  "steady_batches": 1000,
+  "allocation_counter": "tc_dev_alloc_count",
+  "steady_allocations": 0,
+  "old_path_allocations_per_batch": 2,
+  "old_path_projected_steady_allocations": 2000,
+  "reused_arenas": [
+    "decoder batch packet views",
+    "decoder batch frame requests",
+    "color DC rows",
+    "Alpha rows",
+    "V3 intra edges",
+    "thread-pool ring entries"
+  ],
+  "packet_bytes": "borrowed caller memory; no packet copy owned by decoder",
+  "verification": "test_m10 passed for 1-thread and 8-thread context paths"
+}

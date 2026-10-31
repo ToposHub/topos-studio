@@ -1,0 +1,412 @@
+{
+  "status": "synthetic_or_input_domain_measurement_no_release_verdict",
+  "created_at": "2026-09-27T15:30:58.104185+00:00",
+  "kind": "raw16",
+  "width": 128,
+  "height": 128,
+  "source": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/raw16.raw",
+  "source_sha256": "6c12439a04d8b3c60b2542deee35acfd3195d61fa6df695e83bd58eed5f9ff08",
+  "source_bytes": 32768,
+  "codec_cli": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+  "codec_cli_sha256": "06508c5cbeca04ce9ab26c992a3a38ad7dd760edbe5f1fbc421b6470a2c34de8",
+  "measurement_script_sha256": "2669bd9c7ecbde53937c585efdb1def1a09891b9e07bfe2021bde2bb11a533cf",
+  "results": [
+    {
+      "tier": "raw16-2",
+      "encoded_bytes": 22124,
+      "source_over_encoded": 1.4811064906888447,
+      "encoded_sha256": "3d34f240976f1317840c44f7cff531e1edfa96a12d20160e0727d9d1077a414e",
+      "decoded_sha256": "ab6fa470fb8afbd4c8fc4ea68aa20c6c6011aaaff3dc22999dc06a8f98096375",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/raw16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-2.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "raw16-2"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-2.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-2.raw"
+      ],
+      "metrics": {
+        "phase_order": [
+          "R",
+          "Gr",
+          "Gb",
+          "B"
+        ],
+        "per_phase": [
+          {
+            "psnr_db": 96.8504115763556,
+            "mae_codes": 0.674072265625,
+            "p99_abs_codes": 2.0,
+            "max_abs_codes": 3,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 96.75932645883228,
+            "mae_codes": 0.6884765625,
+            "p99_abs_codes": 2.0,
+            "max_abs_codes": 3,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 97.0074245800223,
+            "mae_codes": 0.6650390625,
+            "p99_abs_codes": 2.0,
+            "max_abs_codes": 3,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 96.93856557525399,
+            "mae_codes": 0.67236328125,
+            "p99_abs_codes": 2.0,
+            "max_abs_codes": 3,
+            "bit_exact": false
+          }
+        ],
+        "all_bit_exact": false
+      }
+    },
+    {
+      "tier": "raw16-4",
+      "encoded_bytes": 11212,
+      "source_over_encoded": 2.9225829468426685,
+      "encoded_sha256": "7edce40a8e45132ed6141ee10a5f05a789d1e08baea2dcaabf8f8aaf3534b5b8",
+      "decoded_sha256": "c3d992610df2d027db765f5922ef783cb904cb2de4a22e1b7b95321e4415cbd2",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/raw16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-4.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "raw16-4"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-4.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-4.raw"
+      ],
+      "metrics": {
+        "phase_order": [
+          "R",
+          "Gr",
+          "Gb",
+          "B"
+        ],
+        "per_phase": [
+          {
+            "psnr_db": 65.62931391096777,
+            "mae_codes": 27.308349609375,
+            "p99_abs_codes": 90.0,
+            "max_abs_codes": 138,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 65.6832576647277,
+            "mae_codes": 27.34765625,
+            "p99_abs_codes": 88.0,
+            "max_abs_codes": 140,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 65.78465688481002,
+            "mae_codes": 26.909423828125,
+            "p99_abs_codes": 90.0,
+            "max_abs_codes": 155,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 65.77300393080178,
+            "mae_codes": 26.794677734375,
+            "p99_abs_codes": 87.0,
+            "max_abs_codes": 138,
+            "bit_exact": false
+          }
+        ],
+        "all_bit_exact": false
+      }
+    },
+    {
+      "tier": "raw16-6",
+      "encoded_bytes": 9027,
+      "source_over_encoded": 3.629998892212252,
+      "encoded_sha256": "2e9464fbf2735806a85fc9858fa69f55a55fcb828edb6b96f054fba9e13a7377",
+      "decoded_sha256": "a7793a514df1a4702216a8e30676bf371e9b72ab3465bddffc2824f602264158",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/raw16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-6.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "raw16-6"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-6.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-6.raw"
+      ],
+      "metrics": {
+        "phase_order": [
+          "R",
+          "Gr",
+          "Gb",
+          "B"
+        ],
+        "per_phase": [
+          {
+            "psnr_db": 59.835059705080475,
+            "mae_codes": 53.30859375,
+            "p99_abs_codes": 171.0,
+            "max_abs_codes": 242,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 59.7319908885025,
+            "mae_codes": 54.243408203125,
+            "p99_abs_codes": 170.0,
+            "max_abs_codes": 243,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 59.815202730344296,
+            "mae_codes": 53.5634765625,
+            "p99_abs_codes": 170.05000000000018,
+            "max_abs_codes": 274,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 59.763810998838466,
+            "mae_codes": 53.783203125,
+            "p99_abs_codes": 168.05000000000018,
+            "max_abs_codes": 344,
+            "bit_exact": false
+          }
+        ],
+        "all_bit_exact": false
+      }
+    },
+    {
+      "tier": "raw16-8",
+      "encoded_bytes": 7934,
+      "source_over_encoded": 4.13007310310058,
+      "encoded_sha256": "ff7b2f193ca9e1f485ddb4f88faa207bd32a76aa16c3ed277c1f661f037fef9c",
+      "decoded_sha256": "b4e8a309a42d4ecccac4862d390705a7d7c935bb2c29f4da9fd4286095bf1282",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/raw16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-8.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "raw16-8"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-8.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-8.raw"
+      ],
+      "metrics": {
+        "phase_order": [
+          "R",
+          "Gr",
+          "Gb",
+          "B"
+        ],
+        "per_phase": [
+          {
+            "psnr_db": 56.78456438024036,
+            "mae_codes": 75.955078125,
+            "p99_abs_codes": 239.05000000000018,
+            "max_abs_codes": 430,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 56.88139595958872,
+            "mae_codes": 75.189208984375,
+            "p99_abs_codes": 239.05000000000018,
+            "max_abs_codes": 438,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 56.80315637430098,
+            "mae_codes": 75.7392578125,
+            "p99_abs_codes": 240.05000000000018,
+            "max_abs_codes": 480,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 56.83831767579377,
+            "mae_codes": 74.8232421875,
+            "p99_abs_codes": 237.05000000000018,
+            "max_abs_codes": 460,
+            "bit_exact": false
+          }
+        ],
+        "all_bit_exact": false
+      }
+    },
+    {
+      "tier": "raw16-12",
+      "encoded_bytes": 6776,
+      "source_over_encoded": 4.8358913813459266,
+      "encoded_sha256": "d6e3d8115685e743871068c3a7efc2de5241769783450dd8aaa9c0741f0566f1",
+      "decoded_sha256": "8b218b9a991d16a447524c64d7480bb903888786bb073b6ee41b05d61fe56b05",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/raw16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-12.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "raw16-12"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-12.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-12.raw"
+      ],
+      "metrics": {
+        "phase_order": [
+          "R",
+          "Gr",
+          "Gb",
+          "B"
+        ],
+        "per_phase": [
+          {
+            "psnr_db": 53.98178195822852,
+            "mae_codes": 105.397216796875,
+            "p99_abs_codes": 329.0500000000002,
+            "max_abs_codes": 643,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 53.86881061765793,
+            "mae_codes": 106.2978515625,
+            "p99_abs_codes": 338.0500000000002,
+            "max_abs_codes": 513,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 53.792657647509955,
+            "mae_codes": 108.08203125,
+            "p99_abs_codes": 340.0500000000002,
+            "max_abs_codes": 585,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 54.10423799803917,
+            "mae_codes": 102.8857421875,
+            "p99_abs_codes": 342.10000000000036,
+            "max_abs_codes": 473,
+            "bit_exact": false
+          }
+        ],
+        "all_bit_exact": false
+      }
+    },
+    {
+      "tier": "raw16-16",
+      "encoded_bytes": 5606,
+      "source_over_encoded": 5.845165893685337,
+      "encoded_sha256": "5808e504708fc4660d419a3d2643cb9fd61035a1c29cb22809d85fb0679b6019",
+      "decoded_sha256": "1097d15cf13cfc829d51a17b07238bdfc0ced87af12b2e48d5ea7b2d7e6166d7",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/raw16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-16.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "raw16-16"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-16.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/raw16/raw16-16.raw"
+      ],
+      "metrics": {
+        "phase_order": [
+          "R",
+          "Gr",
+          "Gb",
+          "B"
+        ],
+        "per_phase": [
+          {
+            "psnr_db": 50.82743687228722,
+            "mae_codes": 151.186767578125,
+            "p99_abs_codes": 492.0500000000002,
+            "max_abs_codes": 827,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 51.05497600729884,
+            "mae_codes": 147.411376953125,
+            "p99_abs_codes": 470.0500000000002,
+            "max_abs_codes": 795,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 51.12959791607152,
+            "mae_codes": 146.626953125,
+            "p99_abs_codes": 451.10000000000036,
+            "max_abs_codes": 849,
+            "bit_exact": false
+          },
+          {
+            "psnr_db": 51.155784322472215,
+            "mae_codes": 145.306396484375,
+            "p99_abs_codes": 451.0500000000002,
+            "max_abs_codes": 768,
+            "bit_exact": false
+          }
+        ],
+        "all_bit_exact": false
+      }
+    }
+  ],
+  "artifacts_retained_in_repository": "compact report only; synthetic binary input and encoded files excluded"
+}

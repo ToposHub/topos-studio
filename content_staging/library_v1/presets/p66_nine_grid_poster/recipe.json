@@ -1,0 +1,30 @@
+{
+  "recipe_id": "P66",
+  "name": "九宫格海报",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "九宫格海报：3×3 等分，spacing 0.02–0.08",
+  "component": "C14 tile_array（暂存节点 lib1_tile_array）＋生产 transform",
+  "dependencies": {
+    "component_id": "C14",
+    "component_slug": "tile_array",
+    "component_kind": "node",
+    "node_type": "lib1_tile_array",
+    "aux_node_types": [
+      "transform"
+    ]
+  },
+  "params": {
+    "count_x": 3,
+    "count_y": 3,
+    "spacing": 0.04,
+    "offset_x": 0.0,
+    "offset_y": 0.0
+  },
+  "notes": "C14 tile_array 暂存组件＋生产 transform 组成九宫格海报宏模板（暂存，宿主图导入未接线，未接 L05 白名单）。"
+}

@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P49",
+  "name": "水波折射",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "中心水波折射桥接；frequency 6–10、amplitude 0.08–0.16",
+  "component": "X15 ripple_refraction（生产 lib1_ripple_refraction，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/ripple_refraction）",
+  "dependencies": {
+    "component_id": "X15",
+    "component_slug": "ripple_refraction",
+    "component_kind": "transition",
+    "transition_type": "lib1_ripple_refraction",
+    "user_json_base": false
+  },
+  "params": {
+    "center_x": 0.5,
+    "center_y": 0.5,
+    "frequency": 8.0,
+    "amplitude": 0.12,
+    "damping": 0.3
+  },
+  "notes": "X15 生产 base lib1_ripple_refraction（transition_catalog 已注册，resample_cores 复合核）；base 不在 custom_transitions._BASE_TYPES 白名单（未接入），不产出用户转场 JSON。"
+}

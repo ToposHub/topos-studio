@@ -1,0 +1,25 @@
+timer.stop()
+# Unlock through production command and retry previously rejected codec drops.
+tv._on_track_lock_changed(tv._timeline.video_tracks[0].track_id,False);wait(120)
+for filename in ['2K_prores422Proxy.mov','2K_topos_422_Proxy.mov']:
+    media=mw._current_edit_project.get_asset_by_path(str(ROOT/'tests/test_videos'/filename))
+    tail=max(c.timeline_end for t in tv._timeline.video_tracks for c in t.clips)
+    click(panel.btn_zoom_fit)
+    p=frame_point(tail+5)
+    mime=QMimeData();mime.setData(MIME_TYPE_MEDIA_POOL_ASSETS,json.dumps([media.asset_id]).encode())
+    enter=QDragEnterEvent(p,Qt.DropAction.CopyAction,mime,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(tv.viewport(),enter)
+    move=QDragMoveEvent(p,Qt.DropAction.CopyAction,mime,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(tv.viewport(),move)
+    drop=QDropEvent(QPointF(p),Qt.DropAction.CopyAction,mime,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(tv.viewport(),drop);wait(1600)
+    click(panel.btn_zoom_fit)
+    QTest.mouseClick(tv.viewport(),Qt.MouseButton.LeftButton,pos=QPoint(frame_point(tail+25).x(),14));wait(500)
+    key(Qt.Key.Key_Space);wait(1600);key(Qt.Key.Key_Space)
+    record('unlocked_codec_playback_'+filename,drop_accepted=drop.isAccepted(),playhead=tv.get_playhead_frame(),state=timeline_state(),screenshot=shot('11-'+filename.replace('.','-')))
+# Sources share geometry: repeated ruler scrubs across all clip cuts.
+click(panel.btn_select)
+for f in [20,145,315,700,810,1170,80]:
+    p=QPoint(frame_point(f).x(),14);QTest.mouseClick(tv.viewport(),Qt.MouseButton.LeftButton,pos=p);wait(120)
+record('cross_codec_seek',state=timeline_state(),screenshot=shot('12-cross-codec-seek'))
+timer.start(500)

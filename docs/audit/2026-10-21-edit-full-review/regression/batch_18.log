@@ -1,0 +1,34 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 229 items
+
+tests/edit/test_master_limiter.py .......                                [  3%]
+tests/edit/test_media_asset_logging.py ...................               [ 11%]
+tests/edit/test_media_pool.py ........................................   [ 28%]
+tests/edit/test_media_pool_add_to_timeline_av.py .....                   [ 31%]
+tests/edit/test_media_pool_analysis_ui.py ...........                    [ 35%]
+tests/edit/test_media_pool_batch_delete.py .....                         [ 37%]
+tests/edit/test_media_pool_bin_tree_root_top.py .......                  [ 41%]
+tests/edit/test_media_pool_comp_clip_preview.py .                        [ 41%]
+tests/edit/test_media_pool_delete_routing.py ............                [ 46%]
+tests/edit/test_media_pool_drag_into_bin_fix.py ..........               [ 51%]
+tests/edit/test_media_pool_drop_to_bin.py .............                  [ 56%]
+tests/edit/test_media_pool_finder_phase1.py ..............               [ 62%]
+tests/edit/test_media_pool_finder_phase2.py ...............              [ 69%]
+tests/edit/test_media_pool_finder_phase3.py .....OpenCV: Couldn't read video stream from file "/tmp/ql.mp4"
+....                    [ 73%]
+tests/edit/test_media_pool_grade_double_click.py .......                 [ 76%]
+tests/edit/test_media_pool_inline_bin_edit.py .........OpenCV: Couldn't read video stream from file "/tmp/save.mp4"
+.......           [ 83%]
+tests/edit/test_media_pool_log_ui.py .............OpenCV: Couldn't read video stream from file "/tmp/a3.mov"
+                       [ 89%]
+tests/edit/test_media_pool_marquee_perf.py ....                          [ 90%]
+tests/edit/test_media_pool_panel_refresh.py ...........                  [ 95%]
+tests/edit/test_media_pool_unfiled_display.py ..........                 [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_18.xml -
+============================= 229 passed in 17.43s =============================

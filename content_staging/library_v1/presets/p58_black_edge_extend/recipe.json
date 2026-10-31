@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P58",
+  "name": "去黑边前景",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "黑边/暗边污染：有限半径把前景色延伸入透明区；threshold 0.05–0.25",
+  "component": "C17 edge_extend（暂存节点 lib1_edge_extend）＋生产 premult",
+  "dependencies": {
+    "component_id": "C17",
+    "component_slug": "edge_extend",
+    "component_kind": "node",
+    "node_type": "lib1_edge_extend",
+    "aux_node_types": [
+      "premult"
+    ]
+  },
+  "params": {
+    "radius": 3.0,
+    "threshold": 0.15,
+    "output_mode": "color_only"
+  },
+  "notes": "C17 edge_extend 暂存组件＋生产 premult 组成去黑边宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；color_only 模式延伸前景 RGB 覆盖黑污染，默认保留原 alpha（C17 声明口径）。"
+}

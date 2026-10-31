@@ -1,0 +1,136 @@
+{
+  "video_path": "tests/test_videos/2K_prores422HQ.mov",
+  "video_info": {
+    "codec": "prores",
+    "pix_fmt": "yuv422p10le",
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "frames": 647,
+    "duration_s": 25.88
+  },
+  "timestamp": "2026-09-11T07:23:17.380284",
+  "git_sha": "7c147ac97c9eb49ec32bc8e06d04de597c326c9a",
+  "config": {
+    "num_frames": 120,
+    "warmup_frames": 20,
+    "force_mode": "auto"
+  },
+  "sizes": {
+    "1920x1080": {
+      "decode_ms": {
+        "avg": 0.06577937500272431,
+        "p50": 0.06029500036675017,
+        "p95": 0.1175599991256604,
+        "max": 0.15496099877054803
+      },
+      "plane_prepare_ms": {
+        "avg": 0.0006063248899105625,
+        "p50": 0.0005920010153204203,
+        "p95": 0.0007569997251266614,
+        "max": 0.0008429997251369059
+      },
+      "texture_write_ms": {
+        "avg": 2.2521819417913016,
+        "p50": 2.3028260002320167,
+        "p95": 2.6252249990648124,
+        "max": 2.706109000428114
+      },
+      "render_ms": {
+        "avg": 0.1437094750902664,
+        "p50": 0.13233800018497277,
+        "p95": 0.2140929991583107,
+        "max": 0.5556570013141027
+      },
+      "total_ms": {
+        "avg": 2.6943920417428067,
+        "p50": 2.761449000900029,
+        "p95": 3.017907998582814,
+        "max": 3.042256001208443
+      },
+      "estimated_fps": 371.14123873123253,
+      "effective_fps": 331.35536287706327,
+      "pixel_format": "yuv422p10le",
+      "bit_depth": 10,
+      "subsampling": "422",
+      "frame_path": "r16ui_direct",
+      "render_path": {
+        "graphics_api": "opengl_4.1",
+        "compute_api": "glsl_fragment",
+        "decode_api": "cpu_ffmpeg_sw",
+        "interop_api": "none_numpy_handoff"
+      },
+      "frames_tested": 120,
+      "wall_ms": 508.8143230004789,
+      "wall_effective_fps": 235.8424175097112
+    },
+    "1280x720": {
+      "decode_ms": {
+        "avg": 5.922584900008587,
+        "p50": 5.281125000692555,
+        "p95": 8.807989999695565,
+        "max": 13.51107299888099
+      },
+      "plane_prepare_ms": {
+        "avg": 0.0006801083600294078,
+        "p50": 0.0006280006346059963,
+        "p95": 0.0009970008250093088,
+        "max": 0.0012100008461857215
+      },
+      "texture_write_ms": {
+        "avg": 0.5342904750250455,
+        "p50": 0.5095059987070272,
+        "p95": 0.7257489996845834,
+        "max": 1.1251830001128837
+      },
+      "render_ms": {
+        "avg": 0.2066766917323548,
+        "p50": 0.19339500067871995,
+        "p95": 0.3036229991266737,
+        "max": 0.5140880002727499
+      },
+      "total_ms": {
+        "avg": 6.836770424858211,
+        "p50": 6.1742680009047035,
+        "p95": 9.803758000998641,
+        "max": 14.799343000049703
+      },
+      "estimated_fps": 146.26789227323502,
+      "effective_fps": 102.00170178600256,
+      "pixel_format": "yuv422p10le",
+      "bit_depth": 10,
+      "subsampling": "422",
+      "frame_path": "r16ui_direct",
+      "render_path": {
+        "graphics_api": "opengl_4.1",
+        "compute_api": "glsl_fragment",
+        "decode_api": "cpu_ffmpeg_sw",
+        "interop_api": "none_numpy_handoff"
+      },
+      "frames_tested": 120,
+      "wall_ms": 1189.617124000506,
+      "wall_effective_fps": 100.87279140405931
+    }
+  },
+  "gpu_self_test": {
+    "passed": true,
+    "reason": "all_pixels_within_tolerance",
+    "max_error": 0.0018485447603698857
+  },
+  "environment": {
+    "os": "macOS-15.3.1-x86_64-i386-64bit",
+    "machine": "x86_64",
+    "gl_version": "4.1 ATI-6.1.13",
+    "gl_renderer": "AMD Radeon RX 6800 OpenGL Engine",
+    "render_path": {
+      "graphics_api": "opengl_4.1",
+      "compute_api": "glsl_fragment",
+      "decode_api": "cpu_ffmpeg_sw",
+      "interop_api": "none_numpy_handoff"
+    }
+  },
+  "r16ui_self_test": {
+    "passed": true,
+    "reason": "all_pixels_within_tolerance"
+  }
+}

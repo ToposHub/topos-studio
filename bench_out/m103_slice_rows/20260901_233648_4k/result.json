@@ -1,0 +1,159 @@
+{
+ "meta": {
+  "res": "4k",
+  "w": 3840,
+  "h": 2160,
+  "frames": 24,
+  "slice_rows_list": [
+   32,
+   16,
+   8
+  ],
+  "cpu": "Genuine Intel(R) 0000",
+  "logical_cpus": 24,
+  "topos_commit": "0b6322d8"
+ },
+ "rows": {
+  "sr32": {
+   "enc_t8": {
+    "tier": "hq",
+    "mode": "rate",
+    "crf": null,
+    "threads": 8,
+    "codec_s": 5.5764366000003065,
+    "file_close_s": 0.0007059999988996424,
+    "codec_fps": 4.3,
+    "target_bytes_per_frame": 4026532,
+    "file_bytes": 74990701
+   },
+   "enc_t16": {
+    "tier": "hq",
+    "mode": "rate",
+    "crf": null,
+    "threads": 16,
+    "codec_s": 5.475834599998052,
+    "file_close_s": 0.0012822000026062597,
+    "codec_fps": 4.38,
+    "target_bytes_per_frame": 4026532,
+    "file_bytes": 74990701
+   },
+   "file_bytes": 74990701,
+   "file_mbps": 624.9,
+   "bytes_delta_vs_base": 0.0,
+   "dec_t8": {
+    "threads": 8,
+    "frames": 24,
+    "fps_runs": [
+     72.7,
+     72.0,
+     72.7
+    ],
+    "fps_median": 72.7
+   },
+   "dec_t16": {
+    "threads": 16,
+    "frames": 24,
+    "fps_runs": [
+     71.8,
+     71.4,
+     71.3
+    ],
+    "fps_median": 71.4
+   }
+  },
+  "sr16": {
+   "enc_t8": {
+    "tier": "hq",
+    "mode": "rate",
+    "crf": null,
+    "threads": 8,
+    "codec_s": 5.233118200001627,
+    "file_close_s": 0.0012028999990434386,
+    "codec_fps": 4.59,
+    "target_bytes_per_frame": 4026532,
+    "file_bytes": 75056605
+   },
+   "enc_t16": {
+    "tier": "hq",
+    "mode": "rate",
+    "crf": null,
+    "threads": 16,
+    "codec_s": 5.229335899999569,
+    "file_close_s": 0.0007321000011870638,
+    "codec_fps": 4.59,
+    "target_bytes_per_frame": 4026532,
+    "file_bytes": 75056605
+   },
+   "file_bytes": 75056605,
+   "file_mbps": 625.5,
+   "bytes_delta_vs_base": 0.088,
+   "dec_t8": {
+    "threads": 8,
+    "frames": 24,
+    "fps_runs": [
+     77.4,
+     76.5,
+     73.7
+    ],
+    "fps_median": 76.5
+   },
+   "dec_t16": {
+    "threads": 16,
+    "frames": 24,
+    "fps_runs": [
+     75.2,
+     73.9,
+     75.2
+    ],
+    "fps_median": 75.2
+   }
+  },
+  "sr8": {
+   "enc_t8": {
+    "tier": "hq",
+    "mode": "rate",
+    "crf": null,
+    "threads": 8,
+    "codec_s": 4.795797099999618,
+    "file_close_s": 0.0011688000013236888,
+    "codec_fps": 5.0,
+    "target_bytes_per_frame": 4026532,
+    "file_bytes": 75015639
+   },
+   "enc_t16": {
+    "tier": "hq",
+    "mode": "rate",
+    "crf": null,
+    "threads": 16,
+    "codec_s": 4.79600500000015,
+    "file_close_s": 0.0005903999990550801,
+    "codec_fps": 5.0,
+    "target_bytes_per_frame": 4026532,
+    "file_bytes": 75015639
+   },
+   "file_bytes": 75015639,
+   "file_mbps": 625.1,
+   "bytes_delta_vs_base": 0.033,
+   "dec_t8": {
+    "threads": 8,
+    "frames": 24,
+    "fps_runs": [
+     76.8,
+     75.7,
+     76.8
+    ],
+    "fps_median": 76.8
+   },
+   "dec_t16": {
+    "threads": 16,
+    "frames": 24,
+    "fps_runs": [
+     74.9,
+     73.9,
+     77.1
+    ],
+    "fps_median": 74.9
+   }
+  }
+ }
+}

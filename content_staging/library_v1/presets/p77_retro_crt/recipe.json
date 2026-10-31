@@ -1,0 +1,29 @@
+{
+  "recipe_id": "P77",
+  "name": "复古 CRT",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "复古 CRT：Full（扫描线+荫罩）+ 轻辉光；显示域声明以 C08 为准",
+  "component": "C08 crt（暂存节点 lib1_crt，复用 CRT_Scanlines 算法族）＋生产 glow",
+  "dependencies": {
+    "component_id": "C08",
+    "component_slug": "crt",
+    "component_kind": "node",
+    "node_type": "lib1_crt",
+    "aux_node_types": [
+      "glow"
+    ]
+  },
+  "params": {
+    "mode": "Full",
+    "scan_count": 480.0,
+    "scan_strength": 0.45,
+    "mask_strength": 0.4
+  },
+  "notes": "C08 crt 暂存组件＋生产 glow 组成复古 CRT 宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；CRT 为显示域效果，工作域声明以 C08 manifest 为准。"
+}

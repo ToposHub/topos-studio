@@ -1,0 +1,116 @@
+{
+  "schema": "t-p1-71-h265-memory-growth/1",
+  "date": "20260919-021654",
+  "rounds": 10,
+  "frames_per_round": 48,
+  "warmup": {
+    "success": true,
+    "wall_s": 2.691
+  },
+  "base_rss_mb": 445.9,
+  "slope_mb_per_round": 21.681,
+  "growth_unbounded_threshold": "5 MB/round",
+  "growth_unbounded": true,
+  "samples": [
+    {
+      "round": 0,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.746,
+      "rss_mb": 522.3,
+      "delta_mb": 76.4,
+      "handles": 4,
+      "leftover_tmp": 0
+    },
+    {
+      "round": 1,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.713,
+      "rss_mb": 562.8,
+      "delta_mb": 117.0,
+      "handles": 4,
+      "leftover_tmp": 0
+    },
+    {
+      "round": 2,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.758,
+      "rss_mb": 600.2,
+      "delta_mb": 154.4,
+      "handles": 4,
+      "leftover_tmp": 0
+    },
+    {
+      "round": 3,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.787,
+      "rss_mb": 632.4,
+      "delta_mb": 186.5,
+      "handles": 4,
+      "leftover_tmp": 0
+    },
+    {
+      "round": 4,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.72,
+      "rss_mb": 648.7,
+      "delta_mb": 202.8,
+      "handles": 4,
+      "leftover_tmp": 0
+    },
+    {
+      "round": 5,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.738,
+      "rss_mb": 673.2,
+      "delta_mb": 227.3,
+      "handles": 4,
+      "leftover_tmp": 0
+    },
+    {
+      "round": 6,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.743,
+      "rss_mb": 696.8,
+      "delta_mb": 250.9,
+      "handles": 4,
+      "leftover_tmp": 0
+    },
+    {
+      "round": 7,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.743,
+      "rss_mb": 700.9,
+      "delta_mb": 255.0,
+      "handles": 4,
+      "leftover_tmp": 0
+    },
+    {
+      "round": 8,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.75,
+      "rss_mb": 714.1,
+      "delta_mb": 268.2,
+      "handles": 4,
+      "leftover_tmp": 0
+    },
+    {
+      "round": 9,
+      "success": true,
+      "cause": "",
+      "wall_s": 0.757,
+      "rss_mb": 722.1,
+      "delta_mb": 276.2,
+      "handles": 4,
+      "leftover_tmp": 0
+    }
+  ]
+}

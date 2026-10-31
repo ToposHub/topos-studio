@@ -1,0 +1,33 @@
+{
+  "recipe_id": "P67",
+  "name": "极坐标隧道",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "极坐标隧道：CartesianToPolar + radius_scale 1.2–2.0 拉伸纵深",
+  "component": "C11 polar_coordinates（暂存节点 lib1_polar_coordinates）＋生产 transform",
+  "dependencies": {
+    "component_id": "C11",
+    "component_slug": "polar_coordinates",
+    "component_kind": "node",
+    "node_type": "lib1_polar_coordinates",
+    "aux_node_types": [
+      "transform"
+    ]
+  },
+  "params": {
+    "mode": "CartesianToPolar",
+    "center": [
+      0.5,
+      0.5
+    ],
+    "angle_span": 360.0,
+    "radius_scale": 1.6,
+    "filter": "Linear"
+  },
+  "notes": "C11 polar_coordinates 暂存组件＋生产 transform 组成极坐标隧道宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；中心奇点/接缝语义以 C11 声明口径为准。"
+}

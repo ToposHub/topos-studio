@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-09-21T11:26:42.196256+00:00",
+  "master": "tests/test_videos/2K_prores422Proxy.mov",
+  "machine_cpus": 24,
+  "results": [
+    {
+      "size": "2K",
+      "tier": "proxy",
+      "frames": 487,
+      "enc_s": 1.94,
+      "enc_fps": 251.3,
+      "video_mb": 77.3,
+      "decode": {
+        "w0": {
+          "fps": 547.6,
+          "ms_per_frame": 1.83
+        },
+        "w1": {
+          "fps": 45.9,
+          "ms_per_frame": 21.81
+        },
+        "w4": {
+          "fps": 157.6,
+          "ms_per_frame": 6.35
+        },
+        "w8": {
+          "fps": 305.3,
+          "ms_per_frame": 3.27
+        },
+        "w16": {
+          "fps": 491.5,
+          "ms_per_frame": 2.03
+        }
+      }
+    },
+    {
+      "size": "2K",
+      "tier": "4444xq",
+      "frames": 487,
+      "enc_s": 9.22,
+      "enc_fps": 52.8,
+      "video_mb": 753.3,
+      "decode": {
+        "w0": {
+          "fps": 113.5,
+          "ms_per_frame": 8.81
+        }
+      }
+    },
+    {
+      "size": "2K",
+      "tier": "lt",
+      "frames": 487,
+      "enc_s": 8.94,
+      "enc_fps": 54.5,
+      "video_mb": 162.5,
+      "decode": {
+        "w0": {
+          "fps": 307.6,
+          "ms_per_frame": 3.25
+        }
+      }
+    },
+    {
+      "size": "2K",
+      "tier": "standard",
+      "frames": 487,
+      "enc_s": 9.8,
+      "enc_fps": 49.7,
+      "video_mb": 253.4,
+      "decode": {
+        "w0": {
+          "fps": 235.1,
+          "ms_per_frame": 4.25
+        }
+      }
+    },
+    {
+      "size": "2K",
+      "tier": "hq",
+      "frames": 487,
+      "enc_s": 10.69,
+      "enc_fps": 45.6,
+      "video_mb": 377.0,
+      "decode": {
+        "w0": {
+          "fps": 192.1,
+          "ms_per_frame": 5.2
+        }
+      }
+    },
+    {
+      "size": "2K",
+      "tier": "4444",
+      "frames": 487,
+      "enc_s": 9.24,
+      "enc_fps": 52.7,
+      "video_mb": 511.2,
+      "decode": {
+        "w0": {
+          "fps": 146.0,
+          "ms_per_frame": 6.85
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "AI ワークフロー"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "上でテンプレートを選択するか、ここにアセットをドロップしてください",
+      "zoom": "ズーム: {percent}%"
+    },
+    "toolbar": {
+      "template": "テンプレート",
+      "load": "読み込む",
+      "clear": "クリア",
+      "form": "フォーム",
+      "canvas": "キャンバス",
+      "run": "実行",
+      "cancel": "キャンセル"
+    },
+    "gallery": {
+      "title": "ワークフローテンプレートを選択",
+      "use": "使用"
+    },
+    "form": {
+      "title": "パラメーター",
+      "title_with_name": "{name} · パラメーター",
+      "node_section": "ノード: {node}",
+      "no_params": "このテンプレートには調整可能なパラメーターがありません — そのまま実行してください",
+      "advanced_edit": "詳細編集（キャンバス）",
+      "back_to_gallery": "テンプレートに戻る",
+      "back_to_gallery_tooltip": "テンプレートギャラリーに戻ります。現在のワークフローは保持されます（「クリア」で破棄）"
+    },
+    "status": {
+      "idle": "待機中",
+      "queued": "キュー投入済み",
+      "running": "実行中",
+      "cached": "キャッシュ済み",
+      "succeeded": "成功",
+      "failed": "失敗",
+      "cancelled": "キャンセル済み",
+      "waiting_input": "待機中",
+      "skipped": "スキップ",
+      "not_assembled": "状態: 未アセンブル",
+      "no_plan": "プランはまだありません"
+    },
+    "actions": {
+      "preview_plan": "プランをプレビュー",
+      "request_approval": "承認をリクエスト",
+      "apply_approved_plan": "承認済みプランを適用"
+    },
+    "inspector": {
+      "no_selection": "<b>（未選択）</b>"
+    },
+    "node_search": {
+      "placeholder": "ノードを検索…"
+    }
+  }
+}

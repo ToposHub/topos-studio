@@ -1,0 +1,100 @@
+[DRIVER] auto-dismiss dialog: ProjectManagerDialog
+[DRIVER] booted page=Color video=2K_H265.mov seconds=15.0
+[DRIVER] asset imported fps=25.0 frames=487
+[DRIVER] switch attempt 0 failed (composite_id=), retrying
+[DRIVER] graph wired: src→merge.A=True constant→merge.B=True merge→output=True
+[DRIVER] first frame after 1 emissions; current_frame=0 total=720
+
+===== RESULTS =====
+mode=page duration=15.0s still_playing_at_end=True
+viewer emissions: 359  rate=23.9/s
+render submits:   1  (completed/submit = 35900%)
+playhead: start=2 end=360 expected≈360
+viewer max gap: 0.13s @t=2.1s
+viewer gaps > 1s: 0 []
+playhead stalls > 1s (while playing): 0 []
+
+resource pool: created=18 reused=702 active=15 pooled=3 mem=237MB
+
+per-second: t | playhead | emissions
+    0s | frame    23 | 24 emissions
+    1s | frame    47 | 24 emissions
+    2s | frame    71 | 23 emissions
+    3s | frame    94 | 24 emissions
+    4s | frame   119 | 24 emissions
+    5s | frame   143 | 24 emissions
+    6s | frame   166 | 24 emissions
+    7s | frame   191 | 24 emissions
+    8s | frame   215 | 24 emissions
+    9s | frame   238 | 24 emissions
+   10s | frame   263 | 24 emissions
+   11s | frame   287 | 24 emissions
+   12s | frame   310 | 24 emissions
+   13s | frame   335 | 24 emissions
+   14s | frame   358 | 24 emissions
+   15s | frame   360 | 0 emissions
+[DRIVER] audit teardown: calling production MainWindow.closeEvent
+[DRIVE] frames=359 eval=1184.7ms wait=21.7ms render=636.5ms sleep=11880.0ms scope=1304.1ms retries=4 (per-frame avg: eval=3.3 wait=0.1 render=1.8 sleep=33.1 scope=3.6)
+[DRIVER] auto-dismiss dialog: QMessageBox
+[DRIVER] audit teardown: composite_renderer_running=True window_visible=True
+[DRIVER] audit teardown incomplete
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+2026-10-14 10:55:40.007 Python[61427:1956816] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 207 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.app.controllers.composite_controller: [CompClip] Failed to remember active comp clip: Comp clip not found: d5486874-a429-4b00-9519-f39b5bb293bc
+[WARNING] src.features.composite.render.compute_shader_manager: Compute shaders unavailable: OpenGL 4.1 detected, requires 4.3+. Large-radius effects will use fragment shader fallback (slower).
+[WARNING] src.features.composite.render.compute_shader_manager: Metal compute bridge available but disabled by default: fragment fallback is faster for large-radius effects (see tests/media/results/metal_compute_ab.md). Set TOPOS_METAL_COMPUTE=1 to force the Metal path.
+[WARNING] src.features.composite.render.composite_renderer: [COMPOSITE-RENDER] graph produced no valid output; request_id=1 timeline_backed=True dynamic_source=True nodes=3 connections=2 color_tex=0 color_size=0x0
+[WARNING] src.features.composite.adapters.main_window_adapter: [COMPOSITE-PRESENT] empty renderer output; viewer cleared request_id=1 timeline_backed=False
+[WARNING] src.app.controllers.composite_controller: [CompClip] Failed to remember active comp clip: Comp clip not found: d5486874-a429-4b00-9519-f39b5bb293bc
+Fatal Python error: Segmentation fault
+
+Thread 0x000070001a6b6000 (most recent call first):
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 359 in wait
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 655 in wait
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/nodes/video_frame_node.py", line 1336 in _preload_worker
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1012 in run
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x0000700018cfa000 (most recent call first):
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 359 in wait
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/queue.py", line 180 in get
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/render/composite_renderer.py", line 497 in run
+
+Thread 0x00007000148ca000 (most recent call first):
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 359 in wait
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/queue.py", line 180 in get
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/color/core/async_renderer.py", line 568 in run
+
+Thread 0x00007000134af000 (most recent call first):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/shared/control_surfaces/tangent/hub_client.py", line 343 in _receive_exact
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/shared/control_surfaces/tangent/hub_client.py", line 235 in _run
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1012 in run
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x0000700013532000 (most recent call first):
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/selectors.py", line 415 in select
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/socketserver.py", line 235 in serve_forever
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/.venv/lib/python3.12/site-packages/werkzeug/serving.py", line 820 in serve_forever
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/app/integrations/file_explorer/adapter.py", line 97 in run
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/app/integrations/file_explorer/adapter.py", line 229 in run
+
+Current thread 0x00007ff84bd2bb00 (most recent call first):
+  <no Python frame>
+
+Extension modules: PyQt6.QtCore, PyQt6.QtGui, PyQt6.QtWidgets, PyQt6.QtNetwork, PyQt6.QtPrintSupport, PyQt6.QtWebChannel, PyQt6.QtWebEngineCore, PyQt6.QtWebEngineWidgets, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, PIL._imaging, _pillow_heif, rawpy._rawpy, PyQt6.QtSvg, PyQt6.QtOpenGL, PyQt6.QtOpenGLWidgets, _cyutility, scipy._cyutility, scipy._lib._ccallback_c, scipy.special._ufuncs_cxx, scipy.special._ellip_harm_2, scipy.special._special_ufuncs, scipy.special._gufuncs, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.interpolate._fitpack, scipy.interpolate._dfitpack, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg.cython_lapack, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._batched_linalg, scipy.linalg._decomp_lu_cython, scipy.linalg._matfuncs_schur_sqrtm, scipy.linalg._matfuncs_expm, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg._decomp_update, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpacklib, scipy.sparse.linalg._propack, scipy.optimize._group_columns, scipy._lib.messagestream, scipy.optimize._trlib._trlib, scipy.optimize._lbfgsb, _moduleTNC, scipy.optimize._moduleTNC, scipy.optimize._slsqplib, scipy.optimize._minpack, scipy.optimize._lsq.givens_elimination, scipy.optimize._zeros, scipy._lib._uarray._uarray, scipy.linalg._decomp_interpolative, scipy.optimize._bglu_dense, scipy.optimize._lsap, scipy.spatial._ckdtree, scipy.spatial._qhull, scipy.spatial._voronoi, scipy.spatial._hausdorff, scipy.spatial._distance_wrap, scipy.spatial.transform._rotation_cy, scipy.spatial.transform._rigid_transform_cy, scipy.optimize._direct, scipy.interpolate._dierckx, scipy.interpolate._ppoly, scipy.interpolate._interpnd, scipy.interpolate._rbfinterp_pythran, scipy.interpolate._rgi_cython, moderngl.mgl, PyQt6.QtMultimedia, PIL._imagingcms, markupsafe._speedups, objc._objc, CoreFoundation._CoreFoundation, CoreFoundation._inlines, Foundation._Foundation, Foundation._inlines, psutil._psutil_osx, av._core, av.logging, av.buffer, av.audio.format, av.error, av.dictionary, av.container.pyio, av.option, av.descriptor, av.format, av.index, av.utils, av.stream, av.container.streams, av.sidedata.encparams, av.sidedata.motionvectors, av.sidedata.sidedata, av.opaque, av.packet, av.container.input, av.container.output, av.container.core, av.codec.context, av.video.format, av.video.reformatter, av.plane, av.video.plane, av.video.frame, av.video.stream, av.codec.hwaccel, av.codec.codec, av.frame, av.audio.layout, av.audio.plane, av.audio.frame, av.audio.stream, av.filter.link, av.filter.context, av.filter.graph, av.filter.filter, av.filter.loudnorm, av.audio.resampler, av.audio.codeccontext, av.audio.fifo, av.bitstream, av.device, av.video.codeccontext, scipy.signal._sigtools, scipy.signal._max_len_seq_inner, scipy.signal._upfirdn_apply, scipy.signal._spline, scipy.ndimage._nd_image, scipy.ndimage._rank_filter_1d, _ni_label, scipy.ndimage._ni_label, scipy.signal._sosfilt, scipy.integrate._odepack, scipy.integrate._quadpack, scipy.integrate._vode, scipy.integrate._dop, scipy.special.cython_special, scipy.stats._stats, scipy.stats._biasedurn, scipy.stats._stats_pythran, scipy.stats._levy_stable.levyst, scipy.stats._ansari_swilk_statistics, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.stats._sobol, scipy.stats._qmc_cy, scipy.stats._rcont.rcont, scipy.stats._qmvnt_cy, scipy.signal._peak_finding_utils, glcontext.darwin, av.subtitles.stream, AppKit._AppKit, AppKit._inlines, Quartz.CoreGraphics._callbacks, Quartz.CoreGraphics._doubleindirect, Quartz.CoreGraphics._sortandmap, Quartz.CoreGraphics._coregraphics, Quartz.CoreGraphics._inlines, Quartz.ImageKit._imagekit, Quartz.CoreVideo._CVPixelBuffer, Quartz.QuartzCore._quartzcore, Quartz.PDFKit._PDFKit, Quartz.QuickLookUI._QuickLookUI, CoreMedia._CoreMedia, CoreMedia._inlines, VideoToolbox._VideoToolbox (total: 189)

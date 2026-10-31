@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-09-07T17:41:26Z",
+  "reference_implementation": "src.shared.media.color_decode.ColorConverter",
+  "script_sha256": "fa2aef93b69b338215f02d655ffcba8fca3a5186264e9cb7656c6248238f8b96",
+  "status": "scalar_reference_vectors",
+  "profiles": {
+    "preview": {
+      "pixel_format": "yuv422",
+      "alpha": [
+        "absent",
+        "a16",
+        "bounded"
+      ]
+    },
+    "hq": {
+      "pixel_format": "gbr444",
+      "bit_depth": 10
+    },
+    "xq": {
+      "pixel_format": "gbr444",
+      "bit_depth": 12
+    }
+  },
+  "neutral_vectors": [
+    {
+      "name": "neutral-smpte170m-full",
+      "max_abs_error": 0.0
+    },
+    {
+      "name": "neutral-smpte170m-limited",
+      "max_abs_error": 0.0
+    },
+    {
+      "name": "neutral-bt470bg-full",
+      "max_abs_error": 0.0
+    },
+    {
+      "name": "neutral-bt470bg-limited",
+      "max_abs_error": 0.0
+    },
+    {
+      "name": "neutral-bt709-full",
+      "max_abs_error": 0.0
+    },
+    {
+      "name": "neutral-bt709-limited",
+      "max_abs_error": 0.0
+    },
+    {
+      "name": "neutral-bt2020nc-full",
+      "max_abs_error": 0.0
+    },
+    {
+      "name": "neutral-bt2020nc-limited",
+      "max_abs_error": 0.0
+    }
+  ],
+  "transfer_roundtrip_max_abs_error": {
+    "srgb": 5.960464477539063e-08,
+    "bt709": 5.960464477539063e-08,
+    "pq": 1.2755393981933594e-05,
+    "hlg": 0.0
+  },
+  "alpha_zero_rgb_max_abs_error": 0.0,
+  "deferred": [
+    "GPU parity",
+    "file explorer professional display",
+    "ICC tag semantic comparison",
+    "DeltaE2000 against external reference"
+  ]
+}

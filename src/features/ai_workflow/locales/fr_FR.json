@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "Flux de travail IA"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "Sélectionnez un modèle ci-dessus ou déposez des ressources ici",
+      "zoom": "Zoom : {percent} %"
+    },
+    "toolbar": {
+      "template": "Modèle",
+      "load": "Charger",
+      "clear": "Effacer",
+      "form": "Formulaire",
+      "canvas": "Canevas",
+      "run": "Exécuter",
+      "cancel": "Annuler"
+    },
+    "gallery": {
+      "title": "Choisir un modèle de flux de travail",
+      "use": "Utiliser"
+    },
+    "form": {
+      "title": "Paramètres",
+      "title_with_name": "{name} · Paramètres",
+      "node_section": "Nœud : {node}",
+      "no_params": "Ce modèle n'a aucun paramètre réglable — exécutez-le simplement",
+      "advanced_edit": "Édition avancée (canevas)",
+      "back_to_gallery": "Retour aux modèles",
+      "back_to_gallery_tooltip": "Revient à la galerie de modèles ; le flux de travail actuel est conservé (Effacer l'abandonne)"
+    },
+    "status": {
+      "idle": "Inactif",
+      "queued": "En file",
+      "running": "En cours",
+      "cached": "En cache",
+      "succeeded": "Réussi",
+      "failed": "Échec",
+      "cancelled": "Annulé",
+      "waiting_input": "En attente",
+      "skipped": "Ignoré",
+      "not_assembled": "État : non assemblé",
+      "no_plan": "Aucun plan pour l'instant"
+    },
+    "actions": {
+      "preview_plan": "Aperçu du plan",
+      "request_approval": "Demander une approbation",
+      "apply_approved_plan": "Appliquer le plan approuvé"
+    },
+    "inspector": {
+      "no_selection": "<b>(aucune sélection)</b>"
+    },
+    "node_search": {
+      "placeholder": "Rechercher des nœuds…"
+    }
+  }
+}

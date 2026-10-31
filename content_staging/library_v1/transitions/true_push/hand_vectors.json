@@ -1,0 +1,20 @@
+{
+  "component": "X09 true_push",
+  "method": "手算：4x4 常色/模式源，接缝 u_seam=1-p 逐像素判定 A/B 段并按源坐标采样；p 取像素间距整数倍（W=4 → p=0.25k）时双线性为精确平移。独立枚举，容差 1e-6。",
+  "params_default": {"direction": "left", "seam_softness": 0.0},
+  "vectors": [
+    {"desc": "常色源 p=0.25", "a": 0.18, "b": 0.72, "progress": 0.25,
+     "expected_row": [0.18, 0.18, 0.18, 0.72],
+     "note": "接缝 0.75：u=0.875 落 B 段采样 B(0.125)=0.72"},
+    {"desc": "常色源 p=0.5", "a": 0.18, "b": 0.72, "progress": 0.5,
+     "expected_row": [0.18, 0.18, 0.72, 0.72], "note": "接缝 0.5：右半 B"},
+    {"desc": "A 特征左移", "a_pattern": [0, 1, 0, 0], "b_pattern": [0, 0, 0, 0],
+     "progress": 0.25, "expected_row": [1, 0, 0, 0],
+     "note": "A 特征 u=0.375 出现在视口 0.375-0.25=0.125（i=0）——A 源真实移动（slide 不移动，此为差量关键）"},
+    {"desc": "B 特征左移", "a_pattern": [0, 0, 0, 0], "b_pattern": [1, 0, 0, 0],
+     "progress": 0.25, "expected_row": [0, 0, 0, 1],
+     "note": "B 特征 u=0.125 出现在视口 0.125+1-0.25=0.875（i=3）——两源同向移动"},
+    {"desc": "端点 p=0", "progress": 0.0, "expected": "A 比特级拷贝", "note": ""},
+    {"desc": "端点 p=1", "progress": 1.0, "expected": "B 比特级拷贝", "note": ""}
+  ]
+}

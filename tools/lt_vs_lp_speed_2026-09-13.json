@@ -1,0 +1,384 @@
+{
+ "date": "2026-09-13",
+ "n": 16,
+ "lt_bpp": 0.94075,
+ "lp_qp": 72,
+ "lp_ems": [
+  11,
+  10
+ ],
+ "layers": {
+  "static_4k": {
+   "w": 3840,
+   "h": 2160,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 975370,
+   "lt_sized": {
+    "encode_ms": 34.09684199959884,
+    "mean_bytes": 847061.3125,
+    "decode_ms": 6.9696779992227675,
+    "encode_fps": 29.328229283279825,
+    "decode_fps": 143.47865139702526,
+    "mbps": 169.4122625
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 9.07270149946271,
+    "mean_bytes": 847061.3125,
+    "encode_fps": 110.22075399033248,
+    "mbps": 169.4122625
+   },
+   "lp_ip2": {
+    "encode_ms": 17.032402999575424,
+    "mean_bytes": 297835.125,
+    "i_frames": 1,
+    "fallbacks_after_first": 0,
+    "decode_ms": 9.835165000367851,
+    "encode_fps": 58.71162160881982,
+    "decode_fps": 101.6759759457618,
+    "mbps": 59.567025
+   }
+  },
+  "handheld_4k": {
+   "w": 3840,
+   "h": 2160,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 975370,
+   "lt_sized": {
+    "encode_ms": 38.9619119996496,
+    "mean_bytes": 901536.9375,
+    "decode_ms": 6.971212001189997,
+    "encode_fps": 25.66609154111824,
+    "decode_fps": 143.4470791921546,
+    "mbps": 180.3073875
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 5.544774499867344,
+    "mean_bytes": 387964.6875,
+    "encode_fps": 180.3499853824397,
+    "mbps": 77.5929375
+   },
+   "lp_ip2": {
+    "encode_ms": 17.662719000327343,
+    "mean_bytes": 347106.25,
+    "i_frames": 7,
+    "fallbacks_after_first": 6,
+    "decode_ms": 9.143441999185598,
+    "encode_fps": 56.61642468418747,
+    "decode_fps": 109.36800387524409,
+    "mbps": 69.42125
+   }
+  },
+  "broll_4k": {
+   "w": 3840,
+   "h": 2160,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 975370,
+   "lt_sized": {
+    "encode_ms": 31.988943500437017,
+    "mean_bytes": 907670.0625,
+    "decode_ms": 6.263496999963536,
+    "encode_fps": 31.260801094801348,
+    "decode_fps": 159.65522135730595,
+    "mbps": 181.5340125
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 6.6362254992782255,
+    "mean_bytes": 693288.9375,
+    "encode_fps": 150.68806810569694,
+    "mbps": 138.6577875
+   },
+   "lp_ip2": {
+    "encode_ms": 18.3801744997254,
+    "mean_bytes": 576982.5,
+    "i_frames": 1,
+    "fallbacks_after_first": 0,
+    "decode_ms": 9.862943499683752,
+    "encode_fps": 54.40644755657462,
+    "decode_fps": 101.38961051861082,
+    "mbps": 115.3965
+   }
+  },
+  "cut_4k": {
+   "w": 3840,
+   "h": 2160,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 975370,
+   "lt_sized": {
+    "encode_ms": 27.74488749946613,
+    "mean_bytes": 896373.375,
+    "decode_ms": 6.8873159998474875,
+    "encode_fps": 36.04267633160315,
+    "decode_fps": 145.19444149537264,
+    "mbps": 179.274675
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 6.699317499624158,
+    "mean_bytes": 632633.3125,
+    "encode_fps": 149.26893673215244,
+    "mbps": 126.5266625
+   },
+   "lp_ip2": {
+    "encode_ms": 16.998548999254126,
+    "mean_bytes": 387595.0625,
+    "i_frames": 2,
+    "fallbacks_after_first": 1,
+    "decode_ms": 9.70972699997219,
+    "encode_fps": 58.82855060416502,
+    "decode_fps": 102.98950732629909,
+    "mbps": 77.5190125
+   }
+  },
+  "pan_2k": {
+   "w": 1920,
+   "h": 1080,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 243842,
+   "lt_sized": {
+    "encode_ms": 9.190095499434392,
+    "mean_bytes": 230103.5625,
+    "decode_ms": 3.1315754995375755,
+    "encode_fps": 108.8127974362775,
+    "decode_fps": 319.3280826688244,
+    "mbps": 46.0207125
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 8.102497499749006,
+    "mean_bytes": 854162.6875,
+    "encode_fps": 123.41873601700924,
+    "mbps": 170.8325375
+   },
+   "lp_ip2": {
+    "encode_ms": 15.448817500328005,
+    "mean_bytes": 854162.6875,
+    "i_frames": 16,
+    "fallbacks_after_first": 15,
+    "decode_ms": 4.958129500664654,
+    "encode_fps": 64.72987333682778,
+    "decode_fps": 201.68896352262414,
+    "mbps": 170.8325375
+   }
+  },
+  "texture_2k": {
+   "w": 1920,
+   "h": 1080,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 243842,
+   "lt_sized": {
+    "encode_ms": 12.37152049998258,
+    "mean_bytes": 227268.0625,
+    "decode_ms": 3.461020000031567,
+    "encode_fps": 80.83080814532119,
+    "decode_fps": 288.9321645037819,
+    "mbps": 45.4536125
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 9.158169498732605,
+    "mean_bytes": 1042163.375,
+    "encode_fps": 109.19212623640452,
+    "mbps": 208.432675
+   },
+   "lp_ip2": {
+    "encode_ms": 16.583370999796898,
+    "mean_bytes": 1042163.375,
+    "i_frames": 16,
+    "fallbacks_after_first": 15,
+    "decode_ms": 7.911369500106957,
+    "encode_fps": 60.30137057249984,
+    "decode_fps": 126.40036595263065,
+    "mbps": 208.432675
+   }
+  },
+  "static_4k@v9carrier": {
+   "w": 3840,
+   "h": 2160,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 975370,
+   "lt_sized": {
+    "encode_ms": 22.331419500005723,
+    "mean_bytes": 847061.3125,
+    "decode_ms": 6.741212499946414,
+    "encode_fps": 44.779956777926444,
+    "decode_fps": 148.34126650182722,
+    "mbps": 169.4122625
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 7.943567000438634,
+    "mean_bytes": 847061.3125,
+    "encode_fps": 125.88802989195928,
+    "mbps": 169.4122625
+   },
+   "lp_ip2": {
+    "encode_ms": 127.64256300033594,
+    "mean_bytes": 555290.375,
+    "i_frames": 1,
+    "fallbacks_after_first": 0,
+    "decode_ms": 9.63742499880027,
+    "encode_fps": 7.834377315013395,
+    "decode_fps": 103.76215639805099,
+    "mbps": 111.058075
+   }
+  },
+  "handheld_4k@v9carrier": {
+   "w": 3840,
+   "h": 2160,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 975370,
+   "lt_sized": {
+    "encode_ms": 37.085506999574136,
+    "mean_bytes": 901536.9375,
+    "decode_ms": 7.0589500001005945,
+    "encode_fps": 26.9647115788786,
+    "decode_fps": 141.66412851567858,
+    "mbps": 180.3073875
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 5.610495501059631,
+    "mean_bytes": 387964.6875,
+    "encode_fps": 178.23737668288553,
+    "mbps": 77.5929375
+   },
+   "lp_ip2": {
+    "encode_ms": 156.0914199999388,
+    "mean_bytes": 607326.75,
+    "i_frames": 4,
+    "fallbacks_after_first": 3,
+    "decode_ms": 9.974828999474994,
+    "encode_fps": 6.406502035796663,
+    "decode_fps": 100.25234518332425,
+    "mbps": 121.46535
+   }
+  },
+  "broll_4k@v9carrier": {
+   "w": 3840,
+   "h": 2160,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 975370,
+   "lt_sized": {
+    "encode_ms": 34.67070500028058,
+    "mean_bytes": 907670.0625,
+    "decode_ms": 6.8316565002533025,
+    "encode_fps": 28.84279393776121,
+    "decode_fps": 146.3773829909221,
+    "mbps": 181.5340125
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 7.225366500279051,
+    "mean_bytes": 693288.9375,
+    "encode_fps": 138.40128386032444,
+    "mbps": 138.6577875
+   },
+   "lp_ip2": {
+    "encode_ms": 156.76219399938418,
+    "mean_bytes": 834215.5,
+    "i_frames": 1,
+    "fallbacks_after_first": 0,
+    "decode_ms": 10.352889000387222,
+    "encode_fps": 6.3790890806486695,
+    "decode_fps": 96.59139588597904,
+    "mbps": 166.8431
+   }
+  },
+  "cut_4k@v9carrier": {
+   "w": 3840,
+   "h": 2160,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 975370,
+   "lt_sized": {
+    "encode_ms": 26.344381999479083,
+    "mean_bytes": 896373.375,
+    "decode_ms": 7.0138344999577384,
+    "encode_fps": 37.95875720370944,
+    "decode_fps": 142.57536302090182,
+    "mbps": 179.274675
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 6.788823000533739,
+    "mean_bytes": 632633.3125,
+    "encode_fps": 147.3009386047301,
+    "mbps": 126.5266625
+   },
+   "lp_ip2": {
+    "encode_ms": 146.64620399980777,
+    "mean_bytes": 644866.5625,
+    "i_frames": 2,
+    "fallbacks_after_first": 1,
+    "decode_ms": 9.58524399993621,
+    "encode_fps": 6.819133211257967,
+    "decode_fps": 104.32702600024109,
+    "mbps": 128.9733125
+   }
+  },
+  "pan_2k@v9carrier": {
+   "w": 1920,
+   "h": 1080,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 243842,
+   "lt_sized": {
+    "encode_ms": 10.197101999438019,
+    "mean_bytes": 230103.5625,
+    "decode_ms": 3.031486000509176,
+    "encode_fps": 98.06707827921225,
+    "decode_fps": 329.8712248158288,
+    "mbps": 46.0207125
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 8.63922000007733,
+    "mean_bytes": 854162.6875,
+    "encode_fps": 115.75119049995821,
+    "mbps": 170.8325375
+   },
+   "lp_ip2": {
+    "encode_ms": 94.45352249895222,
+    "mean_bytes": 921825.5,
+    "i_frames": 16,
+    "fallbacks_after_first": 15,
+    "decode_ms": 5.239176500253961,
+    "encode_fps": 10.587217644647325,
+    "decode_fps": 190.86969105765505,
+    "mbps": 184.3651
+   }
+  },
+  "texture_2k@v9carrier": {
+   "w": 1920,
+   "h": 1080,
+   "fps": 25.0,
+   "n": 16,
+   "target_bytes": 243842,
+   "lt_sized": {
+    "encode_ms": 13.58942700062471,
+    "mean_bytes": 227268.0625,
+    "decode_ms": 3.474970999377547,
+    "encode_fps": 73.58661994755406,
+    "decode_fps": 287.7721857762625,
+    "mbps": 45.4536125
+   },
+   "lt_fixed_qp72": {
+    "encode_ms": 9.607391500139784,
+    "mean_bytes": 1042163.375,
+    "encode_fps": 104.08652546171876,
+    "mbps": 208.432675
+   },
+   "lp_ip2": {
+    "encode_ms": 89.87195050031005,
+    "mean_bytes": 1109370.125,
+    "i_frames": 16,
+    "fallbacks_after_first": 15,
+    "decode_ms": 5.076409500361478,
+    "encode_fps": 11.126942215375086,
+    "decode_fps": 196.9896242469786,
+    "mbps": 221.874025
+   }
+  }
+ }
+}

@@ -1,0 +1,164 @@
+{
+  "schema": "topos.image_decode_speed.v1",
+  "date": "2026-09-07",
+  "git_commit": "05bb9d9c",
+  "benchmark": {
+    "binary": "native/topos_codec/build/release/toos",
+    "iterations": 20,
+    "cache": "hot",
+    "fps_formula": "1000 / decode_ms",
+    "scope": "decode stage only"
+  },
+  "sources": {
+    "2k": {
+      "path": "tests/test_videos/2K_h264.mp4",
+      "width": 1920,
+      "height": 1080,
+      "frame_index": 300,
+      "pixel_format": "yuv420p source -> planar uint16",
+      "tiers": [
+        {
+          "tier": "422-low",
+          "qmatrix": 3,
+          "qp": 63,
+          "bytes": 309951,
+          "mb_decimal": 0.309951,
+          "decode_p50_ms": 2.022,
+          "decode_p95_ms": 2.604,
+          "decode_p50_fps": 494.56,
+          "decode_p95_fps": 384.025
+        },
+        {
+          "tier": "422-medium",
+          "qmatrix": 1,
+          "qp": 61,
+          "bytes": 439970,
+          "mb_decimal": 0.43997,
+          "decode_p50_ms": 2.402,
+          "decode_p95_ms": 3.112,
+          "decode_p50_fps": 416.32,
+          "decode_p95_fps": 321.337
+        },
+        {
+          "tier": "422-high",
+          "qmatrix": 1,
+          "qp": 58,
+          "bytes": 677738,
+          "mb_decimal": 0.677738,
+          "decode_p50_ms": 3.167,
+          "decode_p95_ms": 4.298,
+          "decode_p50_fps": 315.756,
+          "decode_p95_fps": 232.666
+        },
+        {
+          "tier": "422-ultra",
+          "qmatrix": 0,
+          "qp": 58,
+          "bytes": 1408160,
+          "mb_decimal": 1.40816,
+          "decode_p50_ms": 6.029,
+          "decode_p95_ms": 6.879,
+          "decode_p50_fps": 165.865,
+          "decode_p95_fps": 145.37
+        },
+        {
+          "tier": "444-high",
+          "qmatrix": 2,
+          "qp": 63,
+          "bytes": 1613470,
+          "mb_decimal": 1.61347,
+          "decode_p50_ms": 7.392,
+          "decode_p95_ms": 8.258,
+          "decode_p50_fps": 135.281,
+          "decode_p95_fps": 121.095
+        },
+        {
+          "tier": "444-ultra",
+          "qmatrix": 2,
+          "qp": 58,
+          "bytes": 1799955,
+          "mb_decimal": 1.799955,
+          "decode_p50_ms": 7.77,
+          "decode_p95_ms": 9.35,
+          "decode_p50_fps": 128.7,
+          "decode_p95_fps": 106.952
+        }
+      ]
+    },
+    "4k": {
+      "path": "tests/test_videos/4K_H264.mov",
+      "width": 3840,
+      "height": 2160,
+      "frame_index": 300,
+      "pixel_format": "yuv420p source -> planar uint16",
+      "tiers": [
+        {
+          "tier": "422-low",
+          "qmatrix": 3,
+          "qp": 63,
+          "bytes": 655201,
+          "mb_decimal": 0.655201,
+          "decode_p50_ms": 4.127,
+          "decode_p95_ms": 4.893,
+          "decode_p50_fps": 242.307,
+          "decode_p95_fps": 204.374
+        },
+        {
+          "tier": "422-medium",
+          "qmatrix": 1,
+          "qp": 61,
+          "bytes": 844051,
+          "mb_decimal": 0.844051,
+          "decode_p50_ms": 4.482,
+          "decode_p95_ms": 5.374,
+          "decode_p50_fps": 223.115,
+          "decode_p95_fps": 186.081
+        },
+        {
+          "tier": "422-high",
+          "qmatrix": 1,
+          "qp": 58,
+          "bytes": 1181308,
+          "mb_decimal": 1.181308,
+          "decode_p50_ms": 5.716,
+          "decode_p95_ms": 6.92,
+          "decode_p50_fps": 174.948,
+          "decode_p95_fps": 144.509
+        },
+        {
+          "tier": "422-ultra",
+          "qmatrix": 0,
+          "qp": 58,
+          "bytes": 2130827,
+          "mb_decimal": 2.130827,
+          "decode_p50_ms": 9.329,
+          "decode_p95_ms": 11.234,
+          "decode_p50_fps": 107.193,
+          "decode_p95_fps": 89.015
+        },
+        {
+          "tier": "444-high",
+          "qmatrix": 2,
+          "qp": 63,
+          "bytes": 3037281,
+          "mb_decimal": 3.037281,
+          "decode_p50_ms": 13.491,
+          "decode_p95_ms": 15.565,
+          "decode_p50_fps": 74.123,
+          "decode_p95_fps": 64.247
+        },
+        {
+          "tier": "444-ultra",
+          "qmatrix": 2,
+          "qp": 58,
+          "bytes": 3270664,
+          "mb_decimal": 3.270664,
+          "decode_p50_ms": 13.26,
+          "decode_p95_ms": 15.127,
+          "decode_p50_fps": 75.415,
+          "decode_p95_fps": 66.107
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,4 @@
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/color/test_metal_composition_*.py tests/color/test_color_e2e_consistency_matrix.py -q   # 126 passed
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/color/test_tracking_curve_transform.py tests/color/test_tracking_data.py tests/color/test_tracking_keyframe_bake.py tests/color/test_auto_color.py -q   # 58 passed
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/color -q --ignore=tests/color/test_cache_fix.py   # 1511 passed, 4 skipped
+# test_cache_fix.py Illegal instruction reproduces on clean HEAD worktree (pre-existing)

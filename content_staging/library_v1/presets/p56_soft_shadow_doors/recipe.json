@@ -1,0 +1,26 @@
+{
+  "recipe_id": "P56",
+  "name": "柔影合页",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "双开合页+柔影；perspective 0.4–0.7，shadow 0.5–0.8",
+  "component": "X10 hinged_doors（生产 lib1_hinged_doors，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/hinged_doors）",
+  "dependencies": {
+    "component_id": "X10",
+    "component_slug": "hinged_doors",
+    "component_kind": "transition",
+    "transition_type": "lib1_hinged_doors",
+    "user_json_base": false
+  },
+  "params": {
+    "hinge": "Both",
+    "perspective": 0.55,
+    "shadow": 0.65
+  },
+  "notes": "X10 生产 base lib1_hinged_doors（transition_catalog 已注册，resample_cores 复合核）；base 不在 custom_transitions._BASE_TYPES 白名单（未接入），不产出用户转场 JSON。"
+}

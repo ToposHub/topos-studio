@@ -1,0 +1,54 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Three_Way_Tint": {
+        "name": "三路色调",
+        "params": {
+          "shadow_color": "阴影颜色",
+          "shadow_strength": "阴影强度",
+          "midtone_color": "中间调颜色",
+          "midtone_strength": "中间调强度",
+          "highlight_color": "高光颜色",
+          "highlight_strength": "高光强度"
+        },
+        "desc": {
+          "short": "按亮度将画面分为阴影/中间调/高光三个平滑分区并各自独立着色，乘性增益保留 HDR 动态范围",
+          "params": {
+            "shadow_color": "阴影分区的着色颜色（scene-linear，0.5 为中性锚点）",
+            "shadow_strength": "阴影着色强度，0 为不动",
+            "midtone_color": "中间调分区的着色颜色（scene-linear，0.5 为中性锚点）",
+            "midtone_strength": "中间调制着色强度，0 为不动",
+            "highlight_color": "高光分区的着色颜色（scene-linear，0.5 为中性锚点）",
+            "highlight_strength": "高光着色强度，0 为不动"
+          }
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Three_Way_Tint": {
+        "name": "Three-Way Tint",
+        "params": {
+          "shadow_color": "Shadow Color",
+          "shadow_strength": "Shadow Strength",
+          "midtone_color": "Midtone Color",
+          "midtone_strength": "Midtone Strength",
+          "highlight_color": "Highlight Color",
+          "highlight_strength": "Highlight Strength"
+        },
+        "desc": {
+          "short": "Tints shadows, midtones and highlights as three smooth luminance zones with HDR-safe multiplicative color gains",
+          "params": {
+            "shadow_color": "Tint color for the shadow zone (scene-linear, 0.5 is the neutral pivot)",
+            "shadow_strength": "Shadow tint amount, 0 disables",
+            "midtone_color": "Tint color for the midtone zone (scene-linear, 0.5 is the neutral pivot)",
+            "midtone_strength": "Midtone tint amount, 0 disables",
+            "highlight_color": "Tint color for the highlight zone (scene-linear, 0.5 is the neutral pivot)",
+            "highlight_strength": "Highlight tint amount, 0 disables"
+          }
+        }
+      }
+    }
+  }
+}

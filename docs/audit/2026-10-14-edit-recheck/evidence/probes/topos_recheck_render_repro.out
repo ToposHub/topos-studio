@@ -1,0 +1,18 @@
+LUT {'lift': [250.67947667772825, 0.7041904101271046, 0]} mismatch/max: 5427 25344 4
+  real float fallback equal: True
+  export GLSL no-dark diagnostic mismatch/max: 7 2
+  same B input0, different R/G, authoritative B outputs: [0.14450450241565704, 0.14945507049560547]
+LUT {'gain': [49.360623248919055, 0.375193068518081, 0]} mismatch/max: 0 25344 0
+  real float fallback equal: True
+  export GLSL no-dark diagnostic mismatch/max: 0 0
+  same B input0, different R/G, authoritative B outputs: [0.0, 0.0]
+GPU fixture no-dark diagnostic u8 max/channels: 179 [0, 0, 179] first cpu/diagnostic: [0, 0, 0] [0, 0, 179]
+fixture wheel uniforms: {'u_lift': (8.631674575031098e-05, 8.631674575031098e-05, 8.631674575031098e-05), 'u_gamma': (1000000.0, -1000000.0, -1000000.0), 'u_gain': (5.960464477539063e-08, 5.960464477539063e-08, 5.960464477539063e-08)}
+wheel uniform parser == GradingMath: True
+valid wheels no-dark diagnostic u8 mismatch/max: 0 0
+Metal radius8 single-effect materialize: True
+valid edge wheels black RGB cpu/GL diagnostic u8: [[19, 0, 0]] [[118, 0, 0]]
+CPU dark protection batch dependence HDR samepixel alone/with black: [1.1404030323028564, 6.54038667678833, -30.359594345092773] [0.14005303382873535, 5.540036201477051, -5.034946441650391] maxfloatdiff: 25.324647903442383
+  final samepixel u8 alone/with black: [255, 255, 0] [36, 255, 0]
+GPU fixture no-dark diagnostic u16 max: 45936
+GPU fixture no-dark diagnostic stack max: 63

@@ -1,0 +1,154 @@
+{
+  "generated_at": "2026-09-20T22:41:39.980348+00:00",
+  "stride": 20,
+  "results": {
+    "2K/proxy": {
+      "encode_fps_off": 266.7,
+      "encode_fps_aq": 247.2,
+      "video_bytes_off": 81188121,
+      "video_bytes_aq": 81358300,
+      "decode_fps_combined": 5.9,
+      "off": {
+        "frames": 26,
+        "psnr_y": 35.7279,
+        "mae_y": 10.7253,
+        "psnr_u": 44.2177,
+        "mae_u": 4.0915,
+        "psnr_v": 44.0313,
+        "mae_v": 4.429,
+        "ssim_y": 0.9293,
+        "block_index_y": 1.9182
+      },
+      "aq": {
+        "frames": 26,
+        "psnr_y": 35.546,
+        "mae_y": 10.9239,
+        "psnr_u": 43.6156,
+        "mae_u": 4.2322,
+        "psnr_v": 44.0361,
+        "mae_v": 4.3433,
+        "ssim_y": 0.9252,
+        "block_index_y": 1.9209
+      },
+      "delta": {
+        "psnr_y": -0.182,
+        "psnr_u": -0.602,
+        "psnr_v": 0.005,
+        "ssim_y": -0.00407,
+        "block_y": 0.0028,
+        "mae_y": 0.199
+      }
+    },
+    "2K/lt": {
+      "encode_fps_off": 197.7,
+      "encode_fps_aq": 173.7,
+      "video_bytes_off": 171405503,
+      "video_bytes_aq": 171454416,
+      "decode_fps_combined": 5.9,
+      "off": {
+        "frames": 26,
+        "psnr_y": 39.2133,
+        "mae_y": 7.3862,
+        "psnr_u": 46.5203,
+        "mae_u": 3.1552,
+        "psnr_v": 46.2126,
+        "mae_v": 3.4365,
+        "ssim_y": 0.9646,
+        "block_index_y": 1.3661
+      },
+      "aq": {
+        "frames": 26,
+        "psnr_y": 38.9455,
+        "mae_y": 7.5621,
+        "psnr_u": 46.2286,
+        "mae_u": 3.1656,
+        "psnr_v": 46.2585,
+        "mae_v": 3.381,
+        "ssim_y": 0.9618,
+        "block_index_y": 1.3596
+      },
+      "delta": {
+        "psnr_y": -0.268,
+        "psnr_u": -0.292,
+        "psnr_v": 0.046,
+        "ssim_y": -0.00283,
+        "block_y": -0.0065,
+        "mae_y": 0.176
+      }
+    },
+    "4K/proxy": {
+      "encode_fps_off": 83.9,
+      "encode_fps_aq": 64.9,
+      "video_bytes_off": 325487397,
+      "video_bytes_aq": 326627049,
+      "decode_fps_combined": 1.8,
+      "off": {
+        "frames": 26,
+        "psnr_y": 39.0342,
+        "mae_y": 7.7115,
+        "psnr_u": 48.307,
+        "mae_u": 2.6362,
+        "psnr_v": 47.2735,
+        "mae_v": 3.0709,
+        "ssim_y": 0.9535,
+        "block_index_y": 2.0599
+      },
+      "aq": {
+        "frames": 26,
+        "psnr_y": 38.9119,
+        "mae_y": 7.8314,
+        "psnr_u": 47.5167,
+        "mae_u": 2.7894,
+        "psnr_v": 46.9038,
+        "mae_v": 3.1801,
+        "ssim_y": 0.9518,
+        "block_index_y": 2.0511
+      },
+      "delta": {
+        "psnr_y": -0.122,
+        "psnr_u": -0.79,
+        "psnr_v": -0.37,
+        "ssim_y": -0.0017,
+        "block_y": -0.0088,
+        "mae_y": 0.12
+      }
+    },
+    "4K/lt": {
+      "encode_fps_off": 53.7,
+      "encode_fps_aq": 46.3,
+      "video_bytes_off": 685869649,
+      "video_bytes_aq": 685889855,
+      "decode_fps_combined": 1.8,
+      "off": {
+        "frames": 26,
+        "psnr_y": 43.7332,
+        "mae_y": 4.6544,
+        "psnr_u": 50.6924,
+        "mae_u": 1.9254,
+        "psnr_v": 49.3936,
+        "mae_v": 2.3403,
+        "ssim_y": 0.9816,
+        "block_index_y": 1.5096
+      },
+      "aq": {
+        "frames": 26,
+        "psnr_y": 43.6827,
+        "mae_y": 4.6832,
+        "psnr_u": 50.5323,
+        "mae_u": 1.9171,
+        "psnr_v": 49.2665,
+        "mae_v": 2.3613,
+        "ssim_y": 0.9809,
+        "block_index_y": 1.5085
+      },
+      "delta": {
+        "psnr_y": -0.051,
+        "psnr_u": -0.16,
+        "psnr_v": -0.127,
+        "ssim_y": -0.00068,
+        "block_y": -0.0011,
+        "mae_y": 0.029
+      }
+    }
+  }
+}

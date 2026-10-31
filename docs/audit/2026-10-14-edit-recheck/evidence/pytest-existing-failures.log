@@ -1,0 +1,117 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 177 items
+
+tests/edit/test_ef01_aud_part2.py FFF                                    [  1%]
+tests/edit/test_track_sync_lock.py .........F.                           [  7%]
+tests/edit/test_timeline_color_grade_lut.py F...                         [ 10%]
+tests/edit/test_timeline_gpu_export_renderer.py ......................F. [ 23%]
+..F.F......................                                              [ 38%]
+tests/edit/test_timeline_metal_export_renderer.py ..............F....... [ 51%]
+........................................................................ [ 92%]
+..............                                                           [100%]
+
+=================================== FAILURES ===================================
+_ TestAud16506PrepositionStartFailureCleanup.test_start_failure_releases_reservation_and_event _
+tests/edit/test_ef01_aud_part2.py:175: in test_start_failure_releases_reservation_and_event
+    mgr, src = self._prepare_manager(monkeypatch)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/edit/test_ef01_aud_part2.py:168: in _prepare_manager
+    key = mgr._make_source_key(dsk, spec)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/edit_gpu_decode_manager.py:1665: in _make_source_key
+    source_spec.no_deblock,
+    ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'no_deblock'
+_ TestAud16506PrepositionStartFailureCleanup.test_closing_path_releases_reservation_and_event _
+tests/edit/test_ef01_aud_part2.py:185: in test_closing_path_releases_reservation_and_event
+    mgr, src = self._prepare_manager(monkeypatch)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/edit/test_ef01_aud_part2.py:168: in _prepare_manager
+    key = mgr._make_source_key(dsk, spec)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/edit_gpu_decode_manager.py:1665: in _make_source_key
+    source_spec.no_deblock,
+    ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'no_deblock'
+_ TestAud16506PrepositionStartFailureCleanup.test_healthy_start_still_registers _
+tests/edit/test_ef01_aud_part2.py:194: in test_healthy_start_still_registers
+    mgr, src = self._prepare_manager(monkeypatch)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/edit/test_ef01_aud_part2.py:168: in _prepare_manager
+    key = mgr._make_source_key(dsk, spec)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/edit_gpu_decode_manager.py:1665: in _make_source_key
+    source_spec.no_deblock,
+    ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'no_deblock'
+_____________ TestUiWiring.test_header_menu_emits_sync_lock_signal _____________
+tests/edit/test_track_sync_lock.py:216: in test_header_menu_emits_sync_lock_signal
+    assert header._is_sync_locked is False
+E   assert True is False
+E    +  where True = <src.features.edit.ui.timeline_items.TrackHeaderItem object at 0x2f876bed0>._is_sync_locked
+----------------------------- Captured Qt messages -----------------------------
+QtWarningMsg: Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+_____ test_cached_lut_matches_float_grade_exactly_for_real_project_wheels ______
+tests/edit/test_timeline_color_grade_lut.py:90: in test_cached_lut_matches_float_grade_exactly_for_real_project_wheels
+    np.testing.assert_array_equal(actual, expected)
+/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/contextlib.py:81: in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+E   AssertionError: 
+E   Arrays are not equal
+E   
+E   Mismatched elements: 5427 / 25344 (21.4%)
+E   Max absolute difference: 4
+E   Max relative difference: 0.14285714
+E    x: array([[[ 37, 255,   0],
+E           [ 38, 254,   0],
+E           [ 39, 253,   0],...
+E    y: array([[[ 38, 255,   0],
+E           [ 39, 254,   0],
+E           [ 40, 253,   0],...
+_________________ test_gpu_grade_bit_exact_vs_cpu_grading_math _________________
+tests/edit/test_timeline_gpu_export_renderer.py:787: in test_gpu_grade_bit_exact_vs_cpu_grading_math
+    assert diff.max() <= 2, f"maxdiff {diff.max()}"
+E   AssertionError: maxdiff 179
+E   assert 179 <= 2
+E    +  where 179 = <built-in method max of numpy.ndarray object at 0x2f8a3fb70>()
+E    +    where <built-in method max of numpy.ndarray object at 0x2f8a3fb70> = array([[[  0,   0, 179],\n        [  0,   0, 179],\n        [  0,   0, 179],\n        ...,\n        [  0,   0, 179],\n     ...[  0,   0, 179],\n        ...,\n        [  0,   0, 179],\n        [  0,   0, 179],\n        [  0,   0, 179]]], dtype=int16).max
+____________________ test_gpu_u16_delivery_parity_and_dtype ____________________
+tests/edit/test_timeline_gpu_export_renderer.py:948: in test_gpu_u16_delivery_parity_and_dtype
+    assert diff_g.max() <= 8, f"graded maxdiff {diff_g.max()} code16"
+E   AssertionError: graded maxdiff 45936 code16
+E   assert 45936 <= 8
+E    +  where 45936 = <built-in method max of numpy.ndarray object at 0x2f8bf3f30>()
+E    +    where <built-in method max of numpy.ndarray object at 0x2f8bf3f30> = array([[[    0,     0, 45936],\n        [    0,     0, 45936],\n        [    0,     0, 45936],\n        ...,\n        [   ...       ...,\n        [    0,     0, 45936],\n        [    0,     0, 45936],\n        [    0,     0, 45936]]], dtype=int32).max
+______________________ test_gpu_multi_layer_stack_parity _______________________
+tests/edit/test_timeline_gpu_export_renderer.py:1056: in test_gpu_multi_layer_stack_parity
+    assert diff.max() <= 4, f"maxdiff {diff.max()}"
+E   AssertionError: maxdiff 64
+E   assert 64 <= 4
+E    +  where 64 = <built-in method max of numpy.ndarray object at 0x2f8bf36f0>()
+E    +    where <built-in method max of numpy.ndarray object at 0x2f8bf36f0> = array([[[ 0,  0, 63],\n        [ 0,  1, 63],\n        [ 0,  0, 63],\n        ...,\n        [ 0,  0, 63],\n        [ 0,  0, ...3],\n        [ 0,  0, 63],\n        ...,\n        [ 0,  0, 62],\n        [ 0,  0, 62],\n        [ 0,  0, 62]]], dtype=int16).max
+_____ test_real_metal_stack_reuses_scratch_between_separable_effect_layers _____
+tests/edit/test_timeline_metal_export_renderer.py:649: in test_real_metal_stack_reuses_scratch_between_separable_effect_layers
+    assert "stack_effect_horizontal" in renderer._buffers
+E   AssertionError: assert 'stack_effect_horizontal' in {'stack_accumulator_0': <GFXAAMD_MtlBuffer: 0x7fa4900593c0>\n    label = <none> \n    length = 49152 \n    cpuCacheMode =...sourceStorageModePrivate MTLResourceHazardTrackingModeTracked  \n    purgeableState = MTLPurgeableStateNonVolatile, ...}
+E    +  where {'stack_accumulator_0': <GFXAAMD_MtlBuffer: 0x7fa4900593c0>\n    label = <none> \n    length = 49152 \n    cpuCacheMode =...sourceStorageModePrivate MTLResourceHazardTrackingModeTracked  \n    purgeableState = MTLPurgeableStateNonVolatile, ...} = <src.features.edit.core.timeline_metal_export_renderer.TimelineMetalExportRenderer object at 0x2fdcb87d0>._buffers
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/pytest-existing-failures.xml -
+=========================== short test summary info ============================
+FAILED tests/edit/test_ef01_aud_part2.py::TestAud16506PrepositionStartFailureCleanup::test_start_failure_releases_reservation_and_event
+FAILED tests/edit/test_ef01_aud_part2.py::TestAud16506PrepositionStartFailureCleanup::test_closing_path_releases_reservation_and_event
+FAILED tests/edit/test_ef01_aud_part2.py::TestAud16506PrepositionStartFailureCleanup::test_healthy_start_still_registers
+FAILED tests/edit/test_track_sync_lock.py::TestUiWiring::test_header_menu_emits_sync_lock_signal
+FAILED tests/edit/test_timeline_color_grade_lut.py::test_cached_lut_matches_float_grade_exactly_for_real_project_wheels
+FAILED tests/edit/test_timeline_gpu_export_renderer.py::test_gpu_grade_bit_exact_vs_cpu_grading_math
+FAILED tests/edit/test_timeline_gpu_export_renderer.py::test_gpu_u16_delivery_parity_and_dtype
+FAILED tests/edit/test_timeline_gpu_export_renderer.py::test_gpu_multi_layer_stack_parity
+FAILED tests/edit/test_timeline_metal_export_renderer.py::test_real_metal_stack_reuses_scratch_between_separable_effect_layers
+======================== 9 failed, 168 passed in 30.00s ========================

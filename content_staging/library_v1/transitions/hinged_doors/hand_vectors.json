@@ -1,0 +1,96 @@
+{
+  "component": "X10 hinged_doors",
+  "method": "手算独立脚本（纯 Python 标量逐像素）：门宽 W=1-0.999p；Left 单门 [0,W] 门内 m=x/W、persp=0 时 s=m（线性模型 A(x/(1-p·0.999))）；Both 双门各半幅外侧铰链；shadow 均匀乘 (1-shadow·p)；x>W 露 B 原位。容差 1e-6。",
+  "params_default": {
+    "hinge": "Both",
+    "perspective": 0.5,
+    "shadow": 0.5
+  },
+  "vectors": [
+    {
+      "desc": "Left persp=0 shadow=0 p=0.5：门内压缩采样 + 门外 B（8x4 ramp）",
+      "params": {
+        "hinge": "Left",
+        "perspective": 0.0,
+        "shadow": 0.0
+      },
+      "progress": 0.5,
+      "fixture": "8x4 A=i/7 B=10+i",
+      "expected_row0": [
+        0.071286,
+        0.356715,
+        0.642144,
+        0.927572,
+        14.0,
+        15.0,
+        16.0,
+        17.0
+      ],
+      "note": "W=0.5005：i=1 u=0.1875 → m=0.374625 → src px=2.497 → 2/7·0.503+3/7·0.497=0.356715"
+    },
+    {
+      "desc": "Left shadow=0.5 同帧（门上 ×0.75）",
+      "params": {
+        "hinge": "Left",
+        "perspective": 0.0,
+        "shadow": 0.5
+      },
+      "progress": 0.5,
+      "fixture": "同上",
+      "expected_row0": [
+        0.053464,
+        0.267536,
+        0.481608,
+        0.695679,
+        14.0,
+        15.0,
+        16.0,
+        17.0
+      ],
+      "note": "shade=1-0.5·0.5=0.75；B 区不受 shadow"
+    },
+    {
+      "desc": "Both persp=0.5 shadow=0.3 p=0.5：双门+中缝 B",
+      "params": {
+        "hinge": "Both",
+        "perspective": 0.5,
+        "shadow": 0.3
+      },
+      "progress": 0.5,
+      "fixture": "同上",
+      "expected_row0": [
+        0.030256,
+        0.27279,
+        12.0,
+        13.0,
+        14.0,
+        15.0,
+        0.57721,
+        0.819744
+      ],
+      "note": "half=0.25025：i=0..2 左门（A 左半压缩）、i=3..4 中缝 B、i=5..7 右门（A 右半镜像压缩）"
+    },
+    {
+      "desc": "端点 p=0",
+      "progress": 0.0,
+      "expected": "A 比特级拷贝",
+      "note": ""
+    },
+    {
+      "desc": "端点 p=1",
+      "progress": 1.0,
+      "expected": "B 比特级拷贝",
+      "note": ""
+    }
+  ],
+  "conflicts": [
+    {
+      "desc": "任务原文透视式 x'=1-(1-x)/(1-p·f(x))（f 线性）在铰链 x=1 处 f≠0 时铰链点移动、f(1)=0 时门边解出 x=pk/(1+pk)≠1-0.999p——与钉住的门边/铰链不动语义矛盾",
+      "resolution": "改门内二次重参数化 s=m(1+persp·m)/(1+persp)：s(0)=0 铰链精确、s(1)=1 门边精确、persp=0 精确退化为线性模型；ds/dm 随 m 增 → 自由边压得快（越远压得越快语义保真）"
+    },
+    {
+      "desc": "初算把 8 宽像素 i=1 的中心 u 写成 0.375（W=4 口径），期望 2.497 用错源像素值域",
+      "resolution": "W=8 正确 u=0.1875 → m=0.374625 → 期望 0.356715；核与独立重算一致"
+    }
+  ]
+}

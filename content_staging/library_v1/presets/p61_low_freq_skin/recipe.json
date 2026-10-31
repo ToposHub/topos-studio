@@ -1,0 +1,29 @@
+{
+  "recipe_id": "P61",
+  "name": "低频肤色整理",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "低频带肤色整理：radius 4–8，低频经 grade 后与高频重组",
+  "component": "C21 frequency_separation（暂存节点 lib1_frequency_separation）＋生产 grade/merge",
+  "dependencies": {
+    "component_id": "C21",
+    "component_slug": "frequency_separation",
+    "component_kind": "node",
+    "node_type": "lib1_frequency_separation",
+    "aux_node_types": [
+      "grade",
+      "merge"
+    ]
+  },
+  "params": {
+    "radius": 6.0,
+    "filter": "Gaussian",
+    "mode": "LowHigh"
+  },
+  "notes": "C21 frequency_separation 暂存组件＋生产 grade/merge 组成低频整理宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；重组经 merge(add) 为暂存级近似，精确 low+high 重建语义以 C21 节点 Reconstruct 模式与 L04/L05 接缝为准。"
+}

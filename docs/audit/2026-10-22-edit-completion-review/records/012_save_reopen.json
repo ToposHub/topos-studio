@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "result": {
+    "dialog": {
+      "selected": [
+        "/tmp/topos-round7-gui/Round7Audit20261022.topos"
+      ]
+    },
+    "file_exists": false,
+    "open_return": false,
+    "expected": {
+      "assets": 9,
+      "timelines": 2,
+      "active": "4ae47de0-843c-4ab2-98fc-caa87534093f",
+      "duration": 200
+    },
+    "actual": {
+      "assets": 9,
+      "timelines": 2,
+      "active": "4ae47de0-843c-4ab2-98fc-caa87534093f",
+      "duration": 200
+    }
+  }
+}

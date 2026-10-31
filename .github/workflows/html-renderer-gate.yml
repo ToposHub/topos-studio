@@ -1,0 +1,118 @@
+# HTML Renderer Gate CI (W0-A / W2 P1)
+#
+# 目的：在干净的虚拟环境里安装固定的 Playwright + Chromium headless shell，
+# 再跑 HTML 渲染 gate 测试（pytest -m html_renderer），确保：
+#   1. 固定后端真的被安装、is_available() 返回 True（测试不跳过）；
+#   2. W0-A 确定性 gate（5× byte-identical / out-of-order / cancel / 安全语料）
+#      在 CI 上常绿可复现——而不是只在本机跳过。
+#
+# 这是 ADR 0001/0002 的可执行落点：ADR 写了固定版本
+# playwright==1.62.0 + chrome-151.0.7922.34，但在此 workflow 之前没有任何
+# 安装步骤，所以"真实浏览器验收不可复现"（W2 审计 P1）。本 workflow 把它变成
+# 与 audio-clean-install.yml 同构的独立 gate job。
+#
+# 关键约束（来自 pytest.ini marker 描述）：
+#   html_renderer 测试用 `if not backend.is_available(): pytest.skip(...)`
+#   在测试体内跳过。让它们不跳过的【唯一正确方式】是真装好 chromium，使
+#   is_available()（会真起一个 chromium 抓一帧）返回 True——不能靠 env/marker 绕过。
+#
+# 注意：本 job 只跑 `-m html_renderer`（5 个 playwright gate 测试），【不】包含
+# test_html_spike_real_browser.py——那是 webengine marker 的 Qt WebEngine 测试，
+# ADR 0001 已判定它必然 blank，属另一条线。
+
+name: HTML Renderer Gate
+
+on:
+  push:
+    branches: [main, develop, dev, fix-ui]
+    paths:
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'src/features/teaching_animation/render/**'
+      - 'src/features/teaching_animation/core/html_layer*.py'
+      - 'tests/render/html_spike/**'
+      - 'tests/render/test_html_renderer_service.py'
+      - 'tests/render/test_scene_renderer_router.py'
+      - 'tests/ai/test_html_generation_protocol.py'
+      - '.github/workflows/html-renderer-gate.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'src/features/teaching_animation/render/**'
+      - 'tests/render/html_spike/**'
+      - 'tests/render/test_html_renderer_service.py'
+  workflow_dispatch:  # 允许手动触发
+
+permissions:
+  contents: read
+
+jobs:
+  html-renderer-gate:
+    name: Pinned Chromium + HTML render gate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Chromium headless shell runs sandboxed by default on Linux only when
+        # the setuid helper or user namespaces are available; on CI runners we
+        # install system deps via `playwright install-deps` and keep the sandbox
+        # ON (the backend only opts into --no-sandbox explicitly).
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Create clean virtual environment
+        run: |
+          python -m venv .venv-ci
+          .venv-ci/bin/python -m pip install --upgrade pip
+
+      - name: Install project (dev + html-renderer extra)
+        run: |
+          .venv-ci/bin/python -m pip install -e ".[dev,html-renderer]"
+
+      - name: Install pinned Chromium browser binary
+        run: |
+          # Downloads the headless shell build pinned to playwright==1.62.0.
+          # --with-deps installs OS libraries the sandboxed renderer needs.
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            .venv-ci/bin/python -m playwright install --with-deps chromium
+          else
+            .venv-ci/bin/python -m playwright install chromium
+          fi
+
+      - name: Verify backend is available (gate must NOT skip)
+        run: |
+          .venv-ci/bin/python - <<'PY'
+          from src.features.teaching_animation.render.html_renderer_spike.playwright_backend import (
+              PlaywrightChromiumBackend,
+          )
+          backend = PlaywrightChromiumBackend()
+          if not backend.is_available():
+              raise SystemExit(
+                  "FAIL: pinned Chromium backend reports unavailable — the HTML "
+                  "renderer gate would skip. Check `playwright install chromium`."
+              )
+          print("OK backend_build =", backend.backend_build)
+          assert backend.backend_build.startswith("playwright-chromium/py"), backend.backend_build
+          assert "/chrome-" in backend.backend_build, backend.backend_build
+          PY
+
+      - name: Run HTML renderer gate tests (no skips allowed)
+        env:
+          # Fail loudly if any html_renderer test skips: a skip here means the
+          # gate silently stopped covering the pinned backend.
+          HTML_RENDERER_GATE_STRICT: "1"
+        run: |
+          # The "Verify backend is available" step above guarantees
+          # is_available()==True, so the in-test `pytest.skip(...)` guards
+          # cannot fire — a skip here would indicate a real regression.
+          .venv-ci/bin/python -m pytest -m html_renderer -v --tb=short -rA

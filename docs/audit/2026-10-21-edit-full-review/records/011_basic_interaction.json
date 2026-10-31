@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "error": "'TimelinePanel' object has no attribute 'transport_bar'",
+  "traceback": "Traceback (most recent call last):\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/scripts/interactive_session.py\", line 85, in poll_commands\n    exec(compile(source, str(path), \"exec\"), namespace)\n  File \"/tmp/topos-edit-audit-20261021/commands/011_basic_interaction.py\", line 19, in <module>\n    SESSION = Path(os.environ.get(\"TOPOS_AUDIT_SESSION\", \"/tmp/topos-edit-audit-20261021\"))\n                                    ^^^^^^^^^^^^^^^^\nAttributeError: 'TimelinePanel' object has no attribute 'transport_bar'\n"
+}

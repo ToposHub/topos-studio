@@ -1,0 +1,27 @@
+# 阶段 3b：导出流水线化（2026-09-02，同窗 stash A/B）
+
+## 实现（timeline_export.py）
+- _render_encode_pipeline：渲染生产者线程（有界队列深度 3 ≈ 72MB 预读）
+  ∥ 编码消费线程（ctypes 原生调用释放 GIL → 真重叠）
+- 无死锁收尾：producer_done 队列外事件 + 消费侧 `done ∧ empty` 轮询；
+  stop 置位后有界入队退化为丢帧退出（首版 sentinel-in-queue 排空死锁
+  已修——测试卡死暴露，复现于任何正常完成路径）
+- _pipeline_eligible：GPU 降噪桥（headless GL 线程亲和）在飞时回退串行
+- 取消/异常/进度语义与串行路径逐项对齐（用户取消测试覆盖）
+
+## 产品路径 A/B（真实负载 provider：PyAV 解码 1080p H.264 → 4K BGRA
+## 放大 → TimelineExporter 完整导出 → Topos hq，120 帧）
+串行基线：  1.61 / 1.47 fps（中位 1.54）
+流水线：    2.18 / 2.25 fps（中位 2.22）→ **+44%**（输出文件 480MB 一致）
+机制口径（晨间实验，解码+swscale ∥ 编码）：10.5 → 13.4 = +28%
+
+## 测试
+- tests/media/test_topos_timeline_export.py 22/22（含取消/资源释放）
+- tests/media + tests/deliver：1850 过 / 8 预存环境失败（与 3a 前完全一致）
+- tests/edit 全套 SIGSEGV（test_audio_waveform worker 启动，rc=139）：
+  stash 基线同点复现 → 预存累积状态崩溃，与本批无关（单跑该测试
+  基线/工作树均过）
+
+## 累计（用户素材 4K hq，产品/机制口径见各文件）
+sized 基线 15.93 → 阶段1 19.79（+24%）→ 3a 23.1（+9%）→ 3b 渲染∥编码
++44%（产品全管线口径，渲染侧重于编码时收益更大）

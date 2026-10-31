@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+collected 56 items
+
+tests/media/test_cuda_extras_w06.py ...s.                                [  8%]
+tests/media/test_cuda_resident_capability_w04.py .................       [ 39%]
+tests/media/test_cuda_resident_format_matrix_w04.py ssss                 [ 46%]
+tests/media/test_cuda_resident_lifecycle_w02.py ....................     [ 82%]
+tests/media/test_topos_codec_loader_w01.py ...s..ss.s                    [100%]
+
+======================== 47 passed, 9 skipped in 0.80s =========================

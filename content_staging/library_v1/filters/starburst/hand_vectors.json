@@ -1,0 +1,93 @@
+{
+  "component": "F10 starburst",
+  "method": "独立脚本（纯 math 模块、嵌套 list 场，与 oracle/GLSL 无代码复用）+ 均匀场手算；容差 1e-6。门控/衰减/归一化按 plugins/Anamorphic_Streak.tglsl 惯例：e=max(luma-thr,0)、w=(1-t)^2、全方向总权重归一。",
+  "params_default": {
+    "blades": "4",
+    "angle": 0.0,
+    "ray_length": 0.5,
+    "threshold": 0.55,
+    "intensity": 0.4
+  },
+  "vectors": [
+    {
+      "fixture": "uniform20_8x8",
+      "pos": [0, 0],
+      "params": {},
+      "expected": [3.16, 3.16, 3.16],
+      "note": "均匀 2.0（手算，零采样依赖）：所有 tap s=(2,2,2)、e=1.45 → star=s·e=2.9（方向数/角度无关）；out=2+2.9*0.4"
+    },
+    {
+      "fixture": "uniform02_8x8",
+      "pos": [4, 4],
+      "params": {},
+      "expected": [0.2, 0.2, 0.2],
+      "note": "阈下均匀场（手算）：e=max(0.2-0.55,0)=0 → star=0 → 精确恒等（intensity=1 语义同）"
+    },
+    {
+      "fixture": "uniform12_8x8",
+      "pos": [4, 4],
+      "params": {},
+      "expected": [66.96, 66.96, 66.96],
+      "note": "均匀 HDR 12.0（手算）：star=12*11.45=137.4 → out=12+137.4*0.4=66.96——极亮输入能量有限（线性有界）"
+    },
+    {
+      "fixture": "point33",
+      "pos": [16, 16],
+      "params": {},
+      "expected": [2.15778463, 2.15778463, 2.15778463],
+      "note": "点光源（33x33 底 0.02、(16,16)=2.0）源自身：4 线 28 tap 部分命中源足迹（脚本枚举）"
+    },
+    {
+      "fixture": "point33",
+      "pos": [16, 20],
+      "params": {},
+      "expected": [0.02020374, 0.02020374, 0.02020374],
+      "note": "沿 +x 轴距源 4px：轴向 tap（span 4.125px、最近 tap 距源 0.17px）命中双线性足迹（脚本）"
+    },
+    {
+      "fixture": "point33",
+      "pos": [19, 19],
+      "params": {"blades": "4"},
+      "expected": [0.02005167, 0.02005167, 0.02005167],
+      "note": "45° 对角距源 2.83px：4 叶方向集（0/45/90/135）含对角线 → 45° 线 tap 命中（脚本）"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "desc": "2 叶方向集不含 45° 对角 → 精确基色（方向数差量）",
+      "fixture": "point33",
+      "pos": [19, 19],
+      "params": {"blades": "2"},
+      "expected": [0.02, 0.02, 0.02],
+      "note": "2 叶线集 {0°,90°}：对角像素的全部轴向 tap 均超出源足迹 → star=0；同位置 4 叶=0.02005167（主向量 6）——多叶方向数改变输出钉住"
+    },
+    {
+      "desc": "角度旋转后射线离开轴向像素",
+      "fixture": "point33",
+      "pos": [16, 20],
+      "params": {"angle": 30.0},
+      "expected": [0.02, 0.02, 0.02],
+      "note": "angle=30 的 4 叶线集 {30,75,120,165}：+x 轴像素 tap 不再命中源 → 精确基色；同位置 angle=0=0.02020374（主向量 5）"
+    },
+    {
+      "desc": "intensity=1 满强度（手算）",
+      "fixture": "uniform20_8x8",
+      "pos": [4, 4],
+      "params": {"intensity": 1.0},
+      "expected": [4.9, 4.9, 4.9],
+      "note": "out=2+2.9*1.0"
+    },
+    {
+      "desc": "intensity=0 恒等",
+      "params": {"intensity": 0.0},
+      "expected": null,
+      "note": "任意输入（含 HDR/负值）精确恒等"
+    },
+    {
+      "desc": "ray_length=0 恒等（零行程早退，Anamorphic 同惯例）",
+      "params": {"ray_length": 0.0},
+      "expected": null,
+      "note": "任意输入精确恒等"
+    }
+  ]
+}

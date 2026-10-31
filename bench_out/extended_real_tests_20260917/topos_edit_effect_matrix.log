@@ -1,0 +1,26 @@
+transform: not_attachable_by_design
+crop: not_attachable_by_design
+opacity: not_attachable_by_design
+vignette: not_attachable_by_design
+strip_eq: separate_domain
+limiter: separate_domain
+compressor: separate_domain
+reverb: separate_domain
+delay: separate_domain
+saturation: separate_domain
+imager: separate_domain
+noise_gate: separate_domain
+adjustment_clip: separate_domain
+solid_color: separate_domain
+blur: passed
+sharpen: passed
+denoise: timeout
+edge_detect: passed
+erode_dilate: passed
+defocus: passed
+glow: passed
+plugin:bilateral_skin_smooth: exception
+plugin:Color_Space_Transform: exception
+plugin:HighPass_Retouch: exception
+plugin:Film_Halation: exception
+/Users/testuser/Documents/vscode/topos_1/bench_out/extended_real_tests_20260917/real_topos_edit_effect_matrix.json

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 黄金工程：外部 NLE（DaVinci Resolve FCPXML v1.8 导出方言）形状——
+     有理数 "s" 时长（30000/1001s NTSC）、local timecode、format/asset 资源。
+     手工按 Resolve 导出方言撰写（无 Resolve 运行环境）；导入侧逐切点/
+     源帧身份核验见 test_f61_real_dialect_roundtrip.py。 -->
+<fcpxml version="1.8">
+  <resources>
+    <format id="r1" name="FFVideoFormat1080p2997" frameDuration="1001/30000s" width="1920" height="1080"/>
+    <asset id="r2" name="A001_C001_0715UN" hasVideo="1" format="r1" duration="107374182400/30000s" hasAudio="0" audioSources="0" audioChannels="0">
+      <media-rep kind="original" src="file:///media/A001_C001_0715UN.mov"/>
+    </asset>
+    <asset id="r3" name="A001_C002_0715UN" hasVideo="1" format="r1" duration="7166566400/30000s" hasAudio="0" audioSources="0" audioChannels="0">
+      <media-rep kind="original" src="file:///media/A001_C002_0715UN.mov"/>
+    </asset>
+  </resources>
+  <library location="file:///Users/editor/Movies/roundtrip.fcpbundle/">
+    <event name="Roundtrip">
+      <project name="NTSC Project">
+        <sequence id="seq1" format="r1" duration="63063000/30000s" tcStart="0s" tcFormat="NDF">
+          <spine>
+            <asset-clip name="A001_C001" ref="r2" offset="0s" duration="4504500/30000s" start="900900/30000s"/>
+            <asset-clip name="A001_C002" ref="r3" offset="4504500/30000s" duration="1801800/30000s" start="300300/30000s"/>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

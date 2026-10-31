@@ -1,0 +1,80 @@
+// --- Topos Plugin Metadata ---
+// @name Motion Blur Linear
+// @i18n_name Motion_Blur_Linear
+// @author Topos Team
+// @version 1.0
+// @description Directional linear motion blur: centered tap line along a user angle with compile-time sample-count presets
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost medium
+// @param select motion_quality "Sample Quality" 1 "8 Samples" "16 Samples" "24 Samples"
+// @param slider motion_length "Blur Length" 0.3 0.0 1.0
+// @param slider motion_angle "Angle (Degrees)" 0.0 -180.0 180.0
+// -----------------------------
+//
+// Motion Blur Linear —— 线性方向运动模糊。
+//
+// 原理：对当前像素沿用户角度方向取一条对称线段（长度 = 滑杆 x 画幅
+// 宽度 12% 上限），线段上等距 N tap 求线性平均。与 Radial_Blur_Pro
+// （中心放射 streak）不同，本插件是平移向模糊——模拟横摇/跟拍/物体
+// 平动的运动拖影。
+//
+// 设计要点：
+// - tap 数 select 三档（8/16/24），经 MOTION_ACCUMULATE 宏展开成三个
+//   编译期常量循环分支（Radial_Blur_Pro 同款惯例），运行时单次 int
+//   分支调度；
+// - 方向向量由 uniform 角度现算（每像素 1 次 cos + 1 次 sin，预算内
+//   低频开销，注释明示）；tap 中心对称（t ∈ [-0.5, 0.5)）保持运动
+//   拖影不偏移原位；
+// - 采样 UV 钳到半纹素边界；texel 分母下限守护；
+// - 线性平均全程作用于 scene-linear，无 clamp 触碰内容色（HDR 安全）；
+//   Delta 输出惯例：模糊差值叠加到已调色画面；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+// 对称线段累加宏。N 在每个调用点展开为字面常量，保证循环上限编译期
+// 可知。依赖外层作用域变量：uv / dir_step / min_uv / max_uv。
+#define MOTION_ACCUMULATE(N)                                                   \
+    vec3 acc = vec3(0.0);                                                      \
+    for (int i = 0; i < N; i++) {                                              \
+        float t = (float(i) + 0.5) / float(N) - 0.5;                           \
+        acc += texture(u_input_tex, clamp(uv + dir_step * t, min_uv, max_uv)).rgb; \
+    }                                                                          \
+    return acc / float(N);
+
+// quality: select 索引经早退 if 链调度到编译期 tap 数分支
+vec3 motion_blur_line(vec2 uv, vec2 dir_step, vec2 min_uv, vec2 max_uv,
+                      int quality) {
+    if (quality == 0) { MOTION_ACCUMULATE(8) }
+    else if (quality == 1) { MOTION_ACCUMULATE(16) }
+    else { MOTION_ACCUMULATE(24) }
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零长度纯直通
+    if (motion_length < 0.001) return color;
+
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 safe_size = max(tex_size, vec2(1.0));
+    vec2 half_texel = 0.5 / safe_size;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+
+    // 方向与行程：上限画幅宽度的 12%（4K 下约 460 px）
+    float ang = radians(motion_angle);
+    vec2 dir = vec2(cos(ang), sin(ang));
+    float span_px = motion_length * 0.12 * safe_size.x;
+    vec2 dir_step = dir * (span_px / safe_size.x);
+
+    vec3 blurred = motion_blur_line(uv, dir_step, min_uv, max_uv, motion_quality);
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    return color + (blurred - original_color);
+}

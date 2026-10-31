@@ -1,0 +1,1 @@
+record('after_import',state=timeline_state(), assets=[(a.asset_id, a.display_name, dict(a.metadata)) for a in mw._current_edit_project.assets.values()], docks=[(x.objectName(),x.width(),x.height()) for x in mw.findChildren(src.main.QApplication.__module__ and __import__('PyQt6.QtWidgets',fromlist=['QDockWidget']).QDockWidget)])

@@ -1,0 +1,12 @@
+[
+  {
+    "path": "/2346b22f-2144-45a9-a276-a30e17c59946/audio_tracks/0/clips/0/linked_clip_id",
+    "before": "2c9facf8-6b76-477c-b08f-a568dc73622f",
+    "after": null
+  },
+  {
+    "path": "/2346b22f-2144-45a9-a276-a30e17c59946/video_tracks/0/clips/0/linked_clip_id",
+    "before": "76693005-2af0-4667-a295-18f48000b0a3",
+    "after": null
+  }
+]

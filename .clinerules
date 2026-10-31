@@ -1,0 +1,28 @@
+# Topos 开发约束（简版）
+
+Topos 是 PyQt6 + ModernGL 的 HDR 图像/视频套件，采用 `products → features → shared → app` 分层。优先复用现有模型、服务、registry 与 facade；不要以 UI 自动化或复制逻辑绕过它们。
+
+## 必须遵守
+
+- **线程与 GPU**：UI 只更新状态并发信号；所有 OpenGL/ModernGL 工作走既有渲染线程/任务队列。不得阻塞 UI，也不得从 UI 或脚本线程直接操作 GPU。
+- **状态与提交**：工程、时间线、效果、字幕等变更走既有不可变模型与 command/service 提交入口，保持 undo/redo、revision、预览和持久化一致。不得只更新 controller、UI 或序列化数据中的一层。
+- **资源**：渲染线程创建的 texture/buffer/FBO 必须按既有 deferred-garbage/release 模式释放；取消、失败和窗口关闭路径同样清理。
+- **GLSL/HDR**：浮点语境使用显式 `.0`；整数只用于有意的整数语义。循环上限为编译期常量；动态注入变量必须命名隔离；采样 UV 安全。HDR 内部处理中不得无理由 `clamp(..., 0.0, 1.0)`。
+- **效果与插件**：只通过 Effect Catalog/Registry 暴露能力。新增或修改 effect、transition、preset、plugin 时声明参数 schema、预览/导出后端能力、版本/兼容策略；插件身份或导出能力不匹配时明确诊断，绝不静默丢效果。
+- **项目兼容**：`.topos` 与子 schema 的结构变更必须有版本和迁移策略；保留未知字段/其他模块 payload。工程中不保存 secret、绝对机器路径或不可重建的大型临时缓存。
+- **Python/UI**：新函数有完整类型注解。外部或可选数据须验证并安全读取；不要用宽泛 `except` 或默认值掩盖领域错误。程序化更新控件时使用状态锁，避免递归信号。
+- **性能**：以 4K 实时播放为基准。避免 UI 同步解码/渲染、重复探测和无效缓存；先测量再优化，且不改变 preview/export 的语义一致性。
+
+## 工作方式
+
+1. 修改核心模块前先检查调用方、数据流和现有测试；保持 feature 边界，app/UI 不深度依赖 core internals。
+2. 变更按最小可验证范围实施；为行为变化补 focused test。涉及渲染、线程、序列化、插件或导出时，额外验证失败/取消/兼容路径。
+3. 结构性变更同步更新相关架构文档；不要修改无关的用户工作区改动。
+
+## 关键路径
+
+- Color：`src/features/color/core/`
+- Edit：`src/features/edit/core/`
+- Shared effects：`src/features/shared/effects/`
+- Project package：`src/shared/project/`
+- App/UI integration：`src/app/`

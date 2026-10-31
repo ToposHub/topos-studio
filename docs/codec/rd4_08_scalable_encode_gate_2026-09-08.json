@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "benchmark": "topos_scalable_encode_gate",
+  "generated_at_utc": "2026-09-08T15:58:05.258969+00:00",
+  "environment": {
+    "os": "macOS-15.3.1-x86_64-i386-64bit-Mach-O",
+    "machine": "x86_64",
+    "processor": "i386",
+    "python": "3.13.5",
+    "logical_cpu_count": 16,
+    "git_commit": "e9cd0f8f6258ba10a6f5a3e86becfb192d75583a",
+    "git_dirty": false,
+    "executable": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_scalable_encode_gate"
+  },
+  "scope": {
+    "source": "deterministic image_synth gradient, YUV 4:2:2, 10-bit",
+    "v2": "full source geometry via tc_frame_encode",
+    "v7b": "base + enhancement residual via tc_frame_encode_scalable(max_dim=2048)",
+    "iterations": 3,
+    "quick": true,
+    "quality_comparison": "reference_only",
+    "quality_reason": "the V7-B reference residual is lossless against its fixed-QP base prediction; final joint quality budgeting is still pending"
+  },
+  "gates": {
+    "total_size_median_max_pct": 1.0,
+    "total_size_p95_max_pct": 3.0,
+    "encode_p50_max_pct": 5.0,
+    "encode_p95_max_pct": 8.0,
+    "total_size": {
+      "status": "MEASURED",
+      "value": 0.03916586472479199
+    },
+    "encode_p50": {
+      "status": "MEASURED",
+      "value": 1068.818142171827
+    },
+    "encode_p95": {
+      "status": "MEASURED",
+      "value": 2117.6156830146856
+    },
+    "status": "BLOCKED"
+  },
+  "diagnostics": {
+    "v7b_size_delta_median_pct": 0.03916586472479199,
+    "v7b_encode_delta_p50_pct": 1068.818142171827,
+    "by_resolution": [
+      {
+        "width": 1920,
+        "height": 1080,
+        "base_width": 1920,
+        "base_height": 1080,
+        "iterations": 3,
+        "v2_bytes": 921721,
+        "v7b_bytes": 922082,
+        "size_delta_pct": 0.03916586472479199,
+        "v2_encode_p50_ms": 2.415,
+        "v2_encode_p95_ms": 2.415,
+        "v7b_encode_p50_ms": 27.655,
+        "v7b_encode_p95_ms": 27.655,
+        "encode_delta_p50_pct": 1062.2774327122154,
+        "encode_delta_p95_pct": 1062.2774327122154
+      },
+      {
+        "width": 3840,
+        "height": 2160,
+        "base_width": 2048,
+        "base_height": 1152,
+        "iterations": 3,
+        "v2_bytes": 3694451,
+        "v7b_bytes": 5375195,
+        "size_delta_pct": 45.49374183065359,
+        "v2_encode_p50_ms": 8.535,
+        "v2_encode_p95_ms": 8.535,
+        "v7b_encode_p50_ms": 172.133,
+        "v7b_encode_p95_ms": 172.133,
+        "encode_delta_p50_pct": 1916.789689513767,
+        "encode_delta_p95_pct": 1916.789689513767
+      },
+      {
+        "width": 6144,
+        "height": 3456,
+        "base_width": 2048,
+        "base_height": 1152,
+        "iterations": 3,
+        "v2_bytes": 7541871,
+        "v7b_bytes": 6695159,
+        "size_delta_pct": -11.22681626349748,
+        "v2_encode_p50_ms": 14.5,
+        "v2_encode_p95_ms": 14.5,
+        "v7b_encode_p50_ms": 320.135,
+        "v7b_encode_p95_ms": 320.135,
+        "encode_delta_p50_pct": 2088.7379310344827,
+        "encode_delta_p95_pct": 2088.7379310344827
+      }
+    ]
+  },
+  "samples": [
+    {
+      "width": 1920,
+      "height": 1080,
+      "iteration": 0,
+      "v2_bytes": 921721,
+      "v7b_bytes": 922082,
+      "v2_encode_ms": 3.513,
+      "v7b_encode_ms": 27.655,
+      "base_width": 1920,
+      "base_height": 1080,
+      "size_delta_pct": 0.03916586472479199,
+      "encode_delta_pct": 687.2189012240251
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "iteration": 1,
+      "v2_bytes": 921721,
+      "v7b_bytes": 922082,
+      "v2_encode_ms": 2.293,
+      "v7b_encode_ms": 26.801,
+      "base_width": 1920,
+      "base_height": 1080,
+      "size_delta_pct": 0.03916586472479199,
+      "encode_delta_pct": 1068.818142171827
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "iteration": 2,
+      "v2_bytes": 921721,
+      "v7b_bytes": 922082,
+      "v2_encode_ms": 2.415,
+      "v7b_encode_ms": 28.069,
+      "base_width": 1920,
+      "base_height": 1080,
+      "size_delta_pct": 0.03916586472479199,
+      "encode_delta_pct": 1062.2774327122154
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "iteration": 0,
+      "v2_bytes": 3694451,
+      "v7b_bytes": 5375195,
+      "v2_encode_ms": 28.373,
+      "v7b_encode_ms": 173.791,
+      "base_width": 2048,
+      "base_height": 1152,
+      "size_delta_pct": 45.49374183065359,
+      "encode_delta_pct": 512.5224685440384
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "iteration": 1,
+      "v2_bytes": 3694451,
+      "v7b_bytes": 5375195,
+      "v2_encode_ms": 7.239,
+      "v7b_encode_ms": 171.604,
+      "base_width": 2048,
+      "base_height": 1152,
+      "size_delta_pct": 45.49374183065359,
+      "encode_delta_pct": 2270.548418289819
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "iteration": 2,
+      "v2_bytes": 3694451,
+      "v7b_bytes": 5375195,
+      "v2_encode_ms": 8.535,
+      "v7b_encode_ms": 172.133,
+      "base_width": 2048,
+      "base_height": 1152,
+      "size_delta_pct": 45.49374183065359,
+      "encode_delta_pct": 1916.789689513767
+    },
+    {
+      "width": 6144,
+      "height": 3456,
+      "iteration": 0,
+      "v2_bytes": 7541871,
+      "v7b_bytes": 6695159,
+      "v2_encode_ms": 55.317,
+      "v7b_encode_ms": 354.714,
+      "base_width": 2048,
+      "base_height": 1152,
+      "size_delta_pct": -11.22681626349748,
+      "encode_delta_pct": 541.2386788871414
+    },
+    {
+      "width": 6144,
+      "height": 3456,
+      "iteration": 1,
+      "v2_bytes": 7541871,
+      "v7b_bytes": 6695159,
+      "v2_encode_ms": 14.436,
+      "v7b_encode_ms": 320.135,
+      "base_width": 2048,
+      "base_height": 1152,
+      "size_delta_pct": -11.22681626349748,
+      "encode_delta_pct": 2117.6156830146856
+    },
+    {
+      "width": 6144,
+      "height": 3456,
+      "iteration": 2,
+      "v2_bytes": 7541871,
+      "v7b_bytes": 6695159,
+      "v2_encode_ms": 14.5,
+      "v7b_encode_ms": 317.367,
+      "base_width": 2048,
+      "base_height": 1152,
+      "size_delta_pct": -11.22681626349748,
+      "encode_delta_pct": 2088.7379310344827
+    }
+  ],
+  "decision": "BLOCKED: V7-B reference writer is measurable, but final joint quality budgeting and the size/speed limits are not yet passed; keep default scalable rollout disabled."
+}

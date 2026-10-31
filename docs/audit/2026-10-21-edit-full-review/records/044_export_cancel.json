@@ -1,0 +1,55 @@
+{
+  "ok": true,
+  "result": {
+    "events": [
+      {
+        "action": "cancel",
+        "before": [
+          {
+            "name": "audit_gui_h264.mp4",
+            "status": "done"
+          },
+          {
+            "name": "audit_gui_nested.mp4",
+            "status": "failed"
+          },
+          {
+            "name": "audit_gui_other_timeline.mp4",
+            "status": "failed"
+          },
+          {
+            "name": "audit_gui_cancel.mp4",
+            "status": "running"
+          }
+        ]
+      }
+    ],
+    "jobs": [
+      {
+        "name": "audit_gui_h264.mp4",
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-edit-audit-20261021/exports/audit_gui_h264.mp4"
+      },
+      {
+        "name": "audit_gui_nested.mp4",
+        "status": "failed",
+        "error": "Nested audio preflight failed: nested audio: clip 59f4bdab-fd2b-4009-bad5-ef3740453b72, child 0cc49115-9c98-4728-8412-59e7e83f8f12: child sequence resolver is unavailable",
+        "path": "/tmp/topos-edit-audit-20261021/exports/audit_gui_nested.mp4"
+      },
+      {
+        "name": "audit_gui_other_timeline.mp4",
+        "status": "failed",
+        "error": "'TimelineSequenceRef' object has no attribute 'audio_tracks'",
+        "path": "/tmp/topos-edit-audit-20261021/exports/audit_gui_other_timeline.mp4"
+      },
+      {
+        "name": "audit_gui_cancel.mp4",
+        "status": "cancelled",
+        "error": "",
+        "path": "/tmp/topos-edit-audit-20261021/exports/audit_gui_cancel.mp4"
+      }
+    ],
+    "success_manifest_exists": false
+  }
+}

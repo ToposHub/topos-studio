@@ -1,0 +1,111 @@
+{
+  "schema": "t-p0-31-surface-perf/1",
+  "date": "20260919-014535",
+  "frames": 240,
+  "codec": "h264",
+  "pixel_format": "yuv420p",
+  "runs": [
+    {
+      "run": 0,
+      "success": false,
+      "cause": "RuntimeError: native GPU bridge cannot consume a CPU/host-visible frame",
+      "elapsed_s": 2.047,
+      "fps": 117.22,
+      "delivery_path": "",
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:cpu_fallback",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "fallback_root_cause:metal_frame_not_available"
+      ],
+      "fallback_root_cause": "metal_frame_not_available",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "bridge_selection": {
+        "selected": true,
+        "reason_code": "",
+        "output_surface": "nv12"
+      },
+      "stages": {
+        "probe": {
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_p50_ms": null,
+          "gpu_submit_p95_ms": null
+        },
+        "decode": {
+          "backend": "cpu_fallback",
+          "sample_count": 98,
+          "wall_p50_ms": 2.5274950021412224,
+          "wall_p95_ms": 3.4200359987153206,
+          "gpu_submit_p50_ms": null,
+          "gpu_submit_p95_ms": null
+        },
+        "cpu_to_gpu_upload": {
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_p50_ms": null,
+          "gpu_submit_p95_ms": null
+        },
+        "render": {
+          "backend": "metal",
+          "sample_count": 98,
+          "wall_p50_ms": 8.864563998940866,
+          "wall_p95_ms": 10.711186998378253,
+          "gpu_submit_p50_ms": null,
+          "gpu_submit_p95_ms": null
+        },
+        "gpu_to_cpu_download": {
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_p50_ms": null,
+          "gpu_submit_p95_ms": null
+        },
+        "encode_submit": {
+          "backend": "cpu_encoder",
+          "sample_count": 97,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_p50_ms": null,
+          "gpu_submit_p95_ms": null
+        },
+        "encode": {
+          "backend": "h264",
+          "sample_count": 97,
+          "wall_p50_ms": 0.19096600226475857,
+          "wall_p95_ms": 0.37815799805684946,
+          "gpu_submit_p50_ms": null,
+          "gpu_submit_p95_ms": null
+        },
+        "mux": {
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_p50_ms": null,
+          "gpu_submit_p95_ms": null
+        },
+        "queue_wait": {
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_p50_ms": null,
+          "gpu_submit_p95_ms": null
+        }
+      },
+      "probe": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "frames": 96
+      },
+      "output": "/Users/testuser/Documents/vscode/topos_1/bench_out/ai_upgrade/T-P0-31_20260919-014535/out_h264_240f_r0.mp4"
+    }
+  ]
+}

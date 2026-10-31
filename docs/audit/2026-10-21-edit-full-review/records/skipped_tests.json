@@ -1,0 +1,102 @@
+[
+  {
+    "class": "tests.edit.test_native_gpu_bridge_eligibility.TestRealTopos422GpuBridge",
+    "test": "test_native_vt_export_topos_422_hevc_p010",
+    "reason": "N06（2026-09-27，修正 C19 误诊）：崩溃不在 VT bridge，而在软件 libx265 10-bit——PyAV 17.0.1（ffmpeg 8.0.1 + libx265 4.1 十比特构建）在进程内有过任何 PyAV 媒体探测/解码后，x265 10-bit flush 必发 SIGSEGV（x265_10bit::subpelCompare/interp_8tap_hv 读已污染参考帧；topos 与 prores 源同触发，h264 与 8-bit hevc 不受影响，pools=none/frame-threads=1/bframes=0/ultrafast 均不能绕过——上游缺陷，非本项目代码，最小复现：probe_media_metadata(任意真实视频) 后 FFmpegVideoEncoder(hevc,yuv420p10le) 编 8 帧 close()）。默认跳过防击穿测试进程；设 TOPOS_RUN_KNOWN_X265_CRASH=1 显式执行（变量名与行为一致——修掉原 TOPOS_SKIP_KNOWN_VT_CRASH 设 1 反而执行的极性反转缺陷）。上游升级后移除本标记。"
+  },
+  {
+    "class": "tests.edit.test_timeline_ux_stopgaps",
+    "test": "test_explicitly_cleared_binding_does_not_fall_back",
+    "reason": "ShortcutManager unavailable"
+  },
+  {
+    "class": "tests.edit.test_quick_project.TestQuickProjectDialog",
+    "test": "test_dialog_init_video",
+    "reason": "需要 QApplication，在非 GUI 环境中会崩溃"
+  },
+  {
+    "class": "tests.edit.test_quick_project.TestQuickProjectDialog",
+    "test": "test_dialog_init_image",
+    "reason": "需要 QApplication，在非 GUI 环境中会崩溃"
+  },
+  {
+    "class": "tests.edit.test_quick_project.TestQuickProjectDialog",
+    "test": "test_get_timeline_settings",
+    "reason": "需要 QApplication，在非 GUI 环境中会崩溃"
+  },
+  {
+    "class": "tests.edit.test_quick_project.TestQuickProjectIntegration",
+    "test": "test_quick_project_roundtrip",
+    "reason": "需要 QApplication，在非 GUI 环境中会崩溃"
+  },
+  {
+    "class": "tests.edit.test_quick_project.TestQuickProjectIntegration",
+    "test": "test_quick_project_with_custom_fps",
+    "reason": "需要 QApplication，在非 GUI 环境中会崩溃"
+  },
+  {
+    "class": "tests.edit.test_audio_waveform_perf_and_fx.TestClipEffectWaveformWorker",
+    "test": "test_compressor_lowers_peaks",
+    "reason": "test WAV assets unavailable"
+  },
+  {
+    "class": "tests.edit.ai_editing.test_transcript_provider.TestMissingDependency",
+    "test": "test_qwen_asr_package_missing_raises",
+    "reason": "qwen_asr is installed; cannot test 'missing package' path"
+  },
+  {
+    "class": "tests.edit.ai_editing.test_ocr_provider",
+    "test": "test_rapidocr_package_missing_raises",
+    "reason": "rapidocr is installed; cannot test 'missing package' path"
+  },
+  {
+    "class": "tests.edit.ai_editing.test_real_media_probe_matrix",
+    "test": "test_real_video_probe_matrix[2K_DNxHR HQX 12-bit.mov-expected_resolution0]",
+    "reason": "real test asset is not available: 2K_DNxHR HQX 12-bit.mov"
+  },
+  {
+    "class": "tests.edit.ai_editing.test_real_media_probe_matrix",
+    "test": "test_real_video_probe_matrix[4K_DNxHR HQX 12-bit.mov-expected_resolution4]",
+    "reason": "real test asset is not available: 4K_DNxHR HQX 12-bit.mov"
+  },
+  {
+    "class": "tests.edit.test_timeline_p7_regression.TestLinkedDrag",
+    "test": "test_linked_drag_y_locked_to_tracks",
+    "reason": "Y position depends on full QGraphicsScene layout; verify manually in real UI"
+  },
+  {
+    "class": "tests.edit.test_timeline_export",
+    "test": "test_deliver_page_init",
+    "reason": "DeliverPage requires QApplication - run in GUI test environment"
+  },
+  {
+    "class": "tests.edit.test_timeline_export",
+    "test": "test_deliver_page_set_project",
+    "reason": "DeliverPage requires QApplication - run in GUI test environment"
+  },
+  {
+    "class": "tests.edit.test_timeline_export",
+    "test": "test_deliver_page_set_sequence",
+    "reason": "DeliverPage requires QApplication - run in GUI test environment"
+  },
+  {
+    "class": "tests.edit.test_timeline_export",
+    "test": "test_deliver_page_get_export_config_no_sequence",
+    "reason": "DeliverPage requires QApplication - run in GUI test environment"
+  },
+  {
+    "class": "tests.edit.test_timeline_export",
+    "test": "test_deliver_page_get_export_config_valid",
+    "reason": "DeliverPage requires QApplication - run in GUI test environment"
+  },
+  {
+    "class": "tests.edit.test_fix_wd8g45_aud",
+    "test": "test_aud_12617_12618_otio_import_placement_and_audio_tracks",
+    "reason": "could not import 'opentimelineio': No module named 'opentimelineio'"
+  },
+  {
+    "class": "tests.edit.test_fix_wd8g45_aud",
+    "test": "test_aud_12619_otio_export_target_url_resolvable",
+    "reason": "could not import 'opentimelineio': No module named 'opentimelineio'"
+  }
+]

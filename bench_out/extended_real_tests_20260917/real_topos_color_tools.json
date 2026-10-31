@@ -1,0 +1,256 @@
+{
+  "kind": "real_topos_color_tool_matrix",
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": [
+      25,
+      1
+    ],
+    "pixel_format": "yuv422p10le",
+    "bit_depth": 10
+  },
+  "input_rgb": {
+    "shape": [
+      360,
+      640,
+      3
+    ],
+    "dtype": "float32",
+    "mean": 0.3910559117794037,
+    "std": 0.21167926490306854
+  },
+  "rows": [
+    {
+      "tool": "grading",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.496716,
+      "std": 0.407612,
+      "elapsed_ms": 207.205
+    },
+    {
+      "tool": "curves",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.405947,
+      "std": 0.260904,
+      "elapsed_ms": 40.222
+    },
+    {
+      "tool": "hsl_curve",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.391735,
+      "std": 0.209509,
+      "elapsed_ms": 26.337
+    },
+    {
+      "tool": "lut3d",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.384504,
+      "std": 0.220641,
+      "elapsed_ms": 22.87
+    },
+    {
+      "tool": "mixer",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.379372,
+      "std": 0.212397,
+      "elapsed_ms": 66.438
+    },
+    {
+      "tool": "warper",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.395344,
+      "std": 0.209486,
+      "elapsed_ms": 29.78
+    },
+    {
+      "tool": "soft_clip",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.431543,
+      "std": 0.240396,
+      "elapsed_ms": 75.585
+    },
+    {
+      "tool": "blur_sharpen",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.391062,
+      "std": 0.206985,
+      "elapsed_ms": 13.664
+    },
+    {
+      "tool": "film_grain",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.391024,
+      "std": 0.212425,
+      "elapsed_ms": 30.024
+    },
+    {
+      "tool": "qualifier",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.391346,
+      "std": 0.216982,
+      "elapsed_ms": 33.121
+    },
+    {
+      "tool": "mask_shapes",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.271308,
+      "std": 0.182535,
+      "elapsed_ms": 15.315
+    },
+    {
+      "tool": "blend_modes",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": false,
+      "mean": 0.391056,
+      "std": 0.211679,
+      "elapsed_ms": 11.2
+    },
+    {
+      "tool": "scopes_histogram",
+      "status": "passed",
+      "shape": [
+        256,
+        768,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": false,
+      "mean": 0.106771,
+      "std": 0.308822,
+      "elapsed_ms": 15.176
+    },
+    {
+      "tool": "denoise",
+      "status": "passed",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "dtype": "float32",
+      "finite": true,
+      "changed_from_input": true,
+      "mean": 0.389784,
+      "std": 0.211672,
+      "elapsed_ms": 527.052
+    },
+    {
+      "tool": "tracker",
+      "status": "covered_by_unit_and_tracking_service_tests",
+      "real_frame_pair_available": true
+    },
+    {
+      "tool": "auto_color",
+      "status": "covered_by_unit_tests_and_color_controller",
+      "real_frame_available": true
+    },
+    {
+      "tool": "color_plugins",
+      "status": "blocked_by_design",
+      "reason": "Color MSL emitter explicitly rejects plugin effects until dual-source plugin migration"
+    },
+    {
+      "tool": "raw_develop",
+      "status": "not_applicable",
+      "reason": "TOPOS video is not a RAW source"
+    }
+  ]
+}

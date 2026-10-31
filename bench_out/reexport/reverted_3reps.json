@@ -1,0 +1,66 @@
+{
+ "2K_topos_422_Proxy.mov": [
+  {
+   "threads": 1,
+   "fps_median": 47.5,
+   "fps_all": [
+    47.7,
+    47.1,
+    47.5
+   ],
+   "digest": "8ceb65fa705b5126"
+  },
+  {
+   "threads": 4,
+   "fps_median": 164.8,
+   "fps_all": [
+    164.8,
+    164.8,
+    159.8
+   ],
+   "digest": "8ceb65fa705b5126"
+  },
+  {
+   "threads": 16,
+   "fps_median": 296.1,
+   "fps_all": [
+    313.7,
+    296.1,
+    269.8
+   ],
+   "digest": "8ceb65fa705b5126"
+  }
+ ],
+ "4K_topos_422_Proxy.mov": [
+  {
+   "threads": 1,
+   "fps_median": 11.7,
+   "fps_all": [
+    11.6,
+    11.8,
+    11.7
+   ],
+   "digest": "af2c67bd1c535e12"
+  },
+  {
+   "threads": 4,
+   "fps_median": 48.0,
+   "fps_all": [
+    49.0,
+    48.0,
+    47.0
+   ],
+   "digest": "af2c67bd1c535e12"
+  },
+  {
+   "threads": 16,
+   "fps_median": 88.8,
+   "fps_all": [
+    88.8,
+    85.4,
+    90.9
+   ],
+   "digest": "af2c67bd1c535e12"
+  }
+ ]
+}

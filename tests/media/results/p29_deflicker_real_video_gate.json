@@ -1,0 +1,26 @@
+{
+ "commit": "4be53aac93f1d16ca0ef5b3795cefec02bbf3f6c",
+ "video": "2K_h264.mp4",
+ "frames": 5,
+ "gpu_path_ms_per_frame": [
+  417.57,
+  115.14,
+  128.49,
+  156.71,
+  153.31
+ ],
+ "cpu_path_ms_per_frame": [
+  542.17,
+  250.99,
+  237.87,
+  264.34,
+  292.58
+ ],
+ "gpu_path_p50_ms": 153.31,
+ "cpu_path_p50_ms": 264.34,
+ "fullframe_rgba_readbacks_gpu_path": 0,
+ "path_agreement": {
+  "worst_abs_code_diff": 0,
+  "frac_pixels_diff_gt1": 0.0
+ }
+}

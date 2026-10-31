@@ -1,0 +1,784 @@
+{
+  "date": "2026-10-14",
+  "head": "63c0bdeaeb5edcee59363479cd8c10b947c3ddb1",
+  "baseline": "833dcd382d40f3ff75cb31bc3e3374814efa2b1b",
+  "plan": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/edit_page_third_audit_optimization_plan_2026-10-14.md",
+  "plan_sha256": "a619c9027dbf203dca4fc6606f3dca3f5c5ea5e663cfeb4baf6eaf81486f5dee",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 6283,
+      "sha256": "d3325617fb0932d35e8d917e863cd6ecd86d9f50b9fdd6413c4c163704fb7213"
+    },
+    {
+      "path": "evidence/export-smoke.log",
+      "bytes": 21007,
+      "sha256": "42abde2f418706c043df9a03f335c7ac5a11149040e4dfeb02620313999c6301"
+    },
+    {
+      "path": "evidence/gui-session1/01-empty.png",
+      "bytes": 119811,
+      "sha256": "c620c8473e354fc089b65acf67d5d7b9786c045a47495506916f8e9743dcc33d"
+    },
+    {
+      "path": "evidence/gui-session1/01-normal-empty.png",
+      "bytes": 82319,
+      "sha256": "6da632d87339d44a5e7f6462bcedaa505e6e7eb3441b870974dddc4760fafab7"
+    },
+    {
+      "path": "evidence/gui-session1/02-media.png",
+      "bytes": 104971,
+      "sha256": "7a3a796a3f00817ba4bc172e5bf07de56c5f94f0858baeb9d07d40796a8eb686"
+    },
+    {
+      "path": "evidence/gui-session1/03-source-first-frame.png",
+      "bytes": 105035,
+      "sha256": "349bc4044fd60759b2143377902371ca30a8dc75ff2ea28a4de48ce275d79842"
+    },
+    {
+      "path": "evidence/gui-session1/04-linked.png",
+      "bytes": 811618,
+      "sha256": "4769efc9c9de6b93430b14e009afe396cd9315ee938eab523aed5bfd66a25dfa"
+    },
+    {
+      "path": "evidence/gui-session1/05-source-visible.png",
+      "bytes": 573647,
+      "sha256": "0c2d790c204909c676cd54cf9ed0b91abeabf10090c8c6c9af2754a2fdaa8a7b"
+    },
+    {
+      "path": "evidence/gui-session1/command-01.py",
+      "bytes": 4899,
+      "sha256": "68e0e19903d4f8a4ea0dc54bcec3c73d8ab34f45e6a3df2a831725214d7cafca"
+    },
+    {
+      "path": "evidence/gui-session1/command-02.py",
+      "bytes": 1937,
+      "sha256": "38091f75c84de79f192657bb8cbec00f29c8078bd5a1b1e63b82e761f3394fcc"
+    },
+    {
+      "path": "evidence/gui-session1/full-app.log",
+      "bytes": 6844,
+      "sha256": "b534f19367f639d656550839680c37ff22dab4f46ce6bb6975c1cf50ec87184c"
+    },
+    {
+      "path": "evidence/gui-session1/harness-restart.json",
+      "bytes": 185,
+      "sha256": "9dcb6e97b7b7645411963b44991a727188c975d28545fce4469d3a7be2a51839"
+    },
+    {
+      "path": "evidence/gui-session1/interaction_records.json",
+      "bytes": 3210,
+      "sha256": "d6b151745716947957c66918e086184897c138b020a6927fb017cd07f689b8fc"
+    },
+    {
+      "path": "evidence/gui-session2/01-empty.png",
+      "bytes": 108332,
+      "sha256": "550f915ef8c1828a5e110838c7c42e98b7a38f37ea08f5be27dd57c4664dccdd"
+    },
+    {
+      "path": "evidence/gui-session2/01-normal-empty.png",
+      "bytes": 85667,
+      "sha256": "965fe766b1bd688f9013016ea4c0fd0a273d2951e9c2f9bea2e5a0f386d87c74"
+    },
+    {
+      "path": "evidence/gui-session2/02-media.png",
+      "bytes": 108332,
+      "sha256": "550f915ef8c1828a5e110838c7c42e98b7a38f37ea08f5be27dd57c4664dccdd"
+    },
+    {
+      "path": "evidence/gui-session2/03-source-first-frame.png",
+      "bytes": 105035,
+      "sha256": "349bc4044fd60759b2143377902371ca30a8dc75ff2ea28a4de48ce275d79842"
+    },
+    {
+      "path": "evidence/gui-session2/04-linked.png",
+      "bytes": 811618,
+      "sha256": "4769efc9c9de6b93430b14e009afe396cd9315ee938eab523aed5bfd66a25dfa"
+    },
+    {
+      "path": "evidence/gui-session2/05-source-visible.png",
+      "bytes": 573647,
+      "sha256": "0c2d790c204909c676cd54cf9ed0b91abeabf10090c8c6c9af2754a2fdaa8a7b"
+    },
+    {
+      "path": "evidence/gui-session2/17-source-appended-av.png",
+      "bytes": 486509,
+      "sha256": "5f101a55d02ac70d51801a5f557b264ba3f5aa383a272495e86d9c1fa37eabb3"
+    },
+    {
+      "path": "evidence/gui-session2/18-overwrite-failure.png",
+      "bytes": 300074,
+      "sha256": "e39a11f6d9393b2f987f0108ae7ab8c9bc6758a9cb9822b83d94ca71140f74eb"
+    },
+    {
+      "path": "evidence/gui-session2/19-insert-audio-fallback.png",
+      "bytes": 303448,
+      "sha256": "92d3341680c41c23724672ebe1f10587eb53b3c40e72b0c52d02b73454fc72fc"
+    },
+    {
+      "path": "evidence/gui-session2/command-01.py",
+      "bytes": 4899,
+      "sha256": "68e0e19903d4f8a4ea0dc54bcec3c73d8ab34f45e6a3df2a831725214d7cafca"
+    },
+    {
+      "path": "evidence/gui-session2/command-02.py",
+      "bytes": 2010,
+      "sha256": "9ece218ff50ee6193d3cbe6eb8d2ef7a0e4ae9160da2e1d601d487765c7aece9"
+    },
+    {
+      "path": "evidence/gui-session2/command-03.py",
+      "bytes": 2526,
+      "sha256": "b6b8d6d7fcfb70f6109325cd292065fb4c3d80cf4b081363dae0c7038943c905"
+    },
+    {
+      "path": "evidence/gui-session2/full-app.log",
+      "bytes": 17521,
+      "sha256": "3e7c11267e535700d8a2e175b5b1fd264ec8a840ab2a8d1a23948fb157fcd3f2"
+    },
+    {
+      "path": "evidence/gui-session2/harness-restart.json",
+      "bytes": 203,
+      "sha256": "8608a23b06ac617bb40a584234403382518b3d4b6c5014c7cdf5100ec42a8df5"
+    },
+    {
+      "path": "evidence/gui-session2/interaction_records.json",
+      "bytes": 20919,
+      "sha256": "93b1f1e2bef66370630f5a731ce5d21942d99abffc2cafff906de27cc9efc067"
+    },
+    {
+      "path": "evidence/gui-session3/01-empty.png",
+      "bytes": 108332,
+      "sha256": "550f915ef8c1828a5e110838c7c42e98b7a38f37ea08f5be27dd57c4664dccdd"
+    },
+    {
+      "path": "evidence/gui-session3/01-normal-empty.png",
+      "bytes": 85667,
+      "sha256": "965fe766b1bd688f9013016ea4c0fd0a273d2951e9c2f9bea2e5a0f386d87c74"
+    },
+    {
+      "path": "evidence/gui-session3/02-media.png",
+      "bytes": 108332,
+      "sha256": "550f915ef8c1828a5e110838c7c42e98b7a38f37ea08f5be27dd57c4664dccdd"
+    },
+    {
+      "path": "evidence/gui-session3/03-source-first-frame.png",
+      "bytes": 105035,
+      "sha256": "349bc4044fd60759b2143377902371ca30a8dc75ff2ea28a4de48ce275d79842"
+    },
+    {
+      "path": "evidence/gui-session3/04-linked.png",
+      "bytes": 811618,
+      "sha256": "4769efc9c9de6b93430b14e009afe396cd9315ee938eab523aed5bfd66a25dfa"
+    },
+    {
+      "path": "evidence/gui-session3/05-source-visible.png",
+      "bytes": 573647,
+      "sha256": "0c2d790c204909c676cd54cf9ed0b91abeabf10090c8c6c9af2754a2fdaa8a7b"
+    },
+    {
+      "path": "evidence/gui-session3/17-source-appended-av.png",
+      "bytes": 634680,
+      "sha256": "7c2c46f71629df4a3d2d8795d022b19c2d8325b5fb3f1bf2598f3b659b8763ea"
+    },
+    {
+      "path": "evidence/gui-session3/18-overwrite-failure.png",
+      "bytes": 289735,
+      "sha256": "65fca52791f2be92105b71f41b8966bc4231f1774c239e4be716b9d0109b5f81"
+    },
+    {
+      "path": "evidence/gui-session3/19-insert-audio-fallback.png",
+      "bytes": 289633,
+      "sha256": "5e81acf9d95bf9a2281dcd4e0e48a89417ed803aebbd689e3a58f8252d79a42a"
+    },
+    {
+      "path": "evidence/gui-session3/23-roll-press.png",
+      "bytes": 732992,
+      "sha256": "e9d5ec67986a143e573321ca392dd701cc3cbbf71085319096b555f6bae1e9eb"
+    },
+    {
+      "path": "evidence/gui-session3/24-roll-normal-release.png",
+      "bytes": 693287,
+      "sha256": "e327ef3262190c2337caf47f4e4bb363efd20f2a3827d28b514de49b164c26cc"
+    },
+    {
+      "path": "evidence/gui-session3/25-lock-property-error.png",
+      "bytes": 673012,
+      "sha256": "2332914a67e96e36f5e783d9357b3fa265e89759156e0c65dc4e0e7d8083fb97"
+    },
+    {
+      "path": "evidence/gui-session3/26-multi-xy-overwrite.png",
+      "bytes": 623098,
+      "sha256": "3b60b3deab4bada3d53b3389948f1085c6c0a9b204d298177d1435d4903a58aa"
+    },
+    {
+      "path": "evidence/gui-session3/27-modal-inspection.png",
+      "bytes": 496047,
+      "sha256": "dcc9ba80aee2116b46879dfd88a1e533dbad52cfd564ff3a6e563a421e9547bb"
+    },
+    {
+      "path": "evidence/gui-session3/28-roll-signal-trace.png",
+      "bytes": 690421,
+      "sha256": "3f3bf10d3d93ef65caacd7797f537c4e925293ca4f65a35a26749cba7e873f2d"
+    },
+    {
+      "path": "evidence/gui-session3/audit-scratch.topos",
+      "bytes": 6182,
+      "sha256": "7174bee1a6728351f203caaf94c33e1bf99d1122b2003437bb94969019ea15fe"
+    },
+    {
+      "path": "evidence/gui-session3/command-01.py",
+      "bytes": 4899,
+      "sha256": "68e0e19903d4f8a4ea0dc54bcec3c73d8ab34f45e6a3df2a831725214d7cafca"
+    },
+    {
+      "path": "evidence/gui-session3/command-02.py",
+      "bytes": 1337,
+      "sha256": "eeefa1267b6a1f1d59b80f56a036e519632974ac746ddb2e24186894b4198b7e"
+    },
+    {
+      "path": "evidence/gui-session3/command-03.py",
+      "bytes": 3081,
+      "sha256": "2aa7361f91abc9549848f65e30bb1949ca9071cc70f782a8773d57d1dd3b58c1"
+    },
+    {
+      "path": "evidence/gui-session3/command-04.py",
+      "bytes": 2449,
+      "sha256": "16f18d203f4736188550a16ba482899482b386744799e82c2d1252bbb899bb73"
+    },
+    {
+      "path": "evidence/gui-session3/command-05.py",
+      "bytes": 2461,
+      "sha256": "9c8665f202737378e3b9849085d25be1d0108b7ee261bfbeafe3ae368adc672f"
+    },
+    {
+      "path": "evidence/gui-session3/command-06.py",
+      "bytes": 2431,
+      "sha256": "5aede36770a2d29eda2e1ba6b9a541650e30d9adc58b47857e84c9d004b2026e"
+    },
+    {
+      "path": "evidence/gui-session3/command-07.py",
+      "bytes": 1963,
+      "sha256": "f9c40adb7721425472c81d541f93516196b93b8a7602d1b8521b937787d91127"
+    },
+    {
+      "path": "evidence/gui-session3/command-99.py",
+      "bytes": 650,
+      "sha256": "223dfc9d7388c85bc406476568301b6daabfb7b95503cf3eed2a142e8c3ae15e"
+    },
+    {
+      "path": "evidence/gui-session3/export-smoke-results.json",
+      "bytes": 26095,
+      "sha256": "f87100aed237c30cd5897a5cc665d9f1fc2122a09bfc02e9a6cba03648677cf1"
+    },
+    {
+      "path": "evidence/gui-session3/full-app.log",
+      "bytes": 38836,
+      "sha256": "931cd7e7aea8272960c255367dc925f09ceabaaa908f496becd0dff67d480617"
+    },
+    {
+      "path": "evidence/gui-session3/interaction_records.json",
+      "bytes": 56618,
+      "sha256": "25cf25cd9163b32256a1f79cc02cd84e48bf13977e020a914f4526522ef1e7d0"
+    },
+    {
+      "path": "evidence/gui-session3/save-reload-diff.json",
+      "bytes": 346,
+      "sha256": "71f59d05ca000204166186f243a2738c8cfc4d9279248ed0e34ece76dee66dd0"
+    },
+    {
+      "path": "evidence/gui-session3/smoke-2346b22f.mp4",
+      "bytes": 290660,
+      "sha256": "8b6bc280de4c39dc0c229b716e7aeef4cbccc63d1cfd2506e995a721787312b0"
+    },
+    {
+      "path": "evidence/gui-session3/smoke-2346b22f.mp4.manifest.json",
+      "bytes": 26683,
+      "sha256": "0fa9dcb550115114892142cee52d0dc8fdc89bd3e9777f5b9b0c09361162af3e"
+    },
+    {
+      "path": "evidence/gui-session3/smoke-b48e0a6f.mp4",
+      "bytes": 268641,
+      "sha256": "9ec61f6d7fb55d4fcc0cfe47c8e8d85c7d2d3af9eb745379e3f78de0b51bd7f5"
+    },
+    {
+      "path": "evidence/gui-session3/smoke-b48e0a6f.mp4.manifest.json",
+      "bytes": 23108,
+      "sha256": "4a1f36d2d20fff9e286e6f9acf07406e968562cb2d35a8260b126b8258b24ea3"
+    },
+    {
+      "path": "evidence/gui-session3/timeline_after_reload.json",
+      "bytes": 31799,
+      "sha256": "ec4bc1a51bcb67a8fe46b546d5ea614c01bf3c4847ae37e0df731d29e95c5c42"
+    },
+    {
+      "path": "evidence/gui-session3/timeline_snapshot.json",
+      "bytes": 31867,
+      "sha256": "e85559128a41a22a62099e960e315daae5524ed674269567eed0b20255b92d35"
+    },
+    {
+      "path": "evidence/gui-session3/uncaught-qt-exceptions.log",
+      "bytes": 1641,
+      "sha256": "9eccdcb0094fb33729017b85d22202dc6fc08304308c2213ec32fb1a7282193e"
+    },
+    {
+      "path": "evidence/lut_safety_probe.json",
+      "bytes": 1883,
+      "sha256": "31cdd692155a59c4409abbd2ce26bf3654bb808e67026aeb5fb390420a857d7d"
+    },
+    {
+      "path": "evidence/lut_safety_probe.py",
+      "bytes": 1371,
+      "sha256": "3772b2c7450e0066114b94da00b29f1775f24a0aca1fef8966ba771c07ff2d4f"
+    },
+    {
+      "path": "evidence/probes/topos_round3_core_combo.out",
+      "bytes": 4064,
+      "sha256": "82017d9446ea9b56e1ab53638216ba7198e96088a35cff07b9767e2819521763"
+    },
+    {
+      "path": "evidence/probes/topos_round3_core_combo.py",
+      "bytes": 9265,
+      "sha256": "09400cc206486bcc0e268564d27020dccc3eefcfade5460969256f1aa2924643"
+    },
+    {
+      "path": "evidence/probes/topos_round3_core_macro.out",
+      "bytes": 293,
+      "sha256": "f1b78be32fb36ac6e4d33d25fd261666f21d031bad79ba577ef90c5152789be6"
+    },
+    {
+      "path": "evidence/probes/topos_round3_core_oldprobe.out",
+      "bytes": 6261,
+      "sha256": "49e6ca24de6d5240831ef42af026431ef324fce9bd650b6b773f939e04bb83b3"
+    },
+    {
+      "path": "evidence/probes/topos_round3_core_oldprobe.py",
+      "bytes": 15575,
+      "sha256": "f670483a6c48b840cc77895e1d180c1506bd4c268710956471c93f030ab83844"
+    },
+    {
+      "path": "evidence/probes/topos_round3_core_precision.out",
+      "bytes": 203,
+      "sha256": "dd02ca597fc75276579783fc2e23dacdac8af46fe253cd4b081c3618056ba132"
+    },
+    {
+      "path": "evidence/probes/topos_round3_core_precision.py",
+      "bytes": 890,
+      "sha256": "8b4b272342d1fec622a142d704cd4aa23f29b124ec40e15990436fdb66889d85"
+    },
+    {
+      "path": "evidence/probes/topos_round3_core_pytest.out",
+      "bytes": 1278,
+      "sha256": "a95d074cb54a6ffa09f47b3733b28e3ffe67b81f69494694259f964469426a74"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_cancel.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_cancel.json",
+      "bytes": 302,
+      "sha256": "fd5fb8d8349604b248016405e85061562b319d5ffd9b39c78ebe361686324004"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_cancel.py",
+      "bytes": 1635,
+      "sha256": "596575cfe7a885f1227ecd8cc576111b92a3f2d066974035cfa4c0b848a7e9a9"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_extra.err",
+      "bytes": 1172,
+      "sha256": "fb49ff8396142b8c33bfa1f49d56b8866185ffd486ec00fafb6e2dbeba5cbe1f"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_extra.json",
+      "bytes": 6907,
+      "sha256": "91f5c6d303d823cccb1784b8be98d317c125dd460d7f66eb8af8475a7c379d56"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_extra.py",
+      "bytes": 13606,
+      "sha256": "444b2d918350344a482ed0af6cfb64dc5b769ced5da03e0c892695d98d126c98"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_old_contract.log",
+      "bytes": 555,
+      "sha256": "986df446dd5edf1fbc58affd60686a53adc47e056d1b0d386121ff94623373a5"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_probe.json",
+      "bytes": 2887,
+      "sha256": "97ff3bfa5a2a350db7356208ef3abf81c471427fec14b10500a9201d88b4c1c8"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_probe.py",
+      "bytes": 13279,
+      "sha256": "29a918e72349439e5905a3bb3560ad0f720b5b6ff51a7bd18808181ce17ddc5e"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_replace_contract.json",
+      "bytes": 90,
+      "sha256": "28429ed6ebb5124de7e496f00fa977e930f823bad222889e4b7d6cb1aca36b87"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_revision_structure.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_revision_structure.json",
+      "bytes": 299,
+      "sha256": "80dc48d4a8318c48aea2b30d8391138bb38d17913148880cfe67d7b58822ee36"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_revision_structure.py",
+      "bytes": 2053,
+      "sha256": "58f1198c55869a8238ff73b67b1eb9d1b58547d56455353983589437e588cd5d"
+    },
+    {
+      "path": "evidence/probes/topos_round3_features_tests.log",
+      "bytes": 877,
+      "sha256": "63349b2d17f8053abeea15aa36412e9332d0f87402533c124b4aac0c11b722d0"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_atomic_reset_sync.json",
+      "bytes": 354,
+      "sha256": "33f769f5232255cad39815818d9953127fa80aab81e10a3e83e81f90ed931254"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_atomic_reset_sync.log",
+      "bytes": 794,
+      "sha256": "9b1ac3a82e62dd7e9f2f011e9996fb889311893586936ffcd3e4f450c4d22391"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_atomic_reset_sync.py",
+      "bytes": 3308,
+      "sha256": "7f395bf7dcd15f3d1280c2b6ac7ae43a5be8d0e491467d15b5a814049f0c5e64"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_cancel_matrix.json",
+      "bytes": 114908,
+      "sha256": "7de76d5f6319624cfd49790d67fb2efbe51977c9130d212097ab4ddb2d095e09"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_cancel_matrix.log",
+      "bytes": 11395,
+      "sha256": "b9a635d01f682ba7b165f5c6acbd77a38bee3144c9fd37a884ce575b138e57b9"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_cancel_matrix.py",
+      "bytes": 5867,
+      "sha256": "1e4b4c55a9ba0b24d2c2947d88037bead93a665a38c5166a58934966598ea9ca"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_core_repro.py",
+      "bytes": 15575,
+      "sha256": "f670483a6c48b840cc77895e1d180c1506bd4c268710956471c93f030ab83844"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_extended_tools.json",
+      "bytes": 58028,
+      "sha256": "bf29a5d1550685dfe87159de0416e7adc38a8dd72ab3286008ee448d2067ce82"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_extended_tools.log",
+      "bytes": 19485,
+      "sha256": "61171c1a5952a039d50594c841518a00f85acbd67cbba7f1a502f0a4c695a250"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_extended_tools.py",
+      "bytes": 5200,
+      "sha256": "19101093a852b65cd321263416be7fe349f8555bceb782239d64b2c705995f0f"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_features_probe.py",
+      "bytes": 13020,
+      "sha256": "40c249a14707d7a4821291d56d126eb579c6f135d38c0603dc87b3ef2da05a92"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe1.json",
+      "bytes": 510,
+      "sha256": "7e4855e43ce2787d29693709bd5b3205679e41e87cfe0813b7b2c147e638525f"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe1.log",
+      "bytes": 897,
+      "sha256": "785d766664b93e93e22c02c554f8c9f86771dc879659097d201a7268a877f070"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe1.py",
+      "bytes": 3698,
+      "sha256": "a86ecdeb219a1832a00b19fe58dde2c3e74725ce954e767df3604b8d369176e3"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe2.json",
+      "bytes": 700,
+      "sha256": "7f27157e05104610bd97b682ea295f7fdf6650d3e204270986a704ef82c8cbb6"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe2.log",
+      "bytes": 1087,
+      "sha256": "fd76d5e7e2c40c6e5502b063a42c8ae78023435bb3bbb77ce9cc8b2eb26e31e0"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe2.py",
+      "bytes": 3503,
+      "sha256": "f47cb943f95421b8fa106194b56fd8fa3e68eef4db812a446f4f3b203befe0c0"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe3.json",
+      "bytes": 584,
+      "sha256": "8b9541ae951201bf3c90cd7ca38a97a8285e5060490022c612981a73523c7fd2"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe3.log",
+      "bytes": 1091,
+      "sha256": "56d8239d25f8cf8f67343e656734a811f3b76b0b07ef81b980d6da9845561043"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe3.py",
+      "bytes": 2578,
+      "sha256": "e9e9b3b0c2555657c4c4428ea5cb04da0c9caa3116cc5c065b9cb426df02df57"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe4.json",
+      "bytes": 461,
+      "sha256": "9154200e3fcd8042bde83b6f15db92686d0ae81f63e240a36fb5154e29f5c825"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe4.log",
+      "bytes": 848,
+      "sha256": "345d07b02b95231508207fce10cfe0c2222606502c33d5150f7a69ebe5729266"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe4.py",
+      "bytes": 2802,
+      "sha256": "c2e7e168ff5628db51c6aa222e2b9686f982e3617070e2c99793d65c521656d5"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe5.json",
+      "bytes": 375,
+      "sha256": "a457aac31d00c2edaa6844e428120fe9cd3e1b4cdcf72a0e9c63c93392f37b6a"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe5.log",
+      "bytes": 762,
+      "sha256": "2209b9a75c545c6021e87c0b4153a5f02fbca7283b68830fff4163b4210b0ae0"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_legacy_probe5.py",
+      "bytes": 1959,
+      "sha256": "f9567fc64cece46e97164e2e2f2b78b30030d366be9f415306d5f5aef64910ac"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_extended.json",
+      "bytes": 66141,
+      "sha256": "81adcf5821be803748f168e62a66599757eb2ba6fd9d6887de8a24cd4f881528"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_extended.log",
+      "bytes": 22285,
+      "sha256": "f021707fd07b6bef544913ea11de10ee56082bd8a7cb7dfdb44acb3f5572a1be"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_extended.py",
+      "bytes": 6934,
+      "sha256": "13f2b4795b2069d8338230f95cc9d23481ddd46e1d874adb40d2420d5718441a"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_extended_widgets.json",
+      "bytes": 89519,
+      "sha256": "6a2560f05db0905ee58e7c1b002ad3a3e3f0e70d59a8c8dd31edf7678f66c627"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_extended_widgets.log",
+      "bytes": 30931,
+      "sha256": "8d782f9f4f0d9995fd3854bfe0cdc2f1b7061cccf68f71d5a9fd9348bca58ffd"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_extended_widgets.py",
+      "bytes": 7155,
+      "sha256": "2e1a95012c16048b453712125accd95c721d3dac6ff8da8328303ca1d938a0c8"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_full.json",
+      "bytes": 104867,
+      "sha256": "b8aaa94d9dad862214a18a0826808ac82f02a8509d0722994dab854bb648cf55"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_full.log",
+      "bytes": 36747,
+      "sha256": "8d0e85263258edc9d63a14b448273d55f99e2c27fe59edc4aac5bda3dacd0349"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_full.py",
+      "bytes": 7465,
+      "sha256": "087aa0af659a2a8dc28cbb4dac8e45626a111bbf71e6aa80445454d46eb0ccb7"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_speed.json",
+      "bytes": 9965,
+      "sha256": "18919dcd7f00e271b242dbf062bc60cfcc8868ca8a4c897ec60c437835393bfa"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_speed.log",
+      "bytes": 4808,
+      "sha256": "878e77609ed9bfb7c535043de54903d7330f66fa7695e5a8cedf0580100a3d8d"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_speed.py",
+      "bytes": 3534,
+      "sha256": "2667ba36a43c0baa3c8ece710be8fe549d8170621703277ebe2af036ca9f1929"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_speed_with_hook.log",
+      "bytes": 10455,
+      "sha256": "44c26493ab7e271f8bb766a13d0b2f420c4fbc1fea14e160a24e93435bd414bd"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_wheel.json",
+      "bytes": 7949,
+      "sha256": "ce3b2835b81df1503e7ea82adad1e280d4d9f81cd86e4957592512c785ebc836"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_wheel.log",
+      "bytes": 8539,
+      "sha256": "0d46ba8fc5b84114f91b7bdb19673a9b574c7599c98c03211f458f6c12942f01"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_properties_wheel.py",
+      "bytes": 4688,
+      "sha256": "77ba6157e48e48aa9fa82d28c5984a58599e87dab9e40f6fcebb6f4ebb8c0b43"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_render_repro.py",
+      "bytes": 7749,
+      "sha256": "d7c9346119c28a87f56abe59ccc02564d72695afd4d5c86964a0844e583688d0"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_roll_passive_probe.json",
+      "bytes": 2164,
+      "sha256": "c0c2090a2bc67375166c98903aa383d5e3091505366e063e7187f238b03393cb"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_roll_passive_probe.log",
+      "bytes": 2945,
+      "sha256": "829da0e784f59bda525504f2d514a8a51312ff1739f3e8c8534ef8607c15472b"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_roll_passive_probe.py",
+      "bytes": 3398,
+      "sha256": "b2aa9d40214aa8518937c9ee5fdd805b3bbaba37f42b768e280b7fe2c6207a07"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_roll_preview.json",
+      "bytes": 2164,
+      "sha256": "c0c2090a2bc67375166c98903aa383d5e3091505366e063e7187f238b03393cb"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_roll_preview.log",
+      "bytes": 2945,
+      "sha256": "f8390240df27301a99f4d8b566a234ee505ab1d7e96c713c293224bfdab85c0c"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_roll_preview.py",
+      "bytes": 3228,
+      "sha256": "1fbbbfb39285561c20da3bc24a07b0fa428bd5466f4c7d9533c62a4f2a9d3cea"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_source_range.json",
+      "bytes": 1316,
+      "sha256": "58f67e01fc04e65a59f7932bafbe5c4f35534847004deb5df9170afcad3b1e86"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_source_range.log",
+      "bytes": 1911,
+      "sha256": "d167913daf675b5539461601f39cef55d580161a4736604c9e4ec6cb7d186b42"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_source_range.py",
+      "bytes": 2563,
+      "sha256": "f8b726e1e675a07bd909d7122f9fc2c26c6cbe53ad4ce363392ee40736f708d9"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_trim_preview_menu.json",
+      "bytes": 1836,
+      "sha256": "dbb817f599f9186fa7747b0077b909e96544deef786d3e2338bd513e4faa8657"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_trim_preview_menu.log",
+      "bytes": 2223,
+      "sha256": "a232a796f32f745d96931bc3fc727295d62c4adab850ecc6e2274328fb6cc05a"
+    },
+    {
+      "path": "evidence/probes/topos_round3_interaction_trim_preview_menu.py",
+      "bytes": 3759,
+      "sha256": "c057e79479b10d8175ddca2bea7e473cfdec9ba7bcbaf40fa1950adbdffd6413"
+    },
+    {
+      "path": "evidence/pytest-render-and-contracts.log",
+      "bytes": 1289,
+      "sha256": "cc5f2bc32207f5cbf0a51ed339ee6ad523ed09fc85ed8746bffa5f8893d9634f"
+    },
+    {
+      "path": "evidence/pytest-render-and-contracts.xml",
+      "bytes": 26988,
+      "sha256": "074d406d2fcd41f12a1e59fe82d7323b759d7b8bb3afebf9bfe9a7a530c4f51f"
+    },
+    {
+      "path": "evidence/pytest-round2-fixes.log",
+      "bytes": 1761,
+      "sha256": "a98d0e5339b21f76766c05d96c0f745bbdc4dc5b68f9f223ba64cf4898c0d3fe"
+    },
+    {
+      "path": "evidence/pytest-round2-fixes.xml",
+      "bytes": 15909,
+      "sha256": "47f82da0cc06bc122e3e03c55a722891606000251097427283a600ea0e8b9545"
+    },
+    {
+      "path": "evidence/render_probe.json",
+      "bytes": 1154,
+      "sha256": "a179a42435923360e23049e472b10ea10c420699a013e5a0421f66dcb99f4f7f"
+    },
+    {
+      "path": "evidence/render_probe.py",
+      "bytes": 2388,
+      "sha256": "ee9e5e3cbb841903f2ab3c5dffe4eb41c2f06b2c9b8f666cb9e942238e572508"
+    },
+    {
+      "path": "evidence/render_real_path.json",
+      "bytes": 1022,
+      "sha256": "73cf94238660f0e6a90e72c4a47c3b628df54090c9b2ce8f1352b66aa6c15ddd"
+    },
+    {
+      "path": "export_smoke.py",
+      "bytes": 2466,
+      "sha256": "80627615bedc864300d05c7d3d7b35baf756d0bb5ba7dbd3520f712a13c8d9a6"
+    },
+    {
+      "path": "interactive_driver.py",
+      "bytes": 7754,
+      "sha256": "9b47714d27b23c89873a76fbb2c933524fb07ba44d8b8c8c51db082d853c6ca6"
+    },
+    {
+      "path": "reports/render_review.md",
+      "bytes": 3500,
+      "sha256": "3ea59a1f90c1fdda5db8ee39a5bbc86caabc7ad01f41a5c09caeb99863d5dc5f"
+    },
+    {
+      "path": "reports/topos_round3_core.md",
+      "bytes": 17057,
+      "sha256": "dfca8f301c967d8575bf31373e82c3bf2f3816aba31813e8e2a75dd1d65cc60f"
+    },
+    {
+      "path": "reports/topos_round3_features.md",
+      "bytes": 25159,
+      "sha256": "6d175378bdfc8644ec07a25cdeda6eb375fa08b6c4c051764481747f9ade369b"
+    },
+    {
+      "path": "reports/topos_round3_interaction_report.md",
+      "bytes": 20189,
+      "sha256": "f95afa6b7080709223fd57e64a913cbd6c640daa454c0ade182961112c31570b"
+    }
+  ]
+}

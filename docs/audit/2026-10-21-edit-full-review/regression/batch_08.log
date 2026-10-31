@@ -1,0 +1,36 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 506 items
+
+tests/edit/test_audio_capabilities.py ..........                         [  1%]
+tests/edit/test_audio_clip_effects.py ..........                         [  3%]
+tests/edit/test_audio_dsp.py ........................................... [ 12%]
+...............................................................          [ 24%]
+tests/edit/test_audio_dsp_timeline_export.py .......                     [ 26%]
+tests/edit/test_audio_dsp_vectorization.py ............................. [ 32%]
+.........................................                                [ 40%]
+tests/edit/test_audio_effect_registry_health.py .........                [ 41%]
+tests/edit/test_audio_engine_avsync.py ..............                    [ 44%]
+tests/edit/test_audio_export_parity.py ............                      [ 47%]
+tests/edit/test_audio_export_preflight.py ...........                    [ 49%]
+tests/edit/test_audio_graph_parity.py .................................. [ 55%]
+..                                                                       [ 56%]
+tests/edit/test_audio_graph_snapshot.py ....................             [ 60%]
+tests/edit/test_audio_graph_validation.py ..........                     [ 62%]
+tests/edit/test_audio_health_report.py ................                  [ 65%]
+tests/edit/test_audio_layout_delivery.py ...........                     [ 67%]
+tests/edit/test_audio_leftover_samples.py ................               [ 70%]
+tests/edit/test_audio_playback.py ...................................... [ 78%]
+..............................................................           [ 90%]
+tests/edit/test_audio_ring_buffer.py ............                        [ 92%]
+tests/edit/test_audio_routing_gate.py ....                               [ 93%]
+tests/edit/test_audio_routing_save_warning.py .......                    [ 95%]
+tests/edit/test_audio_signature_completeness.py ........................ [ 99%]
+.                                                                        [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_08.xml -
+============================= 506 passed in 16.03s =============================

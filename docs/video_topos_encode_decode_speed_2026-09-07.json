@@ -1,0 +1,405 @@
+{
+  "date": "2026-09-07",
+  "machine": {
+    "physical": 8,
+    "logical": 16
+  },
+  "cases": [
+    {
+      "resolution": "2K_422",
+      "width": 1920,
+      "height": 1080,
+      "pixel_format": "yuv422p10le",
+      "source": "tests/test_videos/2K_h264.mp4",
+      "start_frame": 300,
+      "frames": 24,
+      "warmup": 4,
+      "runs": 3,
+      "threads": 8,
+      "tiers": {
+        "proxy": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 3.448,
+            "p95_ms": 4.307,
+            "p50_fps": 290.02,
+            "p95_fps": 232.16,
+            "avg_ms": 3.469,
+            "avg_fps": 288.29,
+            "e2e_fps": 238.55,
+            "e2e_ms_per_frame": 4.192,
+            "file_bytes": 10155570,
+            "file_mb": 9.685
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 2.285,
+            "p95_ms": 2.731,
+            "p50_fps": 437.569,
+            "p95_fps": 366.151,
+            "avg_ms": 2.355,
+            "avg_fps": 424.654,
+            "e2e_fps": 337.34,
+            "e2e_ms_per_frame": 2.964
+          }
+        },
+        "lt": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 3.392,
+            "p95_ms": 4.338,
+            "p50_fps": 294.79,
+            "p95_fps": 230.54,
+            "avg_ms": 3.467,
+            "avg_fps": 288.47,
+            "e2e_fps": 235.59,
+            "e2e_ms_per_frame": 4.245,
+            "file_bytes": 10155570,
+            "file_mb": 9.685
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 2.274,
+            "p95_ms": 2.634,
+            "p50_fps": 439.754,
+            "p95_fps": 379.679,
+            "avg_ms": 2.323,
+            "avg_fps": 430.546,
+            "e2e_fps": 343.47,
+            "e2e_ms_per_frame": 2.911
+          }
+        },
+        "standard": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 6.601,
+            "p95_ms": 7.662,
+            "p50_fps": 151.49,
+            "p95_fps": 130.52,
+            "avg_ms": 7.051,
+            "avg_fps": 141.82,
+            "e2e_fps": 131.21,
+            "e2e_ms_per_frame": 7.621,
+            "file_bytes": 11561615,
+            "file_mb": 11.026
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 2.599,
+            "p95_ms": 3.17,
+            "p50_fps": 384.778,
+            "p95_fps": 315.466,
+            "avg_ms": 2.644,
+            "avg_fps": 378.279,
+            "e2e_fps": 303.42,
+            "e2e_ms_per_frame": 3.296
+          }
+        },
+        "hq": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 7.338,
+            "p95_ms": 8.198,
+            "p50_fps": 136.27,
+            "p95_fps": 121.98,
+            "avg_ms": 7.391,
+            "avg_fps": 135.3,
+            "e2e_fps": 130.51,
+            "e2e_ms_per_frame": 7.662,
+            "file_bytes": 17179388,
+            "file_mb": 16.384
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 3.301,
+            "p95_ms": 4.02,
+            "p50_fps": 302.969,
+            "p95_fps": 248.748,
+            "avg_ms": 3.39,
+            "avg_fps": 295.026,
+            "e2e_fps": 234.51,
+            "e2e_ms_per_frame": 4.264
+          }
+        }
+      }
+    },
+    {
+      "resolution": "4K_422",
+      "width": 3840,
+      "height": 2160,
+      "pixel_format": "yuv422p10le",
+      "source": "tests/test_videos/4K_H264.mov",
+      "start_frame": 300,
+      "frames": 24,
+      "warmup": 4,
+      "runs": 3,
+      "threads": 8,
+      "tiers": {
+        "proxy": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 13.491,
+            "p95_ms": 14.561,
+            "p50_fps": 74.13,
+            "p95_fps": 68.67,
+            "avg_ms": 13.615,
+            "avg_fps": 73.45,
+            "e2e_fps": 67.11,
+            "e2e_ms_per_frame": 14.9,
+            "file_bytes": 20606603,
+            "file_mb": 19.652
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 4.831,
+            "p95_ms": 5.717,
+            "p50_fps": 207.007,
+            "p95_fps": 174.903,
+            "avg_ms": 4.974,
+            "avg_fps": 201.053,
+            "e2e_fps": 161.75,
+            "e2e_ms_per_frame": 6.182
+          }
+        },
+        "lt": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 15.068,
+            "p95_ms": 17.434,
+            "p50_fps": 66.36,
+            "p95_fps": 57.36,
+            "avg_ms": 15.404,
+            "avg_fps": 64.92,
+            "e2e_fps": 58.62,
+            "e2e_ms_per_frame": 17.058,
+            "file_bytes": 30187324,
+            "file_mb": 28.789
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 6.179,
+            "p95_ms": 7.367,
+            "p50_fps": 161.841,
+            "p95_fps": 135.735,
+            "avg_ms": 6.224,
+            "avg_fps": 160.663,
+            "e2e_fps": 127.33,
+            "e2e_ms_per_frame": 7.854
+          }
+        },
+        "standard": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 17.424,
+            "p95_ms": 18.912,
+            "p50_fps": 57.39,
+            "p95_fps": 52.88,
+            "avg_ms": 17.807,
+            "avg_fps": 56.16,
+            "e2e_fps": 55.66,
+            "e2e_ms_per_frame": 17.967,
+            "file_bytes": 47359652,
+            "file_mb": 45.166
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 8.362,
+            "p95_ms": 9.985,
+            "p50_fps": 119.583,
+            "p95_fps": 100.152,
+            "avg_ms": 8.48,
+            "avg_fps": 117.921,
+            "e2e_fps": 93.7,
+            "e2e_ms_per_frame": 10.672
+          }
+        },
+        "hq": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 19.431,
+            "p95_ms": 21.265,
+            "p50_fps": 51.47,
+            "p95_fps": 47.03,
+            "avg_ms": 19.445,
+            "avg_fps": 51.43,
+            "e2e_fps": 48.79,
+            "e2e_ms_per_frame": 20.497,
+            "file_bytes": 68641701,
+            "file_mb": 65.462
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 10.341,
+            "p95_ms": 11.671,
+            "p50_fps": 96.704,
+            "p95_fps": 85.684,
+            "avg_ms": 11.553,
+            "avg_fps": 86.555,
+            "e2e_fps": 69.96,
+            "e2e_ms_per_frame": 14.294
+          }
+        }
+      }
+    },
+    {
+      "resolution": "2K_444",
+      "width": 1920,
+      "height": 1080,
+      "pixel_format": "yuv444p10le",
+      "source": "tests/test_videos/4K_prores4444.mov",
+      "start_frame": 0,
+      "frames": 24,
+      "warmup": 4,
+      "runs": 3,
+      "threads": 8,
+      "tiers": {
+        "pro444": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 9.861,
+            "p95_ms": 11.296,
+            "p50_fps": 101.41,
+            "p95_fps": 88.53,
+            "avg_ms": 10.04,
+            "avg_fps": 99.61,
+            "e2e_fps": 97.19,
+            "e2e_ms_per_frame": 10.289,
+            "file_bytes": 25739770,
+            "file_mb": 24.547
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 5.084,
+            "p95_ms": 5.486,
+            "p50_fps": 196.701,
+            "p95_fps": 182.293,
+            "avg_ms": 5.065,
+            "avg_fps": 197.42,
+            "e2e_fps": 159.49,
+            "e2e_ms_per_frame": 6.27
+          }
+        }
+      }
+    },
+    {
+      "resolution": "2K_444_XQ",
+      "width": 1920,
+      "height": 1080,
+      "pixel_format": "yuv444p12le",
+      "source": "tests/test_videos/4K_prores4444.mov",
+      "start_frame": 0,
+      "frames": 24,
+      "warmup": 4,
+      "runs": 3,
+      "threads": 8,
+      "tiers": {
+        "extreme": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 12.399,
+            "p95_ms": 14.358,
+            "p50_fps": 80.65,
+            "p95_fps": 69.65,
+            "avg_ms": 12.668,
+            "avg_fps": 78.94,
+            "e2e_fps": 76.57,
+            "e2e_ms_per_frame": 13.06,
+            "file_bytes": 45264530,
+            "file_mb": 43.168
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 7.483,
+            "p95_ms": 8.256,
+            "p50_fps": 133.631,
+            "p95_fps": 121.117,
+            "avg_ms": 7.549,
+            "avg_fps": 132.467,
+            "e2e_fps": 105.01,
+            "e2e_ms_per_frame": 9.523
+          }
+        }
+      }
+    },
+    {
+      "resolution": "4K_444",
+      "width": 3840,
+      "height": 2160,
+      "pixel_format": "yuv444p10le",
+      "source": "tests/test_videos/4K_prores4444.mov",
+      "start_frame": 0,
+      "frames": 24,
+      "warmup": 4,
+      "runs": 3,
+      "threads": 8,
+      "tiers": {
+        "pro444": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 31.708,
+            "p95_ms": 34.896,
+            "p50_fps": 31.54,
+            "p95_fps": 28.66,
+            "avg_ms": 31.779,
+            "avg_fps": 31.47,
+            "e2e_fps": 28.65,
+            "e2e_ms_per_frame": 34.91,
+            "file_bytes": 103424677,
+            "file_mb": 98.633
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 19.288,
+            "p95_ms": 22.747,
+            "p50_fps": 51.845,
+            "p95_fps": 43.961,
+            "avg_ms": 19.889,
+            "avg_fps": 50.279,
+            "e2e_fps": 40.69,
+            "e2e_ms_per_frame": 24.576
+          }
+        }
+      }
+    },
+    {
+      "resolution": "4K_444_XQ",
+      "width": 3840,
+      "height": 2160,
+      "pixel_format": "yuv444p12le",
+      "source": "tests/test_videos/4K_prores4444.mov",
+      "start_frame": 0,
+      "frames": 24,
+      "warmup": 4,
+      "runs": 3,
+      "threads": 8,
+      "tiers": {
+        "extreme": {
+          "encode": {
+            "n": 60,
+            "p50_ms": 37.853,
+            "p95_ms": 42.332,
+            "p50_fps": 26.42,
+            "p95_fps": 23.62,
+            "avg_ms": 38.383,
+            "avg_fps": 26.05,
+            "e2e_fps": 25.15,
+            "e2e_ms_per_frame": 39.754,
+            "file_bytes": 169932122,
+            "file_mb": 162.06
+          },
+          "decode": {
+            "n": 60,
+            "p50_ms": 26.936,
+            "p95_ms": 33.213,
+            "p50_fps": 37.126,
+            "p95_fps": 30.109,
+            "avg_ms": 27.567,
+            "avg_fps": 36.275,
+            "e2e_fps": 28.85,
+            "e2e_ms_per_frame": 34.662
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+// --- Topos Plugin Metadata ---
+// @name Hatching
+// @i18n_name LIB1_Hatching
+// @author Topos Library v1
+// @version 0.1.0
+// @description Luminance-driven cross hatching: ink density widens periodic band lines in rotated coordinates, optional orthogonal second layer at half density, paper/ink domain output blended by amount (flat grays hatch too - not a Sobel outline)
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider line_spacing "Line Spacing" 8.0 3.0 24.0
+// @param slider angle "Angle" 45.0 -90.0 90.0
+// @param select layers "Layers" 1 "1" "2"
+// @param color ink_color "Ink Color" 0.05 0.05 0.08
+// @param slider paper "Paper" 0.9 0.0 1.0
+// @param slider amount "Amount" 1.0 0.0 1.0
+// -----------------------------
+//
+// Hatching —— 亮度驱动交叉排线（L 计划 F14，LIB1）。
+//
+// 差量（L00 台账 F14 行）：Edge_Ink_Outline 是 Sobel 描边上墨（平坦区域
+// 无输出变化）；本项是**亮度驱动周期排线**——平坦灰阶也产生可解释排线
+// （暗→线宽大、亮→线宽小，密度=1-luma），layers=2 加正交第二层（半密度）。
+// 纸纹外部资源版依赖资源子门，本版为程序几何（零采样）。
+//
+// 算法：
+// - 目标墨密度 D = 1 − clamp(luma, 0, 1)（clamp 仅几何参数域，Halftone_Print
+//   同类惯例：HDR 超白收敛为全露白、负值收敛为满墨）；
+// - 旋转坐标（angle 度，运行期 cos/sin 一次）里做周期条带 SDF：
+//   b = dot(pq, dir)/spacing，cell = |fract(b) − 0.5| ∈ [0, 0.5]；
+//   线半宽 h = −AA + (0.5+2·AA)·D（D=0 → h=−AA 全露白，D=1 → h=0.5+AA
+//   满幅墨，AA=0.06 与 Halftone_Print 网点软边同宽）；
+//   cov = 1 − smoothstep(h−AA, h+AA, cell)；
+// - layers=2：正交第二层（dir 旋转 90°）按半密度 D/2，总覆盖率为
+//   概率并 1 − (1−cov1)(1−cov2)；
+// - 输出墨/纸域：hatched = mix(vec3(paper), ink_color, cov_total)，
+//   按 amount Delta 混合回原画面。
+//
+// 设计要点：
+// - 零纹理采样、零循环（纯程序几何，preview_cost low）——位置驱动不可
+//   LUT 烘出（@export_support opengl）；
+// - amount=0 首行早退精确恒等（含 HDR）；amount<1 时按比例保留原 HDR 值，
+//   amount=1 输出为墨/纸有界域（显示域艺术效果，显式声明）；
+// - spacing 下限守护 max(spacing, 1.0)；smoothstep 边缘恒 a<b 无 NaN；
+// - 纯静态确定性；参数 ABI 裸名引用（paper 为 slider 名，vec3(paper)
+//   显式构造）；u_input_tex 仅用于 textureSize（frame 归一化契约）。
+
+const vec3 HCH_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+const float HCH_AA = 0.06;   // 条带软边宽度（胞元单位，Halftone_Print 同宽惯例）
+
+// 单层条带覆盖率：density ∈ [0,1]，dir 为单位方向，pq 为像素序坐标+0.5
+float hch_band_cov(float density, vec2 pq, vec2 dir, float spacing) {
+    float b = dot(pq, dir) / max(spacing, 1.0);
+    float cell = abs(fract(b) - 0.5);
+    // 线半宽：D=0 → −AA（全露白）；D=1 → 0.5+AA（满幅墨，含胞元边界）
+    float h = -HCH_AA + (0.5 + 2.0 * HCH_AA) * density;
+    return 1.0 - smoothstep(h - HCH_AA, h + HCH_AA, cell);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通（含 HDR）
+    if (amount < 0.001) return color;
+
+    vec2 ts = vec2(textureSize(u_input_tex, 0));
+    vec2 safe = max(ts, vec2(1.0));
+    vec2 pq = uv * safe;
+
+    float phi = radians(angle);
+    vec2 d1 = vec2(cos(phi), sin(phi));
+    vec2 d2 = vec2(-sin(phi), cos(phi));   // 正交方向
+
+    float l = clamp(dot(color, HCH_LUMA_W), 0.0, 1.0);
+    float d_in = 1.0 - l;                  // 目标墨密度（暗 → 密）
+
+    float cov = hch_band_cov(d_in, pq, d1, line_spacing);
+    if (layers == 1) {
+        // 第二层正交、半密度，概率并合成总覆盖率
+        float cov2 = hch_band_cov(d_in * 0.5, pq, d2, line_spacing);
+        cov = 1.0 - (1.0 - cov) * (1.0 - cov2);
+    }
+
+    vec3 hatched = mix(vec3(paper), ink_color, cov);
+    return color + (hatched - color) * amount;
+}

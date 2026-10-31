@@ -1,0 +1,39 @@
+{
+  "$comment": "Deterministic reduced-decode corpus manifest. Large pixel files are generated on demand so the repository does not carry derived binaries.",
+  "schema_version": 2,
+  "generator": "tests/fixtures/topos_image/generate_corpus.py",
+  "authorization": "synthetic; no external media or third-party license",
+  "source_hash_policy": "sha256 of each generated PNG; --write-manifest writes manifest.generated.json beside the output",
+  "artifact_policy": "generated_on_demand; derived PNG files are not committed",
+  "pixel_contract": {
+    "dtype": "uint16",
+    "channels": "RGB or RGBA",
+    "range": [0, 65535],
+    "generator_rng": "numpy.default_rng with category/frame seed",
+    "large_dimensions_max": [16384, 8640]
+  },
+  "dimensions": {
+    "1080p": [1920, 1080],
+    "2K": [2048, 1080],
+    "4K": [3840, 2160],
+    "4K_DCI": [4096, 2160],
+    "6K": [6144, 3240],
+    "8K": [7680, 4320],
+    "8K_DCI": [8192, 4320],
+    "12K": [12288, 6480],
+    "16K": [16384, 8640]
+  },
+  "categories": [
+    "natural_proxy",
+    "gradient",
+    "fine_lines",
+    "text",
+    "texture",
+    "noise",
+    "hdr_highlight",
+    "transparent_edges",
+    "composite",
+    "animation"
+  ],
+  "generated_files": []
+}

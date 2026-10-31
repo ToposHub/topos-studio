@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-09-17T01:08:45.790178+00:00",
+  "platform": "macOS Intel x86_64",
+  "source": "2K_topos_proxy.mov",
+  "frames": 24,
+  "results": [
+    {
+      "case": "h264_yuv420p",
+      "codec": "h264",
+      "source_frames": 24,
+      "success": true,
+      "wall_s": 3.777,
+      "export_fps": 6.35,
+      "error": null,
+      "output_bytes": 929372
+    },
+    {
+      "case": "prores_422",
+      "codec": "prores_422",
+      "source_frames": 24,
+      "success": true,
+      "wall_s": 2.259,
+      "export_fps": 10.62,
+      "error": null,
+      "output_bytes": 10363402
+    },
+    {
+      "case": "dnxhr_lb",
+      "codec": "dnxhr_lb",
+      "source_frames": 24,
+      "success": true,
+      "wall_s": 2.079,
+      "export_fps": 11.54,
+      "error": null,
+      "output_bytes": 4522805
+    },
+    {
+      "case": "topos_proxy",
+      "codec": "topos_proxy",
+      "source_frames": 24,
+      "success": true,
+      "wall_s": 2.098,
+      "export_fps": 11.44,
+      "error": null,
+      "output_bytes": 1835588
+    }
+  ]
+}

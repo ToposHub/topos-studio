@@ -1,0 +1,96 @@
+# MotionGraphicClip post-implementation validation matrix (Batch 0).
+# Focused and waveform lifecycle gates run on every relevant change; real HTML
+# is kept in the dedicated html-renderer workflow because it downloads Chromium.
+
+name: MotionGraphicClip Validation
+
+on:
+  push:
+    branches: [main, develop, dev, fix-ui]
+    paths:
+      - 'src/features/teaching_animation/**'
+      - 'src/features/composite/nodes/motion_graphic_node.py'
+      - 'src/features/shared/effects/**'
+      - 'tests/core/test_w5_audio_composition.py'
+      - 'tests/render/**'
+      - 'tests/motion/**'
+      - 'tests/ui/test_editor_*.py'
+      - 'tests/ui/test_layer_tree_model.py'
+      - 'tests/ai/test_motion_graphic_integration.py'
+      - 'tests/ai/test_teaching_animation_phase5.py'
+      - 'tests/composite/test_graph_evaluator_consistency.py'
+      - 'tests/shared/test_effect_spec.py'
+      - 'tests/architecture/test_boundary_guardrails.py'
+      - 'tests/edit/test_audio_waveform_lifecycle.py'
+      - 'pyproject.toml'
+      - 'pytest.ini'
+      - 'scripts/run_motion_graphic_validation.sh'
+      - '.github/workflows/motion-graphic-validation.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'src/features/teaching_animation/**'
+      - 'src/features/composite/nodes/motion_graphic_node.py'
+      - 'src/features/shared/effects/**'
+      - 'tests/render/**'
+      - 'tests/motion/**'
+      - 'tests/ui/test_editor_*.py'
+      - 'tests/ui/test_layer_tree_model.py'
+      - 'tests/ai/test_motion_graphic_integration.py'
+      - 'tests/ai/test_teaching_animation_phase5.py'
+      - 'tests/composite/test_graph_evaluator_consistency.py'
+      - 'tests/shared/test_effect_spec.py'
+      - 'tests/architecture/test_boundary_guardrails.py'
+      - 'tests/edit/test_audio_waveform_lifecycle.py'
+      - 'pyproject.toml'
+      - 'pytest.ini'
+      - 'scripts/run_motion_graphic_validation.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    name: MotionGraphic focused (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run focused MotionGraphic gate
+        run: ./scripts/run_motion_graphic_validation.sh --focused
+
+  waveform-lifecycle:
+    name: Audio waveform lifecycle (Python 3.12)
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run isolated waveform lifecycle gate
+        run: ./scripts/run_motion_graphic_validation.sh --waveform

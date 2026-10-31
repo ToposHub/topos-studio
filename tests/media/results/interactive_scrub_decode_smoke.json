@@ -1,0 +1,71 @@
+{
+  "timestamp": "2026-06-29T00:22:48.413346",
+  "config": {
+    "videos": "tests/test_videos/2K_h264.mp4",
+    "steps": 4,
+    "target_size": "1280x720",
+    "warmup_wait_ms": 2500.0
+  },
+  "videos": [
+    {
+      "video_path": "tests/test_videos/2K_h264.mp4",
+      "frame_count": 1572,
+      "target_size": "1280x720",
+      "steps": 4,
+      "warmup_wait_ms": 2500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 4,
+        "dropped": 0,
+        "delivered_ratio": 1.0,
+        "deadline_misses": 0,
+        "deadline_miss_ratio": 0.0,
+        "latency_p50_ms": 43.03740850446047,
+        "latency_p90_ms": 56.431687000440434,
+        "latency_p95_ms": 56.431687000440434,
+        "latency_max_ms": 56.431687000440434,
+        "frame_types": {
+          "vt_planar": 4
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 0,
+          "deadline_ms": 40.0,
+          "elapsed_ms": 33.82993600098416,
+          "deadline_miss": false
+        },
+        {
+          "target": 1518,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 1518,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 56.431687000440434,
+          "deadline_miss": false
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 74,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 50.25795100664254,
+          "deadline_miss": false
+        },
+        {
+          "target": 1412,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 1412,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 35.8168660022784,
+          "deadline_miss": false
+        }
+      ]
+    }
+  ]
+}

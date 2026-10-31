@@ -1,0 +1,37 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 442 items
+
+tests/edit/test_timeline_context_menu_guards.py ..                       [  0%]
+tests/edit/test_timeline_copy_paste.py ...........                       [  2%]
+tests/edit/test_timeline_decode_scheduler.py ........................... [  9%]
+.................                                                        [ 12%]
+tests/edit/test_timeline_disable_shortcut.py ..                          [ 13%]
+tests/edit/test_timeline_effect_drop_target.py ...                       [ 14%]
+tests/edit/test_timeline_export.py ...............................sssss. [ 22%]
+.......                                                                  [ 23%]
+tests/edit/test_timeline_export_effects.py ............................. [ 30%]
+                                                                         [ 30%]
+tests/edit/test_timeline_export_planar_passthrough.py .................. [ 34%]
+.....................................                                    [ 42%]
+tests/edit/test_timeline_external_file_drop.py .......                   [ 44%]
+tests/edit/test_timeline_frame_mapper.py ...................             [ 48%]
+tests/edit/test_timeline_gpu_compositor.py ...................           [ 53%]
+tests/edit/test_timeline_gpu_export_renderer.py ........................ [ 58%]
+...........................                                              [ 64%]
+tests/edit/test_timeline_graphics_backend_selection.py .....             [ 65%]
+tests/edit/test_timeline_hit_and_drop.py ........................        [ 71%]
+tests/edit/test_timeline_interaction_stopgaps.py .............           [ 74%]
+tests/edit/test_timeline_link_integrity.py .........                     [ 76%]
+tests/edit/test_timeline_linked_av_regressions.py ...............        [ 79%]
+tests/edit/test_timeline_marker.py ..................                    [ 83%]
+tests/edit/test_timeline_menu_shortcuts.py ......                        [ 85%]
+tests/edit/test_timeline_metal_effect_coverage.py ...................... [ 90%]
+............................................                             [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_28.xml -
+======================== 437 passed, 5 skipped in 9.23s ========================

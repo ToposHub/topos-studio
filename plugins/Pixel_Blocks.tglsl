@@ -1,0 +1,75 @@
+// --- Topos Plugin Metadata ---
+// @name Pixel Blocks
+// @i18n_name Pixel_Blocks
+// @author Topos Team
+// @version 1.0
+// @description Mosaic pixelation with per-block center sampling, linear color quantization and optional 4x4 ordered dither
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider block_px "Block Size" 8.0 1.0 64.0
+// @param slider color_levels "Color Levels" 8.0 2.0 32.0
+// @param separator
+// @param select dither_mode "Dither" 0 "None" "Ordered 4x4"
+// -----------------------------
+//
+// Pixel Blocks —— 像素块 / 色彩量化。
+//
+// 原理：两段式。1) 马赛克：把像素栅格离散成 block_px 见方的色块，
+// 每块只在其几何中心采样一次；2) 量化：把采样值按 color_levels 级
+// 阶梯化，可选 4x4 Bayer 有序抖动打散色带。复古像素画 / 拼贴感。
+//
+// 设计要点：
+// - 单次纹理采样（块中心），预览成本 low；无循环、无三角函数；
+// - 量化在 scene-linear 域进行（本插件的风格语义就是"数据化"的
+//   线性阶梯，非 SDR 效果）：q = (floor(c * L + d) + 0.5) / L 对任意
+//   实数 c 单调、无界——HDR 负值/超白照常量化外推，不 clamp 内容色；
+// - Bayer 抖动窗 (b+0.5)/16 - 0.5 ∈ [-0.5, 0.4375)，即一个量化级的
+//   内部相位，打散大面积色带而不改变平均亮度；
+// - 采样 UV 与数组下标都有下限/上限守护（块中心恒在块内，bayer
+//   下标 min 3.0 钳制）；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+// 4x4 Bayer 矩阵（整数标度 0..15；整数语义使用 int）
+const int PB_BAYER4[16] = int[16](
+    0,  8,  2, 10,
+   12,  4, 14,  6,
+    3, 11,  1,  9,
+   15,  7, 13,  5
+);
+
+vec3 process(vec3 color, vec2 uv) {
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 safe_size = max(tex_size, vec2(1.0));
+
+    // 马赛克离散：块 id → 块中心采样（分母下限守护）
+    float block = max(block_px, 1.0);
+    vec2 px = uv * tex_size;
+    vec2 bid = floor(px / block);
+    vec2 suv = (bid * block + 0.5 * block) / safe_size;
+    vec3 sampled = texture(u_input_tex, suv).rgb;
+
+    // 有序抖动：块内像素坐标 → Bayer 相位
+    float dith = 0.0;
+    if (dither_mode == 1) {
+        vec2 inner = px - bid * block;
+        int ix = int(min(inner.x, 3.0));
+        int iy = int(min(inner.y, 3.0));
+        dith = (float(PB_BAYER4[iy * 4 + ix]) + 0.5) / 16.0 - 0.5;
+    }
+
+    // 线性量化：阶梯中心对齐（+0.5），对 HDR 值单调无界外推
+    float levels = max(color_levels, 2.0);
+    vec3 quantized = (floor(sampled * levels + dith) + 0.5) / levels;
+
+    // Delta 输出：量化差值叠加到已调色画面
+    return color + (quantized - sampled);
+}

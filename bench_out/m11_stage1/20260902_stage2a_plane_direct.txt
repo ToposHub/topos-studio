@@ -1,0 +1,26 @@
+# 阶段 2a：编码平面免拷贝直通（M11-2a，2026-09-02）
+
+## 发现（单遍口径重新剖析，4K t16 qp55，sample）
+profile_enc_4k_qp55_singlepass.txt：tc_plane_pad_u16 占编码线程工作 ~29%
+（1017/3478）——enc_prepare_plane 无条件把每个输入平面整拷进 e->coded
+缓冲（4K 24MB/帧），几何已对齐（3840×2160 8 对齐 + 紧排）时拷贝产物
+与输入逐位相同，纯属浪费。次高项：quant_zz_avx2 1412 / forward_8x8 973 /
+输出自检（packet_scan+crc 串行 ~14%，后续议题）。
+
+## 实现
+- enc_shared 增 plane_src[4]/plane_direct[4]：p≠3 且 可见=coded 且紧排
+  → band/DCT 任务直读调用方输入（只读；mode2 alpha 原位预量化会写，
+  恒走拷贝路径）
+- 三个任务消费点（2× enc_band_task + 1× m7_dct_task——第三点初版漏改，
+  test_codec sized↔direct 等价性测试立即捕获，读空缓冲）
+
+## 基准（同窗）
+内核 4K qp55 t16：53.91 → 71.82 fps（+33%）
+产品路径（用户素材 4K hq t16）：23.1 → 24.9 fps（+8%；Python 侧剩余
+开销为值域校验扫描）
+累计（sized 基线 15.93 → 阶段1 → 3a → 2a）：15.93 → 19.79 → 23.1 → 24.9
+= +56%
+
+## 门禁
+release 全测 + golden×7 byte-exact（折叠值全部不变）+ ASan 全套 + TSan
+全套 ✓；sized↔direct qp 等价性 / 确定性测试通过

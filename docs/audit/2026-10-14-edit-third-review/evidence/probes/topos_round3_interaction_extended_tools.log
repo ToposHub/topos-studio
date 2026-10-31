@@ -1,0 +1,753 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 206 ms. Replace uses of missing font family "SF Mono" with one that exists to avoid this cost. 
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support propagateSizeHints()
+Mouse event "MouseRelease" not accepted by receiving widget
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support propagateSizeHints()
+Mouse event "MouseRelease" not accepted by receiving widget
+{
+  "linked_locked_trim_left_release": {
+    "before": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "trim_preview": false
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "during": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 110,
+          "duration": 90,
+          "source_start": 120,
+          "source_duration": 180,
+          "trim_preview": true
+        },
+        "a": {
+          "start": 110,
+          "duration": 90,
+          "source_start": 110,
+          "source_duration": 90,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "TRIMMING_LEFT",
+      "affected": [
+        "a"
+      ]
+    },
+    "after": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 110,
+          "duration": 90,
+          "source_start": 120,
+          "source_duration": 180,
+          "trim_preview": false
+        },
+        "a": {
+          "start": 110,
+          "duration": 90,
+          "source_start": 110,
+          "source_duration": 90,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": [
+        "a"
+      ]
+    },
+    "errors": [
+      {
+        "message": "Trim clip rejected: track 'A1' is locked",
+        "traceback": "Traceback (most recent call last):\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py\", line 8747, in _on_trim_left_finished\n    self._execute_command(macro)\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py\", line 5583, in _execute_command\n    new_timeline = self._command_stack.execute(command, self._timeline)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 4294, in execute\n    result = command.apply(timeline)\n             ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 11258, in apply\n    result = cmd.apply(current_timeline)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 1774, in apply\n    assert_track_editable(timeline, self.track_id, \"Trim clip\")\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 152, in assert_track_editable\n    raise ValueError(\nValueError: Trim clip rejected: track 'A1' is locked\n"
+      }
+    ]
+  },
+  "linked_locked_trim_left_esc_tool_late_release": {
+    "before": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "trim_preview": false
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "during": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 110,
+          "duration": 90,
+          "source_start": 120,
+          "source_duration": 180,
+          "trim_preview": true
+        },
+        "a": {
+          "start": 110,
+          "duration": 90,
+          "source_start": 110,
+          "source_duration": 90,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "TRIMMING_LEFT",
+      "affected": [
+        "a"
+      ]
+    },
+    "after": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "trim_preview": false
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "errors": []
+  },
+  "linked_locked_trim_right_release": {
+    "before": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "trim_preview": false
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "during": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 100,
+          "duration": 90,
+          "source_start": 100,
+          "source_duration": 180,
+          "trim_preview": true
+        },
+        "a": {
+          "start": 100,
+          "duration": 90,
+          "source_start": 100,
+          "source_duration": 90,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "TRIMMING_RIGHT",
+      "affected": [
+        "a"
+      ]
+    },
+    "after": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 100,
+          "duration": 90,
+          "source_start": 100,
+          "source_duration": 180,
+          "trim_preview": false
+        },
+        "a": {
+          "start": 100,
+          "duration": 90,
+          "source_start": 100,
+          "source_duration": 90,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": [
+        "a"
+      ]
+    },
+    "errors": [
+      {
+        "message": "Trim clip rejected: track 'A1' is locked",
+        "traceback": "Traceback (most recent call last):\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py\", line 8935, in _on_trim_right_finished\n    self._execute_command(macro)\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py\", line 5583, in _execute_command\n    new_timeline = self._command_stack.execute(command, self._timeline)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 4294, in execute\n    result = command.apply(timeline)\n             ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 11258, in apply\n    result = cmd.apply(current_timeline)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 1774, in apply\n    assert_track_editable(timeline, self.track_id, \"Trim clip\")\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 152, in assert_track_editable\n    raise ValueError(\nValueError: Trim clip rejected: track 'A1' is locked\n"
+      }
+    ]
+  },
+  "linked_locked_trim_right_esc_tool_late_release": {
+    "before": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "trim_preview": false
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "during": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 100,
+          "duration": 90,
+          "source_start": 100,
+          "source_duration": 180,
+          "trim_preview": true
+        },
+        "a": {
+          "start": 100,
+          "duration": 90,
+          "source_start": 100,
+          "source_duration": 90,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "TRIMMING_RIGHT",
+      "affected": [
+        "a"
+      ]
+    },
+    "after": {
+      "model": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1
+        }
+      },
+      "items": {
+        "c": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "trim_preview": false
+        },
+        "a": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "errors": []
+  },
+  "roll_speed_0.5": {
+    "during": {
+      "model": {
+        "l": {
+          "start": 0,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 50,
+          "speed": 0.5
+        },
+        "r": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 400,
+          "source_duration": 50,
+          "speed": 0.5
+        }
+      },
+      "items": {
+        "l": {
+          "start": 0,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 50,
+          "trim_preview": false
+        },
+        "r": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 400,
+          "source_duration": 50,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "expected_source": {
+      "l": [
+        100,
+        55
+      ],
+      "r": [
+        405,
+        45
+      ]
+    },
+    "after": {
+      "model": {
+        "l": {
+          "start": 0,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 50,
+          "speed": 0.5
+        },
+        "r": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 400,
+          "source_duration": 50,
+          "speed": 0.5
+        }
+      },
+      "items": {
+        "l": {
+          "start": 0,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 50,
+          "trim_preview": false
+        },
+        "r": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 400,
+          "source_duration": 50,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "errors": []
+  },
+  "roll_speed_2": {
+    "during": {
+      "model": {
+        "l": {
+          "start": 0,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "r": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 400,
+          "source_duration": 200,
+          "speed": 2
+        }
+      },
+      "items": {
+        "l": {
+          "start": 0,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "trim_preview": false
+        },
+        "r": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 400,
+          "source_duration": 200,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "expected_source": {
+      "l": [
+        100,
+        220
+      ],
+      "r": [
+        420,
+        180
+      ]
+    },
+    "after": {
+      "model": {
+        "l": {
+          "start": 0,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "speed": 2
+        },
+        "r": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 400,
+          "source_duration": 200,
+          "speed": 2
+        }
+      },
+      "items": {
+        "l": {
+          "start": 0,
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 200,
+          "trim_preview": false
+        },
+        "r": {
+          "start": 100,
+          "duration": 100,
+          "source_start": 400,
+          "source_duration": 200,
+          "trim_preview": false
+        }
+      },
+      "undo": 0,
+      "redo": 0,
+      "revision": 0,
+      "interaction": "IDLE",
+      "affected": []
+    },
+    "errors": []
+  },
+  "wheel_20plus20_0.1": {
+    "worst_px": 2.100191481883775,
+    "final": {
+      "ppf": 0.09999999999999999,
+      "drift_frames": 1.8189894035458565e-12,
+      "drift_pixels": 1.8189894035458563e-13,
+      "scroll": 800
+    }
+  },
+  "wheel_20plus20_0.2": {
+    "worst_px": 2.100191481883775,
+    "final": {
+      "ppf": 0.19999999999999998,
+      "drift_frames": 9.094947017729282e-13,
+      "drift_pixels": 1.8189894035458563e-13,
+      "scroll": 800
+    }
+  },
+  "wheel_20plus20_0.5": {
+    "worst_px": 2.1001914818858958,
+    "final": {
+      "ppf": 0.4999999999999998,
+      "drift_frames": 1.3642420526593924e-12,
+      "drift_pixels": 6.821210263296959e-13,
+      "scroll": 800
+    }
+  },
+  "wheel_20plus20_1": {
+    "worst_px": 2.1001914818858958,
+    "final": {
+      "ppf": 0.9999999999999996,
+      "drift_frames": 6.821210263296962e-13,
+      "drift_pixels": 6.821210263296959e-13,
+      "scroll": 800
+    }
+  },
+  "wheel_20plus20_3": {
+    "worst_px": 2.10019148188404,
+    "final": {
+      "ppf": 2.9999999999999996,
+      "drift_frames": 1.1368683772161603e-13,
+      "drift_pixels": 3.4106051316484804e-13,
+      "scroll": 800
+    }
+  },
+  "wheel_20plus20_10": {
+    "worst_px": 2.1001914818856307,
+    "final": {
+      "ppf": 9.999999999999996,
+      "drift_frames": 2.842170943040401e-14,
+      "drift_pixels": 2.8421709430403997e-13,
+      "scroll": 800
+    }
+  }
+}

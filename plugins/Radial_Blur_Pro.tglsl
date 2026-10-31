@@ -1,0 +1,88 @@
+// --- Topos Plugin Metadata ---
+// @name Radial Blur Pro
+// @i18n_name Radial_Blur_Pro
+// @author Topos Team
+// @version 1.0
+// @description Zoom/radial blur along center-to-pixel rays with compile-time sample-count presets and adjustable center
+// @input_space scene-linear
+// @output_space scene-linear
+// @preview_cost medium
+// @param select sample_quality "Sample Quality" 1 "8 Samples" "16 Samples" "24 Samples" "32 Samples"
+// @param slider strength "Blur Strength" 0.35 0.0 1.0
+// @param separator
+// @param slider center_x "Center X" 0.5 0.0 1.0
+// @param slider center_y "Center Y" 0.5 0.0 1.0
+// -----------------------------
+
+// Radial (zoom) blur. For each pixel we average N evenly spaced taps on the
+// ray from the adjustable blur center toward the pixel (fixed step pull/N),
+// producing the classic outward-radiating streaks.
+//
+// Design notes (see docs/plugins/2026-09-28/specs/Radial_Blur_Pro.md):
+// - Sample count is a select parameter dispatched to four compile-time
+//   constant loop bounds (8/16/24/32) via the RADIAL_ACCUMULATE macro below,
+//   so every for-loop the compiler sees has a literal bound and stays
+//   unrollable; the runtime cost is a single int branch.
+// - All taps lie on the center-to-pixel segment (never outside the frame),
+//   and sample UVs are additionally clamped to the half-texel border as
+//   explicit clamp-to-edge insurance; the texel denominator is guarded.
+// - No aspect correction on purpose: zoom streaks follow center->pixel rays,
+//   and the affine UV<->pixel axis mapping takes rays to rays, so streak
+//   direction is aspect-safe; u_aspect_ratio fixes are only required for
+//   isotropic (circular) kernels.
+// - Averaging runs in scene-linear space and no clamp(0,1) ever touches
+//   image content: HDR values (negative or >> 1) only pass through the
+//   linear average. Display-range handling belongs to the soft-clip stage.
+// - Output follows the delta convention (HighPass_Retouch pattern): the blur
+//   is computed on u_input_tex and its delta is applied to the already-graded
+//   color, so upstream grading stacks correctly.
+
+// Accumulation body shared by the four quality branches. N expands to a
+// literal constant at every call site, keeping all loop bounds compile-time.
+#define RADIAL_ACCUMULATE(N)                                                  \
+    vec3 acc = vec3(0.0);                                                     \
+    for (int i = 0; i < N; i++) {                                             \
+        vec2 suv = origin - ray * (pull * float(i) / float(N));               \
+        acc += texture(u_input_tex, clamp(suv, min_uv, max_uv)).rgb;          \
+    }                                                                         \
+    return acc / float(N);
+
+// origin : pixel UV (sharp end of the sampling segment)
+// ray    : origin - blur center (direction from center toward the pixel)
+// pull   : normalized sampling span, 0..1 of the center-to-pixel distance
+// quality: select index dispatched to a compile-time sample-count branch
+vec3 radial_zoom_blur(vec2 origin, vec2 ray, float pull, int quality,
+                      vec2 min_uv, vec2 max_uv) {
+    if (quality == 0) { RADIAL_ACCUMULATE(8) }
+    else if (quality == 1) { RADIAL_ACCUMULATE(16) }
+    else if (quality == 2) { RADIAL_ACCUMULATE(24) }
+    else { RADIAL_ACCUMULATE(32) }
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // Early exit: zero effect request is a pure passthrough
+    if (strength < 0.001) return color;
+
+    // Sharp reference for the delta output below
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    // Resolution-aware half-texel border for edge-safe sampling; denominator
+    // guarded against degenerate zero-size textures
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 half_texel = 0.5 / max(tex_size, vec2(1.0, 1.0));
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+
+    // Ease-in curve so the low end of the slider stays fine-grained;
+    // default 0.35 maps to a ~21 percent sampling span (visible, not wild)
+    float pull = pow(strength, 1.5);
+
+    // Ray from the adjustable blur center to this pixel (UV space)
+    vec2 ray = uv - vec2(center_x, center_y);
+
+    vec3 blurred = radial_zoom_blur(uv, ray, pull, sample_quality, min_uv, max_uv);
+
+    // Delta output: apply the blur delta to the graded color; content values
+    // are not clamped, display-range handling belongs to the soft-clip stage
+    return color + (blurred - original_color);
+}

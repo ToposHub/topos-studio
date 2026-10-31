@@ -1,0 +1,54 @@
+{
+  "ok": true,
+  "result": {
+    "actual_path": "/tmp/topos-round7-gui/Round7Audit20261022.topos",
+    "exists": true,
+    "open_return": true,
+    "assets": 9,
+    "timelines": 2,
+    "active": "4ae47de0-843c-4ab2-98fc-caa87534093f",
+    "duration": 200,
+    "keyframes": {
+      "443cadfb-97bf-48db-bd5b-853ad187d917": {
+        "transform.translate_x": {
+          "base_value": 0.0,
+          "keyframes": {
+            "param_name": "",
+            "keyframes": [
+              {
+                "frame": 0,
+                "value": 0.0,
+                "interpolation": "linear",
+                "bezier_in": [
+                  0.2,
+                  0.0
+                ],
+                "bezier_out": [
+                  0.8,
+                  1.0
+                ]
+              },
+              {
+                "frame": 25,
+                "value": 0.0,
+                "interpolation": "linear",
+                "bezier_in": [
+                  0.2,
+                  0.0
+                ],
+                "bezier_out": [
+                  0.8,
+                  1.0
+                ]
+              }
+            ],
+            "min_val": -8192.0,
+            "max_val": 8192.0
+          },
+          "min_value": -8192.0,
+          "max_value": 8192.0
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "wheel": "lift",
+    "brightness": -0.25,
+    "gpu_cpu_max_u8_error": 1,
+    "mean_brightness_delta": -7.458854675292969
+  },
+  {
+    "wheel": "lift",
+    "brightness": 0.25,
+    "gpu_cpu_max_u8_error": 1,
+    "mean_brightness_delta": 9.700653076171875
+  },
+  {
+    "wheel": "gamma",
+    "brightness": -0.25,
+    "gpu_cpu_max_u8_error": 1,
+    "mean_brightness_delta": -19.53308868408203
+  },
+  {
+    "wheel": "gamma",
+    "brightness": 0.25,
+    "gpu_cpu_max_u8_error": 1,
+    "mean_brightness_delta": 20.59130859375
+  },
+  {
+    "wheel": "gain",
+    "brightness": -0.25,
+    "gpu_cpu_max_u8_error": 1,
+    "mean_brightness_delta": -20.830764770507812
+  },
+  {
+    "wheel": "gain",
+    "brightness": 0.25,
+    "gpu_cpu_max_u8_error": 1,
+    "mean_brightness_delta": 24.21551513671875
+  }
+]

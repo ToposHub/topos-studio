@@ -1,0 +1,29 @@
+{
+  "recipe_id": "P62",
+  "name": "高频细节保留",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "底子压平、高频保留：低频加模糊，高频原样加回",
+  "component": "C21 frequency_separation（暂存节点 lib1_frequency_separation）＋生产 blur/merge",
+  "dependencies": {
+    "component_id": "C21",
+    "component_slug": "frequency_separation",
+    "component_kind": "node",
+    "node_type": "lib1_frequency_separation",
+    "aux_node_types": [
+      "blur",
+      "merge"
+    ]
+  },
+  "params": {
+    "radius": 8.0,
+    "filter": "Gaussian",
+    "mode": "LowHigh"
+  },
+  "notes": "C21 frequency_separation 暂存组件＋生产 blur/merge 组成高频保留宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；重组经 merge(add) 为暂存级近似，精确重建以 C21 Reconstruct 模式与 L04/L05 接缝为准。"
+}

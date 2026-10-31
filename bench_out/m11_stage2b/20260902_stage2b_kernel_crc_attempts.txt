@@ -1,0 +1,29 @@
+# 阶段 2b 内核/CRC 两项尝试（2026-09-02，i9-9900K，同窗 A/B）——均按门禁回退
+
+## 2b-A：融合 采样加载+前向变换+量化 AVX2 内核（已实现完整、差分+golden 全绿后回退）
+实现：tc_fwd_quant_zz_avx2（SIMD 行加载 + pass1/pass2 + 自然序量化融合 +
+zigzag 尾排 memset+散射/gather 双路径）、tc_quant_block_nat_zz_avx2、
+quant ctx 自然序 fd_nat_* 表、dispatch 解析 + compose 回退、fill_color_band_tokens
+接入、test_stage9 差分（三档密度 × bd 8/10/12 × qp 全域）。
+结果（4K 422 qp55 t16 用户素材，修正 pf=0 口径）：
+  baseline fill 84.2/85.0 ms CPU —— fused 85.9 ms CPU（+1.5%，噪声级）
+  FPS：baseline 28.31/29.19 vs fused 27.82/28.20；强制全 scatter 27.89 / 全 gather 28.20
+  → 尾排路径选择影响 <1%；整体持平偏差。结论：整数精确 8×8 + 量化在
+  broadcast+mullo 形态下已近该分解的向量化上限（与 M10-2C SoA4 结论一致）；
+  gather 消除只在稀疏块（低噪内容）有理论空间，本机噪点素材无收益。
+门禁：wall <3% → 回退（git checkout native/）。
+
+## 2b-B：编码自检逐 slice CRC 并行化（两种派发形态实测净负，回退）
+串行自检 check_wall = 2.24 ms/帧（纯 C 15.1ms 口径的 ~15%）。
+尝试 1：逐 slice 微任务（51 jobs/16 线程）→ 39.4/42.2 fps vs 串行 44.0（净亏）
+尝试 2：≤8 连续区块派发 → 43.55/43.65 fps vs 串行 46.33（仍净亏 ~1.5ms）
+根因：band 大规模并行 join 后线程池深度休眠，自检阶段的二次唤醒风暴成本
+超过 2.24ms 串行 CRC 本体。check_wall 并行版可降到 0.41ms，但总墙钟反升。
+剩余可行方向（未实施）：把 CRC 折进组装 memcpy 循环（热 L1 数据 ~1.1ms，
+省 ~1ms）——需重构 §11.5 校验时序，属正确性守卫变更，按项目规则需 ADR。
+
+## 附：基准方法论事故记录
+期间一次"崩溃"为基准脚本 pixel_format=1（444）误配 422 几何导致 chroma
+越界读（基线同样偶发崩）——修正后双侧 60 帧三连稳定。非编解码器缺陷；
+顺带发现 profile=3(422)+pixel_format=1(444) 组合未被 config 校验拒绝
+（tc_query_support 存在但 encode 路径未交叉校验，可作后续加固项）。

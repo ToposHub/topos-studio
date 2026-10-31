@@ -1,0 +1,319 @@
+{
+  "manifest": {
+    "schema": "bench_manifest.v1",
+    "topos_version": "0.1.0",
+    "dylib_commit_embedded": "9a8bfd99",
+    "git_head": "9a8bfd99",
+    "git_dirty": false,
+    "dylib_path": "/Users/testuser/Documents/vscode/topos_1/native/topos_codec/build/release/topos_codec.dylib",
+    "dylib_sha256": "5873087581d9adb853dce32efe2a93cf97c619295f9479d5a95a388a97dc35a9",
+    "abi_version": 2,
+    "slice_threads": 16,
+    "simd_avx2": true,
+    "simd_neon": false,
+    "cpu": "Genuine Intel(R) 0000",
+    "os": "darwin",
+    "python": "3.12.14",
+    "threads_effective": 16
+  },
+  "cases": [
+    {
+      "res": "2k",
+      "w": 1920,
+      "h": 1080,
+      "frames": 48,
+      "tier": "hq",
+      "encode": [
+        {
+          "scope": "core",
+          "ref": "prores_hq",
+          "topos_s_median": 0.8454762900000787,
+          "topos_ci95": [
+            0.841541829999187,
+            0.8611942079951405
+          ],
+          "ref_s_median": 0.9937423809969914,
+          "ref_ci95": [
+            0.9463199659949169,
+            1.0007023729995126
+          ],
+          "ratio_median": 0.8605897529889838,
+          "ratio_ci95": [
+            0.8508002739621895,
+            0.8892783204826805
+          ],
+          "interpretation": "topos faster"
+        },
+        {
+          "scope": "core",
+          "ref": "dnxhr_hqx",
+          "topos_s_median": 0.8454762900000787,
+          "topos_ci95": [
+            0.841541829999187,
+            0.8611942079951405
+          ],
+          "ref_s_median": 1.322116139002901,
+          "ref_ci95": [
+            1.2904352429977735,
+            1.3427999170016847
+          ],
+          "ratio_median": 0.6365112755025075,
+          "ratio_ci95": [
+            0.6296368351644887,
+            0.667367241144565
+          ],
+          "interpretation": "topos faster"
+        },
+        {
+          "scope": "e2e",
+          "ref": "prores_hq",
+          "topos_s_median": 0.4708764329989208,
+          "topos_ci95": [
+            0.4645075980006368,
+            0.4923379159954493
+          ],
+          "ref_s_median": 1.0129340849962318,
+          "ref_ci95": [
+            1.0054839579970576,
+            1.0312562500039348
+          ],
+          "ratio_median": 0.4648638445221956,
+          "ratio_ci95": [
+            0.45042888030871514,
+            0.48965268125828226
+          ],
+          "topos_file_bytes": 33788799,
+          "ref_file_bytes": 25577069,
+          "topos_probe": {
+            "width": 1920,
+            "height": 1080,
+            "nb_frames": "48",
+            "side_data_list": [
+              {}
+            ]
+          },
+          "ref_probe": {
+            "codec_name": "prores",
+            "profile": "HQ",
+            "width": 1920,
+            "height": 1080,
+            "pix_fmt": "yuv422p10le",
+            "nb_frames": "48"
+          },
+          "interpretation": "topos faster"
+        },
+        {
+          "scope": "e2e",
+          "ref": "dnxhr_hqx",
+          "topos_s_median": 0.4708764329989208,
+          "topos_ci95": [
+            0.4645075980006368,
+            0.4923379159954493
+          ],
+          "ref_s_median": 1.3357164170010947,
+          "ref_ci95": [
+            1.3097016810061177,
+            1.3466730949949124
+          ],
+          "ratio_median": 0.3546667189461041,
+          "ratio_ci95": [
+            0.3525272483032863,
+            0.3655957171976539
+          ],
+          "topos_file_bytes": 33788799,
+          "ref_file_bytes": 44041155,
+          "topos_probe": {
+            "width": 1920,
+            "height": 1080,
+            "nb_frames": "48",
+            "side_data_list": [
+              {}
+            ]
+          },
+          "ref_probe": {
+            "codec_name": "dnxhd",
+            "profile": "DNXHR HQX",
+            "width": 1920,
+            "height": 1080,
+            "pix_fmt": "yuv422p10le",
+            "nb_frames": "48"
+          },
+          "interpretation": "topos faster"
+        }
+      ],
+      "decode": [
+        {
+          "ref": "prores_hq",
+          "topos_s_median": 0.2813215770001989,
+          "ref_s_median": 0.34539248600049177,
+          "ratio_median": 0.7996040345136745,
+          "ratio_ci95": [
+            0.7907553976643285,
+            0.8419130750714782
+          ],
+          "interpretation": "topos faster"
+        },
+        {
+          "ref": "dnxhr_hqx",
+          "topos_s_median": 0.2813215770001989,
+          "ref_s_median": 0.36556732000462944,
+          "ratio_median": 0.7849823760956061,
+          "ratio_ci95": [
+            0.7344007910615566,
+            0.8441328122054435
+          ],
+          "interpretation": "topos faster"
+        }
+      ]
+    },
+    {
+      "res": "4k",
+      "w": 3840,
+      "h": 2160,
+      "frames": 48,
+      "tier": "hq",
+      "encode": [
+        {
+          "scope": "core",
+          "ref": "prores_hq",
+          "topos_s_median": 2.938111420000496,
+          "topos_ci95": [
+            2.8880161729975953,
+            2.947916980003356
+          ],
+          "ref_s_median": 4.250141967000673,
+          "ref_ci95": [
+            4.113245792002999,
+            4.3839328910034965
+          ],
+          "ratio_median": 0.6912972420245818,
+          "ratio_ci95": [
+            0.6724366118954362,
+            0.7021258439290198
+          ],
+          "interpretation": "topos faster"
+        },
+        {
+          "scope": "core",
+          "ref": "dnxhr_hqx",
+          "topos_s_median": 2.938111420000496,
+          "topos_ci95": [
+            2.8880161729975953,
+            2.947916980003356
+          ],
+          "ref_s_median": 5.369503474001249,
+          "ref_ci95": [
+            5.366340979999222,
+            5.553036085002532
+          ],
+          "ratio_median": 0.5471849369735248,
+          "ratio_ci95": [
+            0.5200787693055804,
+            0.5493346380691193
+          ],
+          "interpretation": "topos faster"
+        },
+        {
+          "scope": "e2e",
+          "ref": "prores_hq",
+          "topos_s_median": 1.5887301889961236,
+          "topos_ci95": [
+            1.560741743996914,
+            1.6375713009983883
+          ],
+          "ref_s_median": 4.25120529600099,
+          "ref_ci95": [
+            4.14123581199965,
+            4.263603289000457
+          ],
+          "ratio_median": 0.38363673577646007,
+          "ratio_ci95": [
+            0.36712923402336456,
+            0.3840815362027489
+          ],
+          "topos_file_bytes": 138090679,
+          "ref_file_bytes": 157149380,
+          "topos_probe": {
+            "width": 3840,
+            "height": 2160,
+            "nb_frames": "48",
+            "side_data_list": [
+              {}
+            ]
+          },
+          "ref_probe": {
+            "codec_name": "prores",
+            "profile": "HQ",
+            "width": 3840,
+            "height": 2160,
+            "pix_fmt": "yuv422p10le",
+            "nb_frames": "48"
+          },
+          "interpretation": "topos faster"
+        },
+        {
+          "scope": "e2e",
+          "ref": "dnxhr_hqx",
+          "topos_s_median": 1.5887301889961236,
+          "topos_ci95": [
+            1.560741743996914,
+            1.6375713009983883
+          ],
+          "ref_s_median": 5.309168931002205,
+          "ref_ci95": [
+            5.277101346000563,
+            5.846759525004018
+          ],
+          "ratio_median": 0.295757394384661,
+          "ratio_ci95": [
+            0.28008186312353306,
+            0.2992427269961103
+          ],
+          "topos_file_bytes": 138090679,
+          "ref_file_bytes": 174785475,
+          "topos_probe": {
+            "width": 3840,
+            "height": 2160,
+            "nb_frames": "48",
+            "side_data_list": [
+              {}
+            ]
+          },
+          "ref_probe": {
+            "codec_name": "dnxhd",
+            "profile": "DNXHR HQX",
+            "width": 3840,
+            "height": 2160,
+            "pix_fmt": "yuv422p10le",
+            "nb_frames": "48"
+          },
+          "interpretation": "topos faster"
+        }
+      ],
+      "decode": [
+        {
+          "ref": "prores_hq",
+          "topos_s_median": 0.6714361920021474,
+          "ref_s_median": 1.0841400759964017,
+          "ratio_median": 0.6221423810299453,
+          "ratio_ci95": [
+            0.5932309265033646,
+            0.6642382796707071
+          ],
+          "interpretation": "topos faster"
+        },
+        {
+          "ref": "dnxhr_hqx",
+          "topos_s_median": 0.6714361920021474,
+          "ref_s_median": 1.0599143919971539,
+          "ratio_median": 0.626676869482327,
+          "ratio_ci95": [
+            0.5567667420016209,
+            0.6794202856751598
+          ],
+          "interpretation": "topos faster"
+        }
+      ]
+    }
+  ]
+}

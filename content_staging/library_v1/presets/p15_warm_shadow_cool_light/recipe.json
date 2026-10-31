@@ -1,0 +1,39 @@
+{
+  "recipe_id": "P15",
+  "name": "暖影冷光",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合夜景人像/霓虹环境；暖影托肤色、冷光写环境",
+  "component": "Three_Way_Tint（生产插件 plugins/Three_Way_Tint.tglsl）",
+  "dependencies": {
+    "plugin_id": "Three_Way_Tint",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "shadow_color": [
+      0.45,
+      0.36,
+      0.28
+    ],
+    "shadow_strength": 0.3,
+    "midtone_color": [
+      0.5,
+      0.48,
+      0.45
+    ],
+    "midtone_strength": 0.05,
+    "highlight_color": [
+      0.42,
+      0.48,
+      0.6
+    ],
+    "highlight_strength": 0.28
+  },
+  "notes": "与 P08 反向的影/光分区；参数已对真实插件 schema 校验。"
+}

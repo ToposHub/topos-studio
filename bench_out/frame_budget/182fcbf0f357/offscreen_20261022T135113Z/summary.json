@@ -1,0 +1,847 @@
+{
+  "schema": "bench_frame_budget.v1",
+  "env": {
+    "schema": "bench_frame_budget.env.v1",
+    "recorded_at_utc": "2026-10-22T13:51:12.169639+00:00",
+    "python": "3.12.13",
+    "numpy": "1.26.4",
+    "moderngl": "5.12.0",
+    "platform": "darwin",
+    "av": "17.0.1",
+    "ffmpeg": {
+      "libavutil": "60.8.100",
+      "libavcodec": "62.11.100",
+      "libavformat": "62.3.100",
+      "libavdevice": "62.1.100",
+      "libavfilter": "11.4.100",
+      "libswscale": "9.1.100",
+      "libswresample": "6.1.100"
+    },
+    "pyqt6": "6.10.2",
+    "qt": "6.10.0",
+    "git": {
+      "head": "182fcbf0f3574e3d95e3cba221a8e672dd657a97",
+      "branch": "perf/a-playback",
+      "dirty_files": 7
+    },
+    "bench_manifest": {
+      "manifest": "light_no_topos",
+      "reason": "build_manifest unavailable: ManifestMismatch: dylib commit e77f85158 != 工作树目标 182fcbf0f——请重建 native 库后再测量（P0-04）"
+    }
+  },
+  "mode": "offscreen",
+  "materials": [
+    "4K_H264.mov",
+    "4K_H265.mov",
+    "4K_prores422HQ.mov",
+    "4K_DNxHR HQX 10bit.mov"
+  ],
+  "failures": [],
+  "results": [
+    {
+      "material": "4K_H264.mov",
+      "mode": "offscreen",
+      "frames_requested": 120,
+      "frames_measured": 120,
+      "warmup": 30,
+      "wall_s": 1.02,
+      "route": {
+        "path": "4K_H264.mov",
+        "zero_copy_capability": {
+          "available": true,
+          "reason": ""
+        },
+        "decode_route": "macos_vt_zero_copy",
+        "vt_fallback_reason": "",
+        "gl": {
+          "GL_RENDERER": "AMD Radeon RX 6900 XT OpenGL Engine",
+          "GL_VERSION": "4.1 ATI-6.1.13",
+          "GL_VENDOR": "ATI Technologies Inc."
+        },
+        "gpu_timer_unsupported": false,
+        "zero_copy_open": true
+      },
+      "r16ui": {
+        "r16ui_self_test_passed": false,
+        "r16ui_disabled_reason": ""
+      },
+      "telemetry_summary": {
+        "frames": 120,
+        "window": 120,
+        "total_ms_mean": 6.474,
+        "total_ms_p50": 6.017,
+        "total_ms_p95": 8.44,
+        "total_ms_max": 24.895,
+        "decode_ms_mean": 5.706,
+        "decode_ms_p50": 5.273,
+        "decode_ms_p95": 7.613,
+        "composite_ms_mean": 0.0,
+        "composite_ms_p50": 0.0,
+        "composite_ms_p95": 0.0,
+        "upload_ms_mean": 0.0,
+        "upload_ms_p50": 0.0,
+        "upload_ms_p95": 0.0,
+        "present_ms_mean": 0.0,
+        "present_ms_p50": 0.0,
+        "present_ms_p95": 0.0,
+        "effective_fps": 154.45,
+        "master_requests": 0,
+        "realtime_master_requests": 0,
+        "cpu_qimage_frames": 0,
+        "wrong_source_frame": 0,
+        "stale_generation": 0,
+        "ring_hit_rate": 0.0,
+        "gpu_composite_frames": 0,
+        "miss_count": 0,
+        "source_kinds": {
+          "disk_proxy": 1.0
+        },
+        "session_total_frames": 120,
+        "wall_elapsed_s": 0.778,
+        "coverage": {
+          "decode": {
+            "samples": 120,
+            "coverage": 1.0
+          },
+          "import_upload": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "composite": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "present": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "total": {
+            "samples": 120,
+            "coverage": 1.0
+          }
+        },
+        "enrich_misses": 0,
+        "present_outcome_counts": {}
+      },
+      "trace_summary": {
+        "page": "bench_frame_budget/offscreen",
+        "total_frames": 150,
+        "gpu_frames": 150,
+        "cpu_fallback_frames": 0,
+        "cpu_to_ndarray_frames": 0,
+        "qimage_upload_frames": 0,
+        "sync_seek_frames": 0,
+        "stale_frame_emitted": 0,
+        "texture_slot_reuse_without_ack": 0,
+        "fallback_frames": 0,
+        "fallback_reasons": {},
+        "decode_path_counts": {
+          "macos_vt_iosurface_zero_copy": 150
+        },
+        "render_path_counts": {
+          "gpu_direct": 150
+        },
+        "decode_avg_ms": 0.0,
+        "render_avg_ms": 0.0,
+        "total_avg_ms": 0.0,
+        "ui_thread_sync_decode_frames": 0,
+        "gl_tex_image_upload_frames": 0,
+        "decode_saturation": {
+          "budget_ms": 33.3,
+          "buckets": {}
+        },
+        "transition_frames": {
+          "transition": {
+            "frames": 0
+          },
+          "non_transition": {
+            "frames": 150
+          }
+        },
+        "gpu_time": {
+          "measured_frames": 0,
+          "unavailable_frames": 150
+        },
+        "pixel_copy_bytes": {
+          "cpu_upload": 0,
+          "cpu_download": 0,
+          "surface_map": 0,
+          "texture_write": 0,
+          "cross_device": 0
+        },
+        "deadline": {
+          "frames_with_deadline": 120,
+          "miss_frames": 0,
+          "miss_by_segment": {}
+        },
+        "present_status_counts": {},
+        "readback_kind_counts": {},
+        "annotate": {
+          "merged": 120,
+          "missed": 0
+        },
+        "import_upload_coverage": {
+          "measured_frames": 0,
+          "not_applicable_frames": 120,
+          "unavailable_frames": 0,
+          "unset_frames": 30
+        },
+        "gc": {
+          "pause_count": 7,
+          "pause_ms_total": 1.927,
+          "pause_ms_max": 0.952,
+          "deadline_miss_frames_overlapping_gc": 0
+        }
+      },
+      "pixel_copies": {
+        "cpu_upload": {
+          "bytes": 0,
+          "events": 0
+        },
+        "cpu_download": {
+          "bytes": 0,
+          "events": 0
+        },
+        "surface_map": {
+          "bytes": 0,
+          "events": 0
+        },
+        "texture_write": {
+          "bytes": 0,
+          "events": 0
+        },
+        "cross_device": {
+          "bytes": 0,
+          "events": 0
+        }
+      },
+      "gc": {
+        "collections": 7,
+        "pause_ms_total": 1.927,
+        "pause_ms_max": 0.952,
+        "by_generation": {
+          "1": {
+            "collections": 1,
+            "pause_ms_total": 0.952,
+            "pause_ms_max": 0.952
+          },
+          "0": {
+            "collections": 6,
+            "pause_ms_total": 0.975,
+            "pause_ms_max": 0.225
+          }
+        }
+      },
+      "errors": [],
+      "ok": true,
+      "zero_copy_import_ms_p50": 0.644,
+      "zero_copy_import_ms_p95": 1.12,
+      "readback_guard": {
+        "cpu_download_bytes": 0,
+        "pass": true
+      }
+    },
+    {
+      "material": "4K_H265.mov",
+      "mode": "offscreen",
+      "frames_requested": 120,
+      "frames_measured": 120,
+      "warmup": 30,
+      "wall_s": 1.462,
+      "route": {
+        "path": "4K_H265.mov",
+        "zero_copy_capability": {
+          "available": true,
+          "reason": ""
+        },
+        "decode_route": "macos_vt_zero_copy",
+        "vt_fallback_reason": "",
+        "gl": {
+          "GL_RENDERER": "AMD Radeon RX 6900 XT OpenGL Engine",
+          "GL_VERSION": "4.1 ATI-6.1.13",
+          "GL_VENDOR": "ATI Technologies Inc."
+        },
+        "gpu_timer_unsupported": false,
+        "zero_copy_open": true
+      },
+      "r16ui": {
+        "r16ui_self_test_passed": false,
+        "r16ui_disabled_reason": ""
+      },
+      "telemetry_summary": {
+        "frames": 120,
+        "window": 120,
+        "total_ms_mean": 9.347,
+        "total_ms_p50": 7.134,
+        "total_ms_p95": 29.531,
+        "total_ms_max": 34.174,
+        "decode_ms_mean": 8.699,
+        "decode_ms_p50": 6.584,
+        "decode_ms_p95": 28.876,
+        "composite_ms_mean": 0.0,
+        "composite_ms_p50": 0.0,
+        "composite_ms_p95": 0.0,
+        "upload_ms_mean": 0.0,
+        "upload_ms_p50": 0.0,
+        "upload_ms_p95": 0.0,
+        "present_ms_mean": 0.0,
+        "present_ms_p50": 0.0,
+        "present_ms_p95": 0.0,
+        "effective_fps": 106.99,
+        "master_requests": 0,
+        "realtime_master_requests": 0,
+        "cpu_qimage_frames": 0,
+        "wrong_source_frame": 0,
+        "stale_generation": 0,
+        "ring_hit_rate": 0.0,
+        "gpu_composite_frames": 0,
+        "miss_count": 0,
+        "source_kinds": {
+          "disk_proxy": 1.0
+        },
+        "session_total_frames": 120,
+        "wall_elapsed_s": 1.103,
+        "coverage": {
+          "decode": {
+            "samples": 120,
+            "coverage": 1.0
+          },
+          "import_upload": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "composite": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "present": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "total": {
+            "samples": 120,
+            "coverage": 1.0
+          }
+        },
+        "enrich_misses": 0,
+        "present_outcome_counts": {}
+      },
+      "trace_summary": {
+        "page": "bench_frame_budget/offscreen",
+        "total_frames": 150,
+        "gpu_frames": 150,
+        "cpu_fallback_frames": 0,
+        "cpu_to_ndarray_frames": 0,
+        "qimage_upload_frames": 0,
+        "sync_seek_frames": 0,
+        "stale_frame_emitted": 0,
+        "texture_slot_reuse_without_ack": 0,
+        "fallback_frames": 0,
+        "fallback_reasons": {},
+        "decode_path_counts": {
+          "macos_vt_iosurface_zero_copy": 150
+        },
+        "render_path_counts": {
+          "gpu_direct": 150
+        },
+        "decode_avg_ms": 0.0,
+        "render_avg_ms": 0.0,
+        "total_avg_ms": 0.0,
+        "ui_thread_sync_decode_frames": 0,
+        "gl_tex_image_upload_frames": 0,
+        "decode_saturation": {
+          "budget_ms": 33.3,
+          "buckets": {}
+        },
+        "transition_frames": {
+          "transition": {
+            "frames": 0
+          },
+          "non_transition": {
+            "frames": 150
+          }
+        },
+        "gpu_time": {
+          "measured_frames": 0,
+          "unavailable_frames": 150
+        },
+        "pixel_copy_bytes": {
+          "cpu_upload": 0,
+          "cpu_download": 0,
+          "surface_map": 0,
+          "texture_write": 0,
+          "cross_device": 0
+        },
+        "deadline": {
+          "frames_with_deadline": 120,
+          "miss_frames": 0,
+          "miss_by_segment": {}
+        },
+        "present_status_counts": {},
+        "readback_kind_counts": {},
+        "annotate": {
+          "merged": 120,
+          "missed": 0
+        },
+        "import_upload_coverage": {
+          "measured_frames": 0,
+          "not_applicable_frames": 120,
+          "unavailable_frames": 0,
+          "unset_frames": 30
+        },
+        "gc": {
+          "pause_count": 7,
+          "pause_ms_total": 1.814,
+          "pause_ms_max": 0.576,
+          "deadline_miss_frames_overlapping_gc": 0
+        }
+      },
+      "pixel_copies": {
+        "cpu_upload": {
+          "bytes": 0,
+          "events": 0
+        },
+        "cpu_download": {
+          "bytes": 0,
+          "events": 0
+        },
+        "surface_map": {
+          "bytes": 0,
+          "events": 0
+        },
+        "texture_write": {
+          "bytes": 0,
+          "events": 0
+        },
+        "cross_device": {
+          "bytes": 0,
+          "events": 0
+        }
+      },
+      "gc": {
+        "collections": 7,
+        "pause_ms_total": 1.814,
+        "pause_ms_max": 0.576,
+        "by_generation": {
+          "0": {
+            "collections": 6,
+            "pause_ms_total": 1.238,
+            "pause_ms_max": 0.397
+          },
+          "1": {
+            "collections": 1,
+            "pause_ms_total": 0.576,
+            "pause_ms_max": 0.576
+          }
+        }
+      },
+      "errors": [],
+      "ok": true,
+      "zero_copy_import_ms_p50": 0.619,
+      "zero_copy_import_ms_p95": 0.946,
+      "readback_guard": {
+        "cpu_download_bytes": 0,
+        "pass": true
+      }
+    },
+    {
+      "material": "4K_prores422HQ.mov",
+      "mode": "offscreen",
+      "frames_requested": 120,
+      "frames_measured": 120,
+      "warmup": 30,
+      "wall_s": 2.607,
+      "route": {
+        "path": "4K_prores422HQ.mov",
+        "zero_copy_capability": {
+          "available": true,
+          "reason": ""
+        },
+        "decode_route": "macos_vt_zero_copy",
+        "vt_fallback_reason": "",
+        "gl": {
+          "GL_RENDERER": "AMD Radeon RX 6900 XT OpenGL Engine",
+          "GL_VERSION": "4.1 ATI-6.1.13",
+          "GL_VENDOR": "ATI Technologies Inc."
+        },
+        "gpu_timer_unsupported": false,
+        "zero_copy_open": true
+      },
+      "r16ui": {
+        "r16ui_self_test_passed": false,
+        "r16ui_disabled_reason": ""
+      },
+      "telemetry_summary": {
+        "frames": 120,
+        "window": 120,
+        "total_ms_mean": 17.409,
+        "total_ms_p50": 16.154,
+        "total_ms_p95": 20.331,
+        "total_ms_max": 155.136,
+        "decode_ms_mean": 16.604,
+        "decode_ms_p50": 15.209,
+        "decode_ms_p95": 19.66,
+        "composite_ms_mean": 0.0,
+        "composite_ms_p50": 0.0,
+        "composite_ms_p95": 0.0,
+        "upload_ms_mean": 0.0,
+        "upload_ms_p50": 0.0,
+        "upload_ms_p95": 0.0,
+        "present_ms_mean": 0.0,
+        "present_ms_p50": 0.0,
+        "present_ms_p95": 0.0,
+        "effective_fps": 57.44,
+        "master_requests": 0,
+        "realtime_master_requests": 0,
+        "cpu_qimage_frames": 0,
+        "wrong_source_frame": 0,
+        "stale_generation": 0,
+        "ring_hit_rate": 0.0,
+        "gpu_composite_frames": 0,
+        "miss_count": 0,
+        "source_kinds": {
+          "disk_proxy": 1.0
+        },
+        "session_total_frames": 120,
+        "wall_elapsed_s": 2.083,
+        "coverage": {
+          "decode": {
+            "samples": 120,
+            "coverage": 1.0
+          },
+          "import_upload": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "composite": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "present": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "total": {
+            "samples": 120,
+            "coverage": 1.0
+          }
+        },
+        "enrich_misses": 0,
+        "present_outcome_counts": {}
+      },
+      "trace_summary": {
+        "page": "bench_frame_budget/offscreen",
+        "total_frames": 150,
+        "gpu_frames": 150,
+        "cpu_fallback_frames": 0,
+        "cpu_to_ndarray_frames": 0,
+        "qimage_upload_frames": 0,
+        "sync_seek_frames": 0,
+        "stale_frame_emitted": 0,
+        "texture_slot_reuse_without_ack": 0,
+        "fallback_frames": 0,
+        "fallback_reasons": {},
+        "decode_path_counts": {
+          "macos_vt_iosurface_zero_copy": 150
+        },
+        "render_path_counts": {
+          "gpu_direct": 150
+        },
+        "decode_avg_ms": 0.0,
+        "render_avg_ms": 0.0,
+        "total_avg_ms": 0.0,
+        "ui_thread_sync_decode_frames": 0,
+        "gl_tex_image_upload_frames": 0,
+        "decode_saturation": {
+          "budget_ms": 33.3,
+          "buckets": {}
+        },
+        "transition_frames": {
+          "transition": {
+            "frames": 0
+          },
+          "non_transition": {
+            "frames": 150
+          }
+        },
+        "gpu_time": {
+          "measured_frames": 0,
+          "unavailable_frames": 150
+        },
+        "pixel_copy_bytes": {
+          "cpu_upload": 0,
+          "cpu_download": 0,
+          "surface_map": 0,
+          "texture_write": 0,
+          "cross_device": 0
+        },
+        "deadline": {
+          "frames_with_deadline": 120,
+          "miss_frames": 0,
+          "miss_by_segment": {}
+        },
+        "present_status_counts": {},
+        "readback_kind_counts": {},
+        "annotate": {
+          "merged": 120,
+          "missed": 0
+        },
+        "import_upload_coverage": {
+          "measured_frames": 0,
+          "not_applicable_frames": 120,
+          "unavailable_frames": 0,
+          "unset_frames": 30
+        },
+        "gc": {
+          "pause_count": 6,
+          "pause_ms_total": 1.197,
+          "pause_ms_max": 0.231,
+          "deadline_miss_frames_overlapping_gc": 0
+        }
+      },
+      "pixel_copies": {
+        "cpu_upload": {
+          "bytes": 0,
+          "events": 0
+        },
+        "cpu_download": {
+          "bytes": 0,
+          "events": 0
+        },
+        "surface_map": {
+          "bytes": 0,
+          "events": 0
+        },
+        "texture_write": {
+          "bytes": 0,
+          "events": 0
+        },
+        "cross_device": {
+          "bytes": 0,
+          "events": 0
+        }
+      },
+      "gc": {
+        "collections": 6,
+        "pause_ms_total": 1.197,
+        "pause_ms_max": 0.231,
+        "by_generation": {
+          "0": {
+            "collections": 6,
+            "pause_ms_total": 1.198,
+            "pause_ms_max": 0.231
+          }
+        }
+      },
+      "errors": [],
+      "ok": true,
+      "zero_copy_import_ms_p50": 0.676,
+      "zero_copy_import_ms_p95": 1.267,
+      "readback_guard": {
+        "cpu_download_bytes": 0,
+        "pass": true
+      }
+    },
+    {
+      "material": "4K_DNxHR HQX 10bit.mov",
+      "mode": "offscreen",
+      "frames_requested": 120,
+      "frames_measured": 120,
+      "warmup": 30,
+      "wall_s": 2.208,
+      "route": {
+        "path": "4K_DNxHR HQX 10bit.mov",
+        "zero_copy_capability": {
+          "available": true,
+          "reason": ""
+        },
+        "vt_fallback_reason": "unsupported_codec: dnxhd",
+        "decode_route": "ffmpeg_planar",
+        "gl": {
+          "GL_RENDERER": "AMD Radeon RX 6900 XT OpenGL Engine",
+          "GL_VERSION": "4.1 ATI-6.1.13",
+          "GL_VENDOR": "ATI Technologies Inc."
+        },
+        "gpu_timer_unsupported": false,
+        "zero_copy_probe_fallback": "unsupported_codec: dnxhd"
+      },
+      "r16ui": {
+        "r16ui_self_test_passed": true,
+        "r16ui_disabled_reason": ""
+      },
+      "telemetry_summary": {
+        "frames": 120,
+        "window": 120,
+        "total_ms_mean": 11.136,
+        "total_ms_p50": 10.918,
+        "total_ms_p95": 12.737,
+        "total_ms_max": 29.545,
+        "decode_ms_mean": 6.409,
+        "decode_ms_p50": 6.384,
+        "decode_ms_p95": 7.793,
+        "composite_ms_mean": 0.0,
+        "composite_ms_p50": 0.0,
+        "composite_ms_p95": 0.0,
+        "upload_ms_mean": 4.727,
+        "upload_ms_p50": 4.431,
+        "upload_ms_p95": 5.341,
+        "present_ms_mean": 0.0,
+        "present_ms_p50": 0.0,
+        "present_ms_p95": 0.0,
+        "effective_fps": 89.8,
+        "master_requests": 0,
+        "realtime_master_requests": 0,
+        "cpu_qimage_frames": 0,
+        "wrong_source_frame": 0,
+        "stale_generation": 0,
+        "ring_hit_rate": 0.0,
+        "gpu_composite_frames": 0,
+        "miss_count": 0,
+        "source_kinds": {
+          "disk_proxy": 1.0
+        },
+        "session_total_frames": 120,
+        "wall_elapsed_s": 1.68,
+        "coverage": {
+          "decode": {
+            "samples": 120,
+            "coverage": 1.0
+          },
+          "import_upload": {
+            "samples": 120,
+            "coverage": 1.0
+          },
+          "composite": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "present": {
+            "samples": 0,
+            "coverage": 0.0
+          },
+          "total": {
+            "samples": 120,
+            "coverage": 1.0
+          }
+        },
+        "enrich_misses": 0,
+        "present_outcome_counts": {}
+      },
+      "trace_summary": {
+        "page": "bench_frame_budget/offscreen",
+        "total_frames": 150,
+        "gpu_frames": 0,
+        "cpu_fallback_frames": 150,
+        "cpu_to_ndarray_frames": 0,
+        "qimage_upload_frames": 0,
+        "sync_seek_frames": 0,
+        "stale_frame_emitted": 0,
+        "texture_slot_reuse_without_ack": 0,
+        "fallback_frames": 150,
+        "fallback_reasons": {},
+        "decode_path_counts": {
+          "ffmpeg_planar": 150
+        },
+        "render_path_counts": {
+          "gpu_planar_upload": 150
+        },
+        "decode_avg_ms": 0.0,
+        "render_avg_ms": 0.0,
+        "total_avg_ms": 0.0,
+        "ui_thread_sync_decode_frames": 0,
+        "gl_tex_image_upload_frames": 0,
+        "decode_saturation": {
+          "budget_ms": 33.3,
+          "buckets": {}
+        },
+        "transition_frames": {
+          "transition": {
+            "frames": 0
+          },
+          "non_transition": {
+            "frames": 150
+          }
+        },
+        "gpu_time": {
+          "measured_frames": 148,
+          "unavailable_frames": 2,
+          "gpu_submit_ms_p50": 0.157,
+          "gpu_submit_ms_p95": 0.195,
+          "gpu_submit_ms_max": 0.221
+        },
+        "pixel_copy_bytes": {
+          "cpu_upload": 3981312000,
+          "cpu_download": 0,
+          "surface_map": 0,
+          "texture_write": 3981312000,
+          "cross_device": 0
+        },
+        "deadline": {
+          "frames_with_deadline": 120,
+          "miss_frames": 2,
+          "miss_by_segment": {
+            "import_upload": 2
+          }
+        },
+        "present_status_counts": {},
+        "readback_kind_counts": {},
+        "annotate": {
+          "merged": 268,
+          "missed": 0
+        },
+        "import_upload_coverage": {
+          "measured_frames": 120,
+          "not_applicable_frames": 0,
+          "unavailable_frames": 0,
+          "unset_frames": 30
+        },
+        "gc": {
+          "pause_count": 3,
+          "pause_ms_total": 0.577,
+          "pause_ms_max": 0.374,
+          "deadline_miss_frames_overlapping_gc": 0
+        }
+      },
+      "pixel_copies": {
+        "cpu_upload": {
+          "bytes": 4976640000,
+          "events": 150
+        },
+        "cpu_download": {
+          "bytes": 0,
+          "events": 0
+        },
+        "surface_map": {
+          "bytes": 0,
+          "events": 0
+        },
+        "texture_write": {
+          "bytes": 4976640000,
+          "events": 150
+        },
+        "cross_device": {
+          "bytes": 0,
+          "events": 0
+        }
+      },
+      "gc": {
+        "collections": 3,
+        "pause_ms_total": 0.577,
+        "pause_ms_max": 0.374,
+        "by_generation": {
+          "0": {
+            "collections": 3,
+            "pause_ms_total": 0.577,
+            "pause_ms_max": 0.374
+          }
+        }
+      },
+      "errors": [],
+      "ok": true,
+      "readback_guard": {
+        "cpu_download_bytes": 0,
+        "pass": true
+      }
+    }
+  ]
+}

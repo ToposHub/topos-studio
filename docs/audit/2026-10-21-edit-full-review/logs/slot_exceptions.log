@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_panel.py", line 1821, in _on_marker_toggled
+    self._show_marker_panel()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_panel.py", line 1888, in _show_marker_panel
+    self._refresh_marker_list()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_panel.py", line 1932, in _refresh_marker_list
+    item = QTreeWidgetItem([
+           ^^^^^^^^^^^^^^^
+NameError: name 'QTreeWidgetItem' is not defined
+

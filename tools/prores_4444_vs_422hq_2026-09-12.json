@@ -1,0 +1,128 @@
+[
+ {
+  "scene": "A_422native",
+  "source": "prores422HQ",
+  "frame": 10,
+  "codec": "prores-422HQ",
+  "bytes": 3159936,
+  "mbps_24": 606.707712,
+  "psnr_y": 64.58,
+  "psnr_u": 67.76,
+  "psnr_v": 67.68
+ },
+ {
+  "scene": "A_422native",
+  "source": "prores422HQ",
+  "frame": 10,
+  "codec": "prores-4444",
+  "bytes": 4039880,
+  "mbps_24": 775.65696,
+  "psnr_y": 66.99,
+  "psnr_u": 68.39,
+  "psnr_v": 67.46
+ },
+ {
+  "scene": "A_422native",
+  "source": "prores422HQ",
+  "frame": 11,
+  "codec": "prores-422HQ",
+  "bytes": 3137614,
+  "mbps_24": 602.421888,
+  "psnr_y": 65.05,
+  "psnr_u": 68.32,
+  "psnr_v": 68.17
+ },
+ {
+  "scene": "A_422native",
+  "source": "prores422HQ",
+  "frame": 11,
+  "codec": "prores-4444",
+  "bytes": 4016552,
+  "mbps_24": 771.177984,
+  "psnr_y": 67.31,
+  "psnr_u": 68.79,
+  "psnr_v": 67.88
+ },
+ {
+  "scene": "A_422native",
+  "source": "dnxhrhqx",
+  "frame": 10,
+  "codec": "prores-422HQ",
+  "bytes": 3394850,
+  "mbps_24": 651.8112,
+  "psnr_y": 60.54,
+  "psnr_u": 63.43,
+  "psnr_v": 62.03
+ },
+ {
+  "scene": "A_422native",
+  "source": "dnxhrhqx",
+  "frame": 10,
+  "codec": "prores-4444",
+  "bytes": 4537457,
+  "mbps_24": 871.191744,
+  "psnr_y": 63.84,
+  "psnr_u": 64.65,
+  "psnr_v": 61.51
+ },
+ {
+  "scene": "A_422native",
+  "source": "dnxhrhqx",
+  "frame": 11,
+  "codec": "prores-422HQ",
+  "bytes": 3420042,
+  "mbps_24": 656.648064,
+  "psnr_y": 60.08,
+  "psnr_u": 62.99,
+  "psnr_v": 61.56
+ },
+ {
+  "scene": "A_422native",
+  "source": "dnxhrhqx",
+  "frame": 11,
+  "codec": "prores-4444",
+  "bytes": 4585363,
+  "mbps_24": 880.389696,
+  "psnr_y": 63.43,
+  "psnr_u": 64.32,
+  "psnr_v": 61.27
+ },
+ {
+  "scene": "B_rgbnative",
+  "source": "synthetic",
+  "frame": 0,
+  "codec": "prores-422HQ",
+  "bytes": 597741,
+  "mbps_24": 114.766272,
+  "psnr_rgb8": 54.66
+ },
+ {
+  "scene": "B_rgbnative",
+  "source": "synthetic",
+  "frame": 0,
+  "codec": "prores-4444",
+  "bytes": 887761,
+  "mbps_24": 170.450112,
+  "psnr_rgb8": 52.39
+ },
+ {
+  "scene": "C_nyquist_chroma",
+  "source": "synthetic_1px_alternating",
+  "frame": 0,
+  "codec": "prores-422HQ",
+  "bytes": 300000,
+  "mbps_24": 57.6,
+  "psnr_rgb8": 9.4,
+  "note": "\u9010\u50cf\u7d20\u4ea4\u66ff\u4e92\u8865\u8272\uff08\u8272\u5ea6\u5948\u594e\u65af\u7279\u6781\u9650\uff09\uff1bbytes \u4e3a\u8be5\u6b21\u5b9e\u6d4b\u7ea6 0.30MB"
+ },
+ {
+  "scene": "C_nyquist_chroma",
+  "source": "synthetic_1px_alternating",
+  "frame": 0,
+  "codec": "prores-4444",
+  "bytes": 910000,
+  "mbps_24": 174.7,
+  "psnr_rgb8": 50.32,
+  "note": "\u540c\u5185\u5bb9 4444 \u76f4\u5165\u5168\u5206\u8fa8\u7387\u8272\u5ea6\uff1bbytes \u7ea6 0.91MB"
+ }
+]

@@ -1,0 +1,78 @@
+{
+  "date": "2026-09-15T14:56:50",
+  "purpose": "计划步骤 1 真机门禁：D3D11 device + 定长纹理池",
+  "os": "win32",
+  "device": {
+    "ok": true,
+    "reason": "",
+    "identity": {
+      "feature_level": "0xc100",
+      "adapter_luid": "000111A0-00000000",
+      "adapter_description": "AMD Radeon RX 6800",
+      "vendor_name": "amd",
+      "bgra_support": true
+    }
+  },
+  "format_support": {
+    "nv12": {
+      "ok": true,
+      "support_bits": "0x2e6f3f0",
+      "reason": ""
+    },
+    "p010": {
+      "ok": false,
+      "support_bits": "0x0",
+      "reason": "gpu_probe_failed:check_format_support fmt=100 hr=0x80004005"
+    },
+    "bgra8": {
+      "ok": true,
+      "support_bits": "0x33fef3f3",
+      "reason": ""
+    }
+  },
+  "pool_single_thread_gate": {
+    "ok": true,
+    "reason": "",
+    "elapsed_s": 0.004,
+    "stats": {
+      "depth": 8,
+      "created": 8,
+      "in_use": 0,
+      "peak_in_use": 1,
+      "serviced": 1000,
+      "acquire_calls": 1000,
+      "acquire_timeouts": 0,
+      "sealed": true,
+      "closed": false
+    },
+    "peak_in_use": 1,
+    "frames": 1000
+  },
+  "pool_concurrent_gate": {
+    "depth": 6,
+    "threads": 4,
+    "frames_per_thread": 250,
+    "elapsed_s": 0.004,
+    "stats": {
+      "depth": 6,
+      "created": 6,
+      "in_use": 0,
+      "peak_in_use": 1,
+      "serviced": 1000,
+      "acquire_calls": 1000,
+      "acquire_timeouts": 0,
+      "sealed": true,
+      "closed": false
+    },
+    "ok": true,
+    "errors": []
+  },
+  "gates": {
+    "device_created": true,
+    "adapter_luid_present": true,
+    "nv12_format_support": true,
+    "pool_1000_frame_no_growth": true,
+    "pool_concurrent_ring_bounded": true
+  },
+  "all_gates_passed": true
+}

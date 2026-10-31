@@ -1,0 +1,153 @@
+{
+  "issue_count": 26,
+  "priorities": {
+    "P2": 11,
+    "P1": 11,
+    "P3": 4
+  },
+  "issues": [
+    {
+      "id": "C01",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "C02",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "C03",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "C04",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "C05",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "C06",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "D01",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "D02",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "D03",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "D04",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "D05",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "D06",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "D07",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "D08",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "D09",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "D10",
+      "priority": "P3",
+      "status": "未开始"
+    },
+    {
+      "id": "U01",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "U02",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "U03",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "U04",
+      "priority": "P1",
+      "status": "未开始"
+    },
+    {
+      "id": "U05",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "U06",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "U07",
+      "priority": "P3",
+      "status": "未开始"
+    },
+    {
+      "id": "Q01",
+      "priority": "P2",
+      "status": "未开始"
+    },
+    {
+      "id": "Q02",
+      "priority": "P3",
+      "status": "未开始"
+    },
+    {
+      "id": "Q03",
+      "priority": "P3",
+      "status": "未开始"
+    }
+  ],
+  "professional_gap_count": 17,
+  "edit_regression": {
+    "files": 619,
+    "passed": 10672,
+    "skipped": 20,
+    "failed": 0
+  },
+  "delivery_focused": {
+    "passed": 330,
+    "failed": 1
+  },
+  "relative_link_errors": [],
+  "product_files_modified": false
+}

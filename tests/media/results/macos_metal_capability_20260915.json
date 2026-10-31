@@ -1,0 +1,114 @@
+{
+  "compute": {
+    "compile": true,
+    "correct": true,
+    "dispatch": true,
+    "error": null,
+    "status": "supported"
+  },
+  "device": {
+    "argument_buffers_tier": 1,
+    "gpu_families": {
+      "Apple7": false,
+      "Common3": true,
+      "Mac2": true
+    },
+    "has_unified_memory": false,
+    "max_buffer_length_bytes": 3758096384,
+    "max_threads_per_group": "<Metal.MTLSize width=1024 height=1024 depth=1024>",
+    "name": "AMD Radeon RX 6900 XT"
+  },
+  "failure_reasons": [
+    "pyobjc_corevideo_route_unusable"
+  ],
+  "format_matrix": [
+    {
+      "iosurface_backed": true,
+      "label": "NV12  8-bit",
+      "status": "supported",
+      "texture": {
+        "height": 1080,
+        "pixel_format": 10,
+        "storage_mode": 1,
+        "storage_mode_name": "Managed",
+        "width": 1920
+      }
+    },
+    {
+      "iosurface_backed": true,
+      "label": "P010 10-bit",
+      "status": "supported",
+      "texture": {
+        "height": 1080,
+        "pixel_format": 20,
+        "storage_mode": 1,
+        "storage_mode_name": "Managed",
+        "width": 1920
+      }
+    },
+    {
+      "iosurface_backed": true,
+      "label": "BGRA  8-bit",
+      "status": "supported",
+      "texture": {
+        "height": 1080,
+        "pixel_format": 80,
+        "storage_mode": 1,
+        "storage_mode_name": "Managed",
+        "width": 1920
+      }
+    },
+    {
+      "label": "422 8-bit  (2vuy, 2B/px) as GBGR422",
+      "status": "supported",
+      "texture": {
+        "height": 1080,
+        "pixel_format": 240,
+        "storage_mode": 1,
+        "width": 1920
+      }
+    },
+    {
+      "label": "422 8-bit  (2vuy, 2B/px) as BGRG422",
+      "status": "supported",
+      "texture": {
+        "height": 1080,
+        "pixel_format": 241,
+        "storage_mode": 1,
+        "width": 1920
+      }
+    },
+    {
+      "label": "422 10-bit (v210, 8/3B/px) as GBGR422(8bit reinterpret)",
+      "status": "supported",
+      "texture": {
+        "height": 1080,
+        "pixel_format": 240,
+        "storage_mode": 1,
+        "width": 1920
+      }
+    },
+    {
+      "label": "422 10-bit (v210, 8/3B/px) as BGRG422(8bit reinterpret)",
+      "status": "supported",
+      "texture": {
+        "height": 1080,
+        "pixel_format": 241,
+        "storage_mode": 1,
+        "width": 1920
+      }
+    }
+  ],
+  "full_chain_gpu_claim": false,
+  "full_chain_gpu_claim_reason": "capability_probe_only; export_gpu_trail_required",
+  "generated_at_utc": "2026-09-15T06:33:00.799468+00:00",
+  "probe": "macos_metal_capability",
+  "pyobjc_route": {
+    "cv_return": -6661,
+    "reason": "pyobjc_corevideo_route_unusable",
+    "status": "unusable"
+  },
+  "schema_version": 1,
+  "status": "partial",
+  "transcript": "CoreVideo: /System/Library/Frameworks/CoreVideo.framework/CoreVideo\n\n== Metal device (P1-01) ==\n  name                : AMD Radeon RX 6900 XT\n  hasUnifiedMemory    : False\n  maxThreadsPerGroup  : <Metal.MTLSize width=1024 height=1024 depth=1024>\n  supportsFamily(Mac2   ): True\n  supportsFamily(Common3): True\n  supportsFamily(Apple7 ): False\n  argumentBuffersTier : 1  (Apple Silicon = 2)\n  maxBufferLength     : 3.8 GB\n\n== MSL compile + compute dispatch (P1-01) ==\n  compile             : OK\n  dispatch            : (1.0, 2.0, 3.0, 4.0) -> (2.0, 3.0, 4.0, 5.0)\n  correct             : True  err=None\n\n== CVPixelBuffer -> CVMetalTextureCache -> MTLTexture (P1-02 / P1-04) ==\n  CVMetalTextureCacheCreate rc=0 (ctype route)\n  NV12  8-bit: IOSurface=True -> MTLTexture 1920x1080 fmt=10 storage=1(Managed) => ZERO-COPY OK\n  P010 10-bit: IOSurface=True -> MTLTexture 1920x1080 fmt=20 storage=1(Managed) => ZERO-COPY OK\n  BGRA  8-bit: IOSurface=True -> MTLTexture 1920x1080 fmt=80 storage=1(Managed) => ZERO-COPY OK\n\n  422 8-bit  (2vuy, 2B/px) as GBGR422: OK -> 1920x1080 fmt=240 storage=1\n  422 8-bit  (2vuy, 2B/px) as BGRG422: OK -> 1920x1080 fmt=241 storage=1\n  422 10-bit (v210, 8/3B/px) as GBGR422(8bit reinterpret): OK -> 1920x1080 fmt=240 storage=1\n  422 10-bit (v210, 8/3B/px) as BGRG422(8bit reinterpret): OK -> 1920x1080 fmt=241 storage=1\n\n== PyObjC route (expected to FAIL - motivates P1-04 decision) ==\n  rc=-6661 -> PyObjC route unusable; use ctypes (as planned)\n"
+}

@@ -1,0 +1,65 @@
+{
+  "date_local": "2026-10-25",
+  "timezone": "Asia/Shanghai",
+  "base_head": "e6c3b6db126574857306b757203de55286d6496d",
+  "python": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 17.0.0 (clang-1700.6.3.2)]",
+  "system": "macOS-15.3.1-x86_64-i386-64bit",
+  "initial_git_status": "clean",
+  "scope": "Plan/source/evidence audit, isolated domain pytest, helper probes; no current Windows/GPU/GUI/packaged-app acceptance. Small fixes are uncommitted working-tree changes.",
+  "original_plans": [
+    "docs/upgrade_plan_M_mac_2026-10-24.md",
+    "docs/upgrade_plan_W_windows_2026-10-24.md"
+  ],
+  "checks": {
+    "m00_gate": {
+      "passed": 188,
+      "failed": 0,
+      "log": "m00_gate.log"
+    },
+    "upgrade_domains_initial": {
+      "passed": 409,
+      "skipped": 14,
+      "failed": 1
+    },
+    "media_after_fix": {
+      "passed": 47,
+      "skipped": 9,
+      "failed": 0
+    },
+    "upgrade_domains_after_replacing_media_result": {
+      "passed": 410,
+      "skipped": 14,
+      "failed": 0
+    },
+    "small_fixes": {
+      "passed": 29,
+      "skipped": 1,
+      "warnings": 1,
+      "failed": 0,
+      "log": "small_fixes_pytest.log"
+    },
+    "old_probes": {
+      "s_groups": 9,
+      "r_groups": 4,
+      "issues_present": 0
+    },
+    "new_mac_probes": {
+      "groups": 4,
+      "issues_present": 4,
+      "command": ".venv/bin/python docs/validation/upgrade_audit_2026-10-25/mac_logic_probes.py"
+    },
+    "core_pip_check": {
+      "exit_code": 0,
+      "command": ".venv-m01-core/bin/python -m pip check"
+    },
+    "shell_syntax": {
+      "exit_code": 0,
+      "command": "bash -n testfarm/2026-10-25_machineB_M18/run_m18_recheck.sh"
+    },
+    "diff_whitespace": {
+      "exit_code": 0,
+      "command": "git diff --check"
+    }
+  },
+  "note": "Counts from overlapping suites are not summed as unique coverage; original failing log retained. Historical subagent reports use baseline line numbers. Not a full suite or real GUI/GPU acceptance."
+}

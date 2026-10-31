@@ -1,0 +1,3 @@
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/test_audio_leftover_samples.py -q   # 16 passed (was 4 failed)
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/test_adjustment_clip_delivery.py -q  # 8 passed
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/ai_editing/test_taep_contracts.py tests/edit/test_adjustment_clip_scope.py tests/edit/test_adjustment_clip_cpu_export_application.py tests/edit/test_audio_export_parity.py tests/edit/test_audio_three_way_parity.py -q   # all pass

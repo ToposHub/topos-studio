@@ -1,0 +1,348 @@
+{
+  "$schema_version": 1,
+  "runner": "p0_benchmark_runner",
+  "protocol": {
+    "warmup_frames": 10,
+    "steady_frames": 120,
+    "seek_samples": 30,
+    "longrun_frames": 600,
+    "repeats": 1
+  },
+  "scenarios": [
+    "B-01",
+    "B-02",
+    "B-03",
+    "B-04"
+  ],
+  "started_at": "2026-09-16T00:48:50+0800",
+  "machine": {
+    "platform": "macOS-15.3.1-x86_64-i386-64bit",
+    "machine": "x86_64",
+    "python": "3.12.13",
+    "git_commit": "7b13746e88cc109b19941fd5c7a82958e8748279"
+  },
+  "media": [
+    {
+      "file": "tests/test_videos/2K_h264.mp4",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 53.65,
+          "p95_ms": 193.164,
+          "max_ms": 208.666,
+          "mean_ms": 104.891
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 2.234,
+          "p95_ms": 3.419,
+          "max_ms": 4.359,
+          "mean_ms": 2.363,
+          "p50_fps": 447.63
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 39.364,
+          "p95_ms": 67.308,
+          "max_ms": 78.51,
+          "mean_ms": 40.908
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 2.403,
+          "p95_ms": 2.992,
+          "max_ms": 26.464,
+          "mean_ms": 2.495,
+          "rss_before_bytes": 418824192,
+          "rss_after_bytes": 432230400,
+          "rss_delta_bytes": 13406208
+        }
+      },
+      "backend": "FFmpegMediaSource",
+      "meta": {
+        "codec": "h264",
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "total_frames": 1572
+      },
+      "wall_s": 3.77
+    },
+    {
+      "file": "tests/test_videos/4K_H265.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 232.786,
+          "p95_ms": 258.229,
+          "max_ms": 261.056,
+          "mean_ms": 242.146
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 22.451,
+          "p95_ms": 27.683,
+          "max_ms": 35.814,
+          "mean_ms": 23.029,
+          "p50_fps": 44.54
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 376.091,
+          "p95_ms": 519.262,
+          "max_ms": 625.289,
+          "mean_ms": 369.512
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 21.966,
+          "p95_ms": 27.952,
+          "max_ms": 294.496,
+          "mean_ms": 23.614,
+          "rss_before_bytes": 1336414208,
+          "rss_after_bytes": 1339826176,
+          "rss_delta_bytes": 3411968
+        }
+      },
+      "backend": "FFmpegMediaSource",
+      "meta": {
+        "codec": "hevc",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 487
+      },
+      "wall_s": 29.81
+    },
+    {
+      "file": "tests/test_videos/4K_prores422HQ.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 95.265,
+          "p95_ms": 97.269,
+          "max_ms": 97.491,
+          "mean_ms": 95.691
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 31.175,
+          "p95_ms": 38.232,
+          "max_ms": 52.253,
+          "mean_ms": 31.741,
+          "p50_fps": 32.08
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 32.123,
+          "p95_ms": 37.39,
+          "max_ms": 39.947,
+          "mean_ms": 32.101
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 29.64,
+          "p95_ms": 35.656,
+          "max_ms": 60.884,
+          "mean_ms": 30.161,
+          "rss_before_bytes": 1339850752,
+          "rss_after_bytes": 1339854848,
+          "rss_delta_bytes": 4096
+        }
+      },
+      "backend": "FFmpegMediaSource",
+      "meta": {
+        "codec": "prores",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 743
+      },
+      "wall_s": 23.59
+    },
+    {
+      "file": "tests/test_videos/4K_prores422LT.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 63.332,
+          "p95_ms": 64.178,
+          "max_ms": 64.272,
+          "mean_ms": 63.114
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 24.418,
+          "p95_ms": 28.861,
+          "max_ms": 43.099,
+          "mean_ms": 24.771,
+          "p50_fps": 40.95
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 25.597,
+          "p95_ms": 30.937,
+          "max_ms": 34.371,
+          "mean_ms": 25.391
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 24.916,
+          "p95_ms": 30.476,
+          "max_ms": 48.5,
+          "mean_ms": 25.093,
+          "rss_before_bytes": 1339858944,
+          "rss_after_bytes": 1343262720,
+          "rss_delta_bytes": 3403776
+        }
+      },
+      "backend": "FFmpegMediaSource",
+      "meta": {
+        "codec": "prores",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 487
+      },
+      "wall_s": 19.29
+    },
+    {
+      "file": "tests/test_videos/4K_DNxHR HQX 10bit.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 70.663,
+          "p95_ms": 71.192,
+          "max_ms": 71.25,
+          "mean_ms": 70.622
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 25.759,
+          "p95_ms": 31.668,
+          "max_ms": 36.653,
+          "mean_ms": 26.206,
+          "p50_fps": 38.82
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 26.588,
+          "p95_ms": 34.786,
+          "max_ms": 46.248,
+          "mean_ms": 27.866
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 26.194,
+          "p95_ms": 31.864,
+          "max_ms": 48.045,
+          "mean_ms": 26.521,
+          "rss_before_bytes": 1344217088,
+          "rss_after_bytes": 1344217088,
+          "rss_delta_bytes": 0
+        }
+      },
+      "backend": "FFmpegMediaSource",
+      "meta": {
+        "codec": "dnxhd",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 487
+      },
+      "wall_s": 20.46
+    },
+    {
+      "file": "tests/test_videos/4K_topos.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 17.613,
+          "p95_ms": 19.661,
+          "max_ms": 19.888,
+          "mean_ms": 17.185
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 13.227,
+          "p95_ms": 16.621,
+          "max_ms": 17.467,
+          "mean_ms": 13.445,
+          "p50_fps": 75.6
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 12.914,
+          "p95_ms": 16.267,
+          "max_ms": 17.566,
+          "mean_ms": 13.189
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 12.587,
+          "p95_ms": 15.966,
+          "max_ms": 33.38,
+          "mean_ms": 12.949,
+          "rss_before_bytes": 1344540672,
+          "rss_after_bytes": 1344622592,
+          "rss_delta_bytes": 81920
+        }
+      },
+      "backend": "ToposMediaSource",
+      "meta": {
+        "codec": "topos",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 96
+      },
+      "wall_s": 10.0
+    },
+    {
+      "file": "tests/test_videos/4K_topos_proxy.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 7.087,
+          "p95_ms": 11.145,
+          "max_ms": 11.595,
+          "mean_ms": 8.57
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 4.715,
+          "p95_ms": 7.501,
+          "max_ms": 21.112,
+          "mean_ms": 5.277,
+          "p50_fps": 212.09
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 4.561,
+          "p95_ms": 7.428,
+          "max_ms": 8.952,
+          "mean_ms": 5.026
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 4.757,
+          "p95_ms": 7.023,
+          "max_ms": 9.14,
+          "mean_ms": 5.026,
+          "rss_before_bytes": 1344643072,
+          "rss_after_bytes": 1344684032,
+          "rss_delta_bytes": 40960
+        }
+      },
+      "backend": "ToposMediaSource",
+      "meta": {
+        "codec": "topos",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 96
+      },
+      "wall_s": 3.91
+    }
+  ]
+}

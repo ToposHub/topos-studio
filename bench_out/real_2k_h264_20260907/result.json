@@ -1,0 +1,58 @@
+{
+  "input": "tests/test_videos/2K_h264.mp4",
+  "input_bytes": 52513775,
+  "input_stream": {
+    "codec_name": "h264",
+    "profile": "High",
+    "width": 1920,
+    "height": 1080,
+    "pix_fmt": "yuv420p",
+    "r_frame_rate": "25/1",
+    "duration": "62.880000",
+    "bit_rate": "6548244",
+    "nb_frames": "1572"
+  },
+  "host": "macOS-15.3.1-x86_64-i386-64bit",
+  "python": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 17.0.0 (clang-1700.6.3.2)]",
+  "topos_library": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/native/topos_codec/build/real-bench-release/topos_codec.0.1.0.dylib",
+  "encode": {
+    "frames": 1572,
+    "pipeline_wall_s": 16.362,
+    "pipeline_fps": 96.08,
+    "topos_encode_sum_s": 9.823,
+    "topos_encode_fps": 160.04,
+    "output_bytes": 781505543,
+    "output_path": "bench_out/real_2k_h264_20260907/2K_h264_topos_proxy.mov",
+    "profile": "proxy"
+  },
+  "decode": {
+    "frames": 1572,
+    "wall_s": 4.129,
+    "fps": 380.69,
+    "avg_ms": 2.627,
+    "width": 1920,
+    "height": 1080
+  },
+  "decode_comparison": {
+    "h264_ffmpeg_120_frames_fps": 1079.0,
+    "h264_videotoolbox_120_frames_fps": 304.0,
+    "topos_wrapper_120_frames_fps": 135.6,
+    "topos_native_120_frames_fps": 335.6,
+    "topos_native_full_clip_fps": 380.69,
+    "topos_wrapper_p50_ms": 6.12,
+    "topos_native_p50_ms": 2.68
+  },
+  "quality_vs_decoded_h264_yuv422p10le": {
+    "frames": 1572,
+    "luma_psnr_db": 54.201,
+    "chroma_u_psnr_db": 61.972,
+    "chroma_v_psnr_db": 62.325,
+    "luma_max_abs": 46,
+    "chroma_u_max_abs": 16,
+    "chroma_v_max_abs": 16,
+    "note": "比较对象是 H.264 解码后再转换的 4:2:2 10-bit 平面；不是原始拍摄源。"
+  },
+  "size_ratio_topos_over_input": 14.8819,
+  "size_ratio_input_over_topos": 0.0672,
+  "generated_at": "2026-09-07T12:07:58+0800"
+}

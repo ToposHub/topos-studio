@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "result": {
+    "saved_path": "/tmp/topos-edit-audit-20261021/audit-review.topos",
+    "dirty": false,
+    "requested_close": "MainWindow.close via Qt timer; normal production shutdown"
+  }
+}

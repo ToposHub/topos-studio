@@ -1,0 +1,81 @@
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 572, in resizeEvent
+    self._reflow()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 568, in _reflow
+    self._sync_host_row_height()
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_effects_panel.py", line 537, in _sync_host_row_height
+    self._host_item.setSizeHint(0, QSize(0, self.height()))
+RuntimeError: wrapped C/C++ object of type QTreeWidgetItem has been deleted
+

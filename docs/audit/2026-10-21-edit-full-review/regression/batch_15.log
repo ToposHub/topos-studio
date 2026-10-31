@@ -1,0 +1,43 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 715 items
+
+tests/edit/test_fix_w6g6_aud6.py ......                                  [  0%]
+tests/edit/test_fix_w6g7_aud6.py .......                                 [  1%]
+tests/edit/test_fix_w6g8_aud6.py .............                           [  3%]
+tests/edit/test_fix_wd10blk_aud.py ..................................... [  8%]
+...                                                                      [  9%]
+tests/edit/test_fix_wd10g51_aud.py ..................................... [ 14%]
+...........                                                              [ 15%]
+tests/edit/test_fix_wd10g60_aud.py ..................................... [ 21%]
+......                                                                   [ 21%]
+tests/edit/test_fix_wd10g63_aud.py ..................................... [ 27%]
+...................                                                      [ 29%]
+tests/edit/test_fix_wd11blk_aud.py ......................                [ 32%]
+tests/edit/test_fix_wd11g53_aud.py ..................................... [ 38%]
+............                                                             [ 39%]
+tests/edit/test_fix_wd11g57_aud.py ..................................... [ 44%]
+.......                                                                  [ 45%]
+tests/edit/test_fix_wd11g58_aud.py ..................................... [ 51%]
+..                                                                       [ 51%]
+tests/edit/test_fix_wd11g61_aud.py ..................................... [ 56%]
+.....                                                                    [ 57%]
+tests/edit/test_fix_wd11g64_aud.py ..............................        [ 61%]
+tests/edit/test_fix_wd12g52_aud.py ...................................   [ 66%]
+tests/edit/test_fix_wd12g54_aud.py ..................................... [ 71%]
+....                                                                     [ 72%]
+tests/edit/test_fix_wd12g59_aud.py ..................................... [ 77%]
+...............                                                          [ 79%]
+tests/edit/test_fix_wd12g62_aud.py ...........................           [ 83%]
+tests/edit/test_fix_wd12g65_aud.py ..................................... [ 88%]
+..                                                                       [ 88%]
+tests/edit/test_fix_wd12g66_aud.py ...............................       [ 92%]
+tests/edit/test_fix_wd13blk_aud.py ..................................... [ 98%]
+..............                                                           [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_15.xml -
+============================= 715 passed in 25.42s =============================

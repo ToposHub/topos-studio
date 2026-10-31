@@ -1,0 +1,1007 @@
+{
+  "catalog_id": "topos.effect-catalog.v1",
+  "effects": [
+    {
+      "category": "generator",
+      "description": "Create a clip that applies its effects to all tracks below it",
+      "effect_type": "adjustment_clip",
+      "name": "Adjustment Clip",
+      "params": {}
+    },
+    {
+      "category": "filter",
+      "description": "Box / Gaussian / Bilateral / Motion / Bokeh blur with per-channel mask and mix.",
+      "effect_type": "blur",
+      "name": "Blur",
+      "params": {
+        "anamorphic": {
+          "default": 0.0,
+          "label": "Anamorphic",
+          "max": 1.0,
+          "min": -1.0,
+          "type": "float"
+        },
+        "angle": {
+          "default": 0.0,
+          "label": "Angle",
+          "max": 360.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "aperture_blades": {
+          "default": "circle",
+          "label": "Aperture Blades",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "blur_type": {
+          "default": "box",
+          "label": "Blur Type",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "channel_a": {
+          "default": false,
+          "label": "Channel A",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        },
+        "channel_b": {
+          "default": true,
+          "label": "Channel B",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        },
+        "channel_g": {
+          "default": true,
+          "label": "Channel G",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        },
+        "channel_r": {
+          "default": true,
+          "label": "Channel R",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        },
+        "edge_policy": {
+          "default": "clamp",
+          "label": "Edge Policy",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "edge_preserve": {
+          "default": 0.5,
+          "label": "Edge Preserve",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "highlight_gain": {
+          "default": 0.0,
+          "label": "Highlight Gain",
+          "max": 4.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "mix": {
+          "default": 1.0,
+          "label": "Mix",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "motion_source": {
+          "default": "angle",
+          "label": "Motion Source",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "process_alpha": {
+          "default": true,
+          "label": "Process Alpha",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        },
+        "quality": {
+          "default": "normal",
+          "label": "Quality",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "radius": {
+          "default": 8.0,
+          "label": "Radius",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "radius_x": {
+          "default": 5.0,
+          "label": "Radius X",
+          "max": 200.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "radius_y": {
+          "default": 5.0,
+          "label": "Radius Y",
+          "max": 200.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "shutter": {
+          "default": 1.0,
+          "label": "Shutter",
+          "max": 2.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Dynamic range compressor",
+      "effect_type": "compressor",
+      "name": "Compressor",
+      "params": {
+        "makeup_gain": {
+          "default": 0.0,
+          "label": "Makeup",
+          "max": 24.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "ratio": {
+          "default": 4.0,
+          "label": "Ratio",
+          "max": 20.0,
+          "min": 1.0,
+          "type": "float"
+        },
+        "threshold_db": {
+          "default": -24.0,
+          "label": "Threshold",
+          "max": 0.0,
+          "min": -60.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "filter",
+      "description": "Lens defocus / bokeh blur.",
+      "effect_type": "defocus",
+      "name": "Defocus",
+      "params": {
+        "edge_policy": {
+          "default": "clamp",
+          "label": "Edge Policy",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "focal_size": {
+          "default": 0.3,
+          "label": "Focal Size",
+          "max": 1.0,
+          "min": 0.01,
+          "type": "float"
+        },
+        "focal_x": {
+          "default": 0.5,
+          "label": "Focal X",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "focal_y": {
+          "default": 0.5,
+          "label": "Focal Y",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "max_radius": {
+          "default": 20.0,
+          "label": "Max Radius",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "mode": {
+          "default": "separable",
+          "label": "Mode",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "process_alpha": {
+          "default": true,
+          "label": "Process Alpha",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Delay with feedback and ping-pong",
+      "effect_type": "delay",
+      "name": "Delay",
+      "params": {
+        "feedback": {
+          "default": 40.0,
+          "label": "Feedback",
+          "max": 90.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "mix": {
+          "default": 30.0,
+          "label": "Mix",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "time_ms": {
+          "default": 300.0,
+          "label": "Time",
+          "max": 2000.0,
+          "min": 1.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "filter",
+      "description": "Bilateral-filter denoise with luma/chroma mode.",
+      "effect_type": "denoise",
+      "name": "Denoise",
+      "params": {
+        "chroma_only": {
+          "default": false,
+          "label": "Chroma Only",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        },
+        "luminance_only": {
+          "default": false,
+          "label": "Luminance Only",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        },
+        "quality": {
+          "default": "normal",
+          "label": "Quality",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "radius": {
+          "default": 3,
+          "label": "Radius",
+          "max": 10.0,
+          "min": 1.0,
+          "type": "int"
+        },
+        "strength": {
+          "default": 0.5,
+          "label": "Strength",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "filter",
+      "description": "Edge detection (Sobel/Laplacian/Prewitt/Canny).",
+      "effect_type": "edge_detect",
+      "name": "Edge Detect",
+      "params": {
+        "channel": {
+          "default": "luminance",
+          "label": "Channel",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "direction": {
+          "default": "both",
+          "label": "Direction",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "invert": {
+          "default": false,
+          "label": "Invert",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        },
+        "kernel_size": {
+          "default": 3,
+          "label": "Kernel Size",
+          "max": 7.0,
+          "min": 3.0,
+          "type": "int"
+        },
+        "method": {
+          "default": "sobel",
+          "label": "Method",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "output_mode": {
+          "default": "edges",
+          "label": "Output Mode",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "output_strength": {
+          "default": 1.0,
+          "label": "Output Strength",
+          "max": 10.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "preblur": {
+          "default": 0.0,
+          "label": "Preblur",
+          "max": 10.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "threshold": {
+          "default": 0.1,
+          "label": "Threshold",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "threshold_high": {
+          "default": 0.3,
+          "label": "Threshold High",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "filter",
+      "description": "Morphological erode/dilate with iteration control.",
+      "effect_type": "erode_dilate",
+      "name": "Erode / Dilate",
+      "params": {
+        "channels": {
+          "default": "alpha",
+          "label": "Channels",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "edge_mode": {
+          "default": "extend",
+          "label": "Edge Mode",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "iterations": {
+          "default": 1,
+          "label": "Iterations",
+          "max": 10.0,
+          "min": 1.0,
+          "type": "int"
+        },
+        "operation": {
+          "default": "erode",
+          "label": "Operation",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "size": {
+          "default": 3,
+          "label": "Size",
+          "max": 50.0,
+          "min": 1.0,
+          "type": "int"
+        }
+      }
+    },
+    {
+      "category": "stylize",
+      "description": "Bloom/glow with threshold, tint and intensity.",
+      "effect_type": "glow",
+      "name": "Glow",
+      "params": {
+        "intensity": {
+          "default": 1.5,
+          "label": "Intensity",
+          "max": 10.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "mix": {
+          "default": 1.0,
+          "label": "Mix",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "quality": {
+          "default": "normal",
+          "label": "Quality",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "radius": {
+          "default": 15.0,
+          "label": "Radius",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "threshold": {
+          "default": 0.7,
+          "label": "Threshold",
+          "max": 2.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "tint_b": {
+          "default": 0.7,
+          "label": "Tint B",
+          "max": 2.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "tint_g": {
+          "default": 0.85,
+          "label": "Tint G",
+          "max": 2.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "tint_r": {
+          "default": 1.0,
+          "label": "Tint R",
+          "max": 2.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Mid/Side stereo width control",
+      "effect_type": "imager",
+      "name": "Stereo Imager",
+      "params": {
+        "pan": {
+          "default": 0.0,
+          "label": "Pan",
+          "max": 100.0,
+          "min": -100.0,
+          "type": "float"
+        },
+        "width": {
+          "default": 100.0,
+          "label": "Width",
+          "max": 200.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "filter",
+      "description": "Per-channel level quantization with optional dither (shared kernel with the Composite Posterize node).",
+      "effect_type": "lib1_posterize",
+      "name": "Posterize (Lib1)",
+      "params": {
+        "channel_mode": {
+          "default": "rgb",
+          "label": "Channel Mode",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "dither": {
+          "default": false,
+          "label": "Dither",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "bool"
+        },
+        "levels": {
+          "default": 8,
+          "label": "Levels",
+          "max": 64.0,
+          "min": 2.0,
+          "type": "int"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Brick-wall limiter to prevent clipping",
+      "effect_type": "limiter",
+      "name": "Limiter",
+      "params": {
+        "release_ms": {
+          "default": 100.0,
+          "label": "Release",
+          "max": 1000.0,
+          "min": 10.0,
+          "type": "float"
+        },
+        "threshold_db": {
+          "default": -3.0,
+          "label": "Threshold",
+          "max": 0.0,
+          "min": -20.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Gate signals below a threshold",
+      "effect_type": "noise_gate",
+      "name": "Noise Gate",
+      "params": {
+        "release_ms": {
+          "default": 100.0,
+          "label": "Release",
+          "max": 1000.0,
+          "min": 10.0,
+          "type": "float"
+        },
+        "threshold_db": {
+          "default": -40.0,
+          "label": "Threshold",
+          "max": 0.0,
+          "min": -60.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Schroeder FDN reverb (room / hall / plate)",
+      "effect_type": "reverb",
+      "name": "Reverb",
+      "params": {
+        "decay": {
+          "default": 2.0,
+          "label": "Decay",
+          "max": 10.0,
+          "min": 0.1,
+          "type": "float"
+        },
+        "mix": {
+          "default": 30.0,
+          "label": "Mix",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Harmonic saturation / waveshaper",
+      "effect_type": "saturation",
+      "name": "Saturation",
+      "params": {
+        "drive": {
+          "default": 0.0,
+          "label": "Drive",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "filter",
+      "description": "Unsharp-mask sharpening with threshold and channel mode.",
+      "effect_type": "sharpen",
+      "name": "Sharpen",
+      "params": {
+        "amount": {
+          "default": 1.0,
+          "label": "Amount",
+          "max": 10.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "channels": {
+          "default": "all",
+          "label": "Channels",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "radius": {
+          "default": 1.0,
+          "label": "Radius",
+          "max": 50.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "threshold": {
+          "default": 0.0,
+          "label": "Threshold",
+          "max": 10.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "generator",
+      "description": "Create a clip that paints a flat color frame",
+      "effect_type": "solid_color",
+      "name": "Solid Color",
+      "params": {
+        "color": {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "label": "Color",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "color"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Multi-band graphic equalizer (open panel for full curve)",
+      "effect_type": "strip_eq",
+      "name": "Graphic EQ",
+      "params": {
+        "gain": {
+          "default": 0.0,
+          "label": "Gain",
+          "max": 12.0,
+          "min": -12.0,
+          "type": "float"
+        }
+      }
+    }
+  ],
+  "evolution": "append-only; semantic param changes require a new type id",
+  "transitions": [
+    {
+      "category": "Dissolve",
+      "label": "Blur Dissolve",
+      "spatial": false,
+      "transition_type": "blur_dissolve"
+    },
+    {
+      "category": "Dissolve",
+      "label": "Cross Dissolve",
+      "spatial": false,
+      "transition_type": "cross_dissolve"
+    },
+    {
+      "category": "Dissolve",
+      "label": "Defocus Dissolve",
+      "spatial": false,
+      "transition_type": "defocus_dissolve"
+    },
+    {
+      "category": "Dissolve",
+      "label": "Dip To Color",
+      "spatial": false,
+      "transition_type": "dip_to_color"
+    },
+    {
+      "category": "Dissolve",
+      "label": "Film Dissolve",
+      "spatial": false,
+      "transition_type": "film_dissolve"
+    },
+    {
+      "category": "Shape",
+      "label": "Iris Arrow",
+      "spatial": true,
+      "transition_type": "iris_arrow"
+    },
+    {
+      "category": "Iris",
+      "label": "Iris Circle",
+      "spatial": true,
+      "transition_type": "iris_circle"
+    },
+    {
+      "category": "Iris",
+      "label": "Iris Diamond",
+      "spatial": true,
+      "transition_type": "iris_diamond"
+    },
+    {
+      "category": "Iris",
+      "label": "Iris Ellipse",
+      "spatial": true,
+      "transition_type": "iris_ellipse"
+    },
+    {
+      "category": "Shape",
+      "label": "Iris Heart",
+      "spatial": true,
+      "transition_type": "iris_heart"
+    },
+    {
+      "category": "Iris",
+      "label": "Iris Hexagon",
+      "spatial": true,
+      "transition_type": "iris_hexagon"
+    },
+    {
+      "category": "Iris",
+      "label": "Iris Plus",
+      "spatial": true,
+      "transition_type": "iris_plus"
+    },
+    {
+      "category": "Iris",
+      "label": "Iris Square",
+      "spatial": true,
+      "transition_type": "iris_square"
+    },
+    {
+      "category": "Shape",
+      "label": "Iris Star",
+      "spatial": true,
+      "transition_type": "iris_star"
+    },
+    {
+      "category": "Shape",
+      "label": "Iris Triangle",
+      "spatial": true,
+      "transition_type": "iris_triangle"
+    },
+    {
+      "category": "Motion",
+      "label": "Burn Reveal (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_burn_reveal"
+    },
+    {
+      "category": "Motion",
+      "label": "Checker Reveal (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_checker_reveal"
+    },
+    {
+      "category": "Motion",
+      "label": "Clock Wipe (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_clock_wipe"
+    },
+    {
+      "category": "Motion",
+      "label": "Cube Faces (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_cube_faces"
+    },
+    {
+      "category": "Motion",
+      "label": "Displacement Bridge (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_displacement_bridge"
+    },
+    {
+      "category": "Motion",
+      "label": "Halftone Reveal (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_halftone_reveal"
+    },
+    {
+      "category": "Motion",
+      "label": "Hinged Doors (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_hinged_doors"
+    },
+    {
+      "category": "Motion",
+      "label": "Kaleido Bridge (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_kaleido_bridge"
+    },
+    {
+      "category": "Motion",
+      "label": "Luma Reveal (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_luma_reveal"
+    },
+    {
+      "category": "Motion",
+      "label": "Noise Dissolve (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_noise_dissolve"
+    },
+    {
+      "category": "Motion",
+      "label": "Page Curl (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_page_curl"
+    },
+    {
+      "category": "Motion",
+      "label": "Pixelate Bridge (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_pixelate_bridge"
+    },
+    {
+      "category": "Motion",
+      "label": "Ripple Refraction (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_ripple_refraction"
+    },
+    {
+      "category": "Motion",
+      "label": "Scanline Slices (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_scanline_slices"
+    },
+    {
+      "category": "Motion",
+      "label": "Staggered Tiles (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_staggered_tiles"
+    },
+    {
+      "category": "Motion",
+      "label": "True Push (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_true_push"
+    },
+    {
+      "category": "Motion",
+      "label": "Venetian Blinds (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_venetian_blinds"
+    },
+    {
+      "category": "Motion",
+      "label": "Voronoi Reveal (Lib1)",
+      "spatial": true,
+      "transition_type": "lib1_voronoi_reveal"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Motion Blur Down",
+      "spatial": true,
+      "transition_type": "motion_blur_down"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Motion Blur Left",
+      "spatial": true,
+      "transition_type": "motion_blur_left"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Motion Blur Right",
+      "spatial": true,
+      "transition_type": "motion_blur_right"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Motion Blur Up",
+      "spatial": true,
+      "transition_type": "motion_blur_up"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "RGB Split Left",
+      "spatial": true,
+      "transition_type": "rgb_split_left"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "RGB Split Right",
+      "spatial": true,
+      "transition_type": "rgb_split_right"
+    },
+    {
+      "category": "Motion",
+      "label": "Slide Down",
+      "spatial": true,
+      "transition_type": "slide_down"
+    },
+    {
+      "category": "Motion",
+      "label": "Slide Left",
+      "spatial": true,
+      "transition_type": "slide_left"
+    },
+    {
+      "category": "Motion",
+      "label": "Slide Right",
+      "spatial": true,
+      "transition_type": "slide_right"
+    },
+    {
+      "category": "Motion",
+      "label": "Slide Up",
+      "spatial": true,
+      "transition_type": "slide_up"
+    },
+    {
+      "category": "Dissolve",
+      "label": "Smooth Cut",
+      "spatial": false,
+      "transition_type": "smooth_cut"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Spin Blur CCW",
+      "spatial": true,
+      "transition_type": "spin_blur_ccw"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Spin Blur CW",
+      "spatial": true,
+      "transition_type": "spin_blur_cw"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Whip Pan Left",
+      "spatial": true,
+      "transition_type": "whip_pan_left"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Whip Pan Right",
+      "spatial": true,
+      "transition_type": "whip_pan_right"
+    },
+    {
+      "category": "Motion",
+      "label": "Wipe",
+      "spatial": true,
+      "transition_type": "wipe"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Zoom Blur In",
+      "spatial": true,
+      "transition_type": "zoom_blur_in"
+    },
+    {
+      "category": "Motion Blur",
+      "label": "Zoom Blur Out",
+      "spatial": true,
+      "transition_type": "zoom_blur_out"
+    }
+  ]
+}

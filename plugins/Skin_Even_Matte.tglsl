@@ -1,0 +1,192 @@
+// --- Topos Plugin Metadata ---
+// @name Skin Even Matte
+// @i18n_name Skin_Even_Matte
+// @author Topos Team
+// @version 1.0
+// @description Skin-tone selective matte smoothing via YCbCr skin detection and skin-gated frequency separation with texture keep-back
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost medium
+// @param slider radius "Radius" 0.4 0.0 1.0
+// @param slider skin_threshold "Skin Threshold" 0.7 0.0 1.0
+// @param slider texture_keep "Texture Keep" 0.5 0.0 1.0
+// -----------------------------
+//
+// Skin Even Matte - 哑光肤色平滑
+//
+// 与 bilateral_skin_smooth（边缘保持双边滤波）不同的算法路径：
+//   1. 肤色检测：BT.601 YCbCr 色度平面上的软边肤色窗口（经典公开肤色区间
+//      的近似），skin_threshold 缩放宽窄；
+//   2. 肤色门控低通：固定 17 tap（中心 + 8×2 环）圆盘低通，每个采样按
+//      其自身肤色隶属度加权——发丝/背景/衣物色度出局，不污染肤色均值；
+//   3. 频率分离回加：result = low + (original - low) * texture_keep，
+//      毛孔/纹理作为高频差值按可调比例回加（哑光 = 少回加）；
+//   4. 中心像素肤色 matte 控制效果落点，非肤色区域严格直通。
+// 全程在 u_input_tex 原生编码域运算（HighPass_Retouch 频率分离同款惯例），
+// 零 pow / 零三角函数（旋转用 const mat2）。
+//
+// 参数 ABI：本文件声明的 @param 变量由引擎以裸名注入并重命名为
+// u_P<n>_<name>；除 u_input_tex / u_tex_size / u_aspect_ratio 外禁止引用
+// 任何未声明的 u_* 标识符（P0-COL-01：会导致整层被渲染循环静默跳过）。
+
+// ====== SECTION 1: CONSTANTS ======
+
+// 红线 #2：for 循环上限必须是编译期 const int。本效果为固定次数采样核
+//（1 中心 + NUM_RINGS x NUM_RING_TAPS = 17 tap），不随半径增减 tap 数，
+// 半径只改变采样步长。
+const int NUM_RING_TAPS = 8; // 每环固定采样数（45 度环）
+const int NUM_RINGS = 2;     // 环数（r 与 2r），核形状固定
+
+// 8 个固定单位圆方向（45 度步进）。const 表 + const 旋转矩阵 = 每 tap
+// 零三角函数（对照：按角度现算需要 2 x 16 次 cos/sin）。
+const vec2 RING_DIRS[8] = vec2[8](
+    vec2( 1.00000000,  0.00000000),
+    vec2( 0.70710678,  0.70710678),
+    vec2( 0.00000000,  1.00000000),
+    vec2(-0.70710678,  0.70710678),
+    vec2(-1.00000000,  0.00000000),
+    vec2(-0.70710678, -0.70710678),
+    vec2( 0.00000000, -1.00000000),
+    vec2( 0.70710678, -0.70710678)
+);
+
+// 22.5 度旋转矩阵（列主序）：把第 2 环采样相位错开到第 1 环的角度间隙，
+// 16 tap 获得 16 个不同方向，圆盘覆盖接近 32 tap 未错位的方环。
+const mat2 ROT_HALF_STEP = mat2(0.92387953, 0.38268343,
+                                -0.38268343, 0.92387953);
+
+// BT.601 YCbCr 色度行向量（开放标准；色度以 0.5 为中心对应 [0,1] 编码域）。
+// 直接作用于纹理原生编码值——YCbCr 肤色区间的经典定义即基于伽马编码 RGB。
+const vec3 CB_WEIGHTS = vec3(-0.16873589, -0.33126411, 0.5);
+const vec3 CR_WEIGHTS = vec3(0.5, -0.41868759, -0.08131241);
+
+// 经典公开肤色窗口（8 位 77-127 / 133-173 换算到 [0,1]）：
+// Cb 中心 102/255、半宽 25/255；Cr 中心 153/255、半宽 20/255。
+// skin_threshold 对半宽做 0.4x-1.0x 缩放（窄 = 严格只选典型肤色）。
+const float CB_CENTER = 0.40000000;
+const float CB_HALF_BASE = 0.09803922;
+const float CR_CENTER = 0.60000000;
+const float CR_HALF_BASE = 0.07843137;
+
+// 窗口软边宽度（[0,1] 色度尺度，约等于 8 位下 5 个码值）：避免硬边界的
+// 抖动/带状伪影；恒 > 0 保证每条 smoothstep 边缘严格递增（防 NaN）。
+const float WINDOW_FEATHER = 0.02;
+
+// ====== SECTION 2: SKIN DETECTION (YCbCr SOFT WINDOW) ======
+
+// 单通道软边窗口隶属度：x 落在 [center-half, center+half] 内为 1，
+// 两侧在 WINDOW_FEATHER 内 smoothstep 平滑衰减到 0。
+// HDR 安全：编码值可为负或远大于 1——窗口外的色度自然得 0 权重，
+// 不对输入做任何 clamp。
+float chromaWindow(float x, float center, float half_width) {
+    float lo = center - half_width;
+    float hi = center + half_width;
+    return smoothstep(lo, lo + WINDOW_FEATHER, x)
+         * (1.0 - smoothstep(hi - WINDOW_FEATHER, hi, x));
+}
+
+// 肤色隶属度 = Cb 窗口 x Cr 窗口（各自独立判定的交集）。
+// skin_half 为已按 skin_threshold 缩放的 (Cb, Cr) 半宽。
+float skinMembership(vec3 encoded_rgb, vec2 skin_half) {
+    float cb = dot(encoded_rgb, CB_WEIGHTS) + 0.5;
+    float cr = dot(encoded_rgb, CR_WEIGHTS) + 0.5;
+    return chromaWindow(cb, CB_CENTER, skin_half.x)
+         * chromaWindow(cr, CR_CENTER, skin_half.y);
+}
+
+// ====== SECTION 3: SKIN-GATED LOW PASS (FIXED 17 TAPS) ======
+
+// 肤色门控低通：固定双环圆盘核，每个采样的权重 = 环衰减 x 该采样自身的
+// 肤色隶属度。发丝/背景/衣物（色度窗外）权重趋 0，不拉扯肤色均值；
+// 中心 tap 带基线权重 1.0（保证 sum_weight >= 1.0，邻域无肤色时
+// low -> center、detail -> 0，边界像素自然无效果）。
+// 红线 #4：分母下限守护；步长 = 半径像素数 x 1.0 / 物理分辨率。
+vec3 skinGatedLowPass(vec2 uv, vec2 tex_offset, float radius_pix, vec2 skin_half) {
+    vec3 center = texture(u_input_tex, uv).rgb;
+    float center_gate = skinMembership(center, skin_half);
+
+    vec3 accum = center * (1.0 + center_gate);
+    float sum_weight = 1.0 + center_gate;
+
+    for (int ring = 0; ring < NUM_RINGS; ring++) {
+        // 环半径 r、2r；环权重 1.0、0.5（近似高斯同心衰减）
+        float ring_radius = radius_pix * (1.0 + float(ring));
+        float ring_weight = 1.0 - 0.5 * float(ring);
+
+        for (int t = 0; t < NUM_RING_TAPS; t++) {
+            // 第 2 环旋转 22.5 度错开相位（const mat2，零三角函数）
+            vec2 dir = RING_DIRS[t];
+            vec2 staggered = ROT_HALF_STEP * dir;
+            dir = mix(dir, staggered, float(ring));
+
+            vec3 sample_col = texture(u_input_tex, uv + dir * ring_radius * tex_offset).rgb;
+            float w = ring_weight * skinMembership(sample_col, skin_half);
+            accum += sample_col * w;
+            sum_weight += w;
+        }
+    }
+
+    return accum / max(sum_weight, 0.001);
+}
+
+// ====== SECTION 4: MAIN ======
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出（红线 #5）：texture_keep = 1.0 时频率分离精确重建原值，
+    // 全画面严格直通，近乎零开销。
+    if (texture_keep > 0.999) return color;
+
+    // 分辨率无关：实时取物理分辨率（优于缓存 u_tex_size）
+    vec2 current_size = vec2(textureSize(u_input_tex, 0));
+    vec2 tex_offset = 1.0 / current_size;
+
+    // Delta 输出基线：效果基于未调色的 u_input_tex 计算，
+    // 最后以增量形式应用到已调色的 color 上（空间采样类核心惯例）。
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    // ---- 参数映射（分辨率无关） ----
+    // Radius：图像宽度的 0.3%-1.5%（4K 下第 1 环约 12-58 px、第 2 环
+    // 23-115 px）。小半径档刻意压低：肤色斑块/泛红的空间尺度远大于毛孔，
+    // 低通只需覆盖斑块即可保住毛孔层高频。
+    float radius_ratio = 0.003 + radius * 0.012;
+    float radius_pix = max(2.0, current_size.x * radius_ratio);
+
+    // Skin Threshold：肤色窗口半宽缩放 0.4x-1.0x。
+    // 低 = 严格（只选典型饱和肤色）；高 = 宽容（纳入偏亮/偏灰的肤色，
+    // 极端 1.0 接近经典全窗口）。
+    float half_scale = mix(0.4, 1.0, skin_threshold);
+    vec2 skin_half = vec2(max(CB_HALF_BASE * half_scale, 0.01),
+                          max(CR_HALF_BASE * half_scale, 0.01));
+
+    // ---- 肤色门控低通（固定 17 tap） ----
+    vec3 low_freq = skinGatedLowPass(uv, tex_offset, radius_pix, skin_half);
+
+    // ---- 频率分离 + 纹理回加 ----
+    // detail = original - low：毛孔/纹理/斑点作为高频差值（可为负，
+    // 不 clamp 到 [0,1]——HDR 红线 #3）。texture_keep 缩放回加比例：
+    // 哑光肌 = 低回加，保纹理 = 高回加。
+    vec3 detail = original_color - low_freq;
+    // 效果增量限幅（红线 #3 允许的 clamp 类别）：只在 matte 边界处压制
+    // 极端增量防 halo，不触碰基色；正常肤色内部 detail 远小于此界。
+    detail = clamp(detail, -0.45, 0.45);
+    vec3 result = low_freq + detail * texture_keep;
+
+    // ---- 肤色 matte 落点 ----
+    // 中心像素隶属度经 smoothstep 整形：窗口内满权重、窗外干净直通，
+    // 过渡带收拢到 0.15-0.85。
+    float matte = skinMembership(original_color, skin_half);
+    matte = smoothstep(0.15, 0.85, matte);
+
+    vec3 final_color = mix(original_color, result, matte);
+
+    // 增量应用到已调色画面；不 clamp——显示域压缩归 soft-clip 阶段
+    //（HDR 红线 #3）。
+    return color + (final_color - original_color);
+}

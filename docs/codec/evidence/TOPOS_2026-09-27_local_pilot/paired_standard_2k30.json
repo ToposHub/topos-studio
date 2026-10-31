@@ -1,0 +1,1184 @@
+{
+  "status": "measurement_only_no_release_verdict",
+  "created_at": "2026-09-27T15:16:13.679421+00:00",
+  "measurement_script_sha256": "37962f6b02a7ef08f04266c9f67301a4c1aa1e87e79bf8d7ab31c7ee4fa42005",
+  "source_origin": "decoded-lossy-source",
+  "source": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_real_source/source_422p10le_30f.yuv",
+  "source_sha256": "506862a3897c379bd8609b3df92fe850796e9f647355cda3b1151daf9c2c3e2a",
+  "source_parent": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_prores4444XQ.mov",
+  "source_parent_sha256": "0880187374eeb2c61deaa64cb350398da4db88a31fd97e13f7a9992394565516",
+  "format": "yuv422p10le",
+  "tier": "standard",
+  "width": 1920,
+  "height": 1080,
+  "fps": 25,
+  "frames": 30,
+  "native_library": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.0.1.0.dylib",
+  "native_library_sha256": "d052edae7ea12f50e189b7621268129ed95fa157af69534c533df6f1b689149c",
+  "topos": {
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_real_source/standard-match/topos_standard.mov",
+    "sha256": "e816708c958d3ac4df4a5f5d1f564d2c543f2ab2f04012adaf8ffdb1a8da184e",
+    "video_bytes": 19247442,
+    "encode_wall_s": 0.41887558000235003,
+    "slice_threads": 8,
+    "crf_override": null,
+    "bitrate_target_bps": 129824907,
+    "encoder": "ToposVideoEncoder"
+  },
+  "prores": {
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_real_source/standard-match/prores_standard.mov",
+    "sha256": "5fce9a57d2ad30b7003b01e4c563ce896b363b4552546e579d478cdf8ddde4ed",
+    "video_bytes": 19473736,
+    "encode_wall_s": 1.2647391890022845,
+    "encoder": "ffmpeg/prores_ks",
+    "command": [
+      "/usr/local/bin/ffmpeg",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "rawvideo",
+      "-pixel_format",
+      "yuv422p10le",
+      "-video_size",
+      "1920x1080",
+      "-framerate",
+      "25",
+      "-i",
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_real_source/source_422p10le_30f.yuv",
+      "-frames:v",
+      "30",
+      "-c:v",
+      "prores_ks",
+      "-profile:v",
+      "2",
+      "-pix_fmt",
+      "yuv422p10le",
+      "-color_primaries",
+      "bt709",
+      "-color_trc",
+      "bt709",
+      "-colorspace",
+      "bt709",
+      "-color_range",
+      "tv",
+      "-y",
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_real_source/standard-match/prores_standard.mov"
+    ]
+  },
+  "topos_over_prores_video_bytes": 0.9883795282014709,
+  "rate_matched_2pct": true,
+  "per_frame": [
+    {
+      "frame": 0,
+      "topos": {
+        "y": {
+          "psnr_db": 50.27539614102192,
+          "mae_codes": 2.446228298611111,
+          "max_abs_codes": 25
+        },
+        "u": {
+          "psnr_db": 55.485740558104396,
+          "mae_codes": 1.1512837577160493,
+          "max_abs_codes": 19
+        },
+        "v": {
+          "psnr_db": 53.806672235871076,
+          "mae_codes": 1.4518315972222222,
+          "max_abs_codes": 20
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.89910503974998,
+          "mae_codes": 9.86943962191358,
+          "max_abs_codes": 100
+        },
+        "u": {
+          "psnr_db": 40.79880712038971,
+          "mae_codes": 6.510341435185185,
+          "max_abs_codes": 71
+        },
+        "v": {
+          "psnr_db": 48.5086170878952,
+          "mae_codes": 2.2192814429012344,
+          "max_abs_codes": 65
+        }
+      }
+    },
+    {
+      "frame": 1,
+      "topos": {
+        "y": {
+          "psnr_db": 50.333480877229704,
+          "mae_codes": 2.428136574074074,
+          "max_abs_codes": 27
+        },
+        "u": {
+          "psnr_db": 55.5699938816879,
+          "mae_codes": 1.1419338348765433,
+          "max_abs_codes": 16
+        },
+        "v": {
+          "psnr_db": 53.92843555098881,
+          "mae_codes": 1.434507137345679,
+          "max_abs_codes": 20
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.906208461275554,
+          "mae_codes": 9.855264756944445,
+          "max_abs_codes": 99
+        },
+        "u": {
+          "psnr_db": 40.80501640355414,
+          "mae_codes": 6.507196180555556,
+          "max_abs_codes": 69
+        },
+        "v": {
+          "psnr_db": 48.607952155204785,
+          "mae_codes": 2.187282986111111,
+          "max_abs_codes": 65
+        }
+      }
+    },
+    {
+      "frame": 2,
+      "topos": {
+        "y": {
+          "psnr_db": 50.33588414949847,
+          "mae_codes": 2.4262528935185186,
+          "max_abs_codes": 26
+        },
+        "u": {
+          "psnr_db": 55.62077254828451,
+          "mae_codes": 1.1336168981481483,
+          "max_abs_codes": 17
+        },
+        "v": {
+          "psnr_db": 53.98536306135539,
+          "mae_codes": 1.423101851851852,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.911015931797515,
+          "mae_codes": 9.855115258487654,
+          "max_abs_codes": 90
+        },
+        "u": {
+          "psnr_db": 40.81029716156521,
+          "mae_codes": 6.504519675925926,
+          "max_abs_codes": 70
+        },
+        "v": {
+          "psnr_db": 48.64694944191835,
+          "mae_codes": 2.1755015432098768,
+          "max_abs_codes": 73
+        }
+      }
+    },
+    {
+      "frame": 3,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34834635614604,
+          "mae_codes": 2.422661072530864,
+          "max_abs_codes": 23
+        },
+        "u": {
+          "psnr_db": 55.65257673511618,
+          "mae_codes": 1.1280025077160494,
+          "max_abs_codes": 21
+        },
+        "v": {
+          "psnr_db": 54.029925069756416,
+          "mae_codes": 1.4146595293209876,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.91748527153506,
+          "mae_codes": 9.840600405092593,
+          "max_abs_codes": 106
+        },
+        "u": {
+          "psnr_db": 40.817225894486825,
+          "mae_codes": 6.494264081790123,
+          "max_abs_codes": 58
+        },
+        "v": {
+          "psnr_db": 48.67652050056204,
+          "mae_codes": 2.164739583333333,
+          "max_abs_codes": 79
+        }
+      }
+    },
+    {
+      "frame": 4,
+      "topos": {
+        "y": {
+          "psnr_db": 50.345352371580546,
+          "mae_codes": 2.4243364197530863,
+          "max_abs_codes": 24
+        },
+        "u": {
+          "psnr_db": 55.66722257221557,
+          "mae_codes": 1.1276244212962963,
+          "max_abs_codes": 17
+        },
+        "v": {
+          "psnr_db": 54.017450607032806,
+          "mae_codes": 1.4169338348765432,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.91479635292983,
+          "mae_codes": 9.847857349537037,
+          "max_abs_codes": 106
+        },
+        "u": {
+          "psnr_db": 40.81516401463598,
+          "mae_codes": 6.496212384259259,
+          "max_abs_codes": 78
+        },
+        "v": {
+          "psnr_db": 48.69691466380627,
+          "mae_codes": 2.162770061728395,
+          "max_abs_codes": 72
+        }
+      }
+    },
+    {
+      "frame": 5,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34806924136369,
+          "mae_codes": 2.4236294367283953,
+          "max_abs_codes": 25
+        },
+        "u": {
+          "psnr_db": 55.676791108137124,
+          "mae_codes": 1.128322723765432,
+          "max_abs_codes": 18
+        },
+        "v": {
+          "psnr_db": 54.020253733723266,
+          "mae_codes": 1.4165364583333333,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.919006466198134,
+          "mae_codes": 9.844438175154322,
+          "max_abs_codes": 96
+        },
+        "u": {
+          "psnr_db": 40.82490540161602,
+          "mae_codes": 6.490056905864198,
+          "max_abs_codes": 64
+        },
+        "v": {
+          "psnr_db": 48.69969497545374,
+          "mae_codes": 2.161819058641975,
+          "max_abs_codes": 64
+        }
+      }
+    },
+    {
+      "frame": 6,
+      "topos": {
+        "y": {
+          "psnr_db": 50.346057111821025,
+          "mae_codes": 2.423804976851852,
+          "max_abs_codes": 23
+        },
+        "u": {
+          "psnr_db": 55.69234129109623,
+          "mae_codes": 1.1238744212962963,
+          "max_abs_codes": 18
+        },
+        "v": {
+          "psnr_db": 54.05218283754043,
+          "mae_codes": 1.4127536651234567,
+          "max_abs_codes": 20
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92193818591542,
+          "mae_codes": 9.842453221450617,
+          "max_abs_codes": 93
+        },
+        "u": {
+          "psnr_db": 40.82432959881971,
+          "mae_codes": 6.491162229938271,
+          "max_abs_codes": 70
+        },
+        "v": {
+          "psnr_db": 48.69570895229528,
+          "mae_codes": 2.1578134645061726,
+          "max_abs_codes": 63
+        }
+      }
+    },
+    {
+      "frame": 7,
+      "topos": {
+        "y": {
+          "psnr_db": 50.339696272526155,
+          "mae_codes": 2.4258203125,
+          "max_abs_codes": 28
+        },
+        "u": {
+          "psnr_db": 55.724230247600076,
+          "mae_codes": 1.1171797839506172,
+          "max_abs_codes": 18
+        },
+        "v": {
+          "psnr_db": 54.085291631019004,
+          "mae_codes": 1.403677662037037,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92320885921807,
+          "mae_codes": 9.835473090277778,
+          "max_abs_codes": 90
+        },
+        "u": {
+          "psnr_db": 40.828080947356035,
+          "mae_codes": 6.486375385802469,
+          "max_abs_codes": 68
+        },
+        "v": {
+          "psnr_db": 48.72614783702191,
+          "mae_codes": 2.147397762345679,
+          "max_abs_codes": 72
+        }
+      }
+    },
+    {
+      "frame": 8,
+      "topos": {
+        "y": {
+          "psnr_db": 51.61762382440797,
+          "mae_codes": 2.093315007716049,
+          "max_abs_codes": 21
+        },
+        "u": {
+          "psnr_db": 56.68626544193021,
+          "mae_codes": 1.0027729552469136,
+          "max_abs_codes": 16
+        },
+        "v": {
+          "psnr_db": 55.13773612772748,
+          "mae_codes": 1.2464226466049382,
+          "max_abs_codes": 17
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92812919375284,
+          "mae_codes": 9.826042148919752,
+          "max_abs_codes": 94
+        },
+        "u": {
+          "psnr_db": 40.832496260833786,
+          "mae_codes": 6.478829089506172,
+          "max_abs_codes": 65
+        },
+        "v": {
+          "psnr_db": 48.73869123892493,
+          "mae_codes": 2.141587577160494,
+          "max_abs_codes": 72
+        }
+      }
+    },
+    {
+      "frame": 9,
+      "topos": {
+        "y": {
+          "psnr_db": 50.3507960564606,
+          "mae_codes": 2.4219666280864196,
+          "max_abs_codes": 25
+        },
+        "u": {
+          "psnr_db": 55.76234309356959,
+          "mae_codes": 1.1104832175925925,
+          "max_abs_codes": 21
+        },
+        "v": {
+          "psnr_db": 54.1321482009426,
+          "mae_codes": 1.393468364197531,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.924937571360964,
+          "mae_codes": 9.829101080246913,
+          "max_abs_codes": 101
+        },
+        "u": {
+          "psnr_db": 40.8270801837103,
+          "mae_codes": 6.480616319444445,
+          "max_abs_codes": 60
+        },
+        "v": {
+          "psnr_db": 48.719087647047076,
+          "mae_codes": 2.1414824459876542,
+          "max_abs_codes": 83
+        }
+      }
+    },
+    {
+      "frame": 10,
+      "topos": {
+        "y": {
+          "psnr_db": 50.348330093053036,
+          "mae_codes": 2.4240986689814816,
+          "max_abs_codes": 30
+        },
+        "u": {
+          "psnr_db": 55.72975033190271,
+          "mae_codes": 1.1164284336419754,
+          "max_abs_codes": 19
+        },
+        "v": {
+          "psnr_db": 54.12439928201564,
+          "mae_codes": 1.395714699074074,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.926188641038856,
+          "mae_codes": 9.823117766203703,
+          "max_abs_codes": 93
+        },
+        "u": {
+          "psnr_db": 40.831854977721676,
+          "mae_codes": 6.4788194444444445,
+          "max_abs_codes": 66
+        },
+        "v": {
+          "psnr_db": 48.7267992256229,
+          "mae_codes": 2.142492283950617,
+          "max_abs_codes": 79
+        }
+      }
+    },
+    {
+      "frame": 11,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34395731453364,
+          "mae_codes": 2.4249985532407408,
+          "max_abs_codes": 26
+        },
+        "u": {
+          "psnr_db": 55.67620983446524,
+          "mae_codes": 1.1230189043209877,
+          "max_abs_codes": 23
+        },
+        "v": {
+          "psnr_db": 54.06535056064258,
+          "mae_codes": 1.4054494598765432,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.91746639578379,
+          "mae_codes": 9.833077256944444,
+          "max_abs_codes": 97
+        },
+        "u": {
+          "psnr_db": 40.82007021699525,
+          "mae_codes": 6.4847501929012346,
+          "max_abs_codes": 60
+        },
+        "v": {
+          "psnr_db": 48.64834282483336,
+          "mae_codes": 2.163779899691358,
+          "max_abs_codes": 77
+        }
+      }
+    },
+    {
+      "frame": 12,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34165977306689,
+          "mae_codes": 2.425047260802469,
+          "max_abs_codes": 22
+        },
+        "u": {
+          "psnr_db": 55.62163561813126,
+          "mae_codes": 1.132884837962963,
+          "max_abs_codes": 23
+        },
+        "v": {
+          "psnr_db": 54.00524238087841,
+          "mae_codes": 1.4158680555555556,
+          "max_abs_codes": 23
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.91834512044783,
+          "mae_codes": 9.832178337191358,
+          "max_abs_codes": 94
+        },
+        "u": {
+          "psnr_db": 40.81296222477135,
+          "mae_codes": 6.4930362654320986,
+          "max_abs_codes": 61
+        },
+        "v": {
+          "psnr_db": 48.6115353919,
+          "mae_codes": 2.1722559799382717,
+          "max_abs_codes": 71
+        }
+      }
+    },
+    {
+      "frame": 13,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34531033349546,
+          "mae_codes": 2.424921875,
+          "max_abs_codes": 21
+        },
+        "u": {
+          "psnr_db": 55.623170875157975,
+          "mae_codes": 1.133244598765432,
+          "max_abs_codes": 17
+        },
+        "v": {
+          "psnr_db": 53.98540614822788,
+          "mae_codes": 1.4192756558641975,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.917248651521405,
+          "mae_codes": 9.830716145833334,
+          "max_abs_codes": 100
+        },
+        "u": {
+          "psnr_db": 40.82041487702776,
+          "mae_codes": 6.486695601851852,
+          "max_abs_codes": 55
+        },
+        "v": {
+          "psnr_db": 48.61210351776251,
+          "mae_codes": 2.1766078317901236,
+          "max_abs_codes": 69
+        }
+      }
+    },
+    {
+      "frame": 14,
+      "topos": {
+        "y": {
+          "psnr_db": 50.33724806510758,
+          "mae_codes": 2.4268446180555556,
+          "max_abs_codes": 28
+        },
+        "u": {
+          "psnr_db": 55.62150563555973,
+          "mae_codes": 1.1347588734567902,
+          "max_abs_codes": 17
+        },
+        "v": {
+          "psnr_db": 53.968579711777835,
+          "mae_codes": 1.4245466820987653,
+          "max_abs_codes": 20
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.90896308935804,
+          "mae_codes": 9.843971836419753,
+          "max_abs_codes": 100
+        },
+        "u": {
+          "psnr_db": 40.821563006411495,
+          "mae_codes": 6.488530092592592,
+          "max_abs_codes": 61
+        },
+        "v": {
+          "psnr_db": 48.60771802545223,
+          "mae_codes": 2.1812509645061726,
+          "max_abs_codes": 74
+        }
+      }
+    },
+    {
+      "frame": 15,
+      "topos": {
+        "y": {
+          "psnr_db": 50.335854527417766,
+          "mae_codes": 2.4269728973765434,
+          "max_abs_codes": 23
+        },
+        "u": {
+          "psnr_db": 55.60387287692015,
+          "mae_codes": 1.1371412037037036,
+          "max_abs_codes": 17
+        },
+        "v": {
+          "psnr_db": 53.957224636938086,
+          "mae_codes": 1.4255854552469136,
+          "max_abs_codes": 20
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.912539619559254,
+          "mae_codes": 9.835470196759259,
+          "max_abs_codes": 98
+        },
+        "u": {
+          "psnr_db": 40.81759960872846,
+          "mae_codes": 6.48951774691358,
+          "max_abs_codes": 57
+        },
+        "v": {
+          "psnr_db": 48.60082093017374,
+          "mae_codes": 2.185048225308642,
+          "max_abs_codes": 71
+        }
+      }
+    },
+    {
+      "frame": 16,
+      "topos": {
+        "y": {
+          "psnr_db": 50.33072279573483,
+          "mae_codes": 2.4285768711419755,
+          "max_abs_codes": 24
+        },
+        "u": {
+          "psnr_db": 55.62480606050258,
+          "mae_codes": 1.1354234182098766,
+          "max_abs_codes": 19
+        },
+        "v": {
+          "psnr_db": 53.97445980259452,
+          "mae_codes": 1.4241734182098766,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.91511392676815,
+          "mae_codes": 9.832363522376543,
+          "max_abs_codes": 109
+        },
+        "u": {
+          "psnr_db": 40.83068914964109,
+          "mae_codes": 6.48162712191358,
+          "max_abs_codes": 60
+        },
+        "v": {
+          "psnr_db": 48.649654238489354,
+          "mae_codes": 2.174009452160494,
+          "max_abs_codes": 65
+        }
+      }
+    },
+    {
+      "frame": 17,
+      "topos": {
+        "y": {
+          "psnr_db": 51.60850834948394,
+          "mae_codes": 2.0969873649691357,
+          "max_abs_codes": 18
+        },
+        "u": {
+          "psnr_db": 56.59974871263391,
+          "mae_codes": 1.0161429398148147,
+          "max_abs_codes": 15
+        },
+        "v": {
+          "psnr_db": 55.01479329724464,
+          "mae_codes": 1.2669212962962964,
+          "max_abs_codes": 16
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.926712841327834,
+          "mae_codes": 9.821682098765432,
+          "max_abs_codes": 95
+        },
+        "u": {
+          "psnr_db": 40.83868086166676,
+          "mae_codes": 6.475844907407407,
+          "max_abs_codes": 56
+        },
+        "v": {
+          "psnr_db": 48.70451743251172,
+          "mae_codes": 2.159566936728395,
+          "max_abs_codes": 70
+        }
+      }
+    },
+    {
+      "frame": 18,
+      "topos": {
+        "y": {
+          "psnr_db": 50.33918405983599,
+          "mae_codes": 2.425920138888889,
+          "max_abs_codes": 25
+        },
+        "u": {
+          "psnr_db": 55.71620132568427,
+          "mae_codes": 1.1202912808641976,
+          "max_abs_codes": 22
+        },
+        "v": {
+          "psnr_db": 54.07980645997882,
+          "mae_codes": 1.404008487654321,
+          "max_abs_codes": 20
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92731978167751,
+          "mae_codes": 9.8219921875,
+          "max_abs_codes": 87
+        },
+        "u": {
+          "psnr_db": 40.83662779627791,
+          "mae_codes": 6.473852237654321,
+          "max_abs_codes": 55
+        },
+        "v": {
+          "psnr_db": 48.70085223300026,
+          "mae_codes": 2.1552912808641977,
+          "max_abs_codes": 76
+        }
+      }
+    },
+    {
+      "frame": 19,
+      "topos": {
+        "y": {
+          "psnr_db": 50.348465837536544,
+          "mae_codes": 2.4229701967592594,
+          "max_abs_codes": 20
+        },
+        "u": {
+          "psnr_db": 55.762186202631625,
+          "mae_codes": 1.1137721836419754,
+          "max_abs_codes": 19
+        },
+        "v": {
+          "psnr_db": 54.13707003171922,
+          "mae_codes": 1.3947087191358025,
+          "max_abs_codes": 21
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92316767799341,
+          "mae_codes": 9.82259162808642,
+          "max_abs_codes": 95
+        },
+        "u": {
+          "psnr_db": 40.83405671760369,
+          "mae_codes": 6.475594135802469,
+          "max_abs_codes": 59
+        },
+        "v": {
+          "psnr_db": 48.7431430449029,
+          "mae_codes": 2.1410426311728394,
+          "max_abs_codes": 70
+        }
+      }
+    },
+    {
+      "frame": 20,
+      "topos": {
+        "y": {
+          "psnr_db": 51.62215923513912,
+          "mae_codes": 2.093002989969136,
+          "max_abs_codes": 24
+        },
+        "u": {
+          "psnr_db": 56.70802408420432,
+          "mae_codes": 1.0016329089506173,
+          "max_abs_codes": 19
+        },
+        "v": {
+          "psnr_db": 55.15619705452231,
+          "mae_codes": 1.241640625,
+          "max_abs_codes": 17
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.93218691201944,
+          "mae_codes": 9.813798707561729,
+          "max_abs_codes": 96
+        },
+        "u": {
+          "psnr_db": 40.83833363242999,
+          "mae_codes": 6.472604166666667,
+          "max_abs_codes": 56
+        },
+        "v": {
+          "psnr_db": 48.742635722604206,
+          "mae_codes": 2.1385841049382717,
+          "max_abs_codes": 72
+        }
+      }
+    },
+    {
+      "frame": 21,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34441722869345,
+          "mae_codes": 2.4244010416666666,
+          "max_abs_codes": 21
+        },
+        "u": {
+          "psnr_db": 55.71770319194073,
+          "mae_codes": 1.1186265432098765,
+          "max_abs_codes": 21
+        },
+        "v": {
+          "psnr_db": 54.110663774972075,
+          "mae_codes": 1.3971469907407408,
+          "max_abs_codes": 20
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.925817099209866,
+          "mae_codes": 9.82246913580247,
+          "max_abs_codes": 98
+        },
+        "u": {
+          "psnr_db": 40.82965822957709,
+          "mae_codes": 6.476903935185185,
+          "max_abs_codes": 57
+        },
+        "v": {
+          "psnr_db": 48.67613893466523,
+          "mae_codes": 2.1486005015432097,
+          "max_abs_codes": 70
+        }
+      }
+    },
+    {
+      "frame": 22,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34047217232871,
+          "mae_codes": 2.4254301697530862,
+          "max_abs_codes": 20
+        },
+        "u": {
+          "psnr_db": 55.66411836411133,
+          "mae_codes": 1.1276109182098766,
+          "max_abs_codes": 19
+        },
+        "v": {
+          "psnr_db": 54.03479213630985,
+          "mae_codes": 1.4105787037037036,
+          "max_abs_codes": 21
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92061894682485,
+          "mae_codes": 9.828944830246913,
+          "max_abs_codes": 105
+        },
+        "u": {
+          "psnr_db": 40.82624483284306,
+          "mae_codes": 6.482067901234568,
+          "max_abs_codes": 59
+        },
+        "v": {
+          "psnr_db": 48.68079881193307,
+          "mae_codes": 2.156221064814815,
+          "max_abs_codes": 73
+        }
+      }
+    },
+    {
+      "frame": 23,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34711248563212,
+          "mae_codes": 2.423019386574074,
+          "max_abs_codes": 24
+        },
+        "u": {
+          "psnr_db": 55.68698416598479,
+          "mae_codes": 1.1255574845679013,
+          "max_abs_codes": 21
+        },
+        "v": {
+          "psnr_db": 54.03985846066057,
+          "mae_codes": 1.4098128858024692,
+          "max_abs_codes": 21
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92974535193129,
+          "mae_codes": 9.81407069830247,
+          "max_abs_codes": 100
+        },
+        "u": {
+          "psnr_db": 40.83163015352197,
+          "mae_codes": 6.476711033950617,
+          "max_abs_codes": 56
+        },
+        "v": {
+          "psnr_db": 48.69866527553006,
+          "mae_codes": 2.1574180169753086,
+          "max_abs_codes": 70
+        }
+      }
+    },
+    {
+      "frame": 24,
+      "topos": {
+        "y": {
+          "psnr_db": 51.60971222343662,
+          "mae_codes": 2.0960175540123456,
+          "max_abs_codes": 25
+        },
+        "u": {
+          "psnr_db": 56.630853836272536,
+          "mae_codes": 1.0116271219135802,
+          "max_abs_codes": 15
+        },
+        "v": {
+          "psnr_db": 55.04991692717348,
+          "mae_codes": 1.257920524691358,
+          "max_abs_codes": 16
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92465911302484,
+          "mae_codes": 9.824396701388888,
+          "max_abs_codes": 87
+        },
+        "u": {
+          "psnr_db": 40.826927510650094,
+          "mae_codes": 6.480019290123457,
+          "max_abs_codes": 57
+        },
+        "v": {
+          "psnr_db": 48.668978916519876,
+          "mae_codes": 2.159075038580247,
+          "max_abs_codes": 70
+        }
+      }
+    },
+    {
+      "frame": 25,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34098064043488,
+          "mae_codes": 2.4245664544753085,
+          "max_abs_codes": 28
+        },
+        "u": {
+          "psnr_db": 55.702762907134236,
+          "mae_codes": 1.1228443287037038,
+          "max_abs_codes": 19
+        },
+        "v": {
+          "psnr_db": 54.008843519572196,
+          "mae_codes": 1.4163850308641974,
+          "max_abs_codes": 20
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.922829787931825,
+          "mae_codes": 9.822063078703703,
+          "max_abs_codes": 94
+        },
+        "u": {
+          "psnr_db": 40.82665510449655,
+          "mae_codes": 6.48076774691358,
+          "max_abs_codes": 58
+        },
+        "v": {
+          "psnr_db": 48.708759206870305,
+          "mae_codes": 2.158201195987654,
+          "max_abs_codes": 81
+        }
+      }
+    },
+    {
+      "frame": 26,
+      "topos": {
+        "y": {
+          "psnr_db": 50.350782170787234,
+          "mae_codes": 2.4214747299382715,
+          "max_abs_codes": 23
+        },
+        "u": {
+          "psnr_db": 55.702633449661114,
+          "mae_codes": 1.1222511574074074,
+          "max_abs_codes": 19
+        },
+        "v": {
+          "psnr_db": 54.04148629293353,
+          "mae_codes": 1.4092746913580247,
+          "max_abs_codes": 21
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92758954263664,
+          "mae_codes": 9.821682581018518,
+          "max_abs_codes": 91
+        },
+        "u": {
+          "psnr_db": 40.830909660201236,
+          "mae_codes": 6.480577739197531,
+          "max_abs_codes": 64
+        },
+        "v": {
+          "psnr_db": 48.72187980880183,
+          "mae_codes": 2.155132137345679,
+          "max_abs_codes": 72
+        }
+      }
+    },
+    {
+      "frame": 27,
+      "topos": {
+        "y": {
+          "psnr_db": 51.615429743276124,
+          "mae_codes": 2.093838734567901,
+          "max_abs_codes": 19
+        },
+        "u": {
+          "psnr_db": 56.650869638047695,
+          "mae_codes": 1.0108188657407406,
+          "max_abs_codes": 18
+        },
+        "v": {
+          "psnr_db": 55.04316191903784,
+          "mae_codes": 1.2601369598765433,
+          "max_abs_codes": 16
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92129710817877,
+          "mae_codes": 9.827078510802469,
+          "max_abs_codes": 103
+        },
+        "u": {
+          "psnr_db": 40.82577152414223,
+          "mae_codes": 6.483569637345679,
+          "max_abs_codes": 57
+        },
+        "v": {
+          "psnr_db": 48.70784595719997,
+          "mae_codes": 2.155022183641975,
+          "max_abs_codes": 68
+        }
+      }
+    },
+    {
+      "frame": 28,
+      "topos": {
+        "y": {
+          "psnr_db": 50.347585308654494,
+          "mae_codes": 2.4239911265432097,
+          "max_abs_codes": 25
+        },
+        "u": {
+          "psnr_db": 55.70072179719304,
+          "mae_codes": 1.1235079089506173,
+          "max_abs_codes": 21
+        },
+        "v": {
+          "psnr_db": 54.00909841125997,
+          "mae_codes": 1.415535300925926,
+          "max_abs_codes": 22
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.9218075472842,
+          "mae_codes": 9.829376929012346,
+          "max_abs_codes": 110
+        },
+        "u": {
+          "psnr_db": 40.82336932301247,
+          "mae_codes": 6.488654513888889,
+          "max_abs_codes": 57
+        },
+        "v": {
+          "psnr_db": 48.67790539717093,
+          "mae_codes": 2.1623225308641976,
+          "max_abs_codes": 75
+        }
+      }
+    },
+    {
+      "frame": 29,
+      "topos": {
+        "y": {
+          "psnr_db": 50.34095726128527,
+          "mae_codes": 2.42393856095679,
+          "max_abs_codes": 21
+        },
+        "u": {
+          "psnr_db": 55.67672750442817,
+          "mae_codes": 1.1271219135802468,
+          "max_abs_codes": 17
+        },
+        "v": {
+          "psnr_db": 53.988667963030615,
+          "mae_codes": 1.420203510802469,
+          "max_abs_codes": 19
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 36.92220027298624,
+          "mae_codes": 9.830897955246913,
+          "max_abs_codes": 98
+        },
+        "u": {
+          "psnr_db": 40.82309414050974,
+          "mae_codes": 6.488023726851852,
+          "max_abs_codes": 66
+        },
+        "v": {
+          "psnr_db": 48.656748069925996,
+          "mae_codes": 2.169934413580247,
+          "max_abs_codes": 75
+        }
+      }
+    }
+  ],
+  "artifacts_retained_in_repository": "compact report only; raw source and MOV outputs regenerable locally from source-parent"
+}

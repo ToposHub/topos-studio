@@ -1,0 +1,73 @@
+// --- Topos Plugin Metadata ---
+// @name Gradient Map
+// @i18n_name LIB1_Gradient_Map
+// @author Topos Library v1
+// @version 0.1.0
+// @description Four-stop luminance gradient map: Rec.709 luma drives a color ramp with linear/smooth interpolation; luma outside [0,1] saturates to the end stops (declared policy, end stops themselves may be HDR/saturated)
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param color stop_0 "Stop 0 Color" 0.02 0.02 0.05
+// @param color stop_1 "Stop 1 Color" 0.10 0.20 0.45
+// @param color stop_2 "Stop 2 Color" 0.90 0.55 0.25
+// @param color stop_3 "Stop 3 Color" 1.00 0.98 0.90
+// @param slider pos_1 "Stop 1 Position" 0.33 0.0 1.0
+// @param slider pos_2 "Stop 2 Position" 0.66 0.0 1.0
+// @param select interp_mode "Interpolation" 0 "Linear" "Smooth"
+// @param slider amount "Amount" 1.0 0.0 1.0
+// -----------------------------
+//
+// Gradient Map —— 多停靠点亮度映射（L 计划 F16 试点，LIB1）。
+//
+// 差量（对 Duotone_Toner，见 L00 台账 F16 行）：Duotone 仅 shadow/highlight
+// 两停靠点线性 ramp；本插件 4 色停靠 + 2 个可动中间位置 + linear/smooth
+// 插值 + Amount 混合。端点停靠位固定 0.0/1.0。
+//
+// 设计要点：
+// - 亮度 = Rec.709 luma（与 Duotone 默认档一致）；
+// - 映射域策略（显式声明）：luma 查找坐标 t=clamp(l,0,1) 端点饱和——
+//   超白/负值映射到端点停靠色（端点色本身可为 HDR/高饱和，这不是把
+//   内容 RGB 裁到 0–1；区别于 Duotone 的线性外推，理由：风格 ramp 的
+//   外推斜率是任意的，端点饱和可预测）；
+// - 纯逐像素数学：零采样、零循环、零三角函数；分段 t' 的 clamp 是
+//   权重域守护（等位置防除零），不触碰内容色；
+// - smooth 档 = 分段 smoothstep（值域内单调），linear 档 = 分段线性；
+// - amount=0 精确恒等（首行早退出）；参数 ABI 裸名引用（编译期命名空间
+//   改写），仅允许引擎注入的 u_input_tex/u_tex_size/u_aspect_ratio。
+
+const vec3 GM_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+float gm_shape(float t) {
+    if (interp_mode == 1) {
+        return t * t * (3.0 - 2.0 * t);
+    }
+    return t;
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (amount < 0.001) return color;
+
+    float t = clamp(dot(color, GM_LUMA_W), 0.0, 1.0);
+
+    vec3 mapped;
+    if (t <= pos_1) {
+        float s = gm_shape(clamp(t / max(pos_1, 1e-4), 0.0, 1.0));
+        mapped = mix(stop_0, stop_1, s);
+    } else if (t <= pos_2) {
+        float s = gm_shape(clamp((t - pos_1) / max(pos_2 - pos_1, 1e-4), 0.0, 1.0));
+        mapped = mix(stop_1, stop_2, s);
+    } else {
+        float s = gm_shape(clamp((t - pos_2) / max(1.0 - pos_2, 1e-4), 0.0, 1.0));
+        mapped = mix(stop_2, stop_3, s);
+    }
+
+    return mix(color, mapped, amount);
+}

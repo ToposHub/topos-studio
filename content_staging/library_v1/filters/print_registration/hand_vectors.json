@@ -1,0 +1,72 @@
+{
+  "component": "F13 print_registration",
+  "method": "独立脚本（纯 math 模块、嵌套 list 场，与 oracle/GLSL 无代码复用）+ 平坦场手算；容差 1e-6。网点几何（r=sqrt(1-l)、smoothstep(r±0.06, d)、pitch=8、角度 0/15/30°）与叠印（各版管辖通道乘性吸收、paper=mix(color,1,paper_base*ink_amount)）按 README 算法节口径。",
+  "params_default": {
+    "cmyk_separation": "CMY approx",
+    "reg_offset_x": 1.0,
+    "reg_offset_y": 0.0,
+    "paper_base": 0.9,
+    "ink_amount": 0.8
+  },
+  "vectors": [
+    {
+      "fixture": "flatblack_8x8",
+      "pos": [3, 3],
+      "params": {},
+      "expected": [0.144, 0.144, 0.144],
+      "note": "平坦黑（手算，位置无关）：src=0 → r=1 ≥ d_max(0.707)+0.06 → 三版 cov=1；paper=mix(0,1,0.72)=0.72；out=0.72*(1-0.8)=0.144"
+    },
+    {
+      "fixture": "flatred_8x8",
+      "pos": [0, 0],
+      "params": {},
+      "expected": [1.0, 0.144, 0.144],
+      "note": "平坦红 CMY approx（手算 G/B）：C←R=1（r=0，(0,0) 处 C 网屏 d=0.625>0.06 → cov_C=0）、M←G=0/Y←B=0 满墨；paper=(1.0,0.72,0.72)；G=B=0.72*0.2=0.144，R=1.0"
+    },
+    {
+      "fixture": "flatred_8x8",
+      "pos": [0, 0],
+      "params": {"cmyk_separation": "Luma"},
+      "expected": [0.2, 0.144, 0.144],
+      "note": "平坦红 Luma 档（手算）：luma=0.2126 → r=0.8874 ≥ d_max → 三版满墨；out=paper*(1-0.8)=(0.2,0.144,0.144)——与 CMY 档 R 通道可区分（分离模式差量）"
+    },
+    {
+      "fixture": "flatwhite_16x16",
+      "pos": [8, 8],
+      "params": {},
+      "expected": [1.0, 1.0, 0.73925518],
+      "note": "平坦白：src=1 → r=0，仅网屏胞心 0.06 邻域内出小网点；(8,8) 恰为 Y 版（30°）胞心 → B 部分上墨（脚本枚举），C/M 版无墨 → R=G=1"
+    },
+    {
+      "fixture": "gradient16",
+      "pos": [3, 9],
+      "params": {},
+      "expected": [0.1776, 0.1776, 0.86729041],
+      "note": "水平灰梯度（x/15）：默认套印偏移下 Y 版采样位 x+1 取到更亮源（10/15）→ 网点变小 → B 通道变亮——套印偏移差量（脚本枚举）"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "desc": "套印对齐（offset=0）三版同源 → 满墨",
+      "fixture": "gradient16",
+      "pos": [3, 9],
+      "params": {"reg_offset_x": 0.0, "reg_offset_y": 0.0},
+      "expected": [0.1776, 0.1776, 0.1776],
+      "note": "对齐后 Y 版采样位回到 x（9/15）→ 满墨 cov=1；与默认偏移的 B=0.86729041 对比即套印错位语义"
+    },
+    {
+      "desc": "平坦场对偏移不敏感（常值场采样不变）",
+      "fixture": "flatblack_8x8",
+      "pos": [3, 3],
+      "params": {"reg_offset_x": 4.0, "reg_offset_y": -4.0},
+      "expected": [0.144, 0.144, 0.144],
+      "note": "常值场任意偏移采样同值——偏移只经空间变化的源起作用"
+    },
+    {
+      "desc": "ink_amount=0 恒等（纸底不参与）",
+      "params": {"ink_amount": 0.0},
+      "expected": null,
+      "note": "任意输入（含 HDR/负值）精确恒等，与 paper_base 取值无关"
+    }
+  ]
+}

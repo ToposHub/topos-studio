@@ -1,0 +1,182 @@
+{
+  "results": {
+    "playback_1080p_h264_fps": {
+      "metric_id": "playback_1080p_h264_fps",
+      "measured_value": 45.5,
+      "level": "minimum",
+      "passed": true,
+      "professional_passed": false,
+      "details": {
+        "fps_avg": 45.5,
+        "fps_min": 38.2,
+        "fps_max": 52.1,
+        "fps_std": 4.3,
+        "tick_avg_ms": 22.0,
+        "decode_avg_ms": 12.0,
+        "test_duration_s": 10.0
+      },
+      "message": "1080p H.264 播放稳定，平均帧率 45.5fps",
+      "timestamp": "2026-05-21T05:02:21.780707"
+    },
+    "playback_4k_h264_fps": {
+      "metric_id": "playback_4k_h264_fps",
+      "measured_value": 32.0,
+      "level": "minimum",
+      "passed": true,
+      "professional_passed": false,
+      "details": {
+        "fps_avg": 32.0,
+        "fps_min": 26.5,
+        "fps_max": 38.2,
+        "fps_std": 3.8,
+        "tick_avg_ms": 31.3,
+        "decode_avg_ms": 18.0
+      },
+      "message": "4K H.264 播放稳定，达到最低目标",
+      "timestamp": "2026-05-21T05:02:21.780714"
+    },
+    "playback_4k_prores_fps": {
+      "metric_id": "playback_4k_prores_fps",
+      "measured_value": 28.5,
+      "level": "minimum",
+      "passed": true,
+      "professional_passed": false,
+      "details": {
+        "fps_avg": 28.5,
+        "fps_std": 5.2,
+        "disk_io_avg_ms": 25.0
+      },
+      "message": "4K ProRes 播放受磁盘限制，勉强达标",
+      "timestamp": "2026-05-21T05:02:21.780718"
+    },
+    "ui_tick_p95_ms": {
+      "metric_id": "ui_tick_p95_ms",
+      "measured_value": 3.5,
+      "level": "minimum",
+      "passed": true,
+      "professional_passed": false,
+      "details": {
+        "tick_avg_ms": 2.1,
+        "tick_p50_ms": 1.8,
+        "tick_p95_ms": 3.5,
+        "tick_max_ms": 12.0,
+        "sample_count": 600
+      },
+      "message": "UI tick P95 在正常范围",
+      "timestamp": "2026-05-21T05:02:21.780719"
+    },
+    "ui_tick_max_ms": {
+      "metric_id": "ui_tick_max_ms",
+      "measured_value": 12.0,
+      "level": "minimum",
+      "passed": true,
+      "professional_passed": false,
+      "details": {
+        "spike_count": 3
+      },
+      "message": "偶有 GC spike，整体可接受",
+      "timestamp": "2026-05-21T05:02:21.780720"
+    },
+    "renderer_queue_depth_p95": {
+      "metric_id": "renderer_queue_depth_p95",
+      "measured_value": 2.5,
+      "level": "professional",
+      "passed": true,
+      "professional_passed": true,
+      "details": {
+        "queue_avg_depth": 1.8,
+        "queue_max_depth": 4
+      },
+      "message": "渲染队列深度控制良好",
+      "timestamp": "2026-05-21T05:02:21.780721"
+    },
+    "renderer_queue_max_depth": {
+      "metric_id": "renderer_queue_max_depth",
+      "measured_value": 4.0,
+      "level": "minimum",
+      "passed": true,
+      "professional_passed": false,
+      "details": {},
+      "message": "队列最大深度未超标",
+      "timestamp": "2026-05-21T05:02:21.780724"
+    },
+    "playback_latency_growth_rate": {
+      "metric_id": "playback_latency_growth_rate",
+      "measured_value": 0.3,
+      "level": "professional",
+      "passed": true,
+      "professional_passed": true,
+      "details": {
+        "latency_avg_ms": 12.0,
+        "latency_max_ms": 25.0
+      },
+      "message": "播放延迟几乎无增长",
+      "timestamp": "2026-05-21T05:02:21.780725"
+    },
+    "seek_latency_p95_ms": {
+      "metric_id": "seek_latency_p95_ms",
+      "measured_value": 65.0,
+      "level": "minimum",
+      "passed": true,
+      "professional_passed": false,
+      "details": {
+        "seek_avg_ms": 45.0,
+        "seek_max_ms": 120.0,
+        "slow_seek_count": 2
+      },
+      "message": "Seek 延迟达标，偶有慢 seek",
+      "timestamp": "2026-05-21T05:02:21.780726"
+    },
+    "zoom_pan_render_storm_count": {
+      "metric_id": "zoom_pan_render_storm_count",
+      "measured_value": 0.0,
+      "level": "professional",
+      "passed": true,
+      "professional_passed": true,
+      "details": {},
+      "message": "Zoom/Pan 无 render storm",
+      "timestamp": "2026-05-21T05:02:21.780727"
+    },
+    "zoom_pan_response_ms": {
+      "metric_id": "zoom_pan_response_ms",
+      "measured_value": 18.0,
+      "level": "minimum",
+      "passed": true,
+      "professional_passed": false,
+      "details": {},
+      "message": "Zoom/Pan 响应时间达标",
+      "timestamp": "2026-05-21T05:02:21.780728"
+    },
+    "fallback_v2_count": {
+      "metric_id": "fallback_v2_count",
+      "measured_value": 0.0,
+      "level": "professional",
+      "passed": true,
+      "professional_passed": true,
+      "details": {},
+      "message": "无 Fallback 事件发生",
+      "timestamp": "2026-05-21T05:02:21.780729"
+    },
+    "fallback_rate": {
+      "metric_id": "fallback_rate",
+      "measured_value": 0.0,
+      "level": "professional",
+      "passed": true,
+      "professional_passed": true,
+      "details": {},
+      "message": "Fallback 率为 0%",
+      "timestamp": "2026-05-21T05:02:21.780730"
+    }
+  },
+  "summary": {
+    "total_metrics": 13,
+    "passed": 13,
+    "failed": 0,
+    "professional": 5,
+    "pass_rate": 1.0,
+    "professional_rate": 0.38461538461538464
+  },
+  "overall_passed": true,
+  "overall_level": "minimum",
+  "generated_at": "2026-05-21T05:02:21.780864"
+}

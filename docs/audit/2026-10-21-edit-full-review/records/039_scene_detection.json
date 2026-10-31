@@ -1,0 +1,72 @@
+{
+  "ok": true,
+  "result": {
+    "source": "2K_prores422.mov",
+    "dialog": "SceneCutDialog",
+    "buttons": [
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "自动场景检测",
+        "enabled": true
+      },
+      {
+        "text": "添加",
+        "enabled": true
+      },
+      {
+        "text": "删除",
+        "enabled": true
+      },
+      {
+        "text": "",
+        "enabled": true
+      },
+      {
+        "text": "标注到时间线",
+        "enabled": false
+      },
+      {
+        "text": "添加剪辑到媒体池",
+        "enabled": true
+      }
+    ],
+    "started": false,
+    "active_dialog": true,
+    "errors": []
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "_meta": {
+    "count": 24,
+    "gl_version": "4.1 ATI-6.1.13",
+    "gpu": "AMD Radeon RX 6800 OpenGL Engine"
+  },
+  "blur_gaussian_fx/checker": "e8c23c7989b054b2cd6133366466e62cbf3fd9636bcff9c48adaa7fb46b4bfa4",
+  "blur_gaussian_fx/hdr_ramp": "9f497f505840a19923b1a42a5da50c2e0c947720fefd47192ff00a82e5c58291",
+  "blur_sharpen_fx/checker": "5d2a50c158c9b0ac6a8bb65ed7b36557c989794bafd4c516efd7c21580b1a5c0",
+  "blur_sharpen_fx/hdr_ramp": "b62f0c11c5a81dcfdf5df2014222a30f820f75e29e1aa9beae84542a2a64c9d2",
+  "film_grain_seed042/checker": "b2b352b4d9abdc7e237738ebd28032b25682a42c1303ed4c2f70d6119d3db1aa",
+  "film_grain_seed042/hdr_ramp": "27a48c47bdc3750d2a0d3d5332cb61cfce6a73eba8f8b56738ec63b7446e1045",
+  "grading_basic/checker": "16a4c7fddf7d4de22e93b3574e1c58f22bb465232b61155f5aa89f7a4c430cf9",
+  "grading_basic/hdr_ramp": "8bbc9f59f540753be0f591f4d0a6978800b404d96c8b271cfff22bb18d91b1d4",
+  "grading_extreme/checker": "bd3fb40f43d3dbec7ed48c0782cbb5c06ce19f414ce811234faa5dba90d0df4e",
+  "grading_extreme/hdr_ramp": "9add8859ba4c38e3b809a76e4218107458be866e0184fdc72723410878e8f200",
+  "matte_gradient_blend/checker": "ecc977e08e77cf1d5f90d96f6721a3934d63018961fd25a45e56f2d577a286e6",
+  "matte_gradient_blend/hdr_ramp": "14c77e93c281269e2457abec4ac836ce97454838845c6ad2ffcde57457bb0235",
+  "mixer_channels/checker": "f060c57df0190f24f9976356708e18458c608770398cd3dac2ef9765df91905a",
+  "mixer_channels/hdr_ramp": "68a672c85d2c2765e21b171626b93b7f670da6409860d7fa6245ee42ab740403",
+  "passthrough_neutral/checker": "f98fc260b0a29f2190bf302263ec0044339c337316b52cca90d2e526cf30e0ec",
+  "passthrough_neutral/hdr_ramp": "dc7eb0a49d1b1c036455a5c68b9b57d08a023a93f18b5a0c847d7c01aab9d765",
+  "plugin_highpass_single/checker": "72d30fb9ec2959fd70afadae2d5a4a570b72e8261c1a70cf024224437e7888b5",
+  "plugin_highpass_single/hdr_ramp": "af018f1984c89579ef527a0bba48f800c827e0d238757bfad2c7bc9ce3454949",
+  "plugin_stack_two/checker": "d643358dd34f995108044d1850e4b82d9fe3fba84072c7603b95b806c2e2b135",
+  "plugin_stack_two/hdr_ramp": "224174979b02ab92edb2a895bcdf4e4a3d97096efa4a114648c9603a8869fec1",
+  "soft_clip_hdr/checker": "13bc8123e8803381adc895699deaf34f51d8457cca76587a7e1c04b692116242",
+  "soft_clip_hdr/hdr_ramp": "df8de321bca6e775ccbf60d07485c2ec655a97496e80cd1cfa1bf9d57f5a9dc2",
+  "stack_all_flags/checker": "16e56dc6e07b2c16856868577a4ba621f41a15c075cc47b9c5d1e8578fb29fa7",
+  "stack_all_flags/hdr_ramp": "a73e8a88d7328dd942b194cf92309fd688b9b00a497cd3a3f450f7d448de8218"
+}

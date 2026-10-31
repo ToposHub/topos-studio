@@ -1,0 +1,9 @@
+{
+ "kind": "export_effects_matrix_bench",
+ "schema_version": 1,
+ "side": "t5_sharpen_adaptive",
+ "git_rev": "cee5aae5",
+ "frames": 240,
+ "warmup": 30,
+ "runs": []
+}

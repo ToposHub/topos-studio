@@ -1,0 +1,4 @@
+{
+  "reason": "NewTimelineDialog one-shot configure callback ran before target visible; audit command remained modal, no product failure asserted",
+  "terminated_own_audit_pid": 36058
+}

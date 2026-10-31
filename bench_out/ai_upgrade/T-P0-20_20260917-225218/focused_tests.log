@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 10 items
+
+tests/export/test_export_stage_telemetry.py ..........                   [100%]
+
+============================== 10 passed in 0.62s ==============================

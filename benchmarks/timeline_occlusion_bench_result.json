@@ -1,0 +1,48 @@
+{
+  "material": {
+    "lower": {
+      "file": "2K_h264.mp4",
+      "sha1_12": "038491830c2b"
+    },
+    "upper": {
+      "file": "2K_prores422HQ.mov",
+      "sha1_12": "2d6a348afa44"
+    }
+  },
+  "params": {
+    "warmup": 4,
+    "measure": 12,
+    "runs": 1
+  },
+  "results": [
+    {
+      "group": "B0_single_track",
+      "cull_on": {
+        "median_s": 0.17108208299760008,
+        "fps": 70.14176931764581,
+        "layer_frame_requests_median": 16,
+        "culled_ratio": 0.0,
+        "all_runs_s": [
+          0.17108208299760008
+        ],
+        "all_runs_requests": [
+          16
+        ]
+      },
+      "cull_off": {
+        "median_s": 0.17573079000067082,
+        "fps": 68.28626901383754,
+        "layer_frame_requests_median": 16,
+        "culled_ratio": 0.0,
+        "all_runs_s": [
+          0.17573079000067082
+        ],
+        "all_runs_requests": [
+          16
+        ]
+      },
+      "speedup": 1.0271723778528927,
+      "request_reduction": 0.0
+    }
+  ]
+}

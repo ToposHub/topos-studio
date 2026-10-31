@@ -1,0 +1,26 @@
+{
+  "recipe_id": "P07",
+  "name": "低密度暖片",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合轻胶片感纪录素材；density 0.2–0.4，避免染料耦合过重",
+  "component": "F02 subtractive_density（暂存组件 content_staging/library_v1/filters/subtractive_density）",
+  "dependencies": {
+    "component_id": "F02",
+    "component_slug": "subtractive_density",
+    "component_kind": "filter"
+  },
+  "params": {
+    "density": 0.3,
+    "dye_coupling": 0.55,
+    "luma_protection": 0.5,
+    "amount": 0.8
+  },
+  "notes": "依赖暂存组件（L10 未接缝）：低密度轻染料耦合 + 亮度保护，暖调由染料耦合给出。"
+}

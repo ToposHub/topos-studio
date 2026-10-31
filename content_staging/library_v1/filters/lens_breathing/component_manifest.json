@@ -1,0 +1,172 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "F11",
+  "dedup": "Lens_Distortion 是静态 r² 多项式重映射+auto-zoom；本项差量为可动画呼吸缩放（参数可关键帧，不称自动估计焦距）——L00 台账 F11 行",
+  "host_min_contract": ".tglsl ABI 四类参数（4 slider+1 select）；发布名 LIB1_Lens_Breathing",
+  "image": {
+    "alpha": "premultiplied",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "filter",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": 1.0,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "amount",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "NaN 拒绝；amount=0 精确恒等；动画走宿主既有 keyframe"
+    },
+    {
+      "animatable": false,
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "pivot_x",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "frame-normalized",
+      "validation": "NaN 拒绝"
+    },
+    {
+      "animatable": false,
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "pivot_y",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "frame-normalized",
+      "validation": "NaN 拒绝"
+    },
+    {
+      "animatable": false,
+      "default": 1.1,
+      "maximum": 1.2,
+      "minimum": 0.8,
+      "name": "scale",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "NaN 拒绝；scale=1 精确恒等"
+    },
+    {
+      "animatable": false,
+      "default": "Freeze",
+      "maximum": null,
+      "minimum": null,
+      "name": "border_mode",
+      "neutral": false,
+      "options": [
+        "Freeze",
+        "Black"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": "Freeze=冻结边（clamp 采样）；Black=越界像素置 0"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "lens_breathing",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_f11_lens_breathing.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "content_staging/library_v1/filters/lens_breathing/hand_vectors.json",
+    "known_limits": "静态参数+既有关键帧（不称自动估计焦距）；几何参数精确零值早退（非阈值）；未验 GPU/Metal/CPU 导出",
+    "oracle": "content_staging/library_v1/references/lens_breathing_ref.py"
+  },
+  "version": "0.1.0"
+}

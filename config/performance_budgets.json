@@ -1,0 +1,127 @@
+{
+  "$schema_version": 1,
+  "purpose": "P0-12 性能预算注册表：decode 路径基准（benchmark_runner 口径）的硬门/软门。锚点来自总计划 §3.2（25fps 前台渲染预算 ≤32ms、常规 seek p95 ≤150ms、首次有画面 ≤500ms）；soft 门是更紧的目标值，hard 门是门禁失败线。known_breach 是已登记的免责缺口（带责任工作项），降级为警告不阻止合入，修复后应转回 active。",
+  "machine_class_note": "macos_intel_x86_64 = 当前 macOS 基准机（Intel 降级机，D-01：绝对性能只在目标 Apple Silicon 机承诺）。Windows/Apple Silicon 目标机闭环（P7-08）后按机器类别扩充 budget 集。",
+  "budgets": [
+    {
+      "budget_id": "BUD-B01-STEADY-P95",
+      "scenario": "B-01",
+      "metric": "steady_sequential.p95_ms",
+      "media_glob": "2K_h264.mp4",
+      "hard_max_ms": 32.0,
+      "soft_max_ms": 16.7,
+      "machine_class": "macos_intel_x86_64",
+      "state": "active",
+      "note": "1080p/2K H.264 单轨稳态 p95：25fps 前台渲染预算。",
+      "source": "master_plan §3.2; baseline docs/p0_baseline_report_macos_2026-09-16.md"
+    },
+    {
+      "budget_id": "BUD-B01-SEEK-P95",
+      "scenario": "B-01",
+      "metric": "seek_random.p95_ms",
+      "media_glob": "2K_h264.mp4",
+      "hard_max_ms": 150.0,
+      "soft_max_ms": 120.0,
+      "machine_class": "macos_intel_x86_64",
+      "state": "active",
+      "note": "常规 seek 预览 p95（总计划 §3.2 统一门槛）。",
+      "source": "master_plan §3.2"
+    },
+    {
+      "budget_id": "BUD-B01-COLD-P95",
+      "scenario": "B-01",
+      "metric": "cold_first_frame.p95_ms",
+      "media_glob": "2K_h264.mp4",
+      "hard_max_ms": 500.0,
+      "soft_max_ms": 300.0,
+      "machine_class": "macos_intel_x86_64",
+      "state": "active",
+      "note": "首次有画面（已打开工程）p95。",
+      "source": "master_plan §3.2"
+    },
+    {
+      "budget_id": "BUD-B02-STEADY-P95",
+      "scenario": "B-02",
+      "metric": "steady_sequential.p95_ms",
+      "media_glob": "4K_H265.mov",
+      "hard_max_ms": 32.0,
+      "soft_max_ms": 30.0,
+      "machine_class": "macos_intel_x86_64",
+      "state": "active",
+      "note": "4K H.265 10-bit 稳态 p95：软解实测 27.7ms；soft 30 给 Intel 软解留少量余量，代理接管（P2-02）后应重新收紧。",
+      "source": "master_plan §3.2; baseline"
+    },
+    {
+      "budget_id": "BUD-B02-SEEK-P95",
+      "scenario": "B-02",
+      "metric": "seek_random.p95_ms",
+      "media_glob": "4K_H265.mov",
+      "hard_max_ms": 150.0,
+      "soft_max_ms": 120.0,
+      "machine_class": "macos_intel_x86_64",
+      "state": "known_breach",
+      "note": "4K H265 长 GOP seek p95：首轮基线 519ms。P2-05 已落地（commit 1f710878：持久化 GOP 索引 + HEVC SLICE seek 会话）复测 266.7ms（-49%），仍超 150ms 硬门——剩余缺口为 HEVC 软解单帧成本（~13ms/帧 × 平均 11 帧 walk），责任转移 P2-14（解码内核 SIMD/内存布局）；macOS 生产播放路径走 VT 硬解 + 交互 coarse，本口径为 CPU 软解回退路径的下界证据。",
+      "source": "baseline docs/p0_baseline_report_macos_2026-09-16.md; P2-05 复测 bench_out/p2_05_after（2026-09-16）"
+    },
+    {
+      "budget_id": "BUD-B03-STEADY-P95",
+      "scenario": "B-03",
+      "metric": "steady_sequential.p95_ms",
+      "media_glob": "4K_prores*.mov",
+      "hard_max_ms": 32.0,
+      "soft_max_ms": 26.0,
+      "machine_class": "macos_intel_x86_64",
+      "state": "known_breach",
+      "note": "4K ProRes 软解稳态 p95 实测 38.2ms（E-06 复现）。修复责任工作项 P1-04/P2-02（realtime 代理接管）——接管后原片不再进实时解码路径，本预算约束代理档位。",
+      "source": "baseline docs/p0_baseline_report_macos_2026-09-16.md"
+    },
+    {
+      "budget_id": "BUD-B03-SEEK-P95",
+      "scenario": "B-03",
+      "metric": "seek_random.p95_ms",
+      "media_glob": "4K_prores*.mov",
+      "hard_max_ms": 150.0,
+      "soft_max_ms": 120.0,
+      "machine_class": "macos_intel_x86_64",
+      "state": "active",
+      "note": "ProRes intra 帧独立，seek 实测 ~37ms 达标。",
+      "source": "master_plan §3.2; baseline"
+    },
+    {
+      "budget_id": "BUD-B04-STEADY-P95",
+      "scenario": "B-04",
+      "metric": "steady_sequential.p95_ms",
+      "media_glob": "4K_topos*.mov",
+      "hard_max_ms": 32.0,
+      "soft_max_ms": 20.0,
+      "machine_class": "macos_intel_x86_64",
+      "state": "active",
+      "note": "Topos 422 家族（含 proxy）稳态 p95：native 75.6fps / proxy 212fps，soft 门槛 20ms 有充分余量。",
+      "source": "master_plan §3.2; T-01 复验 docs/topos_422_family_benchmark_2026-09-16.md"
+    },
+    {
+      "budget_id": "BUD-B04-SEEK-P95",
+      "scenario": "B-04",
+      "metric": "seek_random.p95_ms",
+      "media_glob": "4K_topos*.mov",
+      "hard_max_ms": 150.0,
+      "soft_max_ms": 20.0,
+      "machine_class": "macos_intel_x86_64",
+      "state": "active",
+      "note": "Topos seek p95 实测 16ms（T-01）：自带索引优势，soft 门槛收紧到 20ms 防退化。",
+      "source": "T-01 复验"
+    },
+    {
+      "budget_id": "BUD-B04-COLD-P95",
+      "scenario": "B-04",
+      "metric": "cold_first_frame.p95_ms",
+      "media_glob": "4K_topos*.mov",
+      "hard_max_ms": 500.0,
+      "soft_max_ms": 150.0,
+      "machine_class": "macos_intel_x86_64",
+      "state": "active",
+      "note": "Topos 家族首帧 p95：主流档 11-20ms；4444xq 实测 107ms，soft 150 覆盖全家族并防退化。",
+      "source": "T-01 复验"
+    }
+  ]
+}

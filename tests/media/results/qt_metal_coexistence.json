@@ -1,0 +1,29 @@
+{
+  "schema": "topos.qt_metal_coexistence.v1",
+  "timestamp": "2026-09-11T07:48:18.300995",
+  "git_sha": "10c1456ffa7606d2fc9582e85009f9b9aafbac84",
+  "os": "macOS-15.3.1-x86_64-i386-64bit",
+  "metal_present_error": null,
+  "coexistence": {
+    "gl_pixel": "green(GL)",
+    "metal_pixel": "red(Metal)",
+    "both_visible": true
+  },
+  "z_order_overlap": {
+    "metal_present_error": null,
+    "over_gl_region_now": "red(Metal)"
+  },
+  "resize": {
+    "metal_present_error": null,
+    "host_view_width_after_resize": 400.0,
+    "right_region_after_resize": "red(Metal)"
+  },
+  "present_cadence": {
+    "frames": 60,
+    "wall_seconds": 0.9678676439998526,
+    "fps": 61.991947320442854,
+    "screen_refresh_hz": 60.00001525878906,
+    "vsync_locked": true,
+    "errors": []
+  }
+}

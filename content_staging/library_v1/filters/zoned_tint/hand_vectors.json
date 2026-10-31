@@ -1,0 +1,257 @@
+{
+  "component": "F04 zoned_tint",
+  "method": "手算：按 README §公式逐式笔算（709 luma→Reinhard t=l/(l+0.18)→pivot/width 可动 smoothstep 分区权重→三区 mix(1,tint*2,w*s) 连乘增益），独立一次性脚本（纯 Python，smoothstep 分段直接定义）计算，与 oracle/GLSL 无代码复用；容差 1e-6（float64 语义）。",
+  "params": {
+    "shadow_color": [
+      0.38,
+      0.46,
+      0.6
+    ],
+    "midtone_color": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "highlight_color": [
+      0.6,
+      0.53,
+      0.42
+    ],
+    "shadow_strength": 1.0,
+    "midtone_strength": 0.0,
+    "highlight_strength": 1.0,
+    "shadow_pivot": 0.25,
+    "highlight_pivot": 0.75,
+    "shadow_width": 0.3,
+    "highlight_width": 0.3
+  },
+  "vectors": [
+    {
+      "input": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "expected": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "note": "纯黑 t=0 全阴影：增益 (0.76,0.92,1.20)，0×gain=0（黑位不动）"
+    },
+    {
+      "input": [
+        0.06,
+        0.06,
+        0.06
+      ],
+      "expected": [
+        0.0528,
+        0.0576,
+        0.066
+      ],
+      "note": "luma=0.06→t=0.25（pivot 中心）：w_s=0.5→增益半程 (0.88,0.96,1.10)"
+    },
+    {
+      "input": [
+        0.18,
+        0.18,
+        0.18
+      ],
+      "expected": [
+        0.18,
+        0.18,
+        0.18
+      ],
+      "note": "中灰 t=0.5 纯中间调：mid tint 0.5 灰=增益 1（本参数组 mid 强度亦 0）"
+    },
+    {
+      "input": [
+        1.02,
+        1.02,
+        1.02
+      ],
+      "expected": [
+        1.2088889,
+        1.0766667,
+        0.8688889
+      ],
+      "note": "luma=1.02→t=0.85（高光 pivot 中心）：w_h=0.9259，接近满高光暖增益 (1.20,1.06,0.84) 未满"
+    },
+    {
+      "input": [
+        4.5,
+        4.5,
+        4.5
+      ],
+      "expected": [
+        5.4,
+        4.77,
+        3.78
+      ],
+      "note": "超白 t≈0.9615 全高光：HDR 乘性外推无 clamp（4.5×(1.20,1.06,0.84)）"
+    },
+    {
+      "input": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "expected": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "note": "红 luma=0.2126→t≈0.542 纯中间调区：本组 mid 无 tint→直通"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "params": {
+        "midtone_strength": 0.8
+      },
+      "input": [
+        0.65,
+        0.5,
+        0.4
+      ],
+      "expected": [
+        0.7114664,
+        0.5141846,
+        0.3697396
+      ],
+      "note": "肤色 luma≈0.5247→t≈0.7445：w_m≈0.4319+w_h≈0.5681 混合区，mid 绿+高光暖叠加"
+    },
+    {
+      "params": {
+        "midtone_strength": 0.8
+      },
+      "input": [
+        12.0,
+        0.1,
+        4.5
+      ],
+      "expected": [
+        14.4,
+        0.106,
+        3.78
+      ],
+      "note": "HDR 混合色 luma≈3.144→t≈0.9459 全高光：每通道按高光暖增益缩放（负通道无）"
+    },
+    {
+      "params": {
+        "shadow_pivot": 0.4
+      },
+      "input": [
+        0.18,
+        0.18,
+        0.18
+      ],
+      "expected": [
+        0.1768,
+        0.1789333,
+        0.1826667
+      ],
+      "note": "pivot 上移 0.25→0.40：中灰 t=0.5 进入 shadow 过渡带尾（w_s=0.0741）——分界可动差量"
+    },
+    {
+      "params": {
+        "shadow_width": 0.0
+      },
+      "input": [
+        0.03,
+        0.03,
+        0.03
+      ],
+      "expected": [
+        0.0228,
+        0.0276,
+        0.036
+      ],
+      "note": "width→0 近似硬分界（1e-4 守护）：t=0.1429<0.25 全阴影满增益 (0.76,0.92,1.20)"
+    },
+    {
+      "params": {
+        "shadow_width": 0.5
+      },
+      "input": [
+        0.03,
+        0.03,
+        0.03
+      ],
+      "expected": [
+        0.0242274,
+        0.0280758,
+        0.0348105
+      ],
+      "note": "同输入宽窗 0.5：t=0.1429 落 [0.0,0.5] 带内 w_s≈0.8095——交叉宽度可调差量"
+    },
+    {
+      "params": {
+        "highlight_pivot": 0.5
+      },
+      "input": [
+        1.02,
+        1.02,
+        1.02
+      ],
+      "expected": [
+        1.224,
+        1.0812,
+        0.8568
+      ],
+      "note": "高光 pivot 下移 0.75→0.50：t=0.85 越过过渡带→满高光增益 (1.20,1.06,0.84)"
+    },
+    {
+      "params": {
+        "shadow_color": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "midtone_color": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "highlight_color": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "shadow_strength": 0.35,
+        "midtone_strength": 0.3,
+        "highlight_strength": 0.35
+      },
+      "input": [
+        4.5,
+        0.18,
+        12.0
+      ],
+      "expected": [
+        4.5,
+        0.18,
+        12.0
+      ],
+      "note": "tint 全 0.5 灰（0.5*2.0=1.0 无舍入）乘法路径精确恒等（含 HDR）——默认参数即恒等"
+    },
+    {
+      "params": {
+        "shadow_strength": 0.0,
+        "midtone_strength": 0.0,
+        "highlight_strength": 0.0
+      },
+      "input": [
+        4.5,
+        -0.25,
+        12.0
+      ],
+      "expected": [
+        4.5,
+        -0.25,
+        12.0
+      ],
+      "note": "三强度全 0 早退精确恒等（含 HDR/负值）"
+    }
+  ]
+}

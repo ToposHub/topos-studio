@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "result": {
+    "analysis": null,
+    "errors": [],
+    "buttons": [
+      {
+        "text": "自动场景检测",
+        "enabled": true
+      },
+      {
+        "text": "添加",
+        "enabled": true
+      },
+      {
+        "text": "删除",
+        "enabled": true
+      },
+      {
+        "text": "标注到时间线",
+        "enabled": false
+      },
+      {
+        "text": "添加剪辑到媒体池",
+        "enabled": true
+      }
+    ]
+  }
+}

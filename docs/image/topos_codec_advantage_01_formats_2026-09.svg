@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="2000" viewBox="0 0 1600 2000">
+  <title>TOPOS 优势 01：完整格式域</title>
+  <defs>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#03111d" stop-opacity=".36"/><stop offset=".52" stop-color="#04101d" stop-opacity=".91"/><stop offset="1" stop-color="#020811" stop-opacity=".97"/></linearGradient>
+    <linearGradient id="cyan" x1="0" x2="1"><stop stop-color="#40d9ff"/><stop offset="1" stop-color="#7ef0d1"/></linearGradient>
+    <linearGradient id="amber" x1="0" x2="1"><stop stop-color="#ffb44a"/><stop offset="1" stop-color="#ff6d8a"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#000" flood-opacity=".46"/></filter>
+    <style>
+      .cn{font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif}.mono{font-family:"SFMono-Regular","Cascadia Code",monospace}.white{fill:#f2f7fb}.muted{fill:#a9bdcb}.cyan{fill:#7fe6ff}.amber{fill:#ffc56a}.card{fill:#071725;fill-opacity:.91;stroke:#2b5870;stroke-width:2}.body{font-size:29px}.small{font-size:24px}
+    </style>
+  </defs>
+  <image x="0" y="0" width="1600" height="2000" preserveAspectRatio="xMidYMid slice" xlink:href="assets/topos_codec_poster_bg.png"/>
+  <rect width="1600" height="2000" fill="url(#shade)"/>
+  <g class="cn">
+    <text x="82" y="118" class="cyan" font-size="24" font-weight="800" letter-spacing="5">TOPOS CODEC / ADVANTAGE 01</text>
+    <text x="82" y="220" class="white" font-size="72" font-weight="800">一套编码，覆盖从像素到素材库</text>
+    <text x="86" y="280" class="muted" font-size="29">同一套原生内核，连接视频、图片、RAW 与线性浮点工作流。</text>
+    <rect x="82" y="325" width="360" height="7" rx="3" fill="url(#cyan)"/>
+  </g>
+
+  <g filter="url(#shadow)" class="cn">
+    <rect x="70" y="420" width="700" height="350" rx="26" class="card"/>
+    <rect x="70" y="420" width="11" height="350" rx="5" fill="url(#cyan)"/>
+    <text x="112" y="480" class="cyan" font-size="24" font-weight="800" letter-spacing="4">VIDEO / MOV</text>
+    <text x="112" y="538" class="white" font-size="43" font-weight="800">视频编码</text>
+    <text x="112" y="591" class="white body" font-weight="700">422 Proxy · LT · 422 · HQ · LP</text>
+    <text x="112" y="635" class="white body" font-weight="700">4444 · 4444 XQ</text>
+    <text x="112" y="695" class="muted small">MOV 容器 · 10 / 12 / 16-bit</text>
+    <text x="112" y="731" class="muted small">帧内访问友好，LP 提供微 GOP 选项</text>
+
+    <rect x="830" y="420" width="700" height="350" rx="26" class="card"/>
+    <rect x="830" y="420" width="11" height="350" rx="5" fill="url(#amber)"/>
+    <text x="872" y="480" class="amber" font-size="24" font-weight="800" letter-spacing="4">IMAGE / .TOOS</text>
+    <text x="872" y="538" class="white" font-size="43" font-weight="800">图片编码</text>
+    <text x="872" y="591" class="white body" font-weight="700">Low · Medium · High · Ultra</text>
+    <text x="872" y="635" class="white body" font-weight="700">422 10-bit · 444 10-bit</text>
+    <text x="872" y="695" class="muted small">12-bit Image XQ · GBR 4:4:4</text>
+    <text x="872" y="731" class="muted small">TPIM 信封 · 独立 .toos 文件</text>
+
+    <rect x="70" y="820" width="700" height="350" rx="26" class="card"/>
+    <rect x="70" y="820" width="11" height="350" rx="5" fill="url(#amber)"/>
+    <text x="112" y="880" class="amber" font-size="24" font-weight="800" letter-spacing="4">RAW / CFA</text>
+    <text x="112" y="938" class="white" font-size="43" font-weight="800">相机 RAW</text>
+    <text x="112" y="991" class="white body" font-weight="700">12-bit：2:1 / 4:1 / 6:1 / 8:1</text>
+    <text x="112" y="1035" class="white body" font-weight="700">12:1 / 16:1</text>
+    <text x="112" y="1095" class="white body" font-weight="700">16-bit：2:1 → 16:1</text>
+    <text x="112" y="1135" class="muted small">CFA 四相位平面 · 12-bit LOG0 / 16-bit linear</text>
+
+    <rect x="830" y="820" width="700" height="350" rx="26" class="card"/>
+    <rect x="830" y="820" width="11" height="350" rx="5" fill="url(#cyan)"/>
+    <text x="872" y="880" class="cyan" font-size="24" font-weight="800" letter-spacing="4">FLOAT / LINEAR</text>
+    <text x="872" y="938" class="white" font-size="43" font-weight="800">线性浮点</text>
+    <text x="872" y="991" class="white body" font-weight="700">toos Low / Medium / High / Ultra</text>
+    <text x="872" y="1043" class="white body" font-weight="700">16-bit HALF · GBR 4:4:4</text>
+    <text x="872" y="1095" class="muted small">线性 HDR 合成 · 缓存 · 中间片</text>
+    <text x="872" y="1135" class="amber small" font-weight="700">32-bit float：扩展方向</text>
+  </g>
+
+  <g class="cn">
+    <text x="82" y="1285" class="white" font-size="29" font-weight="800" letter-spacing="3">一个内核，四种素材语义</text>
+    <line x1="82" y1="1320" x2="1518" y2="1320" stroke="#2d657f" stroke-width="2"/>
+    <g transform="translate(82 1400)"><text class="cyan" font-size="27" font-weight="800">位深</text><text y="48" class="muted small">10 / 12 / 16-bit</text></g>
+    <g transform="translate(390 1400)"><text class="cyan" font-size="27" font-weight="800">像素域</text><text y="48" class="muted small">4:2:2 · 4:4:4 · GBR · CFA</text></g>
+    <g transform="translate(840 1400)"><text class="cyan" font-size="27" font-weight="800">文件形态</text><text y="48" class="muted small">MOV · .toos · 原生 RAW</text></g>
+    <g transform="translate(1210 1400)"><text class="cyan" font-size="27" font-weight="800">命名</text><text y="48" class="muted small">Proxy → XQ / Ultra</text></g>
+
+    <rect x="82" y="1555" width="1436" height="200" rx="24" fill="#071725" fill-opacity=".82" stroke="#2b5870"/>
+    <text x="120" y="1620" class="amber" font-size="28" font-weight="800">为什么这很重要</text>
+    <text x="120" y="1670" class="white body">素材不必在多个孤立编码器之间反复换域：同一套规格从编辑代理、</text>
+    <text x="120" y="1713" class="white body">调色中间片、VFX 交换一直延伸到 RAW 与线性缓存。</text>
+    <text x="82" y="1935" class="muted" font-size="20">TOPOS Codec V1 Preview · 当前能力以 capability manifest 与 SDK 文档为准 · 01 / 05</text>
+  </g>
+</svg>

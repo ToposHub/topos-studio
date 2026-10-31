@@ -1,0 +1,85 @@
+// --- Topos Plugin Metadata ---
+// @name Glitch Blocks
+// @i18n_name Glitch_Blocks
+// @author Topos Team
+// @version 1.0
+// @description Digital signal glitch: hash-activated horizontal band displacement with RGB channel split, deterministic per band
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider band_height "Band Height" 24.0 4.0 128.0
+// @param slider band_shift "Band Displacement" 0.35 0.0 1.0
+// @param slider rgb_split "RGB Split" 0.3 0.0 1.0
+// @param separator
+// @param slider corruption "Corruption" 0.35 0.0 1.0
+// -----------------------------
+//
+// Glitch Blocks —— 数字信号毛刺。
+//
+// 原理：把画面按 band_height 像素切成横条带，每条带用无三角函数
+// hash（Dave Hoskins 算法，Film_Grain 同族、不同坐标域）得到两个
+// 确定性伪随机数：n1 与 corruption 比较决定该条带是否"出错"，
+// n2 决定出错条带的水平错位量。RGB 三通道再按错位量相对分离，
+// 模拟数字传输中的色度失锁。
+//
+// 设计要点：
+// - 确定性：无时间/帧 uniform，同一帧内同一坐标输出恒定（条带错位
+//   是静态构图效果，不是逐帧动画——引擎未注入时间 uniform）；
+// - 3 次纹理采样 + 纯 ALU，无循环、零三角函数；预览成本 low；
+// - 采样 UV 钳到半纹素边界；texel 分母下限守护；
+// - Delta 输出惯例：毛刺在 u_input_tex 上计算，差值叠加到已调色画面；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+// Dave Hoskins 无三角函数 hash（大坐标下 fract 精度表现好），输出 [0,1)
+float glitch_hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：三滑杆全零为纯直通
+    if (band_shift < 0.001 && rgb_split < 0.001 && corruption < 0.001) return color;
+
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 safe_size = max(tex_size, vec2(1.0));
+    vec2 half_texel = 0.5 / safe_size;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+
+    // 条带 id（float 参与的 hash 坐标域）
+    float band = floor(uv.y * safe_size.y / max(band_height, 1.0));
+    float n1 = glitch_hash(vec2(band, 7.0));
+    float n2 = glitch_hash(vec2(band, 23.0));
+
+    // 条带激活：n1 >= 1 - corruption 时出错（corruption 控制出错比例）
+    // 注意：active 为 GLSL 保留字，此处用 hot 命名
+    float hot = step(1.0 - corruption, n1);
+    // 错位量：±12.5% 画幅宽以内，方向由 n2 决定
+    float x_shift = (n2 - 0.5) * band_shift * 0.25 * hot;
+
+    // RGB 分离：出错条带全量分离，正常条带保留 25% 底噪式微量分离
+    float split_px = rgb_split * 12.0 * (0.25 + 0.75 * hot);
+    float split_uv = split_px / safe_size.x;
+
+    vec2 uv_r = uv + vec2(x_shift + split_uv, 0.0);
+    vec2 uv_g = uv + vec2(x_shift, 0.0);
+    vec2 uv_b = uv + vec2(x_shift - split_uv, 0.0);
+
+    vec3 glitched = vec3(
+        texture(u_input_tex, clamp(uv_r, min_uv, max_uv)).r,
+        texture(u_input_tex, clamp(uv_g, min_uv, max_uv)).g,
+        texture(u_input_tex, clamp(uv_b, min_uv, max_uv)).b
+    );
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    return color + (glitched - original_color);
+}

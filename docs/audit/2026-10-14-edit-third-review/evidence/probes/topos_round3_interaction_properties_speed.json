@@ -1,0 +1,60 @@
+{
+  "locked_transform": {
+    "model": {
+      "c": {
+        "duration": 96,
+        "source_duration": 120,
+        "x": 10,
+        "speed": 1.0,
+        "linked_id": "a"
+      },
+      "a": {
+        "duration": 96,
+        "source_duration": 120,
+        "x": 10,
+        "speed": 1.0,
+        "linked_id": "c"
+      }
+    },
+    "locked": true,
+    "undo": false,
+    "revision": 0,
+    "widget_value": 99.0,
+    "panel_clip_x": 10,
+    "undo_stack_size": 0,
+    "redo_stack_size": 0,
+    "uncaught": [
+      "Traceback (most recent call last):\n  File \"/tmp/topos_round3_interaction_properties_speed.py\", line 17, in <lambda>\n    c=ClipInstance(clip_id='c',asset_id='missing',track_id='v',timeline_start=100,timeline_duration=96,source_start=100,source_duration=120,_source_fps_num=30,_source_fps_den=1,_timeline_fps_num=24,_timeline_fps_den=1,transform=TransformParams(translate_x=10));a=replace(c,clip_id='a',track_id='a1',linked_clip_id='c');c=replace(c,linked_clip_id='a');seq=TimelineSequence(timeline_id='p',name='p',fps=24,video_tracks=(EditTrack(track_id='v',name='V1',track_type='video',index=0,is_locked=kind=='locked_transform',clips=(c,)),),audio_tracks=(EditTrack(track_id='a1',name='A1',track_type='audio',index=0,clips=(a,)),));v=TimelineView();v.load_timeline(seq);p=EditPropertiesPanel();p.resize(500,900);p.set_clip(c,media_type='video');p.show();app.processEvents();page=SimpleNamespace(_current_timeline=seq);host=SimpleNamespace(edit_page=page,timeline_panel=SimpleNamespace(get_timeline_view=lambda:v),edit_properties_panel=p,timeline_preview_renderer=None);host._execute_timeline_edit_command=MethodType(EditControllerMixin._execute_timeline_edit_command,host);host._request_program_viewer_update=lambda:None;v.timeline_changed.connect(lambda t:setattr(page,'_current_timeline',t));p.clip_param_changed.connect(lambda *a:EditControllerMixin._on_edit_clip_param_changed(host,*a));group='transform' if kind=='locked_transform' else 'speed';section=p._sections['clip:c:'+group]\n                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/edit_controller.py\", line 2408, in _on_edit_clip_param_changed\n    new_timeline = self._execute_timeline_edit_command(command, timeline)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/edit_controller.py\", line 6037, in _execute_timeline_edit_command\n    view.execute_command(command)\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py\", line 5555, in execute_command\n    self._execute_command(command)\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py\", line 5583, in _execute_command\n    new_timeline = self._command_stack.execute(command, self._timeline)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 4294, in execute\n    result = command.apply(timeline)\n             ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 3206, in apply\n    assert_track_editable(timeline, self.track_id, \"Update clip param\")\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 152, in assert_track_editable\n    raise ValueError(\nValueError: Update clip param rejected: track 'V1' is locked\n"
+    ],
+    "expected_2x_mixed_fps_duration": null
+  },
+  "linked_mixed_fps_speed": {
+    "model": {
+      "c": {
+        "duration": 48,
+        "source_duration": 120,
+        "x": 10,
+        "speed": 2.0,
+        "linked_id": "a"
+      },
+      "a": {
+        "duration": 96,
+        "source_duration": 120,
+        "x": 10,
+        "speed": 1.0,
+        "linked_id": "c"
+      }
+    },
+    "locked": false,
+    "undo": true,
+    "revision": 1,
+    "widget_value": 2.0,
+    "panel_clip_x": 10,
+    "undo_stack_size": 1,
+    "redo_stack_size": 0,
+    "uncaught": [
+      "Traceback (most recent call last):\n  File \"/tmp/topos_round3_interaction_properties_speed.py\", line 17, in <lambda>\n    c=ClipInstance(clip_id='c',asset_id='missing',track_id='v',timeline_start=100,timeline_duration=96,source_start=100,source_duration=120,_source_fps_num=30,_source_fps_den=1,_timeline_fps_num=24,_timeline_fps_den=1,transform=TransformParams(translate_x=10));a=replace(c,clip_id='a',track_id='a1',linked_clip_id='c');c=replace(c,linked_clip_id='a');seq=TimelineSequence(timeline_id='p',name='p',fps=24,video_tracks=(EditTrack(track_id='v',name='V1',track_type='video',index=0,is_locked=kind=='locked_transform',clips=(c,)),),audio_tracks=(EditTrack(track_id='a1',name='A1',track_type='audio',index=0,clips=(a,)),));v=TimelineView();v.load_timeline(seq);p=EditPropertiesPanel();p.resize(500,900);p.set_clip(c,media_type='video');p.show();app.processEvents();page=SimpleNamespace(_current_timeline=seq);host=SimpleNamespace(edit_page=page,timeline_panel=SimpleNamespace(get_timeline_view=lambda:v),edit_properties_panel=p,timeline_preview_renderer=None);host._execute_timeline_edit_command=MethodType(EditControllerMixin._execute_timeline_edit_command,host);host._request_program_viewer_update=lambda:None;v.timeline_changed.connect(lambda t:setattr(page,'_current_timeline',t));p.clip_param_changed.connect(lambda *a:EditControllerMixin._on_edit_clip_param_changed(host,*a));group='transform' if kind=='locked_transform' else 'speed';section=p._sections['clip:c:'+group]\n                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/edit_controller.py\", line 2408, in _on_edit_clip_param_changed\n    new_timeline = self._execute_timeline_edit_command(command, timeline)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/edit_controller.py\", line 6037, in _execute_timeline_edit_command\n    view.execute_command(command)\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py\", line 5555, in execute_command\n    self._execute_command(command)\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py\", line 5583, in _execute_command\n    new_timeline = self._command_stack.execute(command, self._timeline)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 4294, in execute\n    result = command.apply(timeline)\n             ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 3206, in apply\n    assert_track_editable(timeline, self.track_id, \"Update clip param\")\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py\", line 152, in assert_track_editable\n    raise ValueError(\nValueError: Update clip param rejected: track 'V1' is locked\n"
+    ],
+    "expected_2x_mixed_fps_duration": 48
+  }
+}

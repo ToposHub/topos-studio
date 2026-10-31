@@ -1,0 +1,112 @@
+name: windows-logic
+
+# W7-02（docs/windows_optimization_plan_2026-09-11.md）：
+# Windows 无 GPU 逻辑层常跑 —— capability 数据整形、windows_hw 契约
+# （reason 词表 / D3D11 骨架 / planar source mock 注入）、hwaccel 枚举、
+# 硬编映射、backend selector 诊断链。
+# W07（升级计划 2026-10-24）：纳入 W02-W06/W10 新增 L1 —— CUDA 生命
+# 周期/回滚/池预算（W02）、驻留失败按素材降级恢复（W03）、设备匹配
+# 与平面格式能力门（W04）、可选 CUDA extra 声明/打包收集（W06）、
+# 跨机归档 Windows 适配（W10）。核心正确性（门闩/释放/能力拒绝/失败
+# 回滚）为 required，不落 continue-on-error。
+# 硬解/interop 实测类用例在无真实硬件适配器的 runner 上诚实 skip
+# （pytest.skip），与 K-W5「无真机不写已验证」一致；Qt 缺席的渲染器
+# 用例经 importorskip 诚实跳过（W03 文件内 QApplication 按需内建）。
+on:
+  push:
+    paths:
+      - "src/shared/media/windows_hw/**"
+      - "src/shared/media/hwaccel.py"
+      - "src/shared/media/decode_policy.py"
+      - "src/shared/gpu/**"
+      - "src/shared/export/encoder.py"
+      - "src/shared/export/render_cache.py"
+      - "src/features/edit/core/edit_gpu_decode_manager.py"
+      - "src/features/edit/core/edit_gpu_preview_renderer.py"
+      - "src/features/edit/core/project_archive.py"
+      - "src/features/edit/core/consolidate.py"
+      - "src/features/edit/ai_editing/generated_media_materializer.py"
+      - "packaging/pyinstaller/base_spec.py"
+      - "pyproject.toml"
+      - "tests/media/test_cuda_resident_lifecycle_w02.py"
+      - "tests/media/test_cuda_resident_capability_w04.py"
+      - "tests/media/test_cuda_extras_w06.py"
+      - "tests/edit/test_resident_failure_recovery_w03.py"
+      - "tests/edit/test_project_archive_w10.py"
+      - "scripts/bench_timeline_export_windows.py"
+      - "tests/media/test_windows_hw_*"
+      - "tests/media/test_bench_timeline_export_windows.py"
+      - "tests/export/test_windows_render_cache.py"
+      - "tests/shared/gpu/**"
+      - "tests/export/test_hwaccel_encoder_map.py"
+      - ".github/workflows/windows-logic.yml"
+  pull_request:
+    paths:
+      - "src/shared/media/windows_hw/**"
+      - "src/shared/gpu/**"
+      - "scripts/bench_timeline_export_windows.py"
+      - ".github/workflows/windows-logic.yml"
+  workflow_dispatch:
+
+jobs:
+  windows-logic:
+    name: windows-latest (no GPU, logic layer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # 逻辑层最小依赖：仅 av/numpy/pytest（Qt/ModernGL 等重依赖不进本 job）
+      - name: Install minimal deps
+        run: python -m pip install --disable-pip-version-check "av>=14" "numpy" "pytest"
+      - name: Run logic-layer suites
+        shell: bash
+        run: |
+          python -m pytest -q \
+            tests/media/test_windows_hw_fallback_reasons.py \
+            tests/media/test_windows_hw_d3d11_contract.py \
+            tests/media/test_windows_hw_gpu_capability.py \
+            tests/media/test_windows_hw_zero_copy.py \
+            tests/media/test_windows_hw_planar_source.py \
+            tests/media/test_windows_hw_native_surface_contract.py \
+            tests/media/test_windows_hw_pipeline_policy.py \
+            tests/media/test_bench_timeline_export_windows.py \
+            tests/media/test_decode_policy.py \
+            tests/shared/gpu/test_platform_capability_kinds.py \
+            tests/shared/gpu/test_backend_types.py \
+            tests/export/test_hwaccel_encoder_map.py \
+            tests/export/test_windows_render_cache.py \
+            tests/media/test_windows_cuda_resident.py \
+            tests/media/test_cuda_resident_lifecycle_w02.py \
+            tests/media/test_cuda_resident_capability_w04.py \
+            tests/media/test_cuda_extras_w06.py \
+            tests/edit/test_resident_failure_recovery_w03.py \
+            tests/edit/test_project_archive_w10.py
+
+  # N20：W03 的 Qt handler 用例在上方 minimal-deps job 因无 Qt 会被
+  # importorskip 静默跳过——那不构成"Windows 侧已验"证据。本 job 装
+  # PyQt6 后同套件重跑：Qt 依赖用例必须真实执行（offscreen），
+  # required、不落 continue-on-error。
+  windows-qt-logic:
+    name: windows-latest (Qt logic layer, offscreen)
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps with Qt
+        run: python -m pip install --disable-pip-version-check "av>=14" "numpy" "pytest" "PyQt6"
+      - name: Run Qt-dependent logic suites
+        shell: bash
+        run: |
+          python -m pytest -q \
+            tests/edit/test_resident_failure_recovery_w03.py \
+            tests/media/test_cuda_resident_lifecycle_w02.py \
+            tests/media/test_cuda_resident_capability_w04.py \
+            tests/media/test_cuda_extras_w06.py \
+            tests/edit/test_project_archive_w10.py \
+            -ra

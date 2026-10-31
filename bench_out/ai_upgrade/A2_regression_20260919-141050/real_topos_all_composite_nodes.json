@@ -1,0 +1,5119 @@
+{
+  "kind": "real_topos_all_composite_node_matrix",
+  "source": "tests/test_videos/2K_topos_proxy.mov",
+  "bench_dir": "/Users/testuser/Documents/vscode/topos_1/.cache/topos_comp_bench",
+  "registered_count": 93,
+  "rows": [
+    {
+      "node_type": "ai_denoise",
+      "exec_class": "cpu_readback",
+      "contract_class": "ai_model",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "ai_denoise@topos_hd",
+      "cold_ms": 892.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "diagnostics": [
+          {
+            "code": "MODEL_UNAVAILABLE",
+            "node_id": "fx0",
+            "node_type": "ai_denoise"
+          }
+        ],
+        "attribution": {
+          "eval_ms": 325.89,
+          "readback_ms": 33.297,
+          "total_ms": 695.776,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 9.7,
+      "preview_p90_ms": 9.7,
+      "attribution_preview": {
+        "eval_ms": 0.387,
+        "readback_ms": 8.099,
+        "total_ms": 8.795,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 44.9,
+      "attribution_export": {
+        "eval_ms": 0.477,
+        "readback_ms": 43.491,
+        "total_ms": 44.364,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.988,
+      "status": "blocked_missing_model"
+    },
+    {
+      "node_type": "ai_expand",
+      "exec_class": "cpu_readback",
+      "contract_class": "ai_model",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "ai_expand@topos_hd",
+      "cold_ms": 509.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "diagnostics": [
+          {
+            "code": "MODEL_UNAVAILABLE",
+            "node_id": "fx0",
+            "node_type": "ai_expand"
+          }
+        ],
+        "attribution": {
+          "eval_ms": 174.573,
+          "readback_ms": 33.23,
+          "total_ms": 411.542,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.6,
+      "preview_p90_ms": 5.6,
+      "attribution_preview": {
+        "eval_ms": 0.385,
+        "readback_ms": 4.018,
+        "total_ms": 4.737,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 46.7,
+      "attribution_export": {
+        "eval_ms": 0.541,
+        "readback_ms": 45.34,
+        "total_ms": 46.21,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.676,
+      "status": "blocked_missing_model"
+    },
+    {
+      "node_type": "ai_gen_expand",
+      "exec_class": "cpu_readback",
+      "contract_class": "ai_model",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "ai_gen_expand@topos_hd",
+      "cold_ms": 616.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 242.863,
+          "readback_ms": 49.301,
+          "total_ms": 537.048,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.9,
+      "preview_p90_ms": 6.9,
+      "attribution_preview": {
+        "eval_ms": 0.684,
+        "readback_ms": 4.056,
+        "total_ms": 5.332,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 45.8,
+      "attribution_export": {
+        "eval_ms": 0.454,
+        "readback_ms": 44.295,
+        "total_ms": 45.167,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.966,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "ai_generate",
+      "exec_class": "cpu_readback",
+      "contract_class": "ai_model",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "ai_generate@topos_hd",
+      "cold_ms": 423.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "diagnostics": [
+          {
+            "code": "MODEL_UNAVAILABLE",
+            "node_id": "fx0",
+            "node_type": "ai_generate"
+          }
+        ],
+        "attribution": {
+          "eval_ms": 137.991,
+          "readback_ms": 33.703,
+          "total_ms": 336.182,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.5,
+      "preview_p90_ms": 5.5,
+      "attribution_preview": {
+        "eval_ms": 0.384,
+        "readback_ms": 3.694,
+        "total_ms": 4.401,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 41.6,
+      "attribution_export": {
+        "eval_ms": 0.792,
+        "readback_ms": 39.342,
+        "total_ms": 40.736,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.663,
+      "status": "blocked_missing_model"
+    },
+    {
+      "node_type": "ai_inpaint",
+      "exec_class": "cpu_readback",
+      "contract_class": "ai_model",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "ai_inpaint@topos_hd",
+      "cold_ms": 624.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "diagnostics": [
+          {
+            "code": "MODEL_UNAVAILABLE",
+            "node_id": "fx0",
+            "node_type": "ai_inpaint"
+          }
+        ],
+        "attribution": {
+          "eval_ms": 267.693,
+          "readback_ms": 52.816,
+          "total_ms": 544.559,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.7,
+      "preview_p90_ms": 6.7,
+      "attribution_preview": {
+        "eval_ms": 0.86,
+        "readback_ms": 3.857,
+        "total_ms": 5.29,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 43.9,
+      "attribution_export": {
+        "eval_ms": 0.463,
+        "readback_ms": 42.507,
+        "total_ms": 43.36,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.085,
+      "status": "blocked_missing_model"
+    },
+    {
+      "node_type": "ai_remove",
+      "exec_class": "cpu_readback",
+      "contract_class": "ai_model",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "ai_remove@topos_hd",
+      "cold_ms": 677.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 300.553,
+          "readback_ms": 47.339,
+          "total_ms": 588.408,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.4,
+      "preview_p90_ms": 5.4,
+      "attribution_preview": {
+        "eval_ms": 0.405,
+        "readback_ms": 3.844,
+        "total_ms": 4.569,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.9,
+      "attribution_export": {
+        "eval_ms": 0.408,
+        "readback_ms": 38.55,
+        "total_ms": 39.296,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.084,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "blend",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "blend@topos_hd",
+      "cold_ms": 792.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.6652,
+        "std": 54.2473,
+        "attribution": {
+          "eval_ms": 397.441,
+          "readback_ms": 62.295,
+          "total_ms": 686.356,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 9.8,
+      "preview_p90_ms": 9.8,
+      "attribution_preview": {
+        "eval_ms": 0.372,
+        "readback_ms": 8.068,
+        "total_ms": 8.814,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 42.0,
+      "attribution_export": {
+        "eval_ms": 0.823,
+        "readback_ms": 39.566,
+        "total_ms": 41.05,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.587,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "blur",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "blur@topos_hd",
+      "cold_ms": 552.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 100.6067,
+        "std": 52.3328,
+        "attribution": {
+          "eval_ms": 234.58,
+          "readback_ms": 46.171,
+          "total_ms": 474.53,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.6,
+      "preview_p90_ms": 5.6,
+      "attribution_preview": {
+        "eval_ms": 0.422,
+        "readback_ms": 3.711,
+        "total_ms": 4.555,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 62.0,
+      "attribution_export": {
+        "eval_ms": 0.793,
+        "readback_ms": 59.406,
+        "total_ms": 60.952,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.918,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "camera3d",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "camera3d@topos_hd",
+      "cold_ms": 213.4,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.213,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "channel_merge",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "channel_merge@topos_hd",
+      "cold_ms": 765.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.66,
+        "std": 54.3573,
+        "attribution": {
+          "eval_ms": 360.758,
+          "readback_ms": 62.737,
+          "total_ms": 672.031,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.9,
+      "preview_p90_ms": 6.9,
+      "attribution_preview": {
+        "eval_ms": 0.519,
+        "readback_ms": 3.876,
+        "total_ms": 5.036,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 42.0,
+      "attribution_export": {
+        "eval_ms": 0.415,
+        "readback_ms": 40.466,
+        "total_ms": 41.307,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.46,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "chroma_keyer",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "chroma_keyer@topos_hd",
+      "cold_ms": 439.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 63.75,
+        "std": 110.4182,
+        "attribution": {
+          "eval_ms": 149.419,
+          "readback_ms": 31.305,
+          "total_ms": 348.951,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 3,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.1,
+      "preview_p90_ms": 6.1,
+      "attribution_preview": {
+        "eval_ms": 0.623,
+        "readback_ms": 3.806,
+        "total_ms": 4.98,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 3,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 61.7,
+      "attribution_export": {
+        "eval_ms": 0.627,
+        "readback_ms": 59.74,
+        "total_ms": 60.926,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 3,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.632,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "chromatic_aberration",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "chromatic_aberration@topos_hd",
+      "cold_ms": 497.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.5662,
+        "std": 54.2244,
+        "attribution": {
+          "eval_ms": 180.035,
+          "readback_ms": 34.582,
+          "total_ms": 415.092,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.9,
+      "preview_p90_ms": 5.9,
+      "attribution_preview": {
+        "eval_ms": 0.34,
+        "readback_ms": 4.099,
+        "total_ms": 4.768,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.5,
+      "attribution_export": {
+        "eval_ms": 0.602,
+        "readback_ms": 38.552,
+        "total_ms": 39.741,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.581,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "clamp",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "clamp@topos_hd",
+      "cold_ms": 548.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 194.558,
+          "readback_ms": 30.267,
+          "total_ms": 470.995,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.5,
+      "preview_p90_ms": 6.5,
+      "attribution_preview": {
+        "eval_ms": 0.732,
+        "readback_ms": 3.663,
+        "total_ms": 5.053,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.2,
+      "attribution_export": {
+        "eval_ms": 0.589,
+        "readback_ms": 38.395,
+        "total_ms": 39.535,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.643,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "color_correct",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "color_correct@topos_hd",
+      "cold_ms": 602.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 270.138,
+          "readback_ms": 51.232,
+          "total_ms": 514.04,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.5,
+      "preview_p90_ms": 6.5,
+      "attribution_preview": {
+        "eval_ms": 0.707,
+        "readback_ms": 3.979,
+        "total_ms": 5.262,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 45.9,
+      "attribution_export": {
+        "eval_ms": 0.499,
+        "readback_ms": 44.453,
+        "total_ms": 45.349,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.913,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "color_input",
+      "exec_class": "unclassified",
+      "contract_class": "generator",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "color_input@topos_hd",
+      "cold_ms": 195.9,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.196,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "compare",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "compare@topos_hd",
+      "cold_ms": 688.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.6506,
+        "std": 54.3189,
+        "attribution": {
+          "eval_ms": 299.324,
+          "readback_ms": 45.729,
+          "total_ms": 613.187,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.5,
+      "preview_p90_ms": 5.5,
+      "attribution_preview": {
+        "eval_ms": 0.431,
+        "readback_ms": 3.697,
+        "total_ms": 4.59,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 61.8,
+      "attribution_export": {
+        "eval_ms": 0.594,
+        "readback_ms": 60.013,
+        "total_ms": 61.135,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.048,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "constant",
+      "exec_class": "gpu",
+      "contract_class": "generator",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "constant@topos_hd",
+      "cold_ms": 397.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 101.6667,
+        "std": 75.2965,
+        "attribution": {
+          "eval_ms": 41.374,
+          "readback_ms": 28.195,
+          "total_ms": 304.699,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.5,
+      "preview_p90_ms": 5.5,
+      "attribution_preview": {
+        "eval_ms": 0.342,
+        "readback_ms": 3.622,
+        "total_ms": 4.303,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 41.7,
+      "attribution_export": {
+        "eval_ms": 0.688,
+        "readback_ms": 39.348,
+        "total_ms": 40.712,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.27,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "copy_channel",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "copy_channel@topos_hd",
+      "cold_ms": 725.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 285.776,
+          "readback_ms": 52.054,
+          "total_ms": 615.643,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.6,
+      "preview_p90_ms": 5.6,
+      "attribution_preview": {
+        "eval_ms": 0.353,
+        "readback_ms": 3.677,
+        "total_ms": 4.416,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 63.2,
+      "attribution_export": {
+        "eval_ms": 0.733,
+        "readback_ms": 60.983,
+        "total_ms": 62.354,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.26,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "cornerpin",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "cornerpin@topos_hd",
+      "cold_ms": 644.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 173.808,
+          "readback_ms": 31.94,
+          "total_ms": 541.409,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 7.1,
+      "preview_p90_ms": 7.1,
+      "attribution_preview": {
+        "eval_ms": 0.743,
+        "readback_ms": 4.076,
+        "total_ms": 5.461,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 47.0,
+      "attribution_export": {
+        "eval_ms": 0.529,
+        "readback_ms": 44.664,
+        "total_ms": 46.031,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.916,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "crop",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "crop@topos_hd",
+      "cold_ms": 633.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 84.8446,
+        "std": 65.8043,
+        "attribution": {
+          "eval_ms": 168.527,
+          "readback_ms": 33.588,
+          "total_ms": 508.184,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.9,
+      "preview_p90_ms": 6.9,
+      "attribution_preview": {
+        "eval_ms": 0.682,
+        "readback_ms": 4.117,
+        "total_ms": 5.411,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 61.9,
+      "attribution_export": {
+        "eval_ms": 0.401,
+        "readback_ms": 60.626,
+        "total_ms": 61.425,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.084,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "cryptomatte_select",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "cryptomatte_select@topos_hd",
+      "cold_ms": 476.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 127.5,
+        "std": 127.5,
+        "attribution": {
+          "eval_ms": 136.074,
+          "readback_ms": 28.477,
+          "total_ms": 381.923,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 3,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.8,
+      "preview_p90_ms": 5.8,
+      "attribution_preview": {
+        "eval_ms": 0.382,
+        "readback_ms": 3.978,
+        "total_ms": 4.705,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 3,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.7,
+      "attribution_export": {
+        "eval_ms": 0.297,
+        "readback_ms": 38.409,
+        "total_ms": 38.997,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 3,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.758,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "cs_transform",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "cs_transform@topos_hd",
+      "cold_ms": 428.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 148.795,
+          "readback_ms": 30.402,
+          "total_ms": 343.955,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.6,
+      "preview_p90_ms": 5.6,
+      "attribution_preview": {
+        "eval_ms": 0.342,
+        "readback_ms": 3.806,
+        "total_ms": 4.459,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 44.0,
+      "attribution_export": {
+        "eval_ms": 0.714,
+        "readback_ms": 39.751,
+        "total_ms": 41.109,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.489,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "deep_merge",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "deep_merge@topos_hd",
+      "cold_ms": 708.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.6652,
+        "std": 54.2473,
+        "attribution": {
+          "eval_ms": 382.019,
+          "readback_ms": 61.489,
+          "total_ms": 628.148,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.7,
+      "preview_p90_ms": 5.7,
+      "attribution_preview": {
+        "eval_ms": 0.337,
+        "readback_ms": 3.957,
+        "total_ms": 4.616,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 47.8,
+      "attribution_export": {
+        "eval_ms": 0.693,
+        "readback_ms": 44.169,
+        "total_ms": 45.45,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.338,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "deflicker",
+      "exec_class": "cpu_readback",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "deflicker@topos_hd",
+      "cold_ms": 515.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 244.202,
+          "readback_ms": 12.964,
+          "total_ms": 441.22,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 255.1,
+      "preview_p90_ms": 255.1,
+      "attribution_preview": {
+        "eval_ms": 248.475,
+        "readback_ms": 4.681,
+        "total_ms": 253.733,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 224.4,
+      "attribution_export": {
+        "eval_ms": 160.831,
+        "readback_ms": 61.172,
+        "total_ms": 222.389,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.081,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "defocus",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "defocus@topos_hd",
+      "cold_ms": 503.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 100.9451,
+        "std": 51.7922,
+        "attribution": {
+          "eval_ms": 172.554,
+          "readback_ms": 30.686,
+          "total_ms": 394.792,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.7,
+      "preview_p90_ms": 5.7,
+      "attribution_preview": {
+        "eval_ms": 0.391,
+        "readback_ms": 3.941,
+        "total_ms": 4.718,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 45.4,
+      "attribution_export": {
+        "eval_ms": 0.388,
+        "readback_ms": 42.625,
+        "total_ms": 43.375,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.503,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "deformer3d",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "deformer3d@topos_hd",
+      "cold_ms": 217.8,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.218,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "denoise",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "denoise@topos_hd",
+      "cold_ms": 481.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 164.521,
+          "readback_ms": 30.06,
+          "total_ms": 408.889,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 7.1,
+      "preview_p90_ms": 7.1,
+      "attribution_preview": {
+        "eval_ms": 0.698,
+        "readback_ms": 4.209,
+        "total_ms": 5.552,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 43.9,
+      "attribution_export": {
+        "eval_ms": 0.387,
+        "readback_ms": 40.62,
+        "total_ms": 41.396,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.642,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "depth_matte",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "depth_matte@topos_hd",
+      "cold_ms": 712.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 104.0765,
+        "std": 119.5917,
+        "attribution": {
+          "eval_ms": 302.759,
+          "readback_ms": 46.221,
+          "total_ms": 587.228,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.6,
+      "preview_p90_ms": 5.6,
+      "attribution_preview": {
+        "eval_ms": 0.357,
+        "readback_ms": 3.757,
+        "total_ms": 4.44,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 41.4,
+      "attribution_export": {
+        "eval_ms": 0.398,
+        "readback_ms": 38.022,
+        "total_ms": 38.827,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.084,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "difference_keyer",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "difference_keyer@topos_hd",
+      "cold_ms": 528.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 4.4202,
+        "std": 20.393,
+        "attribution": {
+          "eval_ms": 242.674,
+          "readback_ms": 48.141,
+          "total_ms": 454.529,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.3,
+      "preview_p90_ms": 6.3,
+      "attribution_preview": {
+        "eval_ms": 0.351,
+        "readback_ms": 4.274,
+        "total_ms": 4.958,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.7,
+      "attribution_export": {
+        "eval_ms": 0.698,
+        "readback_ms": 35.982,
+        "total_ms": 37.289,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.008,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "dissolve",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "dissolve@topos_hd",
+      "cold_ms": 696.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.7988,
+        "std": 53.7053,
+        "attribution": {
+          "eval_ms": 309.749,
+          "readback_ms": 52.39,
+          "total_ms": 567.757,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 7.3,
+      "preview_p90_ms": 7.3,
+      "attribution_preview": {
+        "eval_ms": 0.73,
+        "readback_ms": 4.783,
+        "total_ms": 6.128,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 41.3,
+      "attribution_export": {
+        "eval_ms": 0.604,
+        "readback_ms": 38.045,
+        "total_ms": 39.176,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.043,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "dot",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "dot@topos_hd",
+      "cold_ms": 569.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 192.246,
+          "readback_ms": 30.034,
+          "total_ms": 494.682,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.0,
+      "preview_p90_ms": 6.0,
+      "attribution_preview": {
+        "eval_ms": 0.521,
+        "readback_ms": 4.084,
+        "total_ms": 5.053,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.4,
+      "attribution_export": {
+        "eval_ms": 0.38,
+        "readback_ms": 36.816,
+        "total_ms": 37.547,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.691,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "edge_detect",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "edge_detect@topos_hd",
+      "cold_ms": 1158.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 6.6487,
+        "std": 40.6352,
+        "attribution": {
+          "eval_ms": 842.984,
+          "readback_ms": 34.685,
+          "total_ms": 1086.793,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.5,
+      "preview_p90_ms": 5.5,
+      "attribution_preview": {
+        "eval_ms": 0.349,
+        "readback_ms": 3.945,
+        "total_ms": 4.601,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.5,
+      "attribution_export": {
+        "eval_ms": 0.559,
+        "readback_ms": 36.136,
+        "total_ms": 37.236,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 3.332,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "erode_dilate",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "erode_dilate@topos_hd",
+      "cold_ms": 537.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 198.782,
+          "readback_ms": 35.972,
+          "total_ms": 454.535,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.4,
+      "preview_p90_ms": 6.4,
+      "attribution_preview": {
+        "eval_ms": 0.72,
+        "readback_ms": 3.913,
+        "total_ms": 5.263,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.4,
+      "attribution_export": {
+        "eval_ms": 0.405,
+        "readback_ms": 37.643,
+        "total_ms": 38.449,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.76,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "face_smooth",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "face_smooth@topos_hd",
+      "cold_ms": 645.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.5024,
+        "std": 54.1959,
+        "attribution": {
+          "eval_ms": 289.881,
+          "readback_ms": 49.646,
+          "total_ms": 565.957,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.4,
+      "preview_p90_ms": 5.4,
+      "attribution_preview": {
+        "eval_ms": 0.335,
+        "readback_ms": 3.819,
+        "total_ms": 4.465,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.5,
+      "attribution_export": {
+        "eval_ms": 0.692,
+        "readback_ms": 36.442,
+        "total_ms": 37.751,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.004,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "face_track",
+      "exec_class": "unclassified",
+      "contract_class": "ai_model",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "face_track@topos_hd",
+      "cold_ms": 496.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 135.593,
+          "readback_ms": 30.315,
+          "total_ms": 417.369,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.7,
+      "preview_p90_ms": 6.7,
+      "attribution_preview": {
+        "eval_ms": 0.932,
+        "readback_ms": 3.831,
+        "total_ms": 5.317,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 42.7,
+      "attribution_export": {
+        "eval_ms": 0.699,
+        "readback_ms": 39.079,
+        "total_ms": 40.27,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.672,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "file_output",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "file_output@topos_hd",
+      "cold_ms": 244.9,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.245,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "fog",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "fog@topos_hd",
+      "cold_ms": 751.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 120.7644,
+        "std": 53.2185,
+        "attribution": {
+          "eval_ms": 303.181,
+          "readback_ms": 53.813,
+          "total_ms": 620.696,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.6,
+      "preview_p90_ms": 6.6,
+      "attribution_preview": {
+        "eval_ms": 0.569,
+        "readback_ms": 4.119,
+        "total_ms": 5.211,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.8,
+      "attribution_export": {
+        "eval_ms": 0.586,
+        "readback_ms": 36.232,
+        "total_ms": 37.347,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.007,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "frame_hold",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "frame_hold@topos_hd",
+      "cold_ms": 463.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 150.206,
+          "readback_ms": 29.606,
+          "total_ms": 380.55,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.9,
+      "preview_p90_ms": 6.9,
+      "attribution_preview": {
+        "eval_ms": 1.033,
+        "readback_ms": 4.569,
+        "total_ms": 5.94,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 45.9,
+      "attribution_export": {
+        "eval_ms": 1.636,
+        "readback_ms": 40.596,
+        "total_ms": 42.749,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.539,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "frame_interpolate",
+      "exec_class": "cpu_readback",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "frame_interpolate@topos_hd",
+      "cold_ms": 847.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.8074,
+        "std": 53.7043,
+        "attribution": {
+          "eval_ms": 448.693,
+          "readback_ms": 51.068,
+          "total_ms": 765.915,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 8.5,
+      "preview_p90_ms": 8.5,
+      "attribution_preview": {
+        "eval_ms": 1.932,
+        "readback_ms": 4.623,
+        "total_ms": 7.178,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 61.9,
+      "attribution_export": {
+        "eval_ms": 1.079,
+        "readback_ms": 58.027,
+        "total_ms": 59.56,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.235,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "geo3d",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "geo3d@topos_hd",
+      "cold_ms": 258.3,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.258,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "glow",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "glow@topos_hd",
+      "cold_ms": 587.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.5866,
+        "std": 54.4646,
+        "attribution": {
+          "eval_ms": 205.925,
+          "readback_ms": 31.663,
+          "total_ms": 502.031,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.0,
+      "preview_p90_ms": 6.0,
+      "attribution_preview": {
+        "eval_ms": 0.359,
+        "readback_ms": 4.212,
+        "total_ms": 4.926,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 45.1,
+      "attribution_export": {
+        "eval_ms": 0.756,
+        "readback_ms": 41.412,
+        "total_ms": 42.854,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.755,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "godrays",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "godrays@topos_hd",
+      "cold_ms": 608.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 152.4727,
+        "std": 33.0143,
+        "attribution": {
+          "eval_ms": 286.881,
+          "readback_ms": 50.876,
+          "total_ms": 520.615,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.3,
+      "preview_p90_ms": 6.3,
+      "attribution_preview": {
+        "eval_ms": 0.51,
+        "readback_ms": 3.957,
+        "total_ms": 5.061,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 42.1,
+      "attribution_export": {
+        "eval_ms": 0.377,
+        "readback_ms": 39.212,
+        "total_ms": 39.938,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.168,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "grade",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "grade@topos_hd",
+      "cold_ms": 647.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 269.118,
+          "readback_ms": 47.552,
+          "total_ms": 565.953,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.7,
+      "preview_p90_ms": 6.7,
+      "attribution_preview": {
+        "eval_ms": 0.766,
+        "readback_ms": 3.992,
+        "total_ms": 5.463,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 59.6,
+      "attribution_export": {
+        "eval_ms": 0.637,
+        "readback_ms": 55.673,
+        "total_ms": 56.931,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.038,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "group",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "group@topos_hd",
+      "cold_ms": 533.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 212.151,
+          "readback_ms": 32.489,
+          "total_ms": 431.975,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.4,
+      "preview_p90_ms": 5.4,
+      "attribution_preview": {
+        "eval_ms": 0.361,
+        "readback_ms": 3.696,
+        "total_ms": 4.438,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 41.6,
+      "attribution_export": {
+        "eval_ms": 0.671,
+        "readback_ms": 37.857,
+        "total_ms": 39.102,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.811,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "huecorrect",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "huecorrect@topos_hd",
+      "cold_ms": 648.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 297.029,
+          "readback_ms": 50.212,
+          "total_ms": 561.993,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.2,
+      "preview_p90_ms": 5.2,
+      "attribution_preview": {
+        "eval_ms": 0.407,
+        "readback_ms": 3.58,
+        "total_ms": 4.323,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 44.1,
+      "attribution_export": {
+        "eval_ms": 0.736,
+        "readback_ms": 39.89,
+        "total_ms": 41.315,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.157,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "image_input",
+      "exec_class": "unclassified",
+      "contract_class": "source",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "image_input@topos_hd",
+      "cold_ms": 259.6,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.26,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "invert",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "invert@topos_hd",
+      "cold_ms": 505.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 232.9267,
+        "std": 22.2187,
+        "attribution": {
+          "eval_ms": 193.733,
+          "readback_ms": 34.215,
+          "total_ms": 420.871,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.6,
+      "preview_p90_ms": 5.6,
+      "attribution_preview": {
+        "eval_ms": 0.363,
+        "readback_ms": 3.696,
+        "total_ms": 4.446,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 42.3,
+      "attribution_export": {
+        "eval_ms": 0.369,
+        "readback_ms": 39.187,
+        "total_ms": 39.907,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.815,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "keyer",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "keyer@topos_hd",
+      "cold_ms": 597.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 80.918,
+        "std": 46.9846,
+        "attribution": {
+          "eval_ms": 282.75,
+          "readback_ms": 46.109,
+          "total_ms": 518.605,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.1,
+      "preview_p90_ms": 5.1,
+      "attribution_preview": {
+        "eval_ms": 0.358,
+        "readback_ms": 3.534,
+        "total_ms": 4.225,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 44.0,
+      "attribution_export": {
+        "eval_ms": 0.727,
+        "readback_ms": 40.283,
+        "total_ms": 41.676,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.122,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "lens_distortion",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "lens_distortion@topos_hd",
+      "cold_ms": 578.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 197.966,
+          "readback_ms": 31.557,
+          "total_ms": 482.28,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.5,
+      "preview_p90_ms": 6.5,
+      "attribution_preview": {
+        "eval_ms": 0.728,
+        "readback_ms": 3.839,
+        "total_ms": 5.242,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.8,
+      "attribution_export": {
+        "eval_ms": 0.443,
+        "readback_ms": 36.118,
+        "total_ms": 37.157,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.742,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "lens_flare",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "lens_flare@topos_hd",
+      "cold_ms": 572.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 103.4045,
+        "std": 52.6982,
+        "attribution": {
+          "eval_ms": 202.007,
+          "readback_ms": 32.16,
+          "total_ms": 451.252,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.6,
+      "preview_p90_ms": 6.6,
+      "attribution_preview": {
+        "eval_ms": 0.693,
+        "readback_ms": 4.029,
+        "total_ms": 5.31,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.4,
+      "attribution_export": {
+        "eval_ms": 0.711,
+        "readback_ms": 35.729,
+        "total_ms": 37.088,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.86,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "light3d",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "light3d@topos_hd",
+      "cold_ms": 294.4,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.295,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "light_wrap",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "light_wrap@topos_hd",
+      "cold_ms": 638.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.7193,
+        "std": 54.3175,
+        "attribution": {
+          "eval_ms": 261.332,
+          "readback_ms": 47.218,
+          "total_ms": 553.755,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 11.0,
+      "preview_p90_ms": 11.0,
+      "attribution_preview": {
+        "eval_ms": 0.666,
+        "readback_ms": 8.153,
+        "total_ms": 9.39,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 41.4,
+      "attribution_export": {
+        "eval_ms": 0.72,
+        "readback_ms": 36.908,
+        "total_ms": 38.251,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.069,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "luma_keyer",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "luma_keyer@topos_hd",
+      "cold_ms": 571.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 157.119,
+          "readback_ms": 29.483,
+          "total_ms": 449.433,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.6,
+      "preview_p90_ms": 6.6,
+      "attribution_preview": {
+        "eval_ms": 0.724,
+        "readback_ms": 3.79,
+        "total_ms": 5.137,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 45.5,
+      "attribution_export": {
+        "eval_ms": 0.452,
+        "readback_ms": 42.172,
+        "total_ms": 43.063,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.886,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "lut",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "lut@topos_hd",
+      "cold_ms": 660.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 293.458,
+          "readback_ms": 56.875,
+          "total_ms": 579.392,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.6,
+      "preview_p90_ms": 5.6,
+      "attribution_preview": {
+        "eval_ms": 0.489,
+        "readback_ms": 3.725,
+        "total_ms": 4.672,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 41.9,
+      "attribution_export": {
+        "eval_ms": 0.467,
+        "readback_ms": 38.254,
+        "total_ms": 39.186,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.055,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "mask",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "mask@topos_hd",
+      "cold_ms": 575.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 70.3401,
+        "std": 61.9057,
+        "attribution": {
+          "eval_ms": 239.197,
+          "readback_ms": 30.51,
+          "total_ms": 498.643,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.6,
+      "preview_p90_ms": 6.6,
+      "attribution_preview": {
+        "eval_ms": 0.687,
+        "readback_ms": 3.922,
+        "total_ms": 5.199,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 36.7,
+      "attribution_export": {
+        "eval_ms": 0.594,
+        "readback_ms": 32.987,
+        "total_ms": 34.147,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.737,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "mask_merge",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "mask_merge@topos_hd",
+      "cold_ms": 652.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 314.874,
+          "readback_ms": 48.907,
+          "total_ms": 529.919,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.4,
+      "preview_p90_ms": 5.4,
+      "attribution_preview": {
+        "eval_ms": 0.34,
+        "readback_ms": 3.741,
+        "total_ms": 4.394,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.1,
+      "attribution_export": {
+        "eval_ms": 0.367,
+        "readback_ms": 35.978,
+        "total_ms": 36.682,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.975,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "matte",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "matte@topos_hd",
+      "cold_ms": 498.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 212.3793,
+        "std": 62.4125,
+        "attribution": {
+          "eval_ms": 141.141,
+          "readback_ms": 29.628,
+          "total_ms": 394.56,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.3,
+      "preview_p90_ms": 5.3,
+      "attribution_preview": {
+        "eval_ms": 0.438,
+        "readback_ms": 3.893,
+        "total_ms": 4.741,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 54.5,
+      "attribution_export": {
+        "eval_ms": 0.596,
+        "readback_ms": 49.984,
+        "total_ms": 51.152,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.708,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "matte_cleanup",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "matte_cleanup@topos_hd",
+      "cold_ms": 583.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.6354,
+        "std": 53.9987,
+        "attribution": {
+          "eval_ms": 240.932,
+          "readback_ms": 35.226,
+          "total_ms": 470.199,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.3,
+      "preview_p90_ms": 6.3,
+      "attribution_preview": {
+        "eval_ms": 0.674,
+        "readback_ms": 4.168,
+        "total_ms": 5.44,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 57.8,
+      "attribution_export": {
+        "eval_ms": 0.382,
+        "readback_ms": 55.008,
+        "total_ms": 55.753,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.96,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "merge",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "merge@topos_hd",
+      "cold_ms": 761.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.6652,
+        "std": 54.2473,
+        "attribution": {
+          "eval_ms": 409.921,
+          "readback_ms": 61.53,
+          "total_ms": 667.895,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 10.2,
+      "preview_p90_ms": 10.2,
+      "attribution_preview": {
+        "eval_ms": 0.414,
+        "readback_ms": 8.905,
+        "total_ms": 9.681,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 46.2,
+      "attribution_export": {
+        "eval_ms": 0.784,
+        "readback_ms": 42.376,
+        "total_ms": 43.807,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.686,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "mesh_warp",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "mesh_warp@topos_hd",
+      "cold_ms": 532.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 205.333,
+          "readback_ms": 32.386,
+          "total_ms": 437.074,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.0,
+      "preview_p90_ms": 6.0,
+      "attribution_preview": {
+        "eval_ms": 0.64,
+        "readback_ms": 3.766,
+        "total_ms": 4.879,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 43.8,
+      "attribution_export": {
+        "eval_ms": 0.762,
+        "readback_ms": 39.92,
+        "total_ms": 41.397,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.665,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "model3d",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "model3d@topos_hd",
+      "cold_ms": 300.1,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.303,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "motion_graphic",
+      "exec_class": "unclassified",
+      "contract_class": "generator",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "error": "ValueError: node type not registered: motion_graphic",
+      "error_stage": "build_or_bench",
+      "total_wall_s": 0.0,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "noise",
+      "exec_class": "gpu",
+      "contract_class": "generator",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "noise@topos_hd",
+      "cold_ms": 422.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 186.9309,
+        "std": 14.615,
+        "attribution": {
+          "eval_ms": 56.941,
+          "readback_ms": 15.946,
+          "total_ms": 341.825,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.7,
+      "preview_p90_ms": 6.7,
+      "attribution_preview": {
+        "eval_ms": 0.37,
+        "readback_ms": 4.555,
+        "total_ms": 5.318,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 38.0,
+      "attribution_export": {
+        "eval_ms": 0.424,
+        "readback_ms": 34.77,
+        "total_ms": 35.652,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.288,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "noop",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "noop@topos_hd",
+      "cold_ms": 526.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 166.471,
+          "readback_ms": 34.287,
+          "total_ms": 444.022,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.8,
+      "preview_p90_ms": 5.8,
+      "attribution_preview": {
+        "eval_ms": 0.667,
+        "readback_ms": 3.745,
+        "total_ms": 4.981,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 57.6,
+      "attribution_export": {
+        "eval_ms": 0.377,
+        "readback_ms": 54.588,
+        "total_ms": 55.289,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.86,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "normalize",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "normalize@topos_hd",
+      "cold_ms": 594.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 202.986,
+          "readback_ms": 29.702,
+          "total_ms": 501.098,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 4.9,
+      "preview_p90_ms": 4.9,
+      "attribution_preview": {
+        "eval_ms": 0.402,
+        "readback_ms": 3.641,
+        "total_ms": 4.366,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 56.9,
+      "attribution_export": {
+        "eval_ms": 0.691,
+        "readback_ms": 53.37,
+        "total_ms": 54.658,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.751,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "output",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "output@topos_hd",
+      "cold_ms": 479.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 153.037,
+          "readback_ms": 36.343,
+          "total_ms": 394.802,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.4,
+      "preview_p90_ms": 6.4,
+      "attribution_preview": {
+        "eval_ms": 0.65,
+        "readback_ms": 4.069,
+        "total_ms": 5.267,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.8,
+      "attribution_export": {
+        "eval_ms": 0.674,
+        "readback_ms": 36.195,
+        "total_ms": 37.476,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.711,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "paint",
+      "exec_class": "cpu_readback",
+      "contract_class": "generator",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "paint@topos_hd",
+      "cold_ms": 545.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 198.495,
+          "readback_ms": 35.315,
+          "total_ms": 434.162,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.1,
+      "preview_p90_ms": 6.1,
+      "attribution_preview": {
+        "eval_ms": 0.774,
+        "readback_ms": 3.999,
+        "total_ms": 5.337,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 48.5,
+      "attribution_export": {
+        "eval_ms": 0.83,
+        "readback_ms": 43.559,
+        "total_ms": 45.044,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.756,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "particle",
+      "exec_class": "cpu_raster",
+      "contract_class": "generator",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "particle@topos_hd",
+      "cold_ms": 435.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 0.012,
+        "std": 1.2126,
+        "attribution": {
+          "eval_ms": 25.862,
+          "readback_ms": 15.471,
+          "total_ms": 348.932,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 8.3,
+      "preview_p90_ms": 8.3,
+      "attribution_preview": {
+        "eval_ms": 2.19,
+        "readback_ms": 3.84,
+        "total_ms": 6.679,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.3,
+      "attribution_export": {
+        "eval_ms": 1.888,
+        "readback_ms": 35.773,
+        "total_ms": 38.223,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.207,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "pointcloud3d",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "pointcloud3d@topos_hd",
+      "cold_ms": 262.4,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.263,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "precomp",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "precomp@topos_hd",
+      "cold_ms": 567.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 174.879,
+          "readback_ms": 33.764,
+          "total_ms": 485.354,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 4.8,
+      "preview_p90_ms": 4.8,
+      "attribution_preview": {
+        "eval_ms": 0.33,
+        "readback_ms": 3.745,
+        "total_ms": 4.374,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.7,
+      "attribution_export": {
+        "eval_ms": 0.569,
+        "readback_ms": 36.806,
+        "total_ms": 37.892,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.707,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "premult",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "premult@topos_hd",
+      "cold_ms": 488.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 188.008,
+          "readback_ms": 33.229,
+          "total_ms": 414.021,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.9,
+      "preview_p90_ms": 5.9,
+      "attribution_preview": {
+        "eval_ms": 0.726,
+        "readback_ms": 3.781,
+        "total_ms": 5.11,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.4,
+      "attribution_export": {
+        "eval_ms": 0.375,
+        "readback_ms": 36.21,
+        "total_ms": 37.01,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.78,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "ramp",
+      "exec_class": "gpu",
+      "contract_class": "generator",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "ramp@topos_hd",
+      "cold_ms": 376.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 181.0593,
+        "std": 43.0491,
+        "attribution": {
+          "eval_ms": 26.004,
+          "readback_ms": 18.708,
+          "total_ms": 294.075,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.7,
+      "preview_p90_ms": 5.7,
+      "attribution_preview": {
+        "eval_ms": 0.377,
+        "readback_ms": 3.746,
+        "total_ms": 4.47,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 37.1,
+      "attribution_export": {
+        "eval_ms": 0.429,
+        "readback_ms": 34.319,
+        "total_ms": 35.208,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.165,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "reformat",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "reformat@topos_hd",
+      "cold_ms": 642.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 204.871,
+          "readback_ms": 35.103,
+          "total_ms": 554.204,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.1,
+      "preview_p90_ms": 5.1,
+      "attribution_preview": {
+        "eval_ms": 0.354,
+        "readback_ms": 3.496,
+        "total_ms": 4.235,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 39.4,
+      "attribution_export": {
+        "eval_ms": 0.589,
+        "readback_ms": 36.05,
+        "total_ms": 37.192,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.734,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "relight",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "relight@topos_hd",
+      "cold_ms": 763.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 0.4486,
+        "std": 7.9358,
+        "attribution": {
+          "eval_ms": 349.739,
+          "readback_ms": 60.757,
+          "total_ms": 631.687,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.6,
+      "preview_p90_ms": 5.6,
+      "attribution_preview": {
+        "eval_ms": 0.47,
+        "readback_ms": 3.887,
+        "total_ms": 4.848,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.0,
+      "attribution_export": {
+        "eval_ms": 0.414,
+        "readback_ms": 37.104,
+        "total_ms": 37.895,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.455,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "remove_channels",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "remove_channels@topos_hd",
+      "cold_ms": 446.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 158.958,
+          "readback_ms": 30.391,
+          "total_ms": 372.873,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.7,
+      "preview_p90_ms": 6.7,
+      "attribution_preview": {
+        "eval_ms": 0.572,
+        "readback_ms": 4.196,
+        "total_ms": 5.34,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 42.7,
+      "attribution_export": {
+        "eval_ms": 0.739,
+        "readback_ms": 37.774,
+        "total_ms": 39.195,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.828,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "retime",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "retime@topos_hd",
+      "cold_ms": 466.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 151.247,
+          "readback_ms": 33.058,
+          "total_ms": 359.929,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 4.9,
+      "preview_p90_ms": 4.9,
+      "attribution_preview": {
+        "eval_ms": 0.512,
+        "readback_ms": 3.541,
+        "total_ms": 4.403,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 55.9,
+      "attribution_export": {
+        "eval_ms": 1.14,
+        "readback_ms": 51.446,
+        "total_ms": 53.212,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.65,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "roto_shape",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "roto_shape@topos_hd",
+      "cold_ms": 497.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 206.3,
+          "readback_ms": 29.851,
+          "total_ms": 424.365,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.1,
+      "preview_p90_ms": 6.1,
+      "attribution_preview": {
+        "eval_ms": 0.537,
+        "readback_ms": 3.935,
+        "total_ms": 4.878,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.6,
+      "attribution_export": {
+        "eval_ms": 0.859,
+        "readback_ms": 35.837,
+        "total_ms": 37.36,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.63,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "scene3d",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "scene3d@topos_hd",
+      "cold_ms": 363.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 28.4854,
+        "std": 4.1385,
+        "attribution": {
+          "eval_ms": 54.88,
+          "readback_ms": 15.789,
+          "total_ms": 287.024,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 8,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 7.4,
+      "preview_p90_ms": 7.4,
+      "attribution_preview": {
+        "eval_ms": 1.391,
+        "readback_ms": 3.891,
+        "total_ms": 5.769,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 8,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.4,
+      "attribution_export": {
+        "eval_ms": 2.207,
+        "readback_ms": 34.306,
+        "total_ms": 37.263,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 8,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.127,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "set_alpha",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "set_alpha@topos_hd",
+      "cold_ms": 663.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 299.931,
+          "readback_ms": 52.282,
+          "total_ms": 583.787,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.0,
+      "preview_p90_ms": 5.0,
+      "attribution_preview": {
+        "eval_ms": 0.464,
+        "readback_ms": 3.634,
+        "total_ms": 4.482,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 37.1,
+      "attribution_export": {
+        "eval_ms": 0.401,
+        "readback_ms": 34.094,
+        "total_ms": 34.897,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.03,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "sharpen",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "sharpen@topos_hd",
+      "cold_ms": 512.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.316,
+        "std": 54.513,
+        "attribution": {
+          "eval_ms": 186.086,
+          "readback_ms": 31.999,
+          "total_ms": 435.875,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.0,
+      "preview_p90_ms": 6.0,
+      "attribution_preview": {
+        "eval_ms": 0.724,
+        "readback_ms": 3.932,
+        "total_ms": 5.262,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 42.3,
+      "attribution_export": {
+        "eval_ms": 0.76,
+        "readback_ms": 37.396,
+        "total_ms": 38.818,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.734,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "shuffle",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "shuffle@topos_hd",
+      "cold_ms": 492.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 185.468,
+          "readback_ms": 32.772,
+          "total_ms": 416.487,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 4.6,
+      "preview_p90_ms": 4.6,
+      "attribution_preview": {
+        "eval_ms": 0.327,
+        "readback_ms": 3.542,
+        "total_ms": 4.163,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 44.4,
+      "attribution_export": {
+        "eval_ms": 0.764,
+        "readback_ms": 40.585,
+        "total_ms": 42.037,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.698,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "switch",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "switch@topos_hd",
+      "cold_ms": 635.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 267.929,
+          "readback_ms": 56.062,
+          "total_ms": 528.552,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.5,
+      "preview_p90_ms": 5.5,
+      "attribution_preview": {
+        "eval_ms": 0.564,
+        "readback_ms": 3.694,
+        "total_ms": 4.76,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 43.7,
+      "attribution_export": {
+        "eval_ms": 0.72,
+        "readback_ms": 40.065,
+        "total_ms": 41.452,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.184,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "text",
+      "exec_class": "cpu_raster",
+      "contract_class": "generator",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "text@topos_hd",
+      "cold_ms": 628.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 11.9583,
+        "std": 52.2651,
+        "attribution": {
+          "eval_ms": 245.17,
+          "readback_ms": 15.421,
+          "total_ms": 533.698,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 7.1,
+      "preview_p90_ms": 7.1,
+      "attribution_preview": {
+        "eval_ms": 0.381,
+        "readback_ms": 3.853,
+        "total_ms": 4.595,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 50.7,
+      "attribution_export": {
+        "eval_ms": 0.476,
+        "readback_ms": 46.709,
+        "total_ms": 47.672,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.802,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "time_offset",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "time_offset@topos_hd",
+      "cold_ms": 536.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 162.795,
+          "readback_ms": 28.85,
+          "total_ms": 457.772,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.0,
+      "preview_p90_ms": 6.0,
+      "attribution_preview": {
+        "eval_ms": 0.503,
+        "readback_ms": 3.953,
+        "total_ms": 4.778,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 59.1,
+      "attribution_export": {
+        "eval_ms": 0.826,
+        "readback_ms": 54.988,
+        "total_ms": 56.324,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.933,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "timeline_clip_input",
+      "exec_class": "unclassified",
+      "contract_class": "source",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "timeline_clip_input@topos_hd",
+      "cold_ms": 293.8,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.294,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "topos_color",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "topos_color@topos_hd",
+      "cold_ms": 557.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 171.117,
+          "readback_ms": 34.466,
+          "total_ms": 476.952,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.4,
+      "preview_p90_ms": 5.4,
+      "attribution_preview": {
+        "eval_ms": 0.427,
+        "readback_ms": 4.173,
+        "total_ms": 4.95,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 45.7,
+      "attribution_export": {
+        "eval_ms": 0.609,
+        "readback_ms": 42.095,
+        "total_ms": 43.254,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.73,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "tracker",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "tracker@topos_hd",
+      "cold_ms": 523.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 145.406,
+          "readback_ms": 31.494,
+          "total_ms": 407.652,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.3,
+      "preview_p90_ms": 5.3,
+      "attribution_preview": {
+        "eval_ms": 0.405,
+        "readback_ms": 3.488,
+        "total_ms": 4.194,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 56.8,
+      "attribution_export": {
+        "eval_ms": 0.637,
+        "readback_ms": 53.518,
+        "total_ms": 54.665,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.845,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "transform",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "transform@topos_hd",
+      "cold_ms": 628.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 92.6428,
+        "std": 58.0706,
+        "attribution": {
+          "eval_ms": 219.532,
+          "readback_ms": 29.878,
+          "total_ms": 514.949,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.0,
+      "preview_p90_ms": 5.0,
+      "attribution_preview": {
+        "eval_ms": 0.361,
+        "readback_ms": 3.817,
+        "total_ms": 4.518,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 46.2,
+      "attribution_export": {
+        "eval_ms": 0.407,
+        "readback_ms": 43.623,
+        "total_ms": 44.427,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.909,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "unpremult",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "unpremult@topos_hd",
+      "cold_ms": 467.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 156.393,
+          "readback_ms": 30.993,
+          "total_ms": 391.687,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.9,
+      "preview_p90_ms": 5.9,
+      "attribution_preview": {
+        "eval_ms": 0.724,
+        "readback_ms": 3.803,
+        "total_ms": 5.097,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 53.3,
+      "attribution_export": {
+        "eval_ms": 0.74,
+        "readback_ms": 49.235,
+        "total_ms": 50.609,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.534,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "video_frame",
+      "exec_class": "unclassified",
+      "contract_class": "source",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "video_frame@topos_hd",
+      "cold_ms": 232.3,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.233,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "vignette",
+      "exec_class": "gpu",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "vignette@topos_hd",
+      "cold_ms": 450.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 85.7799,
+        "std": 52.376,
+        "attribution": {
+          "eval_ms": 151.552,
+          "readback_ms": 29.647,
+          "total_ms": 368.835,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 5.5,
+      "preview_p90_ms": 5.5,
+      "attribution_preview": {
+        "eval_ms": 0.372,
+        "readback_ms": 3.897,
+        "total_ms": 4.598,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 40.1,
+      "attribution_export": {
+        "eval_ms": 0.569,
+        "readback_ms": 36.525,
+        "total_ms": 37.616,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 1.403,
+      "status": "passed_nonflat"
+    },
+    {
+      "node_type": "volume3d",
+      "exec_class": "unclassified",
+      "contract_class": "3d_file_output",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "volume3d@topos_hd",
+      "cold_ms": 260.9,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "total_wall_s": 0.261,
+      "status": "blocked_missing_resource"
+    },
+    {
+      "node_type": "zblur",
+      "exec_class": "unclassified",
+      "contract_class": "image_filter",
+      "backend": "headless_gl_fragment",
+      "source": "2K_topos_proxy.mov -> realhd PNG",
+      "name": "zblur@topos_hd",
+      "cold_ms": 775.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 100.9689,
+        "std": 52.148,
+        "attribution": {
+          "eval_ms": 324.66,
+          "readback_ms": 52.443,
+          "total_ms": 644.766,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 4.9,
+      "preview_p90_ms": 4.9,
+      "attribution_preview": {
+        "eval_ms": 0.424,
+        "readback_ms": 3.604,
+        "total_ms": 4.405,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 49.9,
+      "attribution_export": {
+        "eval_ms": 0.872,
+        "readback_ms": 46.655,
+        "total_ms": 47.935,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "total_wall_s": 2.209,
+      "status": "passed_nonflat"
+    }
+  ]
+}

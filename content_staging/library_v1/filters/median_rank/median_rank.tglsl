@@ -1,0 +1,120 @@
+// --- Topos Plugin Metadata ---
+// @name Median Rank
+// @i18n_name LIB1_Median_Rank
+// @author Topos Library v1
+// @version 0.1.0
+// @description Small-kernel rank filter: exact median/percentile of 3x3 or 5x5 neighborhood, RGB per-channel or luma-preserving mode (deterministic rank selection, no bilateral weighting)
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost medium
+// @param select kernel_size "Kernel" 0 "3x3" "5x5"
+// @param slider percentile "Percentile" 0.5 0.0 1.0
+// @param select channel_mode "Mode" 0 "RGB" "Luma"
+// @param slider amount "Amount" 1.0 0.0 1.0
+// -----------------------------
+//
+// Median Rank —— 小核中值/百分位滤波（L 计划 F19 试点，LIB1）。
+//
+// 差量（L00 台账 F19 行）：全库无排序统计滤波——blur 五型为加权平均
+// （box/gaussian/bilateral/motion/bokeh），denoise 是双边，sharpen 是 unsharp；
+// 本项是精确秩选择（k-次序统计量），语义与全部现有核可区分。
+//
+// 设计要点：
+// - 精确选择：对 n=9/25 个样本用秩计数（c_i = #{v_j < v_i} + #{j<i 且
+//   v_j == v_i}，稳定打破并列），取秩 k = round(percentile*(n-1)) 的样本值；
+//   数学上每秩恰一元素，值口径与排序取第 k 个完全一致（并列值占连续秩）；
+// - 循环上限全部编译期常量（const int N 字面量）；无 while；秩计数为
+//   常量双循环（3x3: 81 比较/通道，5x5: 625 比较/通道——5x5 档 preview_cost
+//   声明 medium 偏高，真实成本 L21 基准）；
+// - 采样：邻域索引 clamp 到 [0, size-1]（edge 边界，clamp-half-texel 采样）；
+//   输出走 Delta 惯例 color + (med(u_input_tex) - texture(u_input_tex, uv))；
+// - Luma 档：对 luma 通道取秩，色度按比例保持 out = color * (med_l / l)，
+//   l < 1e-6 时退化为 vec3(med_l)；
+// - amount=0 精确恒等（首行早退出）；纯静态确定性（无 seed/frame 依赖）；
+// - 参数 ABI 裸名引用；u_input_tex 为引擎注入白名单 uniform。
+
+const vec3 MED_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+float med_pick9(float v[9], int k) {
+    for (int i = 0; i < 9; i++) {
+        int c = 0;
+        for (int j = 0; j < 9; j++) {
+            if (v[j] < v[i]) { c++; }
+            else if (v[j] == v[i] && j < i) { c++; }
+        }
+        if (c == k) { return v[i]; }
+    }
+    return v[k];
+}
+
+float med_pick25(float v[25], int k) {
+    for (int i = 0; i < 25; i++) {
+        int c = 0;
+        for (int j = 0; j < 25; j++) {
+            if (v[j] < v[i]) { c++; }
+            else if (v[j] == v[i] && j < i) { c++; }
+        }
+        if (c == k) { return v[i]; }
+    }
+    return v[k];
+}
+
+vec3 med_apply(vec3 color, vec2 uv) {
+    vec2 ts = textureSize(u_input_tex, 0);
+    vec2 px = floor(uv * ts);
+    if (kernel_size == 0) {
+        float r[9]; float g[9]; float b[9]; float l[9];
+        int n = 0;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                vec2 q = clamp(px + vec2(float(dx), float(dy)),
+                               vec2(0.0), ts - 1.0);
+                vec3 s = texture(u_input_tex, (q + 0.5) / ts).rgb;
+                r[n] = s.r; g[n] = s.g; b[n] = s.b;
+                l[n] = dot(s, MED_LUMA_W);
+                n++;
+            }
+        }
+        int k = int(round(percentile * 8.0));
+        vec3 med = vec3(med_pick9(r, k), med_pick9(g, k), med_pick9(b, k));
+        if (channel_mode == 1) {
+            float ml = med_pick9(l, k);
+            float lu = dot(color, MED_LUMA_W);
+            med = (lu > 1e-6) ? color * (ml / lu) : vec3(ml);
+        }
+        return med;
+    }
+    float r[25]; float g[25]; float b[25]; float l[25];
+    int n = 0;
+    for (int dy = -2; dy <= 2; dy++) {
+        for (int dx = -2; dx <= 2; dx++) {
+            vec2 q = clamp(px + vec2(float(dx), float(dy)),
+                           vec2(0.0), ts - 1.0);
+            vec3 s = texture(u_input_tex, (q + 0.5) / ts).rgb;
+            r[n] = s.r; g[n] = s.g; b[n] = s.b;
+            l[n] = dot(s, MED_LUMA_W);
+            n++;
+        }
+    }
+    int k = int(round(percentile * 24.0));
+    vec3 med = vec3(med_pick25(r, k), med_pick25(g, k), med_pick25(b, k));
+    if (channel_mode == 1) {
+        float ml = med_pick25(l, k);
+        float lu = dot(color, MED_LUMA_W);
+        med = (lu > 1e-6) ? color * (ml / lu) : vec3(ml);
+    }
+    return med;
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    if (amount < 0.001) return color;
+    vec3 base = texture(u_input_tex, uv).rgb;
+    return color + (med_apply(color, uv) - base) * amount;
+}

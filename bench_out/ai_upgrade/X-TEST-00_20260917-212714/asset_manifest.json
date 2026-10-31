@@ -1,0 +1,4429 @@
+{
+  "$schema": "xtest00_asset_manifest@1",
+  "$schema_version": 1,
+  "generated_at": "2026-09-17T21:27:51+0800",
+  "media_dir": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos",
+  "fingerprint_mode": "sha256_full",
+  "environment": {
+    "platform": {
+      "os": "macOS",
+      "os_version": "15.3.1",
+      "arch": "x86_64",
+      "python": "3.12.14"
+    },
+    "git": {
+      "revision": "47e30e37aa58560331fb8bf29496eb070b427d5a",
+      "branch": "chore/edit",
+      "dirty_file_count": 2
+    },
+    "gpu": {
+      "status": "AVAILABLE",
+      "reason_code": null,
+      "detail": null,
+      "devices": [
+        {
+          "model": "AMD Radeon RX 6800",
+          "vendor": "sppci_vendor_amd",
+          "vram": "16 GB",
+          "cores": null,
+          "metal_support": null
+        }
+      ]
+    },
+    "metal": {
+      "status": "UNAVAILABLE",
+      "reason_code": "METAL_SUPPORT_NOT_REPORTED",
+      "detail": null
+    },
+    "gl": {
+      "status": "DEFERRED",
+      "reason_code": "GL_CONTEXT_DEFERRED_TO_RUNTIME",
+      "detail": "X-TEST-00 只冻结环境事实；GL 版本/渲染器由运行时 capability snapshot 采集"
+    },
+    "ffmpeg": {
+      "pyav": {
+        "status": "AVAILABLE",
+        "reason_code": null,
+        "pyav_version": "18.1.0",
+        "ffmpeg_version": "8.1.2"
+      },
+      "ffmpeg_cli": {
+        "status": "UNAVAILABLE",
+        "reason_code": "FFMPEG_CLI_NOT_FOUND",
+        "detail": "TOPOS_FFMPEG_HOME/打包 bin/PATH 均未发现；探测仅走 PyAV/native"
+      },
+      "ffprobe_cli": {
+        "status": "UNAVAILABLE",
+        "reason_code": "FFPROBE_CLI_NOT_FOUND",
+        "detail": "TOPOS_FFMPEG_HOME/打包 bin/PATH 均未发现；探测仅走 PyAV/native"
+      }
+    },
+    "topos_codec": {
+      "status": "AVAILABLE",
+      "reason_code": null,
+      "library_path": "/Users/testuser/Documents/vscode/topos_1/native/topos_codec/build/release/topos_codec.0.1.0.dylib",
+      "version": {
+        "major": 0,
+        "minor": 1,
+        "patch": 0,
+        "git_commit": "c88fa81b-dirty",
+        "build_target": "x86_64-AppleClang"
+      },
+      "abi_version": 2,
+      "capabilities": {
+        "abi_version": 2,
+        "max_width": 16384,
+        "max_height": 16384,
+        "full_decode": true,
+        "fixed_reduced_decode": true,
+        "auto2k_decode": true,
+        "cpu_surface_output": true,
+        "host_visible_gpu_surface": true
+      }
+    }
+  },
+  "asset_count": 44,
+  "status_counts": {
+    "PASS": 43,
+    "NOT_MEDIA": 1
+  },
+  "assets": [
+    {
+      "file": "tests/test_videos/2K_DNxHR 444 10bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_DNxHR 444 10bit.mov",
+      "size_bytes": 899263268,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "a1dabd9f47b98f2124177596159a606438659b3660b78d94a4b2f133b5026e3d"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 899263268,
+            "bit_rate": 369307296
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR 444",
+            "pix_fmt": "yuv444p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "pc",
+            "container_metadata_encoder": "Avid DNxHR 444 10-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR 444",
+        "pix_fmt": "yuv444p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "pc",
+        "container_metadata_encoder": "Avid DNxHR 444 10-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 899263268,
+        "bit_rate": 369307296
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_DNxHR 444 12bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_DNxHR 444 12bit.mov",
+      "size_bytes": 899263268,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "bc67a70838d447ea399e5bd789417849655c9393f855e46cf30167cd0ba65199"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 899263268,
+            "bit_rate": 369307296
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR 444",
+            "pix_fmt": "yuv444p12le",
+            "bit_depth": 12,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "pc",
+            "container_metadata_encoder": "Avid DNxHR 444 12-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR 444",
+        "pix_fmt": "yuv444p12le",
+        "bit_depth": 12,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "pc",
+        "container_metadata_encoder": "Avid DNxHR 444 12-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 899263268,
+        "bit_rate": 369307296
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_DNxHR HQX 10bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_DNxHR HQX 10bit.mov",
+      "size_bytes": 452438808,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "91d31c0b157d5575c3bb3575e53a1996357d61ea4c10bfa1cde57b6f9e412b6e"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 452438808,
+            "bit_rate": 185806491
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR HQX",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Avid DNxHR HQX 10-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR HQX",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Avid DNxHR HQX 10-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 452438808,
+        "bit_rate": 185806491
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_DNxHR HQX 12-bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_DNxHR HQX 12-bit.mov",
+      "size_bytes": 690270064,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "8be264ccf7b4ea361a778502f710fe5779f53a3a0da67110a5d7874efe8ebacf"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 690270064,
+            "bit_rate": 185806208
+          },
+          "duration_s": 29.72,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR HQX",
+            "pix_fmt": "yuv422p12le",
+            "bit_depth": 12,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 743,
+            "color_range": "tv",
+            "container_metadata_encoder": "Avid DNxHR HQX 12-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 29.72
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR HQX",
+        "pix_fmt": "yuv422p12le",
+        "bit_depth": 12,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 743,
+        "color_range": "tv",
+        "container_metadata_encoder": "Avid DNxHR HQX 12-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 690270064,
+        "bit_rate": 185806208
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 29.72
+        }
+      ],
+      "duration_s": 29.72,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_DNxHR HQX 12bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_DNxHR HQX 12bit.mov",
+      "size_bytes": 452438808,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "2e14bb48603d9b8734a6be62369a8207b67b428a21b2a0e4026a32c2669702d2"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 452438808,
+            "bit_rate": 185806491
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR HQX",
+            "pix_fmt": "yuv422p12le",
+            "bit_depth": 12,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Avid DNxHR HQX 12-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR HQX",
+        "pix_fmt": "yuv422p12le",
+        "bit_depth": 12,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Avid DNxHR HQX 12-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 452438808,
+        "bit_rate": 185806491
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_H265.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_H265.mov",
+      "size_bytes": 42352987,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "0aee87a9fc159d2e28bfec8286269feef72499007b9bb8422b96fb89a568970b"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 42352987,
+            "bit_rate": 17393423
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "hevc",
+            "codec_tag": null,
+            "profile": "Main 10",
+            "pix_fmt": "yuv420p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "H.265 10-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "hevc",
+        "codec_tag": null,
+        "profile": "Main 10",
+        "pix_fmt": "yuv420p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "H.265 10-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 42352987,
+        "bit_rate": 17393423
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_h264.mp4",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_h264.mp4",
+      "size_bytes": 52513775,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "3d420027cb4b6afcff11e5cc7b3510ddbb019de732ee403d21f6f40b3f1af04f"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 52513775,
+            "bit_rate": 6680008
+          },
+          "duration_s": 62.891,
+          "video": {
+            "codec": "h264",
+            "codec_tag": null,
+            "profile": "High",
+            "pix_fmt": "yuv420p",
+            "bit_depth": 8,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 1572,
+            "color_range": "tv",
+            "container_metadata_encoder": null
+          },
+          "audio_streams": [
+            {
+              "codec": "aac",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 62.891
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "h264",
+        "codec_tag": null,
+        "profile": "High",
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 1572,
+        "color_range": "tv",
+        "container_metadata_encoder": null
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 52513775,
+        "bit_rate": 6680008
+      },
+      "audio_streams": [
+        {
+          "codec": "aac",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 62.891
+        }
+      ],
+      "duration_s": 62.891,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_prores422.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_prores422.mov",
+      "size_bytes": 297668134,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "390e62a2dc781b0ca595667971fe81f2aa2b42374191f58ffe7091d7e3914300"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 297668134,
+            "bit_rate": 122245640
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "Standard",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 422"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "Standard",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 422"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 297668134,
+        "bit_rate": 122245640
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_prores422HQ.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_prores422HQ.mov",
+      "size_bytes": 448008914,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "2421c3ef5575c4603be9570c76521842f2689f19b92da2143e34d8b7c034194a"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 448008914,
+            "bit_rate": 183987233
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "HQ",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 422 HQ"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "HQ",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 422 HQ"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 448008914,
+        "bit_rate": 183987233
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_prores422LT.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_prores422LT.mov",
+      "size_bytes": 201262666,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "9eaa95c2ac5b804608b2484a22c54078d397c995901603e78b21670dbcbf7fcb"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 201262666,
+            "bit_rate": 82654072
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "LT",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 422 LT"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "LT",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 422 LT"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 201262666,
+        "bit_rate": 82654072
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_prores422Proxy.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_prores422Proxy.mov",
+      "size_bytes": 95714182,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "3ead0a6e3743c506f43e753a8e4e8bdbe902bd751fcd37c82d2232f77fd9d9fa"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 95714182,
+            "bit_rate": 39307672
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "Proxy",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 422 Proxy"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "Proxy",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 422 Proxy"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 95714182,
+        "bit_rate": 39307672
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_prores4444.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_prores4444.mov",
+      "size_bytes": 671066878,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "ef95b3fc003b3be15ae49c19377a5ec6f115a057b4cd9e819ee135faec31736c"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 671066878,
+            "bit_rate": 275592147
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "4444",
+            "pix_fmt": "yuv444p12le",
+            "bit_depth": 12,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 4444"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "4444",
+        "pix_fmt": "yuv444p12le",
+        "bit_depth": 12,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 4444"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 671066878,
+        "bit_rate": 275592147
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_prores4444XQ.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_prores4444XQ.mov",
+      "size_bytes": 986283406,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "0880187374eeb2c61deaa64cb350398da4db88a31fd97e13f7a9992394565516"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 986283406,
+            "bit_rate": 405044519
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "XQ",
+            "pix_fmt": "yuv444p12le",
+            "bit_depth": 12,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 4444 XQ"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "XQ",
+        "pix_fmt": "yuv444p12le",
+        "bit_depth": 12,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 4444 XQ"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 986283406,
+        "bit_rate": 405044519
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/2K_topos.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos.mov",
+      "size_bytes": 64270624,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "b287f53eccc5b15654113191693e264cf7fe9adc6c6d1cb0b8991b2cb67208b6"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 64270624,
+            "bit_rate": 133897133
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/2K_topos_4444.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_4444.mov",
+      "size_bytes": 107221283,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "b5eba07525050d2eadac3c3dad5856934d6c9205ba9aeb741266ce32a4431af1"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 107221283,
+            "bit_rate": 223377672
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 4444",
+            "pix_fmt": "topos_yuva444p10a16",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": true
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 4444",
+        "pix_fmt": "topos_yuva444p10a16",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": true
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/2K_topos_4444xq.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_4444xq.mov",
+      "size_bytes": 158262891,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "2609241d3db539c8e18fd9267510c9902238fa055231671b11fa06ca05f41448"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 158262891,
+            "bit_rate": 329714356
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 4444 XQ",
+            "pix_fmt": "yuv444p12le",
+            "bit_depth": 12,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 4444 XQ",
+        "pix_fmt": "yuv444p12le",
+        "bit_depth": 12,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/2K_topos_hq.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_hq.mov",
+      "size_bytes": 64270624,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "b287f53eccc5b15654113191693e264cf7fe9adc6c6d1cb0b8991b2cb67208b6"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 64270624,
+            "bit_rate": 133897133
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/2K_topos_lt.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_lt.mov",
+      "size_bytes": 24302320,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "364c3a0b2278f6f31f15b43684e0c7dee69322fc2d12ff6e486c354416122c8f"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 24302320,
+            "bit_rate": 50629833
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/2K_topos_proxy.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "size_bytes": 7244641,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "4d348e8cf71b094aab600a738a12e3db31dd3efa904c645e57acb810413fabf2"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 7244641,
+            "bit_rate": 15093002
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/2K_topos_standard.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_standard.mov",
+      "size_bytes": 38358273,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "5f43a003f663eab5f2609bb5908a4a96a90b1836304b6283a8d7508a296a701a"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 38358273,
+            "bit_rate": 79913068
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 1920,
+            "height": 1080,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/4K_DNxHR 444 10bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_DNxHR 444 10bit.mov",
+      "size_bytes": 3554278180,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "ba316483ac78f1d240be453f82955fb58a7f6df4e1da6916ef332d2aace0cbeb"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 3554278180,
+            "bit_rate": 1459662496
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR 444",
+            "pix_fmt": "yuv444p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "pc",
+            "container_metadata_encoder": "Avid DNxHR 444 10-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR 444",
+        "pix_fmt": "yuv444p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "pc",
+        "container_metadata_encoder": "Avid DNxHR 444 10-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 3554278180,
+        "bit_rate": 1459662496
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_DNxHR 444 12bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_DNxHR 444 12bit.mov",
+      "size_bytes": 3554278180,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "3e3d013c63ba0897f9eebb8969ce5aa594443820796146aa97526bcd5453077a"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 3554278180,
+            "bit_rate": 1459662496
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR 444",
+            "pix_fmt": "yuv444p12le",
+            "bit_depth": 12,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "pc",
+            "container_metadata_encoder": "Avid DNxHR 444 12-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR 444",
+        "pix_fmt": "yuv444p12le",
+        "bit_depth": 12,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "pc",
+        "container_metadata_encoder": "Avid DNxHR 444 12-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 3554278180,
+        "bit_rate": 1459662496
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_DNxHR HQX 10bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_DNxHR HQX 10bit.mov",
+      "size_bytes": 1778948900,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "4192dcedf81613c331a9d781a06229114e97f43e6bfc3adc02852e08f5530422"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 1778948900,
+            "bit_rate": 730574496
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR HQX",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Avid DNxHR HQX 10-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR HQX",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Avid DNxHR HQX 10-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 1778948900,
+        "bit_rate": 730574496
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_DNxHR HQX 12-bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_DNxHR HQX 12-bit.mov",
+      "size_bytes": 2714083188,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "89f343f26e795adf63b44823bfcd82945d0263a5ea78b20b99d7cc61831d2578"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 2714083188,
+            "bit_rate": 730574209
+          },
+          "duration_s": 29.72,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR HQX",
+            "pix_fmt": "yuv422p12le",
+            "bit_depth": 12,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 743,
+            "color_range": "tv",
+            "container_metadata_encoder": "Avid DNxHR HQX 12-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 29.72
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR HQX",
+        "pix_fmt": "yuv422p12le",
+        "bit_depth": 12,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 743,
+        "color_range": "tv",
+        "container_metadata_encoder": "Avid DNxHR HQX 12-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 2714083188,
+        "bit_rate": 730574209
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 29.72
+        }
+      ],
+      "duration_s": 29.72,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_DNxHR HQX 12bit.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_DNxHR HQX 12bit.mov",
+      "size_bytes": 1778948900,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "79426b4f0b771f7eecdffc3a43af39b7cdb768ee90019efd8183b5652794e8f4"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 1778948900,
+            "bit_rate": 730574496
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "dnxhd",
+            "codec_tag": null,
+            "profile": "DNXHR HQX",
+            "pix_fmt": "yuv422p12le",
+            "bit_depth": 12,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Avid DNxHR HQX 12-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "dnxhd",
+        "codec_tag": null,
+        "profile": "DNXHR HQX",
+        "pix_fmt": "yuv422p12le",
+        "bit_depth": 12,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Avid DNxHR HQX 12-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 1778948900,
+        "bit_rate": 730574496
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_H264.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_H264.mov",
+      "size_bytes": 53743212,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "044b677f60b6bfb5561bfabb974ebb2ab62c128da9a409d52ff0c1dc67973717"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 53743212,
+            "bit_rate": 14466544
+          },
+          "duration_s": 29.72,
+          "video": {
+            "codec": "h264",
+            "codec_tag": null,
+            "profile": "High",
+            "pix_fmt": "yuv420p",
+            "bit_depth": 8,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 743,
+            "color_range": "tv",
+            "container_metadata_encoder": "H.264"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 29.72
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "h264",
+        "codec_tag": null,
+        "profile": "High",
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 743,
+        "color_range": "tv",
+        "container_metadata_encoder": "H.264"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 53743212,
+        "bit_rate": 14466544
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 29.72
+        }
+      ],
+      "duration_s": 29.72,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_H265.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_H265.mov",
+      "size_bytes": 151384974,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "4a37ace370d8381c997d4abd0e49eafdf1d54a5a33b3d3e5d16d23ebf604ddb5"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 151384974,
+            "bit_rate": 62170420
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "hevc",
+            "codec_tag": null,
+            "profile": "Main 10",
+            "pix_fmt": "yuv420p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "H.265 10-bit"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "hevc",
+        "codec_tag": null,
+        "profile": "Main 10",
+        "pix_fmt": "yuv420p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "H.265 10-bit"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 151384974,
+        "bit_rate": 62170420
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_prores422HQ.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_prores422HQ.mov",
+      "size_bytes": 2667990735,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "59c9df4dd12f5744403710a888c2308c052bb2daad0e4a361f659e3bff77fa4d"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 2667990735,
+            "bit_rate": 718167088
+          },
+          "duration_s": 29.72,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "HQ",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 743,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 422 HQ"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s16le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 29.72
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "HQ",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 743,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 422 HQ"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 2667990735,
+        "bit_rate": 718167088
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s16le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 29.72
+        }
+      ],
+      "duration_s": 29.72,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_prores422HQ.topos",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_prores422HQ.topos",
+      "size_bytes": 4838,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "a685f5aa4acbbeb6ded23b5f8a52209fccb0a9a3b8007dd2530e67ed54601a18"
+      },
+      "probe_status": "NOT_MEDIA",
+      "probe_reason_codes": [
+        "TOPOS_PROJECT_PACKAGE_DETECTED"
+      ],
+      "probe_backends": [],
+      "probe_conflicts": [],
+      "container": {
+        "format_name": "zip"
+      },
+      "metadata_source": null
+    },
+    {
+      "file": "tests/test_videos/4K_prores422LT.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_prores422LT.mov",
+      "size_bytes": 739049598,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "cc9ce9ce2bc8c65bc7d10387892f4b66fc2cc96b865603a4dd64a4e8256e941f"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 739049598,
+            "bit_rate": 303511128
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "LT",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 422 LT"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "LT",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 422 LT"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 739049598,
+        "bit_rate": 303511128
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_prores422Proxy.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_prores422Proxy.mov",
+      "size_bytes": 355333634,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "3ffe0fc66fe02c2cb18779821426d8cc68bce584ce6d2f245c91167b1ca3e768"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 355333634,
+            "bit_rate": 145927570
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "Proxy",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 422 Proxy"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "Proxy",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 422 Proxy"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 355333634,
+        "bit_rate": 145927570
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_prores4444.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_prores4444.mov",
+      "size_bytes": 2587996910,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "e62fc71636419cc8b3ae15135fbc1a8ef35ae5eaaff5afec1ac4b89db6d345c2"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 2587996910,
+            "bit_rate": 1062832406
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "4444",
+            "pix_fmt": "yuv444p12le",
+            "bit_depth": 12,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 4444"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "4444",
+        "pix_fmt": "yuv444p12le",
+        "bit_depth": 12,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 4444"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 2587996910,
+        "bit_rate": 1062832406
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_prores4444XQ.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_prores4444XQ.mov",
+      "size_bytes": 3934180734,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 3934180734,
+            "bit_rate": 1615679972
+          },
+          "duration_s": 19.48,
+          "video": {
+            "codec": "prores",
+            "codec_tag": null,
+            "profile": "XQ",
+            "pix_fmt": "yuv444p12le",
+            "bit_depth": 12,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 487,
+            "color_range": "tv",
+            "container_metadata_encoder": "Apple ProRes 4444 XQ"
+          },
+          "audio_streams": [
+            {
+              "codec": "pcm_s24le",
+              "channels": 2,
+              "sample_rate": 48000,
+              "duration_s": 19.48
+            }
+          ],
+          "stream_counts": {
+            "video": 1,
+            "audio": 1,
+            "subtitle": 0,
+            "data": 1,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "prores",
+        "codec_tag": null,
+        "profile": "XQ",
+        "pix_fmt": "yuv444p12le",
+        "bit_depth": 12,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 487,
+        "color_range": "tv",
+        "container_metadata_encoder": "Apple ProRes 4444 XQ"
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 3934180734,
+        "bit_rate": 1615679972
+      },
+      "audio_streams": [
+        {
+          "codec": "pcm_s24le",
+          "channels": 2,
+          "sample_rate": 48000,
+          "duration_s": 19.48
+        }
+      ],
+      "duration_s": 19.48,
+      "stream_counts": {
+        "video": 1,
+        "audio": 1,
+        "subtitle": 0,
+        "data": 1,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/4K_topos.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_topos.mov",
+      "size_bytes": 254787309,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "59fc93f64cc0bb511c6d62fb2b70ec8efe927cdbdddf51886c7cc417aa5c8d4d"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 254787309,
+            "bit_rate": 530806893
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/4K_topos_4444.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_topos_4444.mov",
+      "size_bytes": 423084314,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "a71ef570e1c6702b72a6070389151ddcf18b24c76337bc2f39f1cef834dd3a16"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 423084314,
+            "bit_rate": 881425654
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 4444",
+            "pix_fmt": "topos_yuva444p10a16",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": true
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 4444",
+        "pix_fmt": "topos_yuva444p10a16",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": true
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/4K_topos_4444xq.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_topos_4444xq.mov",
+      "size_bytes": 623968264,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "a1ff3b86b996b8f9299bda97e98e019b2adca6a779f514a6eaf70fca7a449818"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 623968264,
+            "bit_rate": 1299933883
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 4444 XQ",
+            "pix_fmt": "yuv444p12le",
+            "bit_depth": 12,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 4444 XQ",
+        "pix_fmt": "yuv444p12le",
+        "bit_depth": 12,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/4K_topos_hq.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_topos_hq.mov",
+      "size_bytes": 254787309,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "59fc93f64cc0bb511c6d62fb2b70ec8efe927cdbdddf51886c7cc417aa5c8d4d"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 254787309,
+            "bit_rate": 530806893
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/4K_topos_lt.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_topos_lt.mov",
+      "size_bytes": 96054125,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "df89412c605ffbcbb3c45e5205ea0882853d624c89f49747eb61e8e127e040cf"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 96054125,
+            "bit_rate": 200112760
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/4K_topos_proxy.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_topos_proxy.mov",
+      "size_bytes": 29067119,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "2d83dff6bf7c743a593dc4beb76dd73e00f0c211eda157bc18ab1f796ba0daca"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 29067119,
+            "bit_rate": 60556497
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/4K_topos_standard.mov",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_topos_standard.mov",
+      "size_bytes": 153132499,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "5134886d30a044348ed1d44978ac359336dd781e521caa6af5ec88abf3f371c7"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 153132499,
+            "bit_rate": 319026039
+          },
+          "duration_s": 3.84,
+          "video": {
+            "codec": null,
+            "codec_tag": null,
+            "profile": null,
+            "pix_fmt": null,
+            "bit_depth": null,
+            "width": null,
+            "height": null,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": null,
+            "container_metadata_encoder": "Topos Video Codec 2.0"
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "video": {
+            "codec": "topos",
+            "profile": "Topos 422",
+            "pix_fmt": "yuv422p10le",
+            "bit_depth": 10,
+            "width": 3840,
+            "height": 2160,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 96,
+            "color_range": "limited",
+            "color_matrix": "bt709",
+            "color_primaries": "bt709",
+            "color_transfer": "bt709",
+            "has_alpha": false
+          },
+          "audio_streams": []
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "topos",
+        "profile": "Topos 422",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 96,
+        "color_range": "limited",
+        "color_matrix": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "has_alpha": false
+      },
+      "container": null,
+      "audio_streams": [],
+      "duration_s": null,
+      "stream_counts": null,
+      "metadata_source": "topos_native"
+    },
+    {
+      "file": "tests/test_videos/tracking_fixtures/occlusion.mp4",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/tracking_fixtures/occlusion.mp4",
+      "size_bytes": 1092432,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "862257bcc2cb061cc502c4b1402c6902886b3ebb549bef534caa1d3af31363e2"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 1092432,
+            "bit_rate": 1747891
+          },
+          "duration_s": 5.0,
+          "video": {
+            "codec": "mpeg4",
+            "codec_tag": null,
+            "profile": "Simple Profile",
+            "pix_fmt": "yuv420p",
+            "bit_depth": 8,
+            "width": 1280,
+            "height": 720,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 125,
+            "color_range": null,
+            "container_metadata_encoder": null
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "mpeg4",
+        "codec_tag": null,
+        "profile": "Simple Profile",
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "width": 1280,
+        "height": 720,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 125,
+        "color_range": null,
+        "container_metadata_encoder": null
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 1092432,
+        "bit_rate": 1747891
+      },
+      "audio_streams": [],
+      "duration_s": 5.0,
+      "stream_counts": {
+        "video": 1,
+        "audio": 0,
+        "subtitle": 0,
+        "data": 0,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/tracking_fixtures/perspective.mp4",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/tracking_fixtures/perspective.mp4",
+      "size_bytes": 1471290,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "9302047ea293b514d475a2fa5638a932da69ddd24a2db6f0ab3506a8ed3127f6"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 1471290,
+            "bit_rate": 2354064
+          },
+          "duration_s": 5.0,
+          "video": {
+            "codec": "mpeg4",
+            "codec_tag": null,
+            "profile": "Simple Profile",
+            "pix_fmt": "yuv420p",
+            "bit_depth": 8,
+            "width": 1280,
+            "height": 720,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 125,
+            "color_range": null,
+            "container_metadata_encoder": null
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "mpeg4",
+        "codec_tag": null,
+        "profile": "Simple Profile",
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "width": 1280,
+        "height": 720,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 125,
+        "color_range": null,
+        "container_metadata_encoder": null
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 1471290,
+        "bit_rate": 2354064
+      },
+      "audio_streams": [],
+      "duration_s": 5.0,
+      "stream_counts": {
+        "video": 1,
+        "audio": 0,
+        "subtitle": 0,
+        "data": 0,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/tracking_fixtures/translation.mp4",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/tracking_fixtures/translation.mp4",
+      "size_bytes": 1833471,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "a455973fbdde09ba7f16b9773a83568750f5ad096acde2bee12bd0da8c41e169"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 1833471,
+            "bit_rate": 2933553
+          },
+          "duration_s": 5.0,
+          "video": {
+            "codec": "mpeg4",
+            "codec_tag": null,
+            "profile": "Simple Profile",
+            "pix_fmt": "yuv420p",
+            "bit_depth": 8,
+            "width": 1280,
+            "height": 720,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 125,
+            "color_range": null,
+            "container_metadata_encoder": null
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "mpeg4",
+        "codec_tag": null,
+        "profile": "Simple Profile",
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "width": 1280,
+        "height": 720,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 125,
+        "color_range": null,
+        "container_metadata_encoder": null
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 1833471,
+        "bit_rate": 2933553
+      },
+      "audio_streams": [],
+      "duration_s": 5.0,
+      "stream_counts": {
+        "video": 1,
+        "audio": 0,
+        "subtitle": 0,
+        "data": 0,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    },
+    {
+      "file": "tests/test_videos/tracking_fixtures/trs.mp4",
+      "absolute_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/tracking_fixtures/trs.mp4",
+      "size_bytes": 1815536,
+      "content_hash": {
+        "mode": "sha256_full",
+        "digest": "a15649b16dc5dc3eda326d065805ade62089c915505223803cfca48f714729e9"
+      },
+      "probe_status": "PASS",
+      "probe_reason_codes": [],
+      "probe_backends": [
+        {
+          "backend": "pyav",
+          "status": "AVAILABLE",
+          "reason_code": null,
+          "detail": null,
+          "container": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "format_long_name": "QuickTime / MOV",
+            "size_bytes": 1815536,
+            "bit_rate": 2904857
+          },
+          "duration_s": 5.0,
+          "video": {
+            "codec": "mpeg4",
+            "codec_tag": null,
+            "profile": "Simple Profile",
+            "pix_fmt": "yuv420p",
+            "bit_depth": 8,
+            "width": 1280,
+            "height": 720,
+            "fps": [
+              25,
+              1
+            ],
+            "frame_count": 125,
+            "color_range": null,
+            "container_metadata_encoder": null
+          },
+          "audio_streams": [],
+          "stream_counts": {
+            "video": 1,
+            "audio": 0,
+            "subtitle": 0,
+            "data": 0,
+            "other": 0
+          }
+        },
+        {
+          "backend": "topos_native",
+          "status": "NOT_APPLICABLE",
+          "reason_code": null,
+          "detail": null
+        }
+      ],
+      "probe_conflicts": [],
+      "video": {
+        "codec": "mpeg4",
+        "codec_tag": null,
+        "profile": "Simple Profile",
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "width": 1280,
+        "height": 720,
+        "fps": [
+          25,
+          1
+        ],
+        "frame_count": 125,
+        "color_range": null,
+        "container_metadata_encoder": null
+      },
+      "container": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "size_bytes": 1815536,
+        "bit_rate": 2904857
+      },
+      "audio_streams": [],
+      "duration_s": 5.0,
+      "stream_counts": {
+        "video": 1,
+        "audio": 0,
+        "subtitle": 0,
+        "data": 0,
+        "other": 0
+      },
+      "metadata_source": "pyav"
+    }
+  ],
+  "manifest_digest": "034fd087040a3b9971df0eacfc798f41c689e2934757349c197441b51bb4cdc8"
+}

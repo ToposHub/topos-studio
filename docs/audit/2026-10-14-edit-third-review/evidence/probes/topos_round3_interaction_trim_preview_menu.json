@@ -1,0 +1,102 @@
+{
+  "left_snapFalse": {
+    "preview": {
+      "start": 110,
+      "duration": 90,
+      "source_start": 120,
+      "source_duration": 180
+    },
+    "expected_preview_source": [
+      120,
+      180
+    ],
+    "commit": {
+      "start": 110,
+      "duration": 90,
+      "source_start": 120,
+      "source_duration": 180
+    }
+  },
+  "left_snapTrue": {
+    "preview": {
+      "start": 110,
+      "duration": 90,
+      "source_start": 120,
+      "source_duration": 180
+    },
+    "expected_preview_source": [
+      120,
+      180
+    ],
+    "commit": {
+      "start": 110,
+      "duration": 90,
+      "source_start": 120,
+      "source_duration": 180
+    }
+  },
+  "right_snapFalse": {
+    "preview": {
+      "start": 100,
+      "duration": 90,
+      "source_start": 100,
+      "source_duration": 180
+    },
+    "expected_preview_source": [
+      100,
+      180
+    ],
+    "commit": {
+      "start": 100,
+      "duration": 90,
+      "source_start": 100,
+      "source_duration": 180
+    }
+  },
+  "right_snapTrue": {
+    "preview": {
+      "start": 100,
+      "duration": 90,
+      "source_start": 100,
+      "source_duration": 180
+    },
+    "expected_preview_source": [
+      100,
+      180
+    ],
+    "commit": {
+      "start": 100,
+      "duration": 90,
+      "source_start": 100,
+      "source_duration": 180
+    }
+  },
+  "disabled_menu": {
+    "before_enabled": false,
+    "menu": [
+      {
+        "text": "Enable Clip",
+        "enabled": true,
+        "item_state": false
+      }
+    ],
+    "after_enabled": true,
+    "undo": true
+  },
+  "locked_menu": {
+    "before_enabled": true,
+    "menu": [
+      {
+        "text": "Disable Clip",
+        "enabled": false,
+        "item_state": true
+      }
+    ],
+    "after_enabled": true,
+    "undo": false
+  },
+  "locked_keyboard_disable": {
+    "enabled": true,
+    "undo": false
+  }
+}

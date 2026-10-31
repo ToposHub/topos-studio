@@ -1,0 +1,940 @@
+{
+  "schema": "poc_cuda_gl_interop/2",
+  "date": "2026-10-24T16:12:06",
+  "pyav": "18.1.0",
+  "phases": [
+    {
+      "phase": "capability",
+      "status": "ok",
+      "gl_version": "3.3.0 NVIDIA 621.01",
+      "gl_renderer": "NVIDIA GeForce RTX 4090/PCIe/SSE2",
+      "gl_vendor": "NVIDIA Corporation",
+      "cuda_driver_version": 13050,
+      "cuda_device_name": "NVIDIA GeForce RTX 4090",
+      "interop_ctx_kind": "private",
+      "device_match_gl_vs_cuda": true,
+      "wgl_nv_dx_interop": true,
+      "wgl_nv_dx_interop2": true,
+      "wgl_extensions_head": "WGL_ARB_buffer_region WGL_ARB_create_context WGL_ARB_create_context_no_error WGL_ARB_create_context_profile WGL_ARB_create_context_robustness WGL_ARB_context_flush_control WGL_ARB_extensions_string WGL_ARB_make_current_read WGL_ARB_multisample WGL_ARB_pbuffer WGL_ARB_pixel_format WGL_ARB_pixel_forma",
+      "texture2d_array_probe": {
+        "register": "ok",
+        "map": "ok",
+        "layer1_array": "ok"
+      }
+    },
+    {
+      "phase": "matrix",
+      "status": "ok",
+      "nv12_4k_h264": {
+        "status": "ok",
+        "frames": 4,
+        "fmt": "nv12",
+        "gl_textures": [
+          "1xf1@3840x2160",
+          "2xf1@1920x1080"
+        ],
+        "y_pitch_ref": 3840,
+        "y_pitch_resident": 4096,
+        "uv_pitch_resident": 4096,
+        "uv_dlpack_shape": [
+          1080,
+          1920,
+          2
+        ],
+        "uv_dlpack_strides": [
+          4096,
+          2,
+          1
+        ],
+        "readback_md5_matches": "4/4",
+        "sampled_fbo": {
+          "max_abs_diff": 0,
+          "mean_abs_diff": 0.0,
+          "pass": true
+        }
+      },
+      "p010_4k_h265": {
+        "status": "ok",
+        "frames": 4,
+        "fmt": "p010le",
+        "gl_textures": [
+          "1xu2@3840x2160",
+          "2xu2@1920x1080"
+        ],
+        "y_pitch_ref": 7680,
+        "y_pitch_resident": 7680,
+        "uv_pitch_resident": 7680,
+        "uv_dlpack_shape": [
+          1080,
+          1920,
+          2
+        ],
+        "uv_dlpack_strides": [
+          3840,
+          2,
+          1
+        ],
+        "readback_md5_matches": "4/4",
+        "sampled_fbo": {
+          "max_abs_diff": 1,
+          "mean_abs_diff": 0.004649311583719136,
+          "pass": true
+        }
+      }
+    },
+    {
+      "phase": "timing",
+      "status": "ok",
+      "reps": 5,
+      "warmup": 10,
+      "timed_frames": 100,
+      "sources": {
+        "4K_H264_nv12": {
+          "cpu_planar": {
+            "fps_mean": 827.5,
+            "fps_min": 811.4,
+            "fps_max": 836.5,
+            "total_ms_mean": 1.208,
+            "decode_ms_mean": 0.085,
+            "xfer_ms_mean": 1.124,
+            "cpu_bytes_per_frame": 12441600.0,
+            "interleave_errors": null,
+            "interleaved_content_match": null,
+            "texture_layout": "3 planes (Y,U,V)",
+            "per_rep": [
+              {
+                "decode": {
+                  "mean_ms": 0.086,
+                  "p50_ms": 0.078,
+                  "max_ms": 0.216
+                },
+                "xfer": {
+                  "mean_ms": 1.146,
+                  "p50_ms": 1.119,
+                  "max_ms": 1.959
+                },
+                "total": {
+                  "mean_ms": 1.232,
+                  "p50_ms": 1.2,
+                  "max_ms": 2.128
+                },
+                "steady_fps": 811.4,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 0.084,
+                  "p50_ms": 0.076,
+                  "max_ms": 0.193
+                },
+                "xfer": {
+                  "mean_ms": 1.111,
+                  "p50_ms": 1.073,
+                  "max_ms": 1.784
+                },
+                "total": {
+                  "mean_ms": 1.195,
+                  "p50_ms": 1.169,
+                  "max_ms": 1.942
+                },
+                "steady_fps": 836.5,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 0.085,
+                  "p50_ms": 0.075,
+                  "max_ms": 0.239
+                },
+                "xfer": {
+                  "mean_ms": 1.113,
+                  "p50_ms": 1.091,
+                  "max_ms": 1.792
+                },
+                "total": {
+                  "mean_ms": 1.198,
+                  "p50_ms": 1.168,
+                  "max_ms": 1.944
+                },
+                "steady_fps": 834.5,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 0.082,
+                  "p50_ms": 0.075,
+                  "max_ms": 0.187
+                },
+                "xfer": {
+                  "mean_ms": 1.125,
+                  "p50_ms": 1.093,
+                  "max_ms": 1.681
+                },
+                "total": {
+                  "mean_ms": 1.207,
+                  "p50_ms": 1.18,
+                  "max_ms": 1.747
+                },
+                "steady_fps": 828.4,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 0.086,
+                  "p50_ms": 0.079,
+                  "max_ms": 0.244
+                },
+                "xfer": {
+                  "mean_ms": 1.124,
+                  "p50_ms": 1.094,
+                  "max_ms": 1.645
+                },
+                "total": {
+                  "mean_ms": 1.21,
+                  "p50_ms": 1.184,
+                  "max_ms": 1.81
+                },
+                "steady_fps": 826.5,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              }
+            ]
+          },
+          "hw_download_planar": {
+            "fps_mean": 102.4,
+            "fps_min": 101.5,
+            "fps_max": 103.5,
+            "total_ms_mean": 9.768,
+            "decode_ms_mean": 6.184,
+            "xfer_ms_mean": 3.584,
+            "cpu_bytes_per_frame": 12441600.0,
+            "interleave_errors": null,
+            "interleaved_content_match": null,
+            "texture_layout": "2 planes (Y,UV) NV12-family",
+            "per_rep": [
+              {
+                "decode": {
+                  "mean_ms": 6.295,
+                  "p50_ms": 6.239,
+                  "max_ms": 6.947
+                },
+                "xfer": {
+                  "mean_ms": 3.554,
+                  "p50_ms": 3.528,
+                  "max_ms": 4.826
+                },
+                "total": {
+                  "mean_ms": 9.849,
+                  "p50_ms": 9.787,
+                  "max_ms": 11.18
+                },
+                "steady_fps": 101.5,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 6.067,
+                  "p50_ms": 6.013,
+                  "max_ms": 6.635
+                },
+                "xfer": {
+                  "mean_ms": 3.628,
+                  "p50_ms": 3.54,
+                  "max_ms": 6.627
+                },
+                "total": {
+                  "mean_ms": 9.696,
+                  "p50_ms": 9.545,
+                  "max_ms": 13.171
+                },
+                "steady_fps": 103.1,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 6.178,
+                  "p50_ms": 6.104,
+                  "max_ms": 8.526
+                },
+                "xfer": {
+                  "mean_ms": 3.62,
+                  "p50_ms": 3.565,
+                  "max_ms": 4.538
+                },
+                "total": {
+                  "mean_ms": 9.798,
+                  "p50_ms": 9.701,
+                  "max_ms": 13.064
+                },
+                "steady_fps": 102.1,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 6.303,
+                  "p50_ms": 6.264,
+                  "max_ms": 6.977
+                },
+                "xfer": {
+                  "mean_ms": 3.529,
+                  "p50_ms": 3.505,
+                  "max_ms": 4.205
+                },
+                "total": {
+                  "mean_ms": 9.831,
+                  "p50_ms": 9.743,
+                  "max_ms": 10.952
+                },
+                "steady_fps": 101.7,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 6.076,
+                  "p50_ms": 6.02,
+                  "max_ms": 7.268
+                },
+                "xfer": {
+                  "mean_ms": 3.59,
+                  "p50_ms": 3.547,
+                  "max_ms": 4.375
+                },
+                "total": {
+                  "mean_ms": 9.666,
+                  "p50_ms": 9.589,
+                  "max_ms": 10.69
+                },
+                "steady_fps": 103.5,
+                "cpu_bytes": 1244160000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              }
+            ]
+          },
+          "hw_zero_copy": {
+            "fps_mean": 241.2,
+            "fps_min": 229.7,
+            "fps_max": 247.8,
+            "total_ms_mean": 4.149,
+            "decode_ms_mean": 3.808,
+            "xfer_ms_mean": 0.34,
+            "cpu_bytes_per_frame": 0.0,
+            "interleave_errors": [],
+            "interleaved_content_match": true,
+            "texture_layout": "2 planes (Y,UV) NV12-family",
+            "per_rep": [
+              {
+                "decode": {
+                  "mean_ms": 3.939,
+                  "p50_ms": 3.958,
+                  "max_ms": 4.855
+                },
+                "xfer": {
+                  "mean_ms": 0.414,
+                  "p50_ms": 0.436,
+                  "max_ms": 0.679
+                },
+                "total": {
+                  "mean_ms": 4.353,
+                  "p50_ms": 4.389,
+                  "max_ms": 5.216
+                },
+                "steady_fps": 229.7,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              },
+              {
+                "decode": {
+                  "mean_ms": 3.725,
+                  "p50_ms": 3.683,
+                  "max_ms": 4.201
+                },
+                "xfer": {
+                  "mean_ms": 0.31,
+                  "p50_ms": 0.274,
+                  "max_ms": 0.585
+                },
+                "total": {
+                  "mean_ms": 4.035,
+                  "p50_ms": 3.992,
+                  "max_ms": 4.495
+                },
+                "steady_fps": 247.8,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              },
+              {
+                "decode": {
+                  "mean_ms": 3.724,
+                  "p50_ms": 3.677,
+                  "max_ms": 4.272
+                },
+                "xfer": {
+                  "mean_ms": 0.317,
+                  "p50_ms": 0.27,
+                  "max_ms": 0.921
+                },
+                "total": {
+                  "mean_ms": 4.041,
+                  "p50_ms": 3.961,
+                  "max_ms": 4.729
+                },
+                "steady_fps": 247.5,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              },
+              {
+                "decode": {
+                  "mean_ms": 3.878,
+                  "p50_ms": 3.832,
+                  "max_ms": 4.545
+                },
+                "xfer": {
+                  "mean_ms": 0.318,
+                  "p50_ms": 0.298,
+                  "max_ms": 0.534
+                },
+                "total": {
+                  "mean_ms": 4.196,
+                  "p50_ms": 4.175,
+                  "max_ms": 4.941
+                },
+                "steady_fps": 238.3,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              },
+              {
+                "decode": {
+                  "mean_ms": 3.776,
+                  "p50_ms": 3.708,
+                  "max_ms": 4.952
+                },
+                "xfer": {
+                  "mean_ms": 0.342,
+                  "p50_ms": 0.284,
+                  "max_ms": 1.716
+                },
+                "total": {
+                  "mean_ms": 4.118,
+                  "p50_ms": 4.018,
+                  "max_ms": 5.557
+                },
+                "steady_fps": 242.8,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              }
+            ]
+          }
+        },
+        "4K_H265_p010": {
+          "cpu_planar": {
+            "fps_mean": 326.6,
+            "fps_min": 307.3,
+            "fps_max": 338.0,
+            "total_ms_mean": 3.065,
+            "decode_ms_mean": 0.466,
+            "xfer_ms_mean": 2.599,
+            "cpu_bytes_per_frame": 24883200.0,
+            "interleave_errors": null,
+            "interleaved_content_match": null,
+            "texture_layout": "3 planes (Y,U,V)",
+            "per_rep": [
+              {
+                "decode": {
+                  "mean_ms": 0.672,
+                  "p50_ms": 0.443,
+                  "max_ms": 14.386
+                },
+                "xfer": {
+                  "mean_ms": 2.582,
+                  "p50_ms": 2.494,
+                  "max_ms": 4.787
+                },
+                "total": {
+                  "mean_ms": 3.254,
+                  "p50_ms": 2.927,
+                  "max_ms": 16.888
+                },
+                "steady_fps": 307.3,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 0.404,
+                  "p50_ms": 0.159,
+                  "max_ms": 11.626
+                },
+                "xfer": {
+                  "mean_ms": 2.59,
+                  "p50_ms": 2.534,
+                  "max_ms": 3.449
+                },
+                "total": {
+                  "mean_ms": 2.993,
+                  "p50_ms": 2.715,
+                  "max_ms": 14.061
+                },
+                "steady_fps": 334.1,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 0.414,
+                  "p50_ms": 0.159,
+                  "max_ms": 14.437
+                },
+                "xfer": {
+                  "mean_ms": 2.591,
+                  "p50_ms": 2.493,
+                  "max_ms": 4.285
+                },
+                "total": {
+                  "mean_ms": 3.005,
+                  "p50_ms": 2.709,
+                  "max_ms": 16.905
+                },
+                "steady_fps": 332.8,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 0.504,
+                  "p50_ms": 0.16,
+                  "max_ms": 14.862
+                },
+                "xfer": {
+                  "mean_ms": 2.612,
+                  "p50_ms": 2.528,
+                  "max_ms": 4.117
+                },
+                "total": {
+                  "mean_ms": 3.116,
+                  "p50_ms": 2.751,
+                  "max_ms": 17.263
+                },
+                "steady_fps": 320.9,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 0.338,
+                  "p50_ms": 0.16,
+                  "max_ms": 12.896
+                },
+                "xfer": {
+                  "mean_ms": 2.62,
+                  "p50_ms": 2.58,
+                  "max_ms": 3.612
+                },
+                "total": {
+                  "mean_ms": 2.958,
+                  "p50_ms": 2.802,
+                  "max_ms": 15.273
+                },
+                "steady_fps": 338.0,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "3 planes (Y,U,V)",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              }
+            ]
+          },
+          "hw_download_planar": {
+            "fps_mean": 80.4,
+            "fps_min": 79.9,
+            "fps_max": 80.8,
+            "total_ms_mean": 12.438,
+            "decode_ms_mean": 5.346,
+            "xfer_ms_mean": 7.092,
+            "cpu_bytes_per_frame": 24883200.0,
+            "interleave_errors": null,
+            "interleaved_content_match": null,
+            "texture_layout": "2 planes (Y,UV) NV12-family",
+            "per_rep": [
+              {
+                "decode": {
+                  "mean_ms": 5.344,
+                  "p50_ms": 4.978,
+                  "max_ms": 9.558
+                },
+                "xfer": {
+                  "mean_ms": 7.107,
+                  "p50_ms": 7.064,
+                  "max_ms": 7.905
+                },
+                "total": {
+                  "mean_ms": 12.452,
+                  "p50_ms": 12.131,
+                  "max_ms": 17.231
+                },
+                "steady_fps": 80.3,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 5.332,
+                  "p50_ms": 4.948,
+                  "max_ms": 9.153
+                },
+                "xfer": {
+                  "mean_ms": 7.071,
+                  "p50_ms": 7.05,
+                  "max_ms": 7.94
+                },
+                "total": {
+                  "mean_ms": 12.403,
+                  "p50_ms": 12.101,
+                  "max_ms": 16.13
+                },
+                "steady_fps": 80.6,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 5.345,
+                  "p50_ms": 4.901,
+                  "max_ms": 10.562
+                },
+                "xfer": {
+                  "mean_ms": 7.094,
+                  "p50_ms": 7.014,
+                  "max_ms": 8.051
+                },
+                "total": {
+                  "mean_ms": 12.439,
+                  "p50_ms": 12.003,
+                  "max_ms": 18.322
+                },
+                "steady_fps": 80.4,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 5.425,
+                  "p50_ms": 5.07,
+                  "max_ms": 10.388
+                },
+                "xfer": {
+                  "mean_ms": 7.092,
+                  "p50_ms": 7.035,
+                  "max_ms": 8.095
+                },
+                "total": {
+                  "mean_ms": 12.517,
+                  "p50_ms": 12.334,
+                  "max_ms": 17.62
+                },
+                "steady_fps": 79.9,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              },
+              {
+                "decode": {
+                  "mean_ms": 5.286,
+                  "p50_ms": 4.988,
+                  "max_ms": 9.079
+                },
+                "xfer": {
+                  "mean_ms": 7.095,
+                  "p50_ms": 7.039,
+                  "max_ms": 8.168
+                },
+                "total": {
+                  "mean_ms": 12.381,
+                  "p50_ms": 12.169,
+                  "max_ms": 16.709
+                },
+                "steady_fps": 80.8,
+                "cpu_bytes": 2488320000,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": null,
+                "interleaved_content_match": null
+              }
+            ]
+          },
+          "hw_zero_copy": {
+            "fps_mean": 306.3,
+            "fps_min": 301.9,
+            "fps_max": 312.7,
+            "total_ms_mean": 3.265,
+            "decode_ms_mean": 2.772,
+            "xfer_ms_mean": 0.493,
+            "cpu_bytes_per_frame": 0.0,
+            "interleave_errors": [],
+            "interleaved_content_match": true,
+            "texture_layout": "2 planes (Y,UV) NV12-family",
+            "per_rep": [
+              {
+                "decode": {
+                  "mean_ms": 2.816,
+                  "p50_ms": 1.571,
+                  "max_ms": 12.78
+                },
+                "xfer": {
+                  "mean_ms": 0.487,
+                  "p50_ms": 0.444,
+                  "max_ms": 1.016
+                },
+                "total": {
+                  "mean_ms": 3.304,
+                  "p50_ms": 2.033,
+                  "max_ms": 13.31
+                },
+                "steady_fps": 302.7,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              },
+              {
+                "decode": {
+                  "mean_ms": 2.723,
+                  "p50_ms": 1.646,
+                  "max_ms": 11.601
+                },
+                "xfer": {
+                  "mean_ms": 0.475,
+                  "p50_ms": 0.433,
+                  "max_ms": 0.898
+                },
+                "total": {
+                  "mean_ms": 3.198,
+                  "p50_ms": 2.129,
+                  "max_ms": 12.103
+                },
+                "steady_fps": 312.7,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              },
+              {
+                "decode": {
+                  "mean_ms": 2.737,
+                  "p50_ms": 1.653,
+                  "max_ms": 11.294
+                },
+                "xfer": {
+                  "mean_ms": 0.496,
+                  "p50_ms": 0.444,
+                  "max_ms": 0.934
+                },
+                "total": {
+                  "mean_ms": 3.234,
+                  "p50_ms": 2.204,
+                  "max_ms": 11.726
+                },
+                "steady_fps": 309.3,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              },
+              {
+                "decode": {
+                  "mean_ms": 2.796,
+                  "p50_ms": 1.746,
+                  "max_ms": 12.97
+                },
+                "xfer": {
+                  "mean_ms": 0.482,
+                  "p50_ms": 0.417,
+                  "max_ms": 2.032
+                },
+                "total": {
+                  "mean_ms": 3.278,
+                  "p50_ms": 2.169,
+                  "max_ms": 13.69
+                },
+                "steady_fps": 305.1,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              },
+              {
+                "decode": {
+                  "mean_ms": 2.788,
+                  "p50_ms": 1.554,
+                  "max_ms": 12.71
+                },
+                "xfer": {
+                  "mean_ms": 0.525,
+                  "p50_ms": 0.447,
+                  "max_ms": 1.646
+                },
+                "total": {
+                  "mean_ms": 3.313,
+                  "p50_ms": 2.061,
+                  "max_ms": 13.27
+                },
+                "steady_fps": 301.9,
+                "cpu_bytes": 0,
+                "texture_layout": "2 planes (Y,UV) NV12-family",
+                "interleave_errors": [],
+                "interleaved_content_match": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "phase": "limits",
+      "status": "ok",
+      "target": 256,
+      "registered": 256,
+      "register_batch_ms": 28.0,
+      "first_failure": null,
+      "map_unmap_mode": "per-resource",
+      "map_unmap_all_ok": true,
+      "map_unmap_all_ms": 9.5,
+      "unregister_nonzero_rcs": 0,
+      "recovery_after_full_unregister": "ok"
+    },
+    {
+      "phase": "failures",
+      "status": "ok",
+      "register_invalid_gl_name": {
+        "rc": 400,
+        "err": "<CUresult.CUDA_ERROR_INVALID_HANDLE: 400>",
+        "rejected": true
+      },
+      "double_unregister": {
+        "first_rc": 0,
+        "second_rc": 400,
+        "second_err": "<CUresult.CUDA_ERROR_INVALID_HANDLE: 400>",
+        "rejected": true
+      },
+      "unregister_null": {
+        "rc": 400,
+        "err": "<CUresult.CUDA_ERROR_INVALID_HANDLE: 400>",
+        "rejected": true
+      },
+      "bad_extent_copy": {
+        "rc": 1,
+        "err": "<CUresult.CUDA_ERROR_INVALID_VALUE: 1>",
+        "rejected": true,
+        "texture_unchanged": true
+      },
+      "recovery_cycle": {
+        "ok": true,
+        "content_stable_while_registered": true,
+        "content_stable_after_unregister": true
+      },
+      "delete_tex_while_registered": {
+        "returncode": 0,
+        "result": {
+          "case": "delete_tex_while_registered",
+          "unregister_rc": 0,
+          "unregister_err": "no error"
+        },
+        "stderr_tail": ""
+      },
+      "ctx_release_while_registered": {
+        "returncode": 2,
+        "result": {
+          "case": "ctx_release_while_registered",
+          "unregister_rc": 219,
+          "unregister_err": "<CUresult.CUDA_ERROR_INVALID_GRAPHICS_CONTEXT: 219>"
+        },
+        "stderr_tail": ""
+      },
+      "map_without_current_ctx": {
+        "returncode": 2,
+        "result": {
+          "case": "map_without_current_ctx",
+          "ctx_unset_rc": 0,
+          "map_rc_after_unset": 201,
+          "map_err": "<CUresult.CUDA_ERROR_INVALID_CONTEXT: 201>"
+        },
+        "stderr_tail": ""
+      },
+      "map_junk_handle": {
+        "returncode": 3221225477,
+        "result": null,
+        "stderr_tail": ""
+      },
+      "ctx_poison_matrix": {
+        "returncode": 0,
+        "result": {
+          "case": "ctx_poison_matrix",
+          "fresh_open_hw_owned": "OK(743f)",
+          "open_with_primary_current": "FAIL([Errno 129] Error number -129 occurred)",
+          "open_after_unbind": "FAIL([Errno 129] Error number -129 occurred)",
+          "reset_rc": 0,
+          "open_after_reset": "OK(743f)"
+        },
+        "stderr_tail": ""
+      }
+    }
+  ],
+  "git_commit": "9058ffbfe",
+  "args": {
+    "tag": "B12_20261024_run01",
+    "frames": 100,
+    "reps": 5,
+    "debug": false
+  },
+  "issues": []
+}

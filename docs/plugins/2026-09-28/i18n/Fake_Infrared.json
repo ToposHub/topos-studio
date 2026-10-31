@@ -1,0 +1,42 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Fake_Infrared": {
+        "name": "假红外",
+        "params": {
+          "channel_map": "通道映射",
+          "glow": "发光强度",
+          "contrast": "对比度"
+        },
+        "desc": {
+          "short": "假红外艺术效果：植被映射为发光的红色调，天空下沉为深青蓝，附带暗区加权的红色梦幻光晕。",
+          "params": {
+            "channel_map": "通道映射方案：经典（假彩色红外记录位移，植被转红）、琥珀（暖橙红植被）、天空交换（R 与 B 交换类映射，天空转火红、植被转钢蓝）。",
+            "glow": "以 luma 反比加权的暗区/植被启发式发光强度，模拟红外胶片的红色光晕；属于遮蔽型眩光，会轻微提升黑位。",
+            "contrast": "以 18% 灰为锚点的逐通道 S 曲线对比，阴影下压、高光扩张。"
+          }
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Fake_Infrared": {
+        "name": "Fake Infrared",
+        "params": {
+          "channel_map": "Channel Map",
+          "glow": "Glow Strength",
+          "contrast": "Contrast"
+        },
+        "desc": {
+          "short": "False-color infrared look: luminous red foliage, sunken skies, inverse-luma weighted dreamy red glow.",
+          "params": {
+            "channel_map": "Channel mapping scheme: Classic (false-color IR record shift, red foliage), Amber (warm orange-red foliage), Sky Swap (R/B exchange class: fiery skies, steel-blue foliage).",
+            "glow": "Inverse-luma weighted dark-region/vegetation glow simulating infrared halation; a veiling glare that slightly lifts the black point.",
+            "contrast": "Per-channel S-curve contrast anchored at 18% grey; crushes shadows, expands highlights."
+          }
+        }
+      }
+    }
+  }
+}

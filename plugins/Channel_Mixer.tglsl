@@ -1,0 +1,57 @@
+// --- Topos Plugin Metadata ---
+// @name Channel Mixer
+// @i18n_name Channel_Mixer
+// @author Topos Team
+// @version 1.0
+// @description Per-channel RGB mixing matrix: three output gains plus six signed crosstalk sliders, applied linearly with strength blend
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider red_gain "Red Gain" 1.0 0.0 2.0
+// @param slider green_gain "Green Gain" 1.0 0.0 2.0
+// @param slider blue_gain "Blue Gain" 1.0 0.0 2.0
+// @param separator
+// @param slider green_into_red "Green into Red" 0.0 -1.0 1.0
+// @param slider blue_into_red "Blue into Red" 0.0 -1.0 1.0
+// @param slider red_into_green "Red into Green" 0.0 -1.0 1.0
+// @param slider blue_into_green "Blue into Green" 0.0 -1.0 1.0
+// @param slider red_into_blue "Red into Blue" 0.0 -1.0 1.0
+// @param slider green_into_blue "Green into Blue" 0.0 -1.0 1.0
+// @param separator
+// @param slider mixer_strength "Strength" 1.0 0.0 1.0
+// -----------------------------
+//
+// Channel Mixer —— RGB 通道混合矩阵。
+//
+// 原理：3x3 线性矩阵逐像素混合——每个输出通道 = 本通道增益 x 原通道
+// + 另两个通道的串扰贡献。是调色系统的标准工具（红外感光模拟、通道
+// 交换、针对性色相偏移都以它为底座）。
+//
+// 设计要点：
+// - 纯线性矩阵：零采样、零循环、零三角/超越函数；行列式不受限，
+//   矩阵作用于 scene-linear 保证 HDR 单调外推（负值/超白按线性组合
+//   自然映射，绝不 clamp 内容色）；
+// - 默认参数 = 恒等矩阵（增益 1.0、串扰 0.0），首行早退出保证零开销；
+// - mixer_strength 以 mix 回插到原始值，滑杆全程可逆；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (mixer_strength < 0.001) return color;
+
+    vec3 mixed = vec3(
+        color.r * red_gain + color.g * green_into_red + color.b * blue_into_red,
+        color.r * red_into_green + color.g * green_gain + color.b * blue_into_green,
+        color.r * red_into_blue + color.g * green_into_blue + color.b * blue_gain
+    );
+
+    return mix(color, mixed, mixer_strength);
+}

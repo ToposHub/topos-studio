@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "result": {
+    "transform_inline": {
+      "x": -250.0,
+      "field": -250.0
+    },
+    "transform_undo": 0.0,
+    "effect_added": [
+      {
+        "id": "65ca18e4-d11f-4f68-9615-c1301c869555",
+        "type": "blur",
+        "params": {
+          "blur_type": "box",
+          "radius_x": 5.0,
+          "radius_y": 5.0,
+          "radius": 8.0,
+          "angle": 0.0,
+          "motion_source": "angle",
+          "shutter": 1.0,
+          "edge_preserve": 0.5,
+          "aperture_blades": "circle",
+          "anamorphic": 0.0,
+          "highlight_gain": 0.0,
+          "edge_policy": "clamp",
+          "quality": "normal",
+          "channel_r": true,
+          "channel_g": true,
+          "channel_b": true,
+          "channel_a": false,
+          "mix": 1.0,
+          "process_alpha": true
+        }
+      }
+    ],
+    "effect_keys": [
+      "effect:65ca18e4-d11f-4f68-9615-c1301c869555:radius",
+      "effect:65ca18e4-d11f-4f68-9615-c1301c869555:angle",
+      "effect:65ca18e4-d11f-4f68-9615-c1301c869555:shutter",
+      "effect:65ca18e4-d11f-4f68-9615-c1301c869555:edge_preserve",
+      "effect:65ca18e4-d11f-4f68-9615-c1301c869555:anamorphic",
+      "effect:65ca18e4-d11f-4f68-9615-c1301c869555:highlight_gain",
+      "effect:65ca18e4-d11f-4f68-9615-c1301c869555:mix"
+    ]
+  }
+}

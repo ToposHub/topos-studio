@@ -1,0 +1,42 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Prism_Aberration": {
+        "name": "棱镜色散",
+        "desc": {
+          "short": "升级版色散：R/B 通道沿“径向 + 可旋转”分离轴做对称偏移采样，偏移量随离中心距离与边缘衰减曲线增长，G 通道保持原位作参考。",
+          "params": {
+            "separation": "色散强度。经 ease-in 曲线映射为通道偏移量上限（默认 0.35 ≈ 远角 12px @4K）；0 时插件整体旁通。",
+            "rotation": "分离轴旋转角度（度，-180 至 180）。0 为经典径向色散，90 为切向扭转，180 为边缘极性互换（红蓝镶边对调）。",
+            "edge_falloff": "边缘衰减。控制偏移随离中心距离的增长曲线：0 为全画面均匀，1 为强烈集中于最外角（默认 0.5 ≈ 距离平方）。"
+          }
+        },
+        "params": {
+          "separation": "色散强度",
+          "rotation": "旋转角度",
+          "edge_falloff": "边缘衰减"
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Prism_Aberration": {
+        "name": "Prism Aberration",
+        "desc": {
+          "short": "Upgraded dispersion: R/B channels sample at symmetric offsets along a rotatable radial axis, growing with center distance and the edge falloff curve; G stays in place as reference.",
+          "params": {
+            "separation": "Dispersion strength, eased into the channel offset ceiling (default 0.35 gives roughly 12px at the far corners on 4K); 0 bypasses the plugin.",
+            "rotation": "Rotation of the separation axis in degrees (-180 to 180). 0 is classic radial dispersion, 90 is a tangential twist, 180 swaps fringe polarity (red/blue swapped).",
+            "edge_falloff": "Edge falloff shaping how offsets grow with distance from center: 0 is uniform across the frame, 1 concentrates on the outermost corners (default 0.5 is roughly distance squared)."
+          }
+        },
+        "params": {
+          "separation": "Dispersion Strength",
+          "rotation": "Rotation (Degrees)",
+          "edge_falloff": "Edge Falloff"
+        }
+      }
+    }
+  }
+}

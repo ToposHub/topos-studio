@@ -1,0 +1,116 @@
+// --- Topos Plugin Metadata ---
+// @name Print Registration
+// @i18n_name LIB1_Print_Registration
+// @author Topos Library v1
+// @version 0.1.0
+// @description CMY print simulation with per-plate misregistration: three screens 15 degrees apart, each plate samples the source at its own registration offset, paper-base white mixing and channel-wise ink absorption (Halftone_Print dot geometry conventions)
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param select cmyk_separation "CMYK Separation" 1 "Luma" "CMY approx"
+// @param slider reg_offset_x "Registration Offset X" 1.0 -4.0 4.0
+// @param slider reg_offset_y "Registration Offset Y" 0.0 -4.0 4.0
+// @param slider paper_base "Paper Base" 0.9 0.0 1.0
+// @param slider ink_amount "Ink Amount" 0.8 0.0 1.0
+// -----------------------------
+//
+// Print Registration —— CMY 套印错位（L 计划 F13，LIB1）。
+//
+// 差量（L00 台账 F13 行）：Halftone_Print 是单张网屏（4 档角度 select）、
+// 无 CMYK 分离/套印偏移/纸底。本项差量三项参数全缺：
+// - cmyk_separation：Luma（三版同源 Rec.709 luma）/ CMY approx
+//   （C 版←R 通道、M 版←G、Y 版←B 的互补通道近似）；
+// - reg_offset_x/y：套印偏移（px）——M 版为基准，C 版采样位 −offset、
+//   Y 版 +offset（对称错位语义）；
+// - paper_base：纸底（向白纸的混合量，见下）。
+//
+// 算法（网点几何沿用 Halftone_Print 惯例）：
+// - 网点：胞元内 r = sqrt(1−l) 半径、smoothstep(r−0.06, r+0.06, d) 软边、
+//   pitch 固定 8px（不重复 Halftone_Print 的 dot_pitch 参数——差量在套印，
+//   不在网距）；C/M/Y 三版网屏角度 0°/15°/30°（角度差 15°，编译期 const
+//   旋转矩阵，Halftone_Print 的 const mat2 惯例）；
+// - 各版按各自采样偏移取源（邻域采样，UV 钳半纹素）；
+// - 叠印（工作单"paper_base + Σ版墨量×(1-cov)"的实现口径，README 记录）：
+//   每版墨量 d_p = ink_amount × cov_p 只作用于自己管辖的通道
+//   （C 版吸收 R、M 版吸收 G、Y 版吸收 B）的乘性掩码——与 Halftone_Print
+//   的乘性油墨掩码同式，避免加性叠印把纸底加亮：
+//     paper = mix(color, vec3(1.0), paper_base * ink_amount)
+//     out.R = paper.r * (1 − d_C)；out.G/B 同理（M/Y 版）
+// - ink_amount=0 首行早退精确恒等（任意 paper_base——纸底只在有墨时参与）；
+//   clamp 仅作用于网点几何参数（Halftone_Print 同类惯例），输出内容色
+//   不因此钳制——HDR 输入按 (1-paper_base*ink) 线性衰减混入纸底
+//   （SDR 输入输出 ≤1，超白/负值经几何参数域收敛为全露白/满墨）；
+// - 纯静态确定性；参数 ABI 裸名引用，u_input_tex 为引擎注入白名单 uniform。
+
+const vec3 PR_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+const float PR_PITCH = 8.0;   // 网点间距（固定，差量不重复 Halftone_Print 的 dot_pitch）
+
+// 网屏旋转矩阵（列主序），编译期常量（Halftone_Print 同惯例）
+const mat2 PR_ROT_15 = mat2(0.96592583, 0.25881904, -0.25881904, 0.96592583);
+const mat2 PR_ROT_30 = mat2(0.86602540, 0.50000000, -0.50000000, 0.86602540);
+
+// 单版网点覆盖率：src = 该版源亮度（几何参数域 [0,1]），scr = 旋转后网屏坐标
+float pr_dot_cov(float src, vec2 scr) {
+    float l = clamp(src, 0.0, 1.0);
+    float r = sqrt(1.0 - l);
+    vec2 f = fract(scr) - 0.5;
+    float d = length(f);
+    return 1.0 - smoothstep(r - 0.06, r + 0.06, d);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零墨纯直通（含 HDR；纸底不参与）
+    if (ink_amount < 0.001) return color;
+
+    vec2 ts = vec2(textureSize(u_input_tex, 0));
+    vec2 safe = max(ts, vec2(1.0));
+    vec2 half_texel = 0.5 / safe;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+    vec2 texel = 1.0 / safe;
+
+    vec2 base_pq = uv * safe;                       // 像素序坐标 + 0.5
+    vec2 off = vec2(reg_offset_x, reg_offset_y);    // 套印偏移（px）
+
+    // 三版采样位：C 版 −off、M 版基准 0、Y 版 +off
+    vec2 qC = base_pq - off;
+    vec2 qM = base_pq;
+    vec2 qY = base_pq + off;
+
+    vec3 sC = texture(u_input_tex, clamp(uv - off * texel, min_uv, max_uv)).rgb;
+    vec3 sM = texture(u_input_tex, clamp(uv, min_uv, max_uv)).rgb;
+    vec3 sY = texture(u_input_tex, clamp(uv + off * texel, min_uv, max_uv)).rgb;
+
+    float srcC, srcM, srcY;
+    if (cmyk_separation == 1) {
+        // CMY approx：互补通道近似（C←R、M←G、Y←B）
+        srcC = sC.r;
+        srcM = sM.g;
+        srcY = sY.b;
+    } else {
+        // Luma：三版同源 Rec.709 luma
+        srcC = dot(sC, PR_LUMA_W);
+        srcM = dot(sM, PR_LUMA_W);
+        srcY = dot(sY, PR_LUMA_W);
+    }
+
+    // 三版网屏：C 0° / M 15° / Y 30°（角度差 15°，独立相位）
+    float covC = pr_dot_cov(srcC, qC / PR_PITCH);
+    float covM = pr_dot_cov(srcM, PR_ROT_15 * (qM / PR_PITCH));
+    float covY = pr_dot_cov(srcY, PR_ROT_30 * (qY / PR_PITCH));
+
+    // 纸底：向白纸的混合量（仅在有墨时参与，ink=0 恒等不被纸底破坏）
+    vec3 paper = mix(color, vec3(1.0), paper_base * ink_amount);
+
+    // 叠印：各版墨量乘性吸收自己管辖的通道（C→R、M→G、Y→B）
+    return vec3(paper.r * (1.0 - ink_amount * covC),
+                paper.g * (1.0 - ink_amount * covM),
+                paper.b * (1.0 - ink_amount * covY));
+}

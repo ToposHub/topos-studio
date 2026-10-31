@@ -1,0 +1,44 @@
+{
+  "recipe_id": "P25",
+  "name": "限色抖动",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合复古海报/像素风；4 色标 + Ordered 4x4 抖动，strength 0.8–1.0",
+  "component": "F12 palette_dither（暂存组件 content_staging/library_v1/filters/palette_dither）",
+  "dependencies": {
+    "component_id": "F12",
+    "component_slug": "palette_dither",
+    "component_kind": "filter"
+  },
+  "params": {
+    "palette_0": [
+      0.05,
+      0.07,
+      0.12
+    ],
+    "palette_1": [
+      0.2,
+      0.35,
+      0.4
+    ],
+    "palette_2": [
+      0.85,
+      0.55,
+      0.25
+    ],
+    "palette_3": [
+      0.95,
+      0.93,
+      0.86
+    ],
+    "dither_mode": "Ordered 4x4",
+    "strength": 0.9
+  },
+  "notes": "依赖暂存组件（L10 未接缝）：调色板量化 + 有序抖动，与生产 Pixel_Blocks 的差量在调色板映射与抖动图案。"
+}

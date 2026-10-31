@@ -1,0 +1,1489 @@
+{
+  "status": "dirty_worktree_pilot_not_release_performance",
+  "created_at": "2026-09-27T16:05:56.903264+00:00",
+  "order": [
+    [
+      16,
+      8,
+      1
+    ],
+    [
+      8,
+      1,
+      16
+    ],
+    [
+      1,
+      16,
+      8
+    ],
+    [
+      16,
+      1,
+      8
+    ],
+    [
+      8,
+      16,
+      1
+    ]
+  ],
+  "scope": "4K XQ ToposVideoEncoder planar input preparation -> encode -> mux, 16 measured frames after 4 warmup; source preload excluded from wall but included in RSS",
+  "rows": [
+    {
+      "iteration": 1,
+      "threads": 16,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160248340784Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 16,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 32.375619437516434,
+        "frame_wall_ms": [
+          23.530504,
+          38.510691,
+          33.68911,
+          21.64654,
+          38.860533,
+          38.793066,
+          25.068283,
+          35.951191,
+          33.42442,
+          24.473819,
+          34.683345,
+          40.262526,
+          25.715016,
+          44.683289,
+          35.291583,
+          23.379803
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 33.68911,
+        "frame_wall_p95_ms": 44.683289,
+        "frame_wall_p99_ms": 44.683289,
+        "process_peak_rss_bytes": 2368385024,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.0597820625,
+        "native_ms_per_frame": 25.630864875,
+        "mux_ms_per_frame": 4.5347786875,
+        "other_ms_per_frame": 2.1501938125164353,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 1,
+      "threads": 8,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160259858353Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 8,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 44.405366249975486,
+        "frame_wall_ms": [
+          37.686641,
+          45.499257,
+          47.535393,
+          36.397192,
+          51.052047,
+          48.736439,
+          40.070704,
+          46.268607,
+          55.152171,
+          30.576096,
+          54.064594,
+          48.312489,
+          32.617869,
+          51.988426,
+          52.257717,
+          32.213329
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 46.268607,
+        "frame_wall_p95_ms": 55.152171,
+        "frame_wall_p99_ms": 55.152171,
+        "process_peak_rss_bytes": 2367930368,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.07205725,
+        "native_ms_per_frame": 36.922626125,
+        "mux_ms_per_frame": 5.0670154375,
+        "other_ms_per_frame": 2.343667437475485,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 1,
+      "threads": 1,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160316417271Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 1,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 224.1236936874884,
+        "frame_wall_ms": [
+          175.882148,
+          260.106105,
+          247.16272,
+          180.372851,
+          253.673032,
+          246.237733,
+          197.024533,
+          248.329328,
+          251.535921,
+          179.866243,
+          251.927182,
+          251.199898,
+          172.563888,
+          250.055706,
+          253.501082,
+          166.498548
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 247.16272,
+        "frame_wall_p95_ms": 260.106105,
+        "frame_wall_p99_ms": 260.106105,
+        "process_peak_rss_bytes": 2322530304,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.056950625,
+        "native_ms_per_frame": 217.865249,
+        "mux_ms_per_frame": 4.6176536875,
+        "other_ms_per_frame": 1.5838403749883936,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 2,
+      "threads": 8,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160328104560Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 8,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 44.03644162493947,
+        "frame_wall_ms": [
+          36.230331,
+          45.23954,
+          56.415617,
+          28.407709,
+          54.16536,
+          48.520131,
+          37.648452,
+          44.142,
+          57.216817,
+          31.275178,
+          54.980959,
+          43.86136,
+          36.277695,
+          44.970683,
+          56.574901,
+          28.605063
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 44.142,
+        "frame_wall_p95_ms": 57.216817,
+        "frame_wall_p99_ms": 57.216817,
+        "process_peak_rss_bytes": 2358591488,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.058063,
+        "native_ms_per_frame": 37.9012846875,
+        "mux_ms_per_frame": 4.141251875,
+        "other_ms_per_frame": 1.9358420624394714,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 2,
+      "threads": 1,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160344664825Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 1,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 221.2521084375112,
+        "frame_wall_ms": [
+          169.109648,
+          248.377599,
+          253.274846,
+          170.570741,
+          256.571291,
+          249.416678,
+          185.051736,
+          251.207772,
+          250.715168,
+          166.88567,
+          256.996104,
+          246.900566,
+          174.048722,
+          247.767796,
+          242.715344,
+          170.3821
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 246.900566,
+        "frame_wall_p95_ms": 256.996104,
+        "frame_wall_p99_ms": 256.996104,
+        "process_peak_rss_bytes": 2335539200,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.051954125,
+        "native_ms_per_frame": 215.6348684375,
+        "mux_ms_per_frame": 3.960424375,
+        "other_ms_per_frame": 1.6048615000111988,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 2,
+      "threads": 16,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160355771005Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 16,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 29.955535124827293,
+        "frame_wall_ms": [
+          21.266796,
+          33.792792,
+          34.719386,
+          21.846814,
+          32.085717,
+          34.851214,
+          25.683393,
+          31.954157,
+          33.809606,
+          24.375153,
+          34.159452,
+          35.397594,
+          21.781269,
+          35.375203,
+          34.118069,
+          24.034817
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 32.085717,
+        "frame_wall_p95_ms": 35.397594,
+        "frame_wall_p99_ms": 35.397594,
+        "process_peak_rss_bytes": 2370953216,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.0487055625,
+        "native_ms_per_frame": 24.7292856875,
+        "mux_ms_per_frame": 3.6853029375,
+        "other_ms_per_frame": 1.4922409373272933,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 3,
+      "threads": 1,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160412653320Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 1,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 225.7585807499254,
+        "frame_wall_ms": [
+          175.869749,
+          252.193774,
+          245.765888,
+          175.709813,
+          246.832343,
+          244.4289,
+          179.740986,
+          259.872146,
+          257.33459,
+          184.796757,
+          259.601141,
+          252.181698,
+          185.773315,
+          253.488974,
+          262.585405,
+          175.922427
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 245.765888,
+        "frame_wall_p95_ms": 262.585405,
+        "frame_wall_p99_ms": 262.585405,
+        "process_peak_rss_bytes": 2355621888,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.050856125,
+        "native_ms_per_frame": 219.9506129375,
+        "mux_ms_per_frame": 4.1764509375,
+        "other_ms_per_frame": 1.5806607499253786,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 3,
+      "threads": 16,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160424483074Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 16,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 34.485905624933366,
+        "frame_wall_ms": [
+          27.05413,
+          40.912964,
+          38.229673,
+          23.417972,
+          33.997585,
+          42.560275,
+          30.329182,
+          39.179729,
+          46.78278,
+          24.736308,
+          36.637848,
+          39.132956,
+          25.073947,
+          36.92759,
+          43.133862,
+          23.619476
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 36.637848,
+        "frame_wall_p95_ms": 46.78278,
+        "frame_wall_p99_ms": 46.78278,
+        "process_peak_rss_bytes": 2369175552,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.057292,
+        "native_ms_per_frame": 27.694437,
+        "mux_ms_per_frame": 4.589649,
+        "other_ms_per_frame": 2.144527624933369,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 3,
+      "threads": 8,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160436151370Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 8,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 44.24502050005685,
+        "frame_wall_ms": [
+          35.685723,
+          47.409941,
+          54.740067,
+          30.647109,
+          43.899428,
+          55.765578,
+          33.613064,
+          54.672871,
+          44.075304,
+          39.811899,
+          47.72994,
+          45.579244,
+          36.283355,
+          47.054844,
+          54.061421,
+          36.84912
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 44.075304,
+        "frame_wall_p95_ms": 55.765578,
+        "frame_wall_p99_ms": 55.765578,
+        "process_peak_rss_bytes": 2386604032,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.06095975,
+        "native_ms_per_frame": 37.7482066875,
+        "mux_ms_per_frame": 4.65102875,
+        "other_ms_per_frame": 1.7848253125568494,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 4,
+      "threads": 16,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160447766765Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 16,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 32.6608526875134,
+        "frame_wall_ms": [
+          23.313709,
+          37.967896,
+          34.178986,
+          23.204764,
+          47.950474,
+          32.667932,
+          25.833916,
+          39.18465,
+          34.323941,
+          22.549987,
+          40.833484,
+          38.791153,
+          23.66573,
+          38.656704,
+          33.801437,
+          25.599021
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 33.801437,
+        "frame_wall_p95_ms": 47.950474,
+        "frame_wall_p99_ms": 47.950474,
+        "process_peak_rss_bytes": 2354380800,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.051227375,
+        "native_ms_per_frame": 26.4211314375,
+        "mux_ms_per_frame": 4.261296,
+        "other_ms_per_frame": 1.927197875013393,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 4,
+      "threads": 1,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160504355903Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 1,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 200.72581881254337,
+        "frame_wall_ms": [
+          157.198023,
+          225.132631,
+          228.868915,
+          152.746809,
+          223.973327,
+          225.759983,
+          165.479312,
+          229.541794,
+          226.902055,
+          156.420817,
+          229.381223,
+          227.114076,
+          156.832713,
+          225.939413,
+          227.159586,
+          153.125865
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 225.132631,
+        "frame_wall_p95_ms": 229.541794,
+        "frame_wall_p99_ms": 229.541794,
+        "process_peak_rss_bytes": 2357354496,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.0508161875,
+        "native_ms_per_frame": 195.5931653125,
+        "mux_ms_per_frame": 3.5861311875,
+        "other_ms_per_frame": 1.495706125043371,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 4,
+      "threads": 8,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160516287574Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 8,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 44.12027131252216,
+        "frame_wall_ms": [
+          30.475034,
+          54.927744,
+          43.105733,
+          28.870908,
+          60.563954,
+          47.908484,
+          38.751144,
+          55.343114,
+          46.511875,
+          35.628327,
+          45.682037,
+          47.939811,
+          37.568776,
+          46.318438,
+          56.42252,
+          29.860854
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 45.682037,
+        "frame_wall_p95_ms": 60.563954,
+        "frame_wall_p99_ms": 60.563954,
+        "process_peak_rss_bytes": 2399727616,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.0589136875,
+        "native_ms_per_frame": 37.344217125,
+        "mux_ms_per_frame": 4.8075138125,
+        "other_ms_per_frame": 1.9096266875221612,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 5,
+      "threads": 8,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160528267718Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 8,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 44.069815374996324,
+        "frame_wall_ms": [
+          36.49976,
+          43.071882,
+          52.080171,
+          30.447229,
+          52.487692,
+          50.879703,
+          34.620092,
+          54.08974,
+          49.884623,
+          33.490268,
+          43.649619,
+          57.584133,
+          28.537775,
+          55.751677,
+          44.581569,
+          37.413696
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 43.649619,
+        "frame_wall_p95_ms": 57.584133,
+        "frame_wall_p99_ms": 57.584133,
+        "process_peak_rss_bytes": 2410864640,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.0586106875,
+        "native_ms_per_frame": 37.28800025,
+        "mux_ms_per_frame": 4.580645375,
+        "other_ms_per_frame": 2.1425590624963213,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 5,
+      "threads": 16,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160539908762Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 16,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 33.23375881245738,
+        "frame_wall_ms": [
+          26.414973,
+          38.795742,
+          36.558511,
+          26.409585,
+          33.846691,
+          37.555781,
+          34.433918,
+          37.291467,
+          35.273902,
+          24.583659,
+          34.637886,
+          41.221129,
+          27.632755,
+          36.776089,
+          35.494629,
+          24.761524
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 34.637886,
+        "frame_wall_p95_ms": 41.221129,
+        "frame_wall_p99_ms": 41.221129,
+        "process_peak_rss_bytes": 2375585792,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.0627685,
+        "native_ms_per_frame": 26.7711903125,
+        "mux_ms_per_frame": 4.428807,
+        "other_ms_per_frame": 1.9709929999573843,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    },
+    {
+      "iteration": 5,
+      "threads": 1,
+      "result_path": "bench_out/e1_encode/c1245ec6/d5fb9ad5/c9fb38a7/20260927T160556689790Z/result.json",
+      "metrics": {
+        "manifest": {
+          "schema": "bench_manifest.v1",
+          "topos_version": "0.1.0",
+          "dylib_commit_embedded": "c1245ec6",
+          "git_head": "c1245ec6",
+          "git_dirty": true,
+          "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.dylib",
+          "dylib_sha256": "d5fb9ad5acf3d170e3f11946f27a814a2e40dfee583aa4cfdb0cb655169ccc86",
+          "abi_version": 2,
+          "slice_threads": 16,
+          "simd_avx2": true,
+          "simd_neon": false,
+          "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+          "os": "darwin",
+          "python": "3.12.13"
+        },
+        "scope": {
+          "boundary": "ToposVideoEncoder input preparation → native encode → mux",
+          "excludes": [
+            "source decode/loading",
+            "GPU rendering",
+            "Resolve"
+          ]
+        },
+        "input": {
+          "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/4K_prores4444XQ.mov",
+          "sha256": "d8d15bc81f3e6966ca90e3d6a80c1188bb6916ce1c6f0f493843d8f3eadaa255",
+          "width": 3840,
+          "height": 2160,
+          "pixel_format": "yuv444p12le"
+        },
+        "config": {
+          "frames": 16,
+          "warmup": 4,
+          "threads": 1,
+          "qp": null,
+          "profile": "4444xq"
+        },
+        "wall_ms_per_frame": 224.82790837511857,
+        "frame_wall_ms": [
+          169.912206,
+          249.271917,
+          251.353479,
+          173.505188,
+          247.576238,
+          245.300232,
+          179.32739,
+          260.81817,
+          255.885603,
+          177.784623,
+          258.481279,
+          259.123067,
+          176.526684,
+          254.395206,
+          259.771444,
+          178.16929
+        ],
+        "frame_wall_percentile_method": "nearest-rank; includes encode_frame only",
+        "frame_wall_p50_ms": 247.576238,
+        "frame_wall_p95_ms": 260.81817,
+        "frame_wall_p99_ms": 260.81817,
+        "process_peak_rss_bytes": 2321862656,
+        "process_peak_rss_scope": "entire process including source preload",
+        "python_ms_per_frame": 0.055806625,
+        "native_ms_per_frame": 218.692798875,
+        "mux_ms_per_frame": 4.0403649375,
+        "other_ms_per_frame": 2.038937937618572,
+        "native_stage_ms_per_frame": {
+          "pad_ns": 0.0,
+          "fill_ns": 0.0,
+          "entropy_ns": 0.0,
+          "crc_ns": 0.0,
+          "copy_ns": 0.0,
+          "asm_ns": 0.0,
+          "dct_ns": 0.0,
+          "probe_fill_ns": 0.0,
+          "prep_wall_ns": 0.0,
+          "probe_wall_ns": 0.0,
+          "final_wall_ns": 0.0,
+          "check_wall_ns": 0.0
+        },
+        "native_counts": {
+          "slices": 0,
+          "blocks": 0
+        },
+        "sized": {
+          "iters": 7,
+          "calls": 1,
+          "iters_per_call": 7.0
+        }
+      }
+    }
+  ]
+}

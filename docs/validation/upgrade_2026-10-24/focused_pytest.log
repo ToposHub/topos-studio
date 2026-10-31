@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+collected 142 items
+
+tests/edit/test_f81_project_snapshots.py ..............                  [  9%]
+tests/edit/test_f82_review_comments.py ............                      [ 18%]
+tests/edit/test_f83_audition.py .........                                [ 24%]
+tests/deliver/test_f93_version_compiler.py .........                     [ 30%]
+tests/edit/ai_editing/test_f91_filler_removal.py .........               [ 37%]
+tests/edit/test_audio_sync_binding.py ..............                     [ 47%]
+tests/edit/test_color_group.py .............                             [ 56%]
+tests/edit/test_color_versions.py ..............                         [ 66%]
+tests/color/test_qualifier_keyframes.py ...........                      [ 73%]
+tests/shared/test_f64_frame_manifest.py ........                         [ 79%]
+tests/edit/test_proxy_cache_product_loop.py ........                     [ 85%]
+tests/edit/test_realtime_playback_telemetry.py .....................     [100%]
+
+============================= 142 passed in 7.48s ==============================

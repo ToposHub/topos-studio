@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P51",
+  "name": "扫描切片",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "水平条带错位切片；band_px 8–24，amount 0.1–0.2",
+  "component": "X16 scanline_slices（生产 lib1_scanline_slices，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/scanline_slices）",
+  "dependencies": {
+    "component_id": "X16",
+    "component_slug": "scanline_slices",
+    "component_kind": "transition",
+    "transition_type": "lib1_scanline_slices",
+    "user_json_base": false
+  },
+  "params": {
+    "band_px": 12,
+    "amount": 0.15,
+    "seed": 0,
+    "curve": "Linear"
+  },
+  "notes": "X16 生产 base lib1_scanline_slices（transition_catalog 已注册，resample_cores 复合核）；base 不在 custom_transitions._BASE_TYPES 白名单（未接入），不产出用户转场 JSON。"
+}

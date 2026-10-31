@@ -1,0 +1,232 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "C01",
+  "dedup": "Composite 无节点入口；.tglsl 侧 Duotone_Toner 2 停靠（L00 台账 C01 行）",
+  "host_min_contract": "node_type lib1_gradient_map；marker dispatch + 共享核 GLSL（patches/proposal_l04_node_seams.md §C01）",
+  "image": {
+    "alpha": "premultiplied",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "node",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": [
+        0.02,
+        0.02,
+        0.05
+      ],
+      "maximum": null,
+      "minimum": null,
+      "name": "stop_0",
+      "neutral": false,
+      "options": [],
+      "ptype": "color",
+      "unit": "",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": [
+        0.1,
+        0.2,
+        0.45
+      ],
+      "maximum": null,
+      "minimum": null,
+      "name": "stop_1",
+      "neutral": false,
+      "options": [],
+      "ptype": "color",
+      "unit": "",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": [
+        0.9,
+        0.55,
+        0.25
+      ],
+      "maximum": null,
+      "minimum": null,
+      "name": "stop_2",
+      "neutral": false,
+      "options": [],
+      "ptype": "color",
+      "unit": "",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": [
+        1.0,
+        0.98,
+        0.9
+      ],
+      "maximum": null,
+      "minimum": null,
+      "name": "stop_3",
+      "neutral": false,
+      "options": [],
+      "ptype": "color",
+      "unit": "",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": 0.33,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "pos_1",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "luma",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": 0.66,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "pos_2",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "luma",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": "Linear",
+      "maximum": null,
+      "minimum": null,
+      "name": "interp_mode",
+      "neutral": false,
+      "options": [
+        "Linear",
+        "Smooth"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": 1.0,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "amount",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "mix=0 恒等"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    },
+    {
+      "data_type": "image",
+      "direction": "output",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "gradient_map",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_c01_gradient_map_node.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "content_staging/library_v1/filters/gradient_map/hand_vectors.json（共享核向量）",
+    "known_limits": "节点类+marker 草案；dispatch/GLSL/registry/capability 未接线（L04 提案）；仅声明不是完成",
+    "oracle": "content_staging/library_v1/references/gradient_map_ref.py（F16 共享核）"
+  },
+  "version": "0.1.0"
+}

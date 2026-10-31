@@ -1,0 +1,23 @@
+{
+  "shift_box_selection": {
+    "selected_ids": [
+      "c",
+      "c"
+    ],
+    "is_multi": true
+  },
+  "subtitle_fit_selection": {
+    "before": 3,
+    "after": 3
+  },
+  "subtitle_next_boundary": {
+    "from": 50,
+    "to": 239,
+    "subtitle_start": 100
+  },
+  "subtitle_delete_track": {
+    "confirmation_calls": [],
+    "remaining_tracks": 0,
+    "undo": true
+  }
+}

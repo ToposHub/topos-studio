@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Video Performance Acceptance Report</title>
+    <style>
+        body { font-family: system-ui; max-width: 900px; margin: auto; padding: 20px; }
+        .header { background: #667eea; color: white; padding: 20px; border-radius: 8px; }
+        .summary { display: flex; gap: 15px; margin: 20px 0; }
+        .card { background: white; padding: 15px; border-radius: 8px; flex: 1; }
+        .pass { color: #10b981; }
+        .fail { color: #ef4444; }
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th { background: #667eea; color: white; padding: 10px; }
+        td { padding: 10px; border-bottom: 1px solid #eee; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Video Performance Acceptance Report</h1>
+        <p>Demo Report - Generated: 2026-05-21 05:02:21</p>
+    </div>
+
+    <div class="summary">
+        <div class="card"><h3>Overall</h3><p class="pass">PASS</p></div>
+        <div class="card"><h3>Pass Rate</h3><p>100.0%</p></div>
+        <div class="card"><h3>Professional</h3><p>38.5%</p></div>
+    </div>
+
+    <table>
+        <tr><th>Category</th><th>Metric</th><th>Measured</th><th>Min Target</th><th>Pro Target</th><th>Status</th></tr>
+        <tr>
+            <td>playback</td>
+            <td>1080p H.264 Proxy Playback FPS</td>
+            <td>45.5 fps</td>
+            <td>24.0 fps</td>
+            <td>60.0 fps</td>
+            <td class="pass">Min</td>
+        </tr>
+        <tr>
+            <td>playback</td>
+            <td>4K H.264/H.265 Proxy Playback FPS</td>
+            <td>32.0 fps</td>
+            <td>24.0 fps</td>
+            <td>60.0 fps</td>
+            <td class="pass">Min</td>
+        </tr>
+        <tr>
+            <td>playback</td>
+            <td>4K ProRes Proxy Playback FPS</td>
+            <td>28.5 fps</td>
+            <td>24.0 fps</td>
+            <td>60.0 fps</td>
+            <td class="pass">Min</td>
+        </tr>
+        <tr>
+            <td>ui_perf</td>
+            <td>UI Tick P95 Latency</td>
+            <td>3.5 ms</td>
+            <td>5.0 ms</td>
+            <td>2.0 ms</td>
+            <td class="pass">Min</td>
+        </tr>
+        <tr>
+            <td>ui_perf</td>
+            <td>UI Tick Max Latency</td>
+            <td>12.0 ms</td>
+            <td>20.0 ms</td>
+            <td>10.0 ms</td>
+            <td class="pass">Min</td>
+        </tr>
+        <tr>
+            <td>renderer</td>
+            <td>Renderer Queue Depth P95</td>
+            <td>2.5 frames</td>
+            <td>3.0 frames</td>
+            <td>2.0 frames</td>
+            <td class="pass">Pro</td>
+        </tr>
+        <tr>
+            <td>renderer</td>
+            <td>Renderer Queue Max Depth</td>
+            <td>4.0 frames</td>
+            <td>5.0 frames</td>
+            <td>3.0 frames</td>
+            <td class="pass">Min</td>
+        </tr>
+        <tr>
+            <td>latency</td>
+            <td>Playback Latency Growth Rate</td>
+            <td>0.3 ms/s</td>
+            <td>1.0 ms/s</td>
+            <td>0.0 ms/s</td>
+            <td class="pass">Pro</td>
+        </tr>
+        <tr>
+            <td>latency</td>
+            <td>Seek Latency P95</td>
+            <td>65.0 ms</td>
+            <td>100.0 ms</td>
+            <td>50.0 ms</td>
+            <td class="pass">Min</td>
+        </tr>
+        <tr>
+            <td>interaction</td>
+            <td>Zoom/Pan Render Storm Count</td>
+            <td>0.0 count</td>
+            <td>0.0 count</td>
+            <td>0.0 count</td>
+            <td class="pass">Pro</td>
+        </tr>
+        <tr>
+            <td>interaction</td>
+            <td>Zoom/Pan Response Time</td>
+            <td>18.0 ms</td>
+            <td>50.0 ms</td>
+            <td>16.0 ms</td>
+            <td class="pass">Min</td>
+        </tr>
+        <tr>
+            <td>fallback</td>
+            <td>Fallback V2 Count</td>
+            <td>0.0 count</td>
+            <td>1.0 count</td>
+            <td>0.0 count</td>
+            <td class="pass">Pro</td>
+        </tr>
+        <tr>
+            <td>fallback</td>
+            <td>Fallback Rate</td>
+            <td>0.0 rate</td>
+            <td>0.1 rate</td>
+            <td>0.0 rate</td>
+            <td class="pass">Pro</td>
+        </tr>
+    </table>
+    <footer style="text-align: center; padding: 20px; color: #666;">
+        Video Performance Acceptance Test Framework - Demo
+    </footer>
+</body>
+</html>

@@ -1,0 +1,188 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "F14",
+  "dedup": "Edge_Ink_Outline 是 Sobel 描边上墨（平坦区域无输出变化），无排线（L00 台账 F14 行）；差量=亮度驱动交叉排线，平坦灰阶也产生排线",
+  "host_min_contract": ".tglsl ABI（slider×4+select×1+color×1）；零纹理采样（位置驱动程序几何）；发布名 LIB1_Hatching",
+  "image": {
+    "alpha": "premultiplied",
+    "input_space": "scene-linear",
+    "output_range": "bounded-ink-paper-domain-at-amount-1",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "filter",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": 8.0,
+      "maximum": 24.0,
+      "minimum": 3.0,
+      "name": "line_spacing",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "pixel",
+      "validation": "NaN 拒绝；条带周期（下限守护 max(spacing,1)）"
+    },
+    {
+      "animatable": false,
+      "default": 45.0,
+      "maximum": 90.0,
+      "minimum": -90.0,
+      "name": "angle",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "degree",
+      "validation": "NaN 拒绝；排线方向（第二层正交 +90°）"
+    },
+    {
+      "animatable": false,
+      "default": "2",
+      "maximum": null,
+      "minimum": null,
+      "name": "layers",
+      "neutral": false,
+      "options": [
+        "1",
+        "2"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": "2=正交第二层按半密度 D/2，概率并 1-(1-cov1)(1-cov2)"
+    },
+    {
+      "animatable": false,
+      "default": [
+        0.05,
+        0.05,
+        0.08
+      ],
+      "maximum": null,
+      "minimum": null,
+      "name": "ink_color",
+      "neutral": false,
+      "options": [],
+      "ptype": "color",
+      "unit": "",
+      "validation": "墨色（平坦黑输出=ink_color）"
+    },
+    {
+      "animatable": false,
+      "default": 0.9,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "paper",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "luma",
+      "validation": "NaN 拒绝；纸底亮度域（平坦白输出=paper）"
+    },
+    {
+      "animatable": false,
+      "default": 1.0,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "amount",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "NaN 拒绝；amount=0 精确恒等（bypass）；amount<1 按比例保留原 HDR 值"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "hatching",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_f14_hatching.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "content_staging/library_v1/filters/hatching/hand_vectors.json",
+    "known_limits": "零纹理采样（ROI padding=0）但位置驱动 → LUT 不可表达；amount=1 输出为墨/纸有界域（显示域艺术效果，显式声明）；纸纹外部资源版依赖资源子门（本版程序几何）；奇数尺寸/1px 条带走样未验；CPU/Metal 导出未验",
+    "oracle": "content_staging/library_v1/references/hatching_ref.py"
+  },
+  "version": "0.1.0"
+}

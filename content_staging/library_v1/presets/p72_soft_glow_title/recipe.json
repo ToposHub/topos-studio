@@ -1,0 +1,25 @@
+{
+  "recipe_id": "P72",
+  "name": "柔辉标题",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "柔辉标题：text 生成 → 软辉光 → merge 叠底；文字内容由插槽/应用期提供",
+  "component": "生产 text/glow/merge（node_engine 注册表内置节点）",
+  "dependencies": {
+    "node_type": "text",
+    "aux_node_types": [
+      "glow",
+      "merge"
+    ]
+  },
+  "params": {
+    "font_size": 120,
+    "font_weight": "bold"
+  },
+  "notes": "生产内置节点宏模板（text/glow/merge；文字内容由 title_text 插槽提供，不内嵌作者机器字体/路径）；暂存级图模板，宿主图导入未接线，未接 L05 白名单。"
+}

@@ -1,0 +1,20 @@
+Failed to open media: /tmp/topos_round3_features_invalid.mp4
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/shared/media/ffmpeg_source.py", line 1046, in open
+    self._container = av.open(self._path)
+                      ^^^^^^^^^^^^^^^^^^^
+  File "av/container/core.py", line 555, in av.container.core.open
+    return InputContainer(
+    ^^^^^^^^^^^
+  File "av/container/core.py", line 344, in av.container.core.Container.__cinit__
+    self.err_check(res)
+    ^^^^^^^^^^^
+  File "av/container/core.py", line 369, in av.container.core.Container.err_check
+    return err_check(value, filename=self.name)
+    ^^^^^^^^^^^
+  File "av/error.py", line 411, in av.error.err_check
+    raise cls(code, message, filename, log)
+    ^^^^^^^^^^^
+av.error.InvalidDataError: [Errno 1094995529] Invalid data found when processing input: '/tmp/topos_round3_features_invalid.mp4'
+完整探测失败: Failed to open media: [Errno 1094995529] Invalid data found when processing input: '/tmp/topos_round3_features_invalid.mp4'
+Replace media probe failed (/tmp/topos_round3_features_replacement.png): controlled probe failure

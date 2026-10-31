@@ -1,0 +1,91 @@
+{
+  "component": "F11 lens_breathing",
+  "method": "手算：按 README 公式独立脚本推导（s=1+amount·(scale-1) → suv=pivot+(uv-pivot)/s → 像素中心制双线性，索引钳 [0,n-1]），与 oracle/GLSL 无代码复用；容差 1e-6。夹具：8×4 灰度 ramp img[y][x]=(x+8y)/31（RGB 同值，0..31/31）。",
+  "params": {
+    "amount": 1.0,
+    "pivot_x": 0.5,
+    "pivot_y": 0.5,
+    "scale": 1.2,
+    "border_mode": "Freeze"
+  },
+  "vectors": [
+    {
+      "pos": [0, 0],
+      "expected": 0.0833333,
+      "note": "zoom-out s=1.2：suv=(0.1354167,0.1875)，四邻 (0,0)/(1,0)/(0,1)/(1,1) 双线性"
+    },
+    {
+      "pos": [4, 2],
+      "expected": 0.6209677,
+      "note": "s=1.2 中部：suv=(0.5520833,0.6041667)"
+    },
+    {
+      "pos": [7, 3],
+      "expected": 0.9166667,
+      "note": "s=1.2 右下：suv=(0.8645833,0.8125) → 索引 (6.4167, 2.75) 插值"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "params": {
+        "scale": 1.2,
+        "pivot_x": 0.5625,
+        "pivot_y": 0.625
+      },
+      "pos": [4, 2],
+      "expected": 0.6451613,
+      "note": "pivot 锚定：pivot=像素(4,2)中心 → suv=uv → 精确拷贝 val=20/31（任意 scale 不动）"
+    },
+    {
+      "params": {
+        "scale": 0.8
+      },
+      "pos": [4, 2],
+      "expected": 0.6814516,
+      "note": "zoom-in s=0.8 界内：suv=(0.578125,0.65625)"
+    },
+    {
+      "params": {
+        "scale": 0.8,
+        "border_mode": "Black"
+      },
+      "pos": [0, 3],
+      "expected": 0.0,
+      "note": "zoom-in 出界 suv.x=-0.046875<0：Black → vec3(0)"
+    },
+    {
+      "params": {
+        "scale": 0.8,
+        "border_mode": "Freeze"
+      },
+      "pos": [0, 3],
+      "expected": 0.7741935,
+      "note": "同位置 Freeze：钳半纹素 (0.0625,0.9375) → 索引 x=0 精确、y=3.25（行 4 钳回行 3 同值）→ val(0,3)=24/31"
+    },
+    {
+      "params": {
+        "amount": 0.5,
+        "scale": 1.2
+      },
+      "pos": [2, 1],
+      "expected": 0.3387097,
+      "note": "部分呼吸：s=1+0.5·0.2=1.1，suv=(0.3295455,0.3863636)"
+    },
+    {
+      "params": {
+        "pivot_x": 0.39375
+      },
+      "pos": [7, 0],
+      "expected": 0.2669355,
+      "note": "非中心 pivot（0.39375,0.5）：suv=(0.846875,0.1875) → 索引 (6.275,0.25) 插值（pivot 移动差量）"
+    },
+    {
+      "params": {
+        "amount": 0.0
+      },
+      "pos": [4, 2],
+      "expected": null,
+      "note": "amount=0 精确恒等（含 HDR 透传；scale=1 同理）"
+    }
+  ]
+}

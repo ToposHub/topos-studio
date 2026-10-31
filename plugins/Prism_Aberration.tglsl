@@ -1,0 +1,115 @@
+// --- Topos Plugin Metadata ---
+// @name Prism Aberration
+// @i18n_name Prism_Aberration
+// @author Topos Team
+// @version 1.0
+// @description Rotatable radial RGB dispersion: channel-split sampling grows with center distance and adjustable edge falloff
+// @input_space scene-linear
+// @output_space scene-linear
+// @preview_cost low
+// @param slider separation "Dispersion Strength" 0.35 0.0 1.0
+// @param slider rotation "Rotation (Degrees)" 0.0 -180.0 180.0
+// @param separator
+// @param slider edge_falloff "Edge Falloff" 0.5 0.0 1.0
+// -----------------------------
+
+// Prism-style chromatic aberration. The R and B channels are re-sampled at
+// +/- offset along a per-pixel dispersion axis, while G stays on the exact
+// pixel as the reference channel:
+//
+//     dispersed.rgb = ( tex(uv + off).r , tex(uv).g , tex(uv - off).b )
+//
+// Design notes (see docs/plugins/2026-09-28/specs/Prism_Aberration.md):
+// - Radial + rotatable axis: the base direction is the radial vector from
+//   the frame center toward the pixel; `rotation` rotates that axis, so
+//   0 deg = classic radial dispersion, 90 deg = tangential twist,
+//   180 deg = swapped fringe polarity.
+// - Offset magnitude grows with distance from the center, shaped by the
+//   edge falloff curve: mask = dist01^exponent with
+//   exponent = mix(0.0, 4.0, edge_falloff); falloff 0 = flat (effect
+//   everywhere), 1 = strongly concentrated at the outermost corners.
+// - All radial geometry (distance, rotation, magnitude) is computed in an
+//   aspect-corrected space (x scaled by u_aspect_ratio, 1 unit = frame
+//   height) so distances are circular and the rotation angle is a true
+//   geometric angle; the offset is converted back to UV units for sampling.
+// - Only the two listed transcendentals-for-rotation (sin/cos, one each)
+//   and two pow() calls exist; there are no loops and exactly 3 texture
+//   taps per pixel (reference + R + B).
+// - UV safety: sample UVs are clamped to the half-texel border as explicit
+//   clamp-to-edge insurance; every division has a guarded denominator
+//   (max(...) with a positive floor).
+// - No clamp(0,1) ever touches image content: HDR values (negative or >> 1)
+//   only pass through per-channel re-sampling. Display-range handling
+//   belongs to the soft-clip stage.
+// - Output follows the delta convention (HighPass_Retouch pattern): the
+//   dispersion is computed on u_input_tex and its delta is applied to the
+//   already-graded color, so upstream grading stacks correctly.
+
+// Max channel offset at separation=1, as a fraction of the larger frame
+// side (~57.6 px at 4K 3840x2160); default 0.35 eases to ~12 px at the
+// far corners, a visible-but-tasteful fringe.
+const float SEP_MAX_RATIO = 0.015;
+
+// edge_falloff=1 maps to a dist^4 concentration (only outer corners fringe)
+const float FALLOFF_EXP_MAX = 4.0;
+
+// Degrees -> radians for the user-facing rotation parameter
+const float DEG_TO_RAD = 0.017453292519943295;
+
+vec3 process(vec3 color, vec2 uv) {
+    // Early exit: zero effect request is a pure passthrough
+    if (separation < 0.001) return color;
+
+    // Sharp reference for the delta output below; its G channel doubles as
+    // the unshifted reference channel of the dispersion result
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    // Resolution-aware half-texel border for edge-safe sampling; denominator
+    // guarded against degenerate zero-size textures
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 half_texel = 0.5 / max(tex_size, vec2(1.0, 1.0));
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+
+    // Aspect-corrected pixel-proportional space (1 unit = frame height):
+    // keeps radial distances circular and the rotation geometrically true
+    float aspect = max(u_aspect_ratio, 0.001);
+    vec2 radial = vec2(uv.x * aspect, uv.y) - vec2(0.5 * aspect, 0.5);
+    float dist = length(radial);
+    // Guarded normalize: degenerate only at the exact center pixel
+    vec2 radial_dir = radial / max(dist, 0.0001);
+
+    // Rotate the dispersion axis (column-major mat2 = CCW rotation)
+    float ang = rotation * DEG_TO_RAD;
+    float ca = cos(ang);
+    float sa = sin(ang);
+    vec2 sep_dir = mat2(ca, sa, -sa, ca) * radial_dir;
+
+    // Distance falloff: dist01 <= 1.0 by construction (max_radius is the
+    // exact center-to-corner distance; center is fixed at the frame middle)
+    float max_radius = length(vec2(0.5 * aspect, 0.5));
+    float dist01 = dist / max(max_radius, 0.0001);
+    float exponent = mix(0.0, FALLOFF_EXP_MAX, edge_falloff);
+    // Guarded pow: base floored above zero (pow is undefined at x=0 when
+    // the exponent is 0, i.e. edge_falloff exactly 0)
+    float falloff_mask = pow(max(dist01, 0.0001), exponent);
+
+    // Ease-in curve so the low end of the slider stays fine-grained; the
+    // magnitude scales with the larger frame side for a resolution-
+    // independent look (same relative fringe at SD preview and 8K export)
+    float eased = pow(separation, 1.5);
+    float offset_len = eased * SEP_MAX_RATIO * max(aspect, 1.0) * falloff_mask;
+
+    // Back to UV units for sampling (divide x by the aspect we multiplied in)
+    vec2 offset_p = sep_dir * offset_len;
+    vec2 offset_uv = vec2(offset_p.x / aspect, offset_p.y);
+
+    // RGB split: R outward along the (rotated) axis, B inward, G untouched
+    vec3 dispersed = original_color;
+    dispersed.r = texture(u_input_tex, clamp(uv + offset_uv, min_uv, max_uv)).r;
+    dispersed.b = texture(u_input_tex, clamp(uv - offset_uv, min_uv, max_uv)).b;
+
+    // Delta output: apply the dispersion delta to the graded color; content
+    // values are not clamped, display-range handling belongs to soft-clip
+    return color + (dispersed - original_color);
+}

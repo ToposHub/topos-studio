@@ -1,0 +1,8 @@
+.....................................................                    [100%]
+=============================== warnings summary ===============================
+tests/composite/test_node_capabilities.py::TestLegacyListConsistency::test_scheduler_gpu_stateful_types_consistency
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/tests/composite/test_node_capabilities.py:500: UserWarning: SOURCE_NODE_TYPES has nodes not in _GPU_STATEFUL_TYPES: frozenset({'ai_gen_expand', 'particle', 'deflicker', 'face_track', 'volume3d', 'frame_interpolate', 'pointcloud3d'}). Scheduler will treat these as effect nodes instead of source nodes.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+53 passed, 1 warning in 0.65s

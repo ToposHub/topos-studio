@@ -1,0 +1,723 @@
+{
+ "manifest": {
+  "schema": "bench_manifest.v1",
+  "topos_version": "0.1.0",
+  "dylib_commit_embedded": "5bc83bef",
+  "git_head": "5bc83bef",
+  "git_dirty": true,
+  "dylib_path": "/Users/testuser/Documents/vscode/topos/native/topos_codec/build/release/topos_codec.dylib",
+  "dylib_sha256": "8e335ef772baab51e5abce54738858e14fbab98f727a3a4fcfa4237235fc3dce",
+  "abi_version": 2,
+  "slice_threads": 16,
+  "simd_avx2": true,
+  "simd_neon": false,
+  "cpu": "Genuine Intel(R) 0000",
+  "os": "darwin",
+  "python": "3.12.14",
+  "threads_effective": 16
+ },
+ "cases": {
+  "2k": {
+   "case": {
+    "w": 1920,
+    "h": 1080,
+    "profile": 3,
+    "pixel_format": 0,
+    "bit_depth": 10
+   },
+   "frames": 64,
+   "rows": [
+    {
+     "entropy": "V1",
+     "qp": 20,
+     "bytes_per_frame": 4502645.59375,
+     "mbps": 900.52911875,
+     "enc_ms": 23.58,
+     "dec_p50_ms": 9.642,
+     "dec_p95_ms": 10.888,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V1",
+     "qp": 25,
+     "bytes_per_frame": 4021492.78125,
+     "mbps": 804.29855625,
+     "enc_ms": 19.75,
+     "dec_p50_ms": 9.142,
+     "dec_p95_ms": 10.038,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V1",
+     "qp": 30,
+     "bytes_per_frame": 3529182.546875,
+     "mbps": 705.836509375,
+     "enc_ms": 18.38,
+     "dec_p50_ms": 8.768,
+     "dec_p95_ms": 9.695,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V1",
+     "qp": 35,
+     "bytes_per_frame": 2977986.609375,
+     "mbps": 595.597321875,
+     "enc_ms": 15.73,
+     "dec_p50_ms": 8.07,
+     "dec_p95_ms": 8.934,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V1",
+     "qp": 40,
+     "bytes_per_frame": 2390145.6875,
+     "mbps": 478.0291375,
+     "enc_ms": 14.55,
+     "dec_p50_ms": 6.98,
+     "dec_p95_ms": 8.088,
+     "psnr_y": 94.268,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 1
+    },
+    {
+     "entropy": "V1",
+     "qp": 45,
+     "bytes_per_frame": 1742683.03125,
+     "mbps": 348.53660625,
+     "enc_ms": 12.05,
+     "dec_p50_ms": 5.219,
+     "dec_p95_ms": 7.198,
+     "psnr_y": 74.761,
+     "psnr_u": 90.824,
+     "psnr_v": 91.233,
+     "ssim_y": 0.99997,
+     "maxerr": 2
+    },
+    {
+     "entropy": "V1",
+     "qp": 50,
+     "bytes_per_frame": 1085146.4375,
+     "mbps": 217.0292875,
+     "enc_ms": 9.65,
+     "dec_p50_ms": 4.485,
+     "dec_p95_ms": 5.762,
+     "psnr_y": 66.479,
+     "psnr_u": 76.691,
+     "psnr_v": 76.675,
+     "ssim_y": 0.99977,
+     "maxerr": 5
+    },
+    {
+     "entropy": "V1",
+     "qp": 55,
+     "bytes_per_frame": 622980.765625,
+     "mbps": 124.596153125,
+     "enc_ms": 7.81,
+     "dec_p50_ms": 3.156,
+     "dec_p95_ms": 4.508,
+     "psnr_y": 62.626,
+     "psnr_u": 70.949,
+     "psnr_v": 70.745,
+     "ssim_y": 0.99946,
+     "maxerr": 10
+    },
+    {
+     "entropy": "V2",
+     "qp": 20,
+     "bytes_per_frame": 3742132.828125,
+     "mbps": 748.426565625,
+     "enc_ms": 18.16,
+     "dec_p50_ms": 10.631,
+     "dec_p95_ms": 12.207,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V2",
+     "qp": 25,
+     "bytes_per_frame": 3297340.9375,
+     "mbps": 659.4681875,
+     "enc_ms": 19.41,
+     "dec_p50_ms": 10.268,
+     "dec_p95_ms": 12.436,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V2",
+     "qp": 30,
+     "bytes_per_frame": 2810594.921875,
+     "mbps": 562.118984375,
+     "enc_ms": 17.97,
+     "dec_p50_ms": 10.895,
+     "dec_p95_ms": 12.068,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V2",
+     "qp": 35,
+     "bytes_per_frame": 2293518.171875,
+     "mbps": 458.703634375,
+     "enc_ms": 16.15,
+     "dec_p50_ms": 10.058,
+     "dec_p95_ms": 11.05,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V2",
+     "qp": 40,
+     "bytes_per_frame": 1742500.34375,
+     "mbps": 348.50006875,
+     "enc_ms": 14.8,
+     "dec_p50_ms": 8.753,
+     "dec_p95_ms": 10.176,
+     "psnr_y": 94.268,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 1
+    },
+    {
+     "entropy": "V2",
+     "qp": 45,
+     "bytes_per_frame": 1228629.234375,
+     "mbps": 245.725846875,
+     "enc_ms": 12.21,
+     "dec_p50_ms": 7.256,
+     "dec_p95_ms": 9.2,
+     "psnr_y": 74.761,
+     "psnr_u": 90.824,
+     "psnr_v": 91.233,
+     "ssim_y": 0.99997,
+     "maxerr": 2
+    },
+    {
+     "entropy": "V2",
+     "qp": 50,
+     "bytes_per_frame": 773616.75,
+     "mbps": 154.72335,
+     "enc_ms": 10.15,
+     "dec_p50_ms": 6.413,
+     "dec_p95_ms": 7.56,
+     "psnr_y": 66.479,
+     "psnr_u": 76.691,
+     "psnr_v": 76.675,
+     "ssim_y": 0.99977,
+     "maxerr": 5
+    },
+    {
+     "entropy": "V2",
+     "qp": 55,
+     "bytes_per_frame": 434675.4375,
+     "mbps": 86.9350875,
+     "enc_ms": 8.35,
+     "dec_p50_ms": 4.097,
+     "dec_p95_ms": 5.601,
+     "psnr_y": 62.626,
+     "psnr_u": 70.949,
+     "psnr_v": 70.745,
+     "ssim_y": 0.99946,
+     "maxerr": 10
+    }
+   ]
+  },
+  "4k": {
+   "case": {
+    "w": 3840,
+    "h": 2160,
+    "profile": 5,
+    "pixel_format": 1,
+    "bit_depth": 12
+   },
+   "frames": 64,
+   "rows": [
+    {
+     "entropy": "V1",
+     "qp": 20,
+     "bytes_per_frame": 39947906.78125,
+     "mbps": 7989.58135625,
+     "enc_ms": 121.15,
+     "dec_p50_ms": 43.816,
+     "dec_p95_ms": 49.853,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V1",
+     "qp": 25,
+     "bytes_per_frame": 36323445.6875,
+     "mbps": 7264.6891375,
+     "enc_ms": 116.52,
+     "dec_p50_ms": 40.357,
+     "dec_p95_ms": 44.19,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V1",
+     "qp": 30,
+     "bytes_per_frame": 32549636.65625,
+     "mbps": 6509.92733125,
+     "enc_ms": 94.46,
+     "dec_p50_ms": 33.344,
+     "dec_p95_ms": 36.824,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V1",
+     "qp": 35,
+     "bytes_per_frame": 27875793.375,
+     "mbps": 5575.158675,
+     "enc_ms": 89.49,
+     "dec_p50_ms": 29.389,
+     "dec_p95_ms": 34.08,
+     "psnr_y": 106.392,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 1
+    },
+    {
+     "entropy": "V1",
+     "qp": 40,
+     "bytes_per_frame": 22583986.71875,
+     "mbps": 4516.79734375,
+     "enc_ms": 75.34,
+     "dec_p50_ms": 26.821,
+     "dec_p95_ms": 29.953,
+     "psnr_y": 84.585,
+     "psnr_u": 103.558,
+     "psnr_v": 105.672,
+     "ssim_y": 1.0,
+     "maxerr": 2
+    },
+    {
+     "entropy": "V1",
+     "qp": 45,
+     "bytes_per_frame": 16851807.0,
+     "mbps": 3370.3614,
+     "enc_ms": 72.32,
+     "dec_p50_ms": 23.221,
+     "dec_p95_ms": 25.501,
+     "psnr_y": 77.617,
+     "psnr_u": 84.973,
+     "psnr_v": 87.373,
+     "ssim_y": 0.99999,
+     "maxerr": 4
+    },
+    {
+     "entropy": "V1",
+     "qp": 50,
+     "bytes_per_frame": 13165317.109375,
+     "mbps": 2633.063421875,
+     "enc_ms": 65.74,
+     "dec_p50_ms": 19.025,
+     "dec_p95_ms": 21.74,
+     "psnr_y": 72.761,
+     "psnr_u": 79.281,
+     "psnr_v": 81.788,
+     "ssim_y": 0.99996,
+     "maxerr": 8
+    },
+    {
+     "entropy": "V1",
+     "qp": 55,
+     "bytes_per_frame": 10745542.015625,
+     "mbps": 2149.108403125,
+     "enc_ms": 57.55,
+     "dec_p50_ms": 18.338,
+     "dec_p95_ms": 20.226,
+     "psnr_y": 67.432,
+     "psnr_u": 75.48,
+     "psnr_v": 78.136,
+     "ssim_y": 0.99983,
+     "maxerr": 19
+    },
+    {
+     "entropy": "V2",
+     "qp": 20,
+     "bytes_per_frame": 30923168.890625,
+     "mbps": 6184.633778125,
+     "enc_ms": 114.28,
+     "dec_p50_ms": 41.213,
+     "dec_p95_ms": 47.884,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V2",
+     "qp": 25,
+     "bytes_per_frame": 27642042.96875,
+     "mbps": 5528.40859375,
+     "enc_ms": 111.17,
+     "dec_p50_ms": 40.324,
+     "dec_p95_ms": 45.778,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V2",
+     "qp": 30,
+     "bytes_per_frame": 24234004.640625,
+     "mbps": 4846.800928125,
+     "enc_ms": 94.38,
+     "dec_p50_ms": 41.358,
+     "dec_p95_ms": 44.969,
+     "psnr_y": Infinity,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 0
+    },
+    {
+     "entropy": "V2",
+     "qp": 35,
+     "bytes_per_frame": 20603596.78125,
+     "mbps": 4120.71935625,
+     "enc_ms": 86.93,
+     "dec_p50_ms": 37.997,
+     "dec_p95_ms": 43.765,
+     "psnr_y": 106.392,
+     "psnr_u": Infinity,
+     "psnr_v": Infinity,
+     "ssim_y": 1.0,
+     "maxerr": 1
+    },
+    {
+     "entropy": "V2",
+     "qp": 40,
+     "bytes_per_frame": 16735092.390625,
+     "mbps": 3347.018478125,
+     "enc_ms": 77.53,
+     "dec_p50_ms": 33.413,
+     "dec_p95_ms": 37.877,
+     "psnr_y": 84.585,
+     "psnr_u": 103.558,
+     "psnr_v": 105.672,
+     "ssim_y": 1.0,
+     "maxerr": 2
+    },
+    {
+     "entropy": "V2",
+     "qp": 45,
+     "bytes_per_frame": 12958843.953125,
+     "mbps": 2591.768790625,
+     "enc_ms": 72.91,
+     "dec_p50_ms": 26.902,
+     "dec_p95_ms": 29.867,
+     "psnr_y": 77.617,
+     "psnr_u": 84.973,
+     "psnr_v": 87.373,
+     "ssim_y": 0.99999,
+     "maxerr": 4
+    },
+    {
+     "entropy": "V2",
+     "qp": 50,
+     "bytes_per_frame": 10122081.03125,
+     "mbps": 2024.41620625,
+     "enc_ms": 62.45,
+     "dec_p50_ms": 22.999,
+     "dec_p95_ms": 26.473,
+     "psnr_y": 72.761,
+     "psnr_u": 79.281,
+     "psnr_v": 81.788,
+     "ssim_y": 0.99996,
+     "maxerr": 8
+    },
+    {
+     "entropy": "V2",
+     "qp": 55,
+     "bytes_per_frame": 8156954.40625,
+     "mbps": 1631.39088125,
+     "enc_ms": 55.45,
+     "dec_p50_ms": 20.958,
+     "dec_p95_ms": 24.278,
+     "psnr_y": 67.432,
+     "psnr_u": 75.48,
+     "psnr_v": 78.136,
+     "ssim_y": 0.99983,
+     "maxerr": 19
+    }
+   ]
+  }
+ },
+ "generations": {
+  "2k": [
+   {
+    "entropy": "V1",
+    "qp": 45,
+    "gens": [
+     {
+      "gen": 1,
+      "psnr_y": 74.632,
+      "bytes_pf": 1759389.03125
+     },
+     {
+      "gen": 2,
+      "psnr_y": 73.433,
+      "bytes_pf": 1755820.8125
+     },
+     {
+      "gen": 3,
+      "psnr_y": 72.992,
+      "bytes_pf": 1753970.875
+     },
+     {
+      "gen": 4,
+      "psnr_y": 72.814,
+      "bytes_pf": 1753410.34375
+     },
+     {
+      "gen": 5,
+      "psnr_y": 72.74,
+      "bytes_pf": 1752874.8125
+     },
+     {
+      "gen": 6,
+      "psnr_y": 72.709,
+      "bytes_pf": 1752668.8125
+     },
+     {
+      "gen": 7,
+      "psnr_y": 72.695,
+      "bytes_pf": 1752587.46875
+     },
+     {
+      "gen": 8,
+      "psnr_y": 72.69,
+      "bytes_pf": 1752556.25
+     },
+     {
+      "gen": 9,
+      "psnr_y": 72.687,
+      "bytes_pf": 1752544.625
+     },
+     {
+      "gen": 10,
+      "psnr_y": 72.686,
+      "bytes_pf": 1752541.4375
+     }
+    ]
+   },
+   {
+    "entropy": "V2",
+    "qp": 45,
+    "gens": [
+     {
+      "gen": 1,
+      "psnr_y": 74.632,
+      "bytes_pf": 1244677.125
+     },
+     {
+      "gen": 2,
+      "psnr_y": 73.433,
+      "bytes_pf": 1239141.625
+     },
+     {
+      "gen": 3,
+      "psnr_y": 72.992,
+      "bytes_pf": 1236661.125
+     },
+     {
+      "gen": 4,
+      "psnr_y": 72.814,
+      "bytes_pf": 1235577.15625
+     },
+     {
+      "gen": 5,
+      "psnr_y": 72.74,
+      "bytes_pf": 1235146.46875
+     },
+     {
+      "gen": 6,
+      "psnr_y": 72.709,
+      "bytes_pf": 1234981.375
+     },
+     {
+      "gen": 7,
+      "psnr_y": 72.695,
+      "bytes_pf": 1234917.125
+     },
+     {
+      "gen": 8,
+      "psnr_y": 72.69,
+      "bytes_pf": 1234891.84375
+     },
+     {
+      "gen": 9,
+      "psnr_y": 72.687,
+      "bytes_pf": 1234881.90625
+     },
+     {
+      "gen": 10,
+      "psnr_y": 72.686,
+      "bytes_pf": 1234878.65625
+     }
+    ]
+   }
+  ],
+  "4k": [
+   {
+    "entropy": "V1",
+    "qp": 45,
+    "gens": [
+     {
+      "gen": 1,
+      "psnr_y": 77.555,
+      "bytes_pf": 16929457.96875
+     },
+     {
+      "gen": 2,
+      "psnr_y": 76.528,
+      "bytes_pf": 16724962.65625
+     },
+     {
+      "gen": 3,
+      "psnr_y": 75.837,
+      "bytes_pf": 16640018.375
+     },
+     {
+      "gen": 4,
+      "psnr_y": 75.303,
+      "bytes_pf": 16598546.34375
+     },
+     {
+      "gen": 5,
+      "psnr_y": 74.867,
+      "bytes_pf": 16574799.65625
+     },
+     {
+      "gen": 6,
+      "psnr_y": 74.499,
+      "bytes_pf": 16561622.375
+     },
+     {
+      "gen": 7,
+      "psnr_y": 74.183,
+      "bytes_pf": 16552333.9375
+     },
+     {
+      "gen": 8,
+      "psnr_y": 73.906,
+      "bytes_pf": 16545099.875
+     },
+     {
+      "gen": 9,
+      "psnr_y": 73.66,
+      "bytes_pf": 16541265.15625
+     },
+     {
+      "gen": 10,
+      "psnr_y": 73.439,
+      "bytes_pf": 16537713.75
+     }
+    ]
+   },
+   {
+    "entropy": "V2",
+    "qp": 45,
+    "gens": [
+     {
+      "gen": 1,
+      "psnr_y": 77.555,
+      "bytes_pf": 13017273.5625
+     },
+     {
+      "gen": 2,
+      "psnr_y": 76.528,
+      "bytes_pf": 12889190.875
+     },
+     {
+      "gen": 3,
+      "psnr_y": 75.837,
+      "bytes_pf": 12837372.4375
+     },
+     {
+      "gen": 4,
+      "psnr_y": 75.303,
+      "bytes_pf": 12809369.96875
+     },
+     {
+      "gen": 5,
+      "psnr_y": 74.867,
+      "bytes_pf": 12793009.53125
+     },
+     {
+      "gen": 6,
+      "psnr_y": 74.499,
+      "bytes_pf": 12782157.84375
+     },
+     {
+      "gen": 7,
+      "psnr_y": 74.183,
+      "bytes_pf": 12774224.1875
+     },
+     {
+      "gen": 8,
+      "psnr_y": 73.906,
+      "bytes_pf": 12768026.53125
+     },
+     {
+      "gen": 9,
+      "psnr_y": 73.66,
+      "bytes_pf": 12762956.25
+     },
+     {
+      "gen": 10,
+      "psnr_y": 73.439,
+      "bytes_pf": 12758688.5
+     }
+    ]
+   }
+  ]
+ }
+}

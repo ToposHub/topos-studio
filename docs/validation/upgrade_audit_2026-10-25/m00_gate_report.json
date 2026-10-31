@@ -1,0 +1,113 @@
+{
+  "gate": "m00_focused_gate",
+  "plan": "docs/upgrade_plan_M_mac_2026-10-24.md#M00",
+  "blocking_semantics": "any domain failure/timeout fails the gate; baseline comparison is not an excuse",
+  "env_overrides": {
+    "QT_QPA_PLATFORM": "offscreen",
+    "TOPOS_HEADLESS_GL": "1",
+    "TOPOS_TEST_MODE": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "domains": [
+    {
+      "domain": "edit_core",
+      "command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/edit/test_f81_project_snapshots.py",
+        "tests/edit/test_f82_review_comments.py",
+        "tests/edit/test_f83_audition.py",
+        "tests/edit/test_audio_sync_binding.py",
+        "tests/edit/test_color_group.py",
+        "tests/edit/test_color_versions.py",
+        "tests/edit/test_proxy_cache_product_loop.py",
+        "tests/edit/test_realtime_playback_telemetry.py",
+        "tests/edit/test_m02_snapshot_io_fidelity.py",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "exit_code": 0,
+      "duration_sec": 16.2,
+      "timeout": false,
+      "stdout_tail": "============================= test session starts ==============================\ncollected 140 items\n\ntests/edit/test_f81_project_snapshots.py ..............                  [ 10%]\ntests/edit/test_f82_review_comments.py ...............                   [ 20%]\ntests/edit/test_f83_audition.py .............                            [ 30%]\ntests/edit/test_audio_sync_binding.py ..............                     [ 40%]\ntests/edit/test_color_group.py .................                         [ 52%]\ntests/edit/test_color_versions.py ..............                         [ 62%]\ntests/edit/test_proxy_cache_product_loop.py ........                     [ 67%]\ntests/edit/test_realtime_playback_telemetry.py .....................     [ 82%]\ntests/edit/test_m02_snapshot_io_fidelity.py ........................     [100%]\n\n============================= 140 passed in 14.16s =============================\n",
+      "stderr_tail": ""
+    },
+    {
+      "domain": "edit_ai",
+      "command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/edit/ai_editing/test_f91_filler_removal.py",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "exit_code": 0,
+      "duration_sec": 3.21,
+      "timeout": false,
+      "stdout_tail": "============================= test session starts ==============================\ncollected 14 items\n\ntests/edit/ai_editing/test_f91_filler_removal.py ..............          [100%]\n\n============================== 14 passed in 1.70s ==============================\n",
+      "stderr_tail": ""
+    },
+    {
+      "domain": "deliver",
+      "command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/deliver/test_f93_version_compiler.py",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "exit_code": 0,
+      "duration_sec": 1.95,
+      "timeout": false,
+      "stdout_tail": "============================= test session starts ==============================\ncollected 11 items\n\ntests/deliver/test_f93_version_compiler.py ...........                   [100%]\n\n============================== 11 passed in 0.70s ==============================\n",
+      "stderr_tail": ""
+    },
+    {
+      "domain": "color",
+      "command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/color/test_qualifier_keyframes.py",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "exit_code": 0,
+      "duration_sec": 1.49,
+      "timeout": false,
+      "stdout_tail": "============================= test session starts ==============================\ncollected 11 items\n\ntests/color/test_qualifier_keyframes.py ...........                      [100%]\n\n============================== 11 passed in 0.40s ==============================\n",
+      "stderr_tail": ""
+    },
+    {
+      "domain": "shared",
+      "command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/shared/test_f64_frame_manifest.py",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "exit_code": 0,
+      "duration_sec": 1.48,
+      "timeout": false,
+      "stdout_tail": "============================= test session starts ==============================\ncollected 12 items\n\ntests/shared/test_f64_frame_manifest.py ............                     [100%]\n\n============================== 12 passed in 0.34s ==============================\n",
+      "stderr_tail": ""
+    }
+  ],
+  "failed_domains": [],
+  "passed": true
+}

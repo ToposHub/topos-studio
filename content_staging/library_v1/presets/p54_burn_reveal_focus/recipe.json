@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P54",
+  "name": "焦边灼烧",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "焦边前沿+发热橙辉揭示；char_width 0.08–0.14 控制灼烧带宽",
+  "component": "X18 burn_reveal（生产 lib1_burn_reveal，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/burn_reveal）",
+  "dependencies": {
+    "component_id": "X18",
+    "component_slug": "burn_reveal",
+    "component_kind": "transition",
+    "transition_type": "lib1_burn_reveal",
+    "user_json_base": false
+  },
+  "params": {
+    "pattern": "Field",
+    "char_width": 0.1,
+    "emission": 0.6,
+    "seed": 0
+  },
+  "notes": "X18 生产 base lib1_burn_reveal（transition_catalog 已注册，resample_cores 复合核）；base 不在 custom_transitions._BASE_TYPES 白名单（未接入），不产出用户转场 JSON。"
+}

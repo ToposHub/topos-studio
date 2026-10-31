@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P44",
+  "name": "块噪揭示",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "格点块状揭示（Cell 最近格点硬边）；scale 8–16，softness ≤0.05",
+  "component": "X06 noise_dissolve（生产 lib1_noise_dissolve，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/noise_dissolve）",
+  "dependencies": {
+    "component_id": "X06",
+    "component_slug": "noise_dissolve",
+    "component_kind": "transition",
+    "transition_type": "lib1_noise_dissolve",
+    "user_json_base": false
+  },
+  "params": {
+    "noise_mode": "Cell",
+    "scale": 12,
+    "seed": 5,
+    "softness": 0.02
+  },
+  "notes": "X06 生产 base lib1_noise_dissolve（transition_catalog 已注册）；base 不在 custom_transitions._BASE_TYPES 白名单（未接入），不产出用户转场 JSON。"
+}

@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-10-21T14:30:45.881308",
+  "python": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+  "cwd": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01",
+  "records": [
+    {
+      "script": "/tmp/topos_delivery_probe_20261021.py",
+      "exit_code": 0,
+      "stdout": "{\"case\": \"reverse\", \"actual_decode_source_frames\": [50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61], \"canonical_clip_mapping\": [61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50], \"shape\": [2, 24000]}\n{\"case\": \"speedpoint\", \"actual_decode_source_frames\": [50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61], \"canonical_clip_mapping\": [50, 51, 52, 53, 54, 55, 56, 58, 60, 62, 64, 66], \"shape\": [2, 24000]}\n{\"case\": \"constant2\", \"actual_decode_source_frames\": [50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72], \"canonical_clip_mapping\": [50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72], \"shape\": [2, 24000]}\n",
+      "stderr": ""
+    },
+    {
+      "script": "/tmp/topos_delivery_real_audio_20261021.py",
+      "exit_code": 0,
+      "stdout": "{\"case\": \"normal\", \"shape\": [2, 96000], \"peak\": 0.10838188976049423, \"first_source\": 100, \"last_source\": 149}\n{\"case\": \"reverse\", \"shape\": [2, 96000], \"peak\": 0.10838188976049423, \"first_source\": 149, \"last_source\": 100}\n{\"case\": \"speedpoint\", \"shape\": [2, 96000], \"peak\": 0.10838188976049423, \"first_source\": 100, \"last_source\": 173}\n{\"compare\": \"reverse\", \"identical_to_normal\": true, \"max_abs_difference\": 0.0}\n{\"compare\": \"speedpoint\", \"identical_to_normal\": true, \"max_abs_difference\": 0.0}\n",
+      "stderr": ""
+    },
+    {
+      "script": "/tmp/topos_delivery_samples_probe_20261021.py",
+      "exit_code": 0,
+      "stdout": "{\"fps\": \"25/1\", \"samples\": 576000, \"artificial_silent_samples_per_channel\": 0, \"first_10_silent_sample_indices\": []}\n{\"fps\": \"30000/1001\", \"samples\": 480480, \"artificial_silent_samples_per_channel\": 180, \"first_10_silent_sample_indices\": [3202, 6405, 8007, 11210, 14413, 16015, 19218, 22421, 24023, 27226]}\n{\"fps\": \"60000/1001\", \"samples\": 240240, \"artificial_silent_samples_per_channel\": 240, \"first_10_silent_sample_indices\": [1600, 2401, 3202, 4003, 5604, 6405, 7206, 8007, 9608, 10409]}\n{\"cancelled_pcm_is_None\": true, \"opened_decoder_closed\": false}\n",
+      "stderr": ""
+    },
+    {
+      "script": "/tmp/topos_audio_speed_sine_20261021.py",
+      "exit_code": 0,
+      "stdout": "{\"speed\": 1.0, \"preserve_pitch\": false, \"expected_dominant_hz\": 440.0, \"actual_dominant_hz\": 440.0, \"peak\": 0.199981689453125}\n{\"speed\": 2.0, \"preserve_pitch\": false, \"expected_dominant_hz\": 880.0, \"actual_dominant_hz\": 430.0, \"peak\": 0.199981689453125}\n{\"speed\": 0.5, \"preserve_pitch\": false, \"expected_dominant_hz\": 220.0, \"actual_dominant_hz\": 445.0, \"peak\": 0.199981689453125}\n",
+      "stderr": ""
+    },
+    {
+      "script": "/tmp/topos_normalize_probe_20261021.py",
+      "exit_code": 0,
+      "stdout": "{\"case\": \"inphase\", \"ui_method_result\": [true, \"Integrated：-11.1 LUFS（目标 -23）\\nTrue Peak：-7.4 dBTP（上限 -3）\\n建议增益：-11.9 dB\", -11.858385181685126], \"actual_stereo_lufs\": -14.151057663574248, \"expected_gain_db\": -8.848942336425752}\n{\"case\": \"antiphase\", \"ui_method_result\": [true, \"Integrated：-70.0 LUFS（目标 -23）\\nTrue Peak：-inf dBTP（上限 -3）\\n建议增益：+47.0 dB\", 47.0], \"actual_stereo_lufs\": -14.151057663574248, \"expected_gain_db\": -8.848942336425752}\n",
+      "stderr": ""
+    },
+    {
+      "script": "/tmp/topos_audio_fx_keys_20261021.py",
+      "exit_code": 0,
+      "stdout": "{\"case\": \"base\", \"effect_threshold_at_0\": 0.0, \"tail_pcm_level\": 0.5, \"peak\": 0.5}\n{\"case\": \"animated\", \"effect_threshold_at_0\": -20, \"tail_pcm_level\": 0.5, \"peak\": 0.5}\n{\"case\": \"static\", \"effect_threshold_at_0\": -20.0, \"tail_pcm_level\": 0.10000000149011612, \"peak\": 0.10000000149011612}\nanimated_equals_unanimated_base True\n",
+      "stderr": ""
+    },
+    {
+      "script": "/tmp/topos_stem_real_parity_20261021.py",
+      "exit_code": 0,
+      "stdout": "{\"case\": \"limiter\", \"timeline_master_peak\": 0.10000000149011612, \"master_stem_peak\": 0.10838188976049423, \"max_abs_difference\": 0.023793570697307587, \"equal\": false}\n{\"case\": \"freeze\", \"timeline_master_peak\": 0.0, \"master_stem_peak\": 0.10838188976049423, \"max_abs_difference\": 0.10838188976049423, \"equal\": false}\n",
+      "stderr": ""
+    },
+    {
+      "script": "/tmp/topos_stem_parity_20261021.py",
+      "exit_code": 0,
+      "stdout": "{\"case\": \"limiter\", \"timeline_master_peak\": 0.10000000149011612, \"master_stem_peak\": 0.5, \"equal\": false}\n{\"case\": \"freeze\", \"timeline_master_peak\": 0.0, \"master_stem_peak\": 0.5, \"equal\": false}\n",
+      "stderr": ""
+    }
+  ]
+}

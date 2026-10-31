@@ -1,0 +1,586 @@
+{
+  "schema": "anchor_registry.v1",
+  "generated_at": "20260929T155633Z",
+  "tool": "tools/check_regression_anchors.py",
+  "anchors": [
+    {
+      "anchor_id": "ANC-01",
+      "name": "ANC-01 D1 2K proxy 顺序解码 fps（readahead-off）",
+      "tolerance": "fps >= 620（-12%）且 p50 <= 1.55 ms；超带先排负载再按 clean+CI 复测",
+      "sources": [
+        {
+          "pattern": "bench_out/d1_playback/b5f4520a/fb0712a5/b98ca792/20260915T052659309166Z/result.json",
+          "rel_path": "bench_out/d1_playback/b5f4520a/fb0712a5/b98ca792/20260915T052659309166Z/result.json",
+          "exists": true,
+          "sha256": "facdbd048d8590bc1a0503eb9c6376293d8b42a2e208ab3d96639286035661ba",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b5f4520a",
+            "git_dirty": false,
+            "dylib_sha8": "fb0712a5"
+          }
+        },
+        {
+          "pattern": "bench_out/d1_playback/b61cabf4/9a36f61b/a17fde9f/20260915T051544736733Z/result.json",
+          "rel_path": "bench_out/d1_playback/b61cabf4/9a36f61b/a17fde9f/20260915T051544736733Z/result.json",
+          "exists": true,
+          "sha256": "07e1ab9f2ba3e66f77b51b79d44fc71f622f06d7d90ffbd3c3fb95137b7a04c3",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b61cabf4",
+            "git_dirty": false,
+            "dylib_sha8": "9a36f61b"
+          }
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-02",
+      "name": "ANC-02 D1 2K hq 顺序解码 fps（readahead-off）",
+      "tolerance": "fps >= 220 且 p50 <= 4.3 ms",
+      "sources": [
+        {
+          "pattern": "bench_out/d1_playback/b5f4520a/fb0712a5/802c3a7b/20260915T052713822871Z/result.json",
+          "rel_path": "bench_out/d1_playback/b5f4520a/fb0712a5/802c3a7b/20260915T052713822871Z/result.json",
+          "exists": true,
+          "sha256": "3a4efd6e4ad628389172ded91dad53f40e459b3f52840c1ae18feff31da4ca48",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b5f4520a",
+            "git_dirty": false,
+            "dylib_sha8": "fb0712a5"
+          }
+        },
+        {
+          "pattern": "bench_out/d1_playback/b61cabf4/9a36f61b/23a984a1/20260915T051546347499Z/result.json",
+          "rel_path": "bench_out/d1_playback/b61cabf4/9a36f61b/23a984a1/20260915T051546347499Z/result.json",
+          "exists": true,
+          "sha256": "007b7e2f3767169b97a7471bf48ee059486c82732cbd6307441550d4f39020dc",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b61cabf4",
+            "git_dirty": false,
+            "dylib_sha8": "9a36f61b"
+          }
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-03",
+      "name": "ANC-03 D1 4K proxy 顺序解码 fps（readahead-off）",
+      "tolerance": "fps >= 150；单跑 p99 尖峰至 25.7 ms 属已知调度噪声，不单独判回归",
+      "sources": [
+        {
+          "pattern": "bench_out/d1_playback/b5f4520a/fb0712a5/db53552b/20260915T052722129114Z/result.json",
+          "rel_path": "bench_out/d1_playback/b5f4520a/fb0712a5/db53552b/20260915T052722129114Z/result.json",
+          "exists": true,
+          "sha256": "7939d4c3720599e3c5097de08032d00520ce43a5a65e2d3ed3c04be8c4a5b589",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b5f4520a",
+            "git_dirty": false,
+            "dylib_sha8": "fb0712a5"
+          }
+        },
+        {
+          "pattern": "bench_out/d1_playback/b61cabf4/9a36f61b/17ee5b38/20260915T051548268191Z/result.json",
+          "rel_path": "bench_out/d1_playback/b61cabf4/9a36f61b/17ee5b38/20260915T051548268191Z/result.json",
+          "exists": true,
+          "sha256": "e8248c386a26a45596454cb65db81f27353fc7234194da8c3ed7a99fda824d47",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b61cabf4",
+            "git_dirty": false,
+            "dylib_sha8": "9a36f61b"
+          }
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-04",
+      "name": "ANC-04 D1 4K 4444xq 顺序解码（p50/p99/fps）",
+      "tolerance": "fps >= 35 且 p50 <= 27 ms 且 p99 <= 40 ms（4K25 预算 40 ms，p99 越线即风险）",
+      "sources": [
+        {
+          "pattern": "bench_out/d1_playback/b5f4520a/fb0712a5/a0314c95/20260915T052735146059Z/result.json",
+          "rel_path": "bench_out/d1_playback/b5f4520a/fb0712a5/a0314c95/20260915T052735146059Z/result.json",
+          "exists": true,
+          "sha256": "382a13c95f509cb0a4ae4f2ec5de1f4698f94d168a11743e7bdb566247b752a1",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b5f4520a",
+            "git_dirty": false,
+            "dylib_sha8": "fb0712a5"
+          }
+        },
+        {
+          "pattern": "bench_out/d1_playback/b61cabf4/9a36f61b/8fedcb41/20260915T051555356217Z/result.json",
+          "rel_path": "bench_out/d1_playback/b61cabf4/9a36f61b/8fedcb41/20260915T051555356217Z/result.json",
+          "exists": true,
+          "sha256": "40df90d6da80c98fbd2ed69162d581bf8b385f8f48af3ade93ef9e383c4b8130",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b61cabf4",
+            "git_dirty": false,
+            "dylib_sha8": "9a36f61b"
+          }
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-05",
+      "name": "ANC-05 D1 4K 4444xq RSS 峰值",
+      "tolerance": "<= 800 MiB；其余素材超出 160 MiB 即查",
+      "sources": [
+        {
+          "pattern": "bench_out/d1_playback/b5f4520a/fb0712a5/a0314c95/20260915T052735146059Z/result.json",
+          "rel_path": "bench_out/d1_playback/b5f4520a/fb0712a5/a0314c95/20260915T052735146059Z/result.json",
+          "exists": true,
+          "sha256": "382a13c95f509cb0a4ae4f2ec5de1f4698f94d168a11743e7bdb566247b752a1",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b5f4520a",
+            "git_dirty": false,
+            "dylib_sha8": "fb0712a5"
+          }
+        },
+        {
+          "pattern": "bench_out/d1_playback/b61cabf4/9a36f61b/8fedcb41/20260915T051555356217Z/result.json",
+          "rel_path": "bench_out/d1_playback/b61cabf4/9a36f61b/8fedcb41/20260915T051555356217Z/result.json",
+          "exists": true,
+          "sha256": "40df90d6da80c98fbd2ed69162d581bf8b385f8f48af3ade93ef9e383c4b8130",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "b61cabf4",
+            "git_dirty": false,
+            "dylib_sha8": "9a36f61b"
+          }
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-06",
+      "name": "ANC-06 2K 真实素材全片解码 fps",
+      "tolerance": ">= 320 fps（-15%）；弱锚点：首次复测偏差 >15% 先重建基线",
+      "sources": [
+        {
+          "pattern": "bench_out/real_2k_h264_20260907/result.json",
+          "rel_path": "bench_out/real_2k_h264_20260907/result.json",
+          "exists": true,
+          "sha256": "0bc3256aab37214ffe30f63c795ae21149b5db7dfc01f56fb1fd7e5f945cbab7",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-07",
+      "name": "ANC-07 readahead/arena 成对增益",
+      "tolerance": "任一分辨率增益 < +5% 即判回归（3% 为历史回退门）",
+      "sources": [
+        {
+          "pattern": "bench_out/readahead/20260902_stage4_arena_batch_read.txt",
+          "rel_path": "bench_out/readahead/20260902_stage4_arena_batch_read.txt",
+          "exists": true,
+          "sha256": "c8735f8929a6f6ceed20bcc61e1663172b91105c6233195e12c48e6090bff2ee",
+          "classification": "bench_out_off_tree"
+        },
+        {
+          "pattern": "bench_out/readahead/20260902_stage4_product_readahead.txt",
+          "rel_path": "bench_out/readahead/20260902_stage4_product_readahead.txt",
+          "exists": true,
+          "sha256": "ddd96a9762d3e77e76bcdfdab656c47c4de58dc9f9bf5c375346803910054047",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-08",
+      "name": "ANC-08 native raw12-2（合成 128×128）",
+      "tolerance": "max_abs <= 1 code、PSNR ±1 dB、压缩比 ±5%",
+      "sources": [
+        {
+          "pattern": "bench_out/topos_native_domain_matrix/raw12/native_domains_raw12.json",
+          "rel_path": "bench_out/topos_native_domain_matrix/raw12/native_domains_raw12.json",
+          "exists": true,
+          "sha256": "30dc1959c4764a46d5616e0a4c6c25fad171242e59d9f860e11e3ee35d0e2eb8",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-09",
+      "name": "ANC-09 native raw16-2（合成 128×128）",
+      "tolerance": "max_abs <= 4 code、PSNR ±1.5 dB、压缩比 ±5%",
+      "sources": [
+        {
+          "pattern": "bench_out/topos_native_domain_matrix/raw16/native_domains_raw16.json",
+          "rel_path": "bench_out/topos_native_domain_matrix/raw16/native_domains_raw16.json",
+          "exists": true,
+          "sha256": "770e36162d9331458d7d59713cd22d0c685b63c84b421c73e2d1d9c45cf00ffc",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-10",
+      "name": "ANC-10 native float16-ultra",
+      "tolerance": "max_half_ulp <= 3、压缩比 ±3%",
+      "sources": [
+        {
+          "pattern": "bench_out/topos_native_domain_matrix/float16/native_domains_float16.json",
+          "rel_path": "bench_out/topos_native_domain_matrix/float16/native_domains_float16.json",
+          "exists": true,
+          "sha256": "07a4fcaac640a0cb501397f1a3be3e8b3d26e8dac36b535d8ada6b7550069653",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-11",
+      "name": "ANC-11 float16 零/特殊类语义（audit）",
+      "tolerance": "两个 0 恒等：任何非 0 即语义回归；ultra=1 保持，high/medium/low 档 source_zero_to_nonzero=1 保持",
+      "sources": [
+        {
+          "pattern": "bench_out/topos_native_domain_float_zero_audit/native_domains_float16.json",
+          "rel_path": "bench_out/topos_native_domain_float_zero_audit/native_domains_float16.json",
+          "exists": true,
+          "sha256": "03c7d308eb0b660d6db0a6b6919bd43eda7c23cef91440e6396d226944c0a577",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-12",
+      "name": "ANC-12 真实 CFA raw16 六档（2048×2048 RGGB）",
+      "tolerance": "压缩比与 PSNR ±15%（素材熵敏感，仅同 crop SHA 03961f03… 可比）",
+      "sources": [
+        {
+          "pattern": "bench_out/topos_raw_real_cfa_probe/raw16_six_tiers/native_domains_raw16.json",
+          "rel_path": "bench_out/topos_raw_real_cfa_probe/raw16_six_tiers/native_domains_raw16.json",
+          "exists": true,
+          "sha256": "7d172b810cef6b36d9ab8e2fb28c9d1ec6d15b2e803337a5d5060b56876b975b",
+          "classification": "bench_out_off_tree"
+        },
+        {
+          "pattern": "bench_out/topos_raw_real_cfa_probe/crop_manifest.json",
+          "rel_path": "bench_out/topos_raw_real_cfa_probe/crop_manifest.json",
+          "exists": true,
+          "sha256": "effc74c40275352c4eca0118266e6dee5207d326060e830f10f4aeaac95f3a88",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-13",
+      "name": "ANC-13 timeline_occlusion 4K B1（双轨全遮挡）",
+      "tolerance": "speedup >= 2.5×；帧请求比精确 2:1、culled_ratio=0.5（确定性结构量，偏离即功能回归）",
+      "sources": [
+        {
+          "pattern": "benchmarks/timeline_occlusion_bench_result_4k.json",
+          "rel_path": "benchmarks/timeline_occlusion_bench_result_4k.json",
+          "exists": true,
+          "sha256": "7833987cf388de78ca7469dd9afa895d625dc73a6601b04f6f9f9d01782afad0",
+          "classification": "repo_benchmarks_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-14",
+      "name": "ANC-14 codec 六档体积比 T/P 与 QP63 地板",
+      "tolerance": "体积比 ±10%；QP63 地板为结构性表现——地板消失（qp<63 或超支<1.2×）= 熵内核代际变更，更新锚点而非报回归",
+      "sources": [
+        {
+          "pattern": "bench_out/real_codec_bitrate_20260907/report.md",
+          "rel_path": "bench_out/real_codec_bitrate_20260907/report.md",
+          "exists": true,
+          "sha256": "b7e0b5d4e69bd60f102ecb918109fb5654430d949a3a673afc7fb08a549516f9",
+          "classification": "bench_out_off_tree"
+        },
+        {
+          "pattern": "bench_out/real_codec_bitrate_20260907/result.json",
+          "rel_path": "bench_out/real_codec_bitrate_20260907/result.json",
+          "exists": true,
+          "sha256": "1f63ad779e89a806f502f41eb09c7b7163beac7e089d9552eb6c1066374f3ebf",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-15",
+      "name": "ANC-15 paired q01 码率配平画质差（真实素材 30 帧）",
+      "tolerance": "全档 Δ >= +5 dB；码流比 ±3%",
+      "sources": [
+        {
+          "pattern": "bench_out/topos_paired_q01_real_source/proxy-match/paired_*.json",
+          "rel_path": "bench_out/topos_paired_q01_real_source/proxy-match/paired_proxy.json",
+          "exists": true,
+          "sha256": "a9f91ead3350bdf78737a75fe73e7c43d728457dc938cc9b8afc2f1f33f69c58",
+          "classification": "bench_out_off_tree"
+        },
+        {
+          "pattern": "bench_out/topos_paired_q01_real_source/lt-match/paired_*.json",
+          "rel_path": "bench_out/topos_paired_q01_real_source/lt-match/paired_lt.json",
+          "exists": true,
+          "sha256": "a54b8ff09977fbb2226f18fd69798f881c50b32145e5ce722106263db7fc6cd4",
+          "classification": "bench_out_off_tree"
+        },
+        {
+          "pattern": "bench_out/topos_paired_q01_real_source/standard-match/paired_*.json",
+          "rel_path": "bench_out/topos_paired_q01_real_source/standard-match/paired_standard.json",
+          "exists": true,
+          "sha256": "ebb83f8d1b7c17ff6928413febbabc75c91d06e526c6e5d378d2d5a277512fc2",
+          "classification": "bench_out_off_tree"
+        },
+        {
+          "pattern": "bench_out/topos_paired_q01_real_source/hq-match/paired_*.json",
+          "rel_path": "bench_out/topos_paired_q01_real_source/hq-match/paired_hq.json",
+          "exists": true,
+          "sha256": "b4ab990d00afb5d2e5d86ff7084cf082582940f759525603b585ff501fe9cfe3",
+          "classification": "bench_out_off_tree"
+        },
+        {
+          "pattern": "bench_out/topos_paired_q01_real_source/4444-vt-12bit-match/paired_*.json",
+          "rel_path": "bench_out/topos_paired_q01_real_source/4444-vt-12bit-match/paired_4444.json",
+          "exists": true,
+          "sha256": "8a380709d62a03df18f9b17738e0a6696d323f1ff0b486597a493d1b412f4107",
+          "classification": "bench_out_off_tree"
+        },
+        {
+          "pattern": "bench_out/topos_paired_q01_real_source/4444xq-vt-12bit-match/paired_*.json",
+          "rel_path": "bench_out/topos_paired_q01_real_source/4444xq-vt-12bit-match/paired_4444xq.json",
+          "exists": true,
+          "sha256": "9862496df88d7021426e9cfd73fa2f9d1efb0ccf9a6c702fc182712ffb572c1c",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-16",
+      "name": "ANC-16 4K XQ 线程 16T 逐帧 p95",
+      "tolerance": "16T p95 <= 50 ms（轮间 p95 自然范围 35.40-47.95）；12→16 收益应 <5%（当前 +1.5%，>5% = 调度结构变化）",
+      "sources": [
+        {
+          "pattern": "bench_out/topos_perf_thread_refine_3rounds.json",
+          "rel_path": "bench_out/topos_perf_thread_refine_3rounds.json",
+          "exists": true,
+          "sha256": "11da45959bf2e86943e54704cd03e478d0574dc6f70d3b0974781b63c2108727",
+          "classification": "bench_out_off_tree"
+        },
+        {
+          "pattern": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+          "rel_path": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010155729682Z/result.json",
+          "exists": true,
+          "sha256": "ea09b2d2983bb2b63ed52251d2c03a32d8ecb467d30e8b8e426d997b67094a11",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "1d30609f",
+            "git_dirty": true,
+            "dylib_sha8": "7b0cc4d4"
+          }
+        },
+        {
+          "pattern": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+          "rel_path": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010206063591Z/result.json",
+          "exists": true,
+          "sha256": "7ce61ad1869574fb01b4ad9a88a19b2b0de7198722933d65e82907e2f25388f0",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "1d30609f",
+            "git_dirty": true,
+            "dylib_sha8": "7b0cc4d4"
+          }
+        },
+        {
+          "pattern": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+          "rel_path": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010216428115Z/result.json",
+          "exists": true,
+          "sha256": "fe735b8c1792cd3ba1f39a7d5294cf54b0bd7509ac2466f463bed7a394b1a175",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "1d30609f",
+            "git_dirty": true,
+            "dylib_sha8": "7b0cc4d4"
+          }
+        },
+        {
+          "pattern": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+          "rel_path": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010226829401Z/result.json",
+          "exists": true,
+          "sha256": "ca042ff1e196275a88618f431e652cede9c09146ba15f1b3d01017451adf1cd9",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "1d30609f",
+            "git_dirty": true,
+            "dylib_sha8": "7b0cc4d4"
+          }
+        },
+        {
+          "pattern": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+          "rel_path": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010237314053Z/result.json",
+          "exists": true,
+          "sha256": "f6f155136d658946fc20fa2338db4e8919e90a934ed044a66925506c0890467d",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "1d30609f",
+            "git_dirty": true,
+            "dylib_sha8": "7b0cc4d4"
+          }
+        },
+        {
+          "pattern": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+          "rel_path": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010247714249Z/result.json",
+          "exists": true,
+          "sha256": "9649db25dfc849df13088b50cfa1319a762c26737d6daad4cce7b7d16ec597a2",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "1d30609f",
+            "git_dirty": true,
+            "dylib_sha8": "7b0cc4d4"
+          }
+        },
+        {
+          "pattern": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+          "rel_path": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010258203388Z/result.json",
+          "exists": true,
+          "sha256": "a21a4afd0ce2577379e07dc2025455b146094af5539fcfd6e707de3d0b26c7d3",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "1d30609f",
+            "git_dirty": true,
+            "dylib_sha8": "7b0cc4d4"
+          }
+        },
+        {
+          "pattern": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+          "rel_path": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010308561185Z/result.json",
+          "exists": true,
+          "sha256": "20d2039620a69c04989fcf3f82911380fbaad82029b3ee9e47f929589f91e84a",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "1d30609f",
+            "git_dirty": true,
+            "dylib_sha8": "7b0cc4d4"
+          }
+        },
+        {
+          "pattern": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T01*/result.json",
+          "rel_path": "bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010319154355Z/result.json",
+          "exists": true,
+          "sha256": "9229a43312d53d9ecc4b36da79f295a1e21bfc94f584f3fc98f9ca1b1c7371dc",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "1d30609f",
+            "git_dirty": true,
+            "dylib_sha8": "7b0cc4d4"
+          }
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-17",
+      "name": "ANC-17 12-bit ramp 码值映射",
+      "tolerance": "逐位复现（SHA 一致）；不一致时 Y MAE <= 0.2 且 max <= 1 code 才可接受为口径内变化",
+      "sources": [
+        {
+          "pattern": "bench_out/topos_vt_12bit_ramp_probe_v2/vt_12bit_ramp.json",
+          "rel_path": "bench_out/topos_vt_12bit_ramp_probe_v2/vt_12bit_ramp.json",
+          "exists": true,
+          "sha256": "ddc5eb4a8af24f86acb6c143c9db4eaed88c1e8beca1c70461a092220512d8f9",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-18",
+      "name": "ANC-18 RD 确定性位流（2K V2@qp45）",
+      "tolerance": "逐位一致；任何漂移 = 位流语义变更（非噪声），触发人工判读",
+      "sources": [
+        {
+          "pattern": "bench_out/6b3dfe9d/24421afb/e5250099/20260903T110654Z/rd_result.json",
+          "rel_path": "bench_out/6b3dfe9d/24421afb/e5250099/20260903T110654Z/rd_result.json",
+          "exists": true,
+          "sha256": "7027ac40441ff5e6d959dadf7ede8a98778d1618c5a87fd745d4fdc1d08a47d2",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "6b3dfe9d",
+            "git_dirty": false,
+            "dylib_sha8": "24421afb"
+          }
+        },
+        {
+          "pattern": "bench_out/5bc83bef/8e335ef7/318dbea5/20260903T133743Z/rd_result.json",
+          "rel_path": "bench_out/5bc83bef/8e335ef7/318dbea5/20260903T133743Z/rd_result.json",
+          "exists": true,
+          "sha256": "a5d3a709ed3b8d1e3687426e764567431c770ad3995abca44425ebe7444d7470",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "5bc83bef",
+            "git_dirty": true,
+            "dylib_sha8": "8e335ef7"
+          }
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-19",
+      "name": "ANC-19 质量阶梯（recal-p5，对 4K_prores4444 母版）",
+      "tolerance": "±0.5 dB；档位重校准（retier）会整体移位，须随 retier 更新",
+      "sources": [
+        {
+          "pattern": "bench_out/topos_quality/quality_recal-p5.json",
+          "rel_path": "bench_out/topos_quality/quality_recal-p5.json",
+          "exists": true,
+          "sha256": "5b8f62e692bca85d224d867f32a736f1a39d7adf84968701519e8aaa5b0698bf",
+          "classification": "bench_out_off_tree"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "anchor_id": "ANC-20",
+      "name": "ANC-20 E1 编码边界 4K hq（clean 构建）",
+      "tolerance": "±15%；mux 段维持 1.4-4.9 ms/帧区间",
+      "sources": [
+        {
+          "pattern": "bench_out/e1_encode/44784357/d052edae/2709a8be/20260927T120446882365Z/result.json",
+          "rel_path": "bench_out/e1_encode/44784357/d052edae/2709a8be/20260927T120446882365Z/result.json",
+          "exists": true,
+          "sha256": "53a244e460a56628ff3e963bd72c4495d393c12675d7716b029a1ad5ea9f9863",
+          "classification": "p04_manifest_tree",
+          "manifest": {
+            "git_head": "44784357",
+            "git_dirty": false,
+            "dylib_sha8": "d052edae"
+          }
+        }
+      ],
+      "status": "ok"
+    }
+  ],
+  "summary": {
+    "anchors_total": 20,
+    "anchors_ok": 20,
+    "anchors_missing": 0,
+    "sources_p04_manifest_tree": 22,
+    "sources_off_tree": 21
+  },
+  "baseline_sha256": "828301736d2c2d109c183d0f3bc3ae53782af894d4b178640f0380bd931cff61"
+}

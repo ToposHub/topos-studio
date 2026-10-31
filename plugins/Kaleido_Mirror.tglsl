@@ -1,0 +1,75 @@
+// --- Topos Plugin Metadata ---
+// @name Kaleido Mirror
+// @i18n_name Kaleido_Mirror
+// @author Topos Team
+// @version 1.0
+// @description Fold-mirror kaleidoscope: horizontal / vertical / quad folding about an adjustable axis plus diagonal reflection, mix-controlled
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param select mirror_mode "Mirror Mode" 2 "Horizontal" "Vertical" "Quad" "Diagonal"
+// @param slider mirror_axis "Mirror Axis" 0.5 0.0 1.0
+// @param separator
+// @param slider mirror_mix "Mix" 1.0 0.0 1.0
+// -----------------------------
+//
+// Kaleido Mirror —— 折叠镜像万花筒。
+//
+// 原理：把采样坐标关于可调轴折叠（f(x) = axis - |x - axis|），折叠后
+// 的坐标回读原图，形成 2 / 4 / 8 重对称的万花筒构图。四种模式：
+// Horizontal（左右折叠）、Vertical（上下折叠）、Quad（双向折叠）、
+// Diagonal（关于主对角线的镜面反射 p' = p - 2*max(d,0)*n，法向
+// (0.7071, 0.7071) 为编译期常量，零三角函数）。
+//
+// 设计要点：
+// - 单次纹理采样、零循环、零三角函数（对角反射用 const 法向点积）；
+// - 折叠坐标可能落在 [0,1] 之外（axis 偏离 0.5 时）——采样一律钳到
+//   半纹素边界（clamp-to-edge 保险，边界呈拉伸纹理而非未定义读）；
+// - mirror_mix 把折叠坐标回插到原始坐标（可逆滑杆），首行早退出；
+// - Delta 输出惯例：重采样差值叠加到已调色画面；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零混合纯直通
+    if (mirror_mix < 0.001) return color;
+
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 half_texel = 0.5 / max(tex_size, vec2(1.0));
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+
+    // 折叠轴（0.01/0.99 内钳，保证折叠后仍有非退化采样域）
+    float ax = clamp(mirror_axis, 0.01, 0.99);
+    vec2 folded = uv;
+
+    if (mirror_mode == 0 || mirror_mode == 2) {
+        // 水平：右半折叠到轴左侧
+        folded.x = ax - abs(uv.x - ax);
+    }
+    if (mirror_mode == 1 || mirror_mode == 2) {
+        // 垂直：下半折叠到轴上方
+        folded.y = ax - abs(uv.y - ax);
+    }
+    if (mirror_mode == 3) {
+        // 对角反射：d = dot(p, n)，d > 0 侧沿法向折回（const 法向，零三角）
+        vec2 p = uv - 0.5;
+        vec2 n = vec2(0.70710678, 0.70710678);
+        float d = dot(p, n);
+        folded = 0.5 + p - n * (2.0 * max(d, 0.0));
+    }
+
+    // mix 回插 + 边界保险采样
+    vec2 suv = clamp(mix(uv, folded, mirror_mix), min_uv, max_uv);
+    vec3 mirrored = texture(u_input_tex, suv).rgb;
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    return color + (mirrored - original_color);
+}

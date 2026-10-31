@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "result": {
+    "codec": "h264",
+    "resolution": [
+      640.0,
+      360.0
+    ],
+    "jobs": [],
+    "preflight": "PreflightResult(issues=[PreflightIssue(severity='blocking', code='range.start_out_of_bounds', message='Start frame 0 is beyond the timeline length (0 frames).', field='range.start_frame')])",
+    "enabled": true,
+    "controller_type": "VideoBatchExportController"
+  }
+}

@@ -1,0 +1,117 @@
+{
+ "$comment": "Topos Image (.toos/TPIM) 测试向量清单。golden 文件由 native/topos_codec/tests/conformance/golden_image.c 确定性生成；schema_version 随布局冻结提升。阶段 0 冻结计划集合，实际文件在阶段 1 起逐步生成并通过 run_tests.sh 校验。",
+ "schema_version": 1,
+ "format": {
+  "file_magic": "TPIM",
+  "file_version_major": 1,
+  "file_version_minor": 0,
+  "preamble_size": 64,
+  "directory_entry_size": 32,
+  "idsc_size": 128,
+  "inner_packet_magic": "TPIC",
+  "crc": "CRC-32 IEEE 802.3 (same as libtopos_codec tc_crc32)"
+ },
+ "golden_files": [
+  {
+   "name": "golden_image_v1.bin",
+   "profile": "ImagePreview",
+   "desc": "YUV 4:2:2 10-bit 无 Alpha，64x48 合成渐变，最小目录（IDSC+PIXL）",
+   "stage": 1
+  },
+  {
+   "name": "golden_image_v1_alpha.bin",
+   "profile": "ImagePreview",
+   "desc": "YUV422 10-bit + Alpha mode1 (A16 lossless)，straight",
+   "stage": 1
+  },
+  {
+   "name": "golden_image_v1_gbr10.bin",
+   "profile": "ImageHQ",
+   "desc": "GBR 4:4:4 10-bit 无 Alpha，64x48 色卡合成",
+   "stage": 2
+  },
+  {
+   "name": "golden_image_v1_gbr12.bin",
+   "profile": "ImageXQ",
+   "desc": "GBR 4:4:4 12-bit 极值向量（全黑/全白/中间灰合成块）",
+   "stage": 3
+  },
+  {
+   "name": "golden_image_v1_meta.bin",
+   "profile": "ImageHQ",
+   "desc": "GBR 10-bit + ICCP/OCIO/XMP/EXIF/THMB/HASH 全可选 chunk，round-trip 保留基准",
+   "stage": 3
+  },
+  {
+   "name": "golden_image_v1_traw.bin",
+   "profile": "ImageRAW",
+   "desc": "TRAW（v1.6 批 1）：Bayer CFA 4 相位平面 R/Gr/Gb/B 12-bit（pf=3/profile=7/minor=5，qm0/transfer=LOG0/matrix=0），64x48 合成",
+   "stage": 4
+  }
+ ],
+ "negative_vectors": [
+  {
+   "name": "neg_bad_magic.bin",
+   "desc": "preamble magic 非 TPIM（含裸 TPIC packet）→ TC_IMG_ERR_BAD_MAGIC",
+   "stage": 1
+  },
+  {
+   "name": "neg_bad_preamble_crc.bin",
+   "desc": "header_crc32 错 → TC_IMG_ERR_BAD_PREAMBLE/CHECKSUM",
+   "stage": 1
+  },
+  {
+   "name": "neg_dir_overlap.bin",
+   "desc": "chunk 区间重叠 → TC_IMG_ERR_BAD_DIRECTORY",
+   "stage": 1
+  },
+  {
+   "name": "neg_dir_oob.bin",
+   "desc": "chunk_offset+size 越过 file_size（含 u64 溢出构造）→ TC_IMG_ERR_BAD_DIRECTORY",
+   "stage": 1
+  },
+  {
+   "name": "neg_dup_critical.bin",
+   "desc": "重复 IDSC → TC_IMG_ERR_BAD_DIRECTORY",
+   "stage": 1
+  },
+  {
+   "name": "neg_missing_pixl.bin",
+   "desc": "缺 PIXL → TC_IMG_ERR_BAD_DIRECTORY",
+   "stage": 1
+  },
+  {
+   "name": "neg_unknown_critical.bin",
+   "desc": "未知 critical chunk → TC_IMG_ERR_UNKNOWN_CRITICAL",
+   "stage": 1
+  },
+  {
+   "name": "neg_idsc_conflict.bin",
+   "desc": "IDSC 尺寸与内层 visible 不一致 → TC_IMG_ERR_CHUNK_CONFLICT",
+   "stage": 1
+  },
+  {
+   "name": "neg_truncated_*.bin",
+   "desc": "任意字节截断族（1..N 处）→ 有界错误，无越界",
+   "stage": 1
+  },
+  {
+   "name": "neg_meta_conflict.bin",
+   "desc": "ICC 与 CICP 矛盾 → TC_IMG_ERR_METADATA_CONFLICT",
+   "stage": 3
+  }
+ ],
+ "fuzz": {
+  "targets": [
+   "fuzz_image"
+  ],
+  "corpus": "native/topos_codec/tests/fuzz/seed_corpus_image/",
+  "replay": "topos_fuzz_replay_image",
+  "runs_gate": 20000
+ },
+ "rules": [
+  "golden 生成必须确定性（固定种子），禁用时间/随机地址",
+  "任一 golden 在后续版本持续通过（向后兼容门禁）",
+  "IDSC↔PIXL 十项交叉校验（spec §6.1）逐项有负向量覆盖"
+ ]
+}

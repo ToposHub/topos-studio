@@ -1,0 +1,42 @@
+{
+ "video": "2K_h264.mp4",
+ "frames": 8,
+ "mode": "per_frame_clear (before)",
+ "per_frame": [
+  {
+   "frame": 1,
+   "hits": 0,
+   "misses": 6
+  },
+  {
+   "frame": 2,
+   "hits": 0,
+   "misses": 6
+  },
+  {
+   "frame": 3,
+   "hits": 0,
+   "misses": 6
+  },
+  {
+   "frame": 4,
+   "hits": 0,
+   "misses": 6
+  },
+  {
+   "frame": 5,
+   "hits": 0,
+   "misses": 6
+  },
+  {
+   "frame": 6,
+   "hits": 0,
+   "misses": 6
+  },
+  {
+   "frame": 7,
+   "hits": 0,
+   "misses": 6
+  }
+ ]
+}

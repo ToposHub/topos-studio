@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+collected 30 items
+
+tests/shared/test_m18_bundle_abi_audit.py ..........                     [ 33%]
+tests/media/test_cuda_extras_w06.py ...s.                                [ 50%]
+tests/color/test_m22_shot_match_panel.py ........                        [ 76%]
+tests/shared/test_upgrade_audit_gate_regressions.py .......              [100%]
+
+=============================== warnings summary ===============================
+tests/shared/test_m18_bundle_abi_audit.py:15
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/shared/test_m18_bundle_abi_audit.py:15: PytestUnknownMarkWarning: Unknown pytest.mark.shared_core - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    pytestmark = pytest.mark.shared_core
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=================== 29 passed, 1 skipped, 1 warning in 3.47s ===================

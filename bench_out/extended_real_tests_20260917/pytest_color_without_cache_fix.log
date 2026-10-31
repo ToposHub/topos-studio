@@ -1,0 +1,148 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 1515 items
+
+tests/color/test_ab_reference_wipe.py ............                       [  0%]
+tests/color/test_alpha_system.py ......................                  [  2%]
+tests/color/test_async_renderer_lane_merge.py .......................... [  3%]
+..............................                                           [  5%]
+tests/color/test_async_renderer_pass_count.py ................ss         [  7%]
+tests/color/test_auto_color.py .......................                   [  8%]
+tests/color/test_cache_manager.py ....................                   [  9%]
+tests/color/test_canvas_clip_switch_preview.py ....                      [ 10%]
+tests/color/test_cie_scope_widget.py ............                        [ 11%]
+tests/color/test_clip_navigation.py OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+..OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.                     [ 12%]
+tests/color/test_color_e2e_consistency_matrix.py ..............          [ 13%]
+tests/color/test_color_engine_triple_golden.py .........                 [ 13%]
+tests/color/test_color_mapping_panel.py ..                               [ 13%]
+tests/color/test_color_monitor_status_bar.py ...............             [ 14%]
+tests/color/test_color_session.py ...................................... [ 17%]
+...                                                                      [ 17%]
+tests/color/test_color_space_descriptor.py .........................     [ 19%]
+tests/color/test_color_stack_hydrator.py .....................           [ 20%]
+tests/color/test_color_state_roundtrip.py ........                       [ 20%]
+tests/color/test_color_tools_lut_exporter.py .............               [ 21%]
+tests/color/test_color_tools_scripting_api.py ................ss         [ 23%]
+tests/color/test_color_transform_provider_parity.py ..........           [ 23%]
+tests/color/test_composition_uniform_manifest.py ..................      [ 24%]
+tests/color/test_crop_shortcut_scope.py ....                             [ 25%]
+tests/color/test_delivery_matrix.py .................................... [ 27%]
+.                                                                        [ 27%]
+tests/color/test_dirty_propagation.py ......................             [ 29%]
+tests/color/test_effect_preview_quality.py ...........................   [ 30%]
+tests/color/test_export_denoise_bridge.py ...........                    [ 31%]
+tests/color/test_gpu_scope_pipeline.py ................................. [ 33%]
+.....................................                                    [ 36%]
+tests/color/test_gpu_scope_targets.py .....                              [ 36%]
+tests/color/test_grade_clipboard.py .........................            [ 38%]
+tests/color/test_grade_keyframes.py .................................... [ 40%]
+.......                                                                  [ 40%]
+tests/color/test_hdr_transfer.py .......................                 [ 42%]
+tests/color/test_history.py ................                             [ 43%]
+tests/color/test_image_engine_history.py ...........                     [ 44%]
+tests/color/test_image_engine_layers.py ................................ [ 46%]
+.                                                                        [ 46%]
+tests/color/test_image_engine_params.py .......................          [ 47%]
+tests/color/test_image_engine_render_data.py .                           [ 48%]
+tests/color/test_image_engine_state.py ................................. [ 50%]
+...........                                                              [ 50%]
+tests/color/test_image_engine_transforms.py ................             [ 52%]
+tests/color/test_layer.py .............................................. [ 55%]
+.......                                                                  [ 55%]
+tests/color/test_lut_loader.py ....................                      [ 56%]
+tests/color/test_mask_group.py .............                             [ 57%]
+tests/color/test_mask_shape.py .....................                     [ 59%]
+tests/color/test_metal_composition_blend_modes.py ...................... [ 60%]
+......                                                                   [ 60%]
+tests/color/test_metal_composition_blur_sharpen.py .................     [ 62%]
+tests/color/test_metal_composition_curves_lut.py ................        [ 63%]
+tests/color/test_metal_composition_grading.py .......................    [ 64%]
+tests/color/test_metal_composition_grain_softclip.py ...............     [ 65%]
+tests/color/test_metal_composition_mixer_warper.py .............         [ 66%]
+tests/color/test_ocio_config_load.py ......                              [ 66%]
+tests/color/test_opengl_render_backend.py ........                       [ 67%]
+tests/color/test_orchestrator_boundary.py .....                          [ 67%]
+tests/color/test_plugin_manifest_binding.py ................             [ 68%]
+tests/color/test_plugin_params.py ..........                             [ 69%]
+tests/color/test_power_windows.py ............                           [ 70%]
+tests/color/test_presets_gallery.py ........................             [ 71%]
+tests/color/test_professional_scopes.py ................................ [ 73%]
+..                                                                       [ 74%]
+tests/color/test_project_dependencies.py ..............                  [ 74%]
+tests/color/test_qualifier_matte.py ....................                 [ 76%]
+tests/color/test_quality_control.py ...........                          [ 77%]
+tests/color/test_reformat_crop_transform.py ............................ [ 78%]
+...........                                                              [ 79%]
+tests/color/test_scope_input_source.py .............                     [ 80%]
+tests/color/test_scope_live_refresh.py ...........                       [ 81%]
+tests/color/test_shader_golden_corpus.py ..                              [ 81%]
+tests/color/test_shader_pipeline_lifecycle.py .                          [ 81%]
+tests/color/test_timeline_clip_strip_lazy_thumbnails.py ...........OpenCV: Couldn't read video stream from file "/tmp/clip_0000.mov"
+OpenCV: Couldn't read video stream from file "/tmp/clip_0008.mov"
+.OpenCV: Couldn't read video stream from file "/tmp/clip_0009.mov"
+OpenCV: Couldn't read video stream from file "/tmp/clip_0010.mov"
+.... [ 82%]
+........                                                                 [ 82%]
+tests/color/test_timeline_clip_strip_signal_dedup.py .............       [ 83%]
+tests/color/test_timeline_clip_strip_sync.py ............                [ 84%]
+tests/color/test_tracker_homography_overlay.py ...                       [ 84%]
+tests/color/test_tracker_mask_binding_flow.py ......................     [ 86%]
+tests/color/test_tracker_overlay_geometry.py ........................... [ 88%]
+                                                                         [ 88%]
+tests/color/test_tracker_panel_states.py ............................... [ 90%]
+....                                                                     [ 90%]
+tests/color/test_tracking_curve_transform.py ......                      [ 90%]
+tests/color/test_tracking_data.py ......................                 [ 92%]
+tests/color/test_tracking_keyframe_bake.py .......                       [ 92%]
+tests/color/test_tracking_manual_correction.py .....                     [ 93%]
+tests/color/test_tracking_mask_binding.py ...........                    [ 93%]
+tests/color/test_tracking_render_apply.py ................               [ 94%]
+tests/color/test_tracking_schema_migration.py ..........                 [ 95%]
+tests/color/test_tracking_serialization.py ..........                    [ 96%]
+tests/color/test_tracking_service.py ...............                     [ 97%]
+tests/color/test_tracking_source_timeline_frame_sync.py .....            [ 97%]
+tests/color/test_tracking_stale_result_guard.py .......                  [ 97%]
+tests/color/test_tracking_worker_lifecycle.py .....                      [ 98%]
+tests/color/test_video_control_bar_scrub.py ..                           [ 98%]
+tests/color/test_video_front_texture_sync.py ............                [ 99%]
+tests/color/test_workspace_presets.py .............                      [100%]
+
+=============================== warnings summary ===============================
+tests/color/test_color_session.py::TestVideoProjectAssetGuard::test_create_project_asset_rejects_video
+  /Users/testuser/Documents/vscode/topos/tests/color/test_color_session.py:463: DeprecationWarning: PROJECT_ASSET is deprecated for video. Video must go through Edit timeline (TIMELINE_CLIP).
+    ColorSession.create_project_asset(
+
+tests/color/test_metal_composition_blend_modes.py: 2 warnings
+tests/color/test_metal_composition_blur_sharpen.py: 3 warnings
+tests/color/test_metal_composition_curves_lut.py: 8 warnings
+tests/color/test_metal_composition_grading.py: 2 warnings
+tests/color/test_metal_composition_grain_softclip.py: 3 warnings
+tests/color/test_metal_composition_mixer_warper.py: 6 warnings
+  /Users/testuser/Documents/vscode/topos_1/.venv/lib/python3.12/site-packages/_pytest/fixtures.py:1313: PytestRemovedIn10Warning: Class-scoped fixture defined as instance method is deprecated.
+  Instance attributes set in this fixture will NOT be visible to test methods,
+  as each test gets a new instance while the fixture runs only once per class.
+  Use @classmethod decorator and set attributes on cls instead.
+  See https://docs.pytest.org/en/stable/deprecations.html#class-scoped-fixture-as-instance-method
+    fixturefunc = resolve_fixture_function(fixturedef, request)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 1511 passed, 4 skipped, 25 warnings in 33.46s =================

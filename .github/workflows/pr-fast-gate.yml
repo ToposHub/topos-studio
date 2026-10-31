@@ -1,0 +1,273 @@
+# P0-CI-01：PR 快速必跑门禁 + 夜间全量（审计整改 2026-09-20）。
+#
+# 背景：此前只有路径限定的专项 workflow（Product Matrix 仅手动触发），
+# 架构/UI/Render/App 回归没有任何统一 PR required job，已失败的门禁可以
+# 长期留在主线。本文件恢复统一门禁：
+#
+#   * required（core-gates）：compileall + pip check + project + deliver +
+#     composite（软件 GL、无真实媒体）+ color 全套。这些域在审计基线上
+#     全绿，回归必须阻断 PR。
+#   * clean-install-parity（P1-DEP-01）：在两个全新 venv 里分别用
+#     `pip install -e . -c constraints.txt` 与
+#     `pip install -r requirements.txt -c constraints.txt` 安装，pip check
+#     并断言两个入口解析出的核心依赖版本一致。
+#   * watch（known-regressions）：architecture / physical-missing / app /
+#     edit / render / ui focused。审计确认存在已知失败（P1-ARCH-01、
+#     P1-PROD-01、P1-UI-02、P1-APP-01、P1-RENDER-01、P1-EDIT-01），
+#     先以 continue-on-error 运行并产出报告，S3 收口后逐域翻正为
+#     required——不允许用更新 fingerprint/基线的方式"转绿"。
+#   * nightly：夜间全量（CPU/软件 GL），上传 junit 报告。
+#
+# 注意：仓库分支保护需把 core-gates 设为 required check。
+# macOS 本地已知问题：同进程先建 standalone Metal/GL 上下文再建 Qt 控件
+# 会随机 Segfault，CI 统一在 ubuntu + offscreen 运行规避。
+
+name: PR Fast Gate
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop, dev]
+  schedule:
+    # 每日 UTC 18:30 = UTC+8 次日 02:30，夜间全量
+    - cron: '30 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-fast-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_QPA_PLATFORM: offscreen
+
+jobs:
+  lint:
+    # P2 质量还债（2026-10-28）：ruff（E9/F63/F7/F82 零误报集，首轮已全量
+    # 清零）+ mypy（增量 files=src/shared/logging|paths + src/products，起步
+    # 域 0 错误）。收紧节奏按 docs/code_quality_debt_plan_2026-10-28.md P2，
+    # 每轮加规则/扩 files 当轮清零。分支保护需将 lint 设为 required。
+    name: lint (ruff + mypy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install lint tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff mypy
+      - name: Ruff (syntax / undefined-name gate)
+        run: python -m ruff check src apps
+      - name: Mypy (incremental typed domains)
+        run: python -m mypy
+
+  compile-and-deps:
+    name: compile & pip check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Byte-compile all sources
+        run: python -m compileall -q src apps
+      - name: Dependency consistency
+        run: python -m pip check
+
+  core-gates:
+    name: required suites (project/deliver/composite/color)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: compile-and-deps
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Qt headless system libs
+        # product-matrix.yml 同款：PyQt6 offscreen 需要 EGL/XCB 运行库。
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxcb-xinerama0 libxcb-cursor0
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip check
+      - name: Project / serialization suite
+        run: python -m pytest tests/project -q --no-header -p no:cacheprovider
+      - name: Deliver + shared suite
+        run: python -m pytest tests/deliver -q --no-header -p no:cacheprovider
+      - name: Export + P5 new-suite gate (main/products/shared-small/preferences/i18n-consistency)
+        # P5 质量还债（2026-10-28）：新增专测接入 required（各套件 <5s，
+        # 本地全绿基线：main 12 / products 28 / shared-small 28 /
+        # preferences 8 / i18n-consistency 5 / export 295）。
+        run: |
+          python -m pytest tests/export \
+            tests/app/test_main_startup.py \
+            tests/feature_availability/test_products_matrix.py \
+            tests/shared/test_shared_small_modules.py \
+            tests/shared/test_preferences_registry.py \
+            tests/shared/test_i18n_locale_consistency.py \
+            -q --no-header -p no:cacheprovider
+      - name: Composite core (no GPU / no real media)
+        run: python -m pytest tests/composite -q --no-header -p no:cacheprovider -m "not gpu_renderer and not real_media"
+      - name: Color suite (software GL)
+        run: python -m pytest tests/color -q --no-header -p no:cacheprovider
+      - name: Workspace must stay clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::测试改写了工作区（P0-QA-01 门禁）"; git status --porcelain; exit 1
+          fi
+
+  clean-install-parity:
+    name: clean install parity (constraints)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # P1-DEP-01：两个安装入口（pyproject 单一事实源 / requirements 全量清单）
+    # 必须在同一 constraints 下解析出兼容且一致的核心依赖集合。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Venv A — pip install -e . -c constraints.txt
+        run: |
+          python -m venv /tmp/venv-a
+          /tmp/venv-a/bin/python -m pip install --upgrade pip
+          /tmp/venv-a/bin/python -m pip install -e . -c constraints.txt
+          /tmp/venv-a/bin/python -m pip check
+      - name: Venv B — pip install -r requirements.txt -c constraints.txt
+        run: |
+          python -m venv /tmp/venv-b
+          /tmp/venv-b/bin/python -m pip install --upgrade pip
+          /tmp/venv-b/bin/python -m pip install -r requirements.txt -c constraints.txt
+          /tmp/venv-b/bin/python -m pip check
+      - name: Core dependency version parity
+        run: |
+          CORE_PKGS="PyQt6 PyQt6-Qt6 PyQt6-WebEngine numpy opencv-python scipy av moderngl PyOpenGL opencolorio pillow keyring psutil msgpack waitress flask trimesh pyassimp onnxruntime rawpy pillow-heif QtAwesome send2trash"
+          fail=0
+          for p in $CORE_PKGS; do
+            a=$(/tmp/venv-a/bin/python -m pip show "$p" 2>/dev/null | sed -n 's/^Version: //p')
+            b=$(/tmp/venv-b/bin/python -m pip show "$p" 2>/dev/null | sed -n 's/^Version: //p')
+            if [ -z "$a" ] || [ -z "$b" ]; then
+              echo "::warning::$p 未同时出现在两个入口（A=${a:-缺失} B=${b:-缺失}）"
+              continue
+            fi
+            if [ "$a" != "$b" ]; then
+              echo "::error::$p 版本漂移：-e . → $a vs requirements → $b"
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: Import smoke (no Qt platform needed)
+        run: |
+          /tmp/venv-a/bin/python - <<'PY'
+          import numpy, cv2, scipy, av, OpenGL, PyOpenColorIO
+          import PIL, trimesh, keyring, psutil
+          import PyQt6.QtCore  # 只验证导入，不创建平台插件
+          # moderngl 不在此验证：其 C 扩展链接 libGL，裸 runner 无 libgl1，
+          # GL 相关冒烟由 core-gates（装有 EGL 系统库）覆盖。
+          print("import smoke OK")
+          PY
+
+  known-regressions:
+    name: watch suites (arch/app/edit/render/ui)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: compile-and-deps
+    # N20 证据口径：本 job 与 nightly 是 watch-only——continue-on-error
+    # 域内的绿**不构成关键通过证据**，红也不自动阻断。关键证据只有
+    # core-gates（required）与 scripts/m00_focused_gate.py（本地/发布门，
+    # 已扩充覆盖升级新增状态/IO/发布/QC/资源核心用例）。S3 收口后逐域
+    # 翻正为 required；当前域内存在审计确认的已知失败。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Qt headless system libs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxcb-xinerama0 libxcb-cursor0
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Warn when PR touches guardrail baselines
+        if: github.event_name == 'pull_request'
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$base"...HEAD | grep -Ei 'baseline|fingerprint|guardrail.*\.json' ; then
+            echo "::warning::PR 修改了架构基线/fingerprint 文件——请确认不是用更新基线掩盖测试失败（P0-CI-01 红线）"
+          fi
+      - name: i18n literal ratchet (watch-only)
+        # P3 防回归（2026-10-28）：新增 UI 硬编码字面量即红；存量残留走
+        # docs/i18n_literal_baseline.json 棘轮（14 处已登记误报）。先在
+        # watch job 观察，误报率可接受后翻 required。
+        run: python tools/check_i18n_literals.py
+      - name: Architecture guardrails
+        run: python -m pytest tests/architecture -q --no-header -p no:cacheprovider
+      - name: Product physical-missing
+        run: python -m pytest tests -k physical_missing -q --no-header -p no:cacheprovider
+      - name: App focused
+        run: python -m pytest tests/app -q --no-header -p no:cacheprovider
+      - name: Edit focused
+        run: python -m pytest tests/edit -q --no-header -p no:cacheprovider
+      - name: Render focused
+        run: python -m pytest tests/render -q --no-header -p no:cacheprovider
+      - name: UI focused (maxfail 50)
+        run: python -m pytest tests/ui -q --no-header -p no:cacheprovider --maxfail=50
+
+  nightly:
+    name: nightly full (CPU / software GL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # watch-only：作业状态如实红/绿（不再 `|| true` 吞掉退出码），但
+    # 不阻断分支；其结果不作为关键通过证据引用（N20）。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Qt headless system libs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxcb-xinerama0 libxcb-cursor0
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Full suite (excluding benchmarks)
+        run: |
+          python -m pytest tests -q --no-header -p no:cacheprovider \
+            --ignore=tests/benchmark \
+            -m "not gpu_renderer and not real_media" \
+            --junitxml=nightly-report.xml
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-junit
+          path: nightly-report.xml

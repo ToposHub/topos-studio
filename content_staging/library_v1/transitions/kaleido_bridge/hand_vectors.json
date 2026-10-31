@@ -1,0 +1,81 @@
+{
+  "component": "X17 kaleido_bridge",
+  "method": "手算独立脚本（纯 Python 标量逐像素）：θ=atan2((v-cy),(u-cx)·aspect)；m=mod(θ-rot,2A_s)、a=min(m,2A_s-m)（A_s=2π/N）→ θ_f=rot+a 折叠点（r 保持）；s_eff=strength·(1-|2p-1|)；layer=(1-s_eff)·X(u,v)+s_eff·X(u_f,v_f)；w_b=clamp(2p-1,0,1) 换源。容差 1e-6。",
+  "params_default": {
+    "sectors": 6,
+    "rotation": 0.0,
+    "center_x": 0.5,
+    "center_y": 0.5,
+    "strength": 0.8
+  },
+  "vectors": [
+    {
+      "desc": "N=6 rot=30° strength=1 p=0.25（s_eff=0.5·1、w_b=0 纯 A 层）（8x4 ramp）",
+      "params": {
+        "sectors": 6,
+        "rotation": 30.0,
+        "center_x": 0.5,
+        "center_y": 0.5,
+        "strength": 1.0
+      },
+      "progress": 0.25,
+      "fixture": "8x4 A=i/7 B=10+i",
+      "expected_rows": [
+        [
+          0.282212,
+          0.324931,
+          0.432074,
+          0.539217,
+          0.610646,
+          0.64636,
+          0.682074,
+          0.782212
+        ],
+        [
+          0.344071,
+          0.379785,
+          0.415499,
+          0.477358,
+          0.548787,
+          0.629785,
+          0.736928,
+          0.844071
+        ],
+        [
+          0.405929,
+          0.441644,
+          0.477358,
+          0.5,
+          0.571429,
+          0.691644,
+          0.798787,
+          0.905929
+        ],
+        [
+          0.467788,
+          0.5,
+          0.5,
+          0.5,
+          0.571429,
+          0.714286,
+          0.857143,
+          0.967788
+        ]
+      ],
+      "note": "p<0.5 → w_b=0：输出全为 A 层（折叠强度 0.5）——中段折叠可见且无 B 掺入"
+    },
+    {
+      "desc": "端点 p=0",
+      "progress": 0.0,
+      "expected": "A 比特级拷贝（s_eff=0、w_b=0）",
+      "note": ""
+    },
+    {
+      "desc": "端点 p=1",
+      "progress": 1.0,
+      "expected": "B 比特级拷贝（s_eff=0、w_b=1）",
+      "note": ""
+    }
+  ],
+  "conflicts": []
+}

@@ -1,0 +1,262 @@
+[
+  {
+    "domain": "edit",
+    "files": [
+      "tests/edit/test_m02_snapshot_io_fidelity.py",
+      "tests/edit/test_m03_bound_audio_retime.py",
+      "tests/edit/test_m03_sync_diagnostics.py",
+      "tests/edit/test_m04_interpretation_matrix.py",
+      "tests/edit/test_m04_sequence_classify.py",
+      "tests/edit/test_m05_color_chain_order.py",
+      "tests/edit/test_m06_qualifier_export.py",
+      "tests/edit/test_m07_plugin_manifest.py",
+      "tests/edit/test_m07_share_autolock.py",
+      "tests/edit/test_m07_version_tools_panel.py",
+      "tests/edit/test_m11_filler_panel.py",
+      "tests/edit/test_m12_proxy_cleanup_panel.py",
+      "tests/edit/test_m13_cue_animation_wiring.py",
+      "tests/edit/test_m13_multicam_adaptive.py",
+      "tests/edit/test_m13_page_entries.py",
+      "tests/edit/test_m13_patch_matrix_dialog.py",
+      "tests/edit/test_m13_patch_matrix_nav.py",
+      "tests/edit/test_m13_title_animation.py",
+      "tests/edit/test_m14_crossfade_stem.py",
+      "tests/edit/test_m14_nested_retime_audio.py",
+      "tests/edit/test_m14_project_sample_rate.py",
+      "tests/edit/test_m15_snapshot_compare_panel.py",
+      "tests/edit/test_m16_decode_metrics_lifecycle.py",
+      "tests/edit/test_m16_responsiveness_baseline.py",
+      "tests/edit/test_m18_golden_chain3.py",
+      "tests/edit/test_project_archive_w10.py",
+      "tests/edit/test_resident_failure_recovery_w03.py",
+      "tests/edit/test_snapshot_strict_w05.py"
+    ],
+    "command": [
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/edit/test_m02_snapshot_io_fidelity.py",
+      "tests/edit/test_m03_bound_audio_retime.py",
+      "tests/edit/test_m03_sync_diagnostics.py",
+      "tests/edit/test_m04_interpretation_matrix.py",
+      "tests/edit/test_m04_sequence_classify.py",
+      "tests/edit/test_m05_color_chain_order.py",
+      "tests/edit/test_m06_qualifier_export.py",
+      "tests/edit/test_m07_plugin_manifest.py",
+      "tests/edit/test_m07_share_autolock.py",
+      "tests/edit/test_m07_version_tools_panel.py",
+      "tests/edit/test_m11_filler_panel.py",
+      "tests/edit/test_m12_proxy_cleanup_panel.py",
+      "tests/edit/test_m13_cue_animation_wiring.py",
+      "tests/edit/test_m13_multicam_adaptive.py",
+      "tests/edit/test_m13_page_entries.py",
+      "tests/edit/test_m13_patch_matrix_dialog.py",
+      "tests/edit/test_m13_patch_matrix_nav.py",
+      "tests/edit/test_m13_title_animation.py",
+      "tests/edit/test_m14_crossfade_stem.py",
+      "tests/edit/test_m14_nested_retime_audio.py",
+      "tests/edit/test_m14_project_sample_rate.py",
+      "tests/edit/test_m15_snapshot_compare_panel.py",
+      "tests/edit/test_m16_decode_metrics_lifecycle.py",
+      "tests/edit/test_m16_responsiveness_baseline.py",
+      "tests/edit/test_m18_golden_chain3.py",
+      "tests/edit/test_project_archive_w10.py",
+      "tests/edit/test_resident_failure_recovery_w03.py",
+      "tests/edit/test_snapshot_strict_w05.py",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "-m",
+      "not gpu_renderer and not soak"
+    ],
+    "exit_code": 0,
+    "seconds": 10.47
+  },
+  {
+    "domain": "color",
+    "files": [
+      "tests/color/test_m05_advanced_cpu.py",
+      "tests/color/test_m06_keyer_gpu_parity.py",
+      "tests/color/test_m06_mask_shapes_cpu.py",
+      "tests/color/test_m06_qualifier_cpu.py",
+      "tests/color/test_m09_lightbox_alpha.py",
+      "tests/color/test_m13_keyframe_curves.py",
+      "tests/color/test_m19_color_context.py",
+      "tests/color/test_m19_hdr_vectors.py",
+      "tests/color/test_m19_three_page_vectors.py",
+      "tests/color/test_m19_transform_typed.py",
+      "tests/color/test_m22_grade_diff.py",
+      "tests/color/test_m22_shot_match_panel.py"
+    ],
+    "command": [
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/color/test_m05_advanced_cpu.py",
+      "tests/color/test_m06_keyer_gpu_parity.py",
+      "tests/color/test_m06_mask_shapes_cpu.py",
+      "tests/color/test_m06_qualifier_cpu.py",
+      "tests/color/test_m09_lightbox_alpha.py",
+      "tests/color/test_m13_keyframe_curves.py",
+      "tests/color/test_m19_color_context.py",
+      "tests/color/test_m19_hdr_vectors.py",
+      "tests/color/test_m19_three_page_vectors.py",
+      "tests/color/test_m19_transform_typed.py",
+      "tests/color/test_m22_grade_diff.py",
+      "tests/color/test_m22_shot_match_panel.py",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "-m",
+      "not gpu_renderer and not soak"
+    ],
+    "exit_code": 0,
+    "seconds": 3.9
+  },
+  {
+    "domain": "composite",
+    "files": [
+      "tests/composite/test_m05_composite_chain_gpu.py",
+      "tests/composite/test_m08_bake_dialog.py",
+      "tests/composite/test_m23_availability.py",
+      "tests/composite/test_m23_tracker_panel.py"
+    ],
+    "command": [
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/composite/test_m05_composite_chain_gpu.py",
+      "tests/composite/test_m08_bake_dialog.py",
+      "tests/composite/test_m23_availability.py",
+      "tests/composite/test_m23_tracker_panel.py",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "-m",
+      "not gpu_renderer and not soak"
+    ],
+    "exit_code": 0,
+    "seconds": 4.28
+  },
+  {
+    "domain": "deliver",
+    "files": [
+      "tests/deliver/test_m10_consumer_fields.py",
+      "tests/deliver/test_m21_multi_version_qc_panel.py",
+      "tests/deliver/test_m21_sidecar_wiring.py"
+    ],
+    "command": [
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/deliver/test_m10_consumer_fields.py",
+      "tests/deliver/test_m21_multi_version_qc_panel.py",
+      "tests/deliver/test_m21_sidecar_wiring.py",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "-m",
+      "not gpu_renderer and not soak"
+    ],
+    "exit_code": 0,
+    "seconds": 3.9
+  },
+  {
+    "domain": "media",
+    "files": [
+      "tests/media/test_cuda_extras_w06.py",
+      "tests/media/test_cuda_resident_capability_w04.py",
+      "tests/media/test_cuda_resident_format_matrix_w04.py",
+      "tests/media/test_cuda_resident_lifecycle_w02.py",
+      "tests/media/test_topos_codec_loader_w01.py"
+    ],
+    "command": [
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/media/test_cuda_extras_w06.py",
+      "tests/media/test_cuda_resident_capability_w04.py",
+      "tests/media/test_cuda_resident_format_matrix_w04.py",
+      "tests/media/test_cuda_resident_lifecycle_w02.py",
+      "tests/media/test_topos_codec_loader_w01.py",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "-m",
+      "not gpu_renderer and not soak"
+    ],
+    "exit_code": 1,
+    "seconds": 2.18
+  },
+  {
+    "domain": "shared",
+    "files": [
+      "tests/shared/test_m17_gpu_scale_readback.py",
+      "tests/shared/test_m18_bundle_abi_audit.py",
+      "tests/shared/test_m18_bundle_abi_audit_pe.py"
+    ],
+    "command": [
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/shared/test_m17_gpu_scale_readback.py",
+      "tests/shared/test_m18_bundle_abi_audit.py",
+      "tests/shared/test_m18_bundle_abi_audit_pe.py",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "-m",
+      "not gpu_renderer and not soak"
+    ],
+    "exit_code": 0,
+    "seconds": 4.89
+  },
+  {
+    "domain": "video",
+    "files": [
+      "tests/video/test_m21_publish_group.py",
+      "tests/video/test_m21_publish_transaction.py"
+    ],
+    "command": [
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/video/test_m21_publish_group.py",
+      "tests/video/test_m21_publish_transaction.py",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "-m",
+      "not gpu_renderer and not soak"
+    ],
+    "exit_code": 0,
+    "seconds": 1.79
+  },
+  {
+    "domain": "ui",
+    "files": [
+      "tests/ui/test_m12_relink_auto_search.py"
+    ],
+    "command": [
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/ui/test_m12_relink_auto_search.py",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "-m",
+      "not gpu_renderer and not soak"
+    ],
+    "exit_code": 0,
+    "seconds": 2.2
+  }
+]

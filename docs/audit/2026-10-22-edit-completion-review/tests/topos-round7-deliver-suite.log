@@ -1,0 +1,28 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 229 items
+
+tests/deliver/test_custom_export_presets.py ..........                   [  4%]
+tests/deliver/test_deliver_workspace_layout.py .....                     [  6%]
+tests/deliver/test_delivery_capability.py ............                   [ 11%]
+tests/deliver/test_export_queue.py ..................                    [ 19%]
+tests/deliver/test_fix_deliver_aud3.py ....                              [ 21%]
+tests/deliver/test_fix_round6_phase1a_delivery.py .............          [ 27%]
+tests/deliver/test_fix_wd8g43_aud.py ..............................      [ 40%]
+tests/deliver/test_fix_wd9g44_aud.py ..........................          [ 51%]
+tests/deliver/test_gif_export.py ....                                    [ 53%]
+tests/deliver/test_quick_export_defaults.py .....                        [ 55%]
+tests/deliver/test_video_batch_export_dock.py .......                    [ 58%]
+tests/deliver/test_video_batch_export_panel.py ......................... [ 69%]
+...                                                                      [ 70%]
+tests/deliver/test_video_export_formats.py ....                          [ 72%]
+tests/deliver/test_video_export_job.py ..........................        [ 83%]
+tests/deliver/test_video_export_preflight.py ........................    [ 94%]
+tests/deliver/test_video_export_topos_controls.py .............          [100%]
+
+----------- generated xml file: /tmp/topos-round7-deliver-suite.xml ------------
+============================= 229 passed in 12.45s =============================

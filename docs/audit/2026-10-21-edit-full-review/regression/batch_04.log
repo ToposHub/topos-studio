@@ -1,0 +1,34 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 264 items
+
+tests/edit/ai_editing/test_model_pack_manager.py ....................... [  8%]
+....                                                                     [ 10%]
+tests/edit/ai_editing/test_motion_graphic_artifacts.py ................. [ 16%]
+                                                                         [ 16%]
+tests/edit/ai_editing/test_motion_graphic_run.py ..........              [ 20%]
+tests/edit/ai_editing/test_multimodal_input.py ........................  [ 29%]
+tests/edit/ai_editing/test_music_policy.py ..............                [ 34%]
+tests/edit/ai_editing/test_ocr_provider.py .s............                [ 40%]
+tests/edit/ai_editing/test_ocr_provider_integration.py .....             [ 42%]
+tests/edit/ai_editing/test_ocr_provider_real.py .....................    [ 50%]
+tests/edit/ai_editing/test_operation_protocol_matrix.py ...........      [ 54%]
+tests/edit/ai_editing/test_otio_adapter.py .....                         [ 56%]
+tests/edit/ai_editing/test_p0_red_lines.py ..............                [ 61%]
+tests/edit/ai_editing/test_p0_session_wiring.py ............             [ 65%]
+tests/edit/ai_editing/test_persistence_serialization.py ............     [ 70%]
+tests/edit/ai_editing/test_plan_repository.py ..........                 [ 74%]
+tests/edit/ai_editing/test_plugin_export_capability.py ......            [ 76%]
+tests/edit/ai_editing/test_plugin_tool_facade.py .                       [ 76%]
+tests/edit/ai_editing/test_postcondition_checker.py .............        [ 81%]
+tests/edit/ai_editing/test_profile_config.py ......                      [ 84%]
+tests/edit/ai_editing/test_profile_speech_routing.py ...                 [ 85%]
+tests/edit/ai_editing/test_provider_capabilities.py .................... [ 92%]
+...................                                                      [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_04.xml -
+======================= 263 passed, 1 skipped in 12.19s ========================

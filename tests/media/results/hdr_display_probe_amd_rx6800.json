@@ -1,0 +1,42 @@
+{
+  "date": "2026-09-12T07:43:02",
+  "plan_item": "W5-03 前置 probe：HDR/高级色显示能力（本机）",
+  "probe_ok": true,
+  "hdr_active_any_output": false,
+  "output_count": 1,
+  "outputs": [
+    {
+      "adapter": "AMD Radeon RX 6800",
+      "adapter_vendor": "0x1002",
+      "device_name": "\\\\.\\DISPLAY1",
+      "monitor": "0x10001",
+      "bits_per_color": 10,
+      "color_space": 0,
+      "color_space_name": "RGB_FULL_G22_NONE_P709 (SDR sRGB)",
+      "red_primary": [
+        0.669921875,
+        0.314453125
+      ],
+      "green_primary": [
+        0.3271484375,
+        0.6396484375
+      ],
+      "blue_primary": [
+        0.1357421875,
+        0.0693359375
+      ],
+      "white_point": [
+        0.3125,
+        0.328125
+      ],
+      "min_luminance_nits": 0.2928,
+      "max_luminance_nits": 400.0,
+      "max_full_frame_luminance_nits": 400.0,
+      "hdr_active": false,
+      "idxgioutput6": true,
+      "vtable_sanity": "ok",
+      "getdesc_hr": "0x00000000"
+    }
+  ],
+  "note": "ColorSpace 反映当前高级色状态：SDR(0) 不代表显示器无 HDR 能力，只代表 Windows「使用 HDR」未启用；W5-03 裁决前需在该显示器上开启 HDR 复测。"
+}

@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P50",
+  "name": "玻璃位移",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "毛玻璃折射桥接；scale 0.05–0.12，Wave 模式连续纹理",
+  "component": "X14 displacement_bridge（生产 lib1_displacement_bridge，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/displacement_bridge）",
+  "dependencies": {
+    "component_id": "X14",
+    "component_slug": "displacement_bridge",
+    "component_kind": "transition",
+    "transition_type": "lib1_displacement_bridge",
+    "user_json_base": false
+  },
+  "params": {
+    "scale": 0.08,
+    "frequency": 6.0,
+    "seed": 11,
+    "mode": "Wave"
+  },
+  "notes": "X14 生产 base lib1_displacement_bridge（transition_catalog 已注册，resample_cores 复合核）；base 不在 custom_transitions._BASE_TYPES 白名单（未接入），不产出用户转场 JSON。"
+}

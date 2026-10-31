@@ -1,0 +1,19 @@
+{
+  "original_head": "171ce530bf9ab8faeb436950cc9ba0eb50a3b208",
+  "followup_head": "cdce6662cb7ab4468e84aeb2039792e38f1e9131",
+  "checked_paths": [
+    "src/features/composite",
+    "src/app/controllers/composite_controller.py",
+    "src/shared/project/save_router.py",
+    "src/shared/color",
+    "src/shared/export",
+    "src/shared/media",
+    "src/shared/gpu",
+    "src/app/main_window.py",
+    "src/shared/keyframe.py"
+  ],
+  "changed_files": [
+    "src/app/main_window.py",
+    "src/shared/keyframe.py"
+  ]
+}

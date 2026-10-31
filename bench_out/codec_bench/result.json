@@ -1,0 +1,173 @@
+{
+  "meta": {
+    "topos_version": "0.1.0",
+    "topos_commit": "unknown",
+    "topos_slice_threads": 16,
+    "topos_simd_avx2": true,
+    "topos_simd_neon": false,
+    "cpu": "Genuine Intel(R) 0000",
+    "frames": 96,
+    "runs": 3,
+    "ffmpeg": "ffmpeg version 6.0-tessus  https://evermeet.cx/ffmpeg/  Copyright (c) 2000-2023 the FFmpeg developers"
+  },
+  "cases": [
+    {
+      "name": "2K",
+      "w": 1920,
+      "h": 1080,
+      "frames": 96,
+      "encode": [
+        {
+          "name": "topos-fixedqp(qp24)",
+          "seconds_median": 1.904018459999861,
+          "seconds_all": [
+            1.9766,
+            1.904,
+            1.8319
+          ],
+          "bytes": 4132228
+        },
+        {
+          "name": "topos-sized(hq)",
+          "seconds_median": 1.354224300000169,
+          "seconds_all": [
+            1.3542
+          ],
+          "bytes": 956216
+        },
+        {
+          "name": "prores_hq(ks)",
+          "seconds_median": 1.7055786089999856,
+          "seconds_all": [
+            1.7901,
+            1.6886,
+            1.7056
+          ],
+          "bytes": 532327
+        },
+        {
+          "name": "dnxhr_hqx",
+          "seconds_median": 1.6629577010000958,
+          "seconds_all": [
+            1.5915,
+            1.7224,
+            1.663
+          ],
+          "bytes": 917516
+        }
+      ],
+      "topos_mov_size": 91798630,
+      "decode": [
+        {
+          "name": "topos(demux+decode)",
+          "seconds_median": 0.45700473700003386,
+          "seconds_all": [
+            0.4763,
+            0.457,
+            0.4403
+          ],
+          "frames": 96
+        },
+        {
+          "name": "prores_hq(ks)",
+          "seconds_median": 0.3857121350001762,
+          "seconds_all": [
+            0.3573,
+            0.3857,
+            0.3878
+          ],
+          "frames": 96
+        },
+        {
+          "name": "dnxhr_hqx",
+          "seconds_median": 0.4351798319999034,
+          "seconds_all": [
+            0.4979,
+            0.4352,
+            0.4116
+          ],
+          "frames": 96
+        }
+      ]
+    },
+    {
+      "name": "4K",
+      "w": 3840,
+      "h": 2160,
+      "frames": 96,
+      "encode": [
+        {
+          "name": "topos-fixedqp(qp24)",
+          "seconds_median": 6.455420224000136,
+          "seconds_all": [
+            6.471,
+            6.4554,
+            5.9323
+          ],
+          "bytes": 21538486
+        },
+        {
+          "name": "topos-sized(hq)",
+          "seconds_median": 4.342980704999945,
+          "seconds_all": [
+            4.343
+          ],
+          "bytes": 3854717
+        },
+        {
+          "name": "prores_hq(ks)",
+          "seconds_median": 7.864092228000118,
+          "seconds_all": [
+            7.7863,
+            7.8641,
+            8.0883
+          ],
+          "bytes": 3241450
+        },
+        {
+          "name": "dnxhr_hqx",
+          "seconds_median": 7.020447604000083,
+          "seconds_all": [
+            6.4952,
+            7.0263,
+            7.0204
+          ],
+          "bytes": 3641356
+        }
+      ],
+      "topos_mov_size": 370054792,
+      "decode": [
+        {
+          "name": "topos(demux+decode)",
+          "seconds_median": 1.2654394479998246,
+          "seconds_all": [
+            1.3052,
+            1.2654,
+            1.2544
+          ],
+          "frames": 96
+        },
+        {
+          "name": "prores_hq(ks)",
+          "seconds_median": 1.4418499430000793,
+          "seconds_all": [
+            1.3956,
+            1.4418,
+            1.5275
+          ],
+          "frames": 96
+        },
+        {
+          "name": "dnxhr_hqx",
+          "seconds_median": 1.4118810730001314,
+          "seconds_all": [
+            1.4119,
+            1.5575,
+            1.3288
+          ],
+          "frames": 96
+        }
+      ]
+    }
+  ]
+}
