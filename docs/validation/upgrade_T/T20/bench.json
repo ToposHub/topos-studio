@@ -1,0 +1,42 @@
+{
+ "machine": "Mac Intel x86_64, macOS 15.3.1, 64GB, Python 3.12.14",
+ "note": "纯数据路径（无 Qt/GPU/媒体解码）；fixture 构建时间仅参考",
+ "results": [
+  {
+   "n_clips": 100,
+   "n_cues": 1,
+   "fixture_build_s": 0.0045,
+   "capture_s": 0.0046,
+   "index_build_s": 0.0007,
+   "index_cache": {
+    "hits": 1,
+    "misses": 1,
+    "evictions": 0
+   },
+   "search_hit_p50_ms": 0.12,
+   "search_hit_p95_ms": 0.13,
+   "search_miss_p50_ms": 0.13,
+   "search_miss_p95_ms": 0.14,
+   "stats_s": 0.0008,
+   "rss_max_mb": 80.4
+  },
+  {
+   "n_clips": 10000,
+   "n_cues": 100,
+   "fixture_build_s": 0.3244,
+   "capture_s": 0.3855,
+   "index_build_s": 0.045,
+   "index_cache": {
+    "hits": 1,
+    "misses": 1,
+    "evictions": 0
+   },
+   "search_hit_p50_ms": 10.51,
+   "search_hit_p95_ms": 13.56,
+   "search_miss_p50_ms": 12.07,
+   "search_miss_p95_ms": 15.46,
+   "stats_s": 0.073,
+   "rss_max_mb": 145.3
+  }
+ ]
+}

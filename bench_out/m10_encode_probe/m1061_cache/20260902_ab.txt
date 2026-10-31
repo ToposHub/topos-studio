@@ -1,0 +1,6 @@
+== M10-6.1 持久 enc_shared 缓存 A/B（同 commit 同机交错，Mac-Pro 8P/16L，负载 4~5） ==
+4K hq sized t8: cache-off 126~129ms → cache-on 108~108.5ms（−16%，fps 7.8→9.2）
+2K hq sized t8: cache-off 32.4ms → cache-on 27.0~27.7ms（−17~20%，fps 30.9→36.5）
+产品路径（dbg probe）2K sized：wall 53.6ms(基线 R6) → 29.6ms；probe 墙钟 28.9 → 9.1ms
+稳态零分配：test_m10 断言 plain/sized 各 100 帧预热后 tc_dev_alloc_count 增量 = 0
+一致性：缓存开/关 × 交替几何(96x64/128x96, plain/sized) 6 步序列逐字节一致；并发双线程编码与参考一致

@@ -1,0 +1,577 @@
+{
+  "task": "T-P1-20 exportable-effect truth matrix",
+  "generated_at": "2026-09-18 07:29:50",
+  "frames": 48,
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+  "identity_y_stats": {
+    "topos_proxy": {
+      "mean": 401.1461,
+      "std": 167.0257,
+      "hash": "106a40baf2154e88"
+    },
+    "h264": {
+      "mean": 96.2564,
+      "std": 48.5866,
+      "hash": "b9a4f58ca4dd7101"
+    }
+  },
+  "rows": [
+    {
+      "effect_type": "blur",
+      "output_codec": "topos_proxy",
+      "success": true,
+      "wall_s": 12.841469163999136,
+      "fps": 3.7378900643679676,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "topos_native",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 401.1228,
+        "std": 155.2956,
+        "hash": "919f55b23279f4d9"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "sharpen",
+      "output_codec": "topos_proxy",
+      "success": true,
+      "wall_s": 15.280006584005605,
+      "fps": 3.141359902962617,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "topos_native",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 939.242,
+        "std": 21.4802,
+        "hash": "ad29490b48aaec7c"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "glow",
+      "output_codec": "topos_proxy",
+      "success": true,
+      "wall_s": 16.49825237099867,
+      "fps": 2.909399063647277,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "topos_native",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 406.3888,
+        "std": 171.3989,
+        "hash": "d0855bde0d75ea68"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "erode_dilate",
+      "output_codec": "topos_proxy",
+      "success": true,
+      "wall_s": 8.003102369999397,
+      "fps": 5.997674124466262,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "topos_native",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 401.1465,
+        "std": 167.0249,
+        "hash": "4aeb45abace741c1"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "edge_detect",
+      "output_codec": "topos_proxy",
+      "success": true,
+      "wall_s": 13.15855914200074,
+      "fps": 3.647815804299502,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "topos_native",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 589.9405,
+        "std": 429.081,
+        "hash": "89266b0bb8e5cd76"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "denoise",
+      "output_codec": "topos_proxy",
+      "success": true,
+      "wall_s": 404.7901013849987,
+      "fps": 0.11857997474683024,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "topos_native",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 939.9646,
+        "std": 3.5362,
+        "hash": "ab13ce16e9e8c812"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "defocus",
+      "output_codec": "topos_proxy",
+      "success": true,
+      "wall_s": 89.11807743799727,
+      "fps": 0.5386112602507092,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "topos_native",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 401.1428,
+        "std": 160.1662,
+        "hash": "88a1917cf3be0e85"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "blur",
+      "output_codec": "h264",
+      "success": true,
+      "wall_s": 4.480762083003356,
+      "fps": 10.71246344055533,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "ffmpeg",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 96.7666,
+        "std": 44.8648,
+        "hash": "648a02e8ed7401dc"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "sharpen",
+      "output_codec": "h264",
+      "success": true,
+      "wall_s": 4.274749381002039,
+      "fps": 11.22872845208726,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "ffmpeg",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 96.8652,
+        "std": 49.1602,
+        "hash": "1c97173f0720b475"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "glow",
+      "output_codec": "h264",
+      "success": true,
+      "wall_s": 4.031342866001069,
+      "fps": 11.906702455108734,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "ffmpeg",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 97.0663,
+        "std": 48.9242,
+        "hash": "0878cd86c18678c9"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "erode_dilate",
+      "output_codec": "h264",
+      "success": true,
+      "wall_s": 3.7450110479985597,
+      "fps": 12.817051641450448,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "ffmpeg",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 96.8547,
+        "std": 48.5395,
+        "hash": "37e58796458cc57a"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "edge_detect",
+      "output_codec": "h264",
+      "success": true,
+      "wall_s": 4.861617119000584,
+      "fps": 9.873257976734187,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "ffmpeg",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 14.9046,
+        "std": 56.5692,
+        "hash": "ee8fa375019f8d71"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "denoise",
+      "output_codec": "h264",
+      "success": true,
+      "wall_s": 4.46403514299891,
+      "fps": 10.752603521789014,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "ffmpeg",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 96.8349,
+        "std": 48.4334,
+        "hash": "b7d0c06bbc73c19a"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "defocus",
+      "output_codec": "h264",
+      "success": true,
+      "wall_s": 3.9916615870024543,
+      "fps": 12.025067494773696,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "ffmpeg",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 96.8104,
+        "std": 46.5437,
+        "hash": "c4ff8cf0b6bb1740"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "identity",
+      "output_codec": "topos_proxy",
+      "success": true,
+      "wall_s": 2.1365511429976323,
+      "fps": 22.46611327667769,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "topos_direct_planar_cpu_encode",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "topos_native",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 401.1461,
+        "std": 167.0257,
+        "hash": "106a40baf2154e88"
+      },
+      "kind": "effect_truth_combo"
+    },
+    {
+      "effect_type": "identity",
+      "output_codec": "h264",
+      "success": true,
+      "wall_s": 9.065201379999053,
+      "fps": 5.294973380944905,
+      "error_code": "",
+      "cause": "",
+      "delivery_path": "",
+      "preflight_blockers": [],
+      "probe": {
+        "backend": "ffmpeg",
+        "reason_code": null,
+        "ok": true,
+        "width": 1920,
+        "height": 1080,
+        "total_frames": 48
+      },
+      "mid_frame_y_stats": {
+        "mean": 96.2564,
+        "std": 48.5866,
+        "hash": "b9a4f58ca4dd7101"
+      },
+      "kind": "effect_truth_combo"
+    }
+  ],
+  "verdicts": [
+    {
+      "effect_type": "blur",
+      "output_codec": "topos_proxy",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 167.0257,
+      "effect_std": 155.2956,
+      "std_delta": 11.7301,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "sharpen",
+      "output_codec": "topos_proxy",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 167.0257,
+      "effect_std": 21.4802,
+      "std_delta": 145.5455,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "glow",
+      "output_codec": "topos_proxy",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 167.0257,
+      "effect_std": 171.3989,
+      "std_delta": 4.3732,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "erode_dilate",
+      "output_codec": "topos_proxy",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 167.0257,
+      "effect_std": 167.0249,
+      "std_delta": 0.0008,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "edge_detect",
+      "output_codec": "topos_proxy",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 167.0257,
+      "effect_std": 429.081,
+      "std_delta": 262.0553,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "denoise",
+      "output_codec": "topos_proxy",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 167.0257,
+      "effect_std": 3.5362,
+      "std_delta": 163.4895,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "defocus",
+      "output_codec": "topos_proxy",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 167.0257,
+      "effect_std": 160.1662,
+      "std_delta": 6.8595,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "blur",
+      "output_codec": "h264",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 48.5866,
+      "effect_std": 44.8648,
+      "std_delta": 3.7218,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "sharpen",
+      "output_codec": "h264",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 48.5866,
+      "effect_std": 49.1602,
+      "std_delta": 0.5736,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "glow",
+      "output_codec": "h264",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 48.5866,
+      "effect_std": 48.9242,
+      "std_delta": 0.3376,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "erode_dilate",
+      "output_codec": "h264",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 48.5866,
+      "effect_std": 48.5395,
+      "std_delta": 0.0471,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "edge_detect",
+      "output_codec": "h264",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 48.5866,
+      "effect_std": 56.5692,
+      "std_delta": 7.9826,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "denoise",
+      "output_codec": "h264",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 48.5866,
+      "effect_std": 48.4334,
+      "std_delta": 0.1532,
+      "verdict": "PASS"
+    },
+    {
+      "effect_type": "defocus",
+      "output_codec": "h264",
+      "exported": true,
+      "probe_ok": true,
+      "pixels_differ_from_identity": true,
+      "identity_std": 48.5866,
+      "effect_std": 46.5437,
+      "std_delta": 2.0429,
+      "verdict": "PASS"
+    }
+  ],
+  "all_pass": true
+}

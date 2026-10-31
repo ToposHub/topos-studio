@@ -1,0 +1,412 @@
+{
+ "schema": "bench_ab_routes_w09/1",
+ "date": "2026-10-25T17:07:18",
+ "pyav": "18.1.0",
+ "reps": 5,
+ "timed_frames": 42,
+ "machine": "B(RTX 4090)/Windows",
+ "disclaimer": "固定候选对比原始数据；非运行时自适应路由(UW01)。仅超噪声且 md5 正确稳定的子矩阵可作固定白名单候选。",
+ "pairs": [
+  {
+   "asset": "4K_H264.mov",
+   "routes": [
+    "cpu_planar",
+    "hw_download"
+   ],
+   "reps": {
+    "cpu_planar": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "planar"
+     ],
+     "fps_values": [
+      340.5,
+      331.2,
+      333.2,
+      334.5,
+      339.0
+     ],
+     "fps_mean": 335.7,
+     "seek_med_ms_values": [
+      58.8,
+      59.3,
+      59.4,
+      59.9,
+      63.5
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    },
+    "hw_download": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "vt_planar"
+     ],
+     "fps_values": [
+      149.3,
+      150.5,
+      152.2,
+      151.7,
+      148.8
+     ],
+     "fps_mean": 150.5,
+     "seek_med_ms_values": [
+      76.3,
+      74.9,
+      75.0,
+      73.6,
+      76.6
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    }
+   },
+   "delta_fps": -185.2,
+   "beyond_noise": true,
+   "correctness_stable": true,
+   "correctness_note": "cuda_resident 为设备驻留帧(0 CPU 字节)，CPU md5 不适用；其正确性证据 = W04 L2/W02 interop 纹理 md5 与同解码器下载参考逐字节一致(test_windows_cuda_resident/test_cuda_resident_format_matrix_w04)"
+  },
+  {
+   "asset": "4K_H264.mov",
+   "routes": [
+    "hw_download",
+    "cuda_resident"
+   ],
+   "reps": {
+    "hw_download": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "vt_planar"
+     ],
+     "fps_values": [
+      152.4,
+      159.2,
+      157.7,
+      155.4,
+      156.4
+     ],
+     "fps_mean": 156.2,
+     "seek_med_ms_values": [
+      76.6,
+      81.9,
+      71.6,
+      72.4,
+      73.3
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    },
+    "cuda_resident": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "cuda_resident"
+     ],
+     "fps_values": [
+      228.9,
+      233.6,
+      232.5,
+      230.8,
+      229.1
+     ],
+     "fps_mean": 231.0,
+     "seek_med_ms_values": [
+      47.0,
+      47.5,
+      46.5,
+      48.0,
+      47.5
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    }
+   },
+   "delta_fps": 74.8,
+   "beyond_noise": true,
+   "correctness_stable": true,
+   "correctness_note": "cuda_resident 为设备驻留帧(0 CPU 字节)，CPU md5 不适用；其正确性证据 = W04 L2/W02 interop 纹理 md5 与同解码器下载参考逐字节一致(test_windows_cuda_resident/test_cuda_resident_format_matrix_w04)"
+  },
+  {
+   "asset": "2K_H265.mov",
+   "routes": [
+    "hw_download",
+    "cuda_resident"
+   ],
+   "reps": {
+    "hw_download": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "vt_planar"
+     ],
+     "fps_values": [
+      263.2,
+      262.1,
+      266.0,
+      266.6,
+      264.4
+     ],
+     "fps_mean": 264.5,
+     "seek_med_ms_values": [
+      34.0,
+      34.2,
+      35.5,
+      35.5,
+      33.5
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    },
+    "cuda_resident": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "cuda_resident"
+     ],
+     "fps_values": [
+      962.9,
+      911.4,
+      897.3,
+      899.7,
+      903.0
+     ],
+     "fps_mean": 914.9,
+     "seek_med_ms_values": [
+      10.7,
+      11.6,
+      11.6,
+      11.6,
+      11.5
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    }
+   },
+   "delta_fps": 650.4,
+   "beyond_noise": true,
+   "correctness_stable": true,
+   "correctness_note": "cuda_resident 为设备驻留帧(0 CPU 字节)，CPU md5 不适用；其正确性证据 = W04 L2/W02 interop 纹理 md5 与同解码器下载参考逐字节一致(test_windows_cuda_resident/test_cuda_resident_format_matrix_w04)"
+  },
+  {
+   "asset": "unaligned_322x202_h264.mov",
+   "routes": [
+    "hw_download",
+    "cuda_resident"
+   ],
+   "reps": {
+    "hw_download": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "vt_planar"
+     ],
+     "fps_values": [
+      3138.1,
+      3036.6,
+      2964.5,
+      2967.9,
+      2982.2
+     ],
+     "fps_mean": 3017.9,
+     "seek_med_ms_values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    },
+    "cuda_resident": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "cuda_resident"
+     ],
+     "fps_values": [
+      3601.9,
+      3624.5,
+      3639.2,
+      3575.7,
+      3621.1
+     ],
+     "fps_mean": 3612.5,
+     "seek_med_ms_values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    }
+   },
+   "delta_fps": 594.6,
+   "beyond_noise": true,
+   "correctness_stable": true,
+   "correctness_note": "cuda_resident 为设备驻留帧(0 CPU 字节)，CPU md5 不适用；其正确性证据 = W04 L2/W02 interop 纹理 md5 与同解码器下载参考逐字节一致(test_windows_cuda_resident/test_cuda_resident_format_matrix_w04)"
+  },
+  {
+   "asset": "2K_prores422.mov",
+   "routes": [
+    "cpu_planar",
+    "hw_download"
+   ],
+   "reps": {
+    "cpu_planar": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "planar"
+     ],
+     "fps_values": [
+      978.1,
+      972.9,
+      932.4,
+      1025.8,
+      1009.5
+     ],
+     "fps_mean": 983.7,
+     "seek_med_ms_values": [
+      1.1,
+      1.0,
+      1.1,
+      1.0,
+      1.1
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    },
+    "hw_download": {
+     "ok_count": 5,
+     "total": 5,
+     "statuses": [
+      "ok"
+     ],
+     "frame_types": [
+      "planar"
+     ],
+     "fps_values": [
+      967.0,
+      1001.4,
+      1038.5,
+      990.7,
+      987.2
+     ],
+     "fps_mean": 997.0,
+     "seek_med_ms_values": [
+      1.1,
+      1.1,
+      1.0,
+      1.1,
+      1.1
+     ],
+     "md5_matches_ref": [
+      true,
+      true,
+      true,
+      true,
+      true
+     ]
+    }
+   },
+   "delta_fps": 13.3,
+   "beyond_noise": false,
+   "correctness_stable": true,
+   "correctness_note": "cuda_resident 为设备驻留帧(0 CPU 字节)，CPU md5 不适用；其正确性证据 = W04 L2/W02 interop 纹理 md5 与同解码器下载参考逐字节一致(test_windows_cuda_resident/test_cuda_resident_format_matrix_w04)"
+  }
+ ],
+ "coverage": [
+  {
+   "asset": "yuv422_h264.mov",
+   "route": "cuda_resident",
+   "status": "ok",
+   "frame_type": "planar",
+   "note": "fail-closed 回退即预期（4:2:2 无 NVDEC cuda 驻留输出）"
+  },
+  {
+   "asset": "yuv422_h264.mov",
+   "route": "hw_download",
+   "status": "ok",
+   "frame_type": "planar",
+   "note": "fail-closed 回退即预期（4:2:2 无 NVDEC cuda 驻留输出）"
+  }
+ ]
+}

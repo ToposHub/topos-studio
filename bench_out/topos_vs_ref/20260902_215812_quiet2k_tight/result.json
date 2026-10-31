@@ -1,0 +1,533 @@
+{
+ "meta": {
+  "purpose": "ProRes/DNxHR 解码基线静机同窗重测（候选①：钉公平比值）",
+  "res": "2k",
+  "frames": 36,
+  "bs": 8,
+  "pairs": 12,
+  "passes": 5,
+  "arms": [
+   "topos_kernel",
+   "topos_kernel_std",
+   "prores_slice"
+  ],
+  "threads_topos": 8,
+  "threads_ref": 8,
+  "anchor": "prores_slice",
+  "python": "3.12.13"
+ },
+ "pairs": [
+  {
+   "order": true,
+   "load": "4.13 4.66 4.14",
+   "topos_kernel": {
+    "fps_runs": [
+     447.6,
+     430.5,
+     445.5,
+     449.9,
+     448.0
+    ],
+    "fps_median": 447.6,
+    "spawn_s": 0.96
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     496.1,
+     494.3,
+     493.2,
+     472.0,
+     493.8
+    ],
+    "fps_median": 493.8,
+    "spawn_s": 0.71
+   },
+   "prores_slice": {
+    "fps_runs": [
+     463.1,
+     494.0,
+     475.5,
+     485.6,
+     498.5
+    ],
+    "fps_median": 485.6,
+    "spawn_s": 0.81
+   }
+  },
+  {
+   "order": false,
+   "load": "4.13 4.66 4.14",
+   "prores_slice": {
+    "fps_runs": [
+     484.6,
+     494.0,
+     501.8,
+     467.5,
+     472.6
+    ],
+    "fps_median": 484.6,
+    "spawn_s": 0.82
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     452.7,
+     478.4,
+     492.7,
+     469.8,
+     431.9
+    ],
+    "fps_median": 469.8,
+    "spawn_s": 0.75
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     431.3,
+     453.2,
+     406.7,
+     452.2,
+     454.5
+    ],
+    "fps_median": 452.2,
+    "spawn_s": 0.97
+   }
+  },
+  {
+   "order": true,
+   "load": "4.52 4.73 4.16",
+   "topos_kernel": {
+    "fps_runs": [
+     449.6,
+     461.2,
+     345.6,
+     461.8,
+     462.8
+    ],
+    "fps_median": 461.2,
+    "spawn_s": 0.96
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     490.2,
+     501.4,
+     461.9,
+     489.1,
+     473.0
+    ],
+    "fps_median": 489.1,
+    "spawn_s": 0.71
+   },
+   "prores_slice": {
+    "fps_runs": [
+     478.0,
+     463.8,
+     472.5,
+     481.8,
+     476.1
+    ],
+    "fps_median": 476.1,
+    "spawn_s": 0.82
+   }
+  },
+  {
+   "order": false,
+   "load": "4.52 4.73 4.16",
+   "prores_slice": {
+    "fps_runs": [
+     464.0,
+     484.7,
+     472.3,
+     487.5,
+     496.5
+    ],
+    "fps_median": 484.7,
+    "spawn_s": 0.81
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     486.4,
+     477.0,
+     432.4,
+     452.0,
+     486.7
+    ],
+    "fps_median": 477.0,
+    "spawn_s": 0.75
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     458.6,
+     437.7,
+     466.1,
+     434.5,
+     428.4
+    ],
+    "fps_median": 437.7,
+    "spawn_s": 0.92
+   }
+  },
+  {
+   "order": true,
+   "load": "4.63 4.75 4.18",
+   "topos_kernel": {
+    "fps_runs": [
+     458.2,
+     425.6,
+     461.2,
+     465.3,
+     452.9
+    ],
+    "fps_median": 458.2,
+    "spawn_s": 0.94
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     489.5,
+     456.4,
+     495.3,
+     468.4,
+     361.7
+    ],
+    "fps_median": 468.4,
+    "spawn_s": 0.74
+   },
+   "prores_slice": {
+    "fps_runs": [
+     430.9,
+     462.5,
+     499.0,
+     466.5,
+     480.4
+    ],
+    "fps_median": 466.5,
+    "spawn_s": 0.83
+   }
+  },
+  {
+   "order": false,
+   "load": "4.63 4.75 4.18",
+   "prores_slice": {
+    "fps_runs": [
+     448.8,
+     467.9,
+     491.3,
+     447.2,
+     467.4
+    ],
+    "fps_median": 467.4,
+    "spawn_s": 0.83
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     431.5,
+     429.8,
+     445.6,
+     476.0,
+     491.3
+    ],
+    "fps_median": 445.6,
+    "spawn_s": 0.74
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     442.1,
+     458.0,
+     463.0,
+     460.7,
+     463.0
+    ],
+    "fps_median": 460.7,
+    "spawn_s": 0.96
+   }
+  },
+  {
+   "order": true,
+   "load": "5.06 4.84 4.21",
+   "topos_kernel": {
+    "fps_runs": [
+     457.3,
+     453.3,
+     447.7,
+     425.9,
+     421.6
+    ],
+    "fps_median": 447.7,
+    "spawn_s": 0.94
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     497.1,
+     476.7,
+     463.4,
+     493.8,
+     488.5
+    ],
+    "fps_median": 488.5,
+    "spawn_s": 0.72
+   },
+   "prores_slice": {
+    "fps_runs": [
+     482.3,
+     464.7,
+     476.5,
+     494.2,
+     364.7
+    ],
+    "fps_median": 476.5,
+    "spawn_s": 0.84
+   }
+  },
+  {
+   "order": false,
+   "load": "5.06 4.84 4.21",
+   "prores_slice": {
+    "fps_runs": [
+     460.8,
+     347.0,
+     326.6,
+     455.3,
+     456.5
+    ],
+    "fps_median": 455.3,
+    "spawn_s": 0.9
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     408.8,
+     416.6,
+     436.6,
+     432.9,
+     422.6
+    ],
+    "fps_median": 422.6,
+    "spawn_s": 0.78
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     453.2,
+     444.8,
+     450.6,
+     448.4,
+     457.3
+    ],
+    "fps_median": 450.6,
+    "spawn_s": 0.93
+   }
+  },
+  {
+   "order": true,
+   "load": "4.82 4.79 4.20",
+   "topos_kernel": {
+    "fps_runs": [
+     452.1,
+     454.7,
+     453.0,
+     397.5,
+     461.4
+    ],
+    "fps_median": 453.0,
+    "spawn_s": 0.96
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     496.9,
+     488.8,
+     484.1,
+     457.0,
+     477.6
+    ],
+    "fps_median": 484.1,
+    "spawn_s": 0.72
+   },
+   "prores_slice": {
+    "fps_runs": [
+     468.3,
+     484.1,
+     485.6,
+     489.3,
+     462.4
+    ],
+    "fps_median": 484.1,
+    "spawn_s": 0.81
+   }
+  },
+  {
+   "order": false,
+   "load": "4.82 4.79 4.20",
+   "prores_slice": {
+    "fps_runs": [
+     485.2,
+     463.0,
+     498.5,
+     363.3,
+     495.5
+    ],
+    "fps_median": 485.2,
+    "spawn_s": 0.84
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     413.6,
+     485.4,
+     484.3,
+     476.0,
+     470.3
+    ],
+    "fps_median": 476.0,
+    "spawn_s": 0.73
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     419.6,
+     453.3,
+     460.9,
+     450.0,
+     462.0
+    ],
+    "fps_median": 453.3,
+    "spawn_s": 0.96
+   }
+  },
+  {
+   "order": true,
+   "load": "4.51 4.73 4.18",
+   "topos_kernel": {
+    "fps_runs": [
+     408.8,
+     352.8,
+     327.4,
+     439.2,
+     399.2
+    ],
+    "fps_median": 399.2,
+    "spawn_s": 1.02
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     487.3,
+     497.4,
+     483.4,
+     420.9,
+     464.5
+    ],
+    "fps_median": 483.4,
+    "spawn_s": 0.74
+   },
+   "prores_slice": {
+    "fps_runs": [
+     485.6,
+     483.2,
+     493.0,
+     487.6,
+     445.8
+    ],
+    "fps_median": 485.6,
+    "spawn_s": 0.82
+   }
+  },
+  {
+   "order": false,
+   "load": "4.51 4.73 4.18",
+   "prores_slice": {
+    "fps_runs": [
+     472.8,
+     452.9,
+     493.7,
+     472.7,
+     455.2
+    ],
+    "fps_median": 472.7,
+    "spawn_s": 0.83
+   },
+   "topos_kernel_std": {
+    "fps_runs": [
+     491.9,
+     462.9,
+     493.7,
+     496.2,
+     355.9
+    ],
+    "fps_median": 491.9,
+    "spawn_s": 0.74
+   },
+   "topos_kernel": {
+    "fps_runs": [
+     464.1,
+     455.2,
+     463.4,
+     436.7,
+     452.1
+    ],
+    "fps_median": 455.2,
+    "spawn_s": 0.95
+   }
+  }
+ ],
+ "summary": {
+  "topos_kernel": {
+   "fps_median": 452.6,
+   "fps_iqr": [
+    447.7,
+    458.2
+   ],
+   "vs_anchor_median": 0.938,
+   "vs_anchor_per_pair": [
+    0.922,
+    0.933,
+    0.969,
+    0.903,
+    0.982,
+    0.986,
+    0.94,
+    0.99,
+    0.936,
+    0.934,
+    0.822,
+    0.963
+   ]
+  },
+  "topos_kernel_std": {
+   "fps_median": 480.2,
+   "fps_iqr": [
+    469.8,
+    489.1
+   ],
+   "vs_anchor_median": 0.998,
+   "vs_anchor_per_pair": [
+    1.017,
+    0.969,
+    1.027,
+    0.984,
+    1.004,
+    0.953,
+    1.025,
+    0.928,
+    1.0,
+    0.981,
+    0.995,
+    1.041
+   ]
+  },
+  "prores_slice": {
+   "fps_median": 480.3,
+   "fps_iqr": [
+    472.7,
+    485.2
+   ],
+   "vs_anchor_median": 1.0,
+   "vs_anchor_per_pair": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ]
+  }
+ }
+}

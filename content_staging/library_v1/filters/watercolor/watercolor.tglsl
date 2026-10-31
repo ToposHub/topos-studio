@@ -1,0 +1,137 @@
+// --- Topos Plugin Metadata ---
+// @name Watercolor
+// @i18n_name LIB1_Watercolor
+// @author Topos Library v1
+// @version 0.1.0
+// @description Watercolor approximation: reverse-gradient bounded 8-tap color diffusion, edge pigment pooling (saturation/brightness lift) and procedural lattice-hash paper grain - single-pass approximation, true multi-pass diffusion needs native renderer
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost medium
+// @param slider diffusion "Diffusion" 0.5 0.0 1.0
+// @param slider edge_pigment "Edge Pigment" 0.5 0.0 1.0
+// @param slider paper_scale "Paper Scale" 8.0 2.0 16.0
+// @param slider amount "Amount" 1.0 0.0 1.0
+// -----------------------------
+//
+// Watercolor —— 水彩近似（L 计划 F15，LIB1）。
+//
+// 差量（L00 台账 F15 行）：全库无水彩/扩散模型；blur+saturation 冒充被
+// 禁止。本项三要素：局部扩散（沿亮度梯度反向）+ 边缘颜料聚边 + 程序纸纹。
+//
+// **单 pass 近似声明**：颜色扩散为有界单 pass 8-tap 直接采样（位移 ≤8px）；
+// 真正多 pass 迭代扩散（逐轮乒乓传播、无界蔓延）需原生 renderer 多 pass
+// 支持，不强塞一份 .tglsl（多 pass 红线，同 F06 惯例）。
+//
+// 算法（单 pass）：
+// 1. Sobel 亮度梯度（Edge_Ink_Outline 惯例：8 tap 手工展开，1/2/4 加权，
+//    /8 归一）：mag = |g|/8；边缘带掩码 em = smoothstep(0.02, 0.20, mag)；
+// 2. 沿梯度反向 8 tap 扩散：dir = g/|g|（|g|<1e-6 时 0 向量），tap j 位移
+//    = (j+1)·diffusion·em px（≤8px 有界），权重 w_j = 1-(j+0.5)/8，
+//    与中心（权重 1）加权平均 → bleed（平坦区位移=0 精确不变）；
+// 3. 边缘颜料聚边（工作单"饱和度/亮度提升 ∝ edge_pigment"的字面实现）：
+//    chroma 绕 luma 放大 (1+edge_pigment·em)，随后整体乘性亮度提升
+//    (1+0.5·edge_pigment·em)——增益有界（≤2x/≤1.5x）；
+// 4. 程序纸纹（调暗+去饱和）：整数格点 murmur3 风格 uint32 乘法散列
+//    （fixtures/_lattice_hash 的 uint32 同式缩减，无 seed 项=固定 seed 0
+//    语义，宿主白名单外零资源）双线性 value noise，格距 = paper_scale px；
+//    n ∈ [0,1)：desat = mix(vec3(luma), c, 1-0.25n)；out = desat·(1-0.25n)；
+// 5. Delta 混合：out = color + (papered - base)·amount。
+//
+// 设计要点：
+// - 循环上限字面常量 8（扩散 tap）；Sobel 8 采样手工展开（Edge_Ink 同式）；
+// - 采样 UV 钳半纹素；分母（|g|）下限守护；em 只作用于权重/位移/增益，
+//   不钳制基色（HDR 安全）；
+// - amount=0 首行早退精确恒等；纯静态确定性（纸纹 hash 无 seed/frame 依赖）；
+// - uint 字面量（0x...u/uvec2）依赖宿主 #version 330（uint 为 130+ 核心）。
+
+const vec3 WC_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+float wc_luma_at(vec2 p, vec2 min_uv, vec2 max_uv) {
+    return dot(texture(u_input_tex, clamp(p, min_uv, max_uv)).rgb, WC_LUMA_W);
+}
+
+// 整数格点 murmur3 风格 uint32 乘法散列 → [0,1)
+// （fixtures/_lattice_hash 的 uint32 同式缩减；无 seed 项 = 固定 seed 0）
+float wc_hash(uvec2 c) {
+    uint h = c.x * 0x9E3779B1u ^ c.y * 0x85EBCA77u;
+    h ^= h >> 13u;
+    h *= 0xC2B2AE3Du;
+    h ^= h >> 16u;
+    return float(h) * (1.0 / 4294967296.0);
+}
+
+// 纸纹：格距 cell px 的双线性 value noise（fixtures 线性插值同式）
+float wc_paper_noise(vec2 pq, float cell) {
+    vec2 g = pq / max(cell, 2.0);
+    vec2 gi = floor(g);
+    vec2 gf = fract(g);
+    float n00 = wc_hash(uvec2(gi));
+    float n10 = wc_hash(uvec2(gi) + uvec2(1u, 0u));
+    float n01 = wc_hash(uvec2(gi) + uvec2(0u, 1u));
+    float n11 = wc_hash(uvec2(gi) + uvec2(1u, 1u));
+    return mix(mix(n00, n10, gf.x), mix(n01, n11, gf.x), gf.y);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通（含 HDR）
+    if (amount < 0.001) return color;
+
+    vec2 ts = vec2(textureSize(u_input_tex, 0));
+    vec2 safe = max(ts, vec2(1.0));
+    vec2 half_texel = 0.5 / safe;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+    vec2 texel = 1.0 / safe;
+
+    vec3 base = texture(u_input_tex, uv).rgb;
+
+    // ---- Sobel 亮度梯度（8 tap 手工展开，Edge_Ink_Outline 同式）----
+    float tl = wc_luma_at(uv + vec2(-texel.x, -texel.y), min_uv, max_uv);
+    float tm = wc_luma_at(uv + vec2(0.0, -texel.y), min_uv, max_uv);
+    float tr = wc_luma_at(uv + vec2(texel.x, -texel.y), min_uv, max_uv);
+    float ml = wc_luma_at(uv + vec2(-texel.x, 0.0), min_uv, max_uv);
+    float mr = wc_luma_at(uv + vec2(texel.x, 0.0), min_uv, max_uv);
+    float bl = wc_luma_at(uv + vec2(-texel.x, texel.y), min_uv, max_uv);
+    float bm = wc_luma_at(uv + vec2(0.0, texel.y), min_uv, max_uv);
+    float br = wc_luma_at(uv + vec2(texel.x, texel.y), min_uv, max_uv);
+    float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+    float gy = (bl + 2.0 * bm + br) - (tl + 2.0 * tm + tr);
+    float mag = length(vec2(gx, gy)) / 8.0;
+
+    // 边缘带掩码（只作用于权重/位移/增益）
+    float em = smoothstep(0.02, 0.20, mag);
+    vec2 gdir = (mag > 1e-6) ? vec2(gx, gy) / (mag * 8.0) : vec2(0.0);
+
+    // ---- 沿梯度反向 8 tap 有界扩散（位移 ∝ diffusion，≤8px）----
+    vec3 acc = base;
+    float wsum = 1.0;
+    for (int j = 0; j < 8; j++) {
+        float dpx = (float(j) + 1.0) * diffusion * em;
+        vec2 off = -gdir * dpx * texel;
+        float w = 1.0 - (float(j) + 0.5) / 8.0;
+        acc += texture(u_input_tex, clamp(uv + off, min_uv, max_uv)).rgb * w;
+        wsum += w;
+    }
+    vec3 bleed = acc / wsum;
+
+    // ---- 边缘颜料聚边：饱和度/亮度提升 ∝ edge_pigment（增益有界）----
+    float lb = dot(bleed, WC_LUMA_W);
+    vec3 pig = (vec3(lb) + (bleed - vec3(lb)) * (1.0 + edge_pigment * em))
+             * (1.0 + 0.5 * edge_pigment * em);
+
+    // ---- 程序纸纹：调暗 + 去饱和 ----
+    vec2 pq = uv * safe;
+    float n = wc_paper_noise(pq, paper_scale);
+    vec3 desat = mix(vec3(dot(pig, WC_LUMA_W)), pig, 1.0 - 0.25 * n);
+    vec3 papered = desat * (1.0 - 0.25 * n);
+
+    // Delta 输出：纸纹水彩差值叠加到已调色画面
+    return color + (papered - base) * amount;
+}

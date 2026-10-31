@@ -1,0 +1,73 @@
+
+ROLL NEGATIVE UNDO
+after: [('a', 0, 90), ('b', 90, 110)]
+
+REVERSE FPS
+without fps: [199, 198, 197]
+with fps: [199, 198, 197]
+
+REVERSE SPLIT
+before head/seam/tail: [199, 198, 197] [161, 160, 159, 158, 157] [102, 101, 100]
+after: [199, 198, 197] [161, 160, 159, 158, 157] [102, 101, 100]
+ranges [(160, 40), (100, 60)]
+
+SPLIT FADE OUT
+
+TRIM FADE OUT
+
+SLIDE GAPS UNDO
+before: [(0, 90), (100, 90), (200, 100)]
+after: [(0, 105), (105, 90), (195, 105)]
+undo: [(0, 90), (100, 90), (200, 100)]
+
+SPEED MIXED FPS
+before timeline/source duration 96 120 after 48 120 expected 48
+
+INSERT MIDCLIP UNDO
+after [('a', 0, 40), ('b16c934d-08ad-41fd-88bf-252336f2e7f5', 40, 10), ('5390a2c3-bc3d-4b0b-a238-e8b82bbd533a', 50, 60)]
+undo [('a', 0, 100)]
+
+VARIABLE SPEED SPLIT
+before at seam/tail [166, 168, 170, 172, 174, 176, 178] [194, 196, 198]
+after [166, 168, 170, 172, 174, 176, 178] [194, 196, 198]
+point offsets [(SpeedPoint(source_offset=50, speed=2, easing='linear'),), ()]
+
+SPLIT TRANSITION UNDO
+before/after/undo transition count 1 1 1
+
+MOVE TRANSITION ANCHOR
+clip/trans start 200 200
+validation []
+
+MOVE ANIMATION ANCHOR
+before/after local frame0 opacity 0.0 0.0
+
+LINKED RIPPLE CORE
+video/audio duration 80 100
+
+LOCKED PARTNER SPEED
+ValueError: Change clip speed rejected: track 'a' is locked
+
+LINKED RIPPLE UI RELEASE HANDLER
+AttributeError: 'FakeView' object has no attribute '_linked_selection_enabled'
+
+BATCH RIPPLE CROSS TRACK UNDO
+audio start before/after/undo 50 30 50
+
+BATCH RIPPLE ORIGINAL THRESHOLD
+audio start before/after/expected 30 10 10
+
+DELETE TRANSITION UNDO
+before/after/undo transition count 1 0 1
+
+NORMAL TRIM SPEED UI RELEASE
+actual timeline/source duration 80 160 expected 80 160
+
+SLIDE FADE UNDO
+fade out before/after/undo 80 50 80
+
+SPLIT SCOPED MARKER
+marker frame/owner clip end 75 100
+
+SYNC LOCK SCOPED MARKER
+audio start/marker frame before 50 55 after 40 45

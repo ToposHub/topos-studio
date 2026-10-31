@@ -1,0 +1,163 @@
+{
+  "timestamp": "2026-06-29T03:17:17.675287",
+  "config": {
+    "videos": "tests/test_videos/4K_H265.mov",
+    "steps": 12,
+    "target_size": "1280x720",
+    "warmup_wait_ms": 3500.0
+  },
+  "summary": {
+    "videos": 1,
+    "steps": 12,
+    "delivered": 11,
+    "dropped": 1,
+    "delivered_ratio": 0.9166666666666666,
+    "deadline_misses": 10,
+    "deadline_miss_ratio": 0.8333333333333334,
+    "vt_delivered": 11,
+    "vt_delivered_ratio": 1.0,
+    "latency_p50_ms": 141.8013090005843,
+    "latency_p90_ms": 179.74821900133975,
+    "latency_p95_ms": 183.68283999734558,
+    "latency_max_ms": 183.68283999734558,
+    "frame_types": {
+      "vt_planar": 11,
+      "interactive_stale": 1
+    }
+  },
+  "videos": [
+    {
+      "video_path": "tests/test_videos/4K_H265.mov",
+      "frame_count": 743,
+      "target_size": "1280x720",
+      "steps": 12,
+      "warmup_wait_ms": 3500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 11,
+        "dropped": 1,
+        "delivered_ratio": 0.9166666666666666,
+        "deadline_misses": 10,
+        "deadline_miss_ratio": 0.8333333333333334,
+        "latency_p50_ms": 141.8013090005843,
+        "latency_p90_ms": 179.74821900133975,
+        "latency_p95_ms": 183.68283999734558,
+        "latency_max_ms": 183.68283999734558,
+        "frame_types": {
+          "vt_planar": 11,
+          "interactive_stale": 1
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 57.88403098995332,
+          "deadline_miss": false
+        },
+        {
+          "target": 689,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 689,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 156.13599900098052,
+          "deadline_miss": true
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 66,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 183.68283999734558,
+          "deadline_miss": true
+        },
+        {
+          "target": 583,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 583,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 53.5595050023403,
+          "deadline_miss": false
+        },
+        {
+          "target": 148,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 141,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 176.70896799245384,
+          "deadline_miss": true
+        },
+        {
+          "target": 185,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 154.55859299981967,
+          "deadline_miss": true
+        },
+        {
+          "target": 222,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 220,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 178.07041999185458,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 370,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 126.62567199731711,
+          "deadline_miss": true
+        },
+        {
+          "target": 296,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 291,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 141.8013090005843,
+          "deadline_miss": true
+        },
+        {
+          "target": 265,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 265,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 141.28966399584897,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 371,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 179.74821900133975,
+          "deadline_miss": true
+        },
+        {
+          "target": 159,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 159,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 123.52433300111443,
+          "deadline_miss": true
+        }
+      ]
+    }
+  ]
+}

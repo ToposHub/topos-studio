@@ -1,0 +1,1263 @@
+{
+  "schema": "bench_decode_matrix/1",
+  "date": "2026-10-24T16:33:09",
+  "pyav": "18.1.0",
+  "machine_role": "B(RTX 4090)——A/C 部分由各自机器另行产出",
+  "rows": [
+    {
+      "asset": "2K_DNxHR 444 10bit.mov",
+      "size_bytes": 899263268,
+      "head_md5_1mb": "aa69f58496611ad53b4a3990fb26c0c6",
+      "path": "2K_DNxHR 444 10bit.mov",
+      "codec": "dnxhd",
+      "profile": "DNXHR 444",
+      "pix_fmt": "yuv444p10le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 24.3,
+          "fps": 544.4,
+          "frames_measured": 68,
+          "sw_format": "yuv444p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=dnxhd 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_DNxHR 444 12bit.mov",
+      "size_bytes": 899263268,
+      "head_md5_1mb": "d0fd895c2a04e71ae96c2ca7562d6378",
+      "path": "2K_DNxHR 444 12bit.mov",
+      "codec": "dnxhd",
+      "profile": "DNXHR 444",
+      "pix_fmt": "yuv444p12le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 24.25,
+          "fps": 533.8,
+          "frames_measured": 68,
+          "sw_format": "yuv444p12le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=dnxhd 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_DNxHR HQX 10bit.mov",
+      "size_bytes": 452438808,
+      "head_md5_1mb": "bb840a2178d987173a3ab741836d9fcc",
+      "path": "2K_DNxHR HQX 10bit.mov",
+      "codec": "dnxhd",
+      "profile": "DNXHR HQX",
+      "pix_fmt": "yuv422p10le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 12.23,
+          "fps": 916.6,
+          "frames_measured": 68,
+          "sw_format": "yuv422p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=dnxhd 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_DNxHR HQX 12bit.mov",
+      "size_bytes": 452438808,
+      "head_md5_1mb": "f6421f62fb0857cca1329f668118fcb1",
+      "path": "2K_DNxHR HQX 12bit.mov",
+      "codec": "dnxhd",
+      "profile": "DNXHR HQX",
+      "pix_fmt": "yuv422p12le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 12.13,
+          "fps": 963.7,
+          "frames_measured": 68,
+          "sw_format": "yuv422p12le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=dnxhd 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_h264.mp4",
+      "size_bytes": 52513775,
+      "head_md5_1mb": "e6c8d51d2295fc4c1f277cd33c249d24",
+      "path": "2K_h264.mp4",
+      "codec": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "width": 1920,
+      "height": 1080,
+      "frames": 1572,
+      "duration_s": 804864.0,
+      "probe": "ok",
+      "expected_backend": "win_hw_planar_download",
+      "resident_candidate": "cuda_resident(opt-in)",
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 20.87,
+          "fps": 2843.1,
+          "frames_measured": 68,
+          "sw_format": "yuv420p"
+        },
+        "hw_download_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 24.69,
+          "fps": 489.8,
+          "frames_measured": 68,
+          "hw_frame_format": "nv12"
+        },
+        "cuda_resident": {
+          "status": "ok",
+          "evidence": "L2",
+          "contract_format": "nv12",
+          "first_frame_ms": 18.7,
+          "fps": 813.8,
+          "frames_measured": 68,
+          "hw_frame_format": "cuda"
+        },
+        "gl_ready_cpu_planar": {
+          "status": "ok",
+          "fps": 3540.0,
+          "decode_ms_mean": 0.056,
+          "xfer_ms_mean": 0.227,
+          "cpu_bytes_per_frame": 3110400.0,
+          "interleaved_content_match": null
+        },
+        "gl_ready_hw_download": {
+          "status": "ok",
+          "fps": 374.2,
+          "decode_ms_mean": 1.931,
+          "xfer_ms_mean": 0.742,
+          "cpu_bytes_per_frame": 3110400.0,
+          "interleaved_content_match": null
+        },
+        "gl_ready_cuda_resident": {
+          "status": "ok",
+          "fps": 680.8,
+          "decode_ms_mean": 1.256,
+          "xfer_ms_mean": 0.213,
+          "cpu_bytes_per_frame": 0.0,
+          "interleaved_content_match": true
+        }
+      }
+    },
+    {
+      "asset": "2K_H265.mov",
+      "size_bytes": 42352987,
+      "head_md5_1mb": "98f1c2e6c0c824d9bf01ad7f4e075bbd",
+      "path": "2K_H265.mov",
+      "codec": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "win_hw_planar_download",
+      "resident_candidate": "cuda_resident(opt-in)",
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 58.37,
+          "fps": 530.2,
+          "frames_measured": 68,
+          "sw_format": "yuv420p10le"
+        },
+        "hw_download_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 19.09,
+          "fps": 645.2,
+          "frames_measured": 68,
+          "hw_frame_format": "p010le"
+        },
+        "cuda_resident": {
+          "status": "ok",
+          "evidence": "L2",
+          "contract_format": "p016le",
+          "first_frame_ms": 16.58,
+          "fps": 1175.3,
+          "frames_measured": 68,
+          "hw_frame_format": "cuda"
+        },
+        "gl_ready_cpu_planar": {
+          "status": "ok",
+          "fps": 944.0,
+          "decode_ms_mean": 0.518,
+          "xfer_ms_mean": 0.541,
+          "cpu_bytes_per_frame": 6220800.0,
+          "interleaved_content_match": null
+        },
+        "gl_ready_hw_download": {
+          "status": "ok",
+          "fps": 304.0,
+          "decode_ms_mean": 1.547,
+          "xfer_ms_mean": 1.743,
+          "cpu_bytes_per_frame": 6220800.0,
+          "interleaved_content_match": null
+        },
+        "gl_ready_cuda_resident": {
+          "status": "ok",
+          "fps": 770.5,
+          "decode_ms_mean": 1.072,
+          "xfer_ms_mean": 0.225,
+          "cpu_bytes_per_frame": 0.0,
+          "interleaved_content_match": true
+        }
+      }
+    },
+    {
+      "asset": "2K_prores422.mov",
+      "size_bytes": 297668134,
+      "head_md5_1mb": "13ca28b0e92c5a2eedcf4feda95ab36c",
+      "path": "2K_prores422.mov",
+      "codec": "prores",
+      "profile": "Standard",
+      "pix_fmt": "yuv422p10le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 24.34,
+          "fps": 1287.0,
+          "frames_measured": 68,
+          "sw_format": "yuv422p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_prores422HQ.mov",
+      "size_bytes": 448008914,
+      "head_md5_1mb": "b3a1fc3acd2e6bfd9d2195558d18121f",
+      "path": "2K_prores422HQ.mov",
+      "codec": "prores",
+      "profile": "HQ",
+      "pix_fmt": "yuv422p10le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 25.34,
+          "fps": 873.2,
+          "frames_measured": 68,
+          "sw_format": "yuv422p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_prores422LT.mov",
+      "size_bytes": 201262666,
+      "head_md5_1mb": "a0dd8ab9ed657e0752d89b7a17c7542e",
+      "path": "2K_prores422LT.mov",
+      "codec": "prores",
+      "profile": "LT",
+      "pix_fmt": "yuv422p10le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 23.9,
+          "fps": 1704.2,
+          "frames_measured": 68,
+          "sw_format": "yuv422p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_prores422Proxy.mov",
+      "size_bytes": 95714182,
+      "head_md5_1mb": "1a04729adec7ec87ff2146a6d25fa33a",
+      "path": "2K_prores422Proxy.mov",
+      "codec": "prores",
+      "profile": "Proxy",
+      "pix_fmt": "yuv422p10le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 23.89,
+          "fps": 2934.5,
+          "frames_measured": 68,
+          "sw_format": "yuv422p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_prores4444.mov",
+      "size_bytes": 671066878,
+      "head_md5_1mb": "15790b7de4d67d2d0d7caa5f42410a02",
+      "path": "2K_prores4444.mov",
+      "codec": "prores",
+      "profile": "4444",
+      "pix_fmt": "yuv444p12le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 40.27,
+          "fps": 474.7,
+          "frames_measured": 68,
+          "sw_format": "yuv444p12le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_prores4444XQ.mov",
+      "size_bytes": 986283406,
+      "head_md5_1mb": "946b9c81c46d6401a6f35ee76be4bc86",
+      "path": "2K_prores4444XQ.mov",
+      "codec": "prores",
+      "profile": "XQ",
+      "pix_fmt": "yuv444p12le",
+      "width": 1920,
+      "height": 1080,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 41.25,
+          "fps": 388.6,
+          "frames_measured": 68,
+          "sw_format": "yuv444p12le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_topos.mov",
+      "size_bytes": 64270624,
+      "head_md5_1mb": "6a88e0a29c769773b613880529e34618",
+      "path": "2K_topos.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_topos_4444.mov",
+      "size_bytes": 107221283,
+      "head_md5_1mb": "49c9ff1c2126ef588ffead995c432643",
+      "path": "2K_topos_4444.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_topos_4444xq.mov",
+      "size_bytes": 158262891,
+      "head_md5_1mb": "015fc4ba0b77c07103315e0cd01625af",
+      "path": "2K_topos_4444xq.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_topos_hq.mov",
+      "size_bytes": 64270624,
+      "head_md5_1mb": "6a88e0a29c769773b613880529e34618",
+      "path": "2K_topos_hq.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_topos_lt.mov",
+      "size_bytes": 24302320,
+      "head_md5_1mb": "26c4c5a4e88e763f906ffb5879a4889d",
+      "path": "2K_topos_lt.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_topos_proxy.mov",
+      "size_bytes": 7244641,
+      "head_md5_1mb": "324cacc40b7ee04ea21746b975e48f0f",
+      "path": "2K_topos_proxy.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "2K_topos_standard.mov",
+      "size_bytes": 38358273,
+      "head_md5_1mb": "6a15431e310beece4b35520a35698c95",
+      "path": "2K_topos_standard.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_DNxHR 444 10bit.mov",
+      "size_bytes": 3554278180,
+      "head_md5_1mb": "0bfeff19e4ecd1d023dd4bac96e45359",
+      "path": "4K_DNxHR 444 10bit.mov",
+      "codec": "dnxhd",
+      "profile": "DNXHR 444",
+      "pix_fmt": "yuv444p10le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 76.22,
+          "fps": 161.1,
+          "frames_measured": 68,
+          "sw_format": "yuv444p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=dnxhd 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_DNxHR 444 12bit.mov",
+      "size_bytes": 3554278180,
+      "head_md5_1mb": "4ae35927adffb40e96ebe6491e607763",
+      "path": "4K_DNxHR 444 12bit.mov",
+      "codec": "dnxhd",
+      "profile": "DNXHR 444",
+      "pix_fmt": "yuv444p12le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 74.09,
+          "fps": 159.1,
+          "frames_measured": 68,
+          "sw_format": "yuv444p12le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=dnxhd 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_DNxHR HQX 10bit.mov",
+      "size_bytes": 1778948900,
+      "head_md5_1mb": "e132a140d672ae1c7c6cc94180ea13a9",
+      "path": "4K_DNxHR HQX 10bit.mov",
+      "codec": "dnxhd",
+      "profile": "DNXHR HQX",
+      "pix_fmt": "yuv422p10le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 39.44,
+          "fps": 274.4,
+          "frames_measured": 68,
+          "sw_format": "yuv422p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=dnxhd 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_DNxHR HQX 12bit.mov",
+      "size_bytes": 1778948900,
+      "head_md5_1mb": "d6cfa5c70b83fa204d552590aed72948",
+      "path": "4K_DNxHR HQX 12bit.mov",
+      "codec": "dnxhd",
+      "profile": "DNXHR HQX",
+      "pix_fmt": "yuv422p12le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 40.06,
+          "fps": 261.4,
+          "frames_measured": 68,
+          "sw_format": "yuv422p12le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=dnxhd 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_H264.mov",
+      "size_bytes": 53743212,
+      "head_md5_1mb": "a1d0299921a3e0b02ece641c44526cee",
+      "path": "4K_H264.mov",
+      "codec": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "width": 3840,
+      "height": 2160,
+      "frames": 743,
+      "duration_s": 380416.0,
+      "probe": "ok",
+      "expected_backend": "win_hw_planar_download",
+      "resident_candidate": "cuda_resident(opt-in)",
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 55.04,
+          "fps": 887.3,
+          "frames_measured": 68,
+          "sw_format": "yuv420p"
+        },
+        "hw_download_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 24.31,
+          "fps": 154.4,
+          "frames_measured": 68,
+          "hw_frame_format": "nv12"
+        },
+        "cuda_resident": {
+          "status": "ok",
+          "evidence": "L2",
+          "contract_format": "nv12",
+          "first_frame_ms": 20.59,
+          "fps": 252.5,
+          "frames_measured": 68,
+          "hw_frame_format": "cuda"
+        },
+        "gl_ready_cpu_planar": {
+          "status": "ok",
+          "fps": 778.1,
+          "decode_ms_mean": 0.094,
+          "xfer_ms_mean": 1.191,
+          "cpu_bytes_per_frame": 12441600.0,
+          "interleaved_content_match": null
+        },
+        "gl_ready_hw_download": {
+          "status": "ok",
+          "fps": 102.2,
+          "decode_ms_mean": 6.081,
+          "xfer_ms_mean": 3.702,
+          "cpu_bytes_per_frame": 12441600.0,
+          "interleaved_content_match": null
+        },
+        "gl_ready_cuda_resident": {
+          "status": "ok",
+          "fps": 244.9,
+          "decode_ms_mean": 3.749,
+          "xfer_ms_mean": 0.334,
+          "cpu_bytes_per_frame": 0.0,
+          "interleaved_content_match": true
+        }
+      }
+    },
+    {
+      "asset": "4K_H265.mov",
+      "size_bytes": 151384974,
+      "head_md5_1mb": "3d554dcf9a5421acfd6f56494ba00a99",
+      "path": "4K_H265.mov",
+      "codec": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "win_hw_planar_download",
+      "resident_candidate": "cuda_resident(opt-in)",
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 147.83,
+          "fps": 206.7,
+          "frames_measured": 68,
+          "sw_format": "yuv420p10le"
+        },
+        "hw_download_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 35.2,
+          "fps": 186.7,
+          "frames_measured": 68,
+          "hw_frame_format": "p010le"
+        },
+        "cuda_resident": {
+          "status": "ok",
+          "evidence": "L2",
+          "contract_format": "p016le",
+          "first_frame_ms": 29.73,
+          "fps": 387.3,
+          "frames_measured": 68,
+          "hw_frame_format": "cuda"
+        },
+        "gl_ready_cpu_planar": {
+          "status": "ok",
+          "fps": 356.1,
+          "decode_ms_mean": 0.188,
+          "xfer_ms_mean": 2.621,
+          "cpu_bytes_per_frame": 24883200.0,
+          "interleaved_content_match": null
+        },
+        "gl_ready_hw_download": {
+          "status": "ok",
+          "fps": 83.2,
+          "decode_ms_mean": 5.048,
+          "xfer_ms_mean": 6.976,
+          "cpu_bytes_per_frame": 24883200.0,
+          "interleaved_content_match": null
+        },
+        "gl_ready_cuda_resident": {
+          "status": "ok",
+          "fps": 319.8,
+          "decode_ms_mean": 2.61,
+          "xfer_ms_mean": 0.518,
+          "cpu_bytes_per_frame": 0.0,
+          "interleaved_content_match": true
+        }
+      }
+    },
+    {
+      "asset": "4K_prores422HQ.mov",
+      "size_bytes": 2667990735,
+      "head_md5_1mb": "06892cf678a743c88e1b0a3da418b965",
+      "path": "4K_prores422HQ.mov",
+      "codec": "prores",
+      "profile": "HQ",
+      "pix_fmt": "yuv422p10le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 743,
+      "duration_s": 380416.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 93.97,
+          "fps": 218.4,
+          "frames_measured": 68,
+          "sw_format": "yuv422p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_prores422LT.mov",
+      "size_bytes": 739049598,
+      "head_md5_1mb": "c561a2016cc05b0ca4cfbe49716016b3",
+      "path": "4K_prores422LT.mov",
+      "codec": "prores",
+      "profile": "LT",
+      "pix_fmt": "yuv422p10le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 94.46,
+          "fps": 442.1,
+          "frames_measured": 68,
+          "sw_format": "yuv422p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_prores422Proxy.mov",
+      "size_bytes": 355333634,
+      "head_md5_1mb": "5d1e5129ff5f4edce218eed475aad802",
+      "path": "4K_prores422Proxy.mov",
+      "codec": "prores",
+      "profile": "Proxy",
+      "pix_fmt": "yuv422p10le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 93.38,
+          "fps": 665.1,
+          "frames_measured": 68,
+          "sw_format": "yuv422p10le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_prores4444.mov",
+      "size_bytes": 2587996910,
+      "head_md5_1mb": "b847a7e1af1a0d9beee17f5daf7930e3",
+      "path": "4K_prores4444.mov",
+      "codec": "prores",
+      "profile": "4444",
+      "pix_fmt": "yuv444p12le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 143.74,
+          "fps": 160.9,
+          "frames_measured": 68,
+          "sw_format": "yuv444p12le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_prores4444XQ.mov",
+      "size_bytes": 3934180734,
+      "head_md5_1mb": "1fae4c3ade8af9ef6be8cd551331da61",
+      "path": "4K_prores4444XQ.mov",
+      "codec": "prores",
+      "profile": "XQ",
+      "pix_fmt": "yuv444p12le",
+      "width": 3840,
+      "height": 2160,
+      "frames": 487,
+      "duration_s": 249344.0,
+      "probe": "ok",
+      "expected_backend": "cpu_planar",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "ok",
+          "evidence": "L2",
+          "first_frame_ms": 136.61,
+          "fps": 126.7,
+          "frames_measured": 68,
+          "sw_format": "yuv444p12le"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec=prores 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_topos.mov",
+      "size_bytes": 254787309,
+      "head_md5_1mb": "194293fc26df2209bc1e39dd2f67975d",
+      "path": "4K_topos.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_topos_4444.mov",
+      "size_bytes": 423084314,
+      "head_md5_1mb": "f3ed154c8d89bebcc738fdd961a29cf0",
+      "path": "4K_topos_4444.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_topos_4444xq.mov",
+      "size_bytes": 623968264,
+      "head_md5_1mb": "5d6167e3e26d0871c05e5151715f5985",
+      "path": "4K_topos_4444xq.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_topos_hq.mov",
+      "size_bytes": 254787309,
+      "head_md5_1mb": "194293fc26df2209bc1e39dd2f67975d",
+      "path": "4K_topos_hq.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_topos_lt.mov",
+      "size_bytes": 96054125,
+      "head_md5_1mb": "e2027de476fc37e55d0e4ab72d36e2c5",
+      "path": "4K_topos_lt.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_topos_proxy.mov",
+      "size_bytes": 29067119,
+      "head_md5_1mb": "2631087f9485c6feeb04f6826992c1e7",
+      "path": "4K_topos_proxy.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    },
+    {
+      "asset": "4K_topos_standard.mov",
+      "size_bytes": 153132499,
+      "head_md5_1mb": "2789a455772dde49dce01dc9d050925f",
+      "path": "4K_topos_standard.mov",
+      "probe": "error",
+      "probe_error": "AttributeError: 'VideoStream' object has no attribute 'width'",
+      "expected_backend": "topos_native_cpu",
+      "resident_candidate": null,
+      "paths": {
+        "cpu_planar": {
+          "status": "unsupported",
+          "reason": "topos 私有码流不在 PyAV harness 范围（生产走 topos native source，与本矩阵解耦）"
+        },
+        "hw_download_planar": {
+          "status": "not_applicable",
+          "reason": "codec= 生产路由本就不选硬解（Intra 剪辑码流）"
+        },
+        "cuda_resident": {
+          "status": "not_applicable",
+          "reason": "同上"
+        }
+      }
+    }
+  ],
+  "git_commit": "b3951cff6",
+  "gpu": "NVIDIA GeForce RTX 4090/PCIe/SSE2",
+  "summary": {
+    "assets": 37
+  }
+}

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 19 items
+
+tests/edit/test_timeline_gpu_compositor.py ...................           [100%]
+
+============================== 19 passed in 8.70s ==============================

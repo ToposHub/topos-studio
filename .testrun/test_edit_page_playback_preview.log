@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+collected 27 items
+
+tests/edit/test_edit_page_playback_preview.py ...........F.............. [ 96%]
+.                                                                        [100%]
+
+=================================== FAILURES ===================================
+________ test_scrub_moved_deduplicates_playhead_changed_preview_request ________
+tests/edit/test_edit_page_playback_preview.py:322: in test_scrub_moved_deduplicates_playhead_changed_preview_request
+    assert scrub_requests == [10, 12]
+E   assert [10] == [10, 12]
+E     
+E     Right contains one more item: 12
+E     Use -v to get more diff
+=========================== short test summary info ============================
+FAILED tests/edit/test_edit_page_playback_preview.py::test_scrub_moved_deduplicates_playhead_changed_preview_request
+======================== 1 failed, 26 passed in 37.44s =========================

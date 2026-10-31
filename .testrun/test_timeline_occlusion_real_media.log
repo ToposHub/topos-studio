@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 13 items
+
+tests/edit/test_timeline_occlusion_real_media.py .............           [100%]
+
+============================= 13 passed in 35.20s ==============================

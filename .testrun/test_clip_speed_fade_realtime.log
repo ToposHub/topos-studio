@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 11 items
+
+tests/edit/test_clip_speed_fade_realtime.py ...........                  [100%]
+
+============================= 11 passed in 23.86s ==============================

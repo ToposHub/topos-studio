@@ -1,0 +1,87 @@
+{
+    "name": "绿幕抠像合成",
+    "description": "完整的绿幕抠像 + 背景合成流程：输入 → ChromaKeyer → Merge(背景) → 输出。包含一个黑色背景节点作为占位。",
+    "version": 1,
+    "nodes": [
+        {
+            "id": "foreground_input",
+            "type": "image_input",
+            "position": [0, 0],
+            "parameters": {},
+            "disabled": false
+        },
+        {
+            "id": "chroma_key",
+            "type": "chroma_keyer",
+            "position": [200, 0],
+            "parameters": {
+                "screen_color_r": 0.0,
+                "screen_color_g": 1.0,
+                "screen_color_b": 0.0,
+                "tolerance": 0.35,
+                "softness": 0.15,
+                "despill": true,
+                "edge_width": 2.0,
+                "output_mode": "result"
+            },
+            "disabled": false
+        },
+        {
+            "id": "background",
+            "type": "constant",
+            "position": [200, 150],
+            "parameters": {
+                "color_r": 0.0,
+                "color_g": 0.0,
+                "color_b": 0.0,
+                "color_a": 1.0
+            },
+            "disabled": false
+        },
+        {
+            "id": "merge_bg",
+            "type": "merge",
+            "position": [400, 50],
+            "parameters": {
+                "operation": "over",
+                "mix": 1.0
+            },
+            "disabled": false
+        },
+        {
+            "id": "final_output",
+            "type": "output",
+            "position": [600, 50],
+            "parameters": {},
+            "disabled": false
+        }
+    ],
+    "connections": [
+        {
+            "src_idx": 0,
+            "src_port": "output",
+            "dst_idx": 1,
+            "dst_port": "image"
+        },
+        {
+            "src_idx": 1,
+            "src_port": "result",
+            "dst_idx": 3,
+            "dst_port": "A"
+        },
+        {
+            "src_idx": 2,
+            "src_port": "output",
+            "dst_idx": 3,
+            "dst_port": "B"
+        },
+        {
+            "src_idx": 3,
+            "src_port": "output",
+            "dst_idx": 4,
+            "dst_port": "input"
+        }
+    ],
+    "created_at": "2026-05-14T10:00:00",
+    "author": "Topos Color"
+}

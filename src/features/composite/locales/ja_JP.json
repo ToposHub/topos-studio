@@ -1,0 +1,933 @@
+{
+  "nodes": {
+    "blur": {
+      "title": "ぼかし",
+      "description": "チャンネルごとに制御できる多タイプぼかし",
+      "blur_type": {
+        "box": "ボックスぼかし",
+        "gaussian": "ガウシアンぼかし",
+        "bilateral": "サーフェスぼかし（バイラテラル）",
+        "motion": "モーションぼかし",
+        "bokeh": "レンズぼかし（ボケ）"
+      },
+      "edge_policy": {
+        "clamp": "クランプ",
+        "wrap": "ラップ",
+        "mirror": "ミラー"
+      },
+      "quality": {
+        "fast": "高速",
+        "normal": "標準",
+        "high": "高品質"
+      },
+      "aperture_blades": {
+        "circle": "円",
+        "5": "5 枚羽根",
+        "6": "6 枚羽根",
+        "8": "8 枚羽根"
+      },
+      "params": {
+        "blur_type": "ぼかしタイプ",
+        "radius_x": "半径 X",
+        "radius_y": "半径 Y",
+        "radius": "半径",
+        "angle": "角度",
+        "motion_source": "モーションソース",
+        "shutter": "シャッター",
+        "edge_preserve": "エッジ保持",
+        "aperture_blades": "絞り羽根",
+        "anamorphic": "アナモルフィック",
+        "highlight_gain": "ハイライトゲイン",
+        "edge_policy": "エッジポリシー",
+        "quality": "品質",
+        "channel_r": "レッドチャンネル",
+        "channel_g": "グリーンチャンネル",
+        "channel_b": "ブルーチャンネル",
+        "channel_a": "アルファチャンネル",
+        "mix": "ミックス",
+        "process_alpha": "アルファを処理"
+      }
+    },
+    "transform": {
+      "title": "トランスフォーム",
+      "pivot_mode": {
+        "center": "中心",
+        "custom": "カスタム"
+      },
+      "filter": {
+        "linear": "リニア（バイリニア）",
+        "nearest": "ニアレスト（ハードエッジ）"
+      },
+      "params": {
+        "translate_x": "移動 X",
+        "translate_y": "移動 Y",
+        "translate": "移動",
+        "scale_x": "スケール X",
+        "scale_y": "スケール Y",
+        "scale": "スケール",
+        "rotation": "回転",
+        "pivot_mode": "ピボットモード",
+        "pivot_x": "ピボット X",
+        "pivot_y": "ピボット Y",
+        "pivot": "ピボット",
+        "filter": "フィルター"
+      }
+    },
+    "constant": {
+      "title": "定数",
+      "mode": {
+        "solid": "ソリッド",
+        "checker": "チェッカーボード",
+        "gradient": "リニアグラデーション",
+        "radial": "ラディアルグラデーション"
+      },
+      "params": {
+        "width": "幅",
+        "height": "高さ",
+        "mode": "モード",
+        "color_r": "カラー R",
+        "color_g": "カラー G",
+        "color_b": "カラー B",
+        "color_a": "カラー A",
+        "color2_r": "カラー 2 R",
+        "color2_g": "カラー 2 G",
+        "color2_b": "カラー 2 B",
+        "color2_a": "カラー 2 A",
+        "checker_size": "チェッカーサイズ",
+        "start_x": "開始 X",
+        "start_y": "開始 Y",
+        "start": "開始",
+        "end_x": "終了 X",
+        "end_y": "終了 Y",
+        "end": "終了",
+        "center_x": "中心 X",
+        "center_y": "中心 Y",
+        "center": "中心",
+        "radial_radius": "ラディアル半径",
+        "feather": "フェザー",
+        "format_name": "フォーマット",
+        "size_preset": "サイズプリセット",
+        "color_hex": "カラー HEX",
+        "color2_hex": "カラー 2 HEX"
+      }
+    },
+    "merge": {
+      "title": "マージ",
+      "blend_mode": {
+        "over": "通常 (Over)",
+        "under": "Under",
+        "add": "加算",
+        "subtract": "減算",
+        "multiply": "乗算",
+        "screen": "スクリーン",
+        "overlay": "オーバーレイ",
+        "difference": "差の絶対値",
+        "divide": "除算",
+        "min": "最小",
+        "max": "最大",
+        "average": "平均",
+        "copy": "コピー",
+        "stencil": "ステンシル",
+        "mask": "マスク",
+        "in": "In",
+        "out": "Out",
+        "atop": "Atop",
+        "xor": "XOR",
+        "color-dodge": "覆い焼きカラー",
+        "color-burn": "焼き込みカラー",
+        "soft-light": "ソフトライト",
+        "hard-light": "ハードライト",
+        "linear-light": "リニアライト",
+        "hue": "色相",
+        "saturation": "彩度",
+        "color": "カラー",
+        "luminosity": "輝度"
+      },
+      "format_policy": {
+        "from_b": "B に合わせる",
+        "from_a": "A に合わせる",
+        "larger": "大きい方",
+        "smaller": "小さい方"
+      },
+      "bbox_policy": {
+        "union": "結合",
+        "intersection": "共通部分",
+        "a": "A",
+        "b": "B"
+      },
+      "alpha_policy": {
+        "auto": "自動",
+        "premult_force": "プリマルチプライを強制",
+        "straight_force": "ストレートを強制",
+        "output_straight": "ストレートで出力"
+      },
+      "mask_channel": {
+        "luma": "ルミナンス",
+        "red": "レッド",
+        "green": "グリーン",
+        "blue": "ブルー",
+        "alpha": "アルファ"
+      },
+      "params": {
+        "blend_mode": "ブレンドモード",
+        "opacity": "不透明度",
+        "mix": "ミックス",
+        "format_policy": "フォーマットポリシー",
+        "bbox_policy": "バウンディングボックスポリシー",
+        "alpha_policy": "アルファポリシー",
+        "alpha_clamp": "アルファクランプ",
+        "mask_channel": "マスクチャンネル",
+        "mask_invert": "マスクを反転"
+      }
+    },
+    "crop": {
+      "title": "クロップ",
+      "outside": {
+        "black": "ブラック",
+        "transparent": "透明",
+        "repeat": "リピート",
+        "mirror": "ミラー"
+      },
+      "params": {
+        "x": "X",
+        "y": "Y",
+        "width": "幅",
+        "height": "高さ",
+        "reformat": "キャンバスをリサイズ",
+        "outside": "外側の塗り"
+      }
+    },
+    "cornerpin": {
+      "title": "コーナーピン",
+      "interpolation": {
+        "bilinear": "バイリニア",
+        "bicubic": "バイキュービック"
+      },
+      "params": {
+        "to1_x": "To 1 X",
+        "to1_y": "To 1 Y",
+        "to2_x": "To 2 X",
+        "to2_y": "To 2 Y",
+        "to3_x": "To 3 X",
+        "to3_y": "To 3 Y",
+        "to4_x": "To 4 X",
+        "to4_y": "To 4 Y",
+        "from1_x": "From 1 X",
+        "from1_y": "From 1 Y",
+        "from2_x": "From 2 X",
+        "from2_y": "From 2 Y",
+        "from3_x": "From 3 X",
+        "from3_y": "From 3 Y",
+        "from4_x": "From 4 X",
+        "from4_y": "From 4 Y",
+        "interpolation": "フィルター"
+      }
+    },
+    "reformat": {
+      "title": "リフォーマット",
+      "format_mode": {
+        "preset": "プリセット",
+        "custom": "カスタム"
+      },
+      "preset": {
+        "SD NTSC": "SD NTSC",
+        "SD PAL": "SD PAL",
+        "HD 720": "HD 720",
+        "HD 1080": "HD 1080",
+        "HD 1080 Anamorphic": "HD 1080 アナモルフィック",
+        "UHD 4K": "UHD 4K",
+        "DCI 4K": "DCI 4K",
+        "UHD 8K": "UHD 8K",
+        "Square 1024": "正方形 1024",
+        "Square 2048": "正方形 2048",
+        "Square 4096": "正方形 4096"
+      },
+      "resize_mode": {
+        "no_resize": "リサイズなし",
+        "fit": "フィット（レターボックス）",
+        "fill": "フィル（クロップ）",
+        "distort": "ディストート（引き伸ばし）",
+        "center_crop": "センタークロップ"
+      },
+      "filter": {
+        "nearest": "ニアレスト（ハードエッジ）",
+        "linear": "リニア（バイリニア）",
+        "cubic": "キュービック（バイキュービック）",
+        "lanczos": "Lanczos（シャープ）"
+      },
+      "params": {
+        "format_mode": "モード",
+        "preset": "プリセット",
+        "width": "幅",
+        "height": "高さ",
+        "resize_mode": "リサイズモード",
+        "filter": "フィルター",
+        "preserve_bbox": "BBox を保持"
+      }
+    },
+    "glow": {
+      "title": "グロー",
+      "quality": {
+        "fast": "高速",
+        "normal": "標準",
+        "high": "高品質"
+      },
+      "params": {
+        "threshold": "しきい値",
+        "radius": "半径",
+        "intensity": "強さ",
+        "tint_r": "ティント R",
+        "tint_g": "ティント G",
+        "tint_b": "ティント B",
+        "mix": "ミックス",
+        "quality": "品質"
+      }
+    },
+    "shuffle": {
+      "title": "シャッフル",
+      "r_from": {
+        "r": "レッド",
+        "g": "グリーン",
+        "b": "ブルー",
+        "a": "アルファ",
+        "zero": "ゼロ",
+        "one": "1",
+        "luma": "ルマ"
+      },
+      "g_from": {
+        "r": "レッド",
+        "g": "グリーン",
+        "b": "ブルー",
+        "a": "アルファ",
+        "zero": "ゼロ",
+        "one": "1",
+        "luma": "ルマ"
+      },
+      "b_from": {
+        "r": "レッド",
+        "g": "グリーン",
+        "b": "ブルー",
+        "a": "アルファ",
+        "zero": "ゼロ",
+        "one": "1",
+        "luma": "ルマ"
+      },
+      "a_from": {
+        "r": "レッド",
+        "g": "グリーン",
+        "b": "ブルー",
+        "a": "アルファ",
+        "zero": "ゼロ",
+        "one": "1",
+        "luma": "ルマ"
+      },
+      "params": {
+        "r_from": "レッド元",
+        "g_from": "グリーン元",
+        "b_from": "ブルー元",
+        "a_from": "アルファ元"
+      }
+    },
+    "text": {
+      "title": "テキスト",
+      "description": "テキストレイヤー（フォント、サイズ、配置、アウトライン、シャドウ）",
+      "per_char_mode": {
+        "fade": "フェード",
+        "slide_up": "スライドアップ",
+        "slide_left": "スライド左",
+        "scale_pop": "スケールポップ",
+        "rotate_in": "回転イン",
+        "typewriter": "タイプライター"
+      },
+      "path_direction": {
+        "up": "上向きアーク",
+        "down": "下向きアーク"
+      },
+      "params": {
+        "text": "テキスト",
+        "caption_input_enabled": "キャプション入力",
+        "caption_input_field": "キャプションフィールド",
+        "font_family": "フォント",
+        "font_size": "サイズ",
+        "font_weight": "ウェイト",
+        "italic": "イタリック",
+        "halign": "水平配置",
+        "valign": "垂直配置",
+        "letter_spacing": "トラッキング",
+        "line_spacing": "行間",
+        "per_char_enable": "文字ごとのアニメーション",
+        "per_char_mode": "アニメーションモード",
+        "per_char_delay": "時間差（フレーム）",
+        "per_char_overlap": "オーバーラップ",
+        "per_char_slide_distance": "スライド距離",
+        "per_char_rotation": "回転しながらイン",
+        "per_char_scale_from": "開始スケール",
+        "path_enable": "パスに沿って配置",
+        "path_radius": "アーク半径",
+        "path_arc_degrees": "アーク角度（0=自動）",
+        "path_direction": "アーク方向",
+        "translate_x": "移動 X",
+        "translate_y": "移動 Y",
+        "scale_x": "スケール X",
+        "scale_y": "スケール Y",
+        "rotation": "回転",
+        "pivot_mode": "ピボットモード",
+        "pivot_x": "ピボット X",
+        "pivot_y": "ピボット Y",
+        "filter": "フィルター",
+        "fill_r": "塗り R",
+        "fill_g": "塗り G",
+        "fill_b": "塗り B",
+        "fill_a": "塗り A",
+        "outline_enable": "アウトライン",
+        "outline_width": "アウトライン幅",
+        "outline_r": "アウトライン R",
+        "outline_g": "アウトライン G",
+        "outline_b": "アウトライン B",
+        "outline_a": "アウトライン A",
+        "shadow_enable": "シャドウ",
+        "shadow_offset_x": "シャドウオフセット X",
+        "shadow_offset_y": "シャドウオフセット Y",
+        "shadow_blur": "シャドウぼかし",
+        "shadow_r": "シャドウ R",
+        "shadow_g": "シャドウ G",
+        "shadow_b": "シャドウ B",
+        "shadow_a": "シャドウ A"
+      }
+    },
+    "paint": {
+      "title": "ペイント",
+      "description": "ペイントストロークレイヤー（クローン修復、消去、ソリッドブラシ）",
+      "params": {
+        "strokes": "ストローク"
+      }
+    },
+    "particle": {
+      "title": "パーティクル",
+      "description": "ステートレスな決定論的 2D パーティクルエミッター（重力/風/乱流）"
+    },
+    "mesh_warp": {
+      "title": "メッシュワープ",
+      "description": "グリッドワープ: 格子点をドラッグしてローカル変位を作成"
+    },
+    "keyer": {
+      "title": "キーヤー",
+      "keyer_mode": {
+        "auto": "自動",
+        "chroma": "クロマ",
+        "luma": "ルマ",
+        "difference": "ディファレンス"
+      },
+      "despill_method": {
+        "none": "なし",
+        "subtract": "減算",
+        "scale": "スケール"
+      },
+      "output_mode": {
+        "result": "結果",
+        "matte": "マット"
+      },
+      "params": {
+        "keyer_mode": "キーヤーモード",
+        "screen_color": "スクリーンカラー",
+        "screen_color_r": "スクリーン R",
+        "screen_color_g": "スクリーン G",
+        "screen_color_b": "スクリーン B",
+        "screen_color_hex": "スクリーン HEX",
+        "screen_balance": "スクリーンバランス",
+        "clip_black": "クリップブラック",
+        "clip_white": "クリップホワイト",
+        "gain": "ゲイン",
+        "softness": "ソフトネス",
+        "alpha_offset": "アルファオフセット",
+        "despill_strength": "デスピル強度",
+        "despill_method": "デスピル方式",
+        "invert": "反転",
+        "output_mode": "出力モード"
+      }
+    },
+    "light_wrap": {
+      "title": "ライトラップ",
+      "params": {
+        "width": "ラップ幅",
+        "intensity": "強さ",
+        "brightness": "明るさ",
+        "falloff": "フォールオフ",
+        "source_alpha": "前景のアルファを使用"
+      }
+    },
+    "relight": {
+      "title": "リライト",
+      "light_type": {
+        "point": "ポイントライト",
+        "directional": "ディレクショナル"
+      },
+      "params": {
+        "light_type": "ライトタイプ",
+        "light_position_x": "ライト位置 X",
+        "light_position_y": "ライト位置 Y",
+        "light_position_z": "ライト位置 Z",
+        "light_direction_x": "ライト方向 X",
+        "light_direction_y": "ライト方向 Y",
+        "light_direction_z": "ライト方向 Z",
+        "intensity": "強さ",
+        "color": "ライトカラー",
+        "ambient": "アンビエント",
+        "normal_decode": "ノーマルデコード",
+        "normal_flip_y": "ノーマル Y を反転",
+        "normal_decode_options": {
+          "encoded": "エンコード済み [0,1]",
+          "signed": "符号付き (-1~1)"
+        }
+      }
+    },
+    "cryptomatte_select": {
+      "title": "クリプトマット選択",
+      "id_encoding": {
+        "rgba24": "RGBA24 アロケーター ID",
+        "float_r": "Float R（標準クリプトマット）"
+      },
+      "output_mode": {
+        "matte": "マット",
+        "isolate": "分離"
+      },
+      "params": {
+        "id_encoding": "ID エンコーディング",
+        "output_mode": "出力モード"
+      }
+    },
+    "zblur": {
+      "title": "Z ぼかし",
+      "depth_units": {
+        "normalized": "正規化",
+        "world": "ワールド距離"
+      },
+      "quality": {
+        "fast": "高速",
+        "normal": "標準",
+        "high": "高品質"
+      },
+      "params": {
+        "focus_distance": "フォーカス距離",
+        "focal_range": "焦点範囲",
+        "max_blur_radius": "最大ぼかし半径",
+        "bokeh_toggle": "絞り円サンプリング",
+        "depth_units": "深度単位",
+        "near": "ニア",
+        "far": "ファー",
+        "quality": "品質"
+      }
+    },
+    "fog": {
+      "title": "フォグ",
+      "depth_units": {
+        "normalized": "正規化",
+        "world": "ワールド距離"
+      },
+      "params": {
+        "color": "フォグカラー",
+        "density": "密度",
+        "start": "開始",
+        "end": "終了",
+        "depth_units": "深度単位",
+        "near": "ニア",
+        "far": "ファー"
+      }
+    },
+    "depth_matte": {
+      "title": "深度マット",
+      "depth_units": {
+        "normalized": "正規化",
+        "world": "ワールド距離"
+      },
+      "params": {
+        "range_start": "範囲の開始",
+        "range_end": "範囲の終了",
+        "feather": "フェザー",
+        "depth_units": "深度単位",
+        "near": "ニア",
+        "far": "ファー"
+      }
+    },
+    "godrays": {
+      "title": "ゴッドレイ",
+      "params": {
+        "light_x": "ライト X",
+        "light_y": "ライト Y",
+        "color": "ライトカラー",
+        "density": "密度",
+        "weight": "ウェイト",
+        "decay": "減衰",
+        "samples": "サンプル数"
+      }
+    },
+    "chromatic_aberration": {
+      "title": "色収差",
+      "params": {
+        "offset_r": "R オフセット",
+        "offset_b": "B オフセット",
+        "center_x": "中心 X",
+        "center_y": "中心 Y",
+        "edge_boost": "エッジブースト"
+      }
+    },
+    "vignette": {
+      "title": "ビネット",
+      "params": {
+        "amount": "量",
+        "radius": "半径",
+        "softness": "ソフトネス",
+        "roundness": "丸み"
+      }
+    },
+    "lens_flare": {
+      "title": "レンズフレア",
+      "blend_mode": {
+        "screen": "スクリーン",
+        "add": "加算"
+      },
+      "params": {
+        "light_x": "ライト X",
+        "light_y": "ライト Y",
+        "color": "ライトカラー",
+        "intensity": "強さ",
+        "ghost_count": "ゴースト数",
+        "ghost_spacing": "ゴースト間隔",
+        "ghost_decay": "ゴースト減衰",
+        "ghost_size": "ゴーストサイズ",
+        "halo_radius": "ハロー半径",
+        "halo_strength": "ハロー強度",
+        "streak_strength": "ストリーク強度",
+        "streak_width": "ストリーク幅",
+        "use_occlusion": "オクルージョン対応",
+        "blend_mode": "ブレンドモード"
+      }
+    },
+    "deflicker": {
+      "title": "デフリッカー",
+      "window": {
+        "3": "3 フレーム",
+        "5": "5 フレーム",
+        "7": "7 フレーム",
+        "9": "9 フレーム"
+      },
+      "mode": {
+        "per_pixel": "ピクセルごと",
+        "global_gain": "グローバルゲイン"
+      },
+      "params": {
+        "window": "ウィンドウ",
+        "percentile": "パーセンタイル",
+        "luma_only": "ルマのみ",
+        "mode": "モード"
+      }
+    },
+    "ai_gen_expand": {
+      "title": "AI 生成拡張",
+      "params": {
+        "prompt": "プロンプト",
+        "negative_prompt": "ネガティブ",
+        "model": "モデル",
+        "seed": "シード",
+        "strength": "強さ",
+        "expand_left": "左へ拡張",
+        "expand_top": "上へ拡張",
+        "expand_right": "右へ拡張",
+        "expand_bottom": "下へ拡張"
+      }
+    },
+    "frame_interpolate": {
+      "title": "フレーム補間",
+      "params": {
+        "t": "補間 t",
+        "hd_mode": "HD タイリング"
+      }
+    },
+    "face_track": {
+      "title": "フェイストラック",
+      "params": {
+        "face_index": "顔インデックス"
+      }
+    },
+    "face_smooth": {
+      "title": "フェイススムージング",
+      "params": {
+        "strength": "強さ",
+        "radius": "半径",
+        "luminance_only": "ルマのみ"
+      }
+    },
+    "pointcloud3d": {
+      "title": "ポイントクラウド",
+      "source": {
+        "file": "ファイル",
+        "tracker": "トラッカーから"
+      },
+      "color_mode": {
+        "flat": "フラット",
+        "vertex_color": "頂点カラー",
+        "depth_ramp": "深度ランプ"
+      },
+      "params": {
+        "source": "ソース",
+        "file_path": "ファイルパス",
+        "output_width": "出力幅",
+        "output_height": "出力高さ",
+        "point_size": "ポイントサイズ",
+        "color_mode": "カラーモード",
+        "point_color": "ポイントカラー",
+        "opacity": "不透明度"
+      }
+    },
+    "volume3d": {
+      "title": "ボリューム 3D",
+      "params": {
+        "file_path": "ボリュームファイル",
+        "density_multiplier": "密度マルチプライヤー",
+        "absorption_color": "吸収カラー",
+        "step_count": "ステップ数",
+        "output_width": "出力幅",
+        "output_height": "出力高さ"
+      }
+    },
+    "chroma_keyer": {
+      "title": "クロマキーヤー",
+      "output_mode": {
+        "result": "結果",
+        "matte": "マット"
+      },
+      "params": {
+        "screen_color_r": "スクリーン R",
+        "screen_color_g": "スクリーン G",
+        "screen_color_b": "スクリーン B",
+        "tolerance": "トレランス",
+        "softness": "ソフトネス",
+        "despill": "デスピル",
+        "edge_width": "エッジ幅",
+        "output_mode": "出力モード"
+      }
+    },
+    "luma_keyer": {
+      "title": "ルマキーヤー",
+      "output_mode": {
+        "result": "結果",
+        "matte": "マット"
+      },
+      "params": {
+        "black_point": "ブラックポイント",
+        "white_point": "ホワイトポイント",
+        "softness": "ソフトネス",
+        "invert": "反転",
+        "output_mode": "出力モード"
+      }
+    },
+    "camera3d": {
+      "title": "カメラ",
+      "params": {
+        "camera_mode": "カメラモード",
+        "cam_fov": "視野角",
+        "cam_focal_length": "焦点距離 (mm)",
+        "cam_sensor_size": "センサーサイズ (mm)",
+        "cam_near": "ニアククリップ",
+        "cam_far": "ファークリップ",
+        "cam_lens_shift_x": "レンズシフト X",
+        "cam_lens_shift_y": "レンズシフト Y",
+        "cam_exposure": "露出 (EV)",
+        "cam_focus_distance": "フォーカス距離",
+        "cam_fstop": "絞り (f値)",
+        "cam_dof_enable": "被写界深度",
+        "cam_show_safe_areas": "セーフエリア"
+      }
+    },
+    "light3d": {
+      "title": "ライト",
+      "light_type": {
+        "directional": "ディレクショナル",
+        "point": "ポイント",
+        "spot": "スポット",
+        "ambient": "アンビエント"
+      },
+      "params": {
+        "light_type": "ライトタイプ",
+        "light_pos_x": "位置 X",
+        "light_pos_y": "位置 Y",
+        "light_pos_z": "位置 Z",
+        "light_dir_x": "方向 X",
+        "light_dir_y": "方向 Y",
+        "light_dir_z": "方向 Z",
+        "light_color_r": "カラー R",
+        "light_color_g": "カラー G",
+        "light_color_b": "カラー B",
+        "light_intensity": "強さ",
+        "light_range": "範囲",
+        "light_inner_cone": "内側コーン",
+        "light_outer_cone": "外側コーン",
+        "hdri_path": "HDRI ファイル",
+        "use_ibl": "IBL を使用",
+        "env_intensity": "環境強度",
+        "icon_pos_x": "アイコン位置 X",
+        "icon_pos_y": "アイコン位置 Y",
+        "icon_pos_z": "アイコン位置 Z"
+      }
+    },
+    "model3d": {
+      "title": "Model3D",
+      "size_mode": {
+        "fit_to_scene": "シーンに合わせる",
+        "real_world": "実寸"
+      },
+      "source_unit": {
+        "m": "メートル",
+        "cm": "センチメートル",
+        "mm": "ミリメートル",
+        "in": "インチ",
+        "ft": "フィート",
+        "custom": "カスタム"
+      },
+      "axis_mode": {
+        "auto": "自動",
+        "y_up": "Y アップ",
+        "z_up": "Z アップ",
+        "none": "なし"
+      },
+      "uv_v_mode": {
+        "auto": "自動",
+        "original": "オリジナル",
+        "flip": "V を反転"
+      },
+      "anim_play_mode": {
+        "loop": "ループ",
+        "pingpong": "ピンポン",
+        "once": "1 回",
+        "clamp": "クランプ"
+      },
+      "material_mode": {
+        "imported": "インポート済み",
+        "override": "オーバーライド",
+        "mix": "ミックス"
+      },
+      "normal_format": {
+        "OpenGL": "OpenGL",
+        "DirectX": "DirectX"
+      },
+      "orm_layout": {
+        "glTF ORM": "glTF ORM",
+        "separate": "分離"
+      },
+      "texture_filter": {
+        "nearest": "ニアレスト",
+        "linear": "リニア",
+        "mipmap": "ミップマップ"
+      },
+      "texture_wrap": {
+        "repeat": "リピート",
+        "clamp": "クランプ",
+        "mirror": "ミラー"
+      },
+      "viewport_lod_mode": {
+        "auto": "自動",
+        "force_lod0": "LOD 0 を強制",
+        "force_lod1": "LOD 1 を強制",
+        "force_lod2": "LOD 2 を強制"
+      },
+      "render_role": {
+        "solid": "ソリッド",
+        "holdout": "ホールドアウト",
+        "shadow_catcher": "シャドウキャッチャー",
+        "matte": "マット"
+      },
+      "params": {
+        "model_path": "モデルファイル",
+        "use_imported_model": "インポート済みモデルを使用",
+        "size_mode": "サイズモード",
+        "source_unit": "ソース単位",
+        "unit_scale": "単位スケール",
+        "axis_mode": "軸モード",
+        "uv_v_mode": "UV V モード",
+        "object_pos_x": "位置 X",
+        "object_pos_y": "位置 Y",
+        "object_pos_z": "位置 Z",
+        "object_rot_x": "回転 X",
+        "object_rot_y": "回転 Y",
+        "object_rot_z": "回転 Z",
+        "mesh_scale": "スケール",
+        "anim_enabled": "アニメーションを有効化",
+        "anim_time": "アニメーション時間",
+        "anim_speed": "アニメーション速度",
+        "anim_clip": "アニメーションクリップ",
+        "anim_play_mode": "再生モード",
+        "anim_clip_name": "クリップ名",
+        "anim_time_offset": "時間オフセット",
+        "anim_start_frame": "開始フレーム",
+        "anim_end_frame": "終了フレーム",
+        "anim_fps": "アニメーション FPS",
+        "material_mode": "マテリアルモード",
+        "normal_format": "ノーマルフォーマット",
+        "orm_layout": "ORM レイアウト",
+        "texture_filter": "テクスチャーフィルター",
+        "texture_wrap": "テクスチャーラップ",
+        "emissive_intensity": "エミッシブ強度",
+        "viewport_lod_mode": "ビューポート LOD",
+        "render_role": "レンダーロール",
+        "matte_id": "マット ID",
+        "shadow_intensity": "シャドウ強度",
+        "shadow_softness": "シャドウソフトネス"
+      }
+    },
+    "scene3d": {
+      "title": "Scene3D",
+      "params": {
+        "width": "幅",
+        "height": "高さ"
+      }
+    }
+  },
+  "param_groups": {
+    "Blur": "ぼかし",
+    "Channels": "チャンネル",
+    "Keying": "キーイング",
+    "Screen": "スクリーン",
+    "Matte": "マット",
+    "Despill": "デスピル",
+    "Output": "出力"
+  },
+  "channels": {
+    "label": "チャンネル"
+  },
+  "panel": {
+    "node_graph": "ノードグラフ",
+    "node_properties": "ノードプロパティ",
+    "performance": "パフォーマンス",
+    "perf": "パフォーマンス",
+    "composite_scopes": "スコープ",
+    "keyframes": "キーフレーム",
+    "spline": "スプライン",
+    "animation": "アニメーション",
+    "import_report": "インポートレポート",
+    "asset_dependency": "アセット依存関係",
+    "scene_outliner": "シーンアウトライナー",
+    "material": "マテリアル"
+  },
+  "keyframes": {
+    "prev_kf": "前のキーフレーム",
+    "next_kf": "次のキーフレーム",
+    "fit": "時間範囲を合わせる",
+    "zoom_in": "ズームイン",
+    "expand_all": "すべて展開",
+    "collapse_all": "すべて折りたたむ",
+    "pan": "プレイヘッドへパン",
+    "unit_time": "時間",
+    "unit_frame": "フレーム",
+    "unit_seconds": "秒",
+    "unit_timecode": "タイムコード",
+    "empty": "アニメーションパラメーターはありません"
+  },
+  "spline": {
+    "empty": "カーブはありません",
+    "fit": "カーブを合わせる",
+    "smooth": "スムーズ",
+    "linear": "リニア",
+    "flat": "フラット",
+    "step": "ステップ/ホールド"
+  }
+}

@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 142 items
+
+tests/deliver/test_custom_export_presets.py ..........                   [  7%]
+tests/deliver/test_deliver_workspace_layout.py .....                     [ 10%]
+tests/deliver/test_export_queue.py ..................                    [ 23%]
+tests/deliver/test_gif_export.py ....                                    [ 26%]
+tests/deliver/test_quick_export_defaults.py .....                        [ 29%]
+tests/deliver/test_video_batch_export_dock.py .......                    [ 34%]
+tests/deliver/test_video_batch_export_panel.py ......................... [ 52%]
+...                                                                      [ 54%]
+tests/deliver/test_video_export_formats.py ....                          [ 57%]
+tests/deliver/test_video_export_job.py ..........................        [ 75%]
+tests/deliver/test_video_export_preflight.py ......................      [ 90%]
+tests/deliver/test_video_export_topos_controls.py .............          [100%]
+
+============================= 142 passed in 13.75s =============================

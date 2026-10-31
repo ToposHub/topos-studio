@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 9 items
+
+tests/edit/test_media_pool_finder_phase3.py .......OpenCV: Couldn't read video stream from file "/tmp/ql.mp4"
+..                    [100%]
+
+============================== 9 passed in 18.18s ==============================

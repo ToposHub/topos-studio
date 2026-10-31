@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<TangentWave fileType="ControlSystem" fileVersion="3.0">
+    <Capabilities>
+        <Jog enabled="false" />
+        <Shuttle enabled="false" />
+        <StatusDisplay lineCount="3" />
+    </Capabilities>
+    <DefaultGlobalSettings>
+        <KnobSensitivity std="3" alt="5" />
+        <TrackerballSensitivity std="1" alt="5" />
+        <TrackerballDialSensitivity std="1" alt="5" />
+        <IndependentPanelBanks enabled="false" />
+    </DefaultGlobalSettings>
+    <Modes>
+        <Mode id="0x00010004">
+            <Name>Color Wheels</Name>
+        </Mode>
+    </Modes>
+    <Controls>
+        <Group name="Lift">
+            <Parameter id="0x00310021">
+                <Name>Lift X</Name>
+                <MinValue>-1.0</MinValue>
+                <MaxValue>1.0</MaxValue>
+                <StepSize>0.001</StepSize>
+            </Parameter>
+            <Parameter id="0x00310023">
+                <Name>Lift Y</Name>
+                <MinValue>-1.0</MinValue>
+                <MaxValue>1.0</MaxValue>
+                <StepSize>0.001</StepSize>
+            </Parameter>
+            <Parameter id="0x00310024">
+                <Name>Lift Brightness</Name>
+                <MinValue>-1.0</MinValue>
+                <MaxValue>1.0</MaxValue>
+                <StepSize>0.001</StepSize>
+            </Parameter>
+        </Group>
+        <Group name="Gamma">
+            <Parameter id="0x00310031">
+                <Name>Gamma X</Name>
+                <MinValue>-1.0</MinValue>
+                <MaxValue>1.0</MaxValue>
+                <StepSize>0.001</StepSize>
+            </Parameter>
+            <Parameter id="0x00310033">
+                <Name>Gamma Y</Name>
+                <MinValue>-1.0</MinValue>
+                <MaxValue>1.0</MaxValue>
+                <StepSize>0.001</StepSize>
+            </Parameter>
+            <Parameter id="0x00310034">
+                <Name>Gamma Brightness</Name>
+                <MinValue>-1.0</MinValue>
+                <MaxValue>1.0</MaxValue>
+                <StepSize>0.001</StepSize>
+            </Parameter>
+        </Group>
+        <Group name="Gain">
+            <Parameter id="0x00310041">
+                <Name>Gain X</Name>
+                <MinValue>-1.0</MinValue>
+                <MaxValue>1.0</MaxValue>
+                <StepSize>0.001</StepSize>
+            </Parameter>
+            <Parameter id="0x00310043">
+                <Name>Gain Y</Name>
+                <MinValue>-1.0</MinValue>
+                <MaxValue>1.0</MaxValue>
+                <StepSize>0.001</StepSize>
+            </Parameter>
+            <Parameter id="0x00310044">
+                <Name>Gain Brightness</Name>
+                <MinValue>-1.0</MinValue>
+                <MaxValue>1.0</MaxValue>
+                <StepSize>0.001</StepSize>
+            </Parameter>
+        </Group>
+        <Action id="0x00020001">
+            <Name>Reset All Wheels</Name>
+        </Action>
+    </Controls>
+</TangentWave>

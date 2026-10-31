@@ -1,0 +1,126 @@
+{
+  "image_sequence_p3_channel_order": {
+    "actual_bgr16": [
+      [
+        [
+          0,
+          0,
+          62886
+        ]
+      ]
+    ],
+    "correct_bgr16": [
+      [
+        [
+          9080,
+          13125,
+          60127
+        ]
+      ]
+    ],
+    "max_error": 13125
+  },
+  "sequence_mid_cancel": {
+    "success": true,
+    "output_path": "/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-render-audit-pz4fy3j4/cancel",
+    "frames_written": 1,
+    "error": "",
+    "frames_dropped": 0,
+    "files": [
+      "x_0001.png"
+    ],
+    "cleanup_called": false,
+    "renderer_retained": true
+  },
+  "sequence_missing_frame": {
+    "success": true,
+    "output_path": "/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-render-audit-pz4fy3j4/gap",
+    "frames_written": 2,
+    "error": "",
+    "frames_dropped": 0,
+    "files": [
+      "x_0001.png",
+      "x_0003.png"
+    ]
+  },
+  "sequence_factory_fallback_missing": {
+    "success": false,
+    "output_path": "",
+    "frames_written": 0,
+    "error": "Render failed",
+    "frames_dropped": 0,
+    "serial_calls": []
+  },
+  "export_project_shutter": {
+    "requested": 0.9,
+    "observed_ctx_and_effective_shutter": [
+      [
+        null,
+        0.5
+      ]
+    ],
+    "error": null
+  },
+  "paint_production_pool": {
+    "passthrough_instead_of_paint": true,
+    "result_same_object": true,
+    "pool_stats": {
+      "active_count": 2,
+      "pooled_count": 0,
+      "pinned_count": 0,
+      "owned_count": 2,
+      "external_count": 0,
+      "memory_mb": 0.0009765625,
+      "pooled_memory_mb": 0.0,
+      "deferred_memory_mb": 0.0,
+      "resident_memory_mb": 0.0009765625,
+      "budget_mb": 16.0,
+      "initial_budget_mb": 16,
+      "total_created": 2,
+      "total_reused": 0,
+      "total_evicted": 0,
+      "cost_evictions": 0,
+      "vram_adjustments": 0,
+      "format_f2_count": 2,
+      "format_f4_count": 0,
+      "usage_distribution": {
+        "TEMP": 2
+      },
+      "video_slots": {
+        "slot_count": 0,
+        "memory_bytes": 0,
+        "memory_mb": 0.0,
+        "total_acquisitions": 0,
+        "total_reuses": 0,
+        "total_creations": 0,
+        "reuse_rate": 0.0
+      },
+      "vram_monitor": {
+        "supported": false,
+        "vendor": "",
+        "total_kb": 0,
+        "available_kb": 0,
+        "budget_mb": 0
+      },
+      "render_mode": "PREVIEW"
+    },
+    "source_alpha": 0.5
+  },
+  "ai_production_pool_upload": {
+    "returned_none": true
+  },
+  "paint_straight_alpha_math": {
+    "expected_unpainted_rgba": [
+      0.1,
+      0.1,
+      0.1,
+      0.5
+    ],
+    "actual_unpainted_rgba": [
+      0.10000000149011612,
+      0.10000000149011612,
+      0.10000000149011612,
+      0.25
+    ]
+  }
+}

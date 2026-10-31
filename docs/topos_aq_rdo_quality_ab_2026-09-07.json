@@ -1,0 +1,40 @@
+{
+  "date": "2026-09-07",
+  "scope": {
+    "frames": 8,
+    "start_frame": 300,
+    "pixel_format": "yuv422p10le",
+    "qmatrix": 1,
+    "qp": 58,
+    "entropy": "v2",
+    "machine": "8 physical cores / 16 logical threads"
+  },
+  "same_qp": {
+    "2K": {
+      "AQ0/RDO0": {"bytes_per_frame": 728506.75, "psnr_y": 58.0963, "psnr_u": 66.0510, "psnr_v": 66.3531, "ssim_y": 0.9999774},
+      "AQ1/RDO0": {"bytes_per_frame": 731666.5, "psnr_y": 58.0963, "psnr_u": 66.1236, "psnr_v": 66.4270, "ssim_y": 0.9999774},
+      "AQ0/RDO1": {"bytes_per_frame": 667815.875, "psnr_y": 57.2727, "psnr_u": 65.7918, "psnr_v": 66.0995, "ssim_y": 0.9999726},
+      "AQ1/RDO1": {"bytes_per_frame": 671397.125, "psnr_y": 57.2727, "psnr_u": 65.8719, "psnr_v": 66.1840, "ssim_y": 0.9999726}
+    },
+    "4K": {
+      "AQ0/RDO0": {"bytes_per_frame": 1331249.75, "psnr_y": 62.5562, "psnr_u": 73.6129, "psnr_v": 72.0666, "ssim_y": 0.9999877},
+      "AQ1/RDO0": {"bytes_per_frame": 1336214.375, "psnr_y": 62.5562, "psnr_u": 72.9875, "psnr_v": 72.4341, "ssim_y": 0.9999877},
+      "AQ0/RDO1": {"bytes_per_frame": 1219221.875, "psnr_y": 61.5867, "psnr_u": 73.1408, "psnr_v": 71.6228, "ssim_y": 0.9999846},
+      "AQ1/RDO1": {"bytes_per_frame": 1226752.25, "psnr_y": 61.5867, "psnr_u": 72.3055, "psnr_v": 72.1264, "ssim_y": 0.9999846}
+    }
+  },
+  "near_same_rate": {
+    "2K": {
+      "reference": {"mode": "AQ1/RDO1", "qp": 58, "bytes_per_frame": 673482, "psnr_y": 57.2788},
+      "AQ0/RDO0": {"qp": 59, "bytes_per_frame": 658031, "psnr_y": 57.475, "delta_psnr_y": 0.196},
+      "AQ1/RDO0": {"qp": 59, "bytes_per_frame": 660841, "psnr_y": 57.475, "delta_psnr_y": 0.196},
+      "AQ0/RDO1": {"qp": 58, "bytes_per_frame": 669960, "psnr_y": 57.279, "delta_psnr_y": 0.000}
+    },
+    "4K": {
+      "reference": {"mode": "AQ1/RDO1", "qp": 58, "bytes_per_frame": 1215504, "psnr_y": 61.6777},
+      "AQ0/RDO0": {"qp": 59, "bytes_per_frame": 1219076, "psnr_y": 61.996, "delta_psnr_y": 0.318},
+      "AQ1/RDO0": {"qp": 59, "bytes_per_frame": 1222977, "psnr_y": 61.996, "delta_psnr_y": 0.318},
+      "AQ0/RDO1": {"qp": 58, "bytes_per_frame": 1206702, "psnr_y": 61.678, "delta_psnr_y": 0.000}
+    }
+  }
+}

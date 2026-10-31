@@ -1,0 +1,180 @@
+PASS 412
+FAIL 8
+TIMEOUT 0
+
+===== FAIL tests/edit/test_color_vs_edit_decode.py =====
+============================= test session starts ==============================
+collected 0 items
+
+============================ no tests ran in 0.13s =============================
+
+
+===== FAIL tests/edit/test_edit_gpu_pipeline.py =====
+============================= test session starts ==============================
+collected 0 items
+
+============================ no tests ran in 0.13s =============================
+
+
+===== FAIL tests/edit/test_ef01_aud_part2.py =====
+============================= test session starts ==============================
+collected 48 items
+
+tests/edit/test_ef01_aud_part2.py ..FFF................................. [ 79%]
+..........                                                               [100%]
+
+=================================== FAILURES ===================================
+_ TestAud16506PrepositionStartFailureCleanup.test_start_failure_releases_reservation_and_event _
+tests/edit/test_ef01_aud_part2.py:175: in test_start_failure_releases_reservation_and_event
+    mgr, src = self._prepare_manager(monkeypatch)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/edit/test_ef01_aud_part2.py:168: in _prepare_manager
+    key = mgr._make_source_key(dsk, spec)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/edit_gpu_decode_manager.py:1665: in _make_source_key
+    source_spec.no_deblock,
+    ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'no_deblock'
+_ TestAud16506PrepositionStartFailureCleanup.test_closing_path_releases_reservation_and_event _
+tests/edit/test_ef01_aud_part2.py:185: in test_closing_path_releases_reservation_and_event
+    mgr, src = self._prepare_manager(monkeypatch)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/edit/test_ef01_aud_part2.py:168: in _prepare_manager
+    key = mgr._make_source_key(dsk, spec)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/edit_gpu_decode_manager.py:1665: in _make_source_key
+    source_spec.no_deblock,
+    ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'no_deblock'
+_ TestAud16506PrepositionStartFailureCleanup.test_healthy_start_still_registers _
+tests/edit/test_ef01_aud_part2.py:194: in test_healthy_start_still_registers
+    mgr, src = self._prepare_manager(monkeypatch)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/edit/test_ef01_aud_part2.py:168: in _prepare_manager
+    key = mgr._make_source_key(dsk, spec)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/edit_gpu_decode_manager.py:1665: in _make_source_key
+    source_spec.no_deblock,
+    ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'no_deblock'
+=========================== short test summary info ============================
+FAILED tests/edit/test_ef01_aud_part2.py::TestAud16506PrepositionStartFailureCleanup::test_start_failure_releases_reservation_and_event
+FAILED tests/edit/test_ef01_aud_part2.py::TestAud16506PrepositionStartFailureCleanup::test_closing_path_releases_reservation_and_event
+FAILED tests/edit/test_ef01_aud_part2.py::TestAud16506PrepositionStartFailureCleanup::test_healthy_start_still_registers
+========================= 3 failed, 45 passed in 3.13s =========================
+
+
+===== FAIL tests/edit/test_multicam_production.py =====
+2/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 199 in main
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 223 in console_main
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/pytest/__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Extension modules: yaml._yaml, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, PyQt6.QtCore, PyQt6.QtNetwork, PyQt6.QtGui, PyQt6.QtWidgets, PyQt6.QtPrintSupport, PyQt6.QtWebChannel, PyQt6.QtWebEngineCore, PyQt6.QtWebEngineWidgets, moderngl.mgl, PyQt6.QtTest, PIL._imaging, _pillow_heif, rawpy._rawpy, cython.cimports.libc.math, _cyutility, scipy._cyutility, scipy._lib._ccallback_c, scipy.signal._sigtools, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg.cython_lapack, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._batched_linalg, scipy.linalg._decomp_lu_cython, scipy.linalg._matfuncs_schur_sqrtm, scipy.linalg._matfuncs_expm, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg._decomp_update, scipy.special._ufuncs_cxx, scipy.special._ellip_harm_2, scipy.special._special_ufuncs, scipy.special._gufuncs, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy._lib._uarray._uarray, scipy.signal._max_len_seq_inner, scipy.signal._upfirdn_apply, scipy.signal._spline, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.spatial._ckdtree, scipy._lib.messagestream, scipy.spatial._qhull, scipy.spatial._voronoi, scipy.spatial._hausdorff, scipy.spatial._distance_wrap, scipy.spatial.transform._rotation_cy, scipy.spatial.transform._rigid_transform_cy, scipy.interpolate._fitpack, scipy.interpolate._dfitpack, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpacklib, scipy.sparse.linalg._propack, scipy.optimize._group_columns, scipy.optimize._trlib._trlib, scipy.optimize._lbfgsb, _moduleTNC, scipy.optimize._moduleTNC, scipy.optimize._slsqplib, scipy.optimize._minpack, scipy.optimize._lsq.givens_elimination, scipy.optimize._zeros, scipy.linalg._decomp_interpolative, scipy.optimize._bglu_dense, scipy.optimize._lsap, scipy.optimize._direct, scipy.interpolate._dierckx, scipy.interpolate._ppoly, scipy.interpolate._interpnd, scipy.interpolate._rbfinterp_pythran, scipy.interpolate._rgi_cython, scipy.ndimage._nd_image, scipy.ndimage._rank_filter_1d, _ni_label, scipy.ndimage._ni_label, scipy.signal._sosfilt, scipy.integrate._odepack, scipy.integrate._quadpack, scipy.integrate._vode, scipy.integrate._dop, scipy.special.cython_special, scipy.stats._stats, scipy.stats._biasedurn, scipy.stats._stats_pythran, scipy.stats._levy_stable.levyst, scipy.stats._ansari_swilk_statistics, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.stats._sobol, scipy.stats._qmc_cy, scipy.stats._rcont.rcont, scipy.stats._qmvnt_cy, scipy.signal._peak_finding_utils (total: 116)
+
+
+===== FAIL tests/edit/test_timeline_color_grade_lut.py =====
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_timeline_color_grade_lut.py F...                         [100%]
+
+=================================== FAILURES ===================================
+_____ test_cached_lut_matches_float_grade_exactly_for_real_project_wheels ______
+tests/edit/test_timeline_color_grade_lut.py:90: in test_cached_lut_matches_float_grade_exactly_for_real_project_wheels
+    np.testing.assert_array_equal(actual, expected)
+/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/contextlib.py:81: in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+E   AssertionError: 
+E   Arrays are not equal
+E   
+E   Mismatched elements: 5427 / 25344 (21.4%)
+E   Max absolute difference: 4
+E   Max relative difference: 0.14285714
+E    x: array([[[ 37, 255,   0],
+E           [ 38, 254,   0],
+E           [ 39, 253,   0],...
+E    y: array([[[ 38, 255,   0],
+E           [ 39, 254,   0],
+E           [ 40, 253,   0],...
+=========================== short test summary info ============================
+FAILED tests/edit/test_timeline_color_grade_lut.py::test_cached_lut_matches_float_grade_exactly_for_real_project_wheels
+========================= 1 failed, 3 passed in 1.30s ==========================
+
+
+===== FAIL tests/edit/test_timeline_gpu_export_renderer.py =====
+============================= test session starts ==============================
+collected 51 items
+
+tests/edit/test_timeline_gpu_export_renderer.py ......................F. [ 47%]
+..F.F......................                                              [100%]
+
+=================================== FAILURES ===================================
+_________________ test_gpu_grade_bit_exact_vs_cpu_grading_math _________________
+tests/edit/test_timeline_gpu_export_renderer.py:787: in test_gpu_grade_bit_exact_vs_cpu_grading_math
+    assert diff.max() <= 2, f"maxdiff {diff.max()}"
+E   AssertionError: maxdiff 179
+E   assert 179 <= 2
+E    +  where 179 = <built-in method max of numpy.ndarray object at 0x2fe021590>()
+E    +    where <built-in method max of numpy.ndarray object at 0x2fe021590> = array([[[  0,   0, 179],\n        [  0,   0, 179],\n        [  0,   0, 179],\n        ...,\n        [  0,   0, 179],\n     ...[  0,   0, 179],\n        ...,\n        [  0,   0, 179],\n        [  0,   0, 179],\n        [  0,   0, 179]]], dtype=int16).max
+____________________ test_gpu_u16_delivery_parity_and_dtype ____________________
+tests/edit/test_timeline_gpu_export_renderer.py:948: in test_gpu_u16_delivery_parity_and_dtype
+    assert diff_g.max() <= 8, f"graded maxdiff {diff_g.max()} code16"
+E   AssertionError: graded maxdiff 45936 code16
+E   assert 45936 <= 8
+E    +  where 45936 = <built-in method max of numpy.ndarray object at 0x2fe2f58f0>()
+E    +    where <built-in method max of numpy.ndarray object at 0x2fe2f58f0> = array([[[    0,     0, 45936],\n        [    0,     0, 45936],\n        [    0,     0, 45936],\n        ...,\n        [   ...       ...,\n        [    0,     0, 45936],\n        [    0,     0, 45936],\n        [    0,     0, 45936]]], dtype=int32).max
+______________________ test_gpu_multi_layer_stack_parity _______________________
+tests/edit/test_timeline_gpu_export_renderer.py:1056: in test_gpu_multi_layer_stack_parity
+    assert diff.max() <= 4, f"maxdiff {diff.max()}"
+E   AssertionError: maxdiff 64
+E   assert 64 <= 4
+E    +  where 64 = <built-in method max of numpy.ndarray object at 0x2fe2f6370>()
+E    +    where <built-in method max of numpy.ndarray object at 0x2fe2f6370> = array([[[ 0,  0, 63],\n        [ 0,  1, 63],\n        [ 0,  0, 63],\n        ...,\n        [ 0,  0, 63],\n        [ 0,  0, ...3],\n        [ 0,  0, 63],\n        ...,\n        [ 0,  0, 62],\n        [ 0,  0, 62],\n        [ 0,  0, 62]]], dtype=int16).max
+=========================== short test summary info ============================
+FAILED tests/edit/test_timeline_gpu_export_renderer.py::test_gpu_grade_bit_exact_vs_cpu_grading_math
+FAILED tests/edit/test_timeline_gpu_export_renderer.py::test_gpu_u16_delivery_parity_and_dtype
+FAILED tests/edit/test_timeline_gpu_export_renderer.py::test_gpu_multi_layer_stack_parity
+========================= 3 failed, 48 passed in 3.74s =========================
+
+
+===== FAIL tests/edit/test_timeline_metal_export_renderer.py =====
+============================= test session starts ==============================
+collected 108 items
+
+tests/edit/test_timeline_metal_export_renderer.py ..............F....... [ 20%]
+........................................................................ [ 87%]
+..............                                                           [100%]
+
+=================================== FAILURES ===================================
+_____ test_real_metal_stack_reuses_scratch_between_separable_effect_layers _____
+tests/edit/test_timeline_metal_export_renderer.py:649: in test_real_metal_stack_reuses_scratch_between_separable_effect_layers
+    assert "stack_effect_horizontal" in renderer._buffers
+E   AssertionError: assert 'stack_effect_horizontal' in {'stack_accumulator_0': <GFXAAMD_MtlBuffer: 0x7f7c2a6d0b80>\n    label = <none> \n    length = 49152 \n    cpuCacheMode =...sourceStorageModePrivate MTLResourceHazardTrackingModeTracked  \n    purgeableState = MTLPurgeableStateNonVolatile, ...}
+E    +  where {'stack_accumulator_0': <GFXAAMD_MtlBuffer: 0x7f7c2a6d0b80>\n    label = <none> \n    length = 49152 \n    cpuCacheMode =...sourceStorageModePrivate MTLResourceHazardTrackingModeTracked  \n    purgeableState = MTLPurgeableStateNonVolatile, ...} = <src.features.edit.core.timeline_metal_export_renderer.TimelineMetalExportRenderer object at 0x30c1dd8b0>._buffers
+=========================== short test summary info ============================
+FAILED tests/edit/test_timeline_metal_export_renderer.py::test_real_metal_stack_reuses_scratch_between_separable_effect_layers
+======================== 1 failed, 107 passed in 22.55s ========================
+
+
+===== FAIL tests/edit/test_track_sync_lock.py =====
+============================= test session starts ==============================
+collected 11 items
+
+tests/edit/test_track_sync_lock.py .........F.                           [100%]
+
+=================================== FAILURES ===================================
+_____________ TestUiWiring.test_header_menu_emits_sync_lock_signal _____________
+tests/edit/test_track_sync_lock.py:216: in test_header_menu_emits_sync_lock_signal
+    assert header._is_sync_locked is False
+E   assert True is False
+E    +  where True = <src.features.edit.ui.timeline_items.TrackHeaderItem object at 0x2dcf38870>._is_sync_locked
+=========================== short test summary info ============================
+FAILED tests/edit/test_track_sync_lock.py::TestUiWiring::test_header_menu_emits_sync_lock_signal
+========================= 1 failed, 10 passed in 0.59s =========================
+

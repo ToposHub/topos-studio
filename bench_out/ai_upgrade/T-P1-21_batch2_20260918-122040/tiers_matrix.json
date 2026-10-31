@@ -1,0 +1,207 @@
+{
+  "task": "T-P1-21 batch 2 — 质量档计时矩阵",
+  "date": "20260918-122040",
+  "host": {
+    "platform": "darwin",
+    "gl_renderer": "AMD Radeon RX 6800 OpenGL Engine",
+    "note": "standalone GL (headless; NOT Metal)"
+  },
+  "resolution": [
+    1920,
+    1080
+  ],
+  "warmup": 3,
+  "frames": 16,
+  "stat": "median of per-frame wall ms",
+  "rows": [
+    {
+      "effect": "blur",
+      "tier": "normal",
+      "params": {
+        "radius_x": 8.0,
+        "radius_y": 8.0,
+        "blur_type": "gaussian",
+        "mix": 1.0
+      },
+      "median_ms": 0.589,
+      "fps_at_median": 1698.05,
+      "fast_tier_engaged": false
+    },
+    {
+      "effect": "blur",
+      "tier": "fast",
+      "params": {
+        "radius_x": 8.0,
+        "radius_y": 8.0,
+        "blur_type": "gaussian",
+        "mix": 1.0
+      },
+      "median_ms": 0.553,
+      "fps_at_median": 1808.4,
+      "fast_tier_engaged": true,
+      "speedup_vs_normal": 1.07
+    },
+    {
+      "effect": "blur",
+      "tier": "normal",
+      "params": {
+        "radius_x": 16.0,
+        "radius_y": 16.0,
+        "blur_type": "gaussian",
+        "mix": 1.0
+      },
+      "median_ms": 0.773,
+      "fps_at_median": 1294.05,
+      "fast_tier_engaged": false
+    },
+    {
+      "effect": "blur",
+      "tier": "fast",
+      "params": {
+        "radius_x": 16.0,
+        "radius_y": 16.0,
+        "blur_type": "gaussian",
+        "mix": 1.0
+      },
+      "median_ms": 0.547,
+      "fps_at_median": 1827.71,
+      "fast_tier_engaged": true,
+      "speedup_vs_normal": 1.41
+    },
+    {
+      "effect": "blur",
+      "tier": "normal",
+      "params": {
+        "radius_x": 32.0,
+        "radius_y": 32.0,
+        "blur_type": "gaussian",
+        "mix": 1.0
+      },
+      "median_ms": 1.112,
+      "fps_at_median": 899.26,
+      "fast_tier_engaged": false
+    },
+    {
+      "effect": "blur",
+      "tier": "fast",
+      "params": {
+        "radius_x": 32.0,
+        "radius_y": 32.0,
+        "blur_type": "gaussian",
+        "mix": 1.0
+      },
+      "median_ms": 0.595,
+      "fps_at_median": 1681.53,
+      "fast_tier_engaged": true,
+      "speedup_vs_normal": 1.87
+    },
+    {
+      "effect": "defocus",
+      "tier": "separable",
+      "params": {
+        "mode": "separable",
+        "max_radius": 8.0,
+        "focal_size": 0.01
+      },
+      "median_ms": 0.571,
+      "fps_at_median": 1751.09,
+      "fast_tier_engaged": false
+    },
+    {
+      "effect": "defocus",
+      "tier": "mipmap-fast",
+      "params": {
+        "mode": "mipmap",
+        "max_radius": 8.0,
+        "focal_size": 0.01
+      },
+      "median_ms": 0.392,
+      "fps_at_median": 2553.32,
+      "fast_tier_engaged": true,
+      "speedup_vs_separable": 1.46
+    },
+    {
+      "effect": "defocus",
+      "tier": "separable",
+      "params": {
+        "mode": "separable",
+        "max_radius": 16.0,
+        "focal_size": 0.01
+      },
+      "median_ms": 0.468,
+      "fps_at_median": 2134.81,
+      "fast_tier_engaged": false
+    },
+    {
+      "effect": "defocus",
+      "tier": "mipmap-fast",
+      "params": {
+        "mode": "mipmap",
+        "max_radius": 16.0,
+        "focal_size": 0.01
+      },
+      "median_ms": 0.358,
+      "fps_at_median": 2796.74,
+      "fast_tier_engaged": true,
+      "speedup_vs_separable": 1.31
+    },
+    {
+      "effect": "defocus",
+      "tier": "separable",
+      "params": {
+        "mode": "separable",
+        "max_radius": 32.0,
+        "focal_size": 0.01
+      },
+      "median_ms": 0.462,
+      "fps_at_median": 2164.32,
+      "fast_tier_engaged": false
+    },
+    {
+      "effect": "defocus",
+      "tier": "mipmap-fast",
+      "params": {
+        "mode": "mipmap",
+        "max_radius": 32.0,
+        "focal_size": 0.01
+      },
+      "median_ms": 0.379,
+      "fps_at_median": 2635.74,
+      "fast_tier_engaged": true,
+      "speedup_vs_separable": 1.22
+    },
+    {
+      "effect": "denoise",
+      "tier": "quality=fast",
+      "params": {
+        "strength": 0.8,
+        "radius": 6
+      },
+      "median_ms": 0.653,
+      "fps_at_median": 1530.97,
+      "fast_tier_engaged": false
+    },
+    {
+      "effect": "denoise",
+      "tier": "quality=normal",
+      "params": {
+        "strength": 0.8,
+        "radius": 6
+      },
+      "median_ms": 2.471,
+      "fps_at_median": 404.7,
+      "fast_tier_engaged": false
+    },
+    {
+      "effect": "denoise",
+      "tier": "quality=high",
+      "params": {
+        "strength": 0.8,
+        "radius": 6
+      },
+      "median_ms": 5.943,
+      "fps_at_median": 168.27,
+      "fast_tier_engaged": false
+    }
+  ]
+}

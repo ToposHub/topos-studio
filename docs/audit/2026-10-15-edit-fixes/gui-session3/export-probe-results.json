@@ -1,0 +1,47 @@
+[
+  {
+    "file": "smoke-8a7d115c.mp4",
+    "width": 640,
+    "height": 360,
+    "fps": "25",
+    "audio_codec": "aac",
+    "video_frames": 49,
+    "first_pixel_range": [
+      0,
+      255
+    ],
+    "audio_frames": 93,
+    "audio_samples": 95232,
+    "audio_rms": 0.019882047667395496
+  },
+  {
+    "file": "smoke-ddb1f549.mp4",
+    "width": 640,
+    "height": 360,
+    "fps": "25",
+    "audio_codec": "aac",
+    "video_frames": 49,
+    "first_pixel_range": [
+      0,
+      255
+    ],
+    "audio_frames": 93,
+    "audio_samples": 95232,
+    "audio_rms": 0.02159686113356201
+  },
+  {
+    "file": "smoke-e60618f3.mp4",
+    "width": 640,
+    "height": 360,
+    "fps": "25",
+    "audio_codec": "aac",
+    "video_frames": 49,
+    "first_pixel_range": [
+      0,
+      255
+    ],
+    "audio_frames": 93,
+    "audio_samples": 95232,
+    "audio_rms": 0.019882047667395496
+  }
+]

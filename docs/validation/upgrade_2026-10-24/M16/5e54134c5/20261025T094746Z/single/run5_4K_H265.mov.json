@@ -1,0 +1,125 @@
+{
+  "material": "4K_H265.mov",
+  "kind": "zero_copy",
+  "route": {
+    "path": "4K_H265.mov",
+    "decode_route": "macos_vt_zero_copy",
+    "gl": {
+      "GL_RENDERER": "AMD Radeon RX 6900 XT OpenGL Engine",
+      "GL_VERSION": "4.1 ATI-6.1.13"
+    }
+  },
+  "probe": {
+    "frames": 487,
+    "fps": 25.0,
+    "probe": "av"
+  },
+  "finish_reason": "complete",
+  "cold": {
+    "frame": 0,
+    "present_ms": 1.344,
+    "step_total_ms": 612.335,
+    "decode_ms": 29.171,
+    "import_ms": 4.735
+  },
+  "seeks": [
+    {
+      "frame": 244,
+      "present_ms": 0.612,
+      "step_total_ms": 222.647,
+      "decode_ms": 191.025,
+      "import_ms": 1.392
+    },
+    {
+      "frame": 448,
+      "present_ms": 1.567,
+      "step_total_ms": 258.201,
+      "decode_ms": 254.366,
+      "import_ms": 2.126
+    },
+    {
+      "frame": 39,
+      "present_ms": 0.635,
+      "step_total_ms": 145.747,
+      "decode_ms": 143.994,
+      "import_ms": 0.867
+    },
+    {
+      "frame": 341,
+      "present_ms": 0.566,
+      "step_total_ms": 169.102,
+      "decode_ms": 166.587,
+      "import_ms": 1.828
+    },
+    {
+      "frame": 146,
+      "present_ms": 0.513,
+      "step_total_ms": 207.436,
+      "decode_ms": 206.074,
+      "import_ms": 0.763
+    },
+    {
+      "frame": 414,
+      "present_ms": 0.484,
+      "step_total_ms": 154.736,
+      "decode_ms": 153.415,
+      "import_ms": 0.757
+    },
+    {
+      "frame": 58,
+      "present_ms": 0.735,
+      "step_total_ms": 55.353,
+      "decode_ms": 53.707,
+      "import_ms": 0.814
+    },
+    {
+      "frame": 292,
+      "present_ms": 0.49,
+      "step_total_ms": 149.911,
+      "decode_ms": 148.515,
+      "import_ms": 0.829
+    },
+    {
+      "frame": 195,
+      "present_ms": 0.678,
+      "step_total_ms": 162.367,
+      "decode_ms": 160.619,
+      "import_ms": 0.988
+    },
+    {
+      "frame": 463,
+      "present_ms": 0.571,
+      "step_total_ms": 146.925,
+      "decode_ms": 145.42,
+      "import_ms": 0.856
+    }
+  ],
+  "seek_summary": {
+    "n": 10,
+    "p50": 162.367,
+    "p95": 258.201,
+    "max": 258.201,
+    "min": 55.353
+  },
+  "play": {
+    "frames_measured": 72,
+    "decode_ms_p50": 22.181,
+    "decode_ms_p95": 93.36,
+    "import_ms_p50": 0.892,
+    "present_ms_p50": 0.761,
+    "present_ms_p95": 12.891,
+    "frame_total_p50": 25.672,
+    "frame_total_p95": 133.185,
+    "swaps_total": 95,
+    "target_fps": 24.0,
+    "drop_ratio": 0.0
+  },
+  "rss_bytes": [
+    108838912,
+    213590016,
+    206725120,
+    216182784
+  ],
+  "errors": [],
+  "ok": true
+}

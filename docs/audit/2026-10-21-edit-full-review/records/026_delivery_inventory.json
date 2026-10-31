@@ -1,0 +1,297 @@
+{
+  "ok": true,
+  "result": {
+    "workspace": "DeliverWorkspace",
+    "settings_attrs": [
+      [
+        "_project_name",
+        "str"
+      ],
+      [
+        "_filename_follows_timeline",
+        "bool"
+      ],
+      [
+        "_syncing_resolution_values",
+        "bool"
+      ],
+      [
+        "_selected_preset_ids",
+        "list"
+      ],
+      [
+        "_preset_cards",
+        "dict"
+      ],
+      [
+        "_preset_cards_layout",
+        "QHBoxLayout"
+      ],
+      [
+        "_save_preset_btn",
+        "QPushButton"
+      ],
+      [
+        "_filename_edit",
+        "QLineEdit"
+      ],
+      [
+        "_render_mode_group",
+        "QButtonGroup"
+      ],
+      [
+        "_range_combo",
+        "ChevronComboBox"
+      ],
+      [
+        "_custom_range_label",
+        "QLabel"
+      ],
+      [
+        "_custom_range_widget",
+        "QWidget"
+      ],
+      [
+        "_start_frame_spin",
+        "QSpinBox"
+      ],
+      [
+        "_end_frame_spin",
+        "QSpinBox"
+      ],
+      [
+        "_codec_combo",
+        "ChevronComboBox"
+      ],
+      [
+        "_resolution_combo",
+        "ChevronComboBox"
+      ],
+      [
+        "_width_spin",
+        "DragValue"
+      ],
+      [
+        "_height_spin",
+        "DragValue"
+      ],
+      [
+        "_subtitle_combo",
+        "ChevronComboBox"
+      ],
+      [
+        "_audio_check",
+        "QCheckBox"
+      ],
+      [
+        "_audio_codec_combo",
+        "ChevronComboBox"
+      ],
+      [
+        "_audio_sample_combo",
+        "ChevronComboBox"
+      ],
+      [
+        "_audio_bitrate_combo",
+        "ChevronComboBox"
+      ],
+      [
+        "_audio_channels_combo",
+        "ChevronComboBox"
+      ],
+      [
+        "_filename_use_group",
+        "QButtonGroup"
+      ],
+      [
+        "_custom_name_radio",
+        "QRadioButton"
+      ],
+      [
+        "_timeline_or_source_name_radio",
+        "QRadioButton"
+      ],
+      [
+        "_custom_name_edit",
+        "QLineEdit"
+      ],
+      [
+        "_unique_filenames_check",
+        "QCheckBox"
+      ],
+      [
+        "_add_and_start_btn",
+        "QPushButton"
+      ],
+      [
+        "_is_gif_export",
+        "bool"
+      ]
+    ],
+    "buttons": [
+      {
+        "text": "另存为预设…",
+        "tip": "把当前设置面板状态保存为自定义预设（Presets/User/export）",
+        "name": "",
+        "enabled": true,
+        "visible": true
+      },
+      {
+        "text": "浏览",
+        "tip": "",
+        "name": "",
+        "enabled": true,
+        "visible": true
+      },
+      {
+        "text": "单一片段",
+        "tip": "",
+        "name": "",
+        "enabled": true,
+        "visible": true
+      },
+      {
+        "text": "逐片段输出",
+        "tip": "",
+        "name": "",
+        "enabled": true,
+        "visible": true
+      },
+      {
+        "text": "",
+        "tip": "",
+        "name": "ScrollLeftButton",
+        "enabled": false,
+        "visible": false
+      },
+      {
+        "text": "",
+        "tip": "",
+        "name": "ScrollRightButton",
+        "enabled": false,
+        "visible": false
+      },
+      {
+        "text": "自定义名称",
+        "tip": "",
+        "name": "",
+        "enabled": true,
+        "visible": false
+      },
+      {
+        "text": "时间线名称",
+        "tip": "",
+        "name": "",
+        "enabled": true,
+        "visible": false
+      },
+      {
+        "text": "使用唯一文件名",
+        "tip": "附加各片段标识",
+        "name": "",
+        "enabled": true,
+        "visible": false
+      },
+      {
+        "text": "前缀",
+        "tip": "",
+        "name": "",
+        "enabled": false,
+        "visible": false
+      },
+      {
+        "text": "后缀",
+        "tip": "",
+        "name": "",
+        "enabled": false,
+        "visible": false
+      },
+      {
+        "text": "文件名附加源帧号",
+        "tip": "",
+        "name": "",
+        "enabled": false,
+        "visible": false
+      },
+      {
+        "text": "允许占位片段导出",
+        "tip": "含占位片段的时间线默认禁止交付。勾选后仍可导出，占位片段将以彩条形式渲染进成片。",
+        "name": "",
+        "enabled": true,
+        "visible": false
+      },
+      {
+        "text": "包含音频",
+        "tip": "",
+        "name": "",
+        "enabled": true,
+        "visible": false
+      },
+      {
+        "text": "Stems 多音轨（角色分组容器轨）",
+        "tip": "轨 0 为主混音（兼容视图）；时间线上标注了角色（对白/音乐/…）",
+        "name": "",
+        "enabled": true,
+        "visible": false
+      },
+      {
+        "text": "",
+        "tip": "锁定宽高比",
+        "name": "",
+        "enabled": false,
+        "visible": true
+      },
+      {
+        "text": "Alpha 通道",
+        "tip": "",
+        "name": "",
+        "enabled": false,
+        "visible": false
+      },
+      {
+        "text": "加入视频队列",
+        "tip": "",
+        "name": "PrimaryButton",
+        "enabled": true,
+        "visible": true
+      },
+      {
+        "text": "加入并开始",
+        "tip": "",
+        "name": "",
+        "enabled": true,
+        "visible": true
+      }
+    ],
+    "workspace_attrs": [
+      [
+        "_controller",
+        "VideoBatchExportController"
+      ],
+      [
+        "_settings_panel",
+        "VideoExportSettingsPanel"
+      ],
+      [
+        "_batch_panel",
+        "VideoBatchExportPanel"
+      ],
+      [
+        "_batch_panel_host",
+        "DetachablePanelHost"
+      ],
+      [
+        "_queue_running",
+        "bool"
+      ],
+      [
+        "_edit_panels_attached",
+        "bool"
+      ],
+      [
+        "_shared_timeline_panel",
+        "TimelinePanel"
+      ]
+    ]
+  }
+}

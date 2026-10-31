@@ -1,0 +1,95 @@
+// --- Topos Plugin Metadata ---
+// @name Seeded Grain
+// @i18n_name LIB1_Seeded_Grain
+// @author Topos Library v1
+// @version 0.1.0
+// @description Reproducible film grain: smooth value-noise lattice with seed entering the integer hash, luminance-weighted emulsion response and optional chroma grain on two independent hash phases; static mode (same seed = same pattern every frame, host injects no frame uniform)
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider strength "Strength" 0.35 0.0 1.0
+// @param slider grain_size "Grain Size" 1.5 1.0 8.0
+// @param slider seed "Seed" 7.0 0.0 100.0
+// @param slider chroma "Chroma Grain" 0.25 0.0 1.0
+// @param slider shadow_bias "Shadow Bias" 0.25 0.0 1.0
+// @param slider highlight_bias "Highlight Bias" 0.15 0.0 1.0
+// -----------------------------
+//
+// Seeded Grain —— 可复现胶片颗粒（L 计划 F07，LIB1，静态版）。
+//
+// 差量（L00 台账 F07 行，对 plugins/Film_Grain.tglsl）：Film_Grain 为
+// hash value-noise 但无 seed、无彩色颗粒、无动画模式（引擎不注入时间，
+// 其文件注释明示）。本项差量：seed 进入格点散列、彩色相关颗粒（两个
+// 独立 hash 相位）。动画模式依赖正式 frame/seed 子门（L01 冻结口径），
+// 本版仅静态：同一 seed 每帧相同（无 frame 输入）。
+//
+// 算法（与 references/seeded_grain_ref.py 逐式同构）：
+// - 整数格点散列 murmur3 风格 uint32（与库 fixtures/_lattice_hash 同式
+//   ——乘法异或移位雪崩，位宽 32 以在 GLSL 330 uint 原生可表达）：
+//   h = (x·0x9E3779B1)^(y·0x85EBCA77)^(s·0xC2B2AE3D)；h^=h>>15；
+//   h*=0x2545F491；h^=h>>13；h*=0x9E3779B1；h^=h>>16；值=h/2^32 ∈[0,1)
+// - 颗粒格子：cell=max(grain_size,1) 输出像素；gp = uv·texSize/cell；
+//   4-tap 平滑 value noise（smoothstep fade，无 sin/cos 无纹理采样）；
+//   单色相位 s、彩噪相位 s+1001（R 偏移）与 s+2002（B 偏移）；
+// - 亮度加权（乳剂密度响应，同 Film_Grain）：l=clamp(luma,0,1)（权重
+//   域守护，不触碰输出色）；weight = 4l(1-l) + (1-l)^2·shadow_bias + l^2·highlight_bias；
+// - 加性颗粒（HDR 安全不 clamp）：amp=strength·0.12，
+//   R += (n0+n1·chroma)·amp·weight；G += n0·amp·weight；B += (n0+n2·chroma)·amp·weight。
+//
+// strength<0.001 首行早退精确恒等（oracle 同阈值镜像）；参数 ABI 裸名
+// 引用；u_input_tex 仅经 textureSize 取尺寸（引擎注入白名单）。
+
+float sg_hash(uvec2 p, uint s) {
+    uint h = (p.x * 0x9E3779B1u) ^ (p.y * 0x85EBCA77u) ^ (s * 0xC2B2AE3Du);
+    h ^= h >> 15u;
+    h *= 0x2545F491u;
+    h ^= h >> 13u;
+    h *= 0x9E3779B1u;
+    h ^= h >> 16u;
+    return float(h) * (1.0 / 4294967296.0);
+}
+
+float sg_noise(vec2 gp, uint s) {
+    vec2 ci = floor(gp);
+    vec2 f = fract(gp);
+    vec2 fade = f * f * (3.0 - 2.0 * f);
+    float n00 = sg_hash(uvec2(ci), s);
+    float n10 = sg_hash(uvec2(ci) + uvec2(1u, 0u), s);
+    float n01 = sg_hash(uvec2(ci) + uvec2(0u, 1u), s);
+    float n11 = sg_hash(uvec2(ci) + uvec2(1u, 1u), s);
+    return mix(mix(n00, n10, fade.x), mix(n01, n11, fade.x), fade.y);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (strength < 0.001) return color;
+
+    vec2 ts = vec2(textureSize(u_input_tex, 0));
+    float cell = max(grain_size, 1.0);
+    vec2 gp = uv * ts / vec2(cell);
+    uint s = uint(int(seed));
+
+    float n0 = sg_noise(gp, s) * 2.0 - 1.0;            // 单色相位
+    float n1 = sg_noise(gp, s + 1001u) * 2.0 - 1.0;    // 彩噪 R 相位
+    float n2 = sg_noise(gp, s + 2002u) * 2.0 - 1.0;    // 彩噪 B 相位
+
+    // 亮度加权：clamp 只作用于权重调制量，绝不触碰输出颜色（HDR 安全）
+    float l = clamp(dot(color, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+    float mid_w = 4.0 * l * (1.0 - l);
+    float shadow_w = (1.0 - l) * (1.0 - l);
+    float highlight_w = l * l;
+    float weight = mid_w + shadow_w * shadow_bias + highlight_w * highlight_bias;
+
+    float amp = strength * 0.12;
+    return vec3(
+        color.r + (n0 + n1 * chroma) * amp * weight,
+        color.g + n0 * amp * weight,
+        color.b + (n0 + n2 * chroma) * amp * weight);
+}

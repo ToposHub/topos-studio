@@ -1,0 +1,99 @@
+4K_topos_422_Proxy.mov {"preview_sequential": {"n": 12, "median_ms": 726.88975300116, "p95_ms": 748.9755060014431, "max_ms": 748.9755060014431, "render_throughput_fps": 1.3740202646246853}, "preview_seek": {"n": 4, "median_ms": 718.7877174983441, "p95_ms": 870.7170470006531, "max_ms": 870.7170470006531, "render_throughput_fps": 1.3520034125495095}, "export_sequential": {"n": 4, "median_ms": 1334.1627230001905, "p95_ms": 1376.5469170029974, "max_ms": 1376.5469170029974, "render_throughput_fps": 0.7544631301970335}}
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6900 XT OpenGL Engine); compute-shader effects will use the fragment fallback
+Compute shaders unavailable: OpenGL 4.1 detected, requires 4.3+. Large-radius effects will use fragment shader fallback (slower).
+Metal compute bridge available but disabled by default: fragment fallback is faster for large-radius effects (see tests/media/results/metal_compute_ab.md). Set TOPOS_METAL_COMPUTE=1 to force the Metal path.
+Could only free 70361600 bytes, needed 120885248
+Could only free 72921088 bytes, needed 128733696
+Could only free 44781568 bytes, needed 118780416
+Could only free 2254336 bytes, needed 57422848
+Could only free 0 bytes, needed 187878912
+Could only free 134964736 bytes, needed 189854720
+Error evaluating v (source): GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glActiveTexture,
+	cArguments = (33984,)
+)
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 913, in _evaluate_snapshot
+    outputs[port_name] = self._crop_to_tile_roi(
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 1874, in _crop_to_tile_roi
+    self._bind_external_texture(tex.texture_id)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 3149, in _bind_external_texture
+    self._bind_texture_unit(texture_id, 0)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 3126, in _bind_texture_unit
+    bind_texture_unit(texture_id, unit)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/core/gl_bind.py", line 56, in bind_texture_unit
+    active(_gl.GL_TEXTURE0 + int(unit))
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/.venv/lib/python3.12/site-packages/OpenGL/error.py", line 230, in glCheckError
+    raise self._errorClass(
+OpenGL.error.GLError: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glActiveTexture,
+	cArguments = (33984,)
+)
+Could only free 0 bytes, needed 121245184
+Could only free 201401344 bytes, needed 253955584
+Could only free 36586496 bytes, needed 44923392
+Could only free 0 bytes, needed 74692096
+Could only free 0 bytes, needed 207402496
+Could only free 162812416 bytes, needed 209656832
+Error evaluating v (source): GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glActiveTexture,
+	cArguments = (33984,)
+)
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 913, in _evaluate_snapshot
+    outputs[port_name] = self._crop_to_tile_roi(
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 1874, in _crop_to_tile_roi
+    self._bind_external_texture(tex.texture_id)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 3149, in _bind_external_texture
+    self._bind_texture_unit(texture_id, 0)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 3126, in _bind_texture_unit
+    bind_texture_unit(texture_id, unit)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/core/gl_bind.py", line 56, in bind_texture_unit
+    active(_gl.GL_TEXTURE0 + int(unit))
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/.venv/lib/python3.12/site-packages/OpenGL/error.py", line 230, in glCheckError
+    raise self._errorClass(
+OpenGL.error.GLError: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glActiveTexture,
+	cArguments = (33984,)
+)
+Could only free 0 bytes, needed 113199616
+Could only free 0 bytes, needed 245910016
+Could only free 134964736 bytes, needed 247885824
+Error evaluating v (source): GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glActiveTexture,
+	cArguments = (33984,)
+)
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 913, in _evaluate_snapshot
+    outputs[port_name] = self._crop_to_tile_roi(
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 1874, in _crop_to_tile_roi
+    self._bind_external_texture(tex.texture_id)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 3149, in _bind_external_texture
+    self._bind_texture_unit(texture_id, 0)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/evaluators/base_evaluator.py", line 3126, in _bind_texture_unit
+    bind_texture_unit(texture_id, unit)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/core/gl_bind.py", line 56, in bind_texture_unit
+    active(_gl.GL_TEXTURE0 + int(unit))
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/.venv/lib/python3.12/site-packages/OpenGL/error.py", line 230, in glCheckError
+    raise self._errorClass(
+OpenGL.error.GLError: GLError(
+	err = 1282,
+	description = b'invalid operation',
+	baseOperation = glActiveTexture,
+	cArguments = (33984,)
+)
+Could only free 0 bytes, needed 179276288
+Could only free 0 bytes, needed 311986688

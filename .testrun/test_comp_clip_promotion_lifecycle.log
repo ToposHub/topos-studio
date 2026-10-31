@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 20 items
+
+tests/edit/test_comp_clip_promotion_lifecycle.py ....................    [100%]
+
+============================== 20 passed in 7.55s ==============================

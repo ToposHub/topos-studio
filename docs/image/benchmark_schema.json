@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://topos.color/image/benchmark-schema-v1.json",
+  "title": "Topos Image benchmark report",
+  "type": "object",
+  "required": ["schema_version", "environment", "source", "profile", "threads", "cache_state", "stages", "quality"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "generated_at_utc": {"type": "string"},
+    "environment": {"$ref": "#/$defs/environment"},
+    "source": {"$ref": "#/$defs/source"},
+    "profile": {"$ref": "#/$defs/profile"},
+    "threads": {"type": "object", "required": ["requested"], "properties": {"requested": {"type": "integer", "minimum": 0}, "env": {"type": ["string", "null"]}}, "additionalProperties": true},
+    "cache_state": {"enum": ["cold", "hot", "unknown"]},
+    "target_size": {"type": "integer", "minimum": 1},
+    "webp_quality": {"type": "integer", "minimum": 0, "maximum": 100},
+    "iterations": {"type": "integer", "minimum": 1},
+    "stages": {"type": "array", "minItems": 7, "items": {"$ref": "#/$defs/stage"}},
+    "quality": {"type": "object", "required": ["status"], "properties": {"status": {"type": "string"}, "reference": {}, "note": {"type": "string"}}, "additionalProperties": true}
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "environment": {"type": "object", "required": ["os", "python", "machine", "logical_cpu_count", "build_type", "git_commit"], "additionalProperties": true},
+    "source": {"type": "object", "required": ["path", "sha256", "bytes", "width", "height"], "properties": {"path": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "bytes": {"type": "integer", "minimum": 1}, "width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}}, "additionalProperties": true},
+    "profile": {"type": "object", "required": ["image_profile", "name", "pixel_format", "bit_depth", "plane_count", "alpha_mode", "alpha_bit_depth", "color_range", "color_primaries", "color_transfer", "color_matrix"], "additionalProperties": true},
+    "percentiles": {"type": "object", "required": ["p50", "p95", "p99", "max", "mean"], "properties": {"p50": {"type": "number", "minimum": 0}, "p95": {"type": "number", "minimum": 0}, "p99": {"type": "number", "minimum": 0}, "max": {"type": "number", "minimum": 0}, "mean": {"type": "number", "minimum": 0}}, "additionalProperties": false},
+    "stage": {"type": "object", "required": ["name", "latency_ms", "throughput_fps", "memory_peak_mb"], "properties": {"name": {"type": "string"}, "latency_ms": {"$ref": "#/$defs/percentiles"}, "throughput_fps": {"type": "number", "minimum": 0}, "memory_peak_mb": {"type": "number", "minimum": 0}, "output_bytes": {"type": "integer", "minimum": 0}}, "additionalProperties": true}
+  }
+}

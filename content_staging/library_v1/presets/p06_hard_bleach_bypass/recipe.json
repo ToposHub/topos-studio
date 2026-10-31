@@ -1,0 +1,24 @@
+{
+  "recipe_id": "P06",
+  "name": "硬朗漂白",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合高反差动作/战争感；contrast 0.5–0.8，饱和保留压到 0.3 以下",
+  "component": "Bleach_Bypass（生产插件 plugins/Bleach_Bypass.tglsl）",
+  "dependencies": {
+    "plugin_id": "Bleach_Bypass",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "strength": 0.85,
+    "contrast": 0.65,
+    "saturation": 0.25
+  },
+  "notes": "生产插件硬朗漂白路线：低饱和高反差银保留；参数已对真实插件 schema 校验。"
+}

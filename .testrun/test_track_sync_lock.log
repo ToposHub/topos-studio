@@ -1,0 +1,14 @@
+============================= test session starts ==============================
+collected 11 items
+
+tests/edit/test_track_sync_lock.py .........F.                           [100%]
+
+=================================== FAILURES ===================================
+_____________ TestUiWiring.test_header_menu_emits_sync_lock_signal _____________
+tests/edit/test_track_sync_lock.py:216: in test_header_menu_emits_sync_lock_signal
+    assert header._is_sync_locked is False
+E   assert True is False
+E    +  where True = <src.features.edit.ui.timeline_items.TrackHeaderItem object at 0x2ebb3c410>._is_sync_locked
+=========================== short test summary info ============================
+FAILED tests/edit/test_track_sync_lock.py::TestUiWiring::test_header_menu_emits_sync_lock_signal
+========================= 1 failed, 10 passed in 4.60s =========================

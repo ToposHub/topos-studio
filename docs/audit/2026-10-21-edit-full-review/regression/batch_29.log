@@ -1,0 +1,39 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 588 items
+
+tests/edit/test_timeline_metal_export_renderer.py ...................... [  3%]
+........................................................................ [ 15%]
+..............                                                           [ 18%]
+tests/edit/test_timeline_metal_prefetch.py ...                           [ 18%]
+tests/edit/test_timeline_occlusion.py .................................. [ 24%]
+.................................                                        [ 30%]
+tests/edit/test_timeline_occlusion_export_seam.py .........              [ 31%]
+tests/edit/test_timeline_occlusion_preview_seam.py ...........           [ 33%]
+tests/edit/test_timeline_occlusion_real_media.py .............           [ 35%]
+tests/edit/test_timeline_ops.py ........................................ [ 42%]
+....                                                                     [ 43%]
+tests/edit/test_timeline_p7_regression.py .s............................ [ 48%]
+..........                                                               [ 50%]
+tests/edit/test_timeline_panel_auto_cache_playback.py ...                [ 50%]
+tests/edit/test_timeline_panel_zoom_coalescing.py .......                [ 51%]
+tests/edit/test_timeline_playhead_style.py .                             [ 52%]
+tests/edit/test_timeline_preview_renderer.py ........................... [ 56%]
+........................................................................ [ 68%]
+.........................................................                [ 78%]
+tests/edit/test_timeline_range_bar.py .........................          [ 82%]
+tests/edit/test_timeline_render_plan.py ................................ [ 88%]
+........................                                                 [ 92%]
+tests/edit/test_timeline_ripple_delete.py ......                         [ 93%]
+tests/edit/test_timeline_shortcuts_migration.py .......                  [ 94%]
+tests/edit/test_timeline_single_layer_fast_path.py .....                 [ 95%]
+tests/edit/test_timeline_status_feedback.py ....                         [ 96%]
+tests/edit/test_timeline_thumbnail_recovery.py ...                       [ 96%]
+tests/edit/test_timeline_thumbnail_scheduler.py ....................     [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_29.xml -
+======================= 587 passed, 1 skipped in 52.94s ========================

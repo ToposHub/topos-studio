@@ -1,0 +1,242 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 1923 items / 1 skipped
+
+tests/edit/ai_editing/test_agent_feature_flags.py .................      [  0%]
+tests/edit/ai_editing/test_agent_inbox.py ...                            [  1%]
+tests/edit/ai_editing/test_agent_metrics.py .............                [  1%]
+tests/edit/ai_editing/test_agent_models.py ............................. [  3%]
+........................                                                 [  4%]
+tests/edit/ai_editing/test_agent_orchestrator.py ....................... [  5%]
+..................                                                       [  6%]
+tests/edit/ai_editing/test_agent_phase_presenter.py .................... [  7%]
+..................                                                       [  8%]
+tests/edit/ai_editing/test_agent_task_executor.py ....................   [  9%]
+tests/edit/ai_editing/test_agent_tool_loop.py ...................        [ 10%]
+tests/edit/ai_editing/test_ai_provider_catalog.py ......                 [ 10%]
+tests/edit/ai_editing/test_analysis.py ................................. [ 12%]
+...............                                                          [ 13%]
+tests/edit/ai_editing/test_analysis_cache_persistence.py ..              [ 13%]
+tests/edit/ai_editing/test_analysis_progress.py .......                  [ 13%]
+tests/edit/ai_editing/test_analysis_request.py .................         [ 14%]
+tests/edit/ai_editing/test_analysis_scheduler.py ....................    [ 15%]
+tests/edit/ai_editing/test_approval_service.py ......................... [ 17%]
+                                                                         [ 17%]
+tests/edit/ai_editing/test_artifact_store.py ......................      [ 18%]
+tests/edit/ai_editing/test_assistant_capability_router.py .............. [ 18%]
+......                                                                   [ 19%]
+tests/edit/ai_editing/test_assistant_events.py ..........                [ 19%]
+tests/edit/ai_editing/test_assistant_modes.py ...                        [ 19%]
+tests/edit/ai_editing/test_assistant_plan_lifecycle.py ......            [ 20%]
+tests/edit/ai_editing/test_assistant_plugins.py ....                     [ 20%]
+tests/edit/ai_editing/test_assistant_role_executor_injection.py .        [ 20%]
+tests/edit/ai_editing/test_autonomous_agent.py ...........               [ 21%]
+tests/edit/ai_editing/test_autonomous_mission.py ....                    [ 21%]
+tests/edit/ai_editing/test_autonomous_recovery.py ......                 [ 21%]
+tests/edit/ai_editing/test_brief_create_default.py .....                 [ 21%]
+tests/edit/ai_editing/test_capability_catalog_runtime.py ...             [ 22%]
+tests/edit/ai_editing/test_capability_status.py .......                  [ 22%]
+tests/edit/ai_editing/test_chat_inbox_integration.py ..                  [ 22%]
+tests/edit/ai_editing/test_chat_run_driver.py .........................  [ 23%]
+tests/edit/ai_editing/test_commercial_acceptance.py ......               [ 24%]
+tests/edit/ai_editing/test_commercial_p0_p1.py ......................... [ 25%]
+..                                                                       [ 25%]
+tests/edit/ai_editing/test_composition_plugin.py ....                    [ 25%]
+tests/edit/ai_editing/test_context_budget.py ........................... [ 27%]
+..                                                                       [ 27%]
+tests/edit/ai_editing/test_context_bundle.py .....................       [ 28%]
+tests/edit/ai_editing/test_context_compress.py ...........               [ 28%]
+tests/edit/ai_editing/test_context_service.py ..................         [ 29%]
+tests/edit/ai_editing/test_context_spill.py ..                           [ 29%]
+tests/edit/ai_editing/test_creative_assets.py ..                         [ 30%]
+tests/edit/ai_editing/test_credential_store.py ..........                [ 30%]
+tests/edit/ai_editing/test_decision_service.py .....                     [ 30%]
+tests/edit/ai_editing/test_delivery_analyzer.py ...                      [ 30%]
+tests/edit/ai_editing/test_delivery_contracts.py ............            [ 31%]
+tests/edit/ai_editing/test_delivery_quality_gate.py .........            [ 32%]
+tests/edit/ai_editing/test_edit_api.py ...........                       [ 32%]
+tests/edit/ai_editing/test_edit_capability_plugin.py ..                  [ 32%]
+tests/edit/ai_editing/test_edit_project_service.py ............          [ 33%]
+tests/edit/ai_editing/test_editorial_brief_service.py ...........        [ 33%]
+tests/edit/ai_editing/test_eval_runner.py .......                        [ 34%]
+tests/edit/ai_editing/test_eval_trace.py .......................         [ 35%]
+tests/edit/ai_editing/test_evidence_and_commercial_gates.py ....         [ 35%]
+tests/edit/ai_editing/test_execution_policy.py .....                     [ 35%]
+tests/edit/ai_editing/test_export_jobs.py ...............                [ 36%]
+tests/edit/ai_editing/test_export_postcheck.py ..                        [ 36%]
+tests/edit/ai_editing/test_fcpxml_adapter.py ..........                  [ 37%]
+tests/edit/ai_editing/test_generated_media_materializer.py .......       [ 37%]
+tests/edit/ai_editing/test_generation_bin.py ........................... [ 39%]
+                                                                         [ 39%]
+tests/edit/ai_editing/test_generation_models.py ........................ [ 40%]
+.......                                                                  [ 40%]
+tests/edit/ai_editing/test_generation_provider.py ..................     [ 41%]
+tests/edit/ai_editing/test_generation_provider_pack.py .......           [ 42%]
+tests/edit/ai_editing/test_generation_recipe.py ...                      [ 42%]
+tests/edit/ai_editing/test_goal_round_driver.py ..                       [ 42%]
+tests/edit/ai_editing/test_goal_supervisor.py ...............            [ 43%]
+tests/edit/ai_editing/test_help_index.py .................               [ 43%]
+tests/edit/ai_editing/test_http_generation_provider.py ......            [ 44%]
+tests/edit/ai_editing/test_import_builder.py ........                    [ 44%]
+tests/edit/ai_editing/test_job_registry_persistence.py .                 [ 44%]
+tests/edit/ai_editing/test_keyframe_sampler.py ....................      [ 45%]
+tests/edit/ai_editing/test_kill_switch.py ...................            [ 46%]
+tests/edit/ai_editing/test_llm_max_tokens_fallback.py ....               [ 47%]
+tests/edit/ai_editing/test_mcp_gateway.py ........................       [ 48%]
+tests/edit/ai_editing/test_mcp_plugin_host.py ..                         [ 48%]
+tests/edit/ai_editing/test_mcp_vision_gateway.py ....................... [ 49%]
+................                                                         [ 50%]
+tests/edit/ai_editing/test_media_generation_service.py ................. [ 51%]
+.......                                                                  [ 51%]
+tests/edit/ai_editing/test_media_materialization_pipeline.py ....        [ 51%]
+tests/edit/ai_editing/test_media_probe.py .................              [ 52%]
+tests/edit/ai_editing/test_message_record.py ................            [ 53%]
+tests/edit/ai_editing/test_model_pack_manager.py ....................... [ 54%]
+....                                                                     [ 54%]
+tests/edit/ai_editing/test_motion_graphic_artifacts.py ................. [ 55%]
+                                                                         [ 55%]
+tests/edit/ai_editing/test_motion_graphic_run.py ..........              [ 56%]
+tests/edit/ai_editing/test_multimodal_input.py ........................  [ 57%]
+tests/edit/ai_editing/test_music_policy.py ..............                [ 58%]
+tests/edit/ai_editing/test_ocr_provider.py ..............                [ 59%]
+tests/edit/ai_editing/test_ocr_provider_real.py .....................    [ 60%]
+tests/edit/ai_editing/test_otio_adapter.py .....                         [ 60%]
+tests/edit/ai_editing/test_p0_red_lines.py ..............                [ 61%]
+tests/edit/ai_editing/test_p0_session_wiring.py ............             [ 61%]
+tests/edit/ai_editing/test_persistence_serialization.py ............     [ 62%]
+tests/edit/ai_editing/test_plan_repository.py ..........                 [ 62%]
+tests/edit/ai_editing/test_plugin_tool_facade.py .                       [ 62%]
+tests/edit/ai_editing/test_postcondition_checker.py .............        [ 63%]
+tests/edit/ai_editing/test_profile_config.py ......                      [ 63%]
+tests/edit/ai_editing/test_profile_speech_routing.py ...                 [ 64%]
+tests/edit/ai_editing/test_provider_capabilities.py .................... [ 65%]
+...................                                                      [ 66%]
+tests/edit/ai_editing/test_provider_plugin_host.py ...                   [ 66%]
+tests/edit/ai_editing/test_quality_gate.py ...............               [ 67%]
+tests/edit/ai_editing/test_real_media_probe_matrix.py FFFFFFFFFF         [ 67%]
+tests/edit/ai_editing/test_release_evidence.py ...                       [ 67%]
+tests/edit/ai_editing/test_release_gate.py ..........                    [ 68%]
+tests/edit/ai_editing/test_release_manifest.py ....                      [ 68%]
+tests/edit/ai_editing/test_release_test_matrix.py .....                  [ 68%]
+tests/edit/ai_editing/test_render_diagnostics.py .....................   [ 69%]
+tests/edit/ai_editing/test_request_recovery.py ...                       [ 69%]
+tests/edit/ai_editing/test_rollout_metrics.py ..                         [ 70%]
+tests/edit/ai_editing/test_safe_path_policy.py ...............           [ 70%]
+tests/edit/ai_editing/test_scene_cut_ingest.py .....                     [ 71%]
+tests/edit/ai_editing/test_session_catalog.py .......................... [ 72%]
+....                                                                     [ 72%]
+tests/edit/ai_editing/test_skill_manifest.py ........................... [ 74%]
+                                                                         [ 74%]
+tests/edit/ai_editing/test_skill_registry.py ........................... [ 75%]
+..                                                                       [ 75%]
+tests/edit/ai_editing/test_skill_runtime.py .................            [ 76%]
+tests/edit/ai_editing/test_subtitle_draft.py ..............              [ 77%]
+tests/edit/ai_editing/test_subtitle_placement.py ..                      [ 77%]
+tests/edit/ai_editing/test_taep_contracts.py ........................... [ 78%]
+............                                                             [ 79%]
+tests/edit/ai_editing/test_task_graph.py ............................... [ 80%]
+......                                                                   [ 81%]
+tests/edit/ai_editing/test_task_graph_budget.py ...                      [ 81%]
+tests/edit/ai_editing/test_timebase_conversion.py ................       [ 82%]
+tests/edit/ai_editing/test_timebase_service.py ....................      [ 83%]
+tests/edit/ai_editing/test_timeline_capabilities.py ..............       [ 84%]
+tests/edit/ai_editing/test_token_estimator.py ............               [ 84%]
+tests/edit/ai_editing/test_tool_call_log.py ...........................  [ 86%]
+tests/edit/ai_editing/test_tool_calling_client.py ..................     [ 86%]
+tests/edit/ai_editing/test_tool_facade.py .............................. [ 88%]
+.......                                                                  [ 88%]
+tests/edit/ai_editing/test_tool_invocation.py .....................      [ 90%]
+tests/edit/ai_editing/test_tool_operation_ledger.py ...                  [ 90%]
+tests/edit/ai_editing/test_tool_result.py .....................          [ 91%]
+tests/edit/ai_editing/test_tool_result_pruner.py ....                    [ 91%]
+tests/edit/ai_editing/test_toposctl.py ....................              [ 92%]
+tests/edit/ai_editing/test_toposctl_offline.py ..............            [ 93%]
+tests/edit/ai_editing/test_transaction_service.py ...................... [ 94%]
+.......                                                                  [ 94%]
+tests/edit/ai_editing/test_transcript_provider.py .....................  [ 95%]
+tests/edit/ai_editing/test_transcript_provider_real.py ................. [ 96%]
+..                                                                       [ 96%]
+tests/edit/ai_editing/test_transcript_router.py .....                    [ 97%]
+tests/edit/ai_editing/test_user_ai_config.py ...                         [ 97%]
+tests/edit/ai_editing/test_variant_planner.py ........                   [ 97%]
+tests/edit/ai_editing/test_visual_semantics.py .........                 [ 98%]
+tests/edit/ai_editing/test_volcengine_generation_provider.py ....        [ 98%]
+tests/edit/ai_editing/test_workflow_runner.py .........................  [ 99%]
+tests/edit/ai_editing/test_workflow_stage_events.py .......              [100%]
+
+=================================== FAILURES ===================================
+__ test_real_video_probe_matrix[2K_DNxHR HQX 12-bit.mov-expected_resolution0] __
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:39: in test_real_video_probe_matrix
+    assert result.succeeded, (filename, result.error_code)
+E   AssertionError: ('2K_DNxHR HQX 12-bit.mov', 'PROBE_UNAVAILABLE')
+E   assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+________ test_real_video_probe_matrix[2K_H265.mov-expected_resolution1] ________
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:39: in test_real_video_probe_matrix
+    assert result.succeeded, (filename, result.error_code)
+E   AssertionError: ('2K_H265.mov', 'PROBE_UNAVAILABLE')
+E   assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+________ test_real_video_probe_matrix[2K_h264.mp4-expected_resolution2] ________
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:39: in test_real_video_probe_matrix
+    assert result.succeeded, (filename, result.error_code)
+E   AssertionError: ('2K_h264.mp4', 'PROBE_UNAVAILABLE')
+E   assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+____ test_real_video_probe_matrix[2K_prores422HQ.mov-expected_resolution3] _____
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:39: in test_real_video_probe_matrix
+    assert result.succeeded, (filename, result.error_code)
+E   AssertionError: ('2K_prores422HQ.mov', 'PROBE_UNAVAILABLE')
+E   assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+__ test_real_video_probe_matrix[4K_DNxHR HQX 12-bit.mov-expected_resolution4] __
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:39: in test_real_video_probe_matrix
+    assert result.succeeded, (filename, result.error_code)
+E   AssertionError: ('4K_DNxHR HQX 12-bit.mov', 'PROBE_UNAVAILABLE')
+E   assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+________ test_real_video_probe_matrix[4K_H264.mov-expected_resolution5] ________
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:39: in test_real_video_probe_matrix
+    assert result.succeeded, (filename, result.error_code)
+E   AssertionError: ('4K_H264.mov', 'PROBE_UNAVAILABLE')
+E   assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+________ test_real_video_probe_matrix[4K_H265.mov-expected_resolution6] ________
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:39: in test_real_video_probe_matrix
+    assert result.succeeded, (filename, result.error_code)
+E   AssertionError: ('4K_H265.mov', 'PROBE_UNAVAILABLE')
+E   assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+____ test_real_video_probe_matrix[4K_prores422HQ.mov-expected_resolution7] _____
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:39: in test_real_video_probe_matrix
+    assert result.succeeded, (filename, result.error_code)
+E   AssertionError: ('4K_prores422HQ.mov', 'PROBE_UNAVAILABLE')
+E   assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+_____ test_real_video_probe_matrix[4K_prores4444.mov-expected_resolution8] _____
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:39: in test_real_video_probe_matrix
+    assert result.succeeded, (filename, result.error_code)
+E   AssertionError: ('4K_prores4444.mov', 'PROBE_UNAVAILABLE')
+E   assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+_______________________ test_real_h264_delivery_analysis _______________________
+../topos/tests/edit/ai_editing/test_real_media_probe_matrix.py:67: in test_real_h264_delivery_analysis
+    assert probe_result.succeeded
+E   AssertionError: assert False
+E    +  where False = MediaProbeResult(succeeded=False, quality_input=DeliveryQualityInput(project_references_valid=None, timeline_valid=Non...False, output_hash=None, manifest_present=None, thumbnail_present=None), error_code='PROBE_UNAVAILABLE', metadata=None).succeeded
+=========================== short test summary info ============================
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_video_probe_matrix[2K_DNxHR HQX 12-bit.mov-expected_resolution0]
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_video_probe_matrix[2K_H265.mov-expected_resolution1]
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_video_probe_matrix[2K_h264.mp4-expected_resolution2]
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_video_probe_matrix[2K_prores422HQ.mov-expected_resolution3]
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_video_probe_matrix[4K_DNxHR HQX 12-bit.mov-expected_resolution4]
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_video_probe_matrix[4K_H264.mov-expected_resolution5]
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_video_probe_matrix[4K_H265.mov-expected_resolution6]
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_video_probe_matrix[4K_prores422HQ.mov-expected_resolution7]
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_video_probe_matrix[4K_prores4444.mov-expected_resolution8]
+FAILED tests/edit/ai_editing/test_real_media_probe_matrix.py::test_real_h264_delivery_analysis
+================= 10 failed, 1913 passed, 1 skipped in 20.18s ==================

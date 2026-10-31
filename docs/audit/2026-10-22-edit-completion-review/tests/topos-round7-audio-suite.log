@@ -1,0 +1,111 @@
+SELECTED 45
+tests/edit/test_audio_automation.py
+tests/edit/test_audio_automation_recording.py
+tests/edit/test_audio_bus_registration.py
+tests/edit/test_audio_bus_routing.py
+tests/edit/test_audio_capabilities.py
+tests/edit/test_audio_clip_effects.py
+tests/edit/test_audio_dsp.py
+tests/edit/test_audio_dsp_timeline_export.py
+tests/edit/test_audio_dsp_vectorization.py
+tests/edit/test_audio_effect_registry_health.py
+tests/edit/test_audio_engine_avsync.py
+tests/edit/test_audio_export_parity.py
+tests/edit/test_audio_export_preflight.py
+tests/edit/test_audio_graph_parity.py
+tests/edit/test_audio_graph_snapshot.py
+tests/edit/test_audio_graph_validation.py
+tests/edit/test_audio_health_report.py
+tests/edit/test_audio_layout_delivery.py
+tests/edit/test_audio_leftover_samples.py
+tests/edit/test_audio_playback.py
+tests/edit/test_audio_ring_buffer.py
+tests/edit/test_audio_routing_gate.py
+tests/edit/test_audio_routing_save_warning.py
+tests/edit/test_audio_signature_completeness.py
+tests/edit/test_audio_three_way_parity.py
+tests/edit/test_audio_timestretch.py
+tests/edit/test_audio_transitions.py
+tests/edit/test_audio_waveform.py
+tests/edit/test_audio_waveform_lifecycle.py
+tests/edit/test_audio_waveform_perf_and_fx.py
+tests/edit/test_clip_audio_effect_dialog_adapter.py
+tests/edit/test_clip_audio_fade.py
+tests/edit/test_clip_audio_gain.py
+tests/edit/test_effect_registry_audio.py
+tests/edit/test_fix_round6_phase1b_audio.py
+tests/edit/test_multicam_nested_timecode_truepeak.py
+tests/edit/test_nested_audio_flatten.py
+tests/edit/test_nested_sequence.py
+tests/edit/test_nested_sequence_production.py
+tests/edit/test_preserve_pitch_ui.py
+tests/edit/test_round4_nested_audio_gate.py
+tests/edit/test_round4_nested_sampling.py
+tests/edit/test_stem_export.py
+tests/edit/test_stem_export_dialog.py
+tests/edit/test_timeline_audio_integration.py
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 938 items
+
+tests/edit/test_audio_automation.py ........................             [  2%]
+tests/edit/test_audio_automation_recording.py .......                    [  3%]
+tests/edit/test_audio_bus_registration.py ..........                     [  4%]
+tests/edit/test_audio_bus_routing.py .........................           [  7%]
+tests/edit/test_audio_capabilities.py ..........                         [  8%]
+tests/edit/test_audio_clip_effects.py ..........                         [  9%]
+tests/edit/test_audio_dsp.py ........................................... [ 13%]
+...............................................................          [ 20%]
+tests/edit/test_audio_dsp_timeline_export.py .......                     [ 21%]
+tests/edit/test_audio_dsp_vectorization.py ............................. [ 24%]
+.........................................                                [ 28%]
+tests/edit/test_audio_effect_registry_health.py .........                [ 29%]
+tests/edit/test_audio_engine_avsync.py ..............                    [ 31%]
+tests/edit/test_audio_export_parity.py ............                      [ 32%]
+tests/edit/test_audio_export_preflight.py ...........                    [ 33%]
+tests/edit/test_audio_graph_parity.py .................................. [ 37%]
+..                                                                       [ 37%]
+tests/edit/test_audio_graph_snapshot.py ....................             [ 39%]
+tests/edit/test_audio_graph_validation.py ..........                     [ 40%]
+tests/edit/test_audio_health_report.py ................                  [ 42%]
+tests/edit/test_audio_layout_delivery.py ...........                     [ 43%]
+tests/edit/test_audio_leftover_samples.py ................               [ 45%]
+tests/edit/test_audio_playback.py ...................................... [ 49%]
+..............................................................           [ 55%]
+tests/edit/test_audio_ring_buffer.py ............                        [ 57%]
+tests/edit/test_audio_routing_gate.py ....                               [ 57%]
+tests/edit/test_audio_routing_save_warning.py .......                    [ 58%]
+tests/edit/test_audio_signature_completeness.py ........................ [ 60%]
+.                                                                        [ 60%]
+tests/edit/test_audio_three_way_parity.py ....                           [ 61%]
+tests/edit/test_audio_timestretch.py ....................                [ 63%]
+tests/edit/test_audio_transitions.py .............................       [ 66%]
+tests/edit/test_audio_waveform.py ..........................             [ 69%]
+tests/edit/test_audio_waveform_lifecycle.py ..                           [ 69%]
+tests/edit/test_audio_waveform_perf_and_fx.py .............s......       [ 71%]
+tests/edit/test_clip_audio_effect_dialog_adapter.py ........             [ 72%]
+tests/edit/test_clip_audio_fade.py ..............                        [ 74%]
+tests/edit/test_clip_audio_gain.py ........                              [ 74%]
+tests/edit/test_effect_registry_audio.py ............................... [ 78%]
+......                                                                   [ 78%]
+tests/edit/test_fix_round6_phase1b_audio.py .....................        [ 81%]
+tests/edit/test_multicam_nested_timecode_truepeak.py ........            [ 81%]
+tests/edit/test_nested_audio_flatten.py ................                 [ 83%]
+tests/edit/test_nested_sequence.py ...............                       [ 85%]
+tests/edit/test_nested_sequence_production.py ......................     [ 87%]
+tests/edit/test_preserve_pitch_ui.py ......                              [ 88%]
+tests/edit/test_round4_nested_audio_gate.py ............................ [ 91%]
+                                                                         [ 91%]
+tests/edit/test_round4_nested_sampling.py .........                      [ 92%]
+tests/edit/test_stem_export.py ...........................               [ 95%]
+tests/edit/test_stem_export_dialog.py ...........                        [ 96%]
+tests/edit/test_timeline_audio_integration.py .......................... [ 99%]
+.........                                                                [100%]
+
+------------ generated xml file: /tmp/topos-round7-audio-suite.xml -------------
+======================= 937 passed, 1 skipped in 22.32s ========================
+RESULT {"returncode": 0, "seconds": 24.080832785999974, "files": ["tests/edit/test_audio_automation.py", "tests/edit/test_audio_automation_recording.py", "tests/edit/test_audio_bus_registration.py", "tests/edit/test_audio_bus_routing.py", "tests/edit/test_audio_capabilities.py", "tests/edit/test_audio_clip_effects.py", "tests/edit/test_audio_dsp.py", "tests/edit/test_audio_dsp_timeline_export.py", "tests/edit/test_audio_dsp_vectorization.py", "tests/edit/test_audio_effect_registry_health.py", "tests/edit/test_audio_engine_avsync.py", "tests/edit/test_audio_export_parity.py", "tests/edit/test_audio_export_preflight.py", "tests/edit/test_audio_graph_parity.py", "tests/edit/test_audio_graph_snapshot.py", "tests/edit/test_audio_graph_validation.py", "tests/edit/test_audio_health_report.py", "tests/edit/test_audio_layout_delivery.py", "tests/edit/test_audio_leftover_samples.py", "tests/edit/test_audio_playback.py", "tests/edit/test_audio_ring_buffer.py", "tests/edit/test_audio_routing_gate.py", "tests/edit/test_audio_routing_save_warning.py", "tests/edit/test_audio_signature_completeness.py", "tests/edit/test_audio_three_way_parity.py", "tests/edit/test_audio_timestretch.py", "tests/edit/test_audio_transitions.py", "tests/edit/test_audio_waveform.py", "tests/edit/test_audio_waveform_lifecycle.py", "tests/edit/test_audio_waveform_perf_and_fx.py", "tests/edit/test_clip_audio_effect_dialog_adapter.py", "tests/edit/test_clip_audio_fade.py", "tests/edit/test_clip_audio_gain.py", "tests/edit/test_effect_registry_audio.py", "tests/edit/test_fix_round6_phase1b_audio.py", "tests/edit/test_multicam_nested_timecode_truepeak.py", "tests/edit/test_nested_audio_flatten.py", "tests/edit/test_nested_sequence.py", "tests/edit/test_nested_sequence_production.py", "tests/edit/test_preserve_pitch_ui.py", "tests/edit/test_round4_nested_audio_gate.py", "tests/edit/test_round4_nested_sampling.py", "tests/edit/test_stem_export.py", "tests/edit/test_stem_export_dialog.py", "tests/edit/test_timeline_audio_integration.py"]}

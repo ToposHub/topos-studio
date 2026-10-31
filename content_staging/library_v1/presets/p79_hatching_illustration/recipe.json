@@ -1,0 +1,33 @@
+{
+  "recipe_id": "P79",
+  "name": "排线插画",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "排线插画：2 层交叉排线，spacing 4–8，ink 深墨",
+  "component": "C07 hatching（暂存节点 lib1_hatching，复用 F14 排线核）",
+  "dependencies": {
+    "component_id": "C07",
+    "component_slug": "hatching",
+    "component_kind": "node",
+    "node_type": "lib1_hatching",
+    "aux_node_types": []
+  },
+  "params": {
+    "line_spacing": 6.0,
+    "angle": -45.0,
+    "layers": "2",
+    "ink_color": [
+      0.05,
+      0.05,
+      0.08
+    ],
+    "paper": 0.9,
+    "amount": 1.0
+  },
+  "notes": "C07 hatching 暂存组件单节点宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；纸张底色经组件 paper 参数内置。"
+}

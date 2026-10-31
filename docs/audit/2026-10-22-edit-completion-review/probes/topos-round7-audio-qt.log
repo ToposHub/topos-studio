@@ -1,0 +1,19 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+{
+  "worker_cancel_signal": [
+    [
+      "after_cancel_emit",
+      0.10082508499999676,
+      false
+    ]
+  ],
+  "worker_cancel_final": true,
+  "inactive_fx_gate": {
+    "sampler_calls_during_mix": 0,
+    "actual_peak": 0.10000000149011612,
+    "expected_peak": 0.8500000238418579
+  }
+}

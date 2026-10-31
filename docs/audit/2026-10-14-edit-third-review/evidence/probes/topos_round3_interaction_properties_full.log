@@ -1,0 +1,1621 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 214 ms. Replace uses of missing font family "Sans Serif" with one that exists to avoid this cost. 
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+{
+  "locked_single_transform": {
+    "errors": [
+      "Update clip param rejected: track 'V1' is locked"
+    ],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": true,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 99.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 10.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 1.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties",
+      "view_selection": [
+        "c"
+      ],
+      "undo": 0,
+      "redo": 0,
+      "revision": 0
+    }
+  },
+  "locked_single_crop": {
+    "errors": [
+      "Update clip param rejected: track 'V1' is locked"
+    ],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": true,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 10.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 5.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 1.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties",
+      "view_selection": [
+        "c"
+      ],
+      "undo": 0,
+      "redo": 0,
+      "revision": 0
+    }
+  },
+  "locked_single_opacity": {
+    "errors": [
+      "Update clip param rejected: track 'V1' is locked"
+    ],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": true,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 10.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 10.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 1.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 50.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties",
+      "view_selection": [
+        "c"
+      ],
+      "undo": 0,
+      "redo": 0,
+      "revision": 0
+    }
+  },
+  "locked_single_speed": {
+    "errors": [
+      "Update clip param rejected: track 'V1' is locked"
+    ],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": true,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 10.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 10.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 2.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties",
+      "view_selection": [
+        "c"
+      ],
+      "undo": 0,
+      "redo": 0,
+      "revision": 0
+    }
+  },
+  "locked_partner_single_speed": {
+    "errors": [],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 50,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 2.0,
+          "opacity": 0.8,
+          "locked": false,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        },
+        "a": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": true,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 10.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 10.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 2.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 2.0,
+          "reverse": false,
+          "duration": 50,
+          "linked": "a"
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "a": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": "c"
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 2.0,
+          "reverse": false,
+          "duration": 50,
+          "linked": "a"
+        }
+      },
+      "panel_title": "Properties",
+      "view_selection": [
+        "c"
+      ],
+      "undo": 1,
+      "redo": 0,
+      "revision": 1
+    }
+  },
+  "batch_xy": {
+    "errors": [],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": false,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 55.0,
+          "translate_y": 66.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 10.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 1.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 66.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 66.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties (2 clips selected)",
+      "view_selection": [
+        "c",
+        "d"
+      ],
+      "undo": 2,
+      "redo": 0,
+      "revision": 2
+    }
+  },
+  "batch_crop_sides": {
+    "errors": [],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": false,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 10.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 5.0,
+          "right": 7.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 1.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.07,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.07,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties (2 clips selected)",
+      "view_selection": [
+        "c",
+        "d"
+      ],
+      "undo": 2,
+      "redo": 0,
+      "revision": 2
+    }
+  },
+  "batch_speed_undo": {
+    "errors": [],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 50,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 2.0,
+          "opacity": 0.8,
+          "locked": false,
+          "enabled": true
+        },
+        "d": {
+          "duration": 50,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 2.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 10.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 10.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 2.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 2.0,
+          "reverse": false,
+          "duration": 50,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 2.0,
+          "reverse": false,
+          "duration": 50,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties (2 clips selected)",
+      "view_selection": [
+        "c",
+        "d"
+      ],
+      "undo": 0,
+      "redo": 1,
+      "revision": 2
+    }
+  },
+  "batch_crop_reset": {
+    "errors": [],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": false,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 10.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0,
+          "bottom": 0.0,
+          "feather": 0.0
+        },
+        "clip:c:speed": {
+          "speed": 1.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.0,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.0,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties (2 clips selected)",
+      "view_selection": [
+        "c",
+        "d"
+      ],
+      "undo": 4,
+      "redo": 1,
+      "revision": 6
+    }
+  },
+  "batch_speed_reset": {
+    "errors": [],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": false,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 10.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 10.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 1.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties (2 clips selected)",
+      "view_selection": [
+        "c",
+        "d"
+      ],
+      "undo": 2,
+      "redo": 1,
+      "revision": 4
+    }
+  },
+  "batch_transform_reset_context": {
+    "errors": [],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": false,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 0.0,
+          "translate_y": 88.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 10.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 1.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 0.0,
+          "y": 88.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 0.0,
+          "y": 0.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 0.0,
+          "y": 88.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties",
+      "view_selection": [
+        "c",
+        "d"
+      ],
+      "undo": 2,
+      "redo": 0,
+      "revision": 2
+    }
+  },
+  "batch_locked_target": {
+    "errors": [],
+    "after": {
+      "items": {
+        "c": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.8,
+          "locked": true,
+          "enabled": true
+        },
+        "d": {
+          "duration": 100,
+          "source_start": 100,
+          "source_duration": 100,
+          "speed": 1.0,
+          "opacity": 0.3,
+          "locked": false,
+          "enabled": true
+        }
+      },
+      "widgets": {
+        "clip:c:transform": {
+          "translate_x": 99.0,
+          "translate_y": 11.0,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "rotation": 0.0,
+          "pivot_x": 0.0,
+          "pivot_y": 0.0
+        },
+        "clip:c:crop": {
+          "left": 10.0,
+          "right": 20.0,
+          "top": 5.0,
+          "bottom": 3.0,
+          "feather": 0.3
+        },
+        "clip:c:speed": {
+          "speed": 1.0
+        },
+        "clip:c:raw": {
+          "wb_gain_r": 1.0,
+          "wb_gain_g": 1.0,
+          "wb_gain_b": 1.0,
+          "exposure_stops": 0.0,
+          "black_level": 0.0
+        },
+        "clip:c:opacity": {
+          "value": 80.0
+        }
+      },
+      "model": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_snapshots": {
+        "c": {
+          "x": 10,
+          "y": 11,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.1,
+            "right": 0.2,
+            "top": 0.05,
+            "bottom": 0.03,
+            "feather": 0.3
+          },
+          "opacity": 0.8,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        },
+        "d": {
+          "x": 20,
+          "y": 21,
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "crop": {
+            "left": 0.2,
+            "right": 0.1,
+            "top": 0.06,
+            "bottom": 0.02,
+            "feather": 0.4
+          },
+          "opacity": 0.3,
+          "speed": 1.0,
+          "reverse": false,
+          "duration": 100,
+          "linked": null
+        }
+      },
+      "panel_title": "Properties (2 clips selected)",
+      "view_selection": [
+        "c",
+        "d"
+      ],
+      "undo": 0,
+      "redo": 0,
+      "revision": 0
+    }
+  }
+}

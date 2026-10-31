@@ -1,0 +1,307 @@
+{
+  "source_append_av": {
+    "duration": 24,
+    "source_fps": null,
+    "timeline_fps": null,
+    "source_at_12": 12,
+    "expected_duration": 24,
+    "expected_source_at_12": 24,
+    "audio_count": 1
+  },
+  "source_append_silent": {
+    "duration": 48,
+    "source_fps": null,
+    "timeline_fps": null,
+    "source_at_12": 12,
+    "expected_duration": 24,
+    "expected_source_at_12": 24,
+    "audio_count": 0
+  },
+  "source_overwrite_av": {
+    "duration": 24,
+    "source_fps": 48,
+    "timeline_fps": 24,
+    "source_at_12": 24,
+    "expected_duration": 24,
+    "expected_source_at_12": 24,
+    "audio_count": 1
+  },
+  "source_overwrite_silent": {
+    "duration": 48,
+    "source_fps": null,
+    "timeline_fps": null,
+    "source_at_12": 12,
+    "expected_duration": 24,
+    "expected_source_at_12": 24,
+    "audio_count": 0
+  },
+  "source_overwrite_no_audio_track": {
+    "video_clips": 1,
+    "audio_tracks": 0,
+    "source_has_audio": true
+  },
+  "source_append_no_audio_track": {
+    "video_clips": 1,
+    "audio_tracks": 0,
+    "source_has_audio": true
+  },
+  "multicam_boundary_apply_undo": {
+    "apply": [
+      "B",
+      24,
+      144,
+      48,
+      72
+    ],
+    "undo": [
+      "A",
+      24,
+      144,
+      48,
+      144
+    ],
+    "before": [
+      "A",
+      24,
+      200,
+      24,
+      72
+    ],
+    "undo_payload_equal": false
+  },
+  "source_swap_redo": {
+    "new_fps_saved_on_updated_command": null,
+    "json": {
+      "command_id": "u",
+      "command_type": "UpdateClipSourceCommand",
+      "label": "u",
+      "track_id": "v1",
+      "clip_id": "mc",
+      "new_asset_id": "B",
+      "new_source_start": null,
+      "original_asset_id": "A",
+      "original_source_start": 24
+    },
+    "undo_fps": 48,
+    "redo_source_duration": 144,
+    "redo_fps": 48
+  },
+  "source_swap_old_pts": {
+    "pts_preserved": true,
+    "source_start": 48,
+    "source_at_timeline36": 60,
+    "expected_new_cfr48_source": 72
+  },
+  "multicam_smaller_fps_fade": {
+    "exception": null,
+    "clip": {
+      "clip_id": "mc",
+      "asset_id": "B",
+      "track_id": "v1",
+      "timeline_start": 24,
+      "timeline_duration": 72,
+      "source_start": 24,
+      "source_duration": 72,
+      "speed": {
+        "speed": 1.0,
+        "reverse": false,
+        "interpolation": "nearest",
+        "speed_points": [],
+        "preserve_pitch": false
+      },
+      "linked_clip_id": null,
+      "transform": {
+        "translate_x": 0.0,
+        "translate_y": 0.0,
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "rotation": 0.0,
+        "pivot_mode": "center",
+        "pivot_x": 0.0,
+        "pivot_y": 0.0
+      },
+      "crop": {
+        "left": 0.0,
+        "right": 0.0,
+        "top": 0.0,
+        "bottom": 0.0,
+        "feather": 0.0
+      },
+      "opacity": 1.0,
+      "animated_params": {},
+      "effects": [],
+      "is_enabled": true,
+      "label_color": null,
+      "waveform_show_channels": false,
+      "fade_in_duration": 40,
+      "fade_out_duration": 0,
+      "color_stack_id": null,
+      "color_shared": false,
+      "composite_id": null,
+      "composite_bypassed": false,
+      "render_cache_id": null,
+      "freeze_source_frame": null,
+      "blend_mode": "normal",
+      "audio_gain_db": 0.0,
+      "raw": null,
+      "source_fps_num": 24,
+      "source_fps_den": 1,
+      "timeline_fps_num": 24,
+      "timeline_fps_den": 1,
+      "source_pts_index": null
+    }
+  },
+  "multicam_controller_target": {
+    "source_start": 24,
+    "source_duration": 144,
+    "source_fps": 48,
+    "expected": [
+      48,
+      144,
+      48
+    ]
+  },
+  "settings_domain_revisions": {
+    "project": [
+      7,
+      8,
+      9,
+      10
+    ],
+    "sequence": [
+      2,
+      3,
+      9,
+      3
+    ]
+  },
+  "settings_stack_protocol": {
+    "exception": "TypeError",
+    "message": "replace() should be called on dataclass instances"
+  },
+  "settings_controller": {
+    "sequence_fps": 48.0,
+    "sequence_revision": 3,
+    "project_revision": 8,
+    "timeline_execute_calls": 0,
+    "timeline_load_calls": 1
+  },
+  "replace_invalid_actual": {
+    "type": "video",
+    "metadata": {
+      "format": "MP4",
+      "error": "probe failed"
+    },
+    "color_metadata": {
+      "transfer": "PQ",
+      "primaries": "BT2020"
+    },
+    "thumbnail_key": "old-thumb",
+    "revision": 8,
+    "path_changed": true,
+    "warning_count": 0,
+    "elapsed": 0.13744036100251833,
+    "history_count": 1
+  },
+  "replace_image_actual": {
+    "type": "image",
+    "metadata": {
+      "width": 2,
+      "height": 2,
+      "format": "PNG",
+      "file_size": 75,
+      "camera": "",
+      "lens": "",
+      "iso": "",
+      "shutter": "",
+      "aperture": "",
+      "date": ""
+    },
+    "color_metadata": {
+      "transfer": "PQ",
+      "primaries": "BT2020"
+    },
+    "thumbnail_key": "old-thumb",
+    "revision": 8,
+    "path_changed": true,
+    "warning_count": 0,
+    "elapsed": 0.008364594999875408,
+    "history_count": 1
+  },
+  "replace_probe_exception": {
+    "type": "video",
+    "metadata": {
+      "fps": 24,
+      "total_frames": 100,
+      "future_asset": {
+        "x": 1
+      },
+      "multicam_group": {
+        "group_id": "4691d274-faac-4b3e-b46e-31ef87ba29f5",
+        "name": "Multicam 2",
+        "angles": [
+          {
+            "angle_id": "b9118685-7cdf-4f2c-8dc9-7c50f03f5932",
+            "asset_id": "A",
+            "sync_offset": 0,
+            "label": "A"
+          },
+          {
+            "angle_id": "02fbcf00-6f30-4c25-a5d6-14b4443513ca",
+            "asset_id": "B",
+            "sync_offset": 0,
+            "label": "B"
+          }
+        ],
+        "default_angle_id": "b9118685-7cdf-4f2c-8dc9-7c50f03f5932"
+      }
+    },
+    "color_metadata": {
+      "transfer": "PQ",
+      "primaries": "BT2020"
+    },
+    "thumbnail_key": "old-thumb",
+    "revision": 8,
+    "path_changed": true,
+    "warning_count": 0,
+    "elapsed": 0.0007690499987802468,
+    "history_count": 1
+  },
+  "replace_sync_probe": {
+    "type": "image",
+    "metadata": {
+      "width": 2,
+      "height": 2
+    },
+    "color_metadata": {
+      "transfer": "PQ",
+      "primaries": "BT2020"
+    },
+    "thumbnail_key": "old-thumb",
+    "revision": 8,
+    "path_changed": true,
+    "warning_count": 0,
+    "elapsed": 0.12218132999987574,
+    "history_count": 1
+  },
+  "proxy_stage2_same_path_requeue": {
+    "apply_calls": "[call('/tmp/topos_round3_features_same_src.mov', '/tmp/topos_round3_features_same_proxy.mov', 200.0, 20, (111, 222))]",
+    "remaining_new_pending": false,
+    "old_result_accepted": true
+  },
+  "proxy_stage2_mismatch_consumes_new": {
+    "apply_calls": 0,
+    "pending_after_old_callback": false
+  },
+  "nest_unknown_track_extras": {
+    "parent_extra": {
+      "x": 1
+    },
+    "child_extra": null
+  },
+  "ui_relink_commit_revision": {
+    "panel_revision": 7,
+    "host_revision": 7,
+    "new_path": "/tmp/topos_round3_features_invalid.mp4"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "recipe_id": "P04",
+  "name": "柔和低反差人像",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合柔光/素肌人像；vibrance 0.1–0.3，负 saturation 压艳色，lum_preserve 开",
+  "component": "Vibrance_Saturation（生产插件 plugins/Vibrance_Saturation.tglsl）",
+  "dependencies": {
+    "plugin_id": "Vibrance_Saturation",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "saturation": -0.08,
+    "vibrance": 0.2,
+    "lum_preserve": true
+  },
+  "notes": "低反差柔和感以自然饱和 + 微降全局饱和达成；lum_preserve=True 保护亮度结构。"
+}

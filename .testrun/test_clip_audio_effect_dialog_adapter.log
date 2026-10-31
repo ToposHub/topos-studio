@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 8 items
+
+tests/edit/test_clip_audio_effect_dialog_adapter.py ........             [100%]
+
+============================== 8 passed in 30.03s ==============================

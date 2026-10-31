@@ -1,0 +1,209 @@
+{
+  "generated_at": "2026-09-21 (三批运行汇总)",
+  "machine_cpus": 24,
+  "frames": 487,
+  "fps": 25,
+  "decode_pool": "max_slice_workers=0（进程默认满池，产品播放同口径）",
+  "feed_notes": {
+    "passthrough": "同档位同分辨率 ProRes 直通喂入（语料生成器口径，无格式转换）",
+    "same_size_444": "2K 4444 母版喂入（含 444→422 逐帧转换）",
+    "4k_master_downscale": "4K 母版逐帧下采样喂入"
+  },
+  "results": [
+    {
+      "size": "2K",
+      "tier": "proxy",
+      "feed": "passthrough",
+      "enc_fps": 251.3,
+      "video_mb": 77.3,
+      "dec_fps_w0": 548,
+      "decode_worker_sweep": {
+        "w1": 46,
+        "w4": 158,
+        "w8": 305,
+        "w16": 492,
+        "w0": 500
+      }
+    },
+    {
+      "size": "2K",
+      "tier": "proxy",
+      "feed": "same_size_444",
+      "enc_fps": 59.1,
+      "video_mb": 77.5,
+      "dec_fps_w0": 444,
+      "decode_worker_sweep": {
+        "w1": 46,
+        "w4": 158,
+        "w8": 305,
+        "w16": 492,
+        "w0": 500
+      }
+    },
+    {
+      "size": "2K",
+      "tier": "proxy",
+      "feed": "4k_master_downscale",
+      "enc_fps": 24.1,
+      "video_mb": 77.4,
+      "dec_fps_w0": 500,
+      "decode_worker_sweep": {
+        "w1": 46,
+        "w4": 158,
+        "w8": 305,
+        "w16": 492,
+        "w0": 500
+      }
+    },
+    {
+      "size": "2K",
+      "tier": "lt",
+      "feed": "same_size_444",
+      "enc_fps": 54.5,
+      "video_mb": 162.5,
+      "dec_fps_w0": 308,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "2K",
+      "tier": "lt",
+      "feed": "4k_master_downscale",
+      "enc_fps": 21.3,
+      "video_mb": 162.3,
+      "dec_fps_w0": 300,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "2K",
+      "tier": "standard",
+      "feed": "same_size_444",
+      "enc_fps": 49.7,
+      "video_mb": 253.4,
+      "dec_fps_w0": 235,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "2K",
+      "tier": "standard",
+      "feed": "4k_master_downscale",
+      "enc_fps": 20.0,
+      "video_mb": 253.1,
+      "dec_fps_w0": 224,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "2K",
+      "tier": "hq",
+      "feed": "same_size_444",
+      "enc_fps": 45.6,
+      "video_mb": 377.0,
+      "dec_fps_w0": 192,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "2K",
+      "tier": "hq",
+      "feed": "4k_master_downscale",
+      "enc_fps": 18.7,
+      "video_mb": 377.4,
+      "dec_fps_w0": 184,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "2K",
+      "tier": "4444",
+      "feed": "same_size_444",
+      "enc_fps": 52.7,
+      "video_mb": 511.2,
+      "dec_fps_w0": 146,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "2K",
+      "tier": "4444",
+      "feed": "4k_master_downscale",
+      "enc_fps": 18.8,
+      "video_mb": 511.2,
+      "dec_fps_w0": 126,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "2K",
+      "tier": "4444xq",
+      "feed": "same_size_444",
+      "enc_fps": 52.8,
+      "video_mb": 753.3,
+      "dec_fps_w0": 117,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "2K",
+      "tier": "4444xq",
+      "feed": "4k_master_downscale",
+      "enc_fps": 19.7,
+      "video_mb": 753.3,
+      "dec_fps_w0": 117,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "4K",
+      "tier": "proxy",
+      "feed": "4k_master_downscale",
+      "enc_fps": 24.0,
+      "video_mb": 309.0,
+      "dec_fps_w0": 158,
+      "decode_worker_sweep": {
+        "w1": 12,
+        "w4": 41,
+        "w8": 82,
+        "w16": 151,
+        "w0": 158
+      }
+    },
+    {
+      "size": "4K",
+      "tier": "lt",
+      "feed": "4k_master_downscale",
+      "enc_fps": 20.3,
+      "video_mb": 648.5,
+      "dec_fps_w0": 87,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "4K",
+      "tier": "standard",
+      "feed": "4k_master_downscale",
+      "enc_fps": 19.3,
+      "video_mb": 1011.3,
+      "dec_fps_w0": 77,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "4K",
+      "tier": "hq",
+      "feed": "4k_master_downscale",
+      "enc_fps": 18.3,
+      "video_mb": 1511.2,
+      "dec_fps_w0": 60,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "4K",
+      "tier": "4444",
+      "feed": "4k_master_downscale",
+      "enc_fps": 16.8,
+      "video_mb": 2044.5,
+      "dec_fps_w0": 45,
+      "decode_worker_sweep": null
+    },
+    {
+      "size": "4K",
+      "tier": "4444xq",
+      "feed": "4k_master_downscale",
+      "enc_fps": 17.2,
+      "video_mb": 3012.5,
+      "dec_fps_w0": 35,
+      "decode_worker_sweep": null
+    }
+  ]
+}

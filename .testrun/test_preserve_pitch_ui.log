@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_preserve_pitch_ui.py ......                              [100%]
+
+============================== 6 passed in 20.00s ==============================

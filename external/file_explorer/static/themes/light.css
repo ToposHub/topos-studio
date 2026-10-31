@@ -1,0 +1,274 @@
+/* macOS Tahoe 26 Light Concept Theme */
+/* 设计理念：纯净、呼吸感、极致细节 */
+
+:root {
+    /* --- 核心变量覆盖 --- */
+    --bg-body: #f6f6f7;
+    --bg-card: rgba(255, 255, 255, 0.7);
+    --border-color: rgba(0, 0, 0, 0.08);
+    --text-main: #1d1d1f;
+    --text-muted: #86868b;
+    --primary: #007AFF; /* macOS 标准亮色蓝 */
+}
+
+/* ================= 全局设定 ================= */
+
+body {
+    background: var(--bg-body) !important;
+    color: var(--text-main) !important;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条：Mac 风格 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.2);
+}
+
+/* ================= 顶部菜单栏 ================= */
+
+.app-menubar {
+    background: rgba(255, 255, 255, 0.7) !important;
+    backdrop-filter: blur(25px) !important;
+    -webkit-backdrop-filter: blur(25px) !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+    height: 38px !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    color: #333 !important;
+}
+
+.app-menubar .menu-item {
+    font-weight: 500;
+    font-size: 13px;
+    border-radius: 6px;
+    margin: 0 2px;
+}
+.app-menubar .menu-item:hover {
+    background: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* 下拉菜单 */
+.app-menubar .dropdown-menu {
+    background: rgba(255, 255, 255, 0.9) !important;
+    backdrop-filter: blur(30px) !important;
+    -webkit-backdrop-filter: blur(30px) !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08) !important;
+    padding: 6px;
+    margin-top: 6px;
+}
+.app-menubar .dropdown-item {
+    border-radius: 6px;
+    color: #333 !important;
+}
+.app-menubar .dropdown-item:hover {
+    background: var(--primary) !important;
+    color: #fff !important;
+}
+.app-menubar .dropdown-item:hover .text-muted {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* ================= 侧边栏 ================= */
+
+.sidebar-panel {
+    background: rgba(246, 246, 247, 0.5) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border-right: 1px solid rgba(0, 0, 0, 0.05) !important;
+}
+
+.sidebar-header span {
+    color: rgba(0, 0, 0, 0.4) !important;
+    font-weight: 700;
+}
+
+.tree-header {
+    border-radius: 6px;
+    margin: 1px 8px;
+    color: #444;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    padding-right: 10px !important;
+    /* 允许内联样式控制左侧缩进层级 */
+}
+.tree-header:hover {
+    background: rgba(0, 0, 0, 0.04) !important;
+}
+.tree-header.active {
+    background: rgba(0, 122, 255, 0.1) !important;
+    color: var(--primary) !important;
+}
+
+/* ================= 主区域 & 文件卡片 ================= */
+
+.main-panel {
+    background: #ffffff !important;
+}
+
+.file-toolbar {
+    background: rgba(255, 255, 255, 0.8) !important;
+    backdrop-filter: blur(15px);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+}
+
+/* 路径框与搜索框 */
+.breadcrumb-path, .search-input {
+    background: rgba(0, 0, 0, 0.03) !important;
+    border: 1px solid rgba(0, 0, 0, 0.05) !important;
+    border-radius: 8px !important;
+    color: #1d1d1f !important;
+}
+.breadcrumb-path:focus, .search-input:focus {
+    background: #fff !important;
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15) !important;
+}
+
+/* 文件卡片 */
+.file-card {
+    background: #fff !important;
+    border: 1px solid rgba(0, 0, 0, 0.03) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+.file-card:hover {
+    background: #fff !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
+    transform: translateY(-2px);
+}
+.file-card.selected {
+    background: rgba(0, 122, 255, 0.05) !important;
+    border: 1px solid var(--primary) !important;
+    box-shadow: 0 0 0 1px var(--primary) !important;
+}
+
+.file-info {
+    background: rgba(0, 0, 0, 0.02) !important;
+    border-top: 1px solid rgba(0, 0, 0, 0.03) !important;
+}
+.file-name { color: #1d1d1f !important; }
+.file-meta { color: #86868b !important; }
+
+/* ================= 属性面板 (Properties Panel) ================= */
+
+.properties-panel {
+    background: rgba(255, 255, 255, 0.7) !important;
+    backdrop-filter: blur(40px) !important;
+    -webkit-backdrop-filter: blur(40px) !important;
+    border-left: 1px solid rgba(0, 0, 0, 0.05) !important;
+}
+
+.panel-header {
+    background: rgba(255, 255, 255, 0.3);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+}
+.panel-title { color: #1d1d1f !important; }
+
+.prop-group label {
+    color: #86868b !important;
+    font-weight: 600;
+}
+
+.prop-table td {
+    color: #444 !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.03) !important;
+}
+.prop-table td:first-child { color: #888 !important; }
+
+/* 评分星星 */
+.rating-stars i {
+    color: rgba(0, 0, 0, 0.08);
+}
+.rating-stars i.active {
+    color: #FFCC00 !important; /* 经典亮黄色 */
+}
+
+/* 输入框 */
+.form-control, .form-select {
+    background: rgba(0, 0, 0, 0.03) !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    color: #1d1d1f !important;
+}
+.form-control:focus, .form-select:focus {
+    background: #fff !important;
+    border-color: var(--primary) !important;
+}
+
+/* ================= 批量操作标签页 ================= */
+
+.batch-tabs {
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+}
+.batch-tab-item {
+    color: #666 !important;
+}
+.batch-tab-item.active {
+    background: #fff !important;
+    color: var(--primary) !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 按钮美化 */
+.btn-primary {
+    background: var(--primary) !important;
+    box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+}
+
+/* 预览条目 */
+.preview-item {
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px solid rgba(0, 0, 0, 0.04);
+}
+.preview-old { color: #888; }
+.preview-new { color: #28a745; font-weight: 500; }
+
+/* ================= 右键菜单 ================= */
+
+.context-menu {
+    background: rgba(255, 255, 255, 0.85) !important;
+    backdrop-filter: blur(40px) saturate(200%) !important;
+    -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12) !important;
+}
+.context-menu .menu-item { color: #333 !important; }
+.context-menu .menu-item:hover {
+    background: var(--primary) !important;
+    color: #fff !important;
+}
+.context-menu .menu-divider { background: rgba(0, 0, 0, 0.05) !important; }
+
+/* ================= 模态框 ================= */
+
+.modal-content {
+    background: rgba(255, 255, 255, 0.9) !important;
+    backdrop-filter: blur(40px) !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    border-radius: 18px !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15) !important;
+}
+.modal-header, .modal-footer { border-color: rgba(0, 0, 0, 0.05) !important; }
+.modal-title { color: #1d1d1f !important; }
+
+/* Toast */
+.toastify {
+    background: rgba(255, 255, 255, 0.9) !important;
+    color: #1d1d1f !important;
+    border: 1px solid rgba(0, 0, 0, 0.05) !important;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1) !important;
+}

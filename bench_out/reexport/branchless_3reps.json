@@ -1,0 +1,66 @@
+{
+ "2K_topos_422_Proxy.mov": [
+  {
+   "threads": 1,
+   "fps_median": 49.7,
+   "fps_all": [
+    49.0,
+    49.7,
+    50.3
+   ],
+   "digest": null
+  },
+  {
+   "threads": 4,
+   "fps_median": 175.1,
+   "fps_all": [
+    176.6,
+    174.1,
+    175.1
+   ],
+   "digest": null
+  },
+  {
+   "threads": 16,
+   "fps_median": 335.8,
+   "fps_all": [
+    335.8,
+    371.0,
+    292.1
+   ],
+   "digest": null
+  }
+ ],
+ "4K_topos_422_Proxy.mov": [
+  {
+   "threads": 1,
+   "fps_median": 12.7,
+   "fps_all": [
+    12.5,
+    12.7,
+    12.7
+   ],
+   "digest": null
+  },
+  {
+   "threads": 4,
+   "fps_median": 45.0,
+   "fps_all": [
+    44.9,
+    45.0,
+    46.7
+   ],
+   "digest": null
+  },
+  {
+   "threads": 16,
+   "fps_median": 91.3,
+   "fps_all": [
+    91.3,
+    89.2,
+    91.6
+   ],
+   "digest": null
+  }
+ ]
+}

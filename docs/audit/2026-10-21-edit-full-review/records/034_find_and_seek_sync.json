@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "error": "'TransportControlBar' object has no attribute 'btn_next'",
+  "traceback": "Traceback (most recent call last):\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/scripts/interactive_session.py\", line 85, in poll_commands\n    exec(compile(source, str(path), \"exec\"), namespace)\n  File \"/tmp/topos-edit-audit-20261021/commands/034_find_and_seek_sync.py\", line 12, in <module>\n    from pathlib import Path\n          ^^^^^^^^^^^^\nAttributeError: 'TransportControlBar' object has no attribute 'btn_next'\n"
+}

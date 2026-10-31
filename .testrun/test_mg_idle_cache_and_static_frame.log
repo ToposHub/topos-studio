@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 15 items
+
+tests/edit/test_mg_idle_cache_and_static_frame.py ...............        [100%]
+
+============================= 15 passed in 16.44s ==============================

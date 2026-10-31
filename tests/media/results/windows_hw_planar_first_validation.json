@@ -1,0 +1,52 @@
+{
+  "date": "2026-09-12T06:39:29",
+  "plan_item": "W1-05 WindowsHwPlanarSource 真机首验（D3D11VA/AMD 行）",
+  "routing": {
+    "has_nvidia_gpu": false,
+    "available_decoders": [
+      "d3d11va"
+    ],
+    "platform_default": "d3d11va"
+  },
+  "results": [
+    {
+      "check": "platform_routing",
+      "ok": true,
+      "detail": {
+        "has_nvidia_gpu": false,
+        "available_decoders": [
+          "d3d11va"
+        ],
+        "platform_default": "d3d11va"
+      }
+    },
+    {
+      "check": "contract:h264",
+      "file": "tests/test_videos/2K_h264.mp4",
+      "ok": true,
+      "using_hwaccel": true,
+      "active_decoder": "d3d11va",
+      "hw_output_format": "nv12",
+      "width": 1920,
+      "height": 1080,
+      "problems": []
+    },
+    {
+      "check": "contract:hevc",
+      "file": "tests/test_videos/4K_H265.mov",
+      "ok": true,
+      "using_hwaccel": true,
+      "active_decoder": "d3d11va",
+      "hw_output_format": "p010le",
+      "width": 3840,
+      "height": 2160,
+      "problems": []
+    },
+    {
+      "check": "diag_422_10bit_explicit_reject",
+      "ok": true,
+      "error_message": "codec_unsupported_by_hw:h264/yuv422p10le: hardware decoder produced yuv422p10le (not NV12/P010-family); stream is not hardware-decodable"
+    }
+  ],
+  "all_ok": true
+}

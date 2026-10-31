@@ -1,0 +1,34 @@
+{
+  "hand_empty": {
+    "scroll_before": 50,
+    "scroll_after": 140,
+    "during_state": "PANNING",
+    "clip_start": 100
+  },
+  "hand_clip": {
+    "scroll_before": 50,
+    "scroll_after": 140,
+    "during_state": "PANNING",
+    "clip_start": 100
+  },
+  "hand_middle": {
+    "scroll_before": 50,
+    "scroll_after": 140,
+    "during_state": "PANNING",
+    "clip_start": 100
+  },
+  "blade_rightclick": {
+    "clip_count": 1,
+    "durations": [
+      100
+    ],
+    "undo": false
+  },
+  "blade_locked": {
+    "clip_count": 1,
+    "durations": [
+      100
+    ],
+    "undo": false
+  }
+}

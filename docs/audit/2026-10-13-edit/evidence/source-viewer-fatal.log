@@ -1,0 +1,64 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+INFO: [ThumbEngine] FFmpeg found and loaded: /usr/local/bin/ffmpeg
+WARNING: [ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+INFO: Product mode preset 'studio' keeps config value for AI capability 'ai_assistant' (explicit config entry wins over the preset default)
+INFO: Registered feature module: color
+INFO: Registered feature module: edit
+INFO: Registered page: edit (剪辑)
+INFO: Registered feature module: composite
+INFO: Registered page: composite (合成)
+INFO: Scanning plugin directory: /Users/testuser/.topos/plugins/node_plugins
+INFO: Scanning plugin directory: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins
+ERROR: Failed to load plugin from /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins/vintage_plugin.py: No module named 'src.composite'
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/composite/core/node_plugin.py", line 293, in _load_plugin_file
+    spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins/vintage_plugin.py", line 20, in <module>
+    from src.composite.node_plugin import NodePlugin, PluginInfo
+ModuleNotFoundError: No module named 'src.composite'
+ERROR: Failed to load plugin from /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins/posterize_plugin.py: No module named 'src.composite'
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/composite/core/node_plugin.py", line 293, in _load_plugin_file
+    spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins/posterize_plugin.py", line 21, in <module>
+    from src.composite.node_plugin import NodePlugin, PluginInfo
+ModuleNotFoundError: No module named 'src.composite'
+INFO: Plugin discovery complete: 0 plugins loaded
+INFO: Registered 0 node types from plugins
+INFO: Plugin discovery complete: 0 plugins loaded, 0 node types registered
+2026-10-13 23:39:36.093 Python[18346:142743] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 218 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+2026-10-13 23:39:39.499 Python[18346:142743] +[IMKClient subclass]: chose IMKClient_Modern
+2026-10-13 23:39:39.499 Python[18346:142743] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+The top-level window is not using the expected graphics API for composition, 'OpenGL' is not compatible with this QQuickWidget
+QQuickWidget: Failed to get a QRhi from the top-level widget's window
+QQuickWidget::resizeEvent() no QRhi
+AUDIT {"name": "startup", "page": "Edit", "platform": "cocoa", "qt": "6.10.0", "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-13-edit/evidence/01-empty.png"}
+AUDIT {"name": "ui_inventory", "window": [1440, 1000], "source": "SourceViewerWidget", "media": [["", "", "Toggle Bins Panel", true], ["", "", "Search / Filter", true], ["", "", "Ascending", true], ["", "", "List View", true], ["", "", "Grid View", true], ["", "", "Offline Assets - Click to Relink", false], ["", "", "Enable AI Media Analysis", true], ["", "", "", false], ["", "", "返回上级", false]], "source_buttons": [["", "I", "Mark In (I)", true], ["", "O", "Mark Out (O)", true], ["", "Clear", "Clear In/Out Points", true], ["", "", "Jump to Start", true], ["", "", "Previous Frame", true], ["", "", "Play/Pause", true], ["", "", "Next Frame", true], ["", "", "Jump to End", true]]}
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+AUDIT {"name": "media_drop", "enter_accepted": true, "drop_accepted": true, "project_exists": true, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-13-edit/evidence/02-imported.png"}
+AUDIT {"name": "after_import", "state": {"revision": 0, "fps": "25/1", "playhead": 0, "tracks": [{"id": "a811b472-a500-4ff9-b30f-264d817e58ad", "type": "video", "locked": false, "clips": []}, {"id": "74cc0427-aba6-4da1-9071-118ff7824440", "type": "audio", "locked": false, "clips": []}]}, "assets": [["b0d4916a-3fcb-4500-91a6-1777113e7aa2", "2K_h264.mp4", {"width": 1920, "height": 1080, "fps": 25.0, "fps_num": 25, "fps_den": 1, "total_frames": 1572, "duration_seconds": 62.88, "codec": "h264", "codec_profile": "High", "pixel_format": "yuv420p", "bit_depth": 8, "field_order": null, "timecode": null, "rotation": 0, "has_alpha": false, "format": "MP4", "file_size": 52513775, "media_backend": "ffmpeg", "media_identity": {"size_bytes": 52513775, "mtime_ns": 1693292073036483049, "fingerprint": "size+mtime_ns"}, "audio_info": {"channels": 2, "sample_rate": 48000, "codec": "aac", "channel_layout": "stereo", "duration_seconds": 62.89066666666667}}], ["52417837-2c7a-4251-923e-dbda1a42c614", "2K_prores422Proxy.mov", {"width": 1920, "height": 1080, "fps": 25.0, "fps_num": 25, "fps_den": 1, "total_frames": 487, "duration_seconds": 19.48, "codec": "prores", "codec_profile": "Proxy", "pixel_format": "yuv422p10le", "bit_depth": 10, "field_order": null, "timecode": null, "rotation": 0, "has_alpha": false, "format": "MOV", "file_size": 101282290, "media_backend": "ffmpeg", "media_identity": {"size_bytes": 101282290, "mtime_ns": 1790453077207735383, "fingerprint": "size+mtime_ns"}, "audio_info": {"channels": 2, "sample_rate": 48000, "codec": "pcm_s24le", "channel_layout": "stereo", "duration_seconds": 19.48}}], ["2e794bae-749a-449f-9292-5e744e81398f", "2K_topos_422_Proxy.mov", {"width": 1920, "height": 1080, "fps": 25.0, "fps_num": 25, "fps_den": 1, "total_frames": 487, "duration_seconds": 19.48, "codec": "topos", "codec_profile": "Topos 422 Proxy", "pixel_format": "yuv422p10le", "bit_depth": 10, "field_order": "progressive", "timecode": null, "rotation": 0, "has_alpha": false, "format": "MOV", "file_size": 86719957, "media_backend": "topos_native", "media_identity": {"size_bytes": 86719957, "mtime_ns": 1790453439468390019, "fingerprint": "size+mtime_ns"}, "color_primaries": "bt709", "color_transfer": "bt709", "color_matrix": "bt709", "color_range": "limited", "audio_info": {"channels": 2, "sample_rate": 48000, "codec": "pcm_s24be", "channel_layout": "2 channels", "duration_seconds": 19.48}}]], "docks": [["dockViewport", 924, 360], ["dockLibrary", 3534, 479], ["dockFiles", 100, 30], ["dockInfo", 1240, 181], ["dockTracker", 900, 200], ["dockDenoise", 244, 291], ["dockDeblur", 244, 293], ["dockCurves", 300, 291], ["dockColorMapping", 314, 293], ["dockAudioMixer", 267, 339], ["dockBlurSharpen", 244, 291], ["dockGrain", 244, 315], ["dockMasks", 570, 291], ["dockQualifier", 490, 291], ["dockLut", 244, 291], ["dockSoftClip", 312, 291], ["dockRaw", 723, 315], ["dockAnalysis", 485, 339], ["dockExport", 3533, 758], ["dockCrop", 292, 339], ["dockEffects", 3533, 183], ["dockScript", 791, 339], ["dockPresets", 6028, 1649], ["dockColorTimelineClips", 469, 360], ["dockEditMediaPool", 398, 807], ["dockSourceViewer", 1840, 338], ["dockProgramViewer", 666, 807], ["dockEditTimeline", 1440, 102], ["dockProperties", 2945, 53], ["dockEditInfo", 2945, 53], ["dockEditEffects", 2945, 232], ["dockCaptionWorkspace", 1240, 459], ["dockAdrTakeSheet", 2945, 406], ["dockMulticam", 188, 170], ["dock_ai_edit_assistant", 374, 807], ["dockComposite", 3348, 360], ["dockCompositeNodeProperties", 1240, 436], ["dockCompositeScopes", 415, 339], ["dockPerf", 308, 339], ["dockCompositeKeyframes", 1079, 339], ["dockCompositeSpline", 1042, 339], ["dockCompositeImportReport", 212, 1012], ["dockCompositeAssetDependency", 1240, 1015], ["dockCompositeSceneOutliner", 136, 141], ["dockCompositeMaterial", 270, 435], ["dockDeliver", 1240, 622], ["dockGrading", 723, 315], ["dockLayers", 1240, 183]]}
+AUDIT {"name": "timeline_media_drop", "point": [221, 64], "accepted": true, "state": {"revision": 0, "fps": "25/1", "playhead": 0, "tracks": [{"id": "712e627a-bb9d-40d9-b2da-faf650492b4b", "type": "video", "locked": false, "clips": [{"id": "45070145-7779-47c8-8438-fa6bdff36907", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "f95980e4-b4f5-46db-bca1-74a306be2192"}]}, {"id": "a773456c-4c02-4e01-8c35-150ebbad38eb", "type": "audio", "locked": false, "clips": [{"id": "f95980e4-b4f5-46db-bca1-74a306be2192", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "45070145-7779-47c8-8438-fa6bdff36907"}]}]}, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-13-edit/evidence/03-linked-av.png"}
+AUDIT {"name": "media_grid_rows", "rows": [[0, "2K_topos_422_Proxy.mov"], [1, "2K_prores422Proxy.mov"], [2, "2K_h264.mp4"], [3, "Timeline 1"]]}
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 765, in paintGL
+    self._render_texture(display_rect)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/source_viewer.py", line 833, in _render_texture
+    _gl.glUniform4f(self._u_display_rect_loc, x, y, width, height)
+    ^^^^^^^^^^^^^^^
+AttributeError: '_GLWrapper' object has no attribute 'glUniform4f'. Did you mean: 'glUniform1i'?

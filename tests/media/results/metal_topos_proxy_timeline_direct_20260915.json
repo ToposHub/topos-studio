@@ -1,0 +1,82 @@
+{
+  "backend_requested": "metal",
+  "mode": "sequential",
+  "codec": "topos_proxy",
+  "blend_mode": null,
+  "gpu_render_enabled": true,
+  "render_path": "gpu",
+  "effect": "none",
+  "effect_radius": null,
+  "effect_blur_type": null,
+  "effect_edge_preserve": null,
+  "effect_edge_mode": null,
+  "effect_edge_kernel_size": null,
+  "effect_mode": null,
+  "frames_requested": 480,
+  "source": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_topos.mov",
+  "source_codec": "topos",
+  "second_source": null,
+  "second_source_codec": null,
+  "source_pixel_format": "yuv422p10le",
+  "source_resolution": [
+    1920,
+    1080
+  ],
+  "output_resolution": [
+    1280,
+    720
+  ],
+  "fps": 25.0,
+  "decoded_frame_calls": 480,
+  "decode_wall_s": 2.599862,
+  "metal_texture_frames": 480,
+  "topos_metal_surface_frames": 480,
+  "metal_planar_frames": 0,
+  "gpu_yuv422_frames": 480,
+  "gpu_composite_attempts": 480,
+  "gpu_composite_successes": 480,
+  "gpu_render_calls": 480,
+  "gpu_render_wall_s": 1.458039,
+  "gpu_renderers": [
+    {
+      "renderer_id": 12906532928,
+      "class": "TimelineMetalExportRenderer",
+      "frames_rendered": 480,
+      "errors": 0,
+      "last_fallback_reason": null
+    }
+  ],
+  "render_frame_wall_s": 4.130795,
+  "encode_frame_wall_s": 0.643911,
+  "encoder_open_wall_s": 0.001486,
+  "encoder_close_wall_s": 0.003076,
+  "pre_scan_wall_s": 0.01741,
+  "render_encode_pipeline_eligible": true,
+  "encoder_create_wall_s": 0.0001437009996152483,
+  "encoder_name": "topos",
+  "hardware_encoder_engaged": false,
+  "export_wall_s": 5.141287,
+  "export_fps": 93.362,
+  "gpu_backend_resolved": "metal",
+  "output_path": "/tmp/topos_profile_metal_async_manifest3_480_20260915/metal_sequential_none_480f_1280x720.mov",
+  "output_bytes": 16163570,
+  "output_probe": {
+    "codec_name": "topos",
+    "width": 1280,
+    "height": 720,
+    "avg_frame_rate": "25/1",
+    "pix_fmt": "yuv422p10le",
+    "nb_read_frames": 480
+  },
+  "frame_count_matches": true,
+  "frames_encoded_reported": 480,
+  "notes": [
+    "A real source is decoded by VideoFrameProviderService.",
+    "Two timeline segments from the same source are placed sequentially on one video track.",
+    "The complete timeline export includes decode, render, encode, mux, and close.",
+    "Success manifest metadata is written before completion; multi-GB source SHA-256 is finished asynchronously.",
+    "Metal uses VideoToolbox NV12/P010 CVMetalTexture input when available; Topos 422 master uses IOSurface-backed Y/U/V textures; unsupported formats fall back to CPU frames.",
+    "Metal emits native YUV422P10 planes on the GPU for the Topos 422 Proxy encoder; the CPU only forwards those planes to the native encoder. The final plane readback is still a synchronization boundary, not an encoder-native zero-copy surface path."
+  ],
+  "metal_fallback_reasons": []
+}

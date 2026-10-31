@@ -1,0 +1,259 @@
+{
+  "status": "synthetic_or_input_domain_measurement_no_release_verdict",
+  "created_at": "2026-09-27T15:30:57.819186+00:00",
+  "kind": "float16",
+  "width": 128,
+  "height": 128,
+  "source": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/float16.raw",
+  "source_sha256": "11a578304ff12155de6dc30f7ab01ac6d775b83ee5c88ed421b557ce06d5a0b8",
+  "source_bytes": 98304,
+  "codec_cli": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+  "codec_cli_sha256": "06508c5cbeca04ce9ab26c992a3a38ad7dd760edbe5f1fbc421b6470a2c34de8",
+  "measurement_script_sha256": "2669bd9c7ecbde53937c585efdb1def1a09891b9e07bfe2021bde2bb11a533cf",
+  "results": [
+    {
+      "tier": "float-ultra",
+      "encoded_bytes": 34574,
+      "source_over_encoded": 2.8432926476543066,
+      "encoded_sha256": "7c29e72b7bd32aca233410cefa31d5e1e3b1acdb4c07d6d554cc179496c1a489",
+      "decoded_sha256": "ab603dd6e1706fcd2e999e82aeb91f92faa0e1454a566fc12fa1a4a9677b5712",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/float16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-ultra.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "float-ultra"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-ultra.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-ultra.raw"
+      ],
+      "metrics": {
+        "channel_order": [
+          "G",
+          "B",
+          "R"
+        ],
+        "per_channel": [
+          {
+            "bit_exact": false,
+            "finite_samples": 16384,
+            "p99_half_ulp": 0.0,
+            "max_half_ulp": 0,
+            "special_class_changes": 0,
+            "zero_sign_changes": 1
+          },
+          {
+            "bit_exact": false,
+            "finite_samples": 16383,
+            "p99_half_ulp": 0.0,
+            "max_half_ulp": 1,
+            "special_class_changes": 1,
+            "zero_sign_changes": 0
+          },
+          {
+            "bit_exact": false,
+            "finite_samples": 16383,
+            "p99_half_ulp": 1.0,
+            "max_half_ulp": 2,
+            "special_class_changes": 0,
+            "zero_sign_changes": 0
+          }
+        ],
+        "all_bit_exact": false
+      }
+    },
+    {
+      "tier": "float-high",
+      "encoded_bytes": 29594,
+      "source_over_encoded": 3.3217544096776375,
+      "encoded_sha256": "53410c949141d320c405c6b6df61c84615bac24b7907b062e2e9e6042d79c229",
+      "decoded_sha256": "d598a09f869ca89d1ac1c40ca9f752c2c7b11695947c77fbcbdf1ebd45a5413a",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/float16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-high.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "float-high"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-high.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-high.raw"
+      ],
+      "metrics": {
+        "channel_order": [
+          "G",
+          "B",
+          "R"
+        ],
+        "per_channel": [
+          {
+            "bit_exact": false,
+            "finite_samples": 16384,
+            "p99_half_ulp": 1.0,
+            "max_half_ulp": 4,
+            "special_class_changes": 0,
+            "zero_sign_changes": 0
+          },
+          {
+            "bit_exact": false,
+            "finite_samples": 16383,
+            "p99_half_ulp": 1.0,
+            "max_half_ulp": 2,
+            "special_class_changes": 1,
+            "zero_sign_changes": 0
+          },
+          {
+            "bit_exact": false,
+            "finite_samples": 16383,
+            "p99_half_ulp": 3.0,
+            "max_half_ulp": 5,
+            "special_class_changes": 0,
+            "zero_sign_changes": 0
+          }
+        ],
+        "all_bit_exact": false
+      }
+    },
+    {
+      "tier": "float-medium",
+      "encoded_bytes": 15711,
+      "source_over_encoded": 6.257017376360512,
+      "encoded_sha256": "268b8615d114aa3d3545e8a3b35a21cdbc66005ce4773f92b847c12ee6ba8ac6",
+      "decoded_sha256": "b2937f2cccd2007c428cdaa56f2b77b8c41136f972aa13deadac877cabd2c0b1",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/float16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-medium.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "float-medium"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-medium.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-medium.raw"
+      ],
+      "metrics": {
+        "channel_order": [
+          "G",
+          "B",
+          "R"
+        ],
+        "per_channel": [
+          {
+            "bit_exact": false,
+            "finite_samples": 16384,
+            "p99_half_ulp": 16.0,
+            "max_half_ulp": 71,
+            "special_class_changes": 0,
+            "zero_sign_changes": 0
+          },
+          {
+            "bit_exact": false,
+            "finite_samples": 16383,
+            "p99_half_ulp": 16.0,
+            "max_half_ulp": 61,
+            "special_class_changes": 1,
+            "zero_sign_changes": 0
+          },
+          {
+            "bit_exact": false,
+            "finite_samples": 16383,
+            "p99_half_ulp": 92.0,
+            "max_half_ulp": 199,
+            "special_class_changes": 0,
+            "zero_sign_changes": 0
+          }
+        ],
+        "all_bit_exact": false
+      }
+    },
+    {
+      "tier": "float-low",
+      "encoded_bytes": 9696,
+      "source_over_encoded": 10.138613861386139,
+      "encoded_sha256": "24250c662b462b121a3b772f5ddb5ceffbeb5381f2aeaa7f7c97d8b4c7b9c052",
+      "decoded_sha256": "d3153991c21ce0f90b428e4a118374d5c5c72a53b7248a79e328f6f9fdfbd6ea",
+      "encode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "encode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_smoke/float16.raw",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-low.toos",
+        "--width",
+        "128",
+        "--height",
+        "128",
+        "--tier",
+        "float-low"
+      ],
+      "decode_command": [
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/toos",
+        "decode",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-low.toos",
+        "-o",
+        "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_native_domain_matrix/float16/float-low.raw"
+      ],
+      "metrics": {
+        "channel_order": [
+          "G",
+          "B",
+          "R"
+        ],
+        "per_channel": [
+          {
+            "bit_exact": false,
+            "finite_samples": 16384,
+            "p99_half_ulp": 113.85000000000036,
+            "max_half_ulp": 604,
+            "special_class_changes": 0,
+            "zero_sign_changes": 0
+          },
+          {
+            "bit_exact": false,
+            "finite_samples": 16383,
+            "p99_half_ulp": 134.0,
+            "max_half_ulp": 602,
+            "special_class_changes": 1,
+            "zero_sign_changes": 0
+          },
+          {
+            "bit_exact": false,
+            "finite_samples": 16383,
+            "p99_half_ulp": 495.1800000000003,
+            "max_half_ulp": 1102,
+            "special_class_changes": 1,
+            "zero_sign_changes": 0
+          }
+        ],
+        "all_bit_exact": false
+      }
+    }
+  ]
+}

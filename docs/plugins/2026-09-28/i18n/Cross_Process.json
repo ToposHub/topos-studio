@@ -1,0 +1,38 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Cross_Process": {
+        "name": "交叉冲洗",
+        "params": {
+          "preset": "预设",
+          "strength": "强度"
+        },
+        "desc": {
+          "short": "交叉冲洗风格曲线族：通道曲线交叉 + 染料雾交叉曝光，青蓝阴影、黄绿高光的反转负冲质感。",
+          "params": {
+            "preset": "风格预设：经典（青蓝阴影 / 黄绿高光）、绿偏移（病感绿中间调）、暖调（琥珀暖色、蓝色漂白）。",
+            "strength": "整体效果混合量，0 时完全直通；经感知曲线整形，滑杆手感线性。"
+          }
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Cross_Process": {
+        "name": "Cross Process",
+        "params": {
+          "preset": "Preset",
+          "strength": "Strength"
+        },
+        "desc": {
+          "short": "Cross-process look family: crossed per-channel curves plus dye-fog crosstalk for cyan-blue shadows and yellow-green highlights.",
+          "params": {
+            "preset": "Look preset: Classic (cyan-blue shadows / yellow-green highlights), Green Shift (sickly green mids), Warm (amber cast, bleached blues).",
+            "strength": "Overall effect mix, 0 is a full bypass; perceptually shaped slider."
+          }
+        }
+      }
+    }
+  }
+}

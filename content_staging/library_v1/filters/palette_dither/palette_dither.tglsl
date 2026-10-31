@@ -1,0 +1,89 @@
+// --- Topos Plugin Metadata ---
+// @name Palette Dither
+// @i18n_name LIB1_Palette_Dither
+// @author Topos Library v1
+// @version 0.1.0
+// @description Display-domain 4-color palette quantization with nearest-color mapping (explicit clamp-to-[0,1] strategy) and optional 4x4 Bayer ordered dither; strength 0 is exact identity
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param color palette_0 "Palette 0" 0.03 0.03 0.06
+// @param color palette_1 "Palette 1" 0.35 0.12 0.16
+// @param color palette_2 "Palette 2" 0.80 0.48 0.22
+// @param color palette_3 "Palette 3" 0.96 0.95 0.90
+// @param select dither_mode "Dither" 0 "None" "Ordered 4x4"
+// @param slider strength "Strength" 1.0 0.0 1.0
+// -----------------------------
+//
+// Palette Dither —— 调色板量化 + 有序抖动（L 计划 F12，LIB1）。
+//
+// 差量（对 Pixel_Blocks，见 L00 台账 F12 行）：Pixel_Blocks 是逐通道
+// **均匀阶梯**量化+4x4 Bayer，无任意调色板最近色；本件为 4 色程序
+// 调色板（color 参数表达，无外部资源）+ RGB 欧氏最近色映射 +
+// Bayer 相位偏移。蓝噪固定 pattern 需资源子门，暂以程序 Bayer 先行。
+//
+// 设计要点：
+// - **显示域艺术效果（显式策略）**：最近色查找先 clamp(color,0,1) 到
+//   调色板域再比较——这是把效果声明为显示域风格（非把管线 HDR 裁剪：
+//   strength<1 时输出仍为与原值的线性混合，HDR 残留按 strength 保留）；
+// - 抖动模型：Bayer 相位 φ=(b+0.5)/16-0.5 ∈ [-0.46875,0.46875] 按
+//   每通道步长 Δ=(hi-lo)/3（调色板通道极差的 4 色阶梯近似）缩放后
+//   偏移查找点：越界像素在相邻调色板色间按有序图案翻转，打散色带；
+//   调色板退化（同色）→ Δ=0 → 抖动自动失效（数值安全）；
+// - 最近色 4 路完全展开（无循环——GLSL 循环上限常量红线兼容），
+//   平局取低索引（与 oracle np.argmin 同口径）；
+// - 位置相关：像素坐标 = uv·u_tex_size，Bayer 下标 mod 4；同输入
+//   不同像素可映射不同调色板色（确定性，无随机流）；
+// - strength 双语义（如实声明）：同值缩放抖动幅度与混合比——
+//   strength=0 首行早退精确恒等（显示域效果的 bypass 语义）；
+// - 参数 ABI 裸名引用；仅引擎注入 u_input_tex/u_tex_size/u_aspect_ratio
+//   （本件只读 u_tex_size，不采样邻域）。
+
+const int PD_BAYER4[16] = int[16](
+     0,  8,  2, 10,
+    12,  4, 14,  6,
+     3, 11,  1,  9,
+    15,  7, 13,  5
+);
+
+float pd_dist2(vec3 a, vec3 b) {
+    vec3 d = a - b;
+    return dot(d, d);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (strength < 0.001) return color;
+
+    // 显示域策略：查找域 clamp 到 [0,1]（不触碰混合用的原值）
+    vec3 probe = clamp(color, 0.0, 1.0);
+
+    if (dither_mode == 1) {
+        vec2 px = uv * u_tex_size;
+        int ix = int(mod(floor(px.x), 4.0));
+        int iy = int(mod(floor(px.y), 4.0));
+        float phase = (float(PD_BAYER4[iy * 4 + ix]) + 0.5) / 16.0 - 0.5;
+        vec3 lo = min(min(palette_0, palette_1), min(palette_2, palette_3));
+        vec3 hi = max(max(palette_0, palette_1), max(palette_2, palette_3));
+        probe += (phase * strength) * ((hi - lo) / 3.0);
+    }
+
+    // 最近色：4 路展开，平局取低索引
+    vec3 best = palette_0;
+    float best_d = pd_dist2(probe, palette_0);
+    float d1 = pd_dist2(probe, palette_1);
+    float d2 = pd_dist2(probe, palette_2);
+    float d3 = pd_dist2(probe, palette_3);
+    if (d1 < best_d) { best = palette_1; best_d = d1; }
+    if (d2 < best_d) { best = palette_2; best_d = d2; }
+    if (d3 < best_d) { best = palette_3; best_d = d3; }
+
+    return mix(color, best, strength);
+}

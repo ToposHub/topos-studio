@@ -1,0 +1,87 @@
+[
+  {
+    "id": "S01",
+    "issue_present": true,
+    "restored_metadata": {},
+    "restored_rating": 0,
+    "roundtrip_snapshot_names": []
+  },
+  {
+    "id": "S02",
+    "issue_present": true,
+    "compile_error": "Cannot compile operation 'filler-0' (delete_clip): missing required param 'track_id'"
+  },
+  {
+    "id": "S03",
+    "issue_present": true,
+    "actual_resolution": [
+      3840,
+      2160
+    ],
+    "expected_resolution": [
+      1080,
+      1920
+    ],
+    "offline_ok": false,
+    "offline_job_count": 1
+  },
+  {
+    "id": "S04",
+    "issue_present": true,
+    "packet_index_seconds": [
+      -0.08,
+      -0.04,
+      0.0,
+      0.08
+    ],
+    "actual_first_source_frame": 2,
+    "expected_first_source_frame": 0,
+    "scope": "packet stand-in, not real-media proof"
+  },
+  {
+    "id": "S06",
+    "issue_present": true,
+    "actual_seconds_at_24fps": 1.48,
+    "expected_seconds": 1.5,
+    "scope": "helper fps only; controller offset sign checked statically"
+  },
+  {
+    "id": "S07",
+    "issue_present": true,
+    "uncaught_source_read_error": "source removed"
+  },
+  {
+    "id": "S08",
+    "issue_present": true,
+    "actual_bgr": [
+      [
+        [
+          0.3510810136795044,
+          0.5529427528381348,
+          0.7762921452522278
+        ]
+      ]
+    ],
+    "expected_bgr": [
+      [
+        [
+          0.3312232196331024,
+          0.5216673016548157,
+          0.7323837280273438
+        ]
+      ]
+    ],
+    "max_abs_error": 0.04390841722488403,
+    "scope": "production CPU exporter with injected resolved chain"
+  },
+  {
+    "id": "S09",
+    "issue_present": true,
+    "actual_plugin_manifest": {}
+  },
+  {
+    "id": "S10",
+    "issue_present": true,
+    "signature_unchanged_after_port_swap": true
+  }
+]

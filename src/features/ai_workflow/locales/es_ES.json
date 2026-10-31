@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "Flujo de trabajo de IA"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "Selecciona una plantilla arriba o suelta recursos aquí",
+      "zoom": "Zoom: {percent} %"
+    },
+    "toolbar": {
+      "template": "Plantilla",
+      "load": "Cargar",
+      "clear": "Borrar",
+      "form": "Formulario",
+      "canvas": "Lienzo",
+      "run": "Ejecutar",
+      "cancel": "Cancelar"
+    },
+    "gallery": {
+      "title": "Elige una plantilla de flujo de trabajo",
+      "use": "Usar"
+    },
+    "form": {
+      "title": "Parámetros",
+      "title_with_name": "{name} · Parámetros",
+      "node_section": "Nodo: {node}",
+      "no_params": "Esta plantilla no tiene parámetros ajustables; solo ejecútala",
+      "advanced_edit": "Edición avanzada (lienzo)",
+      "back_to_gallery": "Volver a las plantillas",
+      "back_to_gallery_tooltip": "Vuelve a la galería de plantillas; el flujo de trabajo actual se conserva (Borrar lo descarta)"
+    },
+    "status": {
+      "idle": "Inactivo",
+      "queued": "En cola",
+      "running": "Ejecutando",
+      "cached": "En caché",
+      "succeeded": "Completado",
+      "failed": "Fallido",
+      "cancelled": "Cancelado",
+      "waiting_input": "Esperando",
+      "skipped": "Omitido",
+      "not_assembled": "Estado: no ensamblado",
+      "no_plan": "Aún no hay plan"
+    },
+    "actions": {
+      "preview_plan": "Previsualizar plan",
+      "request_approval": "Solicitar aprobación",
+      "apply_approved_plan": "Aplicar plan aprobado"
+    },
+    "inspector": {
+      "no_selection": "<b>(sin selección)</b>"
+    },
+    "node_search": {
+      "placeholder": "Buscar nodos…"
+    }
+  }
+}

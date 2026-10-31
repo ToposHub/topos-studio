@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 8 items
+
+tests/edit/test_present_protocol_cleanup.py ........                     [100%]
+
+============================== 8 passed in 16.93s ==============================

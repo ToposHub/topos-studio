@@ -1,0 +1,161 @@
+# 随附 LUT 契约文件入库（W07：干净 checkout 必须可命中 apply_lut 的
+# 工程根解析目标——tests/edit/test_fix_wd13g69_aud.py 锁定）；本机其余
+# LUT 与 HDRI 为用户数据/来源不明素材，不入仓（2026-11-01 素材审计，本地保留）。
+luts/*
+models/
+# Keep the lightweight pack directory manifest in version control while
+# continuing to ignore all locally downloaded model weights.
+!models/
+models/*
+!models/ai_editing/
+models/ai_editing/*
+!models/ai_editing/*/
+models/ai_editing/*/*
+!models/ai_editing/*/.gitkeep
+.venv/
+.venv-win/
+Presets/User/
+# 用户创建的 MG 素材库（用户级 ~/…/Topos/mg_presets 与工程级 <工程目录>/mg_presets）
+# 均为用户数据，不入库；随应用分发的内置库在
+# src/features/teaching_animation/presets/library/，照常纳入版本控制。
+mg_presets/
+
+.DS_Store
+__pycache__/
+*.py[cod]
+venv/
+.env
+.cache/
+.images_cache/
+src/.images_cache/
+.pytest_cache/
+# 运行时缓存根目录（paths.get_cache_dir() → <repo>/cache，含 scene_cut 分析等，可再生）
+cache/
+# bench_frame_budget --generate-media 的合成基准素材（可再生，不入库）
+4k_h264/
+
+.!*!*
+
+tests/test_videos/**
+!tests/test_videos/benchmark_media_manifest.json
+!tests/test_videos/ai_test_asset_manifest.json
+!tests/test_videos/topos_prores_baseline_manifest.json
+!tests/test_videos/README.md
+tests/test_audio
+src/config.json
+src/metadata.db
+src/topos.db
+*.db
+# SQLite WAL 边车文件（topos.db 被测试以 WAL 模式打开时产生，随连接关闭自动清理）
+*.db-shm
+*.db-wal
+
+# 本地页面布局配置（运行时生成，无需跟踪）
+.topos/
+external/file_explorer/.port_config.json
+
+# [R4-1] 运行时产物（历史版本被误跟踪，2026-09 untrack）
+config.json
+metadata.db
+external/file_explorer/config.json
+
+# [R4-2] AI IDE 状态与一次性测试产物（2026-09 untrack）
+.qoder/
+.qwen/
+tests/video_denoise/output/
+tests/benchmark/results/
+
+# ZCode IDE 内部状态（计划文件等）
+.zcode/
+
+# Python 构建产物（wheel/egg-info 生成，勿入库；src/ 之下才是源码）
+build/
+dist/
+*.egg-info/
+
+# 基准产物（tools/e2e_*_bench.py 的运行结果，机器相关，不入库）
+bench_results/
+scripts/bench_hw_encode_results.json
+
+# 基准派生资产（可再生，不入库；生成：tools/bench_m8_matrix.py 等基准脚本；
+# JSON 结果作为证据链照常入库，仅忽略媒体等可再生产物）
+bench_out/**/*.mov
+bench_out/**/*.mov.manifest.json
+bench_out/**/*.mp4
+bench_out/**/*.mp4.manifest.json
+bench_out/**/*.yuv
+bench_out/**/*.raw
+bench_out/**/*.toos
+bench_out/**/*.rggb16le
+bench_out/**/*.topos-tmp
+bench_out/**/_cold_snippet.py
+bench_out/**/*.calib*
+# 本机 TOPOS 时间线导出的项目包、控制台日志为一次性产物；复现实验用
+# Python 脚本和 JSON 结果照常纳入版本控制。
+bench_out/topos_timeline_export_*/*.topos
+bench_out/topos_timeline_export_*/*.log
+# D1 播放路径结果含机器/动态库 SHA，仅在本机归档，不作为源代码资产提交
+bench_out/d1_playback/
+# D3 worker 预算结果同样含机器/动态库 SHA，仅在本机归档
+bench_out/d3_budget/
+# E1 编码阶段结果含机器/动态库 SHA，仅在本机归档
+bench_out/e1_encode/
+# 本机 Topos 编解码测速产生的大体积 MOV/JSON 临时结果，不入库
+bench_out/topos_codec_stages/
+bench_out/topos_4444_bench_*/
+# Topos same-vs-cross timeline benchmark emits per-run JSON/manifests too;
+# all results are machine-specific and reproducible from the benchmark script.
+bench_out/topos_same_vs_cross/
+
+# [R4-9] 个人 AI CLI 启动器（含个人模型映射）与一次性性能报告，不入库
+run_claude.command
+run_claude.bat
+run_opencode.command
+playback_fps_report*.txt
+
+# DeckLink 桥接扩展：平台/Python 版本双钉死的编译产物，按需构建
+# （python3 tools/build_topos_decklink.py），不入版本控制
+src/topos_decklink*.so
+src/topos_decklink*.pyd
+
+# P0-03/P0-04 生成的 4K 合成基准素材（体积大，不入库）
+tests/media/fixtures/p52/
+samples/
+bin/*.exe
+
+# 真实导出演示产物（可由 scripts/demo_real_timeline_export.py 复现）
+bench_out/real_export_demo/
+
+# 导出诊断产物
+bench_out/diag*
+bench_out/pure_encode*
+bench_out/macos_gpu_export_20260915/
+
+# CP 审计基准的帧输出（仅保留 json/md）
+bench_out/cp_audit_20261014/*/
+bench_out/cp_audit_20261014/w_*.exr
+bench_out/cp_audit_20261014/bench_h264.mp4
+testfarm/**/G*.log
+testfarm/**/G*.xml
+
+# M01: 隔离验证环境（构建脚本 scripts/m01_build_envs.sh）
+.venv-m01-core/
+.venv-m01-ai/
+.venv-m01-tts/
+
+# [素材审计 2026-10-31] 实拍素材与本地参考文件不入仓（含人物肖像/私人场所，
+# 详见素材审计记录；本地文件保留，仅从版本库排除）
+/ref.still.jpg
+/ref.thumb.jpg
+/test_cache_image.exr
+bench_out/**/*.wav
+
+# [隐私清洗 2026-10-31] 覆盖率原始二进制含本机路径，不入仓(可再生)
+docs/testcoverage/**/.covdata
+
+# [侵权排查 2026-11-01] Blackmagic DeckLink SDK 为专有许可，禁止公开再分发；
+# 本地保留用于开发，需要时从 Blackmagic 官网下载
+external/blackmagic/
+
+# [侵权排查 2026-11-01] 来源不明素材不入仓(本地保留)
+hdri/*.jpg

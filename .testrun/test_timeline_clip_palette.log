@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_timeline_clip_palette.py ....                            [100%]
+
+============================== 4 passed in 6.47s ===============================

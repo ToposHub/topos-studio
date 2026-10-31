@@ -1,0 +1,78 @@
+{
+  "platform": {
+    "os": "macOS",
+    "os_version": "15.3.1",
+    "arch": "x86_64",
+    "python": "3.12.14"
+  },
+  "git": {
+    "revision": "47e30e37aa58560331fb8bf29496eb070b427d5a",
+    "branch": "chore/edit",
+    "dirty_file_count": 2
+  },
+  "gpu": {
+    "status": "AVAILABLE",
+    "reason_code": null,
+    "detail": null,
+    "devices": [
+      {
+        "model": "AMD Radeon RX 6800",
+        "vendor": "sppci_vendor_amd",
+        "vram": "16 GB",
+        "cores": null,
+        "metal_support": null
+      }
+    ]
+  },
+  "metal": {
+    "status": "UNAVAILABLE",
+    "reason_code": "METAL_SUPPORT_NOT_REPORTED",
+    "detail": null
+  },
+  "gl": {
+    "status": "DEFERRED",
+    "reason_code": "GL_CONTEXT_DEFERRED_TO_RUNTIME",
+    "detail": "X-TEST-00 只冻结环境事实；GL 版本/渲染器由运行时 capability snapshot 采集"
+  },
+  "ffmpeg": {
+    "pyav": {
+      "status": "AVAILABLE",
+      "reason_code": null,
+      "pyav_version": "18.1.0",
+      "ffmpeg_version": "8.1.2"
+    },
+    "ffmpeg_cli": {
+      "status": "UNAVAILABLE",
+      "reason_code": "FFMPEG_CLI_NOT_FOUND",
+      "detail": "TOPOS_FFMPEG_HOME/打包 bin/PATH 均未发现；探测仅走 PyAV/native"
+    },
+    "ffprobe_cli": {
+      "status": "UNAVAILABLE",
+      "reason_code": "FFPROBE_CLI_NOT_FOUND",
+      "detail": "TOPOS_FFMPEG_HOME/打包 bin/PATH 均未发现；探测仅走 PyAV/native"
+    }
+  },
+  "topos_codec": {
+    "status": "AVAILABLE",
+    "reason_code": null,
+    "library_path": "/Users/testuser/Documents/vscode/topos_1/native/topos_codec/build/release/topos_codec.0.1.0.dylib",
+    "version": {
+      "major": 0,
+      "minor": 1,
+      "patch": 0,
+      "git_commit": "c88fa81b-dirty",
+      "build_target": "x86_64-AppleClang"
+    },
+    "abi_version": 2,
+    "capabilities": {
+      "abi_version": 2,
+      "max_width": 16384,
+      "max_height": 16384,
+      "full_decode": true,
+      "fixed_reduced_decode": true,
+      "auto2k_decode": true,
+      "cpu_surface_output": true,
+      "host_visible_gpu_surface": true
+    }
+  }
+}

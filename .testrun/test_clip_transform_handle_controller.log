@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_clip_transform_handle_controller.py ....                 [100%]
+
+============================== 4 passed in 7.08s ===============================

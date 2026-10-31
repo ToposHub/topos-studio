@@ -1,0 +1,71 @@
+// --- Topos Plugin Metadata ---
+// @name Gamut Rolloff
+// @i18n_name LIB1_Gamut_Rolloff
+// @author Topos Library v1
+// @version 0.1.0
+// @description Chroma-magnitude soft-knee compression toward a threshold: Rec.709 luma is preserved, chroma vector above threshold is rolled toward it with knee-width smooth transition; no RGB clamp, negative/HDR pass through (Euclidean chroma magnitude approximation, not a full gamut boundary solve)
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider threshold "Threshold" 1.0 0.5 4.0
+// @param slider knee "Knee" 0.2 0.0 1.0
+// @param slider strength "Strength" 0.8 0.0 1.0
+// -----------------------------
+//
+// Gamut Rolloff —— 色域软滚降（L 计划 F05，LIB1）。
+//
+// 差量（L00 台账 F05 行）：全库无 gamut 压缩项（Color_Space_Transform
+// 是 CSC+tone map，非 rolloff）。本项是色相保持的色度幅值压缩。
+//
+// 算法（与 references/gamut_rolloff_ref.py 逐式同构）：
+// - luma = dot(rgb, Rec.709W)；chroma = rgb - luma；m = |chroma|；
+// - m ≤ threshold 恒等；m > threshold 时
+//   m' = thr + (m-thr)·(1 - strength·rolloff)，
+//   rolloff = smoothstep(clamp((m-thr)/knee,0,1))——[thr, thr+knee]
+//   区间压缩斜率平滑上升（soft knee），knee=0 为硬膝（rolloff=1）；
+// - out = luma + chroma·(m'/m)——亮度严格保持、色相方向不变、
+//   仅缩短色度向量；输出不 clamp，负值/HDR 透传（HDR 像素同样
+//   只压缩色度幅值，luma 可远大于 1）。
+//
+// 近似声明（README §限制）：|chroma| 为简单欧氏幅值，**非完整 gamut
+// 边界求解**（不做 primaries/白点映射）；工作域假设 scene-linear
+// Rec.709 primaries 近似（M19.1 已验子集口径，见 README）。
+//
+// strength=0 精确恒等（首行早退出）；纯逐像素数学：零采样、零循环、
+// 零三角函数；参数 ABI 裸名引用，仅引擎注入 u_* 白名单（本文件零 u_*）。
+
+const vec3 GR_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (strength < 0.001) return color;
+
+    float gr_thr = max(threshold, 1e-4);
+    float gr_kn = clamp(knee, 0.0, 1.0);
+
+    float gr_l = dot(color, GR_LUMA_W);
+    vec3 gr_c = color - vec3(gr_l);
+    float gr_m = length(gr_c);
+
+    // 幅值在阈值内（含灰像素 m=0）恒等
+    if (gr_m <= gr_thr || gr_m < 1e-6) return color;
+
+    // soft knee：[thr, thr+knee] 内 smoothstep 过渡压缩斜率
+    float gr_ex = gr_m - gr_thr;
+    float gr_roll = 1.0;
+    if (gr_kn > 1e-6) {
+        float gr_t = clamp(gr_ex / gr_kn, 0.0, 1.0);
+        gr_roll = gr_t * gr_t * (3.0 - 2.0 * gr_t);
+    }
+    float gr_m2 = gr_thr + gr_ex * (1.0 - strength * gr_roll);
+
+    // 色度向量按 m'/m 缩放，亮度保持；不 clamp 输出
+    return vec3(gr_l) + gr_c * (gr_m2 / gr_m);
+}

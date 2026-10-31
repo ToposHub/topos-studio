@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 13 items
+
+tests/edit/test_open_in_composite_does_not_create_temporary_composition.py . [  7%]
+............                                                             [100%]
+
+============================== 13 passed in 6.88s ==============================

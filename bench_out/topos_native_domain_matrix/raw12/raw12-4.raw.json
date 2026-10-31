@@ -1,0 +1,15 @@
+{
+  "width": 128,
+  "height": 128,
+  "bit_depth": 12,
+  "pixel_format": 3,
+  "channels": "R,Gr,Gb,B",
+  "alpha_mode": 0,
+  "alpha_bit_depth": 0,
+  "color_range": 1,
+  "color_primaries": 1,
+  "color_transfer": 20,
+  "color_matrix": 0,
+  "sample": "uint16 LE planar",
+  "concealed_slices": 0
+}

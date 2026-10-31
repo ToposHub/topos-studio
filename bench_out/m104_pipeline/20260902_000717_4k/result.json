@@ -1,0 +1,25 @@
+{
+ "meta": {
+  "res": "4k",
+  "frames": 48,
+  "slice_rows": 16,
+  "logical_cpus": 24,
+  "cpu": "Genuine Intel(R) 0000",
+  "topos_commit": "e291c87b"
+ },
+ "rows": {
+  "t8": {
+   "serial": {
+    "fps": 19.2
+   },
+   "pipeline_w2": {
+    "fps": 19.3,
+    "bitexact_vs_serial": true
+   },
+   "pipeline_w3": {
+    "fps": 19.4,
+    "bitexact_vs_serial": true
+   }
+  }
+ }
+}

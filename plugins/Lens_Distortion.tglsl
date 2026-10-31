@@ -1,0 +1,74 @@
+// --- Topos Plugin Metadata ---
+// @name Lens Distortion
+// @i18n_name Lens_Distortion
+// @author Topos Team
+// @version 1.0
+// @description Radial lens distortion (barrel/pincushion) with r2 polynomial remap, manual zoom compensation and auto-zoom framing guard
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider distortion "Distortion" 0.35 -1.0 1.0
+// @param slider zoom_comp "Zoom Compensation" 0.0 0.0 1.0
+// @param separator
+// @param checkbox auto_zoom "Auto Zoom" 1
+// -----------------------------
+//
+// Lens Distortion —— 径向镜头畸变。
+//
+// 原理：单参数 r2 多项式重映射——采样坐标 q（宽高比校正、中心化）
+// 沿径向缩放 f = 1 + k * r2。k > 0 为桶形（barrel，边角向外鼓，
+// 采样坐标外推），k < 0 为枕形（pincushion）。畸变把画幅角推出去会
+// 留下无采样区：auto_zoom 按角点 r2 计算精确收缩比例把整个采样域
+// 缩回画幅内（等价于往里变焦），zoom_comp 提供手动再收缩。
+//
+// 设计要点：
+// - 单次纹理采样、零循环、零三角函数（r2 = dot(q,q) 纯代数）；
+// - 宽高比校正：q.x 乘 u_aspect_ratio 使畸变为各向同性圆对称；
+// - 采样 UV 钳到半纹素边界（clamp-to-edge 保险：关闭 auto_zoom 且
+//   zoom_comp 不足时边角呈拉伸像素而非黑边/未定义行为，注释明示）；
+// - auto_zoom 分母 1 + k * r2_max 在 k > 0 分支内恒 > 1，无除零；
+// - Delta 输出惯例：重采样差值叠加到已调色画面；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零畸变纯直通
+    if (abs(distortion) < 0.001) return color;
+
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 safe_size = max(tex_size, vec2(1.0));
+    vec2 half_texel = 0.5 / safe_size;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+
+    // 宽高比校正的中心化坐标
+    float aspect = max(u_aspect_ratio, 0.1);
+    vec2 q = (uv - 0.5) * vec2(aspect, 1.0);
+    float r2 = dot(q, q);
+
+    // 径向缩放：k 的 0.5 系数使 |distortion| = 1 时角部形变约 15%+，
+    // 可见但可逆
+    float k = distortion * 0.5;
+    float f = 1.0 + k * r2;
+
+    // 采样域收缩：auto_zoom 按角点精确算收缩比例（仅桶形需要），
+    // zoom_comp 再叠加最多 50% 的手动收缩
+    float zoom = 1.0 - zoom_comp * 0.5;
+    if (auto_zoom == 1 && k > 0.0) {
+        float r2_max = (0.5 * aspect) * (0.5 * aspect) + 0.25;
+        zoom *= 1.0 / (1.0 + k * r2_max);
+    }
+
+    vec2 suv = 0.5 + (q * f * zoom) / vec2(aspect, 1.0);
+    vec3 distorted = texture(u_input_tex, clamp(suv, min_uv, max_uv)).rgb;
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    return color + (distorted - original_color);
+}

@@ -1,0 +1,29 @@
+{
+  "recipe_id": "P73",
+  "name": "玻璃折射合成",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "玻璃折射合成：程序/外部 UV map 绝对重映射前景后叠底",
+  "component": "C13 stmap（暂存节点 lib1_stmap）＋生产 merge",
+  "dependencies": {
+    "component_id": "C13",
+    "component_slug": "stmap",
+    "component_kind": "node",
+    "node_type": "lib1_stmap",
+    "aux_node_types": [
+      "merge"
+    ]
+  },
+  "params": {
+    "channels": "RG",
+    "origin": "BottomLeft",
+    "invalid": "Clamp",
+    "filter": "Linear"
+  },
+  "notes": "C13 stmap 暂存组件＋生产 merge 组成玻璃折射宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；UV map 走显式插槽（uv_map），不引用作者机器路径/源媒体（计划 §7.3 口径）。"
+}

@@ -1,0 +1,171 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "C19",
+  "dedup": "matte_cleanup 仅 erode/dilate/blur/clamp/invert/levels、无孔洞填充——新算法差量（L00 台账 C19 行）；全帧算法预算/取消",
+  "host_min_contract": "node_type lib1_fill_holes；marker dispatch（base_evaluator lib1_ 分支）+ GLSL 未接线（L17 草案）；全帧声明子门未开——生产接线待集成者开全帧预算/取消子门，不宣称 tile-safe",
+  "image": {
+    "alpha": "straight",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "node",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": "4",
+      "maximum": null,
+      "minimum": null,
+      "name": "connectivity",
+      "neutral": false,
+      "options": [
+        "4",
+        "8"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": "BG 连通域标注连通度（对角差分：4-conn 填、8-conn 不填已测）"
+    },
+    {
+      "animatable": false,
+      "default": 0.1,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "max_area",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "frame-area-ratio",
+      "validation": "孔面积上界=画幅面积比例；0=不填（恒等锚）"
+    },
+    {
+      "animatable": false,
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "threshold",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "level",
+      "validation": "α ≥ threshold → FG（HDR α 合法）"
+    },
+    {
+      "animatable": false,
+      "default": "Fill",
+      "maximum": null,
+      "minimum": null,
+      "name": "output_mode",
+      "neutral": false,
+      "options": [
+        "Fill",
+        "Holes"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": "Fill=孔 α 置 1；Holes=孔 mask 本身（1/0）"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "no-op：返回空输出（marker 协议）；输入必须含 α 通道",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    },
+    {
+      "data_type": "image",
+      "direction": "output",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "fill_holes",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_c19_fill_holes.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "tests/content_library_v1/test_c19_fill_holes.py（≥4 独立手算向量：中心孔/触边背景/对角连通差分/Holes 模式）",
+    "known_limits": "节点类+marker 草案；dispatch/GLSL/registry/capability 未接线（L04/L17 集成）——仅声明不是完成。全帧声明：连通域两遍扫描（BFS 确定性标注，无 scipy），无法证明分块支持；触边 BG=真背景永不填（验收点）；Fill 只把孔 α 置 1.0（其余 α 原样，HDR 保留）；缺 α 显式 ValueError",
+    "oracle": "content_staging/library_v1/references/fill_holes_ref.py"
+  },
+  "version": "0.1.0"
+}

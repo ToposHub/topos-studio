@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_no_glfinish_hotpath.py ...                               [100%]
+
+============================== 3 passed in 10.37s ==============================

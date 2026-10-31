@@ -1,0 +1,8 @@
+# T-P1-20 evidence command log (2026-09-18)
+# truth matrix: 7 exportable effects x (topos_proxy,h264) x 48 frames + identity baselines
+TOPOS_CODEC_LIB="$PWD/native/topos_codec/build/release/topos_codec.0.1.0.dylib" .venv/bin/python scripts/bench_effect_export_truth_matrix.py --workdir bench_out/ai_upgrade/T-P1-20_truth_matrix   # all_pass=True
+# targeted suites
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/test_effect_catalog_capabilities.py tests/edit/test_effect_execution_capability.py tests/edit/test_export_video_effects_preflight.py tests/edit/ai_editing/test_taep_contracts.py tests/color/test_plugin_manifest_binding.py tests/deliver -q   # 250 passed
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest $(grep -rln "ClipInstance.from_dict" tests/ | tr '\n' ' ') -q   # 176 passed
+# pre-existing-failure isolation (clean HEAD worktree reproduces suite segfault)
+git worktree add /tmp/topos_clean_check HEAD && pytest tests/edit tests/shared ... # Fatal Python error: Segmentation fault at test_audio_waveform (pre-existing)

@@ -1,0 +1,46 @@
+[
+  {
+    "name": "initial",
+    "counts": {
+      "video": 1,
+      "audio": 1
+    }
+  },
+  {
+    "name": "after_split",
+    "counts": {
+      "video": 2,
+      "audio": 2
+    }
+  },
+  {
+    "name": "menu_undo_enabled",
+    "on": false,
+    "redo": false,
+    "undo_text": "撤销\t⌘Z",
+    "redo_text": "重做\t⇧⌘Z",
+    "undo_shortcut": "Ctrl+Z"
+  },
+  {
+    "name": "cmd_z",
+    "counts": {
+      "video": 2,
+      "audio": 2
+    },
+    "menu_undo_enabled": false
+  },
+  {
+    "name": "ctrl_z",
+    "counts": {
+      "video": 1,
+      "audio": 1
+    }
+  },
+  {
+    "name": "cmd_shift_z",
+    "counts": {
+      "video": 1,
+      "audio": 1
+    }
+  }
+]

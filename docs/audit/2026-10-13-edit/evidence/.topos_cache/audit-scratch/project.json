@@ -1,0 +1,91 @@
+{
+  "project_id": "f876f267-f90d-4305-80bd-c1ba5db0171c",
+  "name": "Untitled Project",
+  "project_mode": "edit_project",
+  "assets": {
+    "8d00dabe-18a6-4c6e-945e-a21d7e4b8404": {
+      "asset_id": "8d00dabe-18a6-4c6e-945e-a21d7e4b8404",
+      "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_h264.mp4",
+      "media_type": "video",
+      "display_name": "2K_h264.mp4",
+      "is_offline": false,
+      "path_relative": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_h264.mp4",
+      "path_original": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_h264.mp4"
+    },
+    "865fe588-f156-43c4-8ad7-787bf4cb9ef1": {
+      "asset_id": "865fe588-f156-43c4-8ad7-787bf4cb9ef1",
+      "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_prores422Proxy.mov",
+      "media_type": "video",
+      "display_name": "2K_prores422Proxy.mov",
+      "is_offline": false,
+      "path_relative": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_prores422Proxy.mov",
+      "path_original": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_prores422Proxy.mov"
+    },
+    "01d755c1-4a8c-428f-97fa-f700053c67a2": {
+      "asset_id": "01d755c1-4a8c-428f-97fa-f700053c67a2",
+      "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_topos_422_Proxy.mov",
+      "media_type": "video",
+      "display_name": "2K_topos_422_Proxy.mov",
+      "is_offline": false,
+      "path_relative": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_topos_422_Proxy.mov",
+      "path_original": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_topos_422_Proxy.mov"
+    }
+  },
+  "bins": {
+    "1938197d-12d6-4cca-99cb-4e4d5fa17378": {
+      "bin_id": "1938197d-12d6-4cca-99cb-4e4d5fa17378",
+      "name": "Root",
+      "parent_id": null,
+      "asset_count": 3
+    }
+  },
+  "timelines": {
+    "dc66b83a-5075-4050-b2d2-2a764ec2f400": {
+      "timeline_id": "dc66b83a-5075-4050-b2d2-2a764ec2f400",
+      "name": "Timeline 1",
+      "fps": 25.0,
+      "width": 1920,
+      "height": 1080
+    },
+    "3c477b9c-f485-40a1-b174-3d061889ad5d": {
+      "timeline_id": "3c477b9c-f485-40a1-b174-3d061889ad5d",
+      "name": "Audit Source Edits",
+      "fps": 25.0,
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "color_stacks": {},
+  "compositions": {},
+  "deliver_presets": {},
+  "ui_state": {},
+  "settings": {
+    "root_bin_id": "1938197d-12d6-4cca-99cb-4e4d5fa17378",
+    "active_comp_clip_id": null,
+    "color_management": {
+      "color.preview.timeline_primaries": "bt709",
+      "color.preview.timeline_transfer": "bt709",
+      "color.preview.image_primaries": "bt709",
+      "color.preview.image_transfer": "iec61966_2_1",
+      "color.output.timeline_primaries": "bt709",
+      "color.output.timeline_transfer": "bt709",
+      "color.output.timeline_range": "limited",
+      "color.output.image_primaries": "bt709",
+      "color.output.image_transfer": "iec61966_2_1",
+      "color.preview.hdr_tonemap": 1,
+      "color.preview.hdr_target_peak": 100,
+      "color.output.hdr_metadata": true,
+      "color.smart_default": true
+    },
+    "render_cache_settings": null,
+    "proxy_policy": null,
+    "render_cache_manifests": {}
+  },
+  "primary_asset_id": null,
+  "primary_color_stack_id": null,
+  "active_timeline_id": "3c477b9c-f485-40a1-b174-3d061889ad5d",
+  "active_composition_id": null,
+  "created_at": 1791906271.699038,
+  "modified_at": 1791933255.14143,
+  "revision": 0
+}

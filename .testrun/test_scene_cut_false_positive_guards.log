@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 21 items
+
+tests/edit/test_scene_cut_false_positive_guards.py ..................... [100%]
+
+============================= 21 passed in 52.46s ==============================

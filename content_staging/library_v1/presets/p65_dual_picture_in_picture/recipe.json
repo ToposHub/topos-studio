@@ -1,0 +1,30 @@
+{
+  "recipe_id": "P65",
+  "name": "双列画中画",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "双列并排：count 2×1，spacing 0.04–0.1 分隔缝隙",
+  "component": "C14 tile_array（暂存节点 lib1_tile_array）＋生产 transform",
+  "dependencies": {
+    "component_id": "C14",
+    "component_slug": "tile_array",
+    "component_kind": "node",
+    "node_type": "lib1_tile_array",
+    "aux_node_types": [
+      "transform"
+    ]
+  },
+  "params": {
+    "count_x": 2,
+    "count_y": 1,
+    "spacing": 0.06,
+    "offset_x": 0.0,
+    "offset_y": 0.0
+  },
+  "notes": "C14 tile_array 暂存组件＋生产 transform 组成双列画中画宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；输出 bbox/空隙 alpha 以 C14 声明口径为准。"
+}

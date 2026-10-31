@@ -1,0 +1,76 @@
+{
+  "ok": true,
+  "result": {
+    "parent": {
+      "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+      "name": "Timeline 1",
+      "rev": 4,
+      "frames": 50,
+      "tracks": [
+        {
+          "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+          "clips": [
+            {
+              "id": "2c68b659-7941-48cd-a8fe-12568d92fb89",
+              "start": 0,
+              "end": 50
+            }
+          ]
+        },
+        {
+          "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+          "clips": []
+        }
+      ]
+    },
+    "children": [
+      {
+        "id": "d3896cf0-f8c8-4221-b65b-e11534afe71c",
+        "name": "Nested Timeline 1",
+        "rev": 0,
+        "frames": 50,
+        "tracks": [
+          {
+            "id": "d3896cf0-v0",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 50
+              }
+            ]
+          },
+          {
+            "id": "d3896cf0-a0",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 50
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "preflight": "PreflightResult(issues=[])",
+    "jobs_count": 1,
+    "queue": [
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_custom_h264.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_after_edit.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_nested.mp4"
+      }
+    ]
+  }
+}

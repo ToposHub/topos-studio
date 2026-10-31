@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 5 items
+
+tests/edit/test_edit_project_composite_state_preservation.py .....       [100%]
+
+============================== 5 passed in 7.36s ===============================

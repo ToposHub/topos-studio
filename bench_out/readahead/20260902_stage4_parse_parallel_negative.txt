@@ -1,0 +1,93 @@
+# M11 阶段4 后续：parse 并行化候选否决证据（2026-09-02，i9-9900K 8C16T）
+
+## 结论（负结果，候选撤回）
+- 路线书把 2K 内核 429 vs 理想 487 的残余差距归因之一列为"每帧串行
+  parse"。实测 parse 成本：
+  - 2K hq（0.86MB 包，27 slices）：**0.78 µs/包**（native 直测，best-of-7；
+    绑定层 prepare 含 ctypes 往返 2.2 µs 为上界）
+  - 4K hq（3.61MB 包，51 slices）：**1.26 µs/包**
+  - 占比：2K 帧解码 2331 µs（429fps）的 **0.033%**；批 8 帧共 6.2µs
+    对 18.6ms 批 = 0.03%。并行化收益上限 <0.1% → 远低于 3% 回退线，
+    **不施工**。
+- 更强的否证——串行占比整体测量：负载下内核批量扩展曲线
+  t1 68.9 / t2 137.1（1.99×）/ t4 265.9（3.86×）/ t8 380.7 / t16 481.3。
+  由 t2/t4 的 Amdahl 反推**代码串行占比 s ≈ 0.5~1.2%**：即使消除全部
+  串行段（parse+warmup+build+finalize），t8 上限收益 ~1%。
+  残余差距（t8 理想 ~507 vs 实测 429 静机/380 负载）是**吞吐层损失**
+  （输出写带宽、slice 尾部失衡、调度/超线程利用），不是串行代码。
+
+## 附带发现（待静机复验，不据此改默认）
+- 当前环境 load 15~36（ZCode 渲染进程持续 ~1 核）下，t16 批量在 5 组
+  交替进程对中全部胜过 t8（比值 1.01/1.13/1.14/1.18/1.61，中位 ~1.14，
+  t16 绝对 ~476~507fps ≈ t1×8 理想的 91%）——负载下 HT 隐藏调度抢占。
+  与阶段4 静机结论（t16 批量 362 < t8 429）相反；静机复验前默认
+  min(8,ncpu) 不动。若静机复验 t16 仍 +10%+，改默认是零代码改动的
+  高价值杠杆（熵解码 stall 密集，HT 友好）。
+
+## 方法与复现
+- parse 微基准：C 直测 tc_packet_parse_structure（内部头 packet.h），
+  全 sample 预取去 IO，200 遍预热，7×50 遍取 best（源码附后）；
+  编译：clang -O2 -I native/topos_codec/include -I native/topos_codec/src/
+  bitstream parse_bench.c -o parse_bench build/release/topos_codec.0.dylib
+  -Wl,-rpath,$PWD/native/topos_codec/build/release
+- 扩展曲线：/tmp/sweep_kernel.py（预取 bytes + tc_frame_decode_batch，
+  TOPOS_SLICE_THREADS 1/2/4/8/16 各进程）；负载核查：uptime/ps aux -r。
+- 注意：本文件所有数字采于 load 15~36 的机器（用户桌面环境自身负载，
+  不可 kill）——绝对值偏低但 parse 结论与线程数无关（单线程微基准 +
+  数量级差距）；t16/t8 对比已标注待静机复验。
+
+## 附：parse_bench.c（复现用）
+```c
+#include "topos_codec.h"
+#include "packet.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+static double now_ns(void){struct timespec ts;clock_gettime(CLOCK_MONOTONIC,&ts);
+    return (double)ts.tv_sec*1e9+(double)ts.tv_nsec;}
+typedef struct{const uint8_t* p;size_t len;}mem_src;
+static int32_t memrd(void*ctx,uint64_t off,void*buf,size_t len){
+    mem_src*m=(mem_src*)ctx;
+    if(off>(uint64_t)m->len||len>(uint64_t)m->len-off){return TC_ERR_IO;}
+    if(len!=0u){memcpy(buf,m->p+off,len);}return TC_OK;}
+int main(int argc,char**argv){
+    if(argc<2){fprintf(stderr,"usage: %s <topos.mov>\n",argv[0]);return 2;}
+    FILE*f=fopen(argv[1],"rb");if(f==NULL){return 2;}
+    fseek(f,0,SEEK_END);long len=ftell(f);fseek(f,0,SEEK_SET);
+    uint8_t*data=(uint8_t*)malloc((size_t)len);
+    if(fread(data,1,(size_t)len,f)!=(size_t)len){return 2;}fclose(f);
+    mem_src src={data,(size_t)len};topos_io io;memset(&io,0,sizeof(io));
+    io.struct_size=(uint32_t)sizeof(io);io.abi_version=TOPOS_CODEC_ABI_VERSION;
+    io.ctx=&src;io.read=memrd;io.length=(uint64_t)len;
+    topos_movie*mv=NULL;
+    if(tc_movie_open(&io,&mv)!=TC_OK){fprintf(stderr,"open fail\n");return 2;}
+    topos_movie_info mi;memset(&mi,0,sizeof(mi));
+    mi.struct_size=(uint32_t)sizeof(mi);mi.abi_version=TOPOS_CODEC_ABI_VERSION;
+    tc_movie_info(mv,&mi);
+    size_t cap=0;
+    for(uint32_t i=0;i<mi.sample_count;++i){size_t need=0;
+        if(tc_movie_packet(mv,i,NULL,0,&need)==TC_ERR_BUFFER_TOO_SMALL&&need>cap){cap=need;}}
+    uint8_t**pkts=(uint8_t**)malloc(sizeof(uint8_t*)*mi.sample_count);
+    size_t*sizes=(size_t*)malloc(sizeof(size_t)*mi.sample_count);
+    for(uint32_t i=0;i<mi.sample_count;++i){pkts[i]=(uint8_t*)malloc(cap);
+        size_t need=0;
+        if(tc_movie_packet(mv,i,pkts[i],cap,&need)!=TC_OK){return 2;}sizes[i]=need;}
+    topos_packet_view*views=(topos_packet_view*)malloc(
+        sizeof(topos_packet_view)*mi.sample_count);
+    uint32_t slices=0;
+    for(int r=0;r<200;++r){for(uint32_t i=0;i<mi.sample_count;++i){
+        if(tc_packet_parse_structure(pkts[i],sizes[i],&views[i])!=TC_OK){return 2;}
+        slices=views[i].slice_count;}}
+    double best=1e30;
+    for(int rep=0;rep<7;++rep){double t0=now_ns();
+        for(int r=0;r<50;++r){for(uint32_t i=0;i<mi.sample_count;++i){
+            (void)tc_packet_parse_structure(pkts[i],sizes[i],&views[i]);}}
+        double per=(now_ns()-t0)/(50.0*(double)mi.sample_count);
+        if(per<best){best=per;}}
+    printf("%s: parse %.2f us/packet（slices=%u, samples=%u, size~%.2fMB, "
+           "sizeof(view)=%zuB）\n",argv[1],best/1000.0,(unsigned)slices,
+           (unsigned)mi.sample_count,(double)sizes[0]/1048576.0,
+           sizeof(topos_packet_view));
+    return 0;}
+```

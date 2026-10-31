@@ -1,0 +1,766 @@
+[
+ {
+  "batch": "EF-01",
+  "modules": {
+   "src/features/edit/core": [
+    "AUD-15200",
+    "AUD-15204",
+    "AUD-15423",
+    "AUD-15505",
+    "AUD-15506",
+    "AUD-15511",
+    "AUD-15514",
+    "AUD-15601",
+    "AUD-15605",
+    "AUD-15606",
+    "AUD-15607",
+    "AUD-15610",
+    "AUD-15611",
+    "AUD-15801",
+    "AUD-15802",
+    "AUD-15803",
+    "AUD-16111",
+    "AUD-16112",
+    "AUD-16316",
+    "AUD-16317",
+    "AUD-16416",
+    "AUD-16419",
+    "AUD-16422",
+    "AUD-16504",
+    "AUD-16505",
+    "AUD-16506",
+    "AUD-16715",
+    "AUD-16716",
+    "AUD-16718",
+    "AUD-16801",
+    "AUD-16805",
+    "AUD-16806",
+    "AUD-16807",
+    "AUD-17004",
+    "AUD-17301",
+    "AUD-17305",
+    "AUD-17404",
+    "AUD-17405",
+    "AUD-17407",
+    "AUD-17408",
+    "AUD-17413",
+    "AUD-17414",
+    "AUD-17418",
+    "AUD-17420",
+    "AUD-17423",
+    "AUD-17505",
+    "AUD-17606",
+    "AUD-17812",
+    "AUD-17813",
+    "AUD-17911",
+    "AUD-17913",
+    "AUD-18015",
+    "AUD-18210",
+    "AUD-18215",
+    "AUD-18323",
+    "AUD-18325",
+    "AUD-18326",
+    "AUD-18328",
+    "AUD-18411",
+    "AUD-18511",
+    "AUD-18605",
+    "AUD-18809",
+    "AUD-18816",
+    "AUD-18905",
+    "AUD-18906",
+    "AUD-18909",
+    "AUD-19208"
+   ]
+  },
+  "n": 67
+ },
+ {
+  "batch": "EF-02",
+  "modules": {
+   "src/shared/media": [
+    "AUD-34304",
+    "AUD-34313",
+    "AUD-34314",
+    "AUD-34318",
+    "AUD-34422",
+    "AUD-34502",
+    "AUD-34505",
+    "AUD-34510",
+    "AUD-34514",
+    "AUD-34603",
+    "AUD-34612",
+    "AUD-34709",
+    "AUD-34711",
+    "AUD-34807",
+    "AUD-34813",
+    "AUD-34814",
+    "AUD-34909",
+    "AUD-35001",
+    "AUD-35010",
+    "AUD-35011",
+    "AUD-35103",
+    "AUD-35204",
+    "AUD-35209",
+    "AUD-35309",
+    "AUD-35319",
+    "AUD-35407",
+    "AUD-35409",
+    "AUD-35502",
+    "AUD-35605",
+    "AUD-35611",
+    "AUD-35612",
+    "AUD-35613",
+    "AUD-35617",
+    "AUD-35618",
+    "AUD-35704",
+    "AUD-35714",
+    "AUD-35717",
+    "AUD-35718",
+    "AUD-35810",
+    "AUD-35811",
+    "AUD-35904",
+    "AUD-36006",
+    "AUD-36103",
+    "AUD-36111",
+    "AUD-36115"
+   ]
+  },
+  "n": 45
+ },
+ {
+  "batch": "EF-03",
+  "modules": {
+   "src/features/edit/ui": [
+    "AUD-19403",
+    "AUD-19407",
+    "AUD-19412",
+    "AUD-19511",
+    "AUD-19513",
+    "AUD-19620",
+    "AUD-19700",
+    "AUD-19730",
+    "AUD-19804",
+    "AUD-19807",
+    "AUD-20011",
+    "AUD-20209",
+    "AUD-20210",
+    "AUD-20213",
+    "AUD-20301",
+    "AUD-20316",
+    "AUD-20405",
+    "AUD-20406",
+    "AUD-20411",
+    "AUD-20502",
+    "AUD-20509",
+    "AUD-20604",
+    "AUD-20605",
+    "AUD-20702",
+    "AUD-20714",
+    "AUD-20717",
+    "AUD-20803",
+    "AUD-20807",
+    "AUD-20815",
+    "AUD-20904",
+    "AUD-21003",
+    "AUD-21110",
+    "AUD-21203",
+    "AUD-21204",
+    "AUD-21304",
+    "AUD-21306",
+    "AUD-21408",
+    "AUD-21410",
+    "AUD-21412"
+   ]
+  },
+  "n": 39
+ },
+ {
+  "batch": "EF-04",
+  "modules": {
+   "src/features/edit/ai_editing": [
+    "AUD-12704",
+    "AUD-12907",
+    "AUD-13100",
+    "AUD-13104",
+    "AUD-13112",
+    "AUD-13221",
+    "AUD-13405",
+    "AUD-13504",
+    "AUD-13505",
+    "AUD-13508",
+    "AUD-13607",
+    "AUD-13608",
+    "AUD-13612",
+    "AUD-13707",
+    "AUD-13830",
+    "AUD-13851",
+    "AUD-13905",
+    "AUD-14014",
+    "AUD-14105",
+    "AUD-14117",
+    "AUD-14201",
+    "AUD-14206",
+    "AUD-14207",
+    "AUD-14314",
+    "AUD-14318",
+    "AUD-14504",
+    "AUD-14600",
+    "AUD-14601",
+    "AUD-14603",
+    "AUD-14703",
+    "AUD-14711",
+    "AUD-14803",
+    "AUD-14809",
+    "AUD-14817",
+    "AUD-14904",
+    "AUD-14912",
+    "AUD-14918"
+   ]
+  },
+  "n": 37
+ },
+ {
+  "batch": "EF-05",
+  "modules": {
+   "src/shared/video": [
+    "AUD-38803",
+    "AUD-38804",
+    "AUD-38902",
+    "AUD-38907",
+    "AUD-39006",
+    "AUD-39108",
+    "AUD-39111",
+    "AUD-39204",
+    "AUD-39214",
+    "AUD-39304",
+    "AUD-39311",
+    "AUD-39317",
+    "AUD-39402",
+    "AUD-39403",
+    "AUD-39408",
+    "AUD-39412",
+    "AUD-39512",
+    "AUD-39513",
+    "AUD-39514",
+    "AUD-39515",
+    "AUD-39610",
+    "AUD-39715",
+    "AUD-39810",
+    "AUD-39811"
+   ]
+  },
+  "n": 24
+ },
+ {
+  "batch": "EF-06",
+  "modules": {
+   "src/features/composite/ui": [
+    "AUD-10305",
+    "AUD-10309",
+    "AUD-10311",
+    "AUD-10610",
+    "AUD-10809",
+    "AUD-10816",
+    "AUD-11020",
+    "AUD-11021",
+    "AUD-11027",
+    "AUD-11108",
+    "AUD-11307",
+    "AUD-11310",
+    "AUD-11311",
+    "AUD-11410",
+    "AUD-9409",
+    "AUD-9508",
+    "AUD-9711",
+    "AUD-9714",
+    "AUD-9908",
+    "AUD-9916",
+    "AUD-9917"
+   ]
+  },
+  "n": 21
+ },
+ {
+  "batch": "EF-07",
+  "modules": {
+   "src/features/color/core": [
+    "AUD-0206",
+    "AUD-0208",
+    "AUD-0211",
+    "AUD-0212",
+    "AUD-0301",
+    "AUD-0319",
+    "AUD-0401",
+    "AUD-0403",
+    "AUD-0415",
+    "AUD-0418",
+    "AUD-0522",
+    "AUD-0612",
+    "AUD-0704",
+    "AUD-0714",
+    "AUD-0731",
+    "AUD-0820",
+    "AUD-0905",
+    "AUD-0914",
+    "AUD-1003"
+   ]
+  },
+  "n": 19
+ },
+ {
+  "batch": "EF-08",
+  "modules": {
+   "src/app/controllers": [
+    "AUD-19003",
+    "AUD-2014",
+    "AUD-2015",
+    "AUD-2108",
+    "AUD-2110",
+    "AUD-2111",
+    "AUD-2205",
+    "AUD-2214",
+    "AUD-2410",
+    "AUD-2610",
+    "AUD-2713",
+    "AUD-2717",
+    "AUD-2806",
+    "AUD-2813",
+    "AUD-2904",
+    "AUD-2909",
+    "AUD-3010",
+    "AUD-3107"
+   ]
+  },
+  "n": 18
+ },
+ {
+  "batch": "EF-09",
+  "modules": {
+   "src/features/ai_workflow/tests": [
+    "AUD-23503",
+    "AUD-23505",
+    "AUD-23510",
+    "AUD-23511",
+    "AUD-23520",
+    "AUD-23521",
+    "AUD-23530",
+    "AUD-23531",
+    "AUD-23541",
+    "AUD-23552",
+    "AUD-23560",
+    "AUD-23561",
+    "AUD-23621",
+    "AUD-23660",
+    "AUD-23670",
+    "AUD-23801",
+    "AUD-23804",
+    "AUD-23806"
+   ]
+  },
+  "n": 18
+ },
+ {
+  "batch": "EF-10",
+  "modules": {
+   "src/features/composite/render": [
+    "AUD-7903",
+    "AUD-7916",
+    "AUD-7918",
+    "AUD-7920",
+    "AUD-80011",
+    "AUD-80020",
+    "AUD-8203",
+    "AUD-8206",
+    "AUD-8303",
+    "AUD-8304",
+    "AUD-8313",
+    "AUD-8316",
+    "AUD-8403",
+    "AUD-8404",
+    "AUD-8416",
+    "AUD-8419"
+   ]
+  },
+  "n": 16
+ },
+ {
+  "batch": "EF-11",
+  "modules": {
+   "src/features/composite/render3d": [
+    "AUD-8607",
+    "AUD-8710",
+    "AUD-88020",
+    "AUD-88030",
+    "AUD-88040",
+    "AUD-88055",
+    "AUD-8904",
+    "AUD-8911",
+    "AUD-8915",
+    "AUD-9011",
+    "AUD-9012",
+    "AUD-9015",
+    "AUD-9100",
+    "AUD-9105",
+    "AUD-9120",
+    "AUD-9204"
+   ]
+  },
+  "n": 16
+ },
+ {
+  "batch": "EF-12",
+  "modules": {
+   "src/features/composite/nodes": [
+    "AUD-6312",
+    "AUD-6706",
+    "AUD-6802",
+    "AUD-6909",
+    "AUD-7000",
+    "AUD-7200",
+    "AUD-7209",
+    "AUD-7309",
+    "AUD-7310",
+    "AUD-7312",
+    "AUD-7401",
+    "AUD-7413",
+    "AUD-7509",
+    "AUD-7606",
+    "AUD-7704"
+   ]
+  },
+  "n": 15
+ },
+ {
+  "batch": "EF-13",
+  "modules": {
+   "src/features/composite/core": [
+    "AUD-4702",
+    "AUD-4707",
+    "AUD-48002",
+    "AUD-48006",
+    "AUD-48009",
+    "AUD-48010",
+    "AUD-48015",
+    "AUD-4910",
+    "AUD-5001",
+    "AUD-5002",
+    "AUD-5110",
+    "AUD-5204",
+    "AUD-5210",
+    "AUD-5213"
+   ]
+  },
+  "n": 14
+ },
+ {
+  "batch": "EF-14",
+  "modules": {
+   "src/shared/ui": [
+    "AUD-37612",
+    "AUD-37805",
+    "AUD-37819",
+    "AUD-38007",
+    "AUD-38009",
+    "AUD-38100",
+    "AUD-38201",
+    "AUD-38209",
+    "AUD-38219",
+    "AUD-38309",
+    "AUD-38408",
+    "AUD-38412",
+    "AUD-38417"
+   ]
+  },
+  "n": 13
+ },
+ {
+  "batch": "EF-15",
+  "modules": {
+   "src/shared/ai_models": [
+    "AUD-31503",
+    "AUD-31525",
+    "AUD-31603",
+    "AUD-31617",
+    "AUD-31618",
+    "AUD-31619",
+    "AUD-31710",
+    "AUD-31807",
+    "AUD-31808",
+    "AUD-31810",
+    "AUD-31811",
+    "AUD-31815"
+   ],
+   "src/features/ai_harness": [
+    "AUD-21900",
+    "AUD-21911",
+    "AUD-22022",
+    "AUD-22200",
+    "AUD-22312",
+    "AUD-22313",
+    "AUD-22317",
+    "AUD-22318",
+    "AUD-22319",
+    "AUD-22321",
+    "AUD-22413"
+   ]
+  },
+  "n": 23
+ },
+ {
+  "batch": "EF-16",
+  "modules": {
+   "src/features/teaching_animation/ai": [
+    "AUD-26700",
+    "AUD-26708",
+    "AUD-26714",
+    "AUD-26802",
+    "AUD-26809",
+    "AUD-26812",
+    "AUD-26816",
+    "AUD-26819",
+    "AUD-27001",
+    "AUD-27012",
+    "AUD-27114"
+   ],
+   "src/features/ai_harness/tests": [
+    "AUD-22505",
+    "AUD-22506",
+    "AUD-22510",
+    "AUD-22602",
+    "AUD-22608",
+    "AUD-22615",
+    "AUD-22620",
+    "AUD-22701",
+    "AUD-22706",
+    "AUD-22714"
+   ]
+  },
+  "n": 21
+ },
+ {
+  "batch": "EF-17",
+  "modules": {
+   "src/features/color/ui": [
+    "AUD-25100",
+    "AUD-25213",
+    "AUD-25301",
+    "AUD-25316",
+    "AUD-25403",
+    "AUD-25413",
+    "AUD-25418",
+    "AUD-25510",
+    "AUD-25517",
+    "AUD-25809"
+   ],
+   "src/shared/gpu": [
+    "AUD-1209",
+    "AUD-1217",
+    "AUD-1218",
+    "AUD-1219",
+    "AUD-1403",
+    "AUD-1416",
+    "AUD-1418",
+    "AUD-1523",
+    "AUD-1606",
+    "AUD-1610"
+   ]
+  },
+  "n": 20
+ },
+ {
+  "batch": "EF-18",
+  "modules": {
+   "src/features/teaching_animation/render": [
+    "AUD-29804",
+    "AUD-29809",
+    "AUD-30133",
+    "AUD-30134",
+    "AUD-30217",
+    "AUD-30302",
+    "AUD-30307",
+    "AUD-30310",
+    "AUD-30407"
+   ],
+   "src/shared/codec": [
+    "AUD-32106",
+    "AUD-32205",
+    "AUD-32208",
+    "AUD-32302",
+    "AUD-32303",
+    "AUD-32304"
+   ],
+   "src/shared/export": [
+    "AUD-33115",
+    "AUD-33119",
+    "AUD-33208",
+    "AUD-33212",
+    "AUD-33403",
+    "AUD-33405"
+   ]
+  },
+  "n": 21
+ },
+ {
+  "batch": "EF-19",
+  "modules": {
+   "src/app": [
+    "AUD-3200",
+    "AUD-3507",
+    "AUD-3513",
+    "AUD-42002",
+    "AUD-42004"
+   ],
+   "src/features/composite/evaluators": [
+    "AUD-57001",
+    "AUD-57004",
+    "AUD-5923",
+    "AUD-6010",
+    "AUD-6012"
+   ],
+   "src/features/teaching_animation/ui": [
+    "AUD-30802",
+    "AUD-30905",
+    "AUD-30906",
+    "AUD-31002",
+    "AUD-31003"
+   ],
+   "src/shared/project": [
+    "AUD-36809",
+    "AUD-36817",
+    "AUD-36922",
+    "AUD-37010",
+    "AUD-37012"
+   ],
+   "src/app/ui": [
+    "AUD-03908",
+    "AUD-03912",
+    "AUD-4103",
+    "AUD-4112"
+   ]
+  },
+  "n": 24
+ },
+ {
+  "batch": "EF-20",
+  "modules": {
+   "src/features/color/tracking": [
+    "AUD-24902",
+    "AUD-24910",
+    "AUD-24911",
+    "AUD-24913"
+   ],
+   "src/features/ai_workflow/ui": [
+    "AUD-23924",
+    "AUD-24001",
+    "AUD-24006"
+   ],
+   "src/features/composite/utils": [
+    "AUD-11532",
+    "AUD-11534",
+    "AUD-11611"
+   ],
+   "src/features/deliver/core": [
+    "AUD-11901",
+    "AUD-11907",
+    "AUD-12001"
+   ],
+   "src/features/shared/effects": [
+    "AUD-26302",
+    "AUD-26312",
+    "AUD-26405"
+   ],
+   "src/features/teaching_animation/core": [
+    "AUD-27644",
+    "AUD-27718",
+    "AUD-27801"
+   ],
+   "src/shared/tracking": [
+    "AUD-37307",
+    "AUD-37404",
+    "AUD-37411"
+   ],
+   "src/features/ai_workflow/adapters": [
+    "AUD-23015",
+    "AUD-23019"
+   ]
+  },
+  "n": 24
+ },
+ {
+  "batch": "EF-21",
+  "modules": {
+   "src/features/composite": [
+    "AUD-6200",
+    "AUD-9305"
+   ],
+   "src/features/edit/adapters": [
+    "AUD-12608",
+    "AUD-12613"
+   ],
+   "src/shared/control_surfaces": [
+    "AUD-32801",
+    "AUD-32803"
+   ],
+   "src/shared/io": [
+    "AUD-33910",
+    "AUD-33911"
+   ],
+   "src/shared/node_help": [
+    "AUD-36401",
+    "AUD-36403"
+   ],
+   "src/app/menu": [
+    "AUD-3603"
+   ],
+   "src/features/ai_workflow/core": [
+    "AUD-23209"
+   ],
+   "src/features/ai_workflow/runtime": [
+    "AUD-23407"
+   ],
+   "src/features/color": [
+    "AUD-24401"
+   ],
+   "src/features/edit": [
+    "AUD-19301"
+   ],
+   "src/features/scripting": [
+    "AUD-25912"
+   ],
+   "src/features/teaching_animation": [
+    "AUD-30502"
+   ],
+   "src/features/teaching_animation/motion": [
+    "AUD-28116"
+   ],
+   "src/features/teaching_animation/presets": [
+    "AUD-28323"
+   ],
+   "src/products": [
+    "AUD-21605"
+   ],
+   "src/shared": [
+    "AUD-31903"
+   ],
+   "src/shared/i18n": [
+    "AUD-33802"
+   ],
+   "src/shared/logging": [
+    "AUD-34203"
+   ],
+   "src/shared/render": [
+    "AUD-1702"
+   ]
+  },
+  "n": 24
+ },
+ {
+  "batch": "EF-22",
+  "modules": {
+   "src/shared/utils": [
+    "AUD-38503"
+   ]
+  },
+  "n": 1
+ }
+]

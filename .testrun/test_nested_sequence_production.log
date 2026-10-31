@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 22 items
+
+tests/edit/test_nested_sequence_production.py ......................     [100%]
+
+============================= 22 passed in 14.80s ==============================

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 13 items
+
+tests/edit/test_caption_lock_enforcement.py .............                [100%]
+
+============================== 13 passed in 6.98s ==============================

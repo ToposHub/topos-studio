@@ -1,0 +1,75 @@
+{
+  "keyframe_range_transform.translate_x_-250.0": {
+    "requested": -250.0,
+    "evaluated": 0.0,
+    "range": [
+      0.0,
+      100.0
+    ]
+  },
+  "keyframe_range_transform.translate_y_500.0": {
+    "requested": 500.0,
+    "evaluated": 100.0,
+    "range": [
+      0.0,
+      100.0
+    ]
+  },
+  "keyframe_range_transform.rotation_-45.0": {
+    "requested": -45.0,
+    "evaluated": 0.0,
+    "range": [
+      0.0,
+      100.0
+    ]
+  },
+  "keyframe_range_transform.rotation_180.0": {
+    "requested": 180.0,
+    "evaluated": 100.0,
+    "range": [
+      0.0,
+      100.0
+    ]
+  },
+  "keyframe_range_transform.scale_x_0.0": {
+    "requested": 0.0,
+    "evaluated": 0.1,
+    "range": [
+      0.1,
+      10.0
+    ]
+  },
+  "keyframes_after_new_track": {
+    "start": 300,
+    "keyframes": [
+      100,
+      199
+    ],
+    "value_at_start": 1.0,
+    "original_at_start": 0.0
+  },
+  "keyframes_after_existing_track_legacy": {
+    "start": 300,
+    "keyframes": [
+      100,
+      199
+    ],
+    "value_at_start": 1.0,
+    "original_at_start": 0.0
+  },
+  "transitions_after_new_track": {
+    "before": 1,
+    "after": 0,
+    "undo": 0
+  },
+  "transitions_after_existing_track_legacy": {
+    "before": 1,
+    "after": 0,
+    "undo": 0
+  }
+}
+AUDIO TYPES ('audio:constant_power', 'audio:linear', 'audio:equal_power', 'audio:fade')
+linked_speed_undo_transition [('before', [('a_fade', 80)]), ('after', [('a_fade', 50)]), ('undo', [('a_fade', 50)])]
+freeze_scoped_marker [{'clip': 'c', 'frame': 75}] ['Marker m frame 75 outside owning clip c range [0, 50)']
+freeze_tail_transition [('before', [{'transition_id': 'tail', 'transition_type': 'dip_to_color', 'track_id': 'v1', 'left_clip_id': 'c', 'right_clip_id': '', 'center_frame': 100, 'duration': 12, 'alignment': 'end_on_cut', 'params': {}}]), ('after', [{'transition_id': 'tail', 'transition_type': 'dip_to_color', 'track_id': 'v1', 'left_clip_id': 'c', 'right_clip_id': '', 'center_frame': 50, 'duration': 12, 'alignment': 'end_on_cut', 'params': {}}]), ('undo', [{'transition_id': 'tail', 'transition_type': 'dip_to_color', 'track_id': 'v1', 'left_clip_id': 'c', 'right_clip_id': '', 'center_frame': 100, 'duration': 12, 'alignment': 'end_on_cut', 'params': {}}])]
+locked_keyframe_writes {'track_locked': True, 'added': True, 'removed': True}

@@ -1,0 +1,155 @@
+{
+  "meta": {
+    "res": "4k",
+    "w": 3840,
+    "h": 2160,
+    "fps": 25,
+    "frames": 24,
+    "repeats": 3,
+    "source": "tests/test_videos/4K_prores422HQ.mov",
+    "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "logical_cpus": 16,
+    "topos_commit": "41616453",
+    "slice_rows": 0,
+    "source_decode_s": 0.9,
+    "rss_after_load_mb": 1516.9
+  },
+  "topos_encode": {
+    "hq_rate_t8": {
+      "tier": "hq",
+      "mode": "rate",
+      "crf": null,
+      "threads": 8,
+      "codec_s": 1.8305946820037207,
+      "file_close_s": 0.0016670949989929795,
+      "codec_fps": 13.11,
+      "target_bytes_per_frame": 4026532,
+      "file_bytes": 92082753,
+      "file_mbps": 767.4
+    },
+    "hq_qp20_t8": {
+      "tier": "hq",
+      "mode": "qp",
+      "crf": 20,
+      "threads": 8,
+      "codec_s": 2.4580145259969868,
+      "file_close_s": 0.0012547900041681714,
+      "codec_fps": 9.76,
+      "target_bytes_per_frame": 4026532,
+      "file_bytes": 558396342,
+      "file_mbps": 4653.3
+    },
+    "standard_rate_t8": {
+      "tier": "standard",
+      "mode": "rate",
+      "crf": null,
+      "threads": 8,
+      "codec_s": 1.5682910270043067,
+      "file_close_s": 0.0013698359980480745,
+      "codec_fps": 15.3,
+      "target_bytes_per_frame": 2768241,
+      "file_bytes": 64240454,
+      "file_mbps": 535.3
+    },
+    "proxy_rate_t8": {
+      "tier": "proxy",
+      "mode": "rate",
+      "crf": null,
+      "threads": 8,
+      "codec_s": 1.3624364740026067,
+      "file_close_s": 0.001953728002263233,
+      "codec_fps": 17.62,
+      "target_bytes_per_frame": 922747,
+      "file_bytes": 38121143,
+      "file_mbps": 317.7
+    }
+  },
+  "ref_encode": {
+    "prores_hq_raw": {
+      "wall_s": 2.284,
+      "wall_fps": 10.51,
+      "ffmpeg_fps": 7.9,
+      "file_bytes": 77937917,
+      "repeats_wall_fps": [
+        10.39,
+        10.51,
+        9.7
+      ],
+      "file_mbps": 649.5
+    },
+    "prores_hq_pipeline": {
+      "wall_s": 2.74,
+      "wall_fps": 8.76,
+      "ffmpeg_fps": 9.8,
+      "file_bytes": 77939876,
+      "repeats_wall_fps": [
+        8.76,
+        8.6,
+        8.42
+      ],
+      "file_mbps": 649.5
+    },
+    "dnxhr_hqx_raw": {
+      "wall_s": 2.933,
+      "wall_fps": 8.18,
+      "ffmpeg_fps": 0.0,
+      "file_bytes": 87393124,
+      "repeats_wall_fps": [
+        6.58,
+        8.04,
+        8.18
+      ],
+      "file_mbps": 728.3
+    },
+    "dnxhr_hqx_pipeline": {
+      "wall_s": 3.271,
+      "wall_fps": 7.34,
+      "ffmpeg_fps": 9.1,
+      "file_bytes": 87395083,
+      "repeats_wall_fps": [
+        7.06,
+        7.32,
+        7.34
+      ],
+      "file_mbps": 728.3
+    }
+  },
+  "decode": {
+    "topos_hq_rate": {
+      "threads": 8,
+      "frames": 24,
+      "fps_runs": [
+        82.9,
+        86.0,
+        83.1
+      ],
+      "fps_median": 83.1
+    },
+    "prores_hq": {
+      "decoder": "pyav-threads-auto",
+      "frames": 24,
+      "fps_runs": [
+        123.7,
+        128.5,
+        128.6
+      ],
+      "fps_median": 128.5
+    },
+    "dnxhr_hqx": {
+      "decoder": "pyav-threads-auto",
+      "frames": 24,
+      "fps_runs": [
+        128.4,
+        161.2,
+        153.6
+      ],
+      "fps_median": 153.6
+    }
+  },
+  "quality_psnr": {
+    "topos_hq_rate_vs_src": 63.24,
+    "topos_standard_rate_vs_src": 61.22,
+    "prores_hq_vs_src": 66.58,
+    "dnxhr_hqx_vs_src": 66.17
+  }
+}

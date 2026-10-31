@@ -1,0 +1,933 @@
+{
+  "nodes": {
+    "blur": {
+      "title": "Размытие",
+      "description": "Многотипное размытие с поканальным управлением",
+      "blur_type": {
+        "box": "Прямоугольное размытие",
+        "gaussian": "Гауссово размытие",
+        "bilateral": "Размытие поверхности (билатеральное)",
+        "motion": "Размытие в движении",
+        "bokeh": "Размытие объектива (боке)"
+      },
+      "edge_policy": {
+        "clamp": "Ограничить",
+        "wrap": "Закольцевать",
+        "mirror": "Отразить"
+      },
+      "quality": {
+        "fast": "Быстрое",
+        "normal": "Обычное",
+        "high": "Высокое"
+      },
+      "aperture_blades": {
+        "circle": "Круг",
+        "5": "5 лепестков",
+        "6": "6 лепестков",
+        "8": "8 лепестков"
+      },
+      "params": {
+        "blur_type": "Тип размытия",
+        "radius_x": "Радиус X",
+        "radius_y": "Радиус Y",
+        "radius": "Радиус",
+        "angle": "Угол",
+        "motion_source": "Источник движения",
+        "shutter": "Выдержка",
+        "edge_preserve": "Сохранение краёв",
+        "aperture_blades": "Лепестки диафрагмы",
+        "anamorphic": "Анаморфный",
+        "highlight_gain": "Усиление светов",
+        "edge_policy": "Политика краёв",
+        "quality": "Качество",
+        "channel_r": "Красный канал",
+        "channel_g": "Зелёный канал",
+        "channel_b": "Синий канал",
+        "channel_a": "Альфа-канал",
+        "mix": "Смешение",
+        "process_alpha": "Обрабатывать альфу"
+      }
+    },
+    "transform": {
+      "title": "Трансформация",
+      "pivot_mode": {
+        "center": "Центр",
+        "custom": "Своё"
+      },
+      "filter": {
+        "linear": "Линейная (билинейная)",
+        "nearest": "Ближайшая (жёсткие края)"
+      },
+      "params": {
+        "translate_x": "Сдвиг X",
+        "translate_y": "Сдвиг Y",
+        "translate": "Сдвиг",
+        "scale_x": "Масштаб X",
+        "scale_y": "Масштаб Y",
+        "scale": "Масштаб",
+        "rotation": "Поворот",
+        "pivot_mode": "Режим опорной точки",
+        "pivot_x": "Опорная точка X",
+        "pivot_y": "Опорная точка Y",
+        "pivot": "Опорная точка",
+        "filter": "Фильтр"
+      }
+    },
+    "constant": {
+      "title": "Константа",
+      "mode": {
+        "solid": "Заливка",
+        "checker": "Шахматка",
+        "gradient": "Линейный градиент",
+        "radial": "Радиальный градиент"
+      },
+      "params": {
+        "width": "Ширина",
+        "height": "Высота",
+        "mode": "Режим",
+        "color_r": "Цвет R",
+        "color_g": "Цвет G",
+        "color_b": "Цвет B",
+        "color_a": "Цвет A",
+        "color2_r": "Цвет 2 R",
+        "color2_g": "Цвет 2 G",
+        "color2_b": "Цвет 2 B",
+        "color2_a": "Цвет 2 A",
+        "checker_size": "Размер клетки",
+        "start_x": "Начало X",
+        "start_y": "Начало Y",
+        "start": "Начало",
+        "end_x": "Конец X",
+        "end_y": "Конец Y",
+        "end": "Конец",
+        "center_x": "Центр X",
+        "center_y": "Центр Y",
+        "center": "Центр",
+        "radial_radius": "Радиальный радиус",
+        "feather": "Растушёвка",
+        "format_name": "Формат",
+        "size_preset": "Пресет размера",
+        "color_hex": "Цвет HEX",
+        "color2_hex": "Цвет 2 HEX"
+      }
+    },
+    "merge": {
+      "title": "Слияние",
+      "blend_mode": {
+        "over": "Обычный (Over)",
+        "under": "Under",
+        "add": "Сложение",
+        "subtract": "Вычитание",
+        "multiply": "Умножение",
+        "screen": "Экран",
+        "overlay": "Перекрытие",
+        "difference": "Разница",
+        "divide": "Деление",
+        "min": "Минимум",
+        "max": "Максимум",
+        "average": "Среднее",
+        "copy": "Копирование",
+        "stencil": "Трафарет",
+        "mask": "Маска",
+        "in": "In",
+        "out": "Out",
+        "atop": "Atop",
+        "xor": "Xor",
+        "color-dodge": "Осветление цвета",
+        "color-burn": "Затемнение цвета",
+        "soft-light": "Мягкий свет",
+        "hard-light": "Жёсткий свет",
+        "linear-light": "Линейный свет",
+        "hue": "Цветовой тон",
+        "saturation": "Насыщенность",
+        "color": "Цвет",
+        "luminosity": "Светимость"
+      },
+      "format_policy": {
+        "from_b": "Из B",
+        "from_a": "Из A",
+        "larger": "Больший",
+        "smaller": "Меньший"
+      },
+      "bbox_policy": {
+        "union": "Объединение",
+        "intersection": "Пересечение",
+        "a": "A",
+        "b": "B"
+      },
+      "alpha_policy": {
+        "auto": "Авто",
+        "premult_force": "Форсировать премультипликацию",
+        "straight_force": "Форсировать прямую альфу",
+        "output_straight": "Прямая альфа на выходе"
+      },
+      "mask_channel": {
+        "luma": "Яркость",
+        "red": "Красный",
+        "green": "Зелёный",
+        "blue": "Синий",
+        "alpha": "Альфа"
+      },
+      "params": {
+        "blend_mode": "Режим наложения",
+        "opacity": "Непрозрачность",
+        "mix": "Смешение",
+        "format_policy": "Политика формата",
+        "bbox_policy": "Политика габаритов",
+        "alpha_policy": "Политика альфы",
+        "alpha_clamp": "Ограничение альфы",
+        "mask_channel": "Канал маски",
+        "mask_invert": "Инвертировать маску"
+      }
+    },
+    "crop": {
+      "title": "Кадрирование",
+      "outside": {
+        "black": "Чёрный",
+        "transparent": "Прозрачный",
+        "repeat": "Повтор",
+        "mirror": "Отражение"
+      },
+      "params": {
+        "x": "X",
+        "y": "Y",
+        "width": "Ширина",
+        "height": "Высота",
+        "reformat": "Изменить размер холста",
+        "outside": "Заполнение снаружи"
+      }
+    },
+    "cornerpin": {
+      "title": "Corner Pin",
+      "interpolation": {
+        "bilinear": "Билинейная",
+        "bicubic": "Бикубическая"
+      },
+      "params": {
+        "to1_x": "В 1 X",
+        "to1_y": "В 1 Y",
+        "to2_x": "В 2 X",
+        "to2_y": "В 2 Y",
+        "to3_x": "В 3 X",
+        "to3_y": "В 3 Y",
+        "to4_x": "В 4 X",
+        "to4_y": "В 4 Y",
+        "from1_x": "Из 1 X",
+        "from1_y": "Из 1 Y",
+        "from2_x": "Из 2 X",
+        "from2_y": "Из 2 Y",
+        "from3_x": "Из 3 X",
+        "from3_y": "Из 3 Y",
+        "from4_x": "Из 4 X",
+        "from4_y": "Из 4 Y",
+        "interpolation": "Фильтр"
+      }
+    },
+    "reformat": {
+      "title": "Переформатирование",
+      "format_mode": {
+        "preset": "Пресет",
+        "custom": "Своё"
+      },
+      "preset": {
+        "SD NTSC": "SD NTSC",
+        "SD PAL": "SD PAL",
+        "HD 720": "HD 720",
+        "HD 1080": "HD 1080",
+        "HD 1080 Anamorphic": "HD 1080 анаморфный",
+        "UHD 4K": "UHD 4K",
+        "DCI 4K": "DCI 4K",
+        "UHD 8K": "UHD 8K",
+        "Square 1024": "Квадрат 1024",
+        "Square 2048": "Квадрат 2048",
+        "Square 4096": "Квадрат 4096"
+      },
+      "resize_mode": {
+        "no_resize": "Без изменения",
+        "fit": "Вписать (letterbox)",
+        "fill": "Заполнить (обрезка)",
+        "distort": "Исказить (растянуть)",
+        "center_crop": "Центральная обрезка"
+      },
+      "filter": {
+        "nearest": "Ближайшая (жёсткие края)",
+        "linear": "Линейная (билинейная)",
+        "cubic": "Кубическая (бикубическая)",
+        "lanczos": "Lanczos (резкая)"
+      },
+      "params": {
+        "format_mode": "Режим",
+        "preset": "Пресет",
+        "width": "Ширина",
+        "height": "Высота",
+        "resize_mode": "Режим изменения размера",
+        "filter": "Фильтр",
+        "preserve_bbox": "Сохранять габариты"
+      }
+    },
+    "glow": {
+      "title": "Свечение",
+      "quality": {
+        "fast": "Быстрое",
+        "normal": "Обычное",
+        "high": "Высокое"
+      },
+      "params": {
+        "threshold": "Порог",
+        "radius": "Радиус",
+        "intensity": "Интенсивность",
+        "tint_r": "Оттенок R",
+        "tint_g": "Оттенок G",
+        "tint_b": "Оттенок B",
+        "mix": "Смешение",
+        "quality": "Качество"
+      }
+    },
+    "shuffle": {
+      "title": "Перекоммутация",
+      "r_from": {
+        "r": "Красный",
+        "g": "Зелёный",
+        "b": "Синий",
+        "a": "Альфа",
+        "zero": "Ноль",
+        "one": "Единица",
+        "luma": "Люма"
+      },
+      "g_from": {
+        "r": "Красный",
+        "g": "Зелёный",
+        "b": "Синий",
+        "a": "Альфа",
+        "zero": "Ноль",
+        "one": "Единица",
+        "luma": "Люма"
+      },
+      "b_from": {
+        "r": "Красный",
+        "g": "Зелёный",
+        "b": "Синий",
+        "a": "Альфа",
+        "zero": "Ноль",
+        "one": "Единица",
+        "luma": "Люма"
+      },
+      "a_from": {
+        "r": "Красный",
+        "g": "Зелёный",
+        "b": "Синий",
+        "a": "Альфа",
+        "zero": "Ноль",
+        "one": "Единица",
+        "luma": "Люма"
+      },
+      "params": {
+        "r_from": "Красный из",
+        "g_from": "Зелёный из",
+        "b_from": "Синий из",
+        "a_from": "Альфа из"
+      }
+    },
+    "text": {
+      "title": "Текст",
+      "description": "Текстовый слой (шрифт, размер, выравнивание, обводка, тень)",
+      "per_char_mode": {
+        "fade": "Затухание",
+        "slide_up": "Выезд вверх",
+        "slide_left": "Выезд влево",
+        "scale_pop": "Выпрыгивание масштабом",
+        "rotate_in": "Въезд с поворотом",
+        "typewriter": "Печатная машинка"
+      },
+      "path_direction": {
+        "up": "Дуга вверх",
+        "down": "Дуга вниз"
+      },
+      "params": {
+        "text": "Текст",
+        "caption_input_enabled": "Вход субтитров",
+        "caption_input_field": "Поле субтитров",
+        "font_family": "Шрифт",
+        "font_size": "Размер",
+        "font_weight": "Насыщенность",
+        "italic": "Курсив",
+        "halign": "Выравнивание по гор.",
+        "valign": "Выравнивание по верт.",
+        "letter_spacing": "Трекинг",
+        "line_spacing": "Межстрочный интервал",
+        "per_char_enable": "По-символьная анимация",
+        "per_char_mode": "Режим анимации",
+        "per_char_delay": "Ступенчатость (кадры)",
+        "per_char_overlap": "Перекрытие",
+        "per_char_slide_distance": "Дистанция выезда",
+        "per_char_rotation": "Угол въезда",
+        "per_char_scale_from": "Начальный масштаб",
+        "path_enable": "Разложить по траектории",
+        "path_radius": "Радиус дуги",
+        "path_arc_degrees": "Угол дуги (0=авто)",
+        "path_direction": "Направление дуги",
+        "translate_x": "Сдвиг X",
+        "translate_y": "Сдвиг Y",
+        "scale_x": "Масштаб X",
+        "scale_y": "Масштаб Y",
+        "rotation": "Поворот",
+        "pivot_mode": "Режим опорной точки",
+        "pivot_x": "Опорная точка X",
+        "pivot_y": "Опорная точка Y",
+        "filter": "Фильтр",
+        "fill_r": "Заливка R",
+        "fill_g": "Заливка G",
+        "fill_b": "Заливка B",
+        "fill_a": "Заливка A",
+        "outline_enable": "Обводка",
+        "outline_width": "Толщина обводки",
+        "outline_r": "Обводка R",
+        "outline_g": "Обводка G",
+        "outline_b": "Обводка B",
+        "outline_a": "Обводка A",
+        "shadow_enable": "Тень",
+        "shadow_offset_x": "Смещение тени X",
+        "shadow_offset_y": "Смещение тени Y",
+        "shadow_blur": "Размытие тени",
+        "shadow_r": "Тень R",
+        "shadow_g": "Тень G",
+        "shadow_b": "Тень B",
+        "shadow_a": "Тень A"
+      }
+    },
+    "paint": {
+      "title": "Рисование",
+      "description": "Слой мазков (клонирование-ремонт, ластик, сплошная кисть)",
+      "params": {
+        "strokes": "Мазки"
+      }
+    },
+    "particle": {
+      "title": "Частицы",
+      "description": "Детерминированный эмиттер 2D-частиц без состояния (гравитация/ветер/турбулентность)"
+    },
+    "mesh_warp": {
+      "title": "Сеточная деформация",
+      "description": "Деформация по сетке: перетаскивайте узлы решётки для локальных смещений"
+    },
+    "keyer": {
+      "title": "Кеер",
+      "keyer_mode": {
+        "auto": "Авто",
+        "chroma": "Хрома",
+        "luma": "Люма",
+        "difference": "Разница"
+      },
+      "despill_method": {
+        "none": "Нет",
+        "subtract": "Вычитание",
+        "scale": "Масштабирование"
+      },
+      "output_mode": {
+        "result": "Результат",
+        "matte": "Маска"
+      },
+      "params": {
+        "keyer_mode": "Режим кеера",
+        "screen_color": "Цвет фона хромакея",
+        "screen_color_r": "Фон R",
+        "screen_color_g": "Фон G",
+        "screen_color_b": "Фон B",
+        "screen_color_hex": "Фон HEX",
+        "screen_balance": "Баланс фона",
+        "clip_black": "Отсечка чёрного",
+        "clip_white": "Отсечка белого",
+        "gain": "Усиление",
+        "softness": "Мягкость",
+        "alpha_offset": "Смещение альфы",
+        "despill_strength": "Сила анти-окраски",
+        "despill_method": "Метод анти-окраски",
+        "invert": "Инвертировать",
+        "output_mode": "Режим вывода"
+      }
+    },
+    "light_wrap": {
+      "title": "Light Wrap",
+      "params": {
+        "width": "Ширина подсветки",
+        "intensity": "Интенсивность",
+        "brightness": "Яркость",
+        "falloff": "Затухание",
+        "source_alpha": "Использовать альфу переднего плана"
+      }
+    },
+    "relight": {
+      "title": "Переосвещение",
+      "light_type": {
+        "point": "Точечный свет",
+        "directional": "Направленный"
+      },
+      "params": {
+        "light_type": "Тип света",
+        "light_position_x": "Позиция света X",
+        "light_position_y": "Позиция света Y",
+        "light_position_z": "Позиция света Z",
+        "light_direction_x": "Направление света X",
+        "light_direction_y": "Направление света Y",
+        "light_direction_z": "Направление света Z",
+        "intensity": "Интенсивность",
+        "color": "Цвет света",
+        "ambient": "Окружающий свет",
+        "normal_decode": "Декодирование нормалей",
+        "normal_flip_y": "Инвертировать Y нормали",
+        "normal_decode_options": {
+          "encoded": "Кодированные [0,1]",
+          "signed": "Со знаком (-1~1)"
+        }
+      }
+    },
+    "cryptomatte_select": {
+      "title": "Выбор Cryptomatte",
+      "id_encoding": {
+        "rgba24": "ID аллокатора RGBA24",
+        "float_r": "Float R (стандартный Cryptomatte)"
+      },
+      "output_mode": {
+        "matte": "Маска",
+        "isolate": "Изолировать"
+      },
+      "params": {
+        "id_encoding": "Кодирование ID",
+        "output_mode": "Режим вывода"
+      }
+    },
+    "zblur": {
+      "title": "ZBlur",
+      "depth_units": {
+        "normalized": "Нормализованные",
+        "world": "Мировая дистанция"
+      },
+      "quality": {
+        "fast": "Быстрое",
+        "normal": "Обычное",
+        "high": "Высокое"
+      },
+      "params": {
+        "focus_distance": "Дистанция фокуса",
+        "focal_range": "Фокальный диапазон",
+        "max_blur_radius": "Макс. радиус размытия",
+        "bokeh_toggle": "Сэмплирование диафрагмы",
+        "depth_units": "Единицы глубины",
+        "near": "Ближний",
+        "far": "Дальний",
+        "quality": "Качество"
+      }
+    },
+    "fog": {
+      "title": "Туман",
+      "depth_units": {
+        "normalized": "Нормализованные",
+        "world": "Мировая дистанция"
+      },
+      "params": {
+        "color": "Цвет тумана",
+        "density": "Плотность",
+        "start": "Начало",
+        "end": "Конец",
+        "depth_units": "Единицы глубины",
+        "near": "Ближний",
+        "far": "Дальний"
+      }
+    },
+    "depth_matte": {
+      "title": "Маска глубины",
+      "depth_units": {
+        "normalized": "Нормализованные",
+        "world": "Мировая дистанция"
+      },
+      "params": {
+        "range_start": "Начало диапазона",
+        "range_end": "Конец диапазона",
+        "feather": "Растушёвка",
+        "depth_units": "Единицы глубины",
+        "near": "Ближний",
+        "far": "Дальний"
+      }
+    },
+    "godrays": {
+      "title": "Объёмные лучи",
+      "params": {
+        "light_x": "Свет X",
+        "light_y": "Свет Y",
+        "color": "Цвет света",
+        "density": "Плотность",
+        "weight": "Вес",
+        "decay": "Затухание",
+        "samples": "Сэмплы"
+      }
+    },
+    "chromatic_aberration": {
+      "title": "Хроматическая аберрация",
+      "params": {
+        "offset_r": "Смещение R",
+        "offset_b": "Смещение B",
+        "center_x": "Центр X",
+        "center_y": "Центр Y",
+        "edge_boost": "Усиление краёв"
+      }
+    },
+    "vignette": {
+      "title": "Виньетка",
+      "params": {
+        "amount": "Величина",
+        "radius": "Радиус",
+        "softness": "Мягкость",
+        "roundness": "Округлость"
+      }
+    },
+    "lens_flare": {
+      "title": "Блик объектива",
+      "blend_mode": {
+        "screen": "Экран",
+        "add": "Сложение"
+      },
+      "params": {
+        "light_x": "Свет X",
+        "light_y": "Свет Y",
+        "color": "Цвет света",
+        "intensity": "Интенсивность",
+        "ghost_count": "Число отражений",
+        "ghost_spacing": "Шаг отражений",
+        "ghost_decay": "Затухание отражений",
+        "ghost_size": "Размер отражений",
+        "halo_radius": "Радиус ореола",
+        "halo_strength": "Сила ореола",
+        "streak_strength": "Сила полосы",
+        "streak_width": "Ширина полосы",
+        "use_occlusion": "С учётом перекрытий",
+        "blend_mode": "Режим наложения"
+      }
+    },
+    "deflicker": {
+      "title": "Устранение мерцания",
+      "window": {
+        "3": "3 кадра",
+        "5": "5 кадров",
+        "7": "7 кадров",
+        "9": "9 кадров"
+      },
+      "mode": {
+        "per_pixel": "По пикселям",
+        "global_gain": "Глобальное усиление"
+      },
+      "params": {
+        "window": "Окно",
+        "percentile": "Перцентиль",
+        "luma_only": "Только люма",
+        "mode": "Режим"
+      }
+    },
+    "ai_gen_expand": {
+      "title": "ИИ-расширение кадра",
+      "params": {
+        "prompt": "Промпт",
+        "negative_prompt": "Негативный",
+        "model": "Модель",
+        "seed": "Семя",
+        "strength": "Сила",
+        "expand_left": "Расширить влево",
+        "expand_top": "Расширить вверх",
+        "expand_right": "Расширить вправо",
+        "expand_bottom": "Расширить вниз"
+      }
+    },
+    "frame_interpolate": {
+      "title": "Интерполяция кадров",
+      "params": {
+        "t": "Интерполяция t",
+        "hd_mode": "Тайлинг HD"
+      }
+    },
+    "face_track": {
+      "title": "Трекинг лица",
+      "params": {
+        "face_index": "Индекс лица"
+      }
+    },
+    "face_smooth": {
+      "title": "Сглаживание кожи",
+      "params": {
+        "strength": "Сила",
+        "radius": "Радиус",
+        "luminance_only": "Только люма"
+      }
+    },
+    "pointcloud3d": {
+      "title": "Облако точек",
+      "source": {
+        "file": "Файл",
+        "tracker": "Из трекера"
+      },
+      "color_mode": {
+        "flat": "Плоский",
+        "vertex_color": "Цвет вершин",
+        "depth_ramp": "Градиент глубины"
+      },
+      "params": {
+        "source": "Источник",
+        "file_path": "Путь к файлу",
+        "output_width": "Ширина вывода",
+        "output_height": "Высота вывода",
+        "point_size": "Размер точки",
+        "color_mode": "Режим цвета",
+        "point_color": "Цвет точки",
+        "opacity": "Непрозрачность"
+      }
+    },
+    "volume3d": {
+      "title": "Объём 3D",
+      "params": {
+        "file_path": "Файл объёма",
+        "density_multiplier": "Множитель плотности",
+        "absorption_color": "Цвет поглощения",
+        "step_count": "Число шагов",
+        "output_width": "Ширина вывода",
+        "output_height": "Высота вывода"
+      }
+    },
+    "chroma_keyer": {
+      "title": "Кеер хромакея",
+      "output_mode": {
+        "result": "Результат",
+        "matte": "Маска"
+      },
+      "params": {
+        "screen_color_r": "Фон R",
+        "screen_color_g": "Фон G",
+        "screen_color_b": "Фон B",
+        "tolerance": "Допуск",
+        "softness": "Мягкость",
+        "despill": "Анти-окраска",
+        "edge_width": "Ширина края",
+        "output_mode": "Режим вывода"
+      }
+    },
+    "luma_keyer": {
+      "title": "Кеер люмы",
+      "output_mode": {
+        "result": "Результат",
+        "matte": "Маска"
+      },
+      "params": {
+        "black_point": "Точка чёрного",
+        "white_point": "Точка белого",
+        "softness": "Мягкость",
+        "invert": "Инвертировать",
+        "output_mode": "Режим вывода"
+      }
+    },
+    "camera3d": {
+      "title": "Камера",
+      "params": {
+        "camera_mode": "Режим камеры",
+        "cam_fov": "Угол обзора",
+        "cam_focal_length": "Фокусное расстояние (мм)",
+        "cam_sensor_size": "Размер сенсора (мм)",
+        "cam_near": "Ближняя плоскость",
+        "cam_far": "Дальняя плоскость",
+        "cam_lens_shift_x": "Сдвиг объектива X",
+        "cam_lens_shift_y": "Сдвиг объектива Y",
+        "cam_exposure": "Экспозиция (EV)",
+        "cam_focus_distance": "Дистанция фокуса",
+        "cam_fstop": "Диафрагма (f-stop)",
+        "cam_dof_enable": "Глубина резкости",
+        "cam_show_safe_areas": "Безопасные зоны"
+      }
+    },
+    "light3d": {
+      "title": "Свет",
+      "light_type": {
+        "directional": "Направленный",
+        "point": "Точечный",
+        "spot": "Прожектор",
+        "ambient": "Окружающий"
+      },
+      "params": {
+        "light_type": "Тип света",
+        "light_pos_x": "Позиция X",
+        "light_pos_y": "Позиция Y",
+        "light_pos_z": "Позиция Z",
+        "light_dir_x": "Направление X",
+        "light_dir_y": "Направление Y",
+        "light_dir_z": "Направление Z",
+        "light_color_r": "Цвет R",
+        "light_color_g": "Цвет G",
+        "light_color_b": "Цвет B",
+        "light_intensity": "Интенсивность",
+        "light_range": "Дальность",
+        "light_inner_cone": "Внутренний конус",
+        "light_outer_cone": "Внешний конус",
+        "hdri_path": "Файл HDRI",
+        "use_ibl": "Использовать IBL",
+        "env_intensity": "Интенсивность окружения",
+        "icon_pos_x": "Поз. иконки X",
+        "icon_pos_y": "Поз. иконки Y",
+        "icon_pos_z": "Поз. иконки Z"
+      }
+    },
+    "model3d": {
+      "title": "Модель 3D",
+      "size_mode": {
+        "fit_to_scene": "Вписать в сцену",
+        "real_world": "Реальный масштаб"
+      },
+      "source_unit": {
+        "m": "Метры",
+        "cm": "Сантиметры",
+        "mm": "Миллиметры",
+        "in": "Дюймы",
+        "ft": "Футы",
+        "custom": "Своё"
+      },
+      "axis_mode": {
+        "auto": "Авто",
+        "y_up": "Y вверх",
+        "z_up": "Z вверх",
+        "none": "Нет"
+      },
+      "uv_v_mode": {
+        "auto": "Авто",
+        "original": "Оригинал",
+        "flip": "Перевернуть V"
+      },
+      "anim_play_mode": {
+        "loop": "Цикл",
+        "pingpong": "Пинг-понг",
+        "once": "Один раз",
+        "clamp": "Зафиксировать"
+      },
+      "material_mode": {
+        "imported": "Импортированный",
+        "override": "Переопределить",
+        "mix": "Смешение"
+      },
+      "normal_format": {
+        "OpenGL": "OpenGL",
+        "DirectX": "DirectX"
+      },
+      "orm_layout": {
+        "glTF ORM": "glTF ORM",
+        "separate": "Раздельно"
+      },
+      "texture_filter": {
+        "nearest": "Ближайший",
+        "linear": "Линейный",
+        "mipmap": "Mipmap"
+      },
+      "texture_wrap": {
+        "repeat": "Повтор",
+        "clamp": "Зафиксировать",
+        "mirror": "Отражение"
+      },
+      "viewport_lod_mode": {
+        "auto": "Авто",
+        "force_lod0": "Форсировать LOD 0",
+        "force_lod1": "Форсировать LOD 1",
+        "force_lod2": "Форсировать LOD 2"
+      },
+      "render_role": {
+        "solid": "Заливка",
+        "holdout": "Holdout",
+        "shadow_catcher": "Приёмник теней",
+        "matte": "Маска"
+      },
+      "params": {
+        "model_path": "Файл модели",
+        "use_imported_model": "Использовать импортированную модель",
+        "size_mode": "Режим размера",
+        "source_unit": "Исходная единица",
+        "unit_scale": "Масштаб единиц",
+        "axis_mode": "Режим осей",
+        "uv_v_mode": "Режим UV V",
+        "object_pos_x": "Позиция X",
+        "object_pos_y": "Позиция Y",
+        "object_pos_z": "Позиция Z",
+        "object_rot_x": "Поворот X",
+        "object_rot_y": "Поворот Y",
+        "object_rot_z": "Поворот Z",
+        "mesh_scale": "Масштаб",
+        "anim_enabled": "Анимация включена",
+        "anim_time": "Время анимации",
+        "anim_speed": "Скорость анимации",
+        "anim_clip": "Клип анимации",
+        "anim_play_mode": "Режим воспроизведения",
+        "anim_clip_name": "Имя клипа",
+        "anim_time_offset": "Смещение времени",
+        "anim_start_frame": "Начальный кадр",
+        "anim_end_frame": "Конечный кадр",
+        "anim_fps": "FPS анимации",
+        "material_mode": "Режим материала",
+        "normal_format": "Формат нормалей",
+        "orm_layout": "Компоновка ORM",
+        "texture_filter": "Фильтрация текстуры",
+        "texture_wrap": "Оборачивание текстуры",
+        "emissive_intensity": "Интенсивность свечения",
+        "viewport_lod_mode": "LOD просмотра",
+        "render_role": "Роль рендера",
+        "matte_id": "ID маски",
+        "shadow_intensity": "Интенсивность тени",
+        "shadow_softness": "Мягкость тени"
+      }
+    },
+    "scene3d": {
+      "title": "Сцена 3D",
+      "params": {
+        "width": "Ширина",
+        "height": "Высота"
+      }
+    }
+  },
+  "param_groups": {
+    "Blur": "Размытие",
+    "Channels": "Каналы",
+    "Keying": "Кеинг",
+    "Screen": "Хромакей",
+    "Matte": "Маска",
+    "Despill": "Анти-окраска",
+    "Output": "Вывод"
+  },
+  "channels": {
+    "label": "Каналы"
+  },
+  "panel": {
+    "node_graph": "Граф нод",
+    "node_properties": "Свойства ноды",
+    "performance": "Производительность",
+    "perf": "Производительность",
+    "composite_scopes": "Мониторы",
+    "keyframes": "Ключевые кадры",
+    "spline": "Сплайн",
+    "animation": "Анимация",
+    "import_report": "Отчёт об импорте",
+    "asset_dependency": "Зависимости ассетов",
+    "scene_outliner": "Структура сцены",
+    "material": "Материал"
+  },
+  "keyframes": {
+    "prev_kf": "Предыдущий ключевой кадр",
+    "next_kf": "Следующий ключевой кадр",
+    "fit": "Вписать диапазон времени",
+    "zoom_in": "Увеличить",
+    "expand_all": "Развернуть все",
+    "collapse_all": "Свернуть все",
+    "pan": "Прокрутить к плейхеду",
+    "unit_time": "Время",
+    "unit_frame": "Кадр",
+    "unit_seconds": "Секунды",
+    "unit_timecode": "Таймкод",
+    "empty": "Нет анимированных параметров"
+  },
+  "spline": {
+    "empty": "Нет кривых",
+    "fit": "Вписать кривые",
+    "smooth": "Гладкая",
+    "linear": "Линейная",
+    "flat": "Плоская",
+    "step": "Ступень/Фиксация"
+  }
+}

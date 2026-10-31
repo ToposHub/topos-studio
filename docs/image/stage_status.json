@@ -1,0 +1,195 @@
+{
+ "$comment": "Topos Image 阶段状态（阶段 12 收口快照 2026-09-08；新增持久化 Topos 图片序列导出）。门禁记录见各 ADR 与 SDK.md §7。",
+ "snapshot_date": "2026-09-21",
+ "revision": "persistent-image-sequence-export（e419802d：Deliver/Edit 接入 Topos Image Sequence；复用 ToposCodec 编码缓冲、slice worker、码率反馈与 TPIM writer；真实 2K 素材 8 帧编码总吞吐 6.35×、解码总吞吐 6.29×）；422-low-compact-matrix（ADR-I013：422-low 改用 qmatrix_id=3，qm3 qp63，1080p 实测约 1.081 MB；与 medium 的体积差从 0.248 MB 拉到 0.284 MB，解码路径不变）；444-compact-matrix（ADR-I012：GBR 4:4:4 12-bit 图片档改用 qmatrix_id=2，444-high/ultra 为 qm2 qp63/58，1080p 实测约 4.18/4.46 MB；视频 MOV 保持 qmatrix_id=1）；anchor-input-fix-and-proxy（ADR-I011 修订四：发现标定输入误用 4:4:4 布局（色度=U 平面两半），真 4:2:2 重测四档锚点下移 10~16%——low 1.11/med 1.29/high 1.71/ultra 2.86 MB/帧，PSNR 不变；内核地板确认（qp≤63 顶格、无 8bit/420/chroma-qp、slice_rows −0.6%）；代理场景定案半分辨率工作流（960×540 + 422-low ≈0.4 MB/帧）；用户追问 low/medium 能否再压）；ultra-no-lossless-anchor（ADR-I011 修订三：产品语义定案『很好画质+相对小体积』，档位不设真无损——422-ultra qm0 qp52→qp58（4.05→3.13 MB，视觉无损级 PSNR≈69 dB，与 high 同 qp 仅矩阵不同，= 无 --tier 默认，逐字节回归钉死）；444-ultra qm0 qp22→qp55（12.75→5.79 MB，PSNR≈79.5 dB@12bit）；真无损保留 --qp 28 入口不入菜单；测试改向 ultra>high 画质序 + 默认≡ultra；用户反馈：不需要真无损，无损需求应使用无损格式）；tier-anchors-high-2mb（ADR-I011 修订二：以 422-high = qm1 qp58 ≈1.97 MB/帧（≈PNG 8-bit）为锚重定全阶梯——low qm1 qp63 1.32 MB、medium qm1 qp61 1.53 MB、444-high qm0 qp58 5.10 MB；422-ultra（8-bit 舍回无损）与 444-ultra（数学无损）为保真锚不动；三体积档收敛 Standard 矩阵单轴；无 --tier 默认保持 ADR-I010 不变（用户反馈档位体积普遍偏大，要求 high 锚定 2 MB））；tier-anchors-below-png（ADR-I011 修订：422-low/medium 改用 Standard 量化矩阵（qm1）+ qp61/58，锚点 1.38/1.84 MB/帧——梯子下半段拉到 PNG 8-bit 之下；CLI 加 --qmatrix 显式覆盖；用户反馈最低档不应与 PNG 同尺寸）；tier-system（ADR-I011：--tier 六档 Low/Medium/High/Ultra——422 10-bit 四档 + GBR 444 12-bit 两档，manifest tiers 登记 + CLI 预设 + 5 项回归；GBR 10-bit 不设档产品决策）；default-vlc-qp58（ADR-I010：toos encode 默认 V2 canonical VLC+AQ/RDO、qp58 视觉无损档、--entropy v1 逃生门；4:2:2 10-bit 1080p 实拍 12.3→3.28 MB/帧，解码 13.9 ms/帧；新增 5 项默认策略回归）；audit2-cleanup（ADR-I009 小项清理：sidecar alpha 位深、CLI fstat/tmp 守卫、step 锚点冻结、OIIO 元数据拆键）；audit2-fixes-oiio（ADR-I009 复核追加：OIIO 插件 8 处缺陷——同族刻度 4 + 从未编译暴露 4；新增无 SDK stub 语法门禁）；audit2-fixes（ADR-I009：toos_tools 刻度契约修复、writer 契约缺口、序列预取/缓存并发、plane_view ABI 域、D 级加固）；extension-toos（ADR-I008：图片扩展名 .tpic → .toos 全量迁移，无兼容层；R-I05 根除关闭）；audit-fixes-1（ADR-I007：alpha 链路对齐视频链、C 契约修复、序列策略语义、门禁口径纠正、布局偏离 D6 记录）；float-ladder（v1.8 ADR-C057：HALF 浮点四档 float-ultra/high/medium/low qp44/58/72/82，TMET 展示名 toos <Quality> 16bit float，tier id 与整数阶梯共用 1..4，浮点域由 IDSC sample_kind=HALF 自描述；真无损 --half --qp 20/32 显式不入阶梯）；traw-batch0-5（TRAW 批 0~5 全量：pf=3 CFA 4 相位平面 + profile 7 + qm0 冻结 + transfer 冻结对 12→LOG0/16→linear，raw12/raw16 各六档比率 CQ 锚，原生 reduced 解码与 GPU debayer 承接）；app-raw-float-export（2026-09-21 M2/M3：图片档位注册表 TOPOS_IMAGE_TIERS 22 档单一取名，应用侧浮点/RAW 导出编码链与 CLI 同锚逐位一致，TMET label N-4/N-5/N-6 落盘）",
+ "head_commit": "auto(see git log)",
+ "stages": [
+  {
+   "id": 0,
+   "name": "决策冻结与基线",
+   "status": "done",
+   "evidence": [
+    "docs/image/topos_image_file_spec_v0.md",
+    "docs/image/ADR-I001-stage0-decisions.md",
+    "docs/image/benchmark_protocol.md",
+    "docs/image/test_vector_manifest.json",
+    "docs/image/risk_register.md"
+   ]
+  },
+  {
+   "id": 1,
+   "name": "TPIM parser/writer + 安全基础设施",
+   "status": "done",
+   "evidence": [
+    "native/topos_codec/src/image/",
+    "include/topos_image.h",
+    "tests: image_container/reader/writer",
+    "golden_image_v1.bin",
+    "golden_image_v1_alpha.bin",
+    "fuzz_image"
+   ],
+   "gates": [
+    "debug",
+    "asan",
+    "ubsan",
+    "fuzz-4096",
+    "check_exports"
+   ],
+   "audit_fixes": [
+    "directory 重叠双向区间检查",
+    "minor 版本容忍（§14）",
+    "unknown major→UNSUPPORTED_VERSION",
+    "IDSC reserved=0 强制"
+   ]
+  },
+  {
+   "id": 2,
+   "name": "图片层 GBR444 10-bit（收窄：启用+复验）",
+   "status": "done",
+   "evidence": [
+    "golden_image_v1_gbr10.bin",
+    "test_gbr_hq_semantics",
+    "ADR-I002"
+   ],
+   "audit_fixes": [
+    "image_profile↔codec 组合交叉校验（§9.1）"
+   ]
+  },
+  {
+   "id": 3,
+   "name": "12-bit XQ + 元数据受限读写（收窄）",
+   "status": "done",
+   "evidence": [
+    "golden_image_v1_gbr12.bin",
+    "golden_image_v1_meta.bin",
+    "tc_image_read_metadata",
+    "ADR-I003"
+   ]
+  },
+  {
+   "id": 4,
+   "name": "完整 ABI + toos CLI + 原子写 + PNG 互转",
+   "status": "done",
+   "evidence": [
+    "tc_image_query_capabilities",
+    "tc_image_derive_idsc",
+    "src/cli/image_cli.c",
+    "scripts/toos_tools.py",
+    "ADR-I004"
+   ],
+   "audit_fixes": [
+    "alpha-mode2 默认位深 12 + 实测 alpha_max_abs_err 入 IDSC",
+    "benchmark malloc/泄漏",
+    "Windows 可移植守卫（待实机验证）"
+   ]
+  },
+  {
+   "id": 5,
+   "name": "Topos Color 单图集成",
+   "status": "done-with-deferrals",
+   "evidence": [
+    "src/shared/codec/topos_image_binding.py",
+    "src/shared/media/topos_image_source.py",
+    "format_registry .toos",
+    "factory toos_image 路由",
+    "ADR-I005"
+   ],
+   "audit_fixes": [
+    "extra 键名对齐视频链 topos_*",
+    "topos_*a{N} 格式名（has_alpha/planes 元数据修复）",
+    "alpha 平面声明位深满刻度交付",
+    "open() 改 probe 消除双全文件读"
+   ],
+   "deferred": [
+    "单图导出接线（当前已接入的是图片序列导出）",
+    "缩略图接线（thumbnail_provider）",
+    "导入分辨率探测（project.py 扩展名路径）"
+   ]
+  },
+  {
+   "id": 6,
+   "name": "图片序列与有界预取",
+   "status": "done-with-deferrals",
+   "evidence": [
+    "src/shared/media/topos_image_sequence.py",
+    "src/shared/export/topos_encoder.py",
+    "tests/media/test_topos_image_sequence_export.py",
+    "docs/image/topos_image_sequence_export_speed_2026-09-07.md",
+    "19 用例 + 持久化导出回归",
+    "ADR-I006"
+   ],
+   "audit_fixes": [
+    "skip/error/hold 真实分化（error 开洞检测）",
+    "重复帧拒绝",
+    "padding 严格位宽",
+    "cache key + codec 构建身份",
+    "pending 预取窗口（不丢请求）",
+    "close 后旧代不落缓存"
+   ],
+   "deferred": [
+    "接入 UI/播放链",
+    "复用 DecodeQueue/DecodedFrame 优先级模型",
+    "1000+ 帧长序列压测"
+   ]
+  },
+  {
+   "id": 7,
+   "name": "I/O 性能实测（测量优先）",
+   "status": "done",
+   "evidence": [
+    "docs/image/perf_report_stage7.md",
+    "toos benchmark"
+   ],
+   "deferred": [
+    "NAS/冷缓存矩阵",
+    "真实素材质量基线"
+   ]
+  },
+  {
+   "id": 8,
+   "name": "OIIO 插件",
+   "status": "source-delivered",
+   "evidence": [
+    "plugins/oiio_topos/",
+    "cmake/oiio_plugin.cmake"
+   ],
+   "deferred": [
+    "oiiotool 往返验收（待 OIIO SDK 环境，R-I15）"
+   ]
+  },
+  {
+   "id": 9,
+   "name": "Nuke Reader/Writer",
+   "status": "out-of-scope",
+   "note": "后续独立立项（ADR-I001 D14）"
+  },
+  {
+   "id": 10,
+   "name": "Photoshop 插件",
+   "status": "out-of-scope",
+   "note": "后续独立立项"
+  },
+  {
+   "id": 11,
+   "name": "After Effects 插件",
+   "status": "out-of-scope",
+   "note": "后续独立立项"
+  },
+  {
+   "id": 12,
+   "name": "健壮性、分发与 SDK 收口",
+   "status": "done-with-deferrals",
+   "evidence": [
+    "docs/image/SDK.md",
+    "docs/image/ADR-I007-audit-fixes.md",
+    "最终门禁：34 debug 二进制 + ASan/UBSan + fuzz 4096 + check_exports 36 项 + golden 5 用例 + image pytest 49（口径修订：原 61 混入无关 factory 用例）+ run_tests.sh 已纳入 image pytest 与 topos_fuzz_image"
+   ],
+   "deferred": [
+    "Windows/Linux 构建与 ABI smoke",
+    "1000+ 帧长序列压测",
+    "安装包签名/公证"
+   ]
+  }
+ ],
+ "regressions": "旧视频 golden（transform/bitstream/codec/mov/GBR/BD12/profiles）全数通过，视频路径零回归"
+}

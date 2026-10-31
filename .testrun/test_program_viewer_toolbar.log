@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 11 items
+
+tests/edit/test_program_viewer_toolbar.py ...........                    [100%]
+
+============================= 11 passed in 21.30s ==============================

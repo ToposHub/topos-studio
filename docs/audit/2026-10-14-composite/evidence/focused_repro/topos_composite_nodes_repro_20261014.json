@@ -1,0 +1,173 @@
+{
+  "local_expression_order": [
+    {
+      "set_order": [
+        "translate_x",
+        "translate_y"
+      ],
+      "x": 0.0,
+      "y": 10.0,
+      "errors": {}
+    },
+    {
+      "set_order": [
+        "translate_y",
+        "translate_x"
+      ],
+      "x": 20.0,
+      "y": 10.0,
+      "errors": {}
+    }
+  ],
+  "rejected_expression_loses_keys": {
+    "api_result": [
+      false,
+      "Circular dependency detected"
+    ],
+    "remaining_tracks": {},
+    "remaining_expressions": {}
+  },
+  "loop_out_loses_keys": {
+    "remaining_tracks": {},
+    "values": {
+      "0": 0.0,
+      "12": 0.0,
+      "24": 0.0,
+      "36": 0.0
+    }
+  },
+  "alias_cycle_accepted": {
+    "api_result": [
+      true,
+      null
+    ],
+    "snapshot_errors": {
+      "b": {
+        "radius": "Circular expression dependency"
+      },
+      "a": {
+        "radius": "Circular expression dependency"
+      }
+    }
+  },
+  "animated_parent_lost_in_renderer": {
+    "snapshot_x": 105.0,
+    "render_x": 5.0
+  },
+  "hold_does_not_freeze_upstream_animation": {
+    "override_frame": 5,
+    "snapshot_x": 20.0,
+    "render_x": 20.0
+  },
+  "retime_rounding_drift": [
+    {
+      "frame": 0,
+      "sequential": 0,
+      "combined": 0
+    },
+    {
+      "frame": 1,
+      "sequential": 0,
+      "combined": 1
+    },
+    {
+      "frame": 2,
+      "sequential": 2,
+      "combined": 2
+    },
+    {
+      "frame": 3,
+      "sequential": 4,
+      "combined": 3
+    },
+    {
+      "frame": 4,
+      "sequential": 4,
+      "combined": 4
+    },
+    {
+      "frame": 5,
+      "sequential": 4,
+      "combined": 5
+    },
+    {
+      "frame": 6,
+      "sequential": 6,
+      "combined": 6
+    }
+  ],
+  "shared_source_time_branches": {
+    "needed_source_frames": [
+      15,
+      19
+    ],
+    "only_source_frame": 19
+  },
+  "cryptomatte_wrong_id_comparison": {
+    "input_ids": {
+      "object_0": 8.425936188553057e-36,
+      "object_3": -2.874484779289963e-34
+    },
+    "stored_ids": [
+      8.425936188553057e-36
+    ],
+    "stored_names": [
+      "object_0"
+    ],
+    "third_id_is_nan": true
+  },
+  "cryptomatte_invalid_json_shapes": [
+    {
+      "parameter": "selected_ids",
+      "payload": "null",
+      "outcome": "TypeError: 'NoneType' object is not iterable"
+    },
+    {
+      "parameter": "selected_names",
+      "payload": "null",
+      "outcome": "TypeError: 'NoneType' object is not iterable"
+    },
+    {
+      "parameter": "manifest",
+      "payload": "[]",
+      "outcome": "AttributeError: 'list' object has no attribute 'items'"
+    }
+  ],
+  "expression_truth_and_ternary": [
+    {
+      "expression": "10 if -1 else 20",
+      "success": true,
+      "value": 20.0,
+      "error": null
+    },
+    {
+      "expression": "(-1) and 1",
+      "success": true,
+      "value": 0.0,
+      "error": null
+    },
+    {
+      "expression": "1 or sqrt(-1)",
+      "success": false,
+      "value": null,
+      "error": "Invalid function call: Function 'sqrt' error: math domain error"
+    },
+    {
+      "expression": "0 and sqrt(-1)",
+      "success": false,
+      "value": null,
+      "error": "Invalid function call: Function 'sqrt' error: math domain error"
+    },
+    {
+      "expression": "input.width > 1000 ? 1.0 : 0.5",
+      "success": false,
+      "value": null,
+      "error": "Syntax error: invalid syntax"
+    }
+  ],
+  "unloaded_plugin_stays_in_core_registry": {
+    "plugin_manager_has_node": false,
+    "core_registry_has_node": true,
+    "core_factory_still_creates_node": true
+  }
+}

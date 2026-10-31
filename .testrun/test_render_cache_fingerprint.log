@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 5 items
+
+tests/edit/test_render_cache_fingerprint.py .....                        [100%]
+
+============================== 5 passed in 6.19s ===============================

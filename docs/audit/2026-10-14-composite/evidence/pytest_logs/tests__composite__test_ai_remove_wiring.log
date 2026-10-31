@@ -1,0 +1,34 @@
+...........FF.FF..                                                       [100%]
+=================================== FAILURES ===================================
+_____ TestMaskPreservingReadback.test_read_ai_cache_result_composites_mask _____
+tests/composite/test_ai_remove_wiring.py:179: in test_read_ai_cache_result_composites_mask
+    assert cv2.imwrite(path, cached,
+E   cv2.error: OpenCV(4.11.0) /Users/runner/work/opencv-python/opencv-python/opencv/modules/imgcodecs/src/grfmt_exr.cpp:103: error: (-213:The function/feature is not implemented) imgcodecs: OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option. Refer for details and cautions here: https://github.com/opencv/opencv/issues/21326 in function 'initOpenEXR'
+----------------------------- Captured stderr call -----------------------------
+[ WARN:0@0.113] global grfmt_exr.cpp:102 initOpenEXR imgcodecs: OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option. Refer for details and cautions here: https://github.com/opencv/opencv/issues/21326
+____________________ TestAICacheRoundTrip.test_put_has_get _____________________
+tests/composite/test_ai_remove_wiring.py:212: in test_put_has_get
+    cache.put(key, img)
+src/features/composite/render/ai_cache_manager.py:286: in put
+    cv2.imwrite(tmp_path, image.astype(np.float32),
+E   cv2.error: OpenCV(4.11.0) /Users/runner/work/opencv-python/opencv-python/opencv/modules/imgcodecs/src/grfmt_exr.cpp:103: error: (-213:The function/feature is not implemented) imgcodecs: OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option. Refer for details and cautions here: https://github.com/opencv/opencv/issues/21326 in function 'initOpenEXR'
+----------------------------- Captured stderr call -----------------------------
+[ WARN:0@0.169] global grfmt_exr.cpp:102 initOpenEXR imgcodecs: OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option. Refer for details and cautions here: https://github.com/opencv/opencv/issues/21326
+_ TestMaskNormalization.test_read_ai_cache_result_mask_size_mismatch_returns_none _
+tests/composite/test_ai_remove_wiring.py:272: in test_read_ai_cache_result_mask_size_mismatch_returns_none
+    assert cv2.imwrite(path, cached,
+E   cv2.error: OpenCV(4.11.0) /Users/runner/work/opencv-python/opencv-python/opencv/modules/imgcodecs/src/grfmt_exr.cpp:103: error: (-213:The function/feature is not implemented) imgcodecs: OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option. Refer for details and cautions here: https://github.com/opencv/opencv/issues/21326 in function 'initOpenEXR'
+----------------------------- Captured stderr call -----------------------------
+[ WARN:0@0.181] global grfmt_exr.cpp:102 initOpenEXR imgcodecs: OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option. Refer for details and cautions here: https://github.com/opencv/opencv/issues/21326
+________ TestMaskNormalization.test_read_ai_cache_result_with_3ch_mask _________
+tests/composite/test_ai_remove_wiring.py:253: in test_read_ai_cache_result_with_3ch_mask
+    assert cv2.imwrite(path, cached,
+E   cv2.error: OpenCV(4.11.0) /Users/runner/work/opencv-python/opencv-python/opencv/modules/imgcodecs/src/grfmt_exr.cpp:103: error: (-213:The function/feature is not implemented) imgcodecs: OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option. Refer for details and cautions here: https://github.com/opencv/opencv/issues/21326 in function 'initOpenEXR'
+----------------------------- Captured stderr call -----------------------------
+[ WARN:0@0.187] global grfmt_exr.cpp:102 initOpenEXR imgcodecs: OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option. Refer for details and cautions here: https://github.com/opencv/opencv/issues/21326
+=========================== short test summary info ============================
+FAILED tests/composite/test_ai_remove_wiring.py::TestMaskPreservingReadback::test_read_ai_cache_result_composites_mask
+FAILED tests/composite/test_ai_remove_wiring.py::TestAICacheRoundTrip::test_put_has_get
+FAILED tests/composite/test_ai_remove_wiring.py::TestMaskNormalization::test_read_ai_cache_result_mask_size_mismatch_returns_none
+FAILED tests/composite/test_ai_remove_wiring.py::TestMaskNormalization::test_read_ai_cache_result_with_3ch_mask
+4 failed, 14 passed in 0.71s

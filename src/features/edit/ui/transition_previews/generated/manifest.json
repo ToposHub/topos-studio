@@ -1,0 +1,294 @@
+{
+  "version": 1,
+  "width": 256,
+  "height": 144,
+  "fps": 12,
+  "gif_color_count": 64,
+  "seed": 20260915,
+  "items": [
+    {
+      "transition_type": "cross_dissolve",
+      "output": "cross_dissolve.gif",
+      "source_pair_id": "portrait_studio_contrast",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "dip_to_color",
+      "output": "dip_to_color.gif",
+      "source_pair_id": "portrait_botanical_courtyard",
+      "first": "scene_e1_deep_skin_portrait.png",
+      "second": "scene_e2_warm_mature_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "blur_dissolve",
+      "output": "blur_dissolve.gif",
+      "source_pair_id": "portrait_studio_contrast",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "defocus_dissolve",
+      "output": "defocus_dissolve.gif",
+      "source_pair_id": "nature_cinematic",
+      "first": "scene_a1_lake_blue.png",
+      "second": "scene_a2_desert_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "film_dissolve",
+      "output": "film_dissolve.gif",
+      "source_pair_id": "portrait_studio_contrast",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "smooth_cut",
+      "output": "smooth_cut.gif",
+      "source_pair_id": "portrait_city_cafe",
+      "first": "scene_d1_cool_portrait.png",
+      "second": "scene_d2_warm_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "wipe",
+      "output": "wipe.gif",
+      "source_pair_id": "nature_cinematic",
+      "first": "scene_a1_lake_blue.png",
+      "second": "scene_a2_desert_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_circle",
+      "output": "iris_circle.gif",
+      "source_pair_id": "botanical_geometry",
+      "first": "scene_c1_greenhouse.png",
+      "second": "scene_c2_magenta_geometry.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_diamond",
+      "output": "iris_diamond.gif",
+      "source_pair_id": "portrait_studio_contrast",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_hexagon",
+      "output": "iris_hexagon.gif",
+      "source_pair_id": "nature_cinematic",
+      "first": "scene_a1_lake_blue.png",
+      "second": "scene_a2_desert_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_plus",
+      "output": "iris_plus.gif",
+      "source_pair_id": "portrait_city_cafe",
+      "first": "scene_d1_cool_portrait.png",
+      "second": "scene_d2_warm_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_square",
+      "output": "iris_square.gif",
+      "source_pair_id": "botanical_geometry",
+      "first": "scene_c1_greenhouse.png",
+      "second": "scene_c2_magenta_geometry.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_ellipse",
+      "output": "iris_ellipse.gif",
+      "source_pair_id": "urban_gallery",
+      "first": "scene_b1_city_blue.png",
+      "second": "scene_b2_gallery_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_triangle",
+      "output": "iris_triangle.gif",
+      "source_pair_id": "portrait_botanical_courtyard",
+      "first": "scene_e1_deep_skin_portrait.png",
+      "second": "scene_e2_warm_mature_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_arrow",
+      "output": "iris_arrow.gif",
+      "source_pair_id": "portrait_city_cafe",
+      "first": "scene_d1_cool_portrait.png",
+      "second": "scene_d2_warm_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_star",
+      "output": "iris_star.gif",
+      "source_pair_id": "portrait_studio_contrast",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "iris_heart",
+      "output": "iris_heart.gif",
+      "source_pair_id": "urban_gallery",
+      "first": "scene_b1_city_blue.png",
+      "second": "scene_b2_gallery_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "slide_left",
+      "output": "slide_left.gif",
+      "source_pair_id": "nature_cinematic",
+      "first": "scene_a1_lake_blue.png",
+      "second": "scene_a2_desert_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "slide_right",
+      "output": "slide_right.gif",
+      "source_pair_id": "nature_cinematic",
+      "first": "scene_a1_lake_blue.png",
+      "second": "scene_a2_desert_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "slide_up",
+      "output": "slide_up.gif",
+      "source_pair_id": "nature_cinematic",
+      "first": "scene_a1_lake_blue.png",
+      "second": "scene_a2_desert_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "slide_down",
+      "output": "slide_down.gif",
+      "source_pair_id": "urban_gallery",
+      "first": "scene_b1_city_blue.png",
+      "second": "scene_b2_gallery_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "motion_blur_left",
+      "output": "motion_blur_left.gif",
+      "source_pair_id": "urban_gallery",
+      "first": "scene_b1_city_blue.png",
+      "second": "scene_b2_gallery_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "motion_blur_right",
+      "output": "motion_blur_right.gif",
+      "source_pair_id": "botanical_geometry",
+      "first": "scene_c1_greenhouse.png",
+      "second": "scene_c2_magenta_geometry.png",
+      "params": {}
+    },
+    {
+      "transition_type": "motion_blur_up",
+      "output": "motion_blur_up.gif",
+      "source_pair_id": "portrait_studio_contrast",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "motion_blur_down",
+      "output": "motion_blur_down.gif",
+      "source_pair_id": "nature_cinematic",
+      "first": "scene_a1_lake_blue.png",
+      "second": "scene_a2_desert_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "whip_pan_left",
+      "output": "whip_pan_left.gif",
+      "source_pair_id": "botanical_geometry",
+      "first": "scene_c1_greenhouse.png",
+      "second": "scene_c2_magenta_geometry.png",
+      "params": {}
+    },
+    {
+      "transition_type": "whip_pan_right",
+      "output": "whip_pan_right.gif",
+      "source_pair_id": "portrait_studio_contrast",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "zoom_blur_in",
+      "output": "zoom_blur_in.gif",
+      "source_pair_id": "portrait_city_cafe",
+      "first": "scene_d1_cool_portrait.png",
+      "second": "scene_d2_warm_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "zoom_blur_out",
+      "output": "zoom_blur_out.gif",
+      "source_pair_id": "portrait_city_cafe",
+      "first": "scene_d1_cool_portrait.png",
+      "second": "scene_d2_warm_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "spin_blur_cw",
+      "output": "spin_blur_cw.gif",
+      "source_pair_id": "portrait_studio_contrast",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "spin_blur_ccw",
+      "output": "spin_blur_ccw.gif",
+      "source_pair_id": "portrait_studio_contrast",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "rgb_split_left",
+      "output": "rgb_split_left.gif",
+      "source_pair_id": "urban_gallery",
+      "first": "scene_b1_city_blue.png",
+      "second": "scene_b2_gallery_warm.png",
+      "params": {}
+    },
+    {
+      "transition_type": "rgb_split_right",
+      "output": "rgb_split_right.gif",
+      "source_pair_id": "portrait_city_cafe",
+      "first": "scene_d1_cool_portrait.png",
+      "second": "scene_d2_warm_portrait.png",
+      "params": {}
+    },
+    {
+      "transition_type": "wipe",
+      "output": "wipe_left.gif",
+      "source_pair_id": "nature_cinematic",
+      "first": "scene_a1_lake_blue.png",
+      "second": "scene_a2_desert_warm.png",
+      "params": {
+        "direction": "left"
+      }
+    },
+    {
+      "transition_type": "wipe",
+      "output": "wipe_up.gif",
+      "source_pair_id": "portrait_city_cafe",
+      "first": "scene_d1_cool_portrait.png",
+      "second": "scene_d2_warm_portrait.png",
+      "params": {
+        "direction": "up"
+      }
+    }
+  ]
+}

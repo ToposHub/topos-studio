@@ -1,0 +1,48 @@
+{
+ "file": "tests/test_videos/2K_topos_422_Proxy.mov",
+ "results": [
+  {
+   "block_h": -0.2454,
+   "block_v": -0.7606,
+   "y_psnr": 38.036,
+   "y_psnr_edge": 34.43,
+   "sharp": 1.3135,
+   "grid": 1.3863,
+   "stair": 0.3626,
+   "dec_fps": 284.3,
+   "file": "2K_topos_422_Proxy.mov",
+   "name": "baseA",
+   "env": {}
+  },
+  {
+   "block_h": 0.0674,
+   "block_v": -0.5656,
+   "y_psnr": 37.9521,
+   "y_psnr_edge": 34.4153,
+   "sharp": 1.3131,
+   "grid": 1.3904,
+   "stair": 0.3633,
+   "dec_fps": 315.3,
+   "file": "2K_topos_422_Proxy.mov",
+   "name": "a50b",
+   "env": {
+    "DB_STEP_DEN": "346112"
+   }
+  },
+  {
+   "block_h": 0.0674,
+   "block_v": -0.5656,
+   "y_psnr": 37.9521,
+   "y_psnr_edge": 34.4153,
+   "sharp": 1.3131,
+   "grid": 1.3904,
+   "stair": 0.3633,
+   "dec_fps": 321.4,
+   "file": "2K_topos_422_Proxy.mov",
+   "name": "a50c",
+   "env": {
+    "DB_STEP_DEN": "346112"
+   }
+  }
+ ]
+}

@@ -1,0 +1,86 @@
+// --- Topos Plugin Metadata ---
+// @name HighPass Retouch
+// @i18n_name HighPass_Retouch
+// @author Topos Team
+// @version 1.0
+// @description Frequency-domain skin retouching using high-pass filtering (band-stop filter)
+// @param slider smooth_radius "Smooth Radius" 0.5 0.0 1.0
+// @param slider detail_preserve "Detail Preserve" 0.5 0.0 1.0
+// @param separator
+// @param slider mix_amount "Mix Amount" 1.0 0.0 1.0
+// -----------------------------
+
+vec3 process(vec3 color, vec2 uv) {
+    // Early exit - using mix_amount as primary strength control
+    if (mix_amount < 0.001) return color;
+    
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+    
+    // ====== RESOLUTION-INDEPENDENT SCALING ======
+    // Get current rendering resolution to ensure consistent effect across all scales
+    vec2 current_size = vec2(textureSize(u_input_tex, 0));
+    
+    // ====== PARAMETER MAPPING (RESOLUTION-INDEPENDENT) ======
+    // fast_blur internally calculates: r = (intensity * radius * scale) / 50.0
+    // where scale = max(tex_size.x, tex_size.y) / 1024.0
+    //
+    // To get a target pixel radius R_target, we need:
+    //   R_target = (1.0 * radius * scale) / 50.0
+    //   radius = R_target * 50.0 / scale
+    //
+    // R_target is computed as percentage of image width for resolution independence
+    
+    float scale = max(current_size.x, current_size.y) / 1024.0;
+    
+    // r_large: 0.5% - 3% of image width (low frequency extraction)
+    // At 4K (3840px): 19-115 pixels effective
+    float r_large_min_ratio = 0.005;  // 0.5% of width
+    float r_large_max_ratio = 0.030;  // 3% of width
+    float r_large_ratio = r_large_min_ratio + smooth_radius * (r_large_max_ratio - r_large_min_ratio);
+    float r_large_target = max(1.0, current_size.x * r_large_ratio);
+    // Convert to fast_blur's expected parameter
+    float r_large = r_large_target * 50.0 / max(scale, 0.001);
+    
+    // r_small: 0.05% - 0.3% of image width (high frequency extraction)
+    // At 4K (3840px): 2-12 pixels effective
+    float r_small_min_ratio = 0.0005;  // 0.05% of width
+    float r_small_max_ratio = 0.003;   // 0.3% of width
+    float r_small_ratio = r_small_min_ratio + (1.0 - smooth_radius) * (r_small_max_ratio - r_small_min_ratio);
+    float r_small_target = max(0.5, current_size.x * r_small_ratio);
+    // Convert to fast_blur's expected parameter
+    float r_small = r_small_target * 50.0 / max(scale, 0.001);
+    
+    // detail_preserve: controls high-frequency detail boost (0.2-2.0)
+    float detail_boost = 0.2 + detail_preserve * 1.8;
+    
+    // ====== FREQUENCY SEPARATION ======
+    // Pass current_size to fast_blur for correct UV offset calculation
+    
+    // Low frequency: facial lighting and color distribution (large blur)
+    vec3 low_freq = fast_blur(u_input_tex, uv, 1.0, r_large, current_size);
+    
+    // Small blur for high-pass extraction
+    vec3 blurred_small = fast_blur(u_input_tex, uv, 1.0, r_small, current_size);
+    
+    // High frequency: fine detail (pores, fine texture)
+    // This is the GLSL equivalent of Photoshop's High Pass filter
+    // Important: preserve negative values for proper frequency reconstruction
+    vec3 high_freq = original_color - blurred_small;
+    
+    // ====== BAND-STOP RECONSTRUCTION ======
+    // Combine: low_freq (smooth lighting) + boosted high_freq (preserved detail)
+    // Mid-frequency blemishes are naturally filtered out by the gap between r_large and r_small
+    vec3 retouched = low_freq + high_freq * detail_boost;
+    
+    // ====== LINEAR SPACE COMPATIBILITY ======
+    // Handle negative and super-white color spaces gracefully
+    // Don't clamp - let the soft-clip stage handle this properly
+    // The reconstruction preserves the tonal relationships
+    
+    // ====== GLOBAL MIX ======
+    // Blend between original and retouched result
+    vec3 result = mix(original_color, retouched, mix_amount);
+    
+    // Apply the delta to the graded color (maintains grading adjustments)
+    return color + (result - original_color);
+}

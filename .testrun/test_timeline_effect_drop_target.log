@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_timeline_effect_drop_target.py ...                       [100%]
+
+============================== 3 passed in 11.74s ==============================

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_render_cache_file_cleanup.py ....                        [100%]
+
+============================== 4 passed in 6.56s ===============================

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 17 items
+
+tests/edit/test_transition_double_click.py .................             [100%]
+
+============================= 17 passed in 10.04s ==============================

@@ -1,0 +1,167 @@
+{
+  "action": {
+    "export_srt": "Export Subtitles (SRT)...",
+    "queue_start": "Start Video Queue",
+    "queue_stop": "Stop Video Queue"
+  },
+  "panel": {
+    "deliver_video_batch": "Video Batch Export"
+  },
+  "deliver": {
+    "export_stems": "Export Stems…",
+    "export_stems_tooltip": "Export audio tracks / buses / D-M-E groups as separate WAV stems",
+    "export_chapters": "Export Chapters…",
+    "export_chapters_tooltip": "Export timeline chapter markers as YouTube chapter text or FFMetadata",
+    "video": {
+      "settings_title": "Video Deliver",
+      "source_range": "Source & Range",
+      "video_settings": "Video",
+      "audio_delivery": "Audio & Delivery",
+      "no_project": "(no project)",
+      "output_dir_placeholder": "Output directory",
+      "select_output_dir": "Select Output Directory",
+      "add_to_queue": "Add to Video Queue",
+      "add_and_start": "Add & Start",
+      "alpha": "Alpha channel",
+      "profile_default": "(default)",
+      "preflight_ok": "Ready to add",
+      "project": "Project",
+      "timeline": "Timeline",
+      "range": "Range",
+      "frames": "Frames",
+      "duration": "Duration",
+      "container": "Container",
+      "codec": "Codec",
+      "profile": "Profile",
+      "profile_tooltip": "Encoder profile. Auto selects the codec's default compatibility profile.",
+      "aspect_lock": "Lock aspect ratio",
+      "resolution": "Resolution",
+      "size": "Size",
+      "frame_rate": "Frame rate",
+      "custom_fps": "Custom FPS",
+      "quality_mode": "Quality mode",
+      "quality": "Quality",
+      "quality_crf": "Quality (CRF)",
+      "quality_crf_hint": "CRF is unitless; lower values mean higher quality.",
+      "crf_18": "CRF 18 · High quality",
+      "crf_20": "CRF 20 · Blu-ray quality",
+      "crf_23": "CRF 23 · Recommended",
+      "crf_28": "CRF 28 · Smaller file",
+      "crf_30": "CRF 30 · Preview",
+      "quality_bitrate_hint": "Target average video bitrate in kbps; actual bitrate may vary.",
+      "quality_cbr_hint": "Fixed video bitrate in kbps; minimum and maximum rates are constrained.",
+      "quality_auto_hint": "The encoder chooses the quality automatically.",
+      "estimated_size": "Est. size",
+      "estimated_size_hint": "Estimated from output duration × video bitrate ÷ 8; audio and container overhead are not included.",
+      "filename_placeholder": "Timeline name",
+      "quality_auto": "Auto",
+      "quality_vbr": "VBR",
+      "quality_cbr": "CBR",
+      "quality_bitrate": "Bitrate",
+      "color_space": "Color space",
+      "bit_depth": "Bit depth",
+      "audio_codec": "Audio codec",
+      "sample_rate": "Sample rate",
+      "audio_bitrate": "Audio bitrate",
+      "subtitles": "Subtitles",
+      "output_dir": "Output dir",
+      "filename": "Filename",
+      "if_exists": "If exists",
+      "allow_placeholders": "Allow placeholder clips",
+      "allow_placeholders_hint": "Placeholder clips normally block delivery. Enable to export anyway; placeholders render as color bars in the output."
+    },
+    "preset": {
+      "web_h264": {
+        "title": "Web H.264",
+        "subtitle": "MP4 · H.264 · 1080p"
+      },
+      "mobile_h264": {
+        "title": "Mobile",
+        "subtitle": "MP4 · H.264 · 1080×1920"
+      },
+      "master_prores422": {
+        "title": "Master",
+        "subtitle": "MOV · ProRes 422 · UHD"
+      },
+      "master_prores4444": {
+        "title": "Master (Alpha)",
+        "subtitle": "MOV · ProRes 4444 · 4:4:4"
+      },
+      "hevc_uhd": {
+        "title": "HEVC 4K",
+        "subtitle": "MP4 · HEVC · 3840×2160"
+      },
+      "dnxhr_sq": {
+        "title": "DNxHR SQ",
+        "subtitle": "MOV · DNxHR SQ · 1080p"
+      },
+      "custom": {
+        "title": "Custom",
+        "subtitle": "Current settings"
+      }
+    },
+    "queue": {
+      "title": "Video Render Queue",
+      "start": "Start Queue",
+      "pause": "Pause",
+      "resume": "Resume",
+      "cancel_current": "Cancel Current",
+      "clear_completed": "Clear Completed",
+      "more": "More",
+      "float": "Float Panel",
+      "return_to_deliver": "Return to Deliver",
+      "empty_title": "No video export tasks yet",
+      "empty_hint": "Choose a timeline and a video preset above, then click “Add to Video Queue”.",
+      "tasks": "tasks",
+      "running": "rendering",
+      "pending": "pending",
+      "done": "done",
+      "failed": "failed",
+      "status_pending": "Pending",
+      "status_running": "Rendering",
+      "status_done": "Done",
+      "status_failed": "Failed",
+      "status_cancelled": "Cancelled",
+      "status_paused": "Paused",
+      "status_needs_relink": "Needs Relink",
+      "no_audio": "no audio",
+      "action_cancel": "Cancel",
+      "action_open": "Open",
+      "action_retry": "Retry",
+      "action_remove": "Remove",
+      "action_edit": "Edit Settings",
+      "action_relink": "Relink Timeline",
+      "col_status": "Status",
+      "col_source": "Source",
+      "col_preset": "Preset",
+      "col_output": "Output File",
+      "col_video": "Video",
+      "col_audio": "Audio",
+      "col_progress": "Progress",
+      "col_state": "State",
+      "col_actions": "Actions"
+    },
+    "subtitle": {
+      "off": "Off",
+      "burn": "Burn in",
+      "sidecar": "Sidecar file"
+    },
+    "conflict": {
+      "ask": "Ask",
+      "overwrite": "Overwrite",
+      "auto_number": "Auto-number",
+      "skip": "Skip"
+    },
+    "timeline_unnamed": "Unnamed",
+    "frames_suffix": " frames",
+    "px_suffix": " px",
+    "fps_suffix": " fps",
+    "kbps_suffix": " kbps",
+    "w_label": "W",
+    "h_label": "H",
+    "colors_suffix": " colors",
+    "gif_colors_label": "GIF colors",
+    "qc_title": "Multi-Version Delivery QC",
+    "close": "Close"
+  }
+}

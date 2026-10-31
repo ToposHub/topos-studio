@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "Workflow IA"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "Seleziona un modello sopra o trascina qui gli asset",
+      "zoom": "Zoom: {percent}%"
+    },
+    "toolbar": {
+      "template": "Modello",
+      "load": "Carica",
+      "clear": "Svuota",
+      "form": "Modulo",
+      "canvas": "Area di disegno",
+      "run": "Esegui",
+      "cancel": "Annulla"
+    },
+    "gallery": {
+      "title": "Scegli un modello di workflow",
+      "use": "Usa"
+    },
+    "form": {
+      "title": "Parametri",
+      "title_with_name": "{name} · Parametri",
+      "node_section": "Nodo: {node}",
+      "no_params": "Questo modello non ha parametri regolabili — esegui direttamente",
+      "advanced_edit": "Modifica avanzata (area di disegno)",
+      "back_to_gallery": "Torna ai modelli",
+      "back_to_gallery_tooltip": "Torna alla galleria dei modelli; il workflow corrente viene conservato (Svuota lo scarta)"
+    },
+    "status": {
+      "idle": "Inattivo",
+      "queued": "In coda",
+      "running": "In esecuzione",
+      "cached": "In cache",
+      "succeeded": "Riuscito",
+      "failed": "Fallito",
+      "cancelled": "Annullato",
+      "waiting_input": "In attesa",
+      "skipped": "Saltato",
+      "not_assembled": "Stato: non assemblato",
+      "no_plan": "Ancora nessun piano"
+    },
+    "actions": {
+      "preview_plan": "Anteprima piano",
+      "request_approval": "Richiedi approvazione",
+      "apply_approved_plan": "Applica piano approvato"
+    },
+    "inspector": {
+      "no_selection": "<b>(nessuna selezione)</b>"
+    },
+    "node_search": {
+      "placeholder": "Cerca nodi…"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P26",
+  "name": "彩色套印",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合印刷海报感；套印偏移 1–2px，paper_base 0.9 上下",
+  "component": "F13 print_registration（暂存组件 content_staging/library_v1/filters/print_registration）",
+  "dependencies": {
+    "component_id": "F13",
+    "component_slug": "print_registration",
+    "component_kind": "filter"
+  },
+  "params": {
+    "cmyk_separation": "CMY approx",
+    "reg_offset_x": 1.5,
+    "reg_offset_y": 0.5,
+    "paper_base": 0.92,
+    "ink_amount": 0.85
+  },
+  "notes": "依赖暂存组件（L11 未接缝）：通道套印偏移 + 纸底；CMYK 风格模拟不替代印刷 ICC 流程（组件 README 口径）。"
+}

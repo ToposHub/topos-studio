@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 11 items
+
+tests/edit/test_timeline_occlusion_preview_seam.py ...........           [100%]
+
+============================== 11 passed in 7.48s ==============================

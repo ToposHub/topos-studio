@@ -1,0 +1,26 @@
+{
+  "Film_Grain": {
+    "name": {
+      "zh_CN": "胶片颗粒",
+      "en_US": "Film Grain"
+    },
+    "params": {
+      "strength": {
+        "zh_CN": "强度",
+        "en_US": "Strength"
+      },
+      "grain_size": {
+        "zh_CN": "颗粒尺寸",
+        "en_US": "Grain Size"
+      },
+      "shadow_bias": {
+        "zh_CN": "阴影偏置",
+        "en_US": "Shadow Bias"
+      },
+      "highlight_bias": {
+        "zh_CN": "高光偏置",
+        "en_US": "Highlight Bias"
+      }
+    }
+  }
+}

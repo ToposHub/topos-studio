@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 12 items
+
+tests/edit/test_subtitle_incremental_timeline.py ............            [100%]
+
+============================= 12 passed in 13.80s ==============================

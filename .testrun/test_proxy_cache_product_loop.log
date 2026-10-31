@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 8 items
+
+tests/edit/test_proxy_cache_product_loop.py ........                     [100%]
+
+============================== 8 passed in 12.74s ==============================

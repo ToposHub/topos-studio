@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 1 item
+
+tests/test_topos_abi_smoke.py .                                          [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/topos_abi_smoke.xml -
+============================== 1 passed in 0.41s ===============================

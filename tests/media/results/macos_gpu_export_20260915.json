@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "probe": "macos_gpu_vt_timeline_export",
+  "generated_at_utc": "2026-09-15T08:39:34.691308+00:00",
+  "git_commit": "c1183860f0abc503768bdb7003fd624af1676b52",
+  "status": "passed",
+  "full_gpu_claim": false,
+  "full_gpu_claim_reason": "gpu_time_unmeasured:decode",
+  "input": {
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_h264.mp4",
+    "sha256": "3d420027cb4b6afcff11e5cc7b3510ddbb019de732ee403d21f6f40b3f1af04f",
+    "codec": "h264",
+    "pixel_format": "yuv420p",
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "container_frame_count": 1572
+  },
+  "timeline": {
+    "requested_frames": 480,
+    "fps": 25,
+    "video_tracks": 1,
+    "audio": false,
+    "subtitles": false
+  },
+  "output": {
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/macos_gpu_export_20260915/2K_h264_480frames.mp4",
+    "bytes": 39866423,
+    "native_vt_packet_count": 480,
+    "codec": "h264",
+    "pixel_format": "yuv420p",
+    "width": 1920,
+    "height": 1080,
+    "decoded_frames": 480,
+    "container_frame_count": 480
+  },
+  "timing": {
+    "wall_seconds": 3.947608374997799,
+    "fps": 121.59260858804609
+  },
+  "gpu_trail": {
+    "schema_version": 1,
+    "export_id": "timeline:/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/macos_gpu_export_20260915/2K_h264_480frames.mp4:41745422798937",
+    "adapter_luid": "",
+    "stages": [
+      {
+        "name": "decode",
+        "backend": "unknown",
+        "gpu_submit_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "note": "",
+        "sample_count": 480,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null
+      },
+      {
+        "name": "encode_submit",
+        "backend": "videotoolbox",
+        "gpu_submit_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "note": "",
+        "sample_count": 480,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null
+      },
+      {
+        "name": "render",
+        "backend": "metal",
+        "gpu_submit_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "note": "",
+        "sample_count": 480,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null
+      },
+      {
+        "name": "yuv_conversion",
+        "backend": "metal",
+        "gpu_submit_ms": null,
+        "gpu_wait_ms": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "note": "",
+        "sample_count": 480,
+        "gpu_submit_p50_ms": null,
+        "gpu_submit_p95_ms": null
+      }
+    ],
+    "cpu_upload_bytes": 0,
+    "cpu_download_bytes": 0,
+    "fallback_reason": ""
+  },
+  "outcome": {
+    "success": true,
+    "error_code": "",
+    "cause": ""
+  },
+  "environment": {
+    "platform": "macOS-15.3.1-x86_64-i386-64bit",
+    "python": "3.12.13",
+    "machine": "x86_64",
+    "metal_device": "AMD Radeon RX 6900 XT"
+  }
+}

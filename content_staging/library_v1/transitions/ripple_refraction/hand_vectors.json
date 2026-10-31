@@ -1,0 +1,54 @@
+{
+  "component": "X15 ripple_refraction",
+  "method": "手算独立脚本（纯 Python 标量逐像素）：dr=amp·sin(freq·(r-p·r_max))·exp(-damping·r)；r=宽高比修正径距、r_max=中心至最远角；位移=(du,dv)=dr·r̂（r=0 置 0）；A 幅度 (1-p)w、B 幅度 p·w（w=1-|2p-1|）各自位移采样后 (1-p)A+p·B。容差 1e-6。",
+  "params_default": {
+    "center_x": 0.5,
+    "center_y": 0.5,
+    "frequency": 8.0,
+    "amplitude": 0.1,
+    "damping": 0.3
+  },
+  "vectors": [
+    {
+      "desc": "中心默认 freq=8 amp=0.25 damping=0.3 p=0.5（8x4 ramp）",
+      "params": {
+        "center_x": 0.5,
+        "center_y": 0.5,
+        "frequency": 8.0,
+        "amplitude": 0.25,
+        "damping": 0.3
+      },
+      "progress": 0.5,
+      "fixture": "8x4 A=i/7 B=10+i",
+      "expected_row0": [
+        5.000404,
+        5.378956,
+        6.182056,
+        6.791817,
+        7.208183,
+        7.817944,
+        8.621044,
+        8.999596
+      ],
+      "note": "r_max=中心(0.5,0.5)至角=sqrt(2²·... )（aspect=2）≈1.4142·… 见 README；波前相位随 p 外扩"
+    },
+    {
+      "desc": "端点 p=0",
+      "progress": 0.0,
+      "expected": "A 比特级拷贝（幅度 0）",
+      "note": ""
+    },
+    {
+      "desc": "端点 p=1",
+      "progress": 1.0,
+      "expected": "B 比特级拷贝（幅度 0）",
+      "note": ""
+    }
+  ],
+  "conflicts": [
+    {
+      "desc": "任务原文『A 幅度 (1-p)』在 p=0 幅度=1，与『进出端点位移归零（p=0/1 幅度项为 0）』自相矛盾",
+      "resolution": "同 X14：补三角窗 w=1-|2p-1|（A=(1-p)w、B=p·w），端点幅度精确 0"
+    }
+  ]
+}

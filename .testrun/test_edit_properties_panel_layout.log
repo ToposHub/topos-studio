@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 19 items
+
+tests/edit/test_edit_properties_panel_layout.py ...................      [100%]
+
+============================= 19 passed in 39.55s ==============================

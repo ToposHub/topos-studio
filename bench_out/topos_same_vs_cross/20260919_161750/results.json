@@ -1,0 +1,169 @@
+{
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_hq.mov",
+  "source_meta": {
+    "codec": "topos",
+    "pix_fmt": "yuv422p10le",
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 96
+  },
+  "frames": 96,
+  "reps": 6,
+  "matrix": [
+    {
+      "name": "topos_proxy",
+      "codec": "topos_proxy",
+      "desc": "同族：Topos 422 HQ → Topos 422 Proxy（档位下调）",
+      "runs": [
+        {
+          "ok": true,
+          "wall_s": 2.608741814001405,
+          "overall_fps": 36.79934882200968,
+          "segment_fps": 110.25118065590117,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 0
+        },
+        {
+          "ok": true,
+          "wall_s": 1.061524010001449,
+          "overall_fps": 90.4360137834932,
+          "segment_fps": 111.96495238238147,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 1
+        },
+        {
+          "ok": true,
+          "wall_s": 0.9432854900005623,
+          "overall_fps": 101.7719460520301,
+          "segment_fps": 109.31768000567929,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 2
+        },
+        {
+          "ok": true,
+          "wall_s": 0.9335011369985295,
+          "overall_fps": 102.83865353251436,
+          "segment_fps": 111.10748845838945,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 3
+        },
+        {
+          "ok": true,
+          "wall_s": 0.9060482879940537,
+          "overall_fps": 105.95461773073848,
+          "segment_fps": 111.0130396567477,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 4
+        },
+        {
+          "ok": true,
+          "wall_s": 0.8929315999994287,
+          "overall_fps": 107.51103443988478,
+          "segment_fps": 112.71907868832724,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 5
+        }
+      ],
+      "overall_fps_median": 102.30529979227222,
+      "overall_fps_max": 107.51103443988478,
+      "segment_fps_median": 111.06026405756857,
+      "verify": {
+        "codec": "topos",
+        "pix_fmt": "yuv422p10le",
+        "decoded_frames": 96,
+        "fps": 25.0
+      },
+      "frames_ok": true
+    },
+    {
+      "name": "topos_hq",
+      "codec": "topos_hq",
+      "desc": "同族同档：Topos 422 HQ → Topos 422 HQ（对照）",
+      "runs": [
+        {
+          "ok": true,
+          "wall_s": 0.9921417639998253,
+          "overall_fps": 96.76036578983978,
+          "segment_fps": 113.30561816992342,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 0
+        },
+        {
+          "ok": true,
+          "wall_s": 0.944912667000608,
+          "overall_fps": 101.59669073410593,
+          "segment_fps": 119.05739069033883,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 1
+        },
+        {
+          "ok": true,
+          "wall_s": 0.9445057549964986,
+          "overall_fps": 101.64046062414505,
+          "segment_fps": 117.39522400864455,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 2
+        },
+        {
+          "ok": true,
+          "wall_s": 0.9405529399955412,
+          "overall_fps": 102.06761992626922,
+          "segment_fps": 122.35093924310247,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 3
+        },
+        {
+          "ok": true,
+          "wall_s": 0.9491503269964596,
+          "overall_fps": 101.14309321663235,
+          "segment_fps": 121.28793454277972,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 4
+        },
+        {
+          "ok": true,
+          "wall_s": 0.9078197049966548,
+          "overall_fps": 105.74786983760586,
+          "segment_fps": 120.86537513706094,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 5
+        }
+      ],
+      "overall_fps_median": 101.61857567912548,
+      "overall_fps_max": 105.74786983760586,
+      "segment_fps_median": 119.96138291369988,
+      "verify": {
+        "codec": "topos",
+        "pix_fmt": "yuv422p10le",
+        "decoded_frames": 96,
+        "fps": 25.0
+      },
+      "frames_ok": true
+    }
+  ]
+}

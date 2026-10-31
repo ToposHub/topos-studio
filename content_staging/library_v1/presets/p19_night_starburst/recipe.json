@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P19",
+  "name": "夜景星芒",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合夜景点光源；blades 4/6 档，threshold 0.5 以上只取高光",
+  "component": "F10 starburst（暂存组件 content_staging/library_v1/filters/starburst）",
+  "dependencies": {
+    "component_id": "F10",
+    "component_slug": "starburst",
+    "component_kind": "filter"
+  },
+  "params": {
+    "blades": "4",
+    "angle": 0.0,
+    "ray_length": 0.6,
+    "threshold": 0.5,
+    "intensity": 0.45
+  },
+  "notes": "依赖暂存组件（L11 未接缝）：多叶衍射星芒，与生产 Anamorphic_Streak （水平 streak）的差量在多方向叶片。"
+}

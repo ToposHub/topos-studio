@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P76",
+  "name": "纹理扭曲叠加",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "纹理扭曲叠加：UV 单位向量场扭曲纹理后叠底；scale 0.05–0.15",
+  "component": "C12 vector_displace（暂存节点 lib1_vector_displace，UV units）＋生产 merge",
+  "dependencies": {
+    "component_id": "C12",
+    "component_slug": "vector_displace",
+    "component_kind": "node",
+    "node_type": "lib1_vector_displace",
+    "aux_node_types": [
+      "merge"
+    ]
+  },
+  "params": {
+    "scale": 0.08,
+    "neutral": 0.5,
+    "units": "UV"
+  },
+  "notes": "C12 vector_displace 暂存组件＋生产 merge 组成纹理扭曲宏模板（暂存，宿主图导入未接线，未接 L05 白名单）。"
+}

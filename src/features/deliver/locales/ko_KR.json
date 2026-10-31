@@ -1,0 +1,167 @@
+{
+  "action": {
+    "export_srt": "자막 내보내기 (SRT)...",
+    "queue_start": "영상 큐 시작",
+    "queue_stop": "영상 큐 중지"
+  },
+  "panel": {
+    "deliver_video_batch": "영상 일괄 내보내기"
+  },
+  "deliver": {
+    "export_stems": "스템 내보내기…",
+    "export_stems_tooltip": "오디오 트랙 / 버스 / D-M-E 그룹을 개별 WAV 스템으로 내보냅니다",
+    "export_chapters": "챕터 내보내기…",
+    "export_chapters_tooltip": "타임라인 챕터 마커를 YouTube 챕터 텍스트 또는 FFMetadata로 내보냅니다",
+    "video": {
+      "settings_title": "영상 납품",
+      "source_range": "소스 & 범위",
+      "video_settings": "영상",
+      "audio_delivery": "오디오 & 납품",
+      "no_project": "(프로젝트 없음)",
+      "output_dir_placeholder": "출력 디렉터리",
+      "select_output_dir": "출력 디렉터리 선택",
+      "add_to_queue": "영상 큐에 추가",
+      "add_and_start": "추가 후 시작",
+      "alpha": "알파 채널",
+      "profile_default": "(기본값)",
+      "preflight_ok": "추가 준비 완료",
+      "project": "프로젝트",
+      "timeline": "타임라인",
+      "range": "범위",
+      "frames": "프레임",
+      "duration": "길이",
+      "container": "컨테이너",
+      "codec": "코덱",
+      "profile": "프로파일",
+      "profile_tooltip": "인코더 프로파일입니다. 자동은 코덱의 기본 호환 프로파일을 선택합니다.",
+      "aspect_lock": "가로세로비 잠금",
+      "resolution": "해상도",
+      "size": "크기",
+      "frame_rate": "프레임 레이트",
+      "custom_fps": "커스텀 FPS",
+      "quality_mode": "품질 모드",
+      "quality": "품질",
+      "quality_crf": "품질 (CRF)",
+      "quality_crf_hint": "CRF는 단위가 없는 지표입니다. 값이 낮을수록 품질이 높습니다.",
+      "crf_18": "CRF 18 · 고품질",
+      "crf_20": "CRF 20 · 블루레이 품질",
+      "crf_23": "CRF 23 · 권장",
+      "crf_28": "CRF 28 · 작은 파일",
+      "crf_30": "CRF 30 · 미리보기",
+      "quality_bitrate_hint": "목표 평균 영상 비트레이트(kbps)입니다. 실제 비트레이트는 달라질 수 있습니다.",
+      "quality_cbr_hint": "고정 영상 비트레이트(kbps)입니다. 최소·최대 레이트가 제한됩니다.",
+      "quality_auto_hint": "인코더가 품질을 자동으로 선택합니다.",
+      "estimated_size": "예상 크기",
+      "estimated_size_hint": "출력 길이 × 영상 비트레이트 ÷ 8로 추정합니다. 오디오와 컨테이너 오버헤드는 포함되지 않습니다.",
+      "filename_placeholder": "타임라인 이름",
+      "quality_auto": "자동",
+      "quality_vbr": "VBR",
+      "quality_cbr": "CBR",
+      "quality_bitrate": "비트레이트",
+      "color_space": "컬러 스페이스",
+      "bit_depth": "비트 심도",
+      "audio_codec": "오디오 코덱",
+      "sample_rate": "샘플 레이트",
+      "audio_bitrate": "오디오 비트레이트",
+      "subtitles": "자막",
+      "output_dir": "출력 폴더",
+      "filename": "파일 이름",
+      "if_exists": "같은 이름 파일일 때",
+      "allow_placeholders": "플레이스홀더 클립 허용",
+      "allow_placeholders_hint": "플레이스홀더 클립은 보통 납품을 막습니다. 사용하면 그대로 내보내며 플레이스홀더는 컬러 바로 렌더링됩니다."
+    },
+    "preset": {
+      "web_h264": {
+        "title": "Web H.264",
+        "subtitle": "MP4 · H.264 · 1080p"
+      },
+      "mobile_h264": {
+        "title": "모바일",
+        "subtitle": "MP4 · H.264 · 1080×1920"
+      },
+      "master_prores422": {
+        "title": "마스터",
+        "subtitle": "MOV · ProRes 422 · UHD"
+      },
+      "master_prores4444": {
+        "title": "마스터 (알파)",
+        "subtitle": "MOV · ProRes 4444 · 4:4:4"
+      },
+      "hevc_uhd": {
+        "title": "HEVC 4K",
+        "subtitle": "MP4 · HEVC · 3840×2160"
+      },
+      "dnxhr_sq": {
+        "title": "DNxHR SQ",
+        "subtitle": "MOV · DNxHR SQ · 1080p"
+      },
+      "custom": {
+        "title": "커스텀",
+        "subtitle": "현재 설정"
+      }
+    },
+    "queue": {
+      "title": "영상 렌더 큐",
+      "start": "큐 시작",
+      "pause": "일시정지",
+      "resume": "재개",
+      "cancel_current": "현재 항목 취소",
+      "clear_completed": "완료 항목 지우기",
+      "more": "더 보기",
+      "float": "패널 플로트",
+      "return_to_deliver": "딜리버로 돌아가기",
+      "empty_title": "아직 영상 내보내기 작업이 없습니다",
+      "empty_hint": "위에서 타임라인과 영상 프리셋을 선택한 후 \"영상 큐에 추가\"를 클릭하세요.",
+      "tasks": "작업",
+      "running": "렌더링 중",
+      "pending": "대기 중",
+      "done": "완료",
+      "failed": "실패",
+      "status_pending": "대기 중",
+      "status_running": "렌더링 중",
+      "status_done": "완료",
+      "status_failed": "실패",
+      "status_cancelled": "취소됨",
+      "status_paused": "일시정지됨",
+      "status_needs_relink": "다시 링크 필요",
+      "no_audio": "오디오 없음",
+      "action_cancel": "취소",
+      "action_open": "열기",
+      "action_retry": "재시도",
+      "action_remove": "제거",
+      "action_edit": "설정 편집",
+      "action_relink": "타임라인 다시 링크",
+      "col_status": "상태",
+      "col_source": "소스",
+      "col_preset": "프리셋",
+      "col_output": "출력 파일",
+      "col_video": "영상",
+      "col_audio": "오디오",
+      "col_progress": "진행률",
+      "col_state": "상태",
+      "col_actions": "액션"
+    },
+    "subtitle": {
+      "off": "끄기",
+      "burn": "번인",
+      "sidecar": "사이드카 파일"
+    },
+    "conflict": {
+      "ask": "묻기",
+      "overwrite": "덮어쓰기",
+      "auto_number": "자동 번호",
+      "skip": "건너뛰기"
+    },
+    "timeline_unnamed": "제목 없음",
+    "frames_suffix": " 프레임",
+    "px_suffix": " px",
+    "fps_suffix": " fps",
+    "kbps_suffix": " kbps",
+    "w_label": "W",
+    "h_label": "H",
+    "colors_suffix": " 색",
+    "gif_colors_label": "GIF 색상",
+    "qc_title": "다중 버전 납품 QC",
+    "close": "닫기"
+  }
+}

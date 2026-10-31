@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 8 items
+
+tests/edit/test_generator_clip_gc_wiring.py ........                     [100%]
+
+============================== 8 passed in 14.06s ==============================

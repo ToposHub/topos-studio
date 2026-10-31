@@ -1,0 +1,23 @@
+{
+  "plan": "docs/composite_full_function_audit_optimization_plan_2026-10-14.md",
+  "core_items": 54,
+  "unique_core_items": 54,
+  "followup_cases": [
+    {
+      "media": "4K_H265.mov",
+      "returncode": 2,
+      "log": "docs/audit/2026-10-16-composite-followup/evidence/4K_H265.mov.real_app.log",
+      "config": "/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-comp-followup-20261016-4wujqtow/config.json",
+      "seconds": 15.0
+    },
+    {
+      "media": "4K_topos_422_Proxy.mov",
+      "returncode": 0,
+      "log": "docs/audit/2026-10-16-composite-followup/evidence/4K_topos_422_Proxy.mov.real_app.log",
+      "config": "/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-comp-followup-20261016-satqo7nq/config.json",
+      "seconds": 15.0
+    }
+  ],
+  "missing_link_targets": [],
+  "scope": "documentation and audit evidence only"
+}

@@ -1,0 +1,144 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 1641 items
+
+tests/edit/test_render_cache_evaluator.py ......                         [  0%]
+tests/edit/test_render_cache_file_cleanup.py ....                        [  0%]
+tests/edit/test_render_cache_fingerprint.py .....                        [  0%]
+tests/edit/test_render_cache_indicator.py ..........                     [  1%]
+tests/edit/test_render_cache_job_lifecycle.py .......................... [  3%]
+...............                                                          [  4%]
+tests/edit/test_reorder_effect_command.py ......                         [  4%]
+tests/edit/test_replace_media.py ...........                             [  5%]
+tests/edit/test_revision_and_source_av_routing.py .F....                 [  5%]
+tests/edit/test_round3_a_interaction.py .............                    [  6%]
+tests/edit/test_round3_a_lut_cache.py .....                              [  6%]
+tests/edit/test_round3_a_roll_focus.py ....                              [  6%]
+tests/edit/test_round3_b_features.py .....                               [  7%]
+tests/edit/test_round3_b_transactions.py ..........                      [  7%]
+tests/edit/test_round3_c_async_compat.py .....                           [  7%]
+tests/edit/test_round3_d_zoom_gesture.py ..                              [  8%]
+tests/edit/test_round4_color_pipeline.py .............                   [  8%]
+tests/edit/test_round4_core_time_windows.py ............................ [ 10%]
+...........................................................              [ 14%]
+tests/edit/test_round4_interaction_commit.py ............                [ 14%]
+tests/edit/test_round4_media_replacement.py ............................ [ 16%]
+.........                                                                [ 17%]
+tests/edit/test_round4_multicam_preflight.py ....................        [ 18%]
+tests/edit/test_round4_nested_sampling.py .......                        [ 18%]
+tests/edit/test_round4_settings_history.py .........                     [ 19%]
+tests/edit/test_routing_matrix.py ................                       [ 20%]
+tests/edit/test_routing_ui.py ....................                       [ 21%]
+tests/edit/test_scene_cut_apply_ops.py ................................. [ 23%]
+.............                                                            [ 24%]
+tests/edit/test_scene_cut_cache.py ..................................... [ 26%]
+............                                                             [ 27%]
+tests/edit/test_scene_cut_clip_range.py ............                     [ 28%]
+tests/edit/test_scene_cut_detector.py .................................. [ 30%]
+........................................                                 [ 32%]
+tests/edit/test_scene_cut_dialog_formatting.py .                         [ 32%]
+tests/edit/test_scene_cut_false_positive_guards.py ..................... [ 33%]
+                                                                         [ 33%]
+tests/edit/test_scene_cut_graph_widget.py ...                            [ 34%]
+tests/edit/test_scene_cut_media_pool_integration.py ......               [ 34%]
+tests/edit/test_scene_cut_models.py .................................... [ 36%]
+........................................................................ [ 41%]
+......................................                                   [ 43%]
+tests/edit/test_scene_cut_project_serialization.py ........              [ 43%]
+tests/edit/test_scene_cut_result_model.py .............................. [ 45%]
+..........................                                               [ 47%]
+tests/edit/test_scene_cut_session_memory.py ...                          [ 47%]
+tests/edit/test_scene_cut_subclip_timeline_insert.py .........           [ 48%]
+tests/edit/test_scene_cut_subclips.py .................................. [ 50%]
+.....                                                                    [ 50%]
+tests/edit/test_scene_cut_timeline_mapping.py .......................... [ 51%]
+............................                                             [ 53%]
+tests/edit/test_scene_cut_timeline_overlay_entry.py ................     [ 54%]
+tests/edit/test_scene_cut_vfr_mapping.py ............................... [ 56%]
+.......                                                                  [ 56%]
+tests/edit/test_scene_cut_worker.py .................................... [ 59%]
+..................................                                       [ 61%]
+tests/edit/test_scheduler_real_hotpath.py ........                       [ 61%]
+tests/edit/test_scrub_display_stride.py .....INFO: PreviewRenderWorker started
+.INFO: PreviewRenderWorker started
+.INFO: PreviewRenderWorker started
+..INFO: PreviewRenderWorker started
+.INFO: PreviewRenderWorker started
+.INFO: PreviewRenderWorker started
+.INFO: PreviewRenderWorker started
+.INFO: PreviewRenderWorker started
+.INFO: PreviewRenderWorker started
+.                  [ 62%]
+tests/edit/test_selection_diagnostics.py .......                         [ 63%]
+tests/edit/test_shortcut_preset.py .............                         [ 63%]
+tests/edit/test_shortcut_scope_gates.py ..                               [ 63%]
+tests/edit/test_sidechain_ducker.py ..............                       [ 64%]
+tests/edit/test_smart_bins.py ....................                       [ 66%]
+tests/edit/test_smooth_speed_ramp.py .........                           [ 66%]
+tests/edit/test_solo_audible_closure.py ...............                  [ 67%]
+tests/edit/test_source_resolver.py ..............                        [ 68%]
+tests/edit/test_source_time_domain_mapping.py .......F....               [ 69%]
+tests/edit/test_source_viewer_gl_contract.py ......                      [ 69%]
+tests/edit/test_source_viewer_playback_backpressure.py .......           [ 69%]
+tests/edit/test_source_viewer_playback_chain.py ........................ [ 71%]
+.......                                                                  [ 71%]
+tests/edit/test_source_viewer_scrub_preview.py ...                       [ 71%]
+tests/edit/test_source_viewer_transform_contract.py ...................  [ 73%]
+tests/edit/test_stem_export.py ...........................               [ 74%]
+tests/edit/test_stem_export_dialog.py ...........                        [ 75%]
+tests/edit/test_strip_eq.py ..........................                   [ 77%]
+tests/edit/test_subtitle_command_commit_contract.py ...........          [ 77%]
+tests/edit/test_subtitle_delivery.py ...........                         [ 78%]
+tests/edit/test_subtitle_drag_preview_throttle.py .......                [ 78%]
+tests/edit/test_subtitle_drag_restore_contract.py ...                    [ 78%]
+tests/edit/test_subtitle_edit_policy.py ..........                       [ 79%]
+tests/edit/test_subtitle_font_preflight.py .........                     [ 80%]
+tests/edit/test_subtitle_handle_controller.py ......                     [ 80%]
+tests/edit/test_subtitle_incremental_timeline.py ............            [ 81%]
+tests/edit/test_subtitle_layout_persistence.py .....                     [ 81%]
+tests/edit/test_subtitle_live_clamp.py .....                             [ 81%]
+tests/edit/test_subtitle_model_invariants.py ......................      [ 83%]
+tests/edit/test_subtitle_panel_debounce.py ...........                   [ 83%]
+tests/edit/test_subtitle_preview_signature.py .........                  [ 84%]
+tests/edit/test_subtitle_render_parity.py .....................          [ 85%]
+tests/edit/test_subtitle_resolve_style_render.py ................        [ 86%]
+tests/edit/test_subtitle_snap.py ...........                             [ 87%]
+tests/edit/test_subtitle_track_commands.py ...                           [ 87%]
+tests/edit/test_subtitle_track_semantics.py ...                          [ 87%]
+tests/edit/test_subtitle_undo_transform.py .....                         [ 87%]
+tests/edit/test_switch_from_edit_to_composite_does_not_bind_composite_id.py . [ 88%]
+.........                                                                [ 88%]
+tests/edit/test_sync_lock_ripple.py ...................                  [ 89%]
+tests/edit/test_t03_planar_passthrough.py ..................             [ 90%]
+tests/edit/test_task_priority_protocol.py .......................        [ 92%]
+tests/edit/test_timeline_audio_integration.py .......................... [ 93%]
+.........                                                                [ 94%]
+tests/edit/test_timeline_batch_media_drop.py ....                        [ 94%]
+tests/edit/test_timeline_clip_fade.py ...........                        [ 95%]
+tests/edit/test_timeline_clip_frame_provider.py ........................ [ 96%]
+....................................                                     [ 98%]
+tests/edit/test_timeline_clip_label_color.py .............               [ 99%]
+tests/edit/test_timeline_clip_palette.py ....                            [100%]
+
+=================================== FAILURES ===================================
+______________________ test_undo_redo_revision_monotonic _______________________
+tests/edit/test_revision_and_source_av_routing.py:132: in test_undo_redo_revision_monotonic
+    TimelineView.undo(view)
+src/features/edit/ui/timeline_view.py:5839: in undo
+    if not self._command_stack.can_undo():
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: '_FakeCommandStack' object has no attribute 'can_undo'
+______________________ test_trim_mixed_fps_ratio_applied _______________________
+tests/edit/test_source_time_domain_mapping.py:146: in test_trim_mixed_fps_ratio_applied
+    assert ns == round(10 * 30 / 24)
+E   assert 13 == 12
+E    +  where 12 = round(((10 * 30) / 24))
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/validation/edit-batch-6.xml -
+=========================== short test summary info ============================
+FAILED tests/edit/test_revision_and_source_av_routing.py::test_undo_redo_revision_monotonic
+FAILED tests/edit/test_source_time_domain_mapping.py::test_trim_mixed_fps_ratio_applied
+======================= 2 failed, 1639 passed in 40.26s ========================

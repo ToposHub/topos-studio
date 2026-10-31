@@ -1,0 +1,4 @@
+{"input_codec": "gif", "reported_codec": "exportcodec.gif", "container": "mov", "audio_capable": true, "alpha_capable": false, "audio_limit": null}
+{"input_codec": "topos_image_sequence", "reported_codec": "exportcodec.topos_image_sequence", "container": "mov", "audio_capable": true, "alpha_capable": false, "audio_limit": null}
+{"input_codec": "prores_4444", "reported_codec": "exportcodec.prores_4444", "container": "mov", "audio_capable": true, "alpha_capable": false, "audio_limit": null}
+{"input_codec": "h264", "reported_codec": "exportcodec.h264", "container": "mov", "audio_capable": true, "alpha_capable": false, "audio_limit": null}

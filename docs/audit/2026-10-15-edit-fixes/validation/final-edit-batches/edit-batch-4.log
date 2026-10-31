@@ -1,0 +1,137 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 2021 items
+
+tests/edit/test_effect_favorites.py .............                        [  0%]
+tests/edit/test_effect_generator_attach_blocked.py ...                   [  0%]
+tests/edit/test_effect_golden_frame_parity.py ...........                [  1%]
+tests/edit/test_effect_keyframe_coordinate_contract.py .....             [  1%]
+tests/edit/test_effect_material_parity.py ................               [  2%]
+tests/edit/test_effect_pass_runner_fallback_lifecycle.py ...             [  2%]
+tests/edit/test_effect_pass_runner_glow_feedback.py ...                  [  2%]
+tests/edit/test_effect_quality_param_lifecycle.py .........              [  3%]
+tests/edit/test_effect_registry_audio.py ............................... [  4%]
+......                                                                   [  4%]
+tests/edit/test_effect_render_operations.py ........                     [  5%]
+tests/edit/test_effect_reorder_ui.py .........................           [  6%]
+tests/edit/test_effect_surface_precision.py ..........                   [  7%]
+tests/edit/test_end_to_end_playback_real_videos.py ...........           [  7%]
+tests/edit/test_export_manifest.py ........................              [  8%]
+tests/edit/test_export_outcome.py .............                          [  9%]
+tests/edit/test_export_perf_batch.py ......F..........                   [ 10%]
+tests/edit/test_export_video_effects_preflight.py .......                [ 10%]
+tests/edit/test_fix_commands_aud3.py ............                        [ 11%]
+tests/edit/test_fix_core2_aud3.py ..............                         [ 11%]
+tests/edit/test_fix_core_aud3.py ..............                          [ 12%]
+tests/edit/test_fix_preview_fcpxml_aud3.py .........................     [ 13%]
+tests/edit/test_fix_renderers_aud3.py ..............                     [ 14%]
+tests/edit/test_fix_sourceviewer_aud3.py .........                       [ 14%]
+tests/edit/test_fix_ui2_aud3.py .......                                  [ 15%]
+tests/edit/test_fix_ui_aud3.py ............                              [ 15%]
+tests/edit/test_fix_w5b_aud5b.py ........                                [ 16%]
+tests/edit/test_fix_w6g3_aud6.py .........                               [ 16%]
+tests/edit/test_fix_w6g6_aud6.py ......                                  [ 17%]
+tests/edit/test_fix_w6g7_aud6.py .......                                 [ 17%]
+tests/edit/test_fix_w6g8_aud6.py .............                           [ 18%]
+tests/edit/test_fix_wd10blk_aud.py ..................................... [ 19%]
+...                                                                      [ 20%]
+tests/edit/test_fix_wd10g51_aud.py ..................................... [ 21%]
+...........                                                              [ 22%]
+tests/edit/test_fix_wd10g60_aud.py ..................................... [ 24%]
+......                                                                   [ 24%]
+tests/edit/test_fix_wd10g63_aud.py ..................................... [ 26%]
+...................                                                      [ 27%]
+tests/edit/test_fix_wd11blk_aud.py ......................                [ 28%]
+tests/edit/test_fix_wd11g53_aud.py ..................................... [ 30%]
+............                                                             [ 30%]
+tests/edit/test_fix_wd11g57_aud.py ..................................... [ 32%]
+.......                                                                  [ 33%]
+tests/edit/test_fix_wd11g58_aud.py ..................................... [ 34%]
+..                                                                       [ 34%]
+tests/edit/test_fix_wd11g61_aud.py ..................................... [ 36%]
+.....                                                                    [ 37%]
+tests/edit/test_fix_wd11g64_aud.py ..............................        [ 38%]
+tests/edit/test_fix_wd12g52_aud.py ...................................   [ 40%]
+tests/edit/test_fix_wd12g54_aud.py ..................................... [ 42%]
+....                                                                     [ 42%]
+tests/edit/test_fix_wd12g59_aud.py ..................................... [ 44%]
+...............                                                          [ 44%]
+tests/edit/test_fix_wd12g62_aud.py ...........................           [ 46%]
+tests/edit/test_fix_wd12g65_aud.py ..................................... [ 47%]
+..                                                                       [ 48%]
+tests/edit/test_fix_wd12g66_aud.py ...............................       [ 49%]
+tests/edit/test_fix_wd13blk_aud.py ..................................... [ 51%]
+..............                                                           [ 52%]
+tests/edit/test_fix_wd13g67_aud.py WARNING: 完整探测失败: 文件不存在: /private/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/pytest-of-heng/pytest-27/test_quick_project_presets_use0/clip.mov
+.WARNING: 完整探测失败: 文件不存在: /private/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/pytest-of-heng/pytest-27/test_quick_project_display_tex0/clip.mov
+............................         [ 53%]
+tests/edit/test_fix_wd13g69_aud.py ..................................... [ 55%]
+........................................................................ [ 58%]
+.........................                                                [ 60%]
+tests/edit/test_fix_wd14g68_aud.py ..................................... [ 62%]
+....                                                                     [ 62%]
+tests/edit/test_fix_wd8g45_aud.py ...........ss........                  [ 63%]
+tests/edit/test_fix_wd8g46_aud.py ...............................        [ 64%]
+tests/edit/test_fix_wd8g47_aud.py ..............................         [ 66%]
+tests/edit/test_fix_wd9g48_aud.py ..........................             [ 67%]
+tests/edit/test_fix_wd9g49_aud.py ...................................... [ 69%]
+.................                                                        [ 70%]
+tests/edit/test_fix_wd9g50_aud.py ...................................... [ 72%]
+............                                                             [ 72%]
+tests/edit/test_fix_wd9g55_aud.py ...................................... [ 74%]
+.................                                                        [ 75%]
+tests/edit/test_fix_wd9g56_aud.py ....................................   [ 77%]
+tests/edit/test_frame_blend.py .........                                 [ 77%]
+tests/edit/test_freeze_frame.py .........                                [ 78%]
+tests/edit/test_generator_clip_gc_wiring.py ........                     [ 78%]
+tests/edit/test_generator_clip_transaction.py .........                  [ 79%]
+tests/edit/test_generator_clips.py ..................                    [ 79%]
+tests/edit/test_generator_transaction_boundary.py ...................... [ 80%]
+.....                                                                    [ 81%]
+tests/edit/test_gpu_adjustment_scope_composite.py .......                [ 81%]
+tests/edit/test_gpu_blur_channel_mask_contract.py ......                 [ 81%]
+tests/edit/test_gpu_compositor_real_attach.py .........                  [ 82%]
+tests/edit/test_gpu_frame_pool_key.py ..........                         [ 82%]
+tests/edit/test_gpu_io_surface_sync.py ..............                    [ 83%]
+tests/edit/test_gpu_present_frame.py .......................             [ 84%]
+tests/edit/test_gpu_render_dispatch_gating.py .......                    [ 85%]
+tests/edit/test_gpu_transition_preview.py .......................        [ 86%]
+tests/edit/test_idle_prebuffer.py .INFO: macOS VT: decode implementation ready (ctypes VTDecompressionSession + PyObjC helpers + IOSurface)
+...........                           [ 86%]
+tests/edit/test_individual_clips_export_naming.py ......                 [ 87%]
+tests/edit/test_interchange.py ......................................... [ 89%]
+..                                                                       [ 89%]
+tests/edit/test_interchange_drift.py .................                   [ 90%]
+tests/edit/test_interchange_ui.py ....                                   [ 90%]
+tests/edit/test_keyframe_easing.py ...............                       [ 90%]
+tests/edit/test_legacy_hotpath_isolation_gates.py ................       [ 91%]
+tests/edit/test_lift_extract_range.py ....................               [ 92%]
+tests/edit/test_linked_ripple_revision_proxy_jobs.py ..........          [ 93%]
+tests/edit/test_loudness_analyzer.py ............                        [ 93%]
+tests/edit/test_loudness_delivery.py .............                       [ 94%]
+tests/edit/test_loudness_meter.py ...............                        [ 95%]
+tests/edit/test_master_automation.py ...............                     [ 95%]
+tests/edit/test_master_limiter.py .......                                [ 96%]
+tests/edit/test_media_asset_logging.py ...................               [ 97%]
+tests/edit/test_media_pool.py ........................................   [ 99%]
+tests/edit/test_media_pool_analysis_ui.py ...........[mov,mp4,m4a,3gp,3g2,mj2 @ 0x7f82aafd5e80] moov atom not found
+                    [ 99%]
+tests/edit/test_media_pool_batch_delete.py .....                         [100%]
+
+=================================== FAILURES ===================================
+________ TestAudioSplit.test_render_master_returns_none_without_encoder ________
+tests/edit/test_export_perf_batch.py:134: in test_render_master_returns_none_without_encoder
+    assert ex._render_audio_master(0, 10, SimpleNamespace()) is None
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/timeline_export.py:4052: in _render_audio_master
+    self._sequence, self._sequence_resolver, self._project,
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'TimelineExporter' object has no attribute '_sequence_resolver'
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/validation/final-edit-batches/edit-batch-4.xml -
+=========================== short test summary info ============================
+FAILED tests/edit/test_export_perf_batch.py::TestAudioSplit::test_render_master_returns_none_without_encoder
+============= 1 failed, 2018 passed, 2 skipped in 61.05s (0:01:01) =============

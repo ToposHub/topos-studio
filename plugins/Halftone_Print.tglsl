@@ -1,0 +1,84 @@
+// --- Topos Plugin Metadata ---
+// @name Halftone Print
+// @i18n_name Halftone_Print
+// @author Topos Team
+// @version 1.0
+// @description Halftone print screening: rotated constant-matrix dot lattice, luminance-sized dots with soft anti-aliased coverage
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param select screen_angle "Screen Angle" 2 "0 Deg" "15 Deg" "30 Deg" "45 Deg"
+// @param slider dot_pitch "Dot Pitch" 8.0 3.0 32.0
+// @param slider ink_amount "Ink Amount" 0.8 0.0 1.0
+// @param separator
+// @param checkbox keep_color "Keep Source Color" 1
+// -----------------------------
+//
+// Halftone Print —— 印刷网屏网点。
+//
+// 原理：把像素坐标按可选网屏角度旋转（0/15/30/45 度，印刷四色套印
+// 的经典角度族），除以网点间距后取胞元；胞元内以当前亮度决定网点
+// 半径（越暗网点越大），到胞元中心的距离对半径做 smoothstep 软边
+// 得到抗锯齿覆盖率，最终以乘性油墨掩码输出。
+//
+// 设计要点：
+// - 网屏旋转用编译期 const mat2（每像素零三角函数，Skin_Even_Matte
+//   的 const 旋转矩阵惯例）；
+// - 网点半径 r = sqrt(1 - l) 的输入 l 需收敛到 [0,1] 才能作为几何参数
+//   ——该 clamp 只作用于网点几何权重（Film_Grain 的亮度加权同类别），
+//   输出内容色从不被钳制：keep_color 模式是纯乘性掩码（HDR 超白按同
+//   一掩码缩放），单色墨模式直接输出亮度骨架（上游调性明暗保留）；
+// - 1 次 sqrt + 少量 ALU，零采样（网点几何取当前亮度）、零循环；
+// - smoothstep 边缘 (r-0.06, r+0.06) 恒严格递增，无 NaN；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+const vec3 HT_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+// 网屏旋转矩阵（列主序，cos/sin/-sin/cos），编译期常量
+const mat2 HT_ROT_15 = mat2(0.96592583, 0.25881904, -0.25881904, 0.96592583);
+const mat2 HT_ROT_30 = mat2(0.86602540, 0.50000000, -0.50000000, 0.86602540);
+const mat2 HT_ROT_45 = mat2(0.70710678, 0.70710678, -0.70710678, 0.70710678);
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零油墨纯直通
+    if (ink_amount < 0.001) return color;
+
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    float pitch = max(dot_pitch, 1.0);
+    vec2 p = uv * tex_size / pitch;
+
+    // 网屏角度分派（select 早退 if 链惯例；fallback = 0 度不旋转）
+    if (screen_angle == 1) {
+        p = HT_ROT_15 * p;
+    } else if (screen_angle == 2) {
+        p = HT_ROT_30 * p;
+    } else if (screen_angle == 3) {
+        p = HT_ROT_45 * p;
+    }
+
+    // 胞元内相对坐标（-0.5..0.5）
+    vec2 f = fract(p) - 0.5;
+
+    // 网点几何：亮度收敛到 [0,1] 仅作为半径参数；越暗网点越大
+    float l = dot(color, HT_LUMA_W);
+    float lc = clamp(l, 0.0, 1.0);
+    float r = sqrt(1.0 - lc);
+    float d = length(f);
+    float cov = 1.0 - smoothstep(r - 0.06, r + 0.06, d);
+
+    if (keep_color == 1) {
+        // 彩色模式：乘性油墨掩码（HDR 安全：内容值按同一掩码缩放）
+        return color * (1.0 - cov * ink_amount);
+    }
+
+    // 单色墨模式：亮度骨架 x 掩码直接输出（l 取自已调色 color 的 709
+    // 亮度，上游调性的明暗全部保留；单色打印语义下色度有意丢弃）
+    return vec3(l) * (1.0 - cov * ink_amount);
+}

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 15 items
+
+tests/edit/test_move_to_existing_track_command.py ...............        [100%]
+
+============================== 15 passed in 6.33s ==============================

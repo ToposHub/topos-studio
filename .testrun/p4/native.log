@@ -1,0 +1,126 @@
+============================= test session starts ==============================
+collected 132 items
+
+tests/native/test_a1_fcache_differential.py ....                         [  3%]
+tests/native/test_decode_worker_budget.py ..                             [  4%]
+tests/native/test_release_scripts.py ........F..FFFF....                 [ 18%]
+tests/native/test_sdk_doc_consistency.py ...                             [ 21%]
+tests/native/test_stage10_concurrency.py ...                             [ 23%]
+tests/native/test_topos_binding.py ..................................... [ 51%]
+...                                                                      [ 53%]
+tests/native/test_topos_float_tier_nonfinite.py .                        [ 54%]
+tests/native/test_topos_native_domain_metrics.py .                       [ 55%]
+tests/native/test_topos_paired_quality.py ....                           [ 58%]
+tests/native/test_topos_quality_gate_binding.py ....                     [ 61%]
+tests/native/test_topos_quality_measure_metrics.py ..                    [ 62%]
+tests/native/test_topos_video_16bit.py .......                           [ 68%]
+tests/native/test_v8_conformance.py ....................                 [ 83%]
+tests/native/test_v8_encode.py ............                              [ 92%]
+tests/native/test_v8_roundtrip.py ......F                                [ 97%]
+tests/native/test_v8_table_loss_sim.py ...                               [100%]
+
+=================================== FAILURES ===================================
+______________ TestPackageCodec.test_prebuilt_sdk_cmake_consumer _______________
+tests/native/test_release_scripts.py:178: in test_prebuilt_sdk_cmake_consumer
+    assert consumer.returncode == 0, consumer.stdout + consumer.stderr
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/sdk_consumer_smoke.py", line 64, in <module>
+E         sys.exit(main())
+E                  ^^^^^^
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/sdk_consumer_smoke.py", line 52, in main
+E         run(["cmake", "-S", str(root), "-B", str(root / "build"),
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/sdk_consumer_smoke.py", line 13, in run
+E         result = subprocess.run(command, cwd=cwd, env=env, capture_output=True,
+E                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/subprocess.py", line 548, in run
+E         with Popen(*popenargs, **kwargs) as process:
+E              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/subprocess.py", line 1026, in __init__
+E         self._execute_child(args, executable, preexec_fn, close_fds,
+E       File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/subprocess.py", line 1955, in _execute_child
+E         raise child_exception_type(errno_num, err_msg, err_filename)
+E     PermissionError: [Errno 13] Permission denied: 'cmake'
+E     
+E   assert 1 == 0
+E    +  where 1 = CompletedProcess(args=['/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python', '/Users/h...se child_exception_type(errno_num, err_msg, err_filename)\nPermissionError: [Errno 13] Permission denied: \'cmake\'\n').returncode
+__________ test_open_source_package_imports_without_topos_application __________
+tests/native/test_release_scripts.py:208: in test_open_source_package_imports_without_topos_application
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 499, in <module>
+E         sys.exit(main())
+E                  ^^^^^^
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 480, in main
+E         copy_package(dest)
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 148, in copy_package
+E         assert "src.shared" not in text, f"{src_rel} 重写后仍残留 src.shared 引用"
+E                ^^^^^^^^^^^^^^^^^^^^^^^^
+E     AssertionError: src/shared/codec/color_metadata_config.py 重写后仍残留 src.shared 引用
+E     
+E   assert 1 == 0
+E    +  where 1 = CompletedProcess(args=['/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python', '/Users/h...           ^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: src/shared/codec/color_metadata_config.py 重写后仍残留 src.shared 引用\n').returncode
+_______________ test_extracted_repository_can_package_native_sdk _______________
+tests/native/test_release_scripts.py:235: in test_extracted_repository_can_package_native_sdk
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 499, in <module>
+E         sys.exit(main())
+E                  ^^^^^^
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 480, in main
+E         copy_package(dest)
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 148, in copy_package
+E         assert "src.shared" not in text, f"{src_rel} 重写后仍残留 src.shared 引用"
+E                ^^^^^^^^^^^^^^^^^^^^^^^^
+E     AssertionError: src/shared/codec/color_metadata_config.py 重写后仍残留 src.shared 引用
+E     
+E   assert 1 == 0
+E    +  where 1 = CompletedProcess(args=['/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python', '/Users/h...           ^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: src/shared/codec/color_metadata_config.py 重写后仍残留 src.shared 引用\n').returncode
+______________ test_open_source_package_builds_installable_wheel _______________
+tests/native/test_release_scripts.py:256: in test_open_source_package_builds_installable_wheel
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 499, in <module>
+E         sys.exit(main())
+E                  ^^^^^^
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 480, in main
+E         copy_package(dest)
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 148, in copy_package
+E         assert "src.shared" not in text, f"{src_rel} 重写后仍残留 src.shared 引用"
+E                ^^^^^^^^^^^^^^^^^^^^^^^^
+E     AssertionError: src/shared/codec/color_metadata_config.py 重写后仍残留 src.shared 引用
+E     
+E   assert 1 == 0
+E    +  where 1 = CompletedProcess(args=['/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python', '/Users/h...           ^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: src/shared/codec/color_metadata_config.py 重写后仍残留 src.shared 引用\n').returncode
+____________ test_open_source_binary_wheel_loads_without_repository ____________
+tests/native/test_release_scripts.py:283: in test_open_source_binary_wheel_loads_without_repository
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 499, in <module>
+E         sys.exit(main())
+E                  ^^^^^^
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 480, in main
+E         copy_package(dest)
+E       File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/scripts/package_opensource.py", line 148, in copy_package
+E         assert "src.shared" not in text, f"{src_rel} 重写后仍残留 src.shared 引用"
+E                ^^^^^^^^^^^^^^^^^^^^^^^^
+E     AssertionError: src/shared/codec/color_metadata_config.py 重写后仍残留 src.shared 引用
+E     
+E   assert 1 == 0
+E    +  where 1 = CompletedProcess(args=['/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python', '/Users/h...           ^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: src/shared/codec/color_metadata_config.py 重写后仍残留 src.shared 引用\n').returncode
+_________________________ test_v8_decode_perf_4k_vs_v7 _________________________
+tests/native/test_v8_roundtrip.py:161: in test_v8_decode_perf_4k_vs_v7
+    assert ratio < 1.3  # 生产形态（oracle 关）；4K 口径在批 3 bench 落档
+    ^^^^^^^^^^^^^^^^^^
+E   assert 1.357561448999246 < 1.3
+----------------------------- Captured stdout call -----------------------------
+
+V8 decode 5.5ms vs V7 4.1ms (1K², ratio 1.36×)
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/native.xml -
+=========================== short test summary info ============================
+FAILED tests/native/test_release_scripts.py::TestPackageCodec::test_prebuilt_sdk_cmake_consumer
+FAILED tests/native/test_release_scripts.py::test_open_source_package_imports_without_topos_application
+FAILED tests/native/test_release_scripts.py::test_extracted_repository_can_package_native_sdk
+FAILED tests/native/test_release_scripts.py::test_open_source_package_builds_installable_wheel
+FAILED tests/native/test_release_scripts.py::test_open_source_binary_wheel_loads_without_repository
+FAILED tests/native/test_v8_roundtrip.py::test_v8_decode_perf_4k_vs_v7 - asse...
+======================== 6 failed, 126 passed in 19.06s ========================

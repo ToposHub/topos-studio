@@ -1,0 +1,26 @@
+INFO: [ThumbEngine] FFmpeg found and loaded: /usr/local/bin/ffmpeg
+WARNING: [ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+INFO: Registered feature module: color
+INFO: Registered feature module: edit
+INFO: Registered page: edit (剪辑)
+INFO: Registered feature module: deliver
+INFO: Registered page: deliver (交付)
+2026-10-20 04:34:09.231 Python[15075:96665] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 220 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+2026-10-20 04:34:13.035 Python[15075:96665] +[IMKClient subclass]: chose IMKClient_Modern
+2026-10-20 04:34:13.035 Python[15075:96665] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+OPS {"name": "initial", "summary": {"rev": 1, "counts": {"video": 1, "audio": 1}, "markers": 0, "transitions": 0}}
+OPS {"name": "split_ctrl_b", "summary": {"rev": 2, "counts": {"video": 2, "audio": 2}, "markers": 0, "transitions": 0}, "links_ok": true}
+OPS {"name": "undo_split", "summary": {"rev": 3, "counts": {"video": 1, "audio": 1}, "markers": 0, "transitions": 0}, "restored": null}
+OPS {"name": "redo_split", "summary": {"rev": 4, "counts": {"video": 2, "audio": 2}, "markers": 0, "transitions": 0}}
+OPS {"name": "copy_paste", "before": {"video": 2, "audio": 2}, "after": {"video": 3, "audio": 2}}
+OPS {"name": "marker", "ok": true, "markers": 1}
+OPS {"name": "transition_add", "ok": true, "count": 1, "types": ["cross_dissolve"]}
+OPS {"name": "transition_undo", "count": 0}
+OPS {"name": "clip_item_double_click_receivers", "receivers": [0, 0, 0, 0, 0]}
+OPS {"name": "property_transform", "before": 0.0, "after": 55.0, "undo": 0.0}

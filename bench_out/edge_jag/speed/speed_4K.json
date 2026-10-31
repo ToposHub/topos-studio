@@ -1,0 +1,93 @@
+{
+  "generated_at": "2026-09-21T11:20:34.724174+00:00",
+  "master": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_prores4444.mov",
+  "machine_cpus": 24,
+  "results": [
+    {
+      "size": "4K",
+      "tier": "standard",
+      "frames": 487,
+      "enc_s": 25.29,
+      "enc_fps": 19.3,
+      "video_mb": 1011.3,
+      "decode": {
+        "w0": {
+          "fps": 77.3,
+          "ms_per_frame": 12.93
+        }
+      }
+    },
+    {
+      "size": "4K",
+      "tier": "hq",
+      "frames": 487,
+      "enc_s": 26.62,
+      "enc_fps": 18.3,
+      "video_mb": 1511.2,
+      "decode": {
+        "w0": {
+          "fps": 59.7,
+          "ms_per_frame": 16.74
+        }
+      }
+    },
+    {
+      "size": "4K",
+      "tier": "4444",
+      "frames": 487,
+      "enc_s": 29.03,
+      "enc_fps": 16.8,
+      "video_mb": 2044.5,
+      "decode": {
+        "w0": {
+          "fps": 44.8,
+          "ms_per_frame": 22.32
+        }
+      }
+    },
+    {
+      "size": "4K",
+      "tier": "4444xq",
+      "frames": 487,
+      "enc_s": 28.29,
+      "enc_fps": 17.2,
+      "video_mb": 3012.5,
+      "decode": {
+        "w0": {
+          "fps": 35.3,
+          "ms_per_frame": 28.34
+        }
+      }
+    },
+    {
+      "size": "4K",
+      "tier": "proxy",
+      "frames": 487,
+      "enc_s": 20.26,
+      "enc_fps": 24.0,
+      "video_mb": 309.0,
+      "decode": {
+        "w1": {
+          "fps": 11.8,
+          "ms_per_frame": 84.83
+        },
+        "w4": {
+          "fps": 41.0,
+          "ms_per_frame": 24.4
+        },
+        "w8": {
+          "fps": 82.3,
+          "ms_per_frame": 12.15
+        },
+        "w16": {
+          "fps": 150.6,
+          "ms_per_frame": 6.64
+        },
+        "w0": {
+          "fps": 157.6,
+          "ms_per_frame": 6.34
+        }
+      }
+    }
+  ]
+}

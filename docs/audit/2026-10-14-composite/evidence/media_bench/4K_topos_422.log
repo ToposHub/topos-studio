@@ -1,0 +1,5 @@
+4K_topos_422.mov {"preview_sequential": {"n": 12, "median_ms": 734.1609040013282, "p95_ms": 779.0606650014524, "max_ms": 779.0606650014524, "render_throughput_fps": 1.3597427091763823}, "preview_seek": {"n": 4, "median_ms": 743.6526385026809, "p95_ms": 838.8361050019739, "max_ms": 838.8361050019739, "render_throughput_fps": 1.6404971552819503}, "export_sequential": {"n": 4, "median_ms": 883.1919049989665, "p95_ms": 1290.4241279975395, "max_ms": 1290.4241279975395, "render_throughput_fps": 1.126799627778276}}
+compute_unavailable: headless context is GL 4.1 ATI-6.1.13 (AMD Radeon RX 6900 XT OpenGL Engine); compute-shader effects will use the fragment fallback
+Compute shaders unavailable: OpenGL 4.1 detected, requires 4.3+. Large-radius effects will use fragment shader fallback (slower).
+Metal compute bridge available but disabled by default: fragment fallback is faster for large-radius effects (see tests/media/results/metal_compute_ab.md). Set TOPOS_METAL_COMPUTE=1 to force the Metal path.
+Could only free 0 bytes, needed 42237952

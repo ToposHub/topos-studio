@@ -1,0 +1,167 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "C21",
+  "dedup": "无双彩色输出节点（mask_merge result+matte 是彩色+遮罩先例非双彩色）；HighPass_Retouch.tglsl 单输入高通无重建语义——新算法差量、不是 Sharpen 预设（low+high 精确重建）（L00 台账 C21 行）",
+  "host_min_contract": "node_type lib1_frequency_separation；marker dispatch（base_evaluator lib1_ 分支，双输出占位 low/high）+ GLSL 未接线（L17 草案）；多输出子门未开——生产接线待集成者开多输出子门（首个双彩色输出）",
+  "image": {
+    "alpha": "straight",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "node",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": 4.0,
+      "maximum": 64.0,
+      "minimum": 0.0,
+      "name": "radius",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "px",
+      "validation": "0=恒等锚（low=RGB、high=0）；Box 半宽 round(radius)、Gaussian σ=radius/3"
+    },
+    {
+      "animatable": false,
+      "default": "Box",
+      "maximum": null,
+      "minimum": null,
+      "name": "filter",
+      "neutral": false,
+      "options": [
+        "Box",
+        "Gaussian"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": "可分离低通核（索引钳 [0,n−1]）"
+    },
+    {
+      "animatable": false,
+      "default": "LowHigh",
+      "maximum": null,
+      "minimum": null,
+      "name": "mode",
+      "neutral": false,
+      "options": [
+        "LowHigh",
+        "Reconstruct"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": "Reconstruct：low 端口输出 low+high（声明域=输入）、high 不变"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "no-op：返回空输出（marker 协议）",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    },
+    {
+      "data_type": "image",
+      "direction": "output",
+      "missing_behavior": "",
+      "name": "low",
+      "required": true,
+      "role": "image"
+    },
+    {
+      "data_type": "image",
+      "direction": "output",
+      "missing_behavior": "",
+      "name": "high",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "frequency_separation",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_c21_frequency_separation.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "tests/content_library_v1/test_c21_frequency_separation.py（≥4 独立手算向量：恒等锚/Box 1×5 分数 ramp/Gaussian 权重重推/常数图）",
+    "known_limits": "节点类+marker 草案；dispatch/GLSL/registry/capability 未接线（L04/L17 集成）——仅声明不是完成。多输出子门未开（marker 双占位 low/high）。oracle 双输出签名扩展：evaluate→{'low','high'}（convention #7 显式扩展）。high 允许负值不 clamp；low+high 声明域重建输入（float32 ~1e-5）；α 透传 low、high α=0；clamp 边界下 mean(high) 有 DC 偏置（边缘纹素重复计入，如实记录）；tile_padding=ceil(radius)+1",
+    "oracle": "content_staging/library_v1/references/frequency_separation_ref.py"
+  },
+  "version": "0.1.0"
+}

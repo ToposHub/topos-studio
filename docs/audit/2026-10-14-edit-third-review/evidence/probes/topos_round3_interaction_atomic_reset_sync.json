@@ -1,0 +1,25 @@
+{
+  "reset_one_locked": {
+    "x": {
+      "c": 10,
+      "d": 20
+    },
+    "undo": false,
+    "revision": 0
+  },
+  "sync_lock_integrated_after": {
+    "model": false,
+    "header": false,
+    "events": [
+      [
+        "v",
+        false
+      ]
+    ],
+    "undo": true
+  },
+  "sync_lock_integrated_undo": {
+    "model": true,
+    "header": true
+  }
+}

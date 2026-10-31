@@ -1,0 +1,46 @@
+{
+  "date": "2026-09-12T04:32:58",
+  "purpose": "W1-02 WGL_NV_DX_interop probe (K-W2 evidence)",
+  "dxgi": {
+    "probe_ok": true,
+    "reason": "ok",
+    "primary_vendor": "amd",
+    "adapters": [
+      {
+        "description": "AMD Radeon RX 6800",
+        "vendor_id": "0x1002",
+        "device_id": "0x73BF",
+        "dedicated_video_memory_mb": 16338,
+        "vendor_name": "amd",
+        "adapter_luid": "000110E3-00000000"
+      },
+      {
+        "description": "Microsoft Basic Render Driver",
+        "vendor_id": "0x1414",
+        "device_id": "0x008C",
+        "dedicated_video_memory_mb": 0,
+        "vendor_name": "unknown",
+        "adapter_luid": "00013BD8-00000000"
+      }
+    ]
+  },
+  "gl_context": {
+    "gl_version": "3.3.0 Core Profile Context 26.8.1.260806",
+    "gl_renderer": "AMD Radeon RX 6800",
+    "gl_vendor": "ATI Technologies Inc.",
+    "requested_version": [
+      4,
+      6
+    ]
+  },
+  "wgl_extensions": {
+    "nv_dx_interop_any": true,
+    "count": 23
+  },
+  "wgl_dx_interop": {
+    "open_device_fn_ptr": true,
+    "d3d11_create_device_hr": "0x00000000",
+    "dx_open_device_nv": true
+  },
+  "verdict": "interop_open_ok"
+}

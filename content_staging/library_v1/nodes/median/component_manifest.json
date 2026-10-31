@@ -1,0 +1,171 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "C15",
+  "dedup": "无中值；复用 F19 共享核（L00 台账 C15 行）",
+  "host_min_contract": "node_type lib1_median；marker dispatch（base_evaluator lib1_ 分支）+ GLSL 未接线（L16 草案；patches/proposal_l04_node_seams.md）",
+  "image": {
+    "alpha": "straight",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "node",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": "3x3",
+      "maximum": null,
+      "minimum": null,
+      "name": "kernel_size",
+      "neutral": false,
+      "options": [
+        "3x3",
+        "5x5"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "percentile",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "rank",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": "RGB",
+      "maximum": null,
+      "minimum": null,
+      "name": "channel_mode",
+      "neutral": false,
+      "options": [
+        "RGB",
+        "Luma"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": 1.0,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "amount",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "amount=0 恒等"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "no-op：返回空输出（marker 协议）",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    },
+    {
+      "data_type": "image",
+      "direction": "output",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "median",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_c15_median.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "tests/content_library_v1/test_c15_median.py（≥3 独立手算向量/复用项透传断言）",
+    "known_limits": "节点类+marker 草案；dispatch/GLSL/registry/capability 未接线（L04/L16 集成）——仅声明不是完成。复用 F19 共享核；tile_padding=核半径（3x3→1、5x5→2）",
+    "oracle": "content_staging/library_v1/references/median_ref.py（F19 median_rank_ref 再导出，单一事实源）"
+  },
+  "version": "0.1.0"
+}

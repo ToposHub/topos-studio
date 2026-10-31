@@ -1,0 +1,25 @@
+{
+  "recipe_id": "P03",
+  "name": "冷环境自然肤色",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合雪景/阴天冷环境人像；冷移同时保肤色，strength 0.5–0.8",
+  "component": "White_Balance_Advanced（生产插件 plugins/White_Balance_Advanced.tglsl）",
+  "dependencies": {
+    "plugin_id": "White_Balance_Advanced",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "temperature": -0.12,
+    "tint": 0.05,
+    "wb_method": "Luma Preserving",
+    "strength": 0.8
+  },
+  "notes": "冷环境整体降温、肤色经亮度保持路径少受影响；参数已对真实插件 schema 校验。"
+}

@@ -1,0 +1,30 @@
+{
+  "png_sequence": {
+    "success": true,
+    "error": null,
+    "audio_omitted": false,
+    "output_path": "/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-round7-delivery-e2e-1xm2yxm0/png_sequence",
+    "directory_children": [],
+    "sibling_frames": [
+      "png_sequence_000000.png",
+      "png_sequence_000001.png",
+      "png_sequence.manifest.json"
+    ]
+  },
+  "tiff_sequence": {
+    "success": true,
+    "error": null,
+    "audio_omitted": false,
+    "output_path": "/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-round7-delivery-e2e-1xm2yxm0/tiff_sequence",
+    "directory_children": [],
+    "sibling_frames": [
+      "png_sequence_000000.png",
+      "png_sequence_000001.png",
+      "png_sequence.manifest.json",
+      "tiff_sequence.manifest.json",
+      "tiff_sequence_000000.tif",
+      "tiff_sequence_000001.tif"
+    ]
+  },
+  "root": "/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-round7-delivery-e2e-1xm2yxm0"
+}

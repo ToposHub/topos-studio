@@ -1,0 +1,70 @@
+// --- Topos Plugin Metadata ---
+// @name Frequency Split
+// @i18n_name Frequency_Split
+// @author Topos Team
+// @version 1.0
+// @description Frequency-separation retouch: separate low-frequency tone (smoothed) from high-frequency detail, smooth the former while re-adding the latter at controllable strength
+// @input_space scene-linear
+// @output_space scene-linear
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @occlusion background_independent
+// @param slider radius "Split Radius (px)" 3.0 1.0 8.0
+// @param slider smooth "Low-Freq Smooth" 0.8 0.0 1.0
+// @param slider detail "High-Freq Restore" 1.0 0.0 1.5
+// @param checkbox protect_chroma "Protect Chroma" 1
+// -----------------------------
+
+// Frequency Split —— 频段分离修饰（皮肤/表面纹理保留式柔化）。
+//
+// 原理：经典 frequency separation 的单 pass 近似：
+//   1) 低频层 = 以 radius 为步距的 9-tap 交叉采样均值（上/下/左/右 +
+//      四对角 + 自身），近似小幅盒模糊，代表"色调/结构"；
+//   2) 高频层 = 原图 - 低频层，代表"毛孔/纹理/边缘"细节；
+//   3) 输出 = 低频层经 smooth 插值回原图的程度 + 高频层按 detail 比例
+//      回加。smooth=1 且 detail=1 时数学上恒等于原图（无损复位点）。
+// protect_chroma=1 时高低频分离只在亮度域做（按 luma 差值回加），肤色
+// 边界不发灰——这是皮肤修饰与 bilateral_skin_smooth（整域双向滤波）
+// 的本质差异：后者不可重建原像素，本插件 detail=1/smooth=1 可精确复位。
+//
+// 契约：vec3 process(vec3 color, vec2 uv)。color 为 scene-linear 且可为
+// 负 / 远大于 1.0；高频回加为线性差值运算，全程不 clamp 基色（HDR 安全）。
+// 仅使用注入 uniform u_input_tex；循环不使用（9-tap 手工展开）。
+
+vec3 process(vec3 color, vec2 uv) {
+    if (smooth < 0.001 && abs(detail - 1.0) < 0.001) return color;
+
+    // 采样步距（输出像素单位），分母下限守护由 max 保证
+    vec2 px = vec2(max(radius, 1.0)) / u_tex_size;
+
+    // ====== 9-tap 低频层（交叉 + 对角，等权手工展开）======
+    vec3 c  = texture(u_input_tex, uv).rgb;
+    vec3 n0 = texture(u_input_tex, uv + vec2( 0.0,  px.y)).rgb;
+    vec3 n1 = texture(u_input_tex, uv + vec2( 0.0, -px.y)).rgb;
+    vec3 n2 = texture(u_input_tex, uv + vec2( px.x,  0.0)).rgb;
+    vec3 n3 = texture(u_input_tex, uv + vec2(-px.x,  0.0)).rgb;
+    vec3 n4 = texture(u_input_tex, uv + vec2( px.x,  px.y)).rgb;
+    vec3 n5 = texture(u_input_tex, uv + vec2( px.x, -px.y)).rgb;
+    vec3 n6 = texture(u_input_tex, uv + vec2(-px.x,  px.y)).rgb;
+    vec3 n7 = texture(u_input_tex, uv + vec2(-px.x, -px.y)).rgb;
+    vec3 low = (c + n0 + n1 + n2 + n3 + n4 + n5 + n6 + n7) / 9.0;
+
+    // ====== 高频层 ======
+    vec3 high = c - low;
+
+    // ====== 亮度域保护模式：高频只回加亮度分量，色度高频丢弃 ======
+    if (protect_chroma == 1) {
+        float luma_c = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        float luma_l = dot(low, vec3(0.2126, 0.7152, 0.0722));
+        float high_l = luma_c - luma_l;
+        vec3 smoothed = mix(c, low, smooth);
+        // 亮度差按 detail 回加到三通道（保持色相不漂移）
+        return smoothed + vec3(high_l * detail);
+    }
+
+    // ====== RGB 域模式：低频按 smooth 混合 + 高频按 detail 回加 ======
+    // smooth=1.0, detail=1.0 时 mix(c,low,1)+high = low + (c-low) = c（无损）
+    vec3 out_low = mix(c, low, smooth);
+    return out_low + high * detail;
+}

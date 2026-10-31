@@ -1,0 +1,69 @@
+{
+  "scenarios": {
+    "G1": {
+      "real_window_booted": {
+        "ok": true,
+        "detail": "page=Edit"
+      },
+      "golden_media_imported": {
+        "ok": true,
+        "detail": "video2=True wav=True"
+      }
+    },
+    "G2": {
+      "clips_added": {
+        "ok": true,
+        "detail": "video=1 audio=1"
+      },
+      "linked_av_bidirectional": {
+        "ok": true,
+        "detail": "v.link=3f80b3a1-c52e-49bb-af20-be1582326ea9 a.link=0d43ba7b-2f16-4966-8a40-c0f25eb25e3d"
+      }
+    },
+    "G3": {
+      "copy_linked_pair": {
+        "ok": true,
+        "detail": "clips=2 fps=24.0"
+      },
+      "paste_new_ids_and_link_remap": {
+        "ok": true,
+        "detail": "new=['6736b958-ccca-4807-9807-850f58016e18', 'e46976d5-e499-4e4b-8370-f7b14d024fa4']"
+      },
+      "view_undo_restores": {
+        "ok": true,
+        "detail": "restored=2 expected=2"
+      }
+    },
+    "G4": {
+      "second_timeline_created": {
+        "ok": true,
+        "detail": "id=f074e8d5-c3b4-45b5-b6e0-8a5161b53c81"
+      },
+      "timeline_switch_active": {
+        "ok": true,
+        "detail": "active=f074e8d5-c3b4-45b5-b6e0-8a5161b53c81"
+      },
+      "cross_timeline_paste_recorded": {
+        "ok": true,
+        "detail": "pasted=0 semantics=skipped_by_track_id"
+      }
+    },
+    "G5": {
+      "smart_bin_pull_filters_videos": {
+        "ok": true,
+        "detail": "count=2"
+      },
+      "smart_bin_pull_updates_after_import": {
+        "ok": true,
+        "detail": "count=3"
+      }
+    }
+  },
+  "media": {},
+  "environment": {
+    "media_dir": "/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/golden_g_media_ey03zz7f",
+    "boot_page": "Edit"
+  },
+  "failures": [],
+  "passed": true
+}

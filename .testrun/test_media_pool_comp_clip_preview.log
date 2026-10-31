@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 1 item
+
+tests/edit/test_media_pool_comp_clip_preview.py .                        [100%]
+
+============================== 1 passed in 11.78s ==============================

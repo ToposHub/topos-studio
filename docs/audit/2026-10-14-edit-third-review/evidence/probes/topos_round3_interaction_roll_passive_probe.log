@@ -1,0 +1,171 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 206 ms. Replace uses of missing font family "SF Mono" with one that exists to avoid this cost. 
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support propagateSizeHints()
+Mouse event "MouseRelease" not accepted by receiving widget
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support propagateSizeHints()
+Mouse event "MouseRelease" not accepted by receiving widget
+{
+  "0.5": {
+    "p": [
+      520,
+      290
+    ],
+    "hrect": [
+      -10.0,
+      0.0,
+      20.0,
+      82.0
+    ],
+    "viewport": [
+      1398,
+      630
+    ],
+    "htool": "ROLL",
+    "hvisible": true,
+    "buttons": "MouseButton.LeftButton",
+    "items": [
+      "RollHandleItem",
+      "ClipItem"
+    ],
+    "focus": true,
+    "events_press": [
+      [
+        "l",
+        "r",
+        100
+      ]
+    ],
+    "state_during": "IDLE",
+    "preview": {
+      "l": [
+        100,
+        50,
+        0,
+        100
+      ],
+      "r": [
+        400,
+        50,
+        100,
+        100
+      ]
+    },
+    "committed": {
+      "l": [
+        100,
+        50,
+        0,
+        100
+      ],
+      "r": [
+        400,
+        50,
+        100,
+        100
+      ]
+    },
+    "expected": {
+      "l": [
+        100,
+        55
+      ],
+      "r": [
+        405,
+        45
+      ]
+    },
+    "focus_out": [
+      {
+        "reason": "ActiveWindowFocusReason",
+        "active_window": "TrimMonitorDialog",
+        "interaction": "ROLLING"
+      }
+    ],
+    "errors": []
+  },
+  "2": {
+    "p": [
+      520,
+      290
+    ],
+    "hrect": [
+      -10.0,
+      0.0,
+      20.0,
+      82.0
+    ],
+    "viewport": [
+      1398,
+      630
+    ],
+    "htool": "ROLL",
+    "hvisible": true,
+    "buttons": "MouseButton.LeftButton",
+    "items": [
+      "RollHandleItem",
+      "ClipItem"
+    ],
+    "focus": true,
+    "events_press": [
+      [
+        "l",
+        "r",
+        100
+      ]
+    ],
+    "state_during": "IDLE",
+    "preview": {
+      "l": [
+        100,
+        200,
+        0,
+        100
+      ],
+      "r": [
+        400,
+        200,
+        100,
+        100
+      ]
+    },
+    "committed": {
+      "l": [
+        100,
+        200,
+        0,
+        100
+      ],
+      "r": [
+        400,
+        200,
+        100,
+        100
+      ]
+    },
+    "expected": {
+      "l": [
+        100,
+        220
+      ],
+      "r": [
+        420,
+        180
+      ]
+    },
+    "focus_out": [
+      {
+        "reason": "ActiveWindowFocusReason",
+        "active_window": "TrimMonitorDialog",
+        "interaction": "ROLLING"
+      }
+    ],
+    "errors": []
+  }
+}

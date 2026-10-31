@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 22 items
+
+tests/edit/test_subtitle_model_invariants.py ......................      [100%]
+
+============================== 22 passed in 6.74s ==============================

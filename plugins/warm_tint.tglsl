@@ -1,0 +1,21 @@
+// @name Warm Tint
+// @i18n_name warm_tint
+// @author Topos Team
+// @version 1.1
+// @description Adds a gentle warm tint; declares OpenGL export support (W06 deliverable-plugin slice).
+// @export_support opengl
+// @param slider strength "Strength" 0.35 0.0 1.0
+// @param separator
+
+// Warm tint: lift R, gently sink B, keep G as anchor. Pure per-pixel math
+// (no sampling), so the DCTL wrapper path is trivially deterministic.
+// 契约：vec3 process(vec3 color, vec2 uv)，与 dctl_wrapper 包裹约定一致。
+// 参数 ABI：@param 声明的参数以裸名引用（编译期由 shader_compiler 改写为
+// u_P<n>_<name> 命名空间 uniform）。禁止引用未声明的 u_* 标识符——改写的
+// \b 词边界不会命中 `u_` 前缀，残留的 u_strength 会让真实 GL 编译失败，
+// 该层随即被渲染循环跳过（P0-COL-01）。
+vec3 process(vec3 color, vec2 uv) {
+    return vec3(color.r * (1.0 + 0.20 * strength),
+                color.g,
+                color.b * (1.0 - 0.12 * strength));
+}

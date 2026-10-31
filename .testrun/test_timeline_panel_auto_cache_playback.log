@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_timeline_panel_auto_cache_playback.py ...                [100%]
+
+============================== 3 passed in 11.66s ==============================

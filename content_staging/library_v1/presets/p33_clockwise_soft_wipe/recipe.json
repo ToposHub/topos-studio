@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P33",
+  "name": "顺时钟轻擦",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "通用叙事衔接；softness 0.04–0.1 轻羽化，center 默认画幅中心",
+  "component": "X01 clock_wipe（生产 lib1_clock_wipe，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/clock_wipe）",
+  "dependencies": {
+    "component_id": "X01",
+    "component_slug": "clock_wipe",
+    "component_kind": "transition",
+    "transition_type": "lib1_clock_wipe",
+    "user_json_base": true
+  },
+  "params": {
+    "center_x": 0.5,
+    "center_y": 0.5,
+    "start_angle": 0.0,
+    "clockwise": true,
+    "softness": 0.06
+  },
+  "notes": "X01 生产 base lib1_clock_wipe（transition_catalog 已注册，L03 生产核）；base 在 custom_transitions._BASE_TYPES 白名单，可产出用户转场 JSON。"
+}

@@ -1,0 +1,21 @@
+{
+  "task": "RD3-04",
+  "date": "2026-09-08",
+  "implementation": "flatten all requested frame slices into one bounded tc_parallel_for batch",
+  "implementation_commit": "8fc9161c",
+  "verification": {
+    "test": "native/topos_codec/tests/unit/test_codec.c",
+    "frames": 3,
+    "worker_limits": [8, 16],
+    "pool_batches_per_decode": [1, 1],
+    "nested_fallbacks_per_decode": [0, 0],
+    "output": "each worker-limit run matches the single-frame reference byte-for-byte"
+  },
+  "historical_batch_evidence": {
+    "source": "bench_out/m11_stage4/20260902_stage4_decode_batch.txt",
+    "two_k_pure_kernel_fps": {"sequential": 390.6, "batch": 429.4, "delta": 0.104},
+    "four_k_pure_kernel_fps": {"sequential": 98.5, "batch": 103.4, "delta": 0.052},
+    "note": "historical product benchmark; not a fresh RD3-04 performance claim"
+  },
+  "fallback_policy": "nested worker dispatch is serialized by tpool; per-frame errors remain isolated and are finalized in frame order"
+}

@@ -1,0 +1,16 @@
+INFO: [ThumbEngine] FFmpeg found and loaded: /usr/local/bin/ffmpeg
+WARNING: [ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+INFO: Registered feature module: color
+INFO: Registered feature module: edit
+INFO: Registered page: edit (剪辑)
+INFO: Registered feature module: deliver
+INFO: Registered page: deliver (交付)
+2026-10-20 04:41:41.097 Python[19623:125530] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 221 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+2026-10-20 04:41:44.632 Python[19623:125530] +[IMKClient subclass]: chose IMKClient_Modern
+2026-10-20 04:41:44.632 Python[19623:125530] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+RECV clip_keyframe 0 effect_keyframe 1
+DELIVER_MENU ["交付 (D)/导出字幕 (SRT)..."]

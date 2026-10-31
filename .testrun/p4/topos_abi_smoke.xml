@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="0.407" timestamp="2026-10-28T06:48:11.549500+08:00" hostname="localhost"><testcase classname="tests.test_topos_abi_smoke" name="test_public_abi_smoke_on_golden" time="0.374" /></testsuite></testsuites>

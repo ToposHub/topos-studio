@@ -1,0 +1,313 @@
+============================= test session starts ==============================
+collected 18 items
+
+tests/visual/test_edit_page_visual.py EEEEEEEEEEEEEEE                    [ 83%]
+tests/visual/test_visual_bootstrap.py ...                                [100%]
+
+==================================== ERRORS ====================================
+__ ERROR at setup of TestToolbarAcceptance.test_toolbar_buttons_not_squished ___
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+2026-10-28 06:47:05.188 Python[42421:3566983] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+------------------------------ Captured log setup ------------------------------
+WARNING  thumb_engine:thumb_engine.py:129 [ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+_ ERROR at setup of TestToolbarAcceptance.test_toolbar_buttons_not_overlapping _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestTimelineAcceptance.test_track_header_buttons_not_overlapping _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestTimelineAcceptance.test_timeline_clip_text_no_overflow _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+__ ERROR at setup of TestProgramViewerAcceptance.test_program_viewer_visible ___
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestProgramViewerAcceptance.test_program_viewer_reasonable_size _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+___ ERROR at setup of TestMediaPoolAcceptance.test_media_pool_has_list_view ____
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+___ ERROR at setup of TestMediaPoolAcceptance.test_media_pool_has_grid_view ____
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestMediaPoolAcceptance.test_media_pool_view_toggle_buttons _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestScreenshotCapture.test_capture_edit_page_empty[main_window_at_resolution0] _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestScreenshotCapture.test_capture_edit_page_empty[main_window_at_resolution1] _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestScreenshotCapture.test_capture_edit_page_empty[main_window_at_resolution2] _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestScreenshotCapture.test_capture_edit_timeline_tools[main_window_at_resolution0] _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestScreenshotCapture.test_capture_edit_timeline_tools[main_window_at_resolution1] _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+_ ERROR at setup of TestScreenshotCapture.test_capture_edit_timeline_tools[main_window_at_resolution2] _
+SETUP ERROR: Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+
+---------------------------- Captured stderr setup -----------------------------
+Exceptions caught in Qt event loop:
+________________________________________________________________________________
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/file_controller.py", line 7407, in resizeEvent
+    files_panel = self.files_panel
+                  ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'files_panel'
+________________________________________________________________________________
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/visual.xml -
+=========================== short test summary info ============================
+ERROR tests/visual/test_edit_page_visual.py::TestToolbarAcceptance::test_toolbar_buttons_not_squished
+ERROR tests/visual/test_edit_page_visual.py::TestToolbarAcceptance::test_toolbar_buttons_not_overlapping
+ERROR tests/visual/test_edit_page_visual.py::TestTimelineAcceptance::test_track_header_buttons_not_overlapping
+ERROR tests/visual/test_edit_page_visual.py::TestTimelineAcceptance::test_timeline_clip_text_no_overflow
+ERROR tests/visual/test_edit_page_visual.py::TestProgramViewerAcceptance::test_program_viewer_visible
+ERROR tests/visual/test_edit_page_visual.py::TestProgramViewerAcceptance::test_program_viewer_reasonable_size
+ERROR tests/visual/test_edit_page_visual.py::TestMediaPoolAcceptance::test_media_pool_has_list_view
+ERROR tests/visual/test_edit_page_visual.py::TestMediaPoolAcceptance::test_media_pool_has_grid_view
+ERROR tests/visual/test_edit_page_visual.py::TestMediaPoolAcceptance::test_media_pool_view_toggle_buttons
+ERROR tests/visual/test_edit_page_visual.py::TestScreenshotCapture::test_capture_edit_page_empty[main_window_at_resolution0]
+ERROR tests/visual/test_edit_page_visual.py::TestScreenshotCapture::test_capture_edit_page_empty[main_window_at_resolution1]
+ERROR tests/visual/test_edit_page_visual.py::TestScreenshotCapture::test_capture_edit_page_empty[main_window_at_resolution2]
+ERROR tests/visual/test_edit_page_visual.py::TestScreenshotCapture::test_capture_edit_timeline_tools[main_window_at_resolution0]
+ERROR tests/visual/test_edit_page_visual.py::TestScreenshotCapture::test_capture_edit_timeline_tools[main_window_at_resolution1]
+ERROR tests/visual/test_edit_page_visual.py::TestScreenshotCapture::test_capture_edit_timeline_tools[main_window_at_resolution2]
+========================= 3 passed, 15 errors in 9.83s =========================

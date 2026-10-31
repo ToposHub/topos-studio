@@ -1,0 +1,610 @@
+{
+  "schema_version": 1,
+  "kind": "windows_timeline_export_bench",
+  "meta": {
+    "date": "2026-09-15",
+    "gpu_tag": "amd_rx6800",
+    "os": "win32 nt",
+    "python": "3.12.14",
+    "git_rev": "8fde64ec",
+    "bitrate_bps": 20000000,
+    "json_name": "windows_timeline_export_amd_rx6800_2026-09-15.json"
+  },
+  "protocol": {
+    "frames": 480,
+    "warmup_frames": 60,
+    "runs": 3,
+    "bitrate_mode": "vbr",
+    "report": "median of runs; frame times from progress callback deltas"
+  },
+  "cases": {
+    "T0": {
+      "title": "单段 H.264 直通",
+      "purpose": "解码 -> 编码的最低开销与 surface 连通性（计划 §4.1 T0）。",
+      "coverage": "",
+      "status": "ok",
+      "groups": {
+        "cpu_pipeline": {
+          "status": "ok",
+          "group": "cpu_pipeline",
+          "runs": [
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0009,
+              "wall_s": 10.9988,
+              "status": "ok",
+              "frames": 480,
+              "fps": 43.641,
+              "frame_ms_p50": 21.034,
+              "frame_ms_p95": 35.765,
+              "hw_fallback_reason": "",
+              "output_mb": 43.785,
+              "output_sha256": "367d38cf28c01d3d10027ec4a34374ca039607478adfd0e6d875e5043cb4940f",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 1
+            },
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0009,
+              "wall_s": 11.327,
+              "status": "ok",
+              "frames": 480,
+              "fps": 42.377,
+              "frame_ms_p50": 21.112,
+              "frame_ms_p95": 36.071,
+              "hw_fallback_reason": "",
+              "output_mb": 43.785,
+              "output_sha256": "367d38cf28c01d3d10027ec4a34374ca039607478adfd0e6d875e5043cb4940f",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 2
+            },
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0012,
+              "wall_s": 11.2876,
+              "status": "ok",
+              "frames": 480,
+              "fps": 42.525,
+              "frame_ms_p50": 20.779,
+              "frame_ms_p95": 37.625,
+              "hw_fallback_reason": "",
+              "output_mb": 43.785,
+              "output_sha256": "367d38cf28c01d3d10027ec4a34374ca039607478adfd0e6d875e5043cb4940f",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 3
+            }
+          ],
+          "warmup": "done frames=60",
+          "median_fps": 42.525,
+          "hw_fallback_reasons": [],
+          "env": {
+            "TOPOS_DISABLE_WIN_HW_DECODE": "1",
+            "TOPOS_DISABLE_WIN_HW_ENCODE": "1"
+          },
+          "elapsed_s": 41.93
+        },
+        "hw_download": {
+          "status": "ok",
+          "group": "hw_download",
+          "runs": [
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0013,
+              "wall_s": 3.4527,
+              "status": "ok",
+              "frames": 480,
+              "fps": 139.021,
+              "frame_ms_p50": 6.087,
+              "frame_ms_p95": 6.419,
+              "hw_fallback_reason": "",
+              "output_mb": 43.498,
+              "output_sha256": "8b53fbaa0b432d528f3463c3ae6404cf928438ea2302dd23357036f62ed1fdc0",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 1
+            },
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0007,
+              "wall_s": 3.4719,
+              "status": "ok",
+              "frames": 480,
+              "fps": 138.253,
+              "frame_ms_p50": 6.092,
+              "frame_ms_p95": 6.4,
+              "hw_fallback_reason": "",
+              "output_mb": 43.498,
+              "output_sha256": "8b53fbaa0b432d528f3463c3ae6404cf928438ea2302dd23357036f62ed1fdc0",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 2
+            },
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0007,
+              "wall_s": 3.444,
+              "status": "ok",
+              "frames": 480,
+              "fps": 139.373,
+              "frame_ms_p50": 6.078,
+              "frame_ms_p95": 6.359,
+              "hw_fallback_reason": "",
+              "output_mb": 43.498,
+              "output_sha256": "8b53fbaa0b432d528f3463c3ae6404cf928438ea2302dd23357036f62ed1fdc0",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 3
+            }
+          ],
+          "warmup": "done frames=60",
+          "median_fps": 139.021,
+          "hw_fallback_reasons": [],
+          "env": {
+            "TOPOS_DISABLE_WIN_HW_DECODE": "",
+            "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+          },
+          "elapsed_s": 32.92
+        },
+        "ffmpeg_gpu_ref": {
+          "status": "ok",
+          "group": "ffmpeg_gpu_ref",
+          "vendor": "amd",
+          "ref_mode": "gpu_surface",
+          "ref_mode_fallback": false,
+          "runs": [
+            {
+              "run_index": 1,
+              "status": "ok",
+              "frames": 480,
+              "wall_s": 3.1321,
+              "fps": 153.254,
+              "output_mb": 42.303,
+              "output_sha256": "618ef4c178875a7f0cad9bb0dddec559dd456a8372900748713a4cfbc98d852e",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              }
+            },
+            {
+              "run_index": 2,
+              "status": "ok",
+              "frames": 480,
+              "wall_s": 3.1653,
+              "fps": 151.646,
+              "output_mb": 42.303,
+              "output_sha256": "618ef4c178875a7f0cad9bb0dddec559dd456a8372900748713a4cfbc98d852e",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              }
+            },
+            {
+              "run_index": 3,
+              "status": "ok",
+              "frames": 480,
+              "wall_s": 3.1646,
+              "fps": 151.679,
+              "output_mb": 42.303,
+              "output_sha256": "618ef4c178875a7f0cad9bb0dddec559dd456a8372900748713a4cfbc98d852e",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              }
+            }
+          ],
+          "warmup": "n/a",
+          "median_fps": 151.679,
+          "elapsed_s": 31.34
+        }
+      },
+      "ref_mode": "gpu_surface",
+      "vendor": "amd",
+      "group_summaries": {
+        "cpu_pipeline": {
+          "status": "ok",
+          "runs_recorded": 3,
+          "runs_ok": 3,
+          "median_fps": 42.525,
+          "median_frame_ms_p50": 21.034,
+          "max_frame_ms_p95": 37.625,
+          "median_output_mb": 43.785,
+          "output_sha256_stable": true,
+          "output_sha256": "367d38cf28c01d3d10027ec4a34374ca039607478adfd0e6d875e5043cb4940f",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1920,
+            "height": 1080,
+            "stream_frames": 480,
+            "decoded_frames": 480
+          }
+        },
+        "hw_download": {
+          "status": "ok",
+          "runs_recorded": 3,
+          "runs_ok": 3,
+          "median_fps": 139.021,
+          "median_frame_ms_p50": 6.087,
+          "max_frame_ms_p95": 6.419,
+          "median_output_mb": 43.498,
+          "output_sha256_stable": true,
+          "output_sha256": "8b53fbaa0b432d528f3463c3ae6404cf928438ea2302dd23357036f62ed1fdc0",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1920,
+            "height": 1080,
+            "stream_frames": 480,
+            "decoded_frames": 480
+          }
+        },
+        "ffmpeg_gpu_ref": {
+          "status": "ok",
+          "runs_recorded": 3,
+          "runs_ok": 3,
+          "median_fps": 151.679,
+          "median_output_mb": 42.303,
+          "output_sha256_stable": true,
+          "output_sha256": "618ef4c178875a7f0cad9bb0dddec559dd456a8372900748713a4cfbc98d852e",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1920,
+            "height": 1080,
+            "stream_frames": 480,
+            "decoded_frames": 480
+          }
+        }
+      },
+      "baseline_ratios": {
+        "cpu_pipeline_vs_ffmpeg": 0.28,
+        "hw_download_vs_ffmpeg": 0.917
+      }
+    },
+    "T1": {
+      "title": "resize + 色彩转换",
+      "purpose": "验证最常见的渲染链：解码 -> 缩放 -> 色彩转换 -> 编码。",
+      "coverage": "已接线：resize + yuv420p 色彩转换；未接线：主级调色（效果实例程序化构建属后续批次，届时在 coverage 里显式升级，不冒充完整 T1）。",
+      "status": "ok",
+      "groups": {
+        "cpu_pipeline": {
+          "status": "ok",
+          "group": "cpu_pipeline",
+          "runs": [
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0008,
+              "wall_s": 21.8296,
+              "status": "ok",
+              "frames": 480,
+              "fps": 21.988,
+              "frame_ms_p50": 39.444,
+              "frame_ms_p95": 73.079,
+              "hw_fallback_reason": "",
+              "output_mb": 43.477,
+              "output_sha256": "43e401f0a42c250bcf9546184142162058a5ffd6cdcb18f9a20c9823824c0480",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1280,
+                "height": 720,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 1
+            },
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0007,
+              "wall_s": 21.9687,
+              "status": "ok",
+              "frames": 480,
+              "fps": 21.849,
+              "frame_ms_p50": 39.276,
+              "frame_ms_p95": 74.278,
+              "hw_fallback_reason": "",
+              "output_mb": 43.477,
+              "output_sha256": "43e401f0a42c250bcf9546184142162058a5ffd6cdcb18f9a20c9823824c0480",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1280,
+                "height": 720,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 2
+            },
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0007,
+              "wall_s": 18.1736,
+              "status": "ok",
+              "frames": 480,
+              "fps": 26.412,
+              "frame_ms_p50": 31.462,
+              "frame_ms_p95": 64.89,
+              "hw_fallback_reason": "",
+              "output_mb": 43.477,
+              "output_sha256": "43e401f0a42c250bcf9546184142162058a5ffd6cdcb18f9a20c9823824c0480",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1280,
+                "height": 720,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 3
+            }
+          ],
+          "warmup": "done frames=60",
+          "median_fps": 21.988,
+          "hw_fallback_reasons": [],
+          "env": {
+            "TOPOS_DISABLE_WIN_HW_DECODE": "1",
+            "TOPOS_DISABLE_WIN_HW_ENCODE": "1"
+          },
+          "elapsed_s": 71.22
+        },
+        "hw_download": {
+          "status": "ok",
+          "group": "hw_download",
+          "runs": [
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0018,
+              "wall_s": 17.5758,
+              "status": "ok",
+              "frames": 480,
+              "fps": 27.31,
+              "frame_ms_p50": 33.003,
+              "frame_ms_p95": 49.133,
+              "hw_fallback_reason": "",
+              "output_mb": 43.492,
+              "output_sha256": "20d3588f794f0d40f7fd29a7a5c0164f970ebb8a58782380dc1ea71858d5cfd0",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1280,
+                "height": 720,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 1
+            },
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0012,
+              "wall_s": 17.8747,
+              "status": "ok",
+              "frames": 480,
+              "fps": 26.854,
+              "frame_ms_p50": 34.468,
+              "frame_ms_p95": 48.487,
+              "hw_fallback_reason": "",
+              "output_mb": 43.492,
+              "output_sha256": "20d3588f794f0d40f7fd29a7a5c0164f970ebb8a58782380dc1ea71858d5cfd0",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1280,
+                "height": 720,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 2
+            },
+            {
+              "frames_requested": 480,
+              "setup_s": 0.0012,
+              "wall_s": 17.7212,
+              "status": "ok",
+              "frames": 480,
+              "fps": 27.086,
+              "frame_ms_p50": 34.364,
+              "frame_ms_p95": 49.256,
+              "hw_fallback_reason": "",
+              "output_mb": 43.492,
+              "output_sha256": "20d3588f794f0d40f7fd29a7a5c0164f970ebb8a58782380dc1ea71858d5cfd0",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1280,
+                "height": 720,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              },
+              "run_index": 3
+            }
+          ],
+          "warmup": "done frames=60",
+          "median_fps": 27.086,
+          "hw_fallback_reasons": [],
+          "env": {
+            "TOPOS_DISABLE_WIN_HW_DECODE": "",
+            "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+          },
+          "elapsed_s": 77.47
+        },
+        "ffmpeg_gpu_ref": {
+          "status": "ok",
+          "group": "ffmpeg_gpu_ref",
+          "vendor": "amd",
+          "ref_mode": "gpu_surface",
+          "ref_mode_fallback": false,
+          "runs": [
+            {
+              "run_index": 1,
+              "status": "ok",
+              "frames": 480,
+              "wall_s": 3.1663,
+              "fps": 151.598,
+              "output_mb": 42.303,
+              "output_sha256": "618ef4c178875a7f0cad9bb0dddec559dd456a8372900748713a4cfbc98d852e",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              }
+            },
+            {
+              "run_index": 2,
+              "status": "ok",
+              "frames": 480,
+              "wall_s": 3.1769,
+              "fps": 151.092,
+              "output_mb": 42.303,
+              "output_sha256": "618ef4c178875a7f0cad9bb0dddec559dd456a8372900748713a4cfbc98d852e",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              }
+            },
+            {
+              "run_index": 3,
+              "status": "ok",
+              "frames": 480,
+              "wall_s": 3.194,
+              "fps": 150.281,
+              "output_mb": 42.303,
+              "output_sha256": "618ef4c178875a7f0cad9bb0dddec559dd456a8372900748713a4cfbc98d852e",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 480,
+                "decoded_frames": 480
+              }
+            }
+          ],
+          "warmup": "n/a",
+          "median_fps": 151.092,
+          "elapsed_s": 32.08
+        }
+      },
+      "ref_mode": "gpu_surface",
+      "vendor": "amd",
+      "group_summaries": {
+        "cpu_pipeline": {
+          "status": "ok",
+          "runs_recorded": 3,
+          "runs_ok": 3,
+          "median_fps": 21.988,
+          "median_frame_ms_p50": 39.276,
+          "max_frame_ms_p95": 74.278,
+          "median_output_mb": 43.477,
+          "output_sha256_stable": true,
+          "output_sha256": "43e401f0a42c250bcf9546184142162058a5ffd6cdcb18f9a20c9823824c0480",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1280,
+            "height": 720,
+            "stream_frames": 480,
+            "decoded_frames": 480
+          }
+        },
+        "hw_download": {
+          "status": "ok",
+          "runs_recorded": 3,
+          "runs_ok": 3,
+          "median_fps": 27.086,
+          "median_frame_ms_p50": 34.364,
+          "max_frame_ms_p95": 49.256,
+          "median_output_mb": 43.492,
+          "output_sha256_stable": true,
+          "output_sha256": "20d3588f794f0d40f7fd29a7a5c0164f970ebb8a58782380dc1ea71858d5cfd0",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1280,
+            "height": 720,
+            "stream_frames": 480,
+            "decoded_frames": 480
+          }
+        },
+        "ffmpeg_gpu_ref": {
+          "status": "ok",
+          "runs_recorded": 3,
+          "runs_ok": 3,
+          "median_fps": 151.092,
+          "median_output_mb": 42.303,
+          "output_sha256_stable": true,
+          "output_sha256": "618ef4c178875a7f0cad9bb0dddec559dd456a8372900748713a4cfbc98d852e",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1920,
+            "height": 1080,
+            "stream_frames": 480,
+            "decoded_frames": 480
+          }
+        }
+      },
+      "baseline_ratios": {
+        "cpu_pipeline_vs_ffmpeg": 0.146,
+        "hw_download_vs_ffmpeg": 0.179
+      }
+    }
+  }
+}

@@ -1,0 +1,2849 @@
+{
+  "meta": {
+    "generated": "2026-09-15 23:01:27",
+    "gl": {
+      "version": "3.3.0 Core Profile Context 26.8.1.260806",
+      "renderer": "AMD Radeon RX 6800"
+    },
+    "gl_require": 0,
+    "preview_frames": 5,
+    "export_frames": 3
+  },
+  "cases": [
+    {
+      "name": "grade@4k",
+      "cold_ms": 1590.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 512.8,
+      "preview_p90_ms": 529.0,
+      "export_ms": 486.8,
+      "res": "4k",
+      "node_type": "grade",
+      "exec_class": "gpu",
+      "total_wall_s": 11.07
+    },
+    {
+      "name": "color_correct@4k",
+      "cold_ms": 1606.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 488.4,
+      "preview_p90_ms": 532.4,
+      "export_ms": 520.6,
+      "res": "4k",
+      "node_type": "color_correct",
+      "exec_class": "gpu",
+      "total_wall_s": 11.14
+    },
+    {
+      "name": "cs_transform@4k",
+      "cold_ms": 1304.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 479.2,
+      "preview_p90_ms": 520.5,
+      "export_ms": 487.0,
+      "res": "4k",
+      "node_type": "cs_transform",
+      "exec_class": "gpu",
+      "total_wall_s": 9.89
+    },
+    {
+      "name": "huecorrect@4k",
+      "cold_ms": 1619.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 513.9,
+      "preview_p90_ms": 534.5,
+      "export_ms": 512.3,
+      "res": "4k",
+      "node_type": "huecorrect",
+      "exec_class": "gpu",
+      "total_wall_s": 11.15
+    },
+    {
+      "name": "lut@4k",
+      "cold_ms": 1727.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 526.1,
+      "preview_p90_ms": 547.0,
+      "export_ms": 510.6,
+      "res": "4k",
+      "node_type": "lut",
+      "exec_class": "gpu",
+      "total_wall_s": 11.25
+    },
+    {
+      "name": "topos_color@4k",
+      "cold_ms": 1299.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 515.5,
+      "preview_p90_ms": 524.2,
+      "export_ms": 493.8,
+      "res": "4k",
+      "node_type": "topos_color",
+      "exec_class": "gpu",
+      "total_wall_s": 9.95
+    },
+    {
+      "name": "blur@4k",
+      "cold_ms": 1656.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1604,
+        "std": 0.2052
+      },
+      "preview_ms": 525.6,
+      "preview_p90_ms": 551.9,
+      "export_ms": 492.6,
+      "res": "4k",
+      "node_type": "blur",
+      "exec_class": "gpu",
+      "total_wall_s": 11.26
+    },
+    {
+      "name": "glow@4k",
+      "cold_ms": 1384.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1733,
+        "std": 0.2535
+      },
+      "preview_ms": 517.8,
+      "preview_p90_ms": 539.8,
+      "export_ms": 521.2,
+      "res": "4k",
+      "node_type": "glow",
+      "exec_class": "gpu",
+      "total_wall_s": 10.21
+    },
+    {
+      "name": "denoise@4k",
+      "cold_ms": 1279.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 505.8,
+      "preview_p90_ms": 530.2,
+      "export_ms": 476.2,
+      "res": "4k",
+      "node_type": "denoise",
+      "exec_class": "gpu",
+      "total_wall_s": 9.98
+    },
+    {
+      "name": "sharpen@4k",
+      "cold_ms": 1337.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.16,
+        "std": 0.21
+      },
+      "preview_ms": 525.8,
+      "preview_p90_ms": 565.4,
+      "export_ms": 523.3,
+      "res": "4k",
+      "node_type": "sharpen",
+      "exec_class": "gpu",
+      "total_wall_s": 10.35
+    },
+    {
+      "name": "erode_dilate@4k",
+      "cold_ms": 1379.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1612,
+        "std": 0.21
+      },
+      "preview_ms": 555.9,
+      "preview_p90_ms": 570.5,
+      "export_ms": 572.4,
+      "res": "4k",
+      "node_type": "erode_dilate",
+      "exec_class": "gpu",
+      "total_wall_s": 10.65
+    },
+    {
+      "name": "defocus@4k",
+      "cold_ms": 1264.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1633,
+        "std": 0.2046
+      },
+      "preview_ms": 513.6,
+      "preview_p90_ms": 559.2,
+      "export_ms": 509.5,
+      "res": "4k",
+      "node_type": "defocus",
+      "exec_class": "gpu",
+      "total_wall_s": 10.46
+    },
+    {
+      "name": "edge_detect@4k",
+      "cold_ms": 1356.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0236,
+        "std": 0.1517
+      },
+      "preview_ms": 519.5,
+      "preview_p90_ms": 524.2,
+      "export_ms": 498.0,
+      "res": "4k",
+      "node_type": "edge_detect",
+      "exec_class": "gpu",
+      "total_wall_s": 10.32
+    },
+    {
+      "name": "relight@4k",
+      "cold_ms": 1934.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0006,
+        "std": 0.0096
+      },
+      "preview_ms": 503.5,
+      "preview_p90_ms": 553.6,
+      "export_ms": 485.8,
+      "res": "4k",
+      "node_type": "relight",
+      "exec_class": "gpu",
+      "total_wall_s": 12.0
+    },
+    {
+      "name": "fog@4k",
+      "cold_ms": 1714.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.2056,
+        "std": 0.2107
+      },
+      "preview_ms": 518.7,
+      "preview_p90_ms": 549.2,
+      "export_ms": 518.9,
+      "res": "4k",
+      "node_type": "fog",
+      "exec_class": "gpu",
+      "total_wall_s": 11.47
+    },
+    {
+      "name": "godrays@4k",
+      "cold_ms": 1640.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.3061,
+        "std": 0.2283
+      },
+      "preview_ms": 521.4,
+      "preview_p90_ms": 529.2,
+      "export_ms": 507.8,
+      "res": "4k",
+      "node_type": "godrays",
+      "exec_class": "gpu",
+      "total_wall_s": 11.23
+    },
+    {
+      "name": "chromatic_aberration@4k",
+      "cold_ms": 1307.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1601,
+        "std": 0.2098
+      },
+      "preview_ms": 524.8,
+      "preview_p90_ms": 545.6,
+      "export_ms": 484.7,
+      "res": "4k",
+      "node_type": "chromatic_aberration",
+      "exec_class": "gpu",
+      "total_wall_s": 10.11
+    },
+    {
+      "name": "vignette@4k",
+      "cold_ms": 1277.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1403,
+        "std": 0.1923
+      },
+      "preview_ms": 692.7,
+      "preview_p90_ms": 711.8,
+      "export_ms": 666.9,
+      "res": "4k",
+      "node_type": "vignette",
+      "exec_class": "gpu",
+      "total_wall_s": 12.08
+    },
+    {
+      "name": "lens_flare@4k",
+      "cold_ms": 1494.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1738,
+        "std": 0.2108
+      },
+      "preview_ms": 686.9,
+      "preview_p90_ms": 703.4,
+      "export_ms": 685.1,
+      "res": "4k",
+      "node_type": "lens_flare",
+      "exec_class": "gpu",
+      "total_wall_s": 12.26
+    },
+    {
+      "name": "lens_distortion@4k",
+      "cold_ms": 1496.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 677.7,
+      "preview_p90_ms": 705.7,
+      "export_ms": 628.5,
+      "res": "4k",
+      "node_type": "lens_distortion",
+      "exec_class": "gpu",
+      "total_wall_s": 12.08
+    },
+    {
+      "name": "deflicker@4k",
+      "cold_ms": 2945.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0835,
+        "std": 0.1726
+      },
+      "preview_ms": 3323.6,
+      "preview_p90_ms": 3389.4,
+      "export_ms": 3156.5,
+      "res": "4k",
+      "node_type": "deflicker",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 39.02
+    },
+    {
+      "name": "keyer@4k",
+      "cold_ms": 1888.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1541,
+        "std": 0.2055
+      },
+      "preview_ms": 719.0,
+      "preview_p90_ms": 741.0,
+      "export_ms": 681.2,
+      "res": "4k",
+      "node_type": "keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 13.59
+    },
+    {
+      "name": "chroma_keyer@4k",
+      "cold_ms": 1722.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0016,
+        "std": 0.0255
+      },
+      "preview_ms": 657.3,
+      "preview_p90_ms": 676.1,
+      "export_ms": 627.5,
+      "res": "4k",
+      "node_type": "chroma_keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 12.8
+    },
+    {
+      "name": "luma_keyer@4k",
+      "cold_ms": 1527.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 683.4,
+      "preview_p90_ms": 706.6,
+      "export_ms": 673.0,
+      "res": "4k",
+      "node_type": "luma_keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 12.33
+    },
+    {
+      "name": "difference_keyer@4k",
+      "cold_ms": 1824.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1251,
+        "std": 0.2027
+      },
+      "preview_ms": 697.3,
+      "preview_p90_ms": 713.6,
+      "export_ms": 639.7,
+      "res": "4k",
+      "node_type": "difference_keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 13.24
+    },
+    {
+      "name": "light_wrap@4k",
+      "cold_ms": 1866.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1022,
+        "std": 0.1959
+      },
+      "preview_ms": 726.8,
+      "preview_p90_ms": 784.5,
+      "export_ms": 737.0,
+      "res": "4k",
+      "node_type": "light_wrap",
+      "exec_class": "gpu",
+      "total_wall_s": 13.84
+    },
+    {
+      "name": "shuffle@4k",
+      "cold_ms": 1473.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 682.1,
+      "preview_p90_ms": 693.9,
+      "export_ms": 675.6,
+      "res": "4k",
+      "node_type": "shuffle",
+      "exec_class": "gpu",
+      "total_wall_s": 12.25
+    },
+    {
+      "name": "copy_channel@4k",
+      "cold_ms": 1857.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 733.8,
+      "preview_p90_ms": 772.9,
+      "export_ms": 679.8,
+      "res": "4k",
+      "node_type": "copy_channel",
+      "exec_class": "gpu",
+      "total_wall_s": 13.57
+    },
+    {
+      "name": "set_alpha@4k",
+      "cold_ms": 1887.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 708.8,
+      "preview_p90_ms": 777.8,
+      "export_ms": 657.9,
+      "res": "4k",
+      "node_type": "set_alpha",
+      "exec_class": "gpu",
+      "total_wall_s": 13.38
+    },
+    {
+      "name": "remove_channels@4k",
+      "cold_ms": 1515.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 666.5,
+      "preview_p90_ms": 682.1,
+      "export_ms": 639.2,
+      "res": "4k",
+      "node_type": "remove_channels",
+      "exec_class": "gpu",
+      "total_wall_s": 11.92
+    },
+    {
+      "name": "invert@4k",
+      "cold_ms": 1409.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.7363,
+        "std": 0.3221
+      },
+      "preview_ms": 653.9,
+      "preview_p90_ms": 672.0,
+      "export_ms": 624.6,
+      "res": "4k",
+      "node_type": "invert",
+      "exec_class": "gpu",
+      "total_wall_s": 11.7
+    },
+    {
+      "name": "clamp@4k",
+      "cold_ms": 1491.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 649.5,
+      "preview_p90_ms": 661.3,
+      "export_ms": 641.1,
+      "res": "4k",
+      "node_type": "clamp",
+      "exec_class": "gpu",
+      "total_wall_s": 11.58
+    },
+    {
+      "name": "normalize@4k",
+      "cold_ms": 1456.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 647.8,
+      "preview_p90_ms": 668.2,
+      "export_ms": 623.5,
+      "res": "4k",
+      "node_type": "normalize",
+      "exec_class": "gpu",
+      "total_wall_s": 11.55
+    },
+    {
+      "name": "channel_merge@4k",
+      "cold_ms": 2438.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1063,
+        "std": 0.1829
+      },
+      "preview_ms": 853.4,
+      "preview_p90_ms": 896.3,
+      "export_ms": 677.1,
+      "res": "4k",
+      "node_type": "channel_merge",
+      "exec_class": "gpu",
+      "total_wall_s": 15.91
+    },
+    {
+      "name": "compare@4k",
+      "cold_ms": 1722.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1634,
+        "std": 0.2127
+      },
+      "preview_ms": 734.5,
+      "preview_p90_ms": 745.2,
+      "export_ms": 617.0,
+      "res": "4k",
+      "node_type": "compare",
+      "exec_class": "gpu",
+      "total_wall_s": 12.96
+    },
+    {
+      "name": "transform@4k",
+      "cold_ms": 1383.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0836,
+        "std": 0.1725
+      },
+      "preview_ms": 599.1,
+      "preview_p90_ms": 632.8,
+      "export_ms": 582.0,
+      "res": "4k",
+      "node_type": "transform",
+      "exec_class": "gpu",
+      "total_wall_s": 11.0
+    },
+    {
+      "name": "reformat@4k",
+      "cold_ms": 1136.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0447,
+        "std": 0.1269
+      },
+      "preview_ms": 242.8,
+      "preview_p90_ms": 266.1,
+      "export_ms": 185.6,
+      "res": "4k",
+      "node_type": "reformat",
+      "exec_class": "gpu",
+      "total_wall_s": 6.65
+    },
+    {
+      "name": "crop@4k",
+      "cold_ms": 1323.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1118,
+        "std": 0.1997
+      },
+      "preview_ms": 633.0,
+      "preview_p90_ms": 644.4,
+      "export_ms": 629.2,
+      "res": "4k",
+      "node_type": "crop",
+      "exec_class": "gpu",
+      "total_wall_s": 11.26
+    },
+    {
+      "name": "cornerpin@4k",
+      "cold_ms": 1407.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1599,
+        "std": 0.2098
+      },
+      "preview_ms": 628.0,
+      "preview_p90_ms": 647.4,
+      "export_ms": 609.1,
+      "res": "4k",
+      "node_type": "cornerpin",
+      "exec_class": "gpu",
+      "total_wall_s": 11.09
+    },
+    {
+      "name": "blend@4k",
+      "cold_ms": 2454.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1042,
+        "std": 0.1919
+      },
+      "preview_ms": 852.2,
+      "preview_p90_ms": 895.6,
+      "export_ms": 733.5,
+      "res": "4k",
+      "node_type": "blend",
+      "exec_class": "gpu",
+      "total_wall_s": 16.05
+    },
+    {
+      "name": "premult@4k",
+      "cold_ms": 1471.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 679.4,
+      "preview_p90_ms": 717.1,
+      "export_ms": 648.2,
+      "res": "4k",
+      "node_type": "premult",
+      "exec_class": "gpu",
+      "total_wall_s": 11.93
+    },
+    {
+      "name": "unpremult@4k",
+      "cold_ms": 1375.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 673.3,
+      "preview_p90_ms": 690.1,
+      "export_ms": 650.3,
+      "res": "4k",
+      "node_type": "unpremult",
+      "exec_class": "gpu",
+      "total_wall_s": 11.77
+    },
+    {
+      "name": "matte@4k",
+      "cold_ms": 1458.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.5028,
+        "std": 0.4481
+      },
+      "preview_ms": 631.7,
+      "preview_p90_ms": 690.0,
+      "export_ms": 628.1,
+      "res": "4k",
+      "node_type": "matte",
+      "exec_class": "gpu",
+      "total_wall_s": 11.57
+    },
+    {
+      "name": "mask_merge@4k",
+      "cold_ms": 1803.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 708.8,
+      "preview_p90_ms": 763.9,
+      "export_ms": 627.4,
+      "res": "4k",
+      "node_type": "mask_merge",
+      "exec_class": "gpu",
+      "total_wall_s": 13.28
+    },
+    {
+      "name": "dissolve@4k",
+      "cold_ms": 1814.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.069,
+        "std": 0.1303
+      },
+      "preview_ms": 766.3,
+      "preview_p90_ms": 771.0,
+      "export_ms": 673.3,
+      "res": "4k",
+      "node_type": "dissolve",
+      "exec_class": "gpu",
+      "total_wall_s": 13.57
+    },
+    {
+      "name": "deep_merge@4k",
+      "cold_ms": 2243.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1042,
+        "std": 0.1919
+      },
+      "preview_ms": 931.6,
+      "preview_p90_ms": 947.3,
+      "export_ms": 745.7,
+      "res": "4k",
+      "node_type": "deep_merge",
+      "exec_class": "gpu",
+      "total_wall_s": 16.19
+    },
+    {
+      "name": "switch@4k",
+      "cold_ms": 1780.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 736.0,
+      "preview_p90_ms": 809.5,
+      "export_ms": 671.3,
+      "res": "4k",
+      "node_type": "switch",
+      "exec_class": "gpu",
+      "total_wall_s": 13.64
+    },
+    {
+      "name": "mask@4k",
+      "cold_ms": 1470.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1338,
+        "std": 0.2011
+      },
+      "preview_ms": 687.6,
+      "preview_p90_ms": 711.7,
+      "export_ms": 607.1,
+      "res": "4k",
+      "node_type": "mask",
+      "exec_class": "gpu",
+      "total_wall_s": 11.98
+    },
+    {
+      "name": "roto_shape@4k",
+      "cold_ms": 1591.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 687.7,
+      "preview_p90_ms": 736.9,
+      "export_ms": 631.9,
+      "res": "4k",
+      "node_type": "roto_shape",
+      "exec_class": "gpu",
+      "total_wall_s": 12.44
+    },
+    {
+      "name": "depth_matte@4k",
+      "cold_ms": 1953.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0984,
+        "std": 0.2826
+      },
+      "preview_ms": 729.1,
+      "preview_p90_ms": 746.0,
+      "export_ms": 599.7,
+      "res": "4k",
+      "node_type": "depth_matte",
+      "exec_class": "gpu",
+      "total_wall_s": 13.54
+    },
+    {
+      "name": "text@4k",
+      "cold_ms": 1067.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0,
+        "std": 0.0,
+        "flat": true
+      },
+      "preview_ms": 603.2,
+      "preview_p90_ms": 617.4,
+      "export_ms": 592.5,
+      "res": "4k",
+      "node_type": "text",
+      "exec_class": "cpu_raster",
+      "total_wall_s": 10.15
+    },
+    {
+      "name": "paint@4k",
+      "cold_ms": 1689.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 835.2,
+      "preview_p90_ms": 861.6,
+      "export_ms": 797.8,
+      "res": "4k",
+      "node_type": "paint",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 14.26
+    },
+    {
+      "name": "particle@4k",
+      "cold_ms": 1307.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0,
+        "std": 0.0015
+      },
+      "preview_ms": 801.6,
+      "preview_p90_ms": 854.3,
+      "export_ms": 793.1,
+      "res": "4k",
+      "node_type": "particle",
+      "exec_class": "cpu_raster",
+      "total_wall_s": 12.74
+    },
+    {
+      "name": "frame_interpolate@4k",
+      "cold_ms": 3935.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0684,
+        "std": 0.1299
+      },
+      "preview_ms": 2536.8,
+      "preview_p90_ms": 2763.5,
+      "export_ms": 2321.9,
+      "res": "4k",
+      "node_type": "frame_interpolate",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 36.18
+    },
+    {
+      "name": "ai_remove@4k",
+      "cold_ms": 1956.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 785.2,
+      "preview_p90_ms": 841.7,
+      "export_ms": 649.4,
+      "res": "4k",
+      "node_type": "ai_remove",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 13.88
+    },
+    {
+      "name": "ai_generate@4k",
+      "cold_ms": 413.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0,
+        "std": 0.0,
+        "flat": true
+      },
+      "preview_ms": 2.0,
+      "preview_p90_ms": 2.6,
+      "export_ms": 1.9,
+      "res": "4k",
+      "node_type": "ai_generate",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 2.75
+    },
+    {
+      "name": "ai_inpaint@4k",
+      "cold_ms": 1032.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0,
+        "std": 0.0,
+        "flat": true
+      },
+      "preview_ms": 2.7,
+      "preview_p90_ms": 3.2,
+      "export_ms": 2.2,
+      "res": "4k",
+      "node_type": "ai_inpaint",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 5.14
+    },
+    {
+      "name": "ai_expand@4k",
+      "cold_ms": 709.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0,
+        "std": 0.0,
+        "flat": true
+      },
+      "preview_ms": 2.6,
+      "preview_p90_ms": 2.7,
+      "export_ms": 2.0,
+      "res": "4k",
+      "node_type": "ai_expand",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 4.08
+    },
+    {
+      "name": "ai_gen_expand@4k",
+      "cold_ms": 1839.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0835,
+        "std": 0.1726
+      },
+      "preview_ms": 761.6,
+      "preview_p90_ms": 1032.7,
+      "export_ms": 591.5,
+      "res": "4k",
+      "node_type": "ai_gen_expand",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 13.93
+    },
+    {
+      "name": "ai_denoise@4k",
+      "cold_ms": 865.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0,
+        "std": 0.0,
+        "flat": true
+      },
+      "preview_ms": 2.3,
+      "preview_p90_ms": 3.1,
+      "export_ms": 2.1,
+      "res": "4k",
+      "node_type": "ai_denoise",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 4.05
+    },
+    {
+      "name": "noise@4k",
+      "cold_ms": 1032.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.2163,
+        "std": 0.2539
+      },
+      "preview_ms": 614.5,
+      "preview_p90_ms": 628.4,
+      "export_ms": 608.7,
+      "res": "4k",
+      "node_type": "noise",
+      "exec_class": "gpu",
+      "total_wall_s": 10.37
+    },
+    {
+      "name": "ramp@4k",
+      "cold_ms": 1257.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.2166,
+        "std": 0.2875
+      },
+      "preview_ms": 608.9,
+      "preview_p90_ms": 631.9,
+      "export_ms": 659.8,
+      "res": "4k",
+      "node_type": "ramp",
+      "exec_class": "gpu",
+      "total_wall_s": 10.86
+    },
+    {
+      "name": "constant@4k",
+      "cold_ms": 1169.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0,
+        "std": 0.0,
+        "flat": true
+      },
+      "preview_ms": 601.6,
+      "preview_p90_ms": 626.5,
+      "export_ms": 591.4,
+      "res": "4k",
+      "node_type": "constant",
+      "exec_class": "gpu",
+      "total_wall_s": 10.59
+    },
+    {
+      "name": "grade@hd",
+      "cold_ms": 418.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 30.8,
+      "preview_p90_ms": 32.9,
+      "export_ms": 69.3,
+      "res": "hd",
+      "node_type": "grade",
+      "exec_class": "gpu",
+      "total_wall_s": 2.11
+    },
+    {
+      "name": "color_correct@hd",
+      "cold_ms": 386.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 31.6,
+      "preview_p90_ms": 32.9,
+      "export_ms": 57.9,
+      "res": "hd",
+      "node_type": "color_correct",
+      "exec_class": "gpu",
+      "total_wall_s": 2.07
+    },
+    {
+      "name": "cs_transform@hd",
+      "cold_ms": 350.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 19.4,
+      "preview_p90_ms": 20.8,
+      "export_ms": 57.4,
+      "res": "hd",
+      "node_type": "cs_transform",
+      "exec_class": "gpu",
+      "total_wall_s": 1.95
+    },
+    {
+      "name": "huecorrect@hd",
+      "cold_ms": 463.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 30.4,
+      "preview_p90_ms": 36.5,
+      "export_ms": 68.7,
+      "res": "hd",
+      "node_type": "huecorrect",
+      "exec_class": "gpu",
+      "total_wall_s": 2.42
+    },
+    {
+      "name": "lut@hd",
+      "cold_ms": 390.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 29.4,
+      "preview_p90_ms": 34.4,
+      "export_ms": 61.9,
+      "res": "hd",
+      "node_type": "lut",
+      "exec_class": "gpu",
+      "total_wall_s": 2.06
+    },
+    {
+      "name": "topos_color@hd",
+      "cold_ms": 340.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 20.4,
+      "preview_p90_ms": 21.5,
+      "export_ms": 80.6,
+      "res": "hd",
+      "node_type": "topos_color",
+      "exec_class": "gpu",
+      "total_wall_s": 1.98
+    },
+    {
+      "name": "blur@hd",
+      "cold_ms": 502.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.23,
+        "std": 59.4776
+      },
+      "preview_ms": 31.4,
+      "preview_p90_ms": 34.1,
+      "export_ms": 74.6,
+      "res": "hd",
+      "node_type": "blur",
+      "exec_class": "gpu",
+      "total_wall_s": 2.52
+    },
+    {
+      "name": "glow@hd",
+      "cold_ms": 363.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 111.0407,
+        "std": 63.5314
+      },
+      "preview_ms": 22.1,
+      "preview_p90_ms": 25.7,
+      "export_ms": 80.3,
+      "res": "hd",
+      "node_type": "glow",
+      "exec_class": "gpu",
+      "total_wall_s": 2.29
+    },
+    {
+      "name": "denoise@hd",
+      "cold_ms": 306.2,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 20.2,
+      "preview_p90_ms": 21.7,
+      "export_ms": 77.2,
+      "res": "hd",
+      "node_type": "denoise",
+      "exec_class": "gpu",
+      "total_wall_s": 1.99
+    },
+    {
+      "name": "sharpen@hd",
+      "cold_ms": 391.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 108.9636,
+        "std": 59.9806
+      },
+      "preview_ms": 23.5,
+      "preview_p90_ms": 26.0,
+      "export_ms": 63.8,
+      "res": "hd",
+      "node_type": "sharpen",
+      "exec_class": "gpu",
+      "total_wall_s": 2.08
+    },
+    {
+      "name": "erode_dilate@hd",
+      "cold_ms": 363.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 28.3,
+      "preview_p90_ms": 30.1,
+      "export_ms": 75.9,
+      "res": "hd",
+      "node_type": "erode_dilate",
+      "exec_class": "gpu",
+      "total_wall_s": 2.07
+    },
+    {
+      "name": "defocus@hd",
+      "cold_ms": 385.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.5993,
+        "std": 58.9179
+      },
+      "preview_ms": 21.1,
+      "preview_p90_ms": 21.6,
+      "export_ms": 63.8,
+      "res": "hd",
+      "node_type": "defocus",
+      "exec_class": "gpu",
+      "total_wall_s": 1.99
+    },
+    {
+      "name": "edge_detect@hd",
+      "cold_ms": 316.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 1.3516,
+        "std": 18.5158
+      },
+      "preview_ms": 21.5,
+      "preview_p90_ms": 22.6,
+      "export_ms": 48.4,
+      "res": "hd",
+      "node_type": "edge_detect",
+      "exec_class": "gpu",
+      "total_wall_s": 1.82
+    },
+    {
+      "name": "relight@hd",
+      "cold_ms": 589.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 7.1598,
+        "std": 28.526
+      },
+      "preview_ms": 67.3,
+      "preview_p90_ms": 72.5,
+      "export_ms": 57.7,
+      "res": "hd",
+      "node_type": "relight",
+      "exec_class": "gpu",
+      "total_wall_s": 3.18
+    },
+    {
+      "name": "fog@hd",
+      "cold_ms": 488.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 129.9719,
+        "std": 50.0141
+      },
+      "preview_ms": 52.1,
+      "preview_p90_ms": 231.1,
+      "export_ms": 65.4,
+      "res": "hd",
+      "node_type": "fog",
+      "exec_class": "gpu",
+      "total_wall_s": 2.71
+    },
+    {
+      "name": "godrays@hd",
+      "cold_ms": 523.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 159.4348,
+        "std": 37.2633
+      },
+      "preview_ms": 63.1,
+      "preview_p90_ms": 218.1,
+      "export_ms": 76.2,
+      "res": "hd",
+      "node_type": "godrays",
+      "exec_class": "gpu",
+      "total_wall_s": 2.98
+    },
+    {
+      "name": "chromatic_aberration@hd",
+      "cold_ms": 380.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0405,
+        "std": 59.9578
+      },
+      "preview_ms": 32.6,
+      "preview_p90_ms": 38.2,
+      "export_ms": 69.2,
+      "res": "hd",
+      "node_type": "chromatic_aberration",
+      "exec_class": "gpu",
+      "total_wall_s": 2.15
+    },
+    {
+      "name": "vignette@hd",
+      "cold_ms": 344.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 95.118,
+        "std": 58.9972
+      },
+      "preview_ms": 31.3,
+      "preview_p90_ms": 57.6,
+      "export_ms": 85.6,
+      "res": "hd",
+      "node_type": "vignette",
+      "exec_class": "gpu",
+      "total_wall_s": 2.14
+    },
+    {
+      "name": "lens_flare@hd",
+      "cold_ms": 340.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 112.069,
+        "std": 58.842
+      },
+      "preview_ms": 40.5,
+      "preview_p90_ms": 103.9,
+      "export_ms": 76.8,
+      "res": "hd",
+      "node_type": "lens_flare",
+      "exec_class": "gpu",
+      "total_wall_s": 2.15
+    },
+    {
+      "name": "lens_distortion@hd",
+      "cold_ms": 406.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 41.2,
+      "preview_p90_ms": 121.0,
+      "export_ms": 67.9,
+      "res": "hd",
+      "node_type": "lens_distortion",
+      "exec_class": "gpu",
+      "total_wall_s": 2.37
+    },
+    {
+      "name": "deflicker@hd",
+      "cold_ms": 655.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 400.9,
+      "preview_p90_ms": 505.0,
+      "export_ms": 80.9,
+      "res": "hd",
+      "node_type": "deflicker",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 5.46
+    },
+    {
+      "name": "keyer@hd",
+      "cold_ms": 609.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 106.7317,
+        "std": 61.1852
+      },
+      "preview_ms": 74.0,
+      "preview_p90_ms": 125.8,
+      "export_ms": 71.5,
+      "res": "hd",
+      "node_type": "keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 3.13
+    },
+    {
+      "name": "chroma_keyer@hd",
+      "cold_ms": 494.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 0.7201,
+        "std": 7.0203
+      },
+      "preview_ms": 51.1,
+      "preview_p90_ms": 61.0,
+      "export_ms": 66.2,
+      "res": "hd",
+      "node_type": "chroma_keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 2.75
+    },
+    {
+      "name": "luma_keyer@hd",
+      "cold_ms": 372.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 30.5,
+      "preview_p90_ms": 31.6,
+      "export_ms": 76.0,
+      "res": "hd",
+      "node_type": "luma_keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 2.22
+    },
+    {
+      "name": "difference_keyer@hd",
+      "cold_ms": 508.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 80.2005,
+        "std": 75.8127
+      },
+      "preview_ms": 78.6,
+      "preview_p90_ms": 205.0,
+      "export_ms": 74.1,
+      "res": "hd",
+      "node_type": "difference_keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 2.83
+    },
+    {
+      "name": "light_wrap@hd",
+      "cold_ms": 493.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 93.5623,
+        "std": 55.2835
+      },
+      "preview_ms": 63.7,
+      "preview_p90_ms": 214.7,
+      "export_ms": 70.4,
+      "res": "hd",
+      "node_type": "light_wrap",
+      "exec_class": "gpu",
+      "total_wall_s": 2.87
+    },
+    {
+      "name": "shuffle@hd",
+      "cold_ms": 351.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 25.8,
+      "preview_p90_ms": 32.5,
+      "export_ms": 79.4,
+      "res": "hd",
+      "node_type": "shuffle",
+      "exec_class": "gpu",
+      "total_wall_s": 2.02
+    },
+    {
+      "name": "copy_channel@hd",
+      "cold_ms": 480.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 66.3,
+      "preview_p90_ms": 215.1,
+      "export_ms": 61.9,
+      "res": "hd",
+      "node_type": "copy_channel",
+      "exec_class": "gpu",
+      "total_wall_s": 2.95
+    },
+    {
+      "name": "set_alpha@hd",
+      "cold_ms": 477.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 88.8,
+      "preview_p90_ms": 222.1,
+      "export_ms": 75.2,
+      "res": "hd",
+      "node_type": "set_alpha",
+      "exec_class": "gpu",
+      "total_wall_s": 3.0
+    },
+    {
+      "name": "remove_channels@hd",
+      "cold_ms": 321.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 23.5,
+      "preview_p90_ms": 25.5,
+      "export_ms": 77.7,
+      "res": "hd",
+      "node_type": "remove_channels",
+      "exec_class": "gpu",
+      "total_wall_s": 2.02
+    },
+    {
+      "name": "invert@hd",
+      "cold_ms": 352.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 227.1594,
+        "std": 27.791
+      },
+      "preview_ms": 35.6,
+      "preview_p90_ms": 94.0,
+      "export_ms": 58.6,
+      "res": "hd",
+      "node_type": "invert",
+      "exec_class": "gpu",
+      "total_wall_s": 2.31
+    },
+    {
+      "name": "clamp@hd",
+      "cold_ms": 371.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 39.5,
+      "preview_p90_ms": 72.0,
+      "export_ms": 74.0,
+      "res": "hd",
+      "node_type": "clamp",
+      "exec_class": "gpu",
+      "total_wall_s": 2.35
+    },
+    {
+      "name": "normalize@hd",
+      "cold_ms": 367.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 38.3,
+      "preview_p90_ms": 106.8,
+      "export_ms": 84.1,
+      "res": "hd",
+      "node_type": "normalize",
+      "exec_class": "gpu",
+      "total_wall_s": 2.22
+    },
+    {
+      "name": "channel_merge@hd",
+      "cold_ms": 798.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 108.5315,
+        "std": 58.5014
+      },
+      "preview_ms": 110.9,
+      "preview_p90_ms": 415.3,
+      "export_ms": 60.6,
+      "res": "hd",
+      "node_type": "channel_merge",
+      "exec_class": "gpu",
+      "total_wall_s": 4.14
+    },
+    {
+      "name": "compare@hd",
+      "cold_ms": 471.1,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 89.471,
+        "std": 55.4509
+      },
+      "preview_ms": 41.4,
+      "preview_p90_ms": 45.7,
+      "export_ms": 66.4,
+      "res": "hd",
+      "node_type": "compare",
+      "exec_class": "gpu",
+      "total_wall_s": 2.59
+    },
+    {
+      "name": "transform@hd",
+      "cold_ms": 340.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 103.0662,
+        "std": 64.0072
+      },
+      "preview_ms": 15.1,
+      "preview_p90_ms": 40.0,
+      "export_ms": 56.5,
+      "res": "hd",
+      "node_type": "transform",
+      "exec_class": "gpu",
+      "total_wall_s": 1.98
+    },
+    {
+      "name": "reformat@hd",
+      "cold_ms": 345.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 30.0,
+      "preview_p90_ms": 69.9,
+      "export_ms": 72.5,
+      "res": "hd",
+      "node_type": "reformat",
+      "exec_class": "gpu",
+      "total_wall_s": 2.06
+    },
+    {
+      "name": "crop@hd",
+      "cold_ms": 347.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 92.8696,
+        "std": 71.7202
+      },
+      "preview_ms": 29.3,
+      "preview_p90_ms": 33.0,
+      "export_ms": 60.0,
+      "res": "hd",
+      "node_type": "crop",
+      "exec_class": "gpu",
+      "total_wall_s": 1.95
+    },
+    {
+      "name": "cornerpin@hd",
+      "cold_ms": 304.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 17.4,
+      "preview_p90_ms": 22.5,
+      "export_ms": 50.1,
+      "res": "hd",
+      "node_type": "cornerpin",
+      "exec_class": "gpu",
+      "total_wall_s": 1.83
+    },
+    {
+      "name": "blend@hd",
+      "cold_ms": 1013.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 97.6877,
+        "std": 51.5138
+      },
+      "preview_ms": 76.5,
+      "preview_p90_ms": 275.1,
+      "export_ms": 77.5,
+      "res": "hd",
+      "node_type": "blend",
+      "exec_class": "gpu",
+      "total_wall_s": 3.78
+    },
+    {
+      "name": "premult@hd",
+      "cold_ms": 415.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 20.9,
+      "preview_p90_ms": 23.9,
+      "export_ms": 70.0,
+      "res": "hd",
+      "node_type": "premult",
+      "exec_class": "gpu",
+      "total_wall_s": 2.03
+    },
+    {
+      "name": "unpremult@hd",
+      "cold_ms": 360.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 26.8,
+      "preview_p90_ms": 101.2,
+      "export_ms": 84.8,
+      "res": "hd",
+      "node_type": "unpremult",
+      "exec_class": "gpu",
+      "total_wall_s": 2.19
+    },
+    {
+      "name": "matte@hd",
+      "cold_ms": 702.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 212.3597,
+        "std": 64.2525
+      },
+      "preview_ms": 13.9,
+      "preview_p90_ms": 113.2,
+      "export_ms": 60.8,
+      "res": "hd",
+      "node_type": "matte",
+      "exec_class": "gpu",
+      "total_wall_s": 2.35
+    },
+    {
+      "name": "mask_merge@hd",
+      "cold_ms": 486.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 46.1,
+      "preview_p90_ms": 117.4,
+      "export_ms": 68.0,
+      "res": "hd",
+      "node_type": "mask_merge",
+      "exec_class": "gpu",
+      "total_wall_s": 2.65
+    },
+    {
+      "name": "dissolve@hd",
+      "cold_ms": 449.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 108.9902,
+        "std": 45.0799
+      },
+      "preview_ms": 18.9,
+      "preview_p90_ms": 255.4,
+      "export_ms": 56.7,
+      "res": "hd",
+      "node_type": "dissolve",
+      "exec_class": "gpu",
+      "total_wall_s": 2.52
+    },
+    {
+      "name": "deep_merge@hd",
+      "cold_ms": 796.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 97.6877,
+        "std": 51.5138
+      },
+      "preview_ms": 92.3,
+      "preview_p90_ms": 280.4,
+      "export_ms": 71.5,
+      "res": "hd",
+      "node_type": "deep_merge",
+      "exec_class": "gpu",
+      "total_wall_s": 3.87
+    },
+    {
+      "name": "switch@hd",
+      "cold_ms": 486.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 34.8,
+      "preview_p90_ms": 107.8,
+      "export_ms": 68.4,
+      "res": "hd",
+      "node_type": "switch",
+      "exec_class": "gpu",
+      "total_wall_s": 2.65
+    },
+    {
+      "name": "mask@hd",
+      "cold_ms": 400.7,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 71.1375,
+        "std": 65.2155
+      },
+      "preview_ms": 21.5,
+      "preview_p90_ms": 119.7,
+      "export_ms": 58.0,
+      "res": "hd",
+      "node_type": "mask",
+      "exec_class": "gpu",
+      "total_wall_s": 2.31
+    },
+    {
+      "name": "roto_shape@hd",
+      "cold_ms": 319.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 11.0,
+      "preview_p90_ms": 255.3,
+      "export_ms": 64.0,
+      "res": "hd",
+      "node_type": "roto_shape",
+      "exec_class": "gpu",
+      "total_wall_s": 2.09
+    },
+    {
+      "name": "depth_matte@hd",
+      "cold_ms": 494.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 45.8725,
+        "std": 92.0438
+      },
+      "preview_ms": 38.7,
+      "preview_p90_ms": 54.5,
+      "export_ms": 56.0,
+      "res": "hd",
+      "node_type": "depth_matte",
+      "exec_class": "gpu",
+      "total_wall_s": 2.6
+    },
+    {
+      "name": "text@hd",
+      "cold_ms": 241.9,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 0.0347,
+        "std": 2.9735
+      },
+      "preview_ms": 35.7,
+      "preview_p90_ms": 116.8,
+      "export_ms": 60.8,
+      "res": "hd",
+      "node_type": "text",
+      "exec_class": "cpu_raster",
+      "total_wall_s": 1.91
+    },
+    {
+      "name": "paint@hd",
+      "cold_ms": 328.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 31.4,
+      "preview_p90_ms": 83.0,
+      "export_ms": 49.7,
+      "res": "hd",
+      "node_type": "paint",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 2.04
+    },
+    {
+      "name": "particle@hd",
+      "cold_ms": 512.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 0.012,
+        "std": 1.2127
+      },
+      "preview_ms": 282.0,
+      "preview_p90_ms": 417.8,
+      "export_ms": 60.4,
+      "res": "hd",
+      "node_type": "particle",
+      "exec_class": "cpu_raster",
+      "total_wall_s": 3.77
+    },
+    {
+      "name": "frame_interpolate@hd",
+      "cold_ms": 863.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0029,
+        "std": 45.0849
+      },
+      "preview_ms": 352.1,
+      "preview_p90_ms": 420.8,
+      "export_ms": 67.0,
+      "res": "hd",
+      "node_type": "frame_interpolate",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 5.37
+    },
+    {
+      "name": "ai_remove@hd",
+      "cold_ms": 451.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 25.1,
+      "preview_p90_ms": 45.3,
+      "export_ms": 66.3,
+      "res": "hd",
+      "node_type": "ai_remove",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 2.75
+    },
+    {
+      "name": "ai_generate@hd",
+      "cold_ms": 131.6,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "res": "hd",
+      "node_type": "ai_generate",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 0.13
+    },
+    {
+      "name": "ai_inpaint@hd",
+      "cold_ms": 340.3,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "res": "hd",
+      "node_type": "ai_inpaint",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 0.34
+    },
+    {
+      "name": "ai_expand@hd",
+      "cold_ms": 237.1,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "res": "hd",
+      "node_type": "ai_expand",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 0.24
+    },
+    {
+      "name": "ai_gen_expand@hd",
+      "cold_ms": 574.0,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 39.4,
+      "preview_p90_ms": 64.0,
+      "export_ms": 57.9,
+      "res": "hd",
+      "node_type": "ai_gen_expand",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 2.74
+    },
+    {
+      "name": "ai_denoise@hd",
+      "cold_ms": 241.6,
+      "output": {
+        "ok": false,
+        "error": "render returned None"
+      },
+      "error": "render returned None",
+      "res": "hd",
+      "node_type": "ai_denoise",
+      "exec_class": "cpu_readback",
+      "total_wall_s": 0.24
+    },
+    {
+      "name": "noise@hd",
+      "cold_ms": 264.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 186.9307,
+        "std": 14.6156
+      },
+      "preview_ms": 6.3,
+      "preview_p90_ms": 7.0,
+      "export_ms": 65.1,
+      "res": "hd",
+      "node_type": "noise",
+      "exec_class": "gpu",
+      "total_wall_s": 1.51
+    },
+    {
+      "name": "ramp@hd",
+      "cold_ms": 225.4,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 181.0593,
+        "std": 43.0491
+      },
+      "preview_ms": 8.6,
+      "preview_p90_ms": 9.4,
+      "export_ms": 69.9,
+      "res": "hd",
+      "node_type": "ramp",
+      "exec_class": "gpu",
+      "total_wall_s": 1.44
+    },
+    {
+      "name": "constant@hd",
+      "cold_ms": 260.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 0.0,
+        "std": 0.0,
+        "flat": true
+      },
+      "preview_ms": 9.5,
+      "preview_p90_ms": 10.7,
+      "export_ms": 58.6,
+      "res": "hd",
+      "node_type": "constant",
+      "exec_class": "gpu",
+      "total_wall_s": 1.67
+    }
+  ],
+  "video": [
+    {
+      "name": "video_frame_4k_h264",
+      "material": "2620吉利调色1.mp4",
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.0,
+        "std": 0.0,
+        "flat": true
+      },
+      "preview_ms": 1042.6,
+      "preview_max_ms": 5118.2
+    },
+    {
+      "name": "video_frame_hd_h264",
+      "material": "260616五菱调色2.mov",
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 121.3141,
+        "std": 57.2606
+      },
+      "preview_ms": 79.7,
+      "preview_max_ms": 109.4
+    },
+    {
+      "name": "video_frame_4k_prores4444",
+      "material": "1.mov",
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1409,
+        "std": 0.1614
+      },
+      "preview_ms": 911.2,
+      "preview_max_ms": 983.1
+    }
+  ],
+  "baseline": {
+    "4k": {
+      "name": "baseline_4k",
+      "cold_ms": 1471.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          2160,
+          3840,
+          3
+        ],
+        "dtype": "float32",
+        "mean": 0.1598,
+        "std": 0.2098
+      },
+      "preview_ms": 509.4,
+      "preview_p90_ms": 537.3,
+      "export_ms": 499.7
+    },
+    "hd": {
+      "name": "baseline_hd",
+      "cold_ms": 298.8,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 109.0265,
+        "std": 59.9788
+      },
+      "preview_ms": 18.2,
+      "preview_p90_ms": 23.9,
+      "export_ms": 57.9
+    }
+  }
+}

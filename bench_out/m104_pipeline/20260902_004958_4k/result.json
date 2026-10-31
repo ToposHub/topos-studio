@@ -1,0 +1,38 @@
+{
+ "meta": {
+  "res": "4k",
+  "frames": 48,
+  "slice_rows": 16,
+  "logical_cpus": 24,
+  "cpu": "Genuine Intel(R) 0000",
+  "topos_commit": "e291c87b"
+ },
+ "rows": {
+  "t8": {
+   "serial": {
+    "fps": 17.7
+   },
+   "pipeline_w2": {
+    "fps": 18.5,
+    "bitexact_vs_serial": true
+   },
+   "pipeline_w3": {
+    "fps": 18.4,
+    "bitexact_vs_serial": true
+   }
+  },
+  "t16": {
+   "serial": {
+    "fps": 17.5
+   },
+   "pipeline_w2": {
+    "fps": 18.2,
+    "bitexact_vs_serial": true
+   },
+   "pipeline_w3": {
+    "fps": 18.1,
+    "bitexact_vs_serial": true
+   }
+  }
+ }
+}

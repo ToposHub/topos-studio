@@ -1,0 +1,43 @@
+{
+  "date": "2026-09-12T11:50:47",
+  "plan_item": "W5-03 前置 probe：HDR/高级色显示能力（本机）",
+  "probe_ok": true,
+  "hdr_active_any_output": false,
+  "output_count": 1,
+  "outputs": [
+    {
+      "adapter": "NVIDIA GeForce RTX 4090",
+      "adapter_vendor": "0x10DE",
+      "device_name": "\\\\.\\DISPLAY1",
+      "monitor": "0x10001",
+      "bits_per_color": 8,
+      "color_space": 0,
+      "color_space_name": "RGB_FULL_G22_NONE_P709 (SDR sRGB)",
+      "red_primary": [
+        0.0,
+        0.0
+      ],
+      "green_primary": [
+        0.0,
+        0.0
+      ],
+      "blue_primary": [
+        0.0,
+        0.0
+      ],
+      "white_point": [
+        0.0,
+        0.0
+      ],
+      "min_luminance_nits": 0.0,
+      "max_luminance_nits": 0.0,
+      "max_full_frame_luminance_nits": 0.0,
+      "hdr_active": false,
+      "idxgioutput6": true,
+      "vtable_sanity": "ok",
+      "getdesc_hr": "0x00000000"
+    }
+  ],
+  "note": "ColorSpace 反映当前高级色状态：SDR(0) 不代表显示器无 HDR 能力，只代表 Windows「使用 HDR」未启用；W5-03 裁决前需在该显示器上开启 HDR 复测。",
+  "machine_note": "NVIDIA RTX 4090 真机（批次：NVIDIA 收口）"
+}

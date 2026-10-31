@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "template_id": "particle-flow-background",
+  "display_name": "粒子流光背景",
+  "display_name_i18n": {
+    "en_US": "Particle Flow Background"
+  },
+  "description": "深色网格上的青蓝粒子流与柔和光晕，可作为视频内容的动态背景。",
+  "description_i18n": {
+    "en_US": "Cyan particle streams with soft glows over a dark grid, usable as an animated backdrop for video content."
+  },
+  "version": 1,
+  "template_file": "template.html",
+  "preview_file": "preview.gif",
+  "viewport_width": 1920,
+  "viewport_height": 1080,
+  "fps_num": 24,
+  "fps_den": 1,
+  "duration_frames": 240,
+  "params_schema": [
+    {
+      "name": "accent",
+      "type": "color",
+      "default": "#22d9ff",
+      "description": "粒子与光晕主色",
+      "description_i18n": {"en_US": "Primary color of particles and glows"}
+    },
+    {
+      "name": "particle_density",
+      "type": "integer",
+      "default": 150,
+      "description": "同时漂浮的粒子数量",
+      "description_i18n": {"en_US": "Number of particles floating at once"}
+    },
+    {
+      "name": "motion_speed",
+      "type": "number",
+      "default": 0.72,
+      "description": "粒子移动速度倍率",
+      "description_i18n": {"en_US": "Particle movement speed multiplier"}
+    }
+  ],
+  "metadata": {
+    "render_profile": "motion_graphic_freeform",
+    "allow_inline_scripts": true,
+    "allow_freeform_css": true,
+    "parameter_ui": {
+      "particle_density": {"min": 24, "max": 360, "step": 1, "decimals": 0},
+      "motion_speed": {"min": 0.1, "max": 2.5, "step": 0.01, "decimals": 2}
+    }
+  }
+}

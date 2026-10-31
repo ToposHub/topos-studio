@@ -1,0 +1,171 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "topos"
+version = "3.0.0"
+description = "Professional color grading, editing, and compositing suite"
+license = "GPL-3.0-only"
+requires-python = ">=3.10"
+dependencies = [
+    # P1-DEP-01：核心依赖下限与 requirements.txt 保持一致（README 声明
+    # PyQt6 ≥ 6.10 为硬性要求——file_explorer 前端依赖 QtWebEngine 6.10
+    # 的 Chromium ≥ 122）；本文件是依赖的单一事实源。
+    "PyQt6>=6.10.2",
+    "PyQt6-Qt6>=6.10.2",
+    "PyQt6-WebEngine>=6.10.0",
+    "PyQt6-WebEngine-Qt6>=6.10.2",
+    "QtAwesome>=1.4.1",
+    "moderngl>=5.12.0",
+    # [R4-3] 渲染热路径大量 `from OpenGL import GL`；缺失时 Linux/Windows
+    # 的 Edit/Composite 页面整体禁用（此前只在 macos extra 里）
+    "PyOpenGL>=3.1.10",
+    "numpy>=1.22.1",
+    "opencv-python>=4.11.0",
+    "pillow>=12.0.0",
+    "pillow-heif>=1.3.0",
+    "rawpy>=0.25.0",
+    "scipy>=1.17.0",
+    "onnxruntime>=1.23.0",
+    "send2trash>=2.1.0",
+    "flask>=3.1.0",
+    # [R4-3] 嵌入模式 file_explorer 的生产级 WSGI 后端（ARCH-8）
+    "waitress>=3.0.0",
+    "psutil>=7.2.0",
+    "msgpack>=1.0.0",
+    "av>=10.0.0",
+    # OCIO (OpenColorIO) is a REQUIRED dependency for the color management
+    # system. The pip package `opencolorio` installs the importable module
+    # `PyOpenColorIO`.
+    "opencolorio>=2.2.0",
+    # [R4-3] composite render3d 的 3D 模型导入（软依赖，缺失时降级 procedural
+    # 几何；pyassimp 的 FBX 支持另需系统级 libassimp）
+    "trimesh>=4.0.0",
+    "pyassimp>=4.1.4",
+    # AI Editing: API key/凭据存系统钥匙串（macOS Keychain / Windows Credential
+    # Manager / Linux Secret Service）。profile 本身不存 secret（TAEP §11.4）。
+    "keyring>=25.0.0",
+]
+
+[project.optional-dependencies]
+# W06（Windows 计划项）：Windows cuda 驻留解码（NVDEC→GL interop 零拷贝，
+# opt-in 开关 TOPOS_WIN_HW_RESIDENT_DECODE）的可选运行时绑定。核心依赖
+# 刻意不含 CUDA——无 extra 的安装按 fail-closed 走下载 planar/CPU 路径
+# （probe_cuda_resident_capability 如实报缺，不冒充驻留）。实测矩阵
+# （机器 B，docs/validation/upgrade_2026-10-24/W00 与 W06）：
+# av 18.1.0（FFmpeg 8.1.2）× cuda-bindings 13.4.2（driver 13050）。
+# 打包侧收集见 packaging/pyinstaller/base_spec._collect_cuda_bindings。
+cuda-windows = [
+    "cuda-bindings>=13.0.0,<14",
+]
+macos = [
+    "pyobjc-framework-VideoToolbox",
+    # 注意：pyobjc-framework-CoreVideo 在 PyPI 上不存在独立包（README §8.2），
+    # CoreVideo 功能包含在 pyobjc-framework-CoreMedia 中——勿再添加。
+    "pyobjc-framework-CoreMedia",
+    "pyobjc-framework-Quartz",
+    "pyobjc-framework-IOSurface",
+    # §9.2：Metal probe/后续 Metal 后端绑定。probe 实测 12.1/12.2 可用，
+    # 不固定下限会导致"环境偶然性"（曾在临时 venv 跑通后消失）。
+    "pyobjc-framework-Metal>=12.1,<13",
+]
+dev = [
+    "pytest",
+    "pytest-qt",
+    "tomli>=2.0; python_version < '3.11'",
+]
+# HTML motion-layer renderer: the pinned external headless browser that
+# captures deterministic RGBA for freeform HTML scenes (ADR 0001/0002).
+# The python package is pinned; the matching browser binary is installed via
+# `playwright install chromium` (see scripts/bootstrap_html_renderer.sh and
+# .github/workflows/html-renderer-gate.yml). Pinning both sides is what makes
+# backend_build = playwright-chromium/py1.62.0/chrome-151.0.7922.34 reproducible
+# across machines and CI — a floating browser would silently change the pixels
+# and break the W0-A determinism gate.
+html-renderer = [
+    "playwright==1.62.0",
+    "pillow",        # PNG decode (already a core dep; listed for extra isolation)
+]
+
+[project.scripts]
+topos-studio = "apps.topos_studio.main:main"
+topos-color = "apps.topos_color.main:main"
+topos-edit = "apps.topos_edit.main:main"
+topos-composite = "apps.topos_composite.main:main"
+toposctl = "src.features.edit.ai_editing.toposctl:main"
+topos-vault = "apps.topos_vault.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "apps*"]
+
+[tool.setuptools.package-data]
+"src.features.teaching_animation" = [
+    "templates/motion_graphic/**/*",
+    "presets/**/*",
+    "locales/*.json",
+]
+# R-11: the shared i18n locale tables must ship too — without them every
+# feature's shared-namespace translations silently fall back to English
+# on a clean machine.
+"src.shared.i18n" = [
+    "locales/*.json",
+]
+"src.shared.control_surfaces.tangent" = [
+    "assets/*.xml",
+    "assets/**/*.xml",
+]
+# T21/G2: insights 子包自有词条随 wheel 分发（与 teaching_animation 同型）。
+"src.features.edit.insights" = [
+    "locales/*.json",
+]
+
+# pytest 配置只保留根目录 pytest.ini 一处（R4-4：双份维护易漂移，
+# 且 pytest.ini 优先级更高，[tool.pytest.ini_options] 实际被忽略）。
+
+# ============================================================================
+# P2 质量还债（2026-10-28）：lint + 类型检查工具链
+# 定位：存量注解率 93%，本配置是"上锁防退化"不是"还巨额欠债"。
+# 起步口径（宽松）：E9/F63/F7/F82（语法/未定义名级，零误报基线）。
+# 收紧节奏见 docs/code_quality_debt_plan_2026-10-28.md P2——逐轮加规则
+# 逐轮清零，每轮独立提交。CI lint 门禁在 pr-fast-gate.yml 挂 required。
+# ============================================================================
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+# 排除：生成物/第三方/外部仓库
+exclude = [
+    ".venv",
+    "external",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# 第 1 轮：E9/F63/F7/F82（零误报集）；第 3 轮起收紧为 F 全量（pyflakes，
+# 2026-10-28 已全量清零：F401/F811/F402/F601 实删、F541 自动修、F841 处置、
+# F403 为插件聚合语义 noqa 登记在案）。后续收紧节奏按计划 P2 逐轮推进。
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# scripting 控制台示例：`topos` 由应用脚本运行时注入（非 importable 模块），
+# F821 对它们是设计内的假阳性（P2 首轮甄别结论：33 处全部此因，无真 bug）。
+"src/features/scripting/examples/*" = ["F821"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "silent"
+# 增量上线路径：先小而稳的域，逐轮扩 files 并当轮清零（P2 步骤 2）
+files = [
+    "src/shared/logging",
+    "src/shared/paths",
+    "src/shared/io",
+    "src/shared/diagnostics",
+    "src/shared/layout",
+    "src/shared/preferences",
+    "src/products",
+    "src/main.py",
+]

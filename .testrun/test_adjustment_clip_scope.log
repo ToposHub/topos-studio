@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_adjustment_clip_scope.py ....                            [100%]
+
+============================== 4 passed in 9.20s ===============================

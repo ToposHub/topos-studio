@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "result": {
+    "before": {
+      "view": 250,
+      "controller": 0,
+      "page": 250
+    },
+    "cues": [
+      [
+        "44b525ba-ce25-4cfb-8bec-89ca8b984b01",
+        "Hi, world",
+        10
+      ],
+      [
+        "6978fea2-5452-40db-823d-c033e1b10308",
+        "Second caption",
+        53
+      ],
+      [
+        "4c921d72-9045-4556-ae6c-e4362e2760b7",
+        "world",
+        10
+      ]
+    ],
+    "after_find": {
+      "view": 250,
+      "controller": 0,
+      "page": 250,
+      "selected": [
+        "44b525ba-ce25-4cfb-8bec-89ca8b984b01"
+      ],
+      "status": "1 match(es) for 'Hi'."
+    },
+    "home": {
+      "view": 250,
+      "controller": 0,
+      "page": 250
+    },
+    "next": {
+      "view": 250,
+      "controller": 1,
+      "page": 250
+    }
+  }
+}

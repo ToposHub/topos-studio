@@ -1,0 +1,103 @@
+// --- Topos Plugin Metadata ---
+// @name Multiscale Halation
+// @i18n_name LIB1_Multiscale_Halation
+// @author Topos Library v1
+// @version 0.1.0
+// @description Highlight halation: two-scale golden-ring diffusion (true multiscale needs native multi-pass renderer), soft-knee extraction, red scatter energy weighting; this draft is the single-scale degraded mode
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost medium
+// @param slider strength "Strength" 0.5 0.0 1.0
+// @param slider radius "Radius" 0.5 0.0 1.0
+// @param slider red_scatter "Red Scatter" 0.5 0.0 1.0
+// @param slider threshold "Highlight Threshold" 0.55 0.0 1.0
+// -----------------------------
+//
+// Multiscale Halation —— 多尺度高光红晕（L 计划 F06，LIB1）。
+//
+// 差量（L00 台账 F06 行）：Halation_Extended 是单尺度 13-tap ADR 核 +
+// HSV 重着色；Film_Halation 是空壳。本项差量 = 两尺度扩散（大尺度
+// radius*2 权重 0.6 + 小尺度 radius 权重 0.4，均为固定 12-tap 黄金角
+// 环采样）+ 红色散射能量权重（R 增益 (1+w)、B 增益 (1-0.5w)）+
+// 软膝阈值/能量控制。
+//
+// **多 pass 红线（本文件是降级草稿）**：真多尺度结构为——
+//   pass1  E = color * smoothstep(thr, thr+0.35, luma)（点态提取）
+//   pass2  big = ring12(E, 2R)   pass3  small = ring12(E, R)
+//   pass4  halo = 0.6*big + 0.4*small → 红重着色 → 加性叠加
+// 不能强塞成一份 .tglsl；由原生 renderer 的多 pass 支持（EffectSpec）
+// 承接，本暂存 .tglsl 只交付**单尺度（小尺度 R）单 pass 降级模式**：
+// 12-tap 黄金角环 + 逐 tap 软膝门控（多 pass 版是 E 场先提取后扩散，
+// 两者仅在软膝过渡带有差异，见 README 声明）。
+//
+// 设计要点：
+// - 12-tap 黄金角环：方向 i*137.50776°、等面积距离 sqrt((i+0.5)/12)
+//   全部编译期 const 数组（零运行期三角函数）；
+// - 半径映射沿用 Halation_Extended 口径（0..1 → 画幅宽 0.4%–3.0%，
+//   下限 2px）；采样 UV 钳到半纹素（clamp-to-edge 保险）；
+// - 软膝门控 smoothstep(threshold, threshold+0.35, luma) 只作用于
+//   高光能量权重，输出基色不被钳制（HDR 安全）；
+// - strength=0 首行早退精确恒等；纯静态确定性；
+// - 参数 ABI 裸名引用；u_input_tex 为引擎注入白名单 uniform；
+//   参数名避开 GLSL 保留字（length/mix 等，AUD-0832 黑名单）。
+
+const vec3 MSH_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+const float MSH_KNEE = 0.35;   // 软膝宽度（scene-linear 亮度单位）
+
+// 黄金角环采样：方向 (cos(i*GA), sin(i*GA))，GA=137.50776°
+const vec2 MSH_DIRS[12] = vec2[12](
+    vec2( 1.00000000,  0.00000000), vec2(-0.73736888,  0.67549029),
+    vec2( 0.08742572, -0.99617104), vec2( 0.60843886,  0.79360075),
+    vec2(-0.98471349, -0.17418195), vec2( 0.84375529, -0.53672805),
+    vec2(-0.25960430,  0.96571507), vec2(-0.46090702, -0.88744843),
+    vec2( 0.93932130,  0.34303863), vec2(-0.92434556,  0.38155641),
+    vec2( 0.42384600, -0.90573427), vec2( 0.29928386,  0.95416412)
+);
+// 等面积归一化距离 sqrt((i+0.5)/12)
+const float MSH_DIST[12] = float[12](
+    0.20412415, 0.35355339, 0.45643546, 0.54006172,
+    0.61237244, 0.67700320, 0.73598007, 0.79056942,
+    0.84162541, 0.88975652, 0.93541435, 0.97894501
+);
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通（含 HDR）
+    if (strength < 0.001) return color;
+
+    vec2 ts = vec2(textureSize(u_input_tex, 0));
+    vec2 safe = max(ts, vec2(1.0));
+    vec2 half_texel = 0.5 / safe;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+    vec2 texel = 1.0 / safe;
+
+    // 半径：0..1 -> 画幅宽 0.4%-3.0%（Halation_Extended 同口径），下限 2px
+    float radius_ratio = 0.004 + radius * 0.026;
+    float radius_px = max(2.0, safe.x * radius_ratio);
+
+    // —— 单尺度（小尺度 R）降级：12-tap 黄金角环 + 逐 tap 软膝门控 ——
+    // 真多尺度（2R 权重 0.6 + R 权重 0.4，E 场先提取后扩散）需原生
+    // renderer 多 pass，见文件头红线声明与 README。
+    vec3 acc = vec3(0.0);
+    for (int i = 0; i < 12; i++) {
+        vec2 off = MSH_DIRS[i] * (radius_px * MSH_DIST[i]) * texel;
+        vec3 s = texture(u_input_tex, clamp(uv + off, min_uv, max_uv)).rgb;
+        float m = smoothstep(threshold, threshold + MSH_KNEE, dot(s, MSH_LUMA_W));
+        acc += s * m;
+    }
+    vec3 halo = acc / 12.0;
+
+    // 红色散射重着色：R 增益 (1+w)、G 不变、B 增益 (1-0.5w)
+    float w = red_scatter;
+    vec3 scatter = vec3(halo.r * (1.0 + w), halo.g, halo.b * (1.0 - 0.5 * w));
+
+    // 加性叠加（线性域加法对 HDR 单调、无折返）
+    return color + scatter * strength;
+}

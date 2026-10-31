@@ -1,0 +1,88 @@
+// --- Topos Plugin Metadata ---
+// @name Edge Ink Outline
+// @i18n_name Edge_Ink_Outline
+// @author Topos Team
+// @version 1.0
+// @description Sobel outline inking: 8-neighbor gradient magnitude on selectable luma source, soft-thresholded into a tintable ink overlay
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider edge_strength "Edge Strength" 0.6 0.0 1.0
+// @param slider edge_threshold "Edge Threshold" 0.2 0.0 1.0
+// @param separator
+// @param color ink_color "Ink Color" 0.05 0.05 0.08
+// @param select edge_source "Edge Source" 0 "Luma" "Max Channel"
+// -----------------------------
+//
+// Edge Ink Outline —— Sobel 描边上墨。
+//
+// 原理：对 8 邻域做经典 Sobel 梯度（水平/垂直差分各加权 1/2/4），
+// 梯度幅值经软阈值 smoothstep 整形为边缘掩码并按 edge_strength 线性
+// 缩放，把墨色按掩码混入。
+// 可选梯度源：709 亮度（通用）或最大通道（对彩色边缘更敏感）。
+//
+// 与 HighPass_Retouch 的差异：那是频率分离磨皮（带阻滤波）；本插件
+// 是一阶梯度检测 + 风格化上墨，输出的是"线稿感"。
+//
+// 设计要点：
+// - 8 次纹理采样 + 纯代数差分，无循环（8 tap 手工展开）、无三角函数，
+//   预览成本 low；
+// - 采样 UV 钳到半纹素边界（clamp-to-edge 保险），texel 分母守护；
+// - smoothstep 阈值只作用于边缘掩码（权重），不触碰内容色；墨色混合
+//   走 Delta 输出惯例（inked - original 叠加到已调色画面）；
+// - edge_threshold = 0 时 softstep 边缘 (0, 0.15) 仍严格递增，无 NaN；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+// 单点采样的边缘源亮度（mode 0 = 709 亮度，mode 1 = 最大通道）
+float ink_sample_mag_source(vec2 p, vec2 min_uv, vec2 max_uv, int mode) {
+    vec3 s = texture(u_input_tex, clamp(p, min_uv, max_uv)).rgb;
+    if (mode == 0) {
+        return dot(s, vec3(0.2126, 0.7152, 0.0722));
+    }
+    return max(s.r, max(s.g, s.b));
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (edge_strength < 0.001) return color;
+
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 safe_size = max(tex_size, vec2(1.0));
+    vec2 half_texel = 0.5 / safe_size;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+    vec2 t = 1.0 / safe_size;
+
+    // ---- 8 邻域亮度（Sobel 网格，无循环手工展开） ----
+    float tl = ink_sample_mag_source(uv + vec2(-t.x, -t.y), min_uv, max_uv, edge_source);
+    float tm = ink_sample_mag_source(uv + vec2(0.0, -t.y), min_uv, max_uv, edge_source);
+    float tr = ink_sample_mag_source(uv + vec2(t.x, -t.y), min_uv, max_uv, edge_source);
+    float ml = ink_sample_mag_source(uv + vec2(-t.x, 0.0), min_uv, max_uv, edge_source);
+    float mr = ink_sample_mag_source(uv + vec2(t.x, 0.0), min_uv, max_uv, edge_source);
+    float bl = ink_sample_mag_source(uv + vec2(-t.x, t.y), min_uv, max_uv, edge_source);
+    float bm = ink_sample_mag_source(uv + vec2(0.0, t.y), min_uv, max_uv, edge_source);
+    float br = ink_sample_mag_source(uv + vec2(t.x, t.y), min_uv, max_uv, edge_source);
+
+    // ---- Sobel 差分（1/2/4 加权），/8 归一化到源亮度量纲 ----
+    float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+    float gy = (bl + 2.0 * bm + br) - (tl + 2.0 * tm + tr);
+    float mag = length(vec2(gx, gy)) / 8.0;
+
+    // ---- 软阈值边缘掩码（只作用于权重），强度滑杆线性缩放掩码 ----
+    float lo = edge_threshold * 0.5;
+    float edge = smoothstep(lo, lo + 0.15, mag) * edge_strength;
+
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+    vec3 inked = mix(original_color, ink_color, edge);
+
+    // Delta 输出：上墨差值叠加到已调色画面
+    return color + (inked - original_color);
+}

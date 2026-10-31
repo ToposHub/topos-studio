@@ -1,0 +1,2190 @@
+{
+  "task": "T-P1-11 step1 encode stage matrix",
+  "started_at": "2026-09-18 05:52:34",
+  "finished_at": "2026-09-18 05:54:16",
+  "frames_per_combo": 48,
+  "warmup_per_combo": 8,
+  "crf": 20,
+  "pix_fmt": "yuv422p10le",
+  "counter_semantics": {
+    "worker_cpu_cumulative": [
+      "pad_ns",
+      "fill_ns",
+      "entropy_ns",
+      "crc_ns",
+      "copy_ns",
+      "asm_ns",
+      "dct_ns",
+      "probe_fill_ns"
+    ],
+    "wall_buckets": [
+      "prep_wall_ns",
+      "probe_wall_ns",
+      "final_wall_ns",
+      "check_wall_ns"
+    ],
+    "note": "worker CPU sums may exceed wall when slices run parallel"
+  },
+  "summary_by_resolution": {
+    "2K": {
+      "combos": 18,
+      "fps_range": [
+        26.42,
+        170.28
+      ],
+      "stage_cpu_share": {
+        "pad_ns": 0.0,
+        "fill_ns": 0.4123,
+        "entropy_ns": 0.5576,
+        "crc_ns": 0.0246,
+        "copy_ns": 0.0023,
+        "asm_ns": 0.0032,
+        "dct_ns": 0.0,
+        "probe_fill_ns": 0.0
+      }
+    },
+    "4K": {
+      "combos": 18,
+      "fps_range": [
+        7.22,
+        54.47
+      ],
+      "stage_cpu_share": {
+        "pad_ns": 0.0,
+        "fill_ns": 0.4446,
+        "entropy_ns": 0.5274,
+        "crc_ns": 0.022,
+        "copy_ns": 0.0025,
+        "asm_ns": 0.0035,
+        "dct_ns": 0.0,
+        "probe_fill_ns": 0.0
+      }
+    }
+  },
+  "combos": [
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "proxy",
+      "slice_threads": 1,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.7943334619994857,
+      "fps": 26.750880489355637,
+      "frame_ms_p50": 36.87460500441375,
+      "frame_ms_p95": 48.17346899653785,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "final_wall_ns": 0,
+        "asm_ns": 5530000,
+        "slices": 1296,
+        "blocks": 3110400,
+        "probe_fill_ns": 0,
+        "check_wall_ns": 35753000,
+        "probe_wall_ns": 0,
+        "dct_ns": 0,
+        "copy_ns": 4196000,
+        "fill_ns": 745141000,
+        "pad_ns": 35000,
+        "crc_ns": 37103000,
+        "prep_wall_ns": 0,
+        "entropy_ns": 911944000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "proxy",
+        "threads": 1,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5352,
+        "cpu_total_ns": 1703949000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "proxy",
+      "slice_threads": 4,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.5739568570061238,
+      "fps": 83.629979177142,
+      "frame_ms_p50": 11.695579501974862,
+      "frame_ms_p95": 14.254822002840228,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "crc_ns": 42852000,
+        "fill_ns": 699150000,
+        "prep_wall_ns": 0,
+        "dct_ns": 0,
+        "pad_ns": 46000,
+        "asm_ns": 5991000,
+        "probe_wall_ns": 0,
+        "slices": 1296,
+        "blocks": 3110400,
+        "probe_fill_ns": 0,
+        "entropy_ns": 960673000,
+        "copy_ns": 4366000,
+        "final_wall_ns": 0,
+        "check_wall_ns": 44359000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "proxy",
+        "threads": 4,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5608,
+        "cpu_total_ns": 1713078000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "proxy",
+      "slice_threads": 8,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.39772998500120593,
+      "fps": 120.6848912833526,
+      "frame_ms_p50": 8.179829001164762,
+      "frame_ms_p95": 10.068432995467447,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "probe_fill_ns": 0,
+        "fill_ns": 716638000,
+        "crc_ns": 42332000,
+        "check_wall_ns": 52966000,
+        "pad_ns": 41000,
+        "slices": 1296,
+        "dct_ns": 0,
+        "blocks": 3110400,
+        "entropy_ns": 971280000,
+        "asm_ns": 5769000,
+        "prep_wall_ns": 0,
+        "probe_wall_ns": 0,
+        "final_wall_ns": 0,
+        "copy_ns": 4054000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "proxy",
+        "threads": 8,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5582,
+        "cpu_total_ns": 1740114000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "proxy",
+      "slice_threads": 16,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.3940500209937454,
+      "fps": 121.81194630811068,
+      "frame_ms_p50": 8.245369001087965,
+      "frame_ms_p95": 9.900705998006742,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "probe_fill_ns": 0,
+        "blocks": 3110400,
+        "fill_ns": 714834000,
+        "pad_ns": 30000,
+        "asm_ns": 5431000,
+        "check_wall_ns": 51204000,
+        "slices": 1296,
+        "probe_wall_ns": 0,
+        "prep_wall_ns": 0,
+        "crc_ns": 42687000,
+        "final_wall_ns": 0,
+        "entropy_ns": 987659000,
+        "copy_ns": 4085000,
+        "dct_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "proxy",
+        "threads": 16,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5629,
+        "cpu_total_ns": 1754726000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "lt",
+      "slice_threads": 1,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.8171185859973775,
+      "fps": 26.415447164475413,
+      "frame_ms_p50": 37.71647100074915,
+      "frame_ms_p95": 50.324638999882154,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "copy_ns": 4281000,
+        "fill_ns": 737274000,
+        "dct_ns": 0,
+        "pad_ns": 34000,
+        "final_wall_ns": 0,
+        "check_wall_ns": 39235000,
+        "entropy_ns": 930826000,
+        "slices": 1296,
+        "asm_ns": 5750000,
+        "probe_fill_ns": 0,
+        "blocks": 3110400,
+        "crc_ns": 38882000,
+        "probe_wall_ns": 0,
+        "prep_wall_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "lt",
+        "threads": 1,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5421,
+        "cpu_total_ns": 1717047000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "lt",
+      "slice_threads": 4,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.5786589330018614,
+      "fps": 82.95041735724071,
+      "frame_ms_p50": 12.229428000864573,
+      "frame_ms_p95": 14.39179199951468,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "crc_ns": 45163000,
+        "dct_ns": 0,
+        "prep_wall_ns": 0,
+        "probe_wall_ns": 0,
+        "final_wall_ns": 0,
+        "check_wall_ns": 53019000,
+        "fill_ns": 688850000,
+        "pad_ns": 47000,
+        "slices": 1296,
+        "entropy_ns": 968260000,
+        "blocks": 3110400,
+        "copy_ns": 3952000,
+        "asm_ns": 6111000,
+        "probe_fill_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "lt",
+        "threads": 4,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5654,
+        "cpu_total_ns": 1712383000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "lt",
+      "slice_threads": 8,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.4154170640031225,
+      "fps": 115.54652940217017,
+      "frame_ms_p50": 8.72849150255206,
+      "frame_ms_p95": 10.017165004683193,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "entropy_ns": 979981000,
+        "copy_ns": 3932000,
+        "asm_ns": 5886000,
+        "prep_wall_ns": 0,
+        "probe_wall_ns": 0,
+        "fill_ns": 708272000,
+        "final_wall_ns": 0,
+        "slices": 1296,
+        "crc_ns": 44299000,
+        "dct_ns": 0,
+        "blocks": 3110400,
+        "pad_ns": 39000,
+        "probe_fill_ns": 0,
+        "check_wall_ns": 55094000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "lt",
+        "threads": 8,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5624,
+        "cpu_total_ns": 1742409000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "lt",
+      "slice_threads": 16,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.3896043650020147,
+      "fps": 123.201905090955,
+      "frame_ms_p50": 8.28225049917819,
+      "frame_ms_p95": 9.812316005991306,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "crc_ns": 43605000,
+        "entropy_ns": 953595000,
+        "fill_ns": 679675000,
+        "check_wall_ns": 50571000,
+        "pad_ns": 30000,
+        "dct_ns": 0,
+        "prep_wall_ns": 0,
+        "copy_ns": 3625000,
+        "asm_ns": 5226000,
+        "final_wall_ns": 0,
+        "blocks": 3110400,
+        "slices": 1296,
+        "probe_wall_ns": 0,
+        "probe_fill_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "lt",
+        "threads": 16,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5657,
+        "cpu_total_ns": 1685756000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 1,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.692925313996966,
+      "fps": 28.353288596454895,
+      "frame_ms_p50": 32.627704000333324,
+      "frame_ms_p95": 50.72438999923179,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "copy_ns": 4003000,
+        "crc_ns": 41559000,
+        "pad_ns": 34000,
+        "probe_fill_ns": 0,
+        "probe_wall_ns": 0,
+        "fill_ns": 655031000,
+        "prep_wall_ns": 0,
+        "check_wall_ns": 40976000,
+        "slices": 1296,
+        "blocks": 3110400,
+        "final_wall_ns": 0,
+        "asm_ns": 5326000,
+        "dct_ns": 0,
+        "entropy_ns": 883158000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "standard",
+        "threads": 1,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5558,
+        "cpu_total_ns": 1589111000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 4,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.5448742500011576,
+      "fps": 88.09372070693013,
+      "frame_ms_p50": 10.998712998116389,
+      "frame_ms_p95": 13.506236995453946,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "final_wall_ns": 0,
+        "blocks": 3110400,
+        "copy_ns": 4051000,
+        "probe_wall_ns": 0,
+        "crc_ns": 39039000,
+        "dct_ns": 0,
+        "slices": 1296,
+        "check_wall_ns": 41198000,
+        "probe_fill_ns": 0,
+        "asm_ns": 5493000,
+        "fill_ns": 683168000,
+        "pad_ns": 34000,
+        "prep_wall_ns": 0,
+        "entropy_ns": 907816000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "standard",
+        "threads": 4,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5537,
+        "cpu_total_ns": 1639601000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 8,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.3932915879995562,
+      "fps": 122.046851406479,
+      "frame_ms_p50": 8.145374002197059,
+      "frame_ms_p95": 10.671834999811836,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "crc_ns": 42633000,
+        "pad_ns": 41000,
+        "blocks": 3110400,
+        "copy_ns": 3955000,
+        "asm_ns": 5040000,
+        "dct_ns": 0,
+        "probe_fill_ns": 0,
+        "final_wall_ns": 0,
+        "slices": 1296,
+        "fill_ns": 678900000,
+        "check_wall_ns": 51096000,
+        "prep_wall_ns": 0,
+        "entropy_ns": 947540000,
+        "probe_wall_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "standard",
+        "threads": 8,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5646,
+        "cpu_total_ns": 1678109000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 16,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.3940920120003284,
+      "fps": 121.79896708984805,
+      "frame_ms_p50": 8.186536997527583,
+      "frame_ms_p95": 10.221032003755681,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "dct_ns": 0,
+        "check_wall_ns": 57632000,
+        "asm_ns": 5480000,
+        "entropy_ns": 987925000,
+        "slices": 1296,
+        "probe_wall_ns": 0,
+        "blocks": 3110400,
+        "prep_wall_ns": 0,
+        "probe_fill_ns": 0,
+        "fill_ns": 708549000,
+        "crc_ns": 43925000,
+        "copy_ns": 4070000,
+        "final_wall_ns": 0,
+        "pad_ns": 37000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "standard",
+        "threads": 16,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5645,
+        "cpu_total_ns": 1749986000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "hq",
+      "slice_threads": 1,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.8063167879954563,
+      "fps": 26.57341188378566,
+      "frame_ms_p50": 36.24704749745433,
+      "frame_ms_p95": 49.45658499491401,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "dct_ns": 0,
+        "fill_ns": 727461000,
+        "copy_ns": 4011000,
+        "asm_ns": 5373000,
+        "probe_wall_ns": 0,
+        "probe_fill_ns": 0,
+        "blocks": 3110400,
+        "entropy_ns": 927763000,
+        "crc_ns": 39393000,
+        "final_wall_ns": 0,
+        "check_wall_ns": 42612000,
+        "prep_wall_ns": 0,
+        "slices": 1296,
+        "pad_ns": 39000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "hq",
+        "threads": 1,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5444,
+        "cpu_total_ns": 1704040000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "hq",
+      "slice_threads": 4,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.5831496760001755,
+      "fps": 82.31162937315179,
+      "frame_ms_p50": 11.982802498096135,
+      "frame_ms_p95": 14.761316000658553,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "dct_ns": 0,
+        "probe_wall_ns": 0,
+        "slices": 1296,
+        "entropy_ns": 980675000,
+        "final_wall_ns": 0,
+        "blocks": 3110400,
+        "copy_ns": 4079000,
+        "pad_ns": 49000,
+        "prep_wall_ns": 0,
+        "check_wall_ns": 45263000,
+        "fill_ns": 723670000,
+        "asm_ns": 5330000,
+        "probe_fill_ns": 0,
+        "crc_ns": 43602000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "hq",
+        "threads": 4,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.558,
+        "cpu_total_ns": 1757405000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "hq",
+      "slice_threads": 8,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.4181804719992215,
+      "fps": 114.78297819724438,
+      "frame_ms_p50": 8.883814502041787,
+      "frame_ms_p95": 10.756601004686672,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "crc_ns": 45392000,
+        "probe_wall_ns": 0,
+        "check_wall_ns": 57453000,
+        "blocks": 3110400,
+        "fill_ns": 721805000,
+        "pad_ns": 40000,
+        "asm_ns": 5382000,
+        "dct_ns": 0,
+        "probe_fill_ns": 0,
+        "copy_ns": 4010000,
+        "final_wall_ns": 0,
+        "prep_wall_ns": 0,
+        "slices": 1296,
+        "entropy_ns": 994993000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "hq",
+        "threads": 8,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5616,
+        "cpu_total_ns": 1771622000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "hq",
+      "slice_threads": 16,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.40620080499502365,
+      "fps": 118.16815577356634,
+      "frame_ms_p50": 8.43939999685972,
+      "frame_ms_p95": 10.161162004806101,
+      "bytes_per_frame": 1074793.8125,
+      "output_bytes": 51590103,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "asm_ns": 5740000,
+        "final_wall_ns": 0,
+        "probe_wall_ns": 0,
+        "copy_ns": 3810000,
+        "entropy_ns": 992070000,
+        "probe_fill_ns": 0,
+        "slices": 1296,
+        "check_wall_ns": 58709000,
+        "pad_ns": 40000,
+        "crc_ns": 42760000,
+        "dct_ns": 0,
+        "fill_ns": 729341000,
+        "blocks": 3110400,
+        "prep_wall_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "hq",
+        "threads": 16,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5593,
+        "cpu_total_ns": 1773761000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "proxy",
+      "slice_threads": 1,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 6.607605432000128,
+      "fps": 7.264356277622098,
+      "frame_ms_p50": 135.85001200044644,
+      "frame_ms_p95": 172.76340600074036,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "pad_ns": 48000,
+        "check_wall_ns": 161859000,
+        "probe_fill_ns": 0,
+        "copy_ns": 15523000,
+        "fill_ns": 2760172000,
+        "entropy_ns": 3282610000,
+        "blocks": 12441600,
+        "prep_wall_ns": 0,
+        "final_wall_ns": 0,
+        "asm_ns": 21180000,
+        "probe_wall_ns": 0,
+        "dct_ns": 0,
+        "slices": 2448,
+        "crc_ns": 145188000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "proxy",
+        "threads": 1,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5274,
+        "cpu_total_ns": 6224721000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "proxy",
+      "slice_threads": 4,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.9672054119946552,
+      "fps": 24.400095540267056,
+      "frame_ms_p50": 40.22439099935582,
+      "frame_ms_p95": 48.33680700539844,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "copy_ns": 15481000,
+        "dct_ns": 0,
+        "pad_ns": 49000,
+        "crc_ns": 139619000,
+        "fill_ns": 2784682000,
+        "slices": 2448,
+        "probe_wall_ns": 0,
+        "probe_fill_ns": 0,
+        "final_wall_ns": 0,
+        "blocks": 12441600,
+        "asm_ns": 21187000,
+        "check_wall_ns": 151478000,
+        "entropy_ns": 3271336000,
+        "prep_wall_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "proxy",
+        "threads": 4,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5249,
+        "cpu_total_ns": 6232354000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "proxy",
+      "slice_threads": 8,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.2571813209942775,
+      "fps": 38.1806499972795,
+      "frame_ms_p50": 25.38363649728126,
+      "frame_ms_p95": 31.309862999478355,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "fill_ns": 2891508000,
+        "blocks": 12441600,
+        "check_wall_ns": 157884000,
+        "dct_ns": 0,
+        "prep_wall_ns": 0,
+        "crc_ns": 134443000,
+        "copy_ns": 15381000,
+        "probe_fill_ns": 0,
+        "final_wall_ns": 0,
+        "slices": 2448,
+        "probe_wall_ns": 0,
+        "asm_ns": 23108000,
+        "entropy_ns": 3355633000,
+        "pad_ns": 38000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "proxy",
+        "threads": 8,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5227,
+        "cpu_total_ns": 6420111000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "proxy",
+      "slice_threads": 16,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.0247807200066745,
+      "fps": 46.839288701379324,
+      "frame_ms_p50": 21.925356002611807,
+      "frame_ms_p95": 25.621172004321124,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "prep_wall_ns": 0,
+        "copy_ns": 16248000,
+        "check_wall_ns": 216085000,
+        "final_wall_ns": 0,
+        "dct_ns": 0,
+        "probe_fill_ns": 0,
+        "asm_ns": 22909000,
+        "pad_ns": 52000,
+        "fill_ns": 3195412000,
+        "crc_ns": 151984000,
+        "blocks": 12441600,
+        "slices": 2448,
+        "entropy_ns": 3796009000,
+        "probe_wall_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "proxy",
+        "threads": 16,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5285,
+        "cpu_total_ns": 7182614000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "lt",
+      "slice_threads": 1,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 6.650633065000875,
+      "fps": 7.217358036575678,
+      "frame_ms_p50": 137.03923849971034,
+      "frame_ms_p95": 177.2755049969419,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "blocks": 12441600,
+        "dct_ns": 0,
+        "fill_ns": 2841372000,
+        "slices": 2448,
+        "copy_ns": 16480000,
+        "prep_wall_ns": 0,
+        "probe_fill_ns": 0,
+        "entropy_ns": 3266378000,
+        "probe_wall_ns": 0,
+        "asm_ns": 23716000,
+        "check_wall_ns": 137019000,
+        "final_wall_ns": 0,
+        "crc_ns": 141456000,
+        "pad_ns": 48000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "lt",
+        "threads": 1,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5193,
+        "cpu_total_ns": 6289450000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "lt",
+      "slice_threads": 4,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.9524026009967201,
+      "fps": 24.58509324639065,
+      "frame_ms_p50": 40.66302600040217,
+      "frame_ms_p95": 45.99571699509397,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "pad_ns": 61000,
+        "check_wall_ns": 159106000,
+        "copy_ns": 15208000,
+        "slices": 2448,
+        "asm_ns": 21531000,
+        "fill_ns": 2674634000,
+        "crc_ns": 142307000,
+        "prep_wall_ns": 0,
+        "final_wall_ns": 0,
+        "entropy_ns": 3228626000,
+        "probe_fill_ns": 0,
+        "probe_wall_ns": 0,
+        "dct_ns": 0,
+        "blocks": 12441600
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "lt",
+        "threads": 4,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5308,
+        "cpu_total_ns": 6082367000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "lt",
+      "slice_threads": 8,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.204668884005514,
+      "fps": 39.844973699661274,
+      "frame_ms_p50": 24.651652500324417,
+      "frame_ms_p95": 30.70416000264231,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "asm_ns": 22029000,
+        "slices": 2448,
+        "fill_ns": 2666333000,
+        "blocks": 12441600,
+        "final_wall_ns": 0,
+        "prep_wall_ns": 0,
+        "dct_ns": 0,
+        "check_wall_ns": 166343000,
+        "crc_ns": 127586000,
+        "probe_fill_ns": 0,
+        "probe_wall_ns": 0,
+        "pad_ns": 36000,
+        "entropy_ns": 3116770000,
+        "copy_ns": 15150000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "lt",
+        "threads": 8,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.524,
+        "cpu_total_ns": 5947904000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "lt",
+      "slice_threads": 16,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.8812194599959184,
+      "fps": 54.469972780926014,
+      "frame_ms_p50": 17.972291498153936,
+      "frame_ms_p95": 23.5459039977286,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "entropy_ns": 3585075000,
+        "copy_ns": 16046000,
+        "pad_ns": 52000,
+        "probe_wall_ns": 0,
+        "dct_ns": 0,
+        "slices": 2448,
+        "blocks": 12441600,
+        "prep_wall_ns": 0,
+        "final_wall_ns": 0,
+        "fill_ns": 2946766000,
+        "asm_ns": 22222000,
+        "probe_fill_ns": 0,
+        "crc_ns": 142569000,
+        "check_wall_ns": 167112000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "lt",
+        "threads": 16,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5341,
+        "cpu_total_ns": 6712730000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 1,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 6.21363150900288,
+      "fps": 7.724951170736982,
+      "frame_ms_p50": 127.76549399859505,
+      "frame_ms_p95": 171.25491600017995,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "copy_ns": 15543000,
+        "asm_ns": 21005000,
+        "probe_wall_ns": 0,
+        "pad_ns": 44000,
+        "slices": 2448,
+        "dct_ns": 0,
+        "final_wall_ns": 0,
+        "probe_fill_ns": 0,
+        "check_wall_ns": 129846000,
+        "blocks": 12441600,
+        "fill_ns": 2645469000,
+        "crc_ns": 132835000,
+        "entropy_ns": 3064372000,
+        "prep_wall_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "standard",
+        "threads": 1,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5212,
+        "cpu_total_ns": 5879268000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 4,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.8528011229936965,
+      "fps": 25.90672004906989,
+      "frame_ms_p50": 38.7302559975069,
+      "frame_ms_p95": 44.95933299767785,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "entropy_ns": 2998179000,
+        "final_wall_ns": 0,
+        "prep_wall_ns": 0,
+        "fill_ns": 2572111000,
+        "crc_ns": 127513000,
+        "probe_wall_ns": 0,
+        "dct_ns": 0,
+        "asm_ns": 21156000,
+        "pad_ns": 40000,
+        "probe_fill_ns": 0,
+        "slices": 2448,
+        "check_wall_ns": 146617000,
+        "blocks": 12441600,
+        "copy_ns": 14722000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "standard",
+        "threads": 4,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5229,
+        "cpu_total_ns": 5733721000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 8,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.1548589699959848,
+      "fps": 41.56351662590185,
+      "frame_ms_p50": 22.768087499571266,
+      "frame_ms_p95": 28.866287000710145,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "probe_fill_ns": 0,
+        "blocks": 12441600,
+        "prep_wall_ns": 0,
+        "slices": 2448,
+        "fill_ns": 2619906000,
+        "entropy_ns": 3087229000,
+        "dct_ns": 0,
+        "pad_ns": 44000,
+        "asm_ns": 21667000,
+        "check_wall_ns": 153401000,
+        "crc_ns": 128159000,
+        "final_wall_ns": 0,
+        "probe_wall_ns": 0,
+        "copy_ns": 14894000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "standard",
+        "threads": 8,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5258,
+        "cpu_total_ns": 5871899000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 16,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.9518659339955775,
+      "fps": 50.42726951947312,
+      "frame_ms_p50": 19.722405999345938,
+      "frame_ms_p95": 25.164102000417188,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "dct_ns": 0,
+        "blocks": 12441600,
+        "pad_ns": 55000,
+        "fill_ns": 2957993000,
+        "slices": 2448,
+        "asm_ns": 23864000,
+        "probe_wall_ns": 0,
+        "prep_wall_ns": 0,
+        "crc_ns": 139929000,
+        "entropy_ns": 3557078000,
+        "final_wall_ns": 0,
+        "check_wall_ns": 201946000,
+        "probe_fill_ns": 0,
+        "copy_ns": 15980000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "standard",
+        "threads": 16,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5313,
+        "cpu_total_ns": 6694899000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "hq",
+      "slice_threads": 1,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 6.2741307340038475,
+      "fps": 7.650462197074544,
+      "frame_ms_p50": 129.43361149882548,
+      "frame_ms_p95": 167.79999100253917,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "slices": 2448,
+        "blocks": 12441600,
+        "check_wall_ns": 124981000,
+        "fill_ns": 2685762000,
+        "probe_wall_ns": 0,
+        "copy_ns": 15730000,
+        "prep_wall_ns": 0,
+        "probe_fill_ns": 0,
+        "crc_ns": 128947000,
+        "asm_ns": 20535000,
+        "entropy_ns": 3092144000,
+        "pad_ns": 35000,
+        "dct_ns": 0,
+        "final_wall_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "hq",
+        "threads": 1,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5203,
+        "cpu_total_ns": 5943153000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "hq",
+      "slice_threads": 4,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.8448411749996012,
+      "fps": 26.01849993943808,
+      "frame_ms_p50": 37.39380800107028,
+      "frame_ms_p95": 48.84316699462943,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "slices": 2448,
+        "entropy_ns": 3034828000,
+        "pad_ns": 35000,
+        "final_wall_ns": 0,
+        "check_wall_ns": 145112000,
+        "blocks": 12441600,
+        "probe_fill_ns": 0,
+        "copy_ns": 14333000,
+        "crc_ns": 134424000,
+        "prep_wall_ns": 0,
+        "probe_wall_ns": 0,
+        "fill_ns": 2533048000,
+        "asm_ns": 20647000,
+        "dct_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "hq",
+        "threads": 4,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.529,
+        "cpu_total_ns": 5737315000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "hq",
+      "slice_threads": 8,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.1832373999932315,
+      "fps": 40.56666903892201,
+      "frame_ms_p50": 23.744083500787383,
+      "frame_ms_p95": 32.565876994340215,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "entropy_ns": 3191183000,
+        "dct_ns": 0,
+        "prep_wall_ns": 0,
+        "probe_fill_ns": 0,
+        "blocks": 12441600,
+        "final_wall_ns": 0,
+        "pad_ns": 41000,
+        "check_wall_ns": 165783000,
+        "copy_ns": 14798000,
+        "asm_ns": 21400000,
+        "probe_wall_ns": 0,
+        "slices": 2448,
+        "crc_ns": 134358000,
+        "fill_ns": 2680191000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "hq",
+        "threads": 8,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5282,
+        "cpu_total_ns": 6041971000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "hq",
+      "slice_threads": 16,
+      "slice_rows": 16,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.907802517998789,
+      "fps": 52.87493595613053,
+      "frame_ms_p50": 18.62399949823157,
+      "frame_ms_p95": 24.30764100427041,
+      "bytes_per_frame": 3794595.9791666665,
+      "output_bytes": 182140607,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "pad_ns": 46000,
+        "copy_ns": 15671000,
+        "probe_wall_ns": 0,
+        "crc_ns": 135371000,
+        "fill_ns": 2785274000,
+        "final_wall_ns": 0,
+        "slices": 2448,
+        "check_wall_ns": 196554000,
+        "dct_ns": 0,
+        "probe_fill_ns": 0,
+        "blocks": 12441600,
+        "asm_ns": 23138000,
+        "prep_wall_ns": 0,
+        "entropy_ns": 3377279000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "hq",
+        "threads": 16,
+        "rows": 16,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.533,
+        "cpu_total_ns": 6336779000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 16,
+      "slice_rows": 8,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.2818939139979193,
+      "fps": 170.27682265021974,
+      "frame_ms_p50": 5.991030997392954,
+      "frame_ms_p95": 7.386859004327562,
+      "bytes_per_frame": 1077933.3125,
+      "output_bytes": 51740799,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "copy_ns": 4009000,
+        "final_wall_ns": 0,
+        "fill_ns": 742254000,
+        "entropy_ns": 1016953000,
+        "prep_wall_ns": 0,
+        "blocks": 3110400,
+        "asm_ns": 5354000,
+        "probe_fill_ns": 0,
+        "probe_wall_ns": 0,
+        "crc_ns": 43014000,
+        "dct_ns": 0,
+        "slices": 2448,
+        "check_wall_ns": 61270000,
+        "pad_ns": 40000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "standard",
+        "threads": 16,
+        "rows": 8,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5613,
+        "cpu_total_ns": 1811624000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "2K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 16,
+      "slice_rows": 32,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.5411964049999369,
+      "fps": 88.69238516099455,
+      "frame_ms_p50": 9.862287999567343,
+      "frame_ms_p95": 16.054075000283774,
+      "bytes_per_frame": 1073722.8125,
+      "output_bytes": 51538695,
+      "input_plane_means": {
+        "Y": 400.275,
+        "U": 498.315,
+        "V": 552.75
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "crc_ns": 38944000,
+        "prep_wall_ns": 0,
+        "blocks": 3110400,
+        "fill_ns": 634870000,
+        "final_wall_ns": 0,
+        "slices": 720,
+        "dct_ns": 0,
+        "probe_fill_ns": 0,
+        "probe_wall_ns": 0,
+        "pad_ns": 26000,
+        "entropy_ns": 865950000,
+        "copy_ns": 3871000,
+        "asm_ns": 5281000,
+        "check_wall_ns": 40720000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "2K",
+        "profile": "standard",
+        "threads": 16,
+        "rows": 32,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5591,
+        "cpu_total_ns": 1548942000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 16,
+      "slice_rows": 8,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 0.9049616449992754,
+      "fps": 53.04092197193444,
+      "frame_ms_p50": 19.893738000973826,
+      "frame_ms_p95": 23.052611999446526,
+      "bytes_per_frame": 3801132.8125,
+      "output_bytes": 182454375,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "copy_ns": 15777000,
+        "pad_ns": 48000,
+        "slices": 4896,
+        "entropy_ns": 3454330000,
+        "probe_fill_ns": 0,
+        "blocks": 12441600,
+        "dct_ns": 0,
+        "final_wall_ns": 0,
+        "check_wall_ns": 206203000,
+        "fill_ns": 2780015000,
+        "prep_wall_ns": 0,
+        "crc_ns": 138292000,
+        "probe_wall_ns": 0,
+        "asm_ns": 22652000
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "standard",
+        "threads": 16,
+        "rows": 8,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5388,
+        "cpu_total_ns": 6411114000
+      }
+    },
+    {
+      "status": "ok",
+      "source": "4K_topos_proxy.mov",
+      "profile": "standard",
+      "slice_threads": 16,
+      "slice_rows": 32,
+      "frames": 48,
+      "warmup": 8,
+      "wall_s": 1.2918482550012413,
+      "fps": 37.15606675487894,
+      "frame_ms_p50": 27.572721999604255,
+      "frame_ms_p95": 30.901976002496667,
+      "bytes_per_frame": 3793135.3125,
+      "output_bytes": 182070495,
+      "input_plane_means": {
+        "Y": 624.028,
+        "U": 505.419,
+        "V": 513.138
+      },
+      "roundtrip": {
+        "status": "ok",
+        "plane_mean_abs_delta": {
+          "Y": 0.0,
+          "U": 0.0,
+          "V": 0.0
+        },
+        "max_abs_delta": 0.0
+      },
+      "stage": {
+        "asm_ns": 23443000,
+        "fill_ns": 2766121000,
+        "final_wall_ns": 0,
+        "check_wall_ns": 220260000,
+        "probe_wall_ns": 0,
+        "blocks": 12441600,
+        "pad_ns": 46000,
+        "entropy_ns": 3296349000,
+        "slices": 1296,
+        "copy_ns": 14980000,
+        "probe_fill_ns": 0,
+        "prep_wall_ns": 0,
+        "crc_ns": 136320000,
+        "dct_ns": 0
+      },
+      "kind": "encode_stage_combo",
+      "spec": {
+        "res": "4K",
+        "profile": "standard",
+        "threads": 16,
+        "rows": 32,
+        "frames": 48,
+        "warmup": 8
+      },
+      "dominant": {
+        "stage": "entropy",
+        "share": 0.5285,
+        "cpu_total_ns": 6237259000
+      }
+    }
+  ]
+}

@@ -1,0 +1,167 @@
+{
+  "action": {
+    "export_srt": "Экспортировать субтитры (SRT)...",
+    "queue_start": "Запустить видеочереду",
+    "queue_stop": "Остановить видеочереду"
+  },
+  "panel": {
+    "deliver_video_batch": "Пакетный экспорт видео"
+  },
+  "deliver": {
+    "export_stems": "Экспортировать дорожки…",
+    "export_stems_tooltip": "Экспортирует аудиодорожки / шины / группы D-M-E как отдельные WAV-дорожки",
+    "export_chapters": "Экспортировать главы…",
+    "export_chapters_tooltip": "Экспортирует маркеры глав таймлайна как текст глав YouTube или FFMetadata",
+    "video": {
+      "settings_title": "Поставка видео",
+      "source_range": "Источник & Диапазон",
+      "video_settings": "Видео",
+      "audio_delivery": "Аудио & Поставка",
+      "no_project": "(нет проекта)",
+      "output_dir_placeholder": "Папка вывода",
+      "select_output_dir": "Выбрать папку вывода",
+      "add_to_queue": "Добавить в видеочереду",
+      "add_and_start": "Добавить & Запустить",
+      "alpha": "Альфа-канал",
+      "profile_default": "(по умолчанию)",
+      "preflight_ok": "Готово к добавлению",
+      "project": "Проект",
+      "timeline": "Таймлайн",
+      "range": "Диапазон",
+      "frames": "Кадры",
+      "duration": "Длительность",
+      "container": "Контейнер",
+      "codec": "Кодек",
+      "profile": "Профиль",
+      "profile_tooltip": "Профиль кодировщика. «Авто» выбирает совместимый профиль кодека по умолчанию.",
+      "aspect_lock": "Заблокировать пропорции",
+      "resolution": "Разрешение",
+      "size": "Размер",
+      "frame_rate": "Частота кадров",
+      "custom_fps": "Свой FPS",
+      "quality_mode": "Режим качества",
+      "quality": "Качество",
+      "quality_crf": "Качество (CRF)",
+      "quality_crf_hint": "CRF безразмерен; меньшие значения — выше качество.",
+      "crf_18": "CRF 18 · Высокое качество",
+      "crf_20": "CRF 20 · Качество Blu-ray",
+      "crf_23": "CRF 23 · Рекомендуется",
+      "crf_28": "CRF 28 · Меньше файл",
+      "crf_30": "CRF 30 · Предпросмотр",
+      "quality_bitrate_hint": "Целевой средний битрейт видео в кбит/с; фактический битрейт может отличаться.",
+      "quality_cbr_hint": "Постоянный битрейт видео в кбит/с; минимальный и максимальный ограничены.",
+      "quality_auto_hint": "Качество кодировщик выбирает автоматически.",
+      "estimated_size": "Оценка размера",
+      "estimated_size_hint": "Оценка = длительность вывода × битрейт видео ÷ 8; аудио и накладные расходы контейнера не учтены.",
+      "filename_placeholder": "Имя таймлайна",
+      "quality_auto": "Авто",
+      "quality_vbr": "VBR",
+      "quality_cbr": "CBR",
+      "quality_bitrate": "Битрейт",
+      "color_space": "Цветовое пространство",
+      "bit_depth": "Глубина цвета",
+      "audio_codec": "Аудиокодек",
+      "sample_rate": "Частота дискретизации",
+      "audio_bitrate": "Битрейт аудио",
+      "subtitles": "Субтитры",
+      "output_dir": "Папка вывода",
+      "filename": "Имя файла",
+      "if_exists": "Если существует",
+      "allow_placeholders": "Разрешить заглушки",
+      "allow_placeholders_hint": "Клипы-заглушки обычно блокируют поставку. Включите, чтобы экспортировать всё равно; заглушки будут выведены как цветные полосы."
+    },
+    "preset": {
+      "web_h264": {
+        "title": "Веб H.264",
+        "subtitle": "MP4 · H.264 · 1080p"
+      },
+      "mobile_h264": {
+        "title": "Мобильный",
+        "subtitle": "MP4 · H.264 · 1080×1920"
+      },
+      "master_prores422": {
+        "title": "Мастер",
+        "subtitle": "MOV · ProRes 422 · UHD"
+      },
+      "master_prores4444": {
+        "title": "Мастер (альфа)",
+        "subtitle": "MOV · ProRes 4444 · 4:4:4"
+      },
+      "hevc_uhd": {
+        "title": "HEVC 4K",
+        "subtitle": "MP4 · HEVC · 3840×2160"
+      },
+      "dnxhr_sq": {
+        "title": "DNxHR SQ",
+        "subtitle": "MOV · DNxHR SQ · 1080p"
+      },
+      "custom": {
+        "title": "Своё",
+        "subtitle": "Текущие настройки"
+      }
+    },
+    "queue": {
+      "title": "Очередь рендера видео",
+      "start": "Запустить очередь",
+      "pause": "Пауза",
+      "resume": "Продолжить",
+      "cancel_current": "Отменить текущий",
+      "clear_completed": "Очистить завершённые",
+      "more": "Ещё",
+      "float": "Открепить панель",
+      "return_to_deliver": "Вернуться к доставке",
+      "empty_title": "Задач экспорта видео пока нет",
+      "empty_hint": "Выберите выше таймлайн и видеопресет, затем нажмите «Добавить в видеочереду».",
+      "tasks": "задач",
+      "running": "рендерится",
+      "pending": "в очереди",
+      "done": "готово",
+      "failed": "с ошибками",
+      "status_pending": "В очереди",
+      "status_running": "Рендеринг",
+      "status_done": "Готово",
+      "status_failed": "Ошибка",
+      "status_cancelled": "Отменено",
+      "status_paused": "Пауза",
+      "status_needs_relink": "Требуется перепривязка",
+      "no_audio": "без аудио",
+      "action_cancel": "Отмена",
+      "action_open": "Открыть",
+      "action_retry": "Повторить",
+      "action_remove": "Удалить",
+      "action_edit": "Изменить настройки",
+      "action_relink": "Перепривязать таймлайн",
+      "col_status": "Статус",
+      "col_source": "Источник",
+      "col_preset": "Пресет",
+      "col_output": "Файл вывода",
+      "col_video": "Видео",
+      "col_audio": "Аудио",
+      "col_progress": "Прогресс",
+      "col_state": "Состояние",
+      "col_actions": "Действия"
+    },
+    "subtitle": {
+      "off": "Выкл.",
+      "burn": "Встроить в видео",
+      "sidecar": "Отдельным файлом"
+    },
+    "conflict": {
+      "ask": "Спрашивать",
+      "overwrite": "Перезаписать",
+      "auto_number": "Автонумерация",
+      "skip": "Пропустить"
+    },
+    "timeline_unnamed": "Без названия",
+    "frames_suffix": " кадров",
+    "px_suffix": " px",
+    "fps_suffix": " fps",
+    "kbps_suffix": " kbps",
+    "w_label": "W",
+    "h_label": "H",
+    "colors_suffix": " цветов",
+    "gif_colors_label": "Цвета GIF",
+    "qc_title": "QC мультиверсионной поставки",
+    "close": "Закрыть"
+  }
+}

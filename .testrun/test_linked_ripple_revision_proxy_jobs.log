@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 10 items
+
+tests/edit/test_linked_ripple_revision_proxy_jobs.py ..........          [100%]
+
+============================= 10 passed in 15.77s ==============================

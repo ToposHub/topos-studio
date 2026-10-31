@@ -1,0 +1,228 @@
+{
+  "W01": {
+    "plan_apply_1": {
+      "applied": true,
+      "error": null,
+      "revision": 1
+    },
+    "plan_apply_2": {
+      "applied": true,
+      "error": null,
+      "revision": 2
+    },
+    "export": {
+      "success": true,
+      "cancelled": false,
+      "cause": "",
+      "full_gpu_blockers": [
+        "stage_missing:decode",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ]
+    },
+    "probe": {
+      "video": true,
+      "audio": true,
+      "frames": 24,
+      "codec": "h264",
+      "w": 1920,
+      "h": 1080,
+      "audio_s": 0.981
+    },
+    "clips": 2,
+    "clips_after_reload": 2,
+    "ok": true
+  },
+  "W03": {
+    "results": {
+      "h264": {
+        "export": {
+          "success": true,
+          "cancelled": false,
+          "cause": "",
+          "full_gpu_blockers": [
+            "stage_backend_cpu:decode:provider_session",
+            "stage_backend_cpu:render:opengl",
+            "stage_backend_cpu:encode_submit:cpu_encoder",
+            "encode_backend_cpu:h264",
+            "fallback_root_cause:adaptive_policy:cpu_preferred_single_layer_trivial_composite"
+          ]
+        },
+        "probe": {
+          "video": true,
+          "audio": false,
+          "frames": 24,
+          "codec": "h264",
+          "w": 1920,
+          "h": 1080
+        }
+      },
+      "hevc": {
+        "export": {
+          "success": true,
+          "cancelled": false,
+          "cause": "",
+          "full_gpu_blockers": [
+            "stage_backend_cpu:decode:provider_session",
+            "stage_backend_cpu:render:opengl",
+            "stage_backend_cpu:encode_submit:cpu_encoder",
+            "encode_backend_cpu:hevc",
+            "fallback_root_cause:adaptive_policy:cpu_preferred_single_layer_trivial_composite"
+          ]
+        },
+        "probe": {
+          "video": true,
+          "audio": false,
+          "frames": 24,
+          "codec": "hevc",
+          "w": 1920,
+          "h": 1080
+        }
+      }
+    },
+    "cpu_fallback_honest": true,
+    "ok": true
+  },
+  "W04": {
+    "export": {
+      "success": true,
+      "cancelled": false,
+      "cause": "",
+      "full_gpu_blockers": [
+        "stage_missing:decode",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ]
+    },
+    "probe": {
+      "video": true,
+      "audio": true,
+      "frames": 24,
+      "codec": "h264",
+      "w": 1920,
+      "h": 1080,
+      "audio_s": 0.981
+    },
+    "peak_dbfs": -14.8,
+    "audio_video_aligned": true,
+    "ok": true
+  },
+  "W06": {
+    "deliverable_apply": {
+      "applied": true,
+      "error": null,
+      "revision": 1
+    },
+    "identity_remove": {
+      "applied": true,
+      "error": null,
+      "revision": 2
+    },
+    "tinted_export": {
+      "success": true,
+      "cancelled": false,
+      "cause": "",
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ]
+    },
+    "plugin_engaged_in_output": true,
+    "preview_only_reject": {
+      "applied": false,
+      "error": "plan did not pass validation; cannot commit",
+      "revision": 0
+    },
+    "ok": true
+  },
+  "W07": {
+    "portrait_cancel": {
+      "success": false,
+      "cancelled": true,
+      "cause": "",
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ]
+    },
+    "landscape_done": {
+      "success": true,
+      "cancelled": false,
+      "cause": "",
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ]
+    },
+    "portrait_probe": {
+      "video": true,
+      "audio": false,
+      "frames": 5,
+      "codec": "h264",
+      "w": 1080,
+      "h": 1920
+    },
+    "landscape_probe": {
+      "video": true,
+      "audio": false,
+      "frames": 24,
+      "codec": "h264",
+      "w": 1920,
+      "h": 1080
+    },
+    "ok": true
+  },
+  "W08": {
+    "model_capabilities": [
+      {
+        "id": "local_media_analysis",
+        "state": "not_installed"
+      },
+      {
+        "id": "asr_local",
+        "state": "not_installed"
+      },
+      {
+        "id": "visual_caption_local",
+        "state": "not_installed"
+      }
+    ],
+    "models_honest_unavailable": true,
+    "search_assets_graceful": true,
+    "export": {
+      "success": true,
+      "cancelled": false,
+      "cause": "",
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ]
+    },
+    "probe": {
+      "video": true,
+      "audio": false,
+      "frames": 24,
+      "codec": "h264",
+      "w": 1920,
+      "h": 1080
+    },
+    "cpu_fallback_honest": true,
+    "ok": true
+  }
+}

@@ -1,0 +1,5 @@
+[run]
+data_file = docs/testcoverage/2026-09-28/.covdata
+data_file_format = sqlite
+source = src
+disable_warnings = module-not-imported,no-data-collected

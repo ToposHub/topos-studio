@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_transition_preview_mode.py ....                          [100%]
+
+============================== 4 passed in 9.76s ===============================

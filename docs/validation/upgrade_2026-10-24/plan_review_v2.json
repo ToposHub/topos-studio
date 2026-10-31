@@ -1,0 +1,126 @@
+{
+  "review_version": "v2",
+  "audit_date": "2026-10-24",
+  "head": "9e05556c3a3e6d900e7db1d7d3a14ae68552a87c",
+  "scope": "plan omissions and execution contracts; no product edits, GUI/GPU/Windows or full-suite rerun",
+  "previous_focused_tests_rerun": false,
+  "additional_readonly_probe_command": [
+    ".venv/bin/python",
+    "docs/validation/upgrade_2026-10-24/plan_omission_probes.py"
+  ],
+  "additional_probe_results": "docs/validation/upgrade_2026-10-24/plan_omission_probe_results.json",
+  "items": [
+    {
+      "id": "R01",
+      "omission": "软件色彩/显示/Scope只有索引，没有实施责任",
+      "owner": "M19；W04/W07",
+      "repository_relative_path": "src/shared/color/color_transform_provider.py",
+      "line": 664,
+      "evidence": "provider失败与shape恒等行为有局部复现；三页显示与Scope为静态接线/验收遗漏"
+    },
+    {
+      "id": "R02",
+      "omission": "完整组载荷、Composite消费和组成员编辑漏实施",
+      "owner": "M05.1–M05.3；W07",
+      "repository_relative_path": "src/features/edit/core/color_chain.py",
+      "line": 88,
+      "evidence": "静态：高级链段/完整Layer不能由顺序修复自动补齐"
+    },
+    {
+      "id": "R03",
+      "omission": "归档依赖闭包、LUT重写和跨OS脱机恢复漏实施",
+      "owner": "M20；W10",
+      "repository_relative_path": "src/features/edit/core/asset_usage_index.py",
+      "line": 102,
+      "evidence": "局部复现：绑定WAV被usage index标unused；不冒充完整归档实测"
+    },
+    {
+      "id": "R04",
+      "omission": "编码输出与sidecar缺统一发布事务和保旧成片验收",
+      "owner": "M21.1；W07/W10",
+      "repository_relative_path": "src/shared/export/video_encoder.py",
+      "line": 897,
+      "evidence": "静态：直接打开最终路径，close异常删除最终路径；序列需集合一致性"
+    },
+    {
+      "id": "R05",
+      "omission": "黑/冻/坏帧与逐版本响度未测状态、QC报告缺生产者接线",
+      "owner": "M21.2；W07",
+      "repository_relative_path": "src/features/edit/ai_editing/delivery_quality_gate.py",
+      "line": 40,
+      "evidence": "静态：字段默认0不能证明已经测量；run_summary有原台账欠项"
+    },
+    {
+      "id": "R06",
+      "omission": "交换子帧、实际采样时基与活动grade版本缺adapter实施包",
+      "owner": "M24；M18/W07验收",
+      "repository_relative_path": "src/features/edit/adapters/fcpxml_adapter.py",
+      "line": 639,
+      "evidence": "计划遗漏/静态字段检索，48k项目输出48k本身不视为bug"
+    },
+    {
+      "id": "R07",
+      "omission": "镜头匹配参考锁、实际帧预览、批准与命令前台漏实施",
+      "owner": "M22；W07按启用模式验收",
+      "repository_relative_path": "src/features/color/core/shot_match.py",
+      "line": 283,
+      "evidence": "静态API与台账；现有算法接线与算法升级分开"
+    },
+    {
+      "id": "R08",
+      "omission": "COMP增量重跟/修正、人脸/ML Roto前台入口漏实施",
+      "owner": "M23；W07按启用模式验收",
+      "repository_relative_path": "src/features/composite/nodes/face_track_node.py",
+      "line": 146,
+      "evidence": "静态/模型条件项；缺detector不宣称用户功能完成"
+    },
+    {
+      "id": "R09",
+      "omission": "Bake worker、产物验证与图rewrite发布协调漏实施",
+      "owner": "M08.2；W07/W10",
+      "repository_relative_path": "src/features/composite/bake_service.py",
+      "line": 188,
+      "evidence": "静态：缓存已有原子存储可复用，不误称所有缓存均不原子"
+    },
+    {
+      "id": "R10",
+      "omission": "评论重复源歧义与Audition fit时长契约不完整",
+      "owner": "M15.2/M15.3；W07",
+      "repository_relative_path": "src/features/edit/core/review_comments.py",
+      "line": 197,
+      "evidence": "评论重复源局部复现；Audition为计划契约缺项"
+    },
+    {
+      "id": "R11",
+      "omission": "取消结果、sample split归属与RGBA外部往返验收遗漏",
+      "owner": "M12.1/M14.1/M09/M10；W07",
+      "repository_relative_path": "src/features/edit/core/verified_ingest.py",
+      "line": 69,
+      "evidence": "取消report.all_passed=True有helper复现；采样/RGBA为已声明范围的验收补项"
+    },
+    {
+      "id": "R12",
+      "omission": "CUDA同线程current-context与外部YUV颜色数值门遗漏",
+      "owner": "W02/W04；M19共享集成",
+      "repository_relative_path": "src/shared/media/windows_hw/cuda_resident.py",
+      "line": 527,
+      "evidence": "静态：同线程不保证current-context；RGB/HDR真机偏差本轮未测"
+    },
+    {
+      "id": "R13",
+      "omission": "跨平台证据定位与文件系统命名/目录签名边界遗漏",
+      "owner": "M20/W10；两份计划§0",
+      "repository_relative_path": "src/features/edit/core/project_archive.py",
+      "line": 56,
+      "evidence": "静态规范缺口：平台分隔符/大小写/目标保留名，跨OS真机待验"
+    },
+    {
+      "id": "R14",
+      "omission": "硬依赖过大与W09/UW01推广口径倒置",
+      "owner": "M07/M09–M12/M18；W09/升级UW01",
+      "repository_relative_path": "docs/upgrade_plan_W_windows_2026-10-24.md",
+      "line": 1,
+      "evidence": "计划安排修正，不计产品新bug"
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "date": "2026-08-29T07:02:29",
+  "os": "Windows 11 build 26200",
+  "python": "3.12.13",
+  "pyav": "18.1.0",
+  "cpu": "Genuine Intel(R) 0000",
+  "gpu_hint": "AMD Radeon RX 6800",
+  "warmup_frames": 12,
+  "sources": {
+    "2K_H265.mov": {
+      "hw_applicable": true,
+      "meta": {
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "size": "1920x1080",
+        "total_frames": 743,
+        "fps": 25.0
+      },
+      "raw_sw_decode": {
+        "frames": 120,
+        "fps": 474.3,
+        "ms_per_frame": 2.11,
+        "mb_read": 0.0,
+        "setup_ms": 388.0
+      },
+      "raw_hw_decode": {
+        "frames": 120,
+        "fps": 152.3,
+        "ms_per_frame": 6.56,
+        "mb_read": 0.0,
+        "out_fmt": "p010le",
+        "setup_ms": 976.0
+      },
+      "prod_cpu_planar": {
+        "frames": 120,
+        "fps": 480.6,
+        "ms_per_frame": 2.08,
+        "mb_read": 0.0,
+        "pix_fmt": "yuv420p10le",
+        "setup_ms": 420.0
+      },
+      "prod_hw_planar": {
+        "frames": 120,
+        "fps": 145.7,
+        "ms_per_frame": 6.86,
+        "mb_read": 0.0,
+        "out_fmt": "p010le",
+        "hw_active": true,
+        "setup_ms": 1186.0
+      }
+    },
+    "4K_H265.mov": {
+      "hw_applicable": true,
+      "meta": {
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "size": "3840x2160",
+        "total_frames": 743,
+        "fps": 25.0
+      },
+      "raw_sw_decode": {
+        "frames": 90,
+        "fps": 189.7,
+        "ms_per_frame": 5.27,
+        "mb_read": 0.0,
+        "setup_ms": 764.0
+      },
+      "raw_hw_decode": {
+        "frames": 90,
+        "fps": 40.8,
+        "ms_per_frame": 24.54,
+        "mb_read": 0.0,
+        "out_fmt": "p010le",
+        "setup_ms": 2530.0
+      },
+      "prod_cpu_planar": {
+        "frames": 90,
+        "fps": 182.3,
+        "ms_per_frame": 5.48,
+        "mb_read": 0.0,
+        "pix_fmt": "yuv420p10le",
+        "setup_ms": 801.0
+      },
+      "prod_hw_planar": {
+        "frames": 90,
+        "fps": 41.9,
+        "ms_per_frame": 23.85,
+        "mb_read": 0.0,
+        "out_fmt": "p010le",
+        "hw_active": true,
+        "setup_ms": 2480.0
+      }
+    }
+  }
+}

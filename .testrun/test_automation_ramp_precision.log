@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_automation_ramp_precision.py .......                     [100%]
+
+============================== 7 passed in 3.68s ===============================

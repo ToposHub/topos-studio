@@ -1,0 +1,75 @@
+// --- Topos Plugin Metadata ---
+// @name CRT Scanlines
+// @i18n_name CRT_Scanlines
+// @author Topos Team
+// @version 1.0
+// @description CRT display emulation: triangle-wave scanlines and offset-triangle aperture grille mask, brightness-neutral multiplicative gains
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param select crt_mode "Pattern" 2 "Scanlines" "RGB Grille" "Full CRT"
+// @param slider scan_count "Scanline Count" 480.0 120.0 1200.0
+// @param slider scan_strength "Scanline Strength" 0.35 0.0 1.0
+// @param separator
+// @param slider mask_strength "Grille Strength" 0.5 0.0 1.0
+// -----------------------------
+//
+// CRT Scanlines —— CRT 扫描线 / 荫罩条纹。
+//
+// 原理：两个乘性增益场。1) 扫描线：按物理像素行对"行数"取相位，
+// 三角波平方收窄出亮脊与暗缝；2) 荫罩（aperture grille）：3 px 周期
+// 的 RGB 竖条，三通道三角波相位互错 1/3。两场独立开关（select）。
+//
+// 设计要点：
+// - 零纹理采样、零循环、零三角函数——三角波用 1 - |2x - 1| 纯代数
+//   构造（sin/cos 的廉价替代，波形线性但经平方整形后观感一致）；
+// - 亮度中性：三角波均值 0.5，荫罩增益 1.0 + (tri - 0.5) * k 的期望
+//   为 1.0，扫描线同理只重新分配明暗——整体平均亮度不变（乘性，
+//   HDR 安全：超白/负值按同一增益缩放，不 clamp 内容色）；
+// - 分母全部下限守护（safe_size、scan_count >= 1）；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+// [0,1] 周期三角波：0.5 处峰值 1.0，整数相位处 0.0
+float crt_triangle(float x) {
+    return 1.0 - abs(x * 2.0 - 1.0);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：双增益滑杆归零为纯直通
+    if (scan_strength < 0.001 && mask_strength < 0.001) return color;
+
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 safe_size = max(tex_size, vec2(1.0));
+    vec2 px = uv * tex_size;
+
+    // ---- 扫描线场（模式 0 / 2） ----
+    float scan_gain = 1.0;
+    if (crt_mode == 0 || crt_mode == 2) {
+        float period = max(safe_size.y / max(scan_count, 1.0), 1.0);
+        float tri = crt_triangle(fract(px.y / period));
+        tri = tri * tri;  // 平方收窄亮脊：扫描缝更锐
+        scan_gain = 1.0 - scan_strength * 0.6 * (1.0 - tri);
+    }
+
+    // ---- 荫罩条纹场（模式 1 / 2）：3 px 周期，相位互错 1/3 ----
+    vec3 mask_gain = vec3(1.0);
+    if (crt_mode == 1 || crt_mode == 2) {
+        float k = mask_strength * 0.8;
+        float s = px.x / 3.0;
+        float mr = crt_triangle(fract(s));
+        float mg = crt_triangle(fract(s + 0.33333333));
+        float mb = crt_triangle(fract(s + 0.66666667));
+        // 1.0 + (tri - 0.5) * k：均值恰为 1.0，亮度中性
+        mask_gain = vec3(1.0) + (vec3(mr, mg, mb) - vec3(0.5)) * k;
+    }
+
+    return color * scan_gain * mask_gain;
+}

@@ -1,0 +1,58 @@
+# X-TEST-00 环境与素材不可变 manifest
+
+- 状态：**PASS**（asset_count=44, status_counts={'PASS': 43, 'NOT_MEDIA': 1}）
+- manifest：`/Users/testuser/Documents/vscode/topos_1/tests/test_videos/ai_test_asset_manifest.json`（digest `bb9b991d1b1c0def…`）
+- git：47e30e37aa58（chore/edit）
+- OS：macOS 15.3.1 (x86_64), Python 3.12.14
+- GPU：AVAILABLE — AMD Radeon RX 6800
+- Metal：AVAILABLE
+- GL：DEFERRED（reason_code=GL_CONTEXT_DEFERRED_TO_RUNTIME）
+- PyAV：AVAILABLE 18.1.0; ffmpeg_cli=UNAVAILABLE/ffprobe_cli=UNAVAILABLE
+- TOPOS codec：AVAILABLE abi=2
+
+## 条目状态
+
+- `tests/test_videos/2K_DNxHR 444 10bit.mov` — PASS
+- `tests/test_videos/2K_DNxHR 444 12bit.mov` — PASS
+- `tests/test_videos/2K_DNxHR HQX 10bit.mov` — PASS
+- `tests/test_videos/2K_DNxHR HQX 12-bit.mov` — PASS
+- `tests/test_videos/2K_DNxHR HQX 12bit.mov` — PASS
+- `tests/test_videos/2K_H265.mov` — PASS
+- `tests/test_videos/2K_h264.mp4` — PASS
+- `tests/test_videos/2K_prores422.mov` — PASS
+- `tests/test_videos/2K_prores422HQ.mov` — PASS
+- `tests/test_videos/2K_prores422LT.mov` — PASS
+- `tests/test_videos/2K_prores422Proxy.mov` — PASS
+- `tests/test_videos/2K_prores4444.mov` — PASS
+- `tests/test_videos/2K_prores4444XQ.mov` — PASS
+- `tests/test_videos/2K_topos.mov` — PASS
+- `tests/test_videos/2K_topos_4444.mov` — PASS
+- `tests/test_videos/2K_topos_4444xq.mov` — PASS
+- `tests/test_videos/2K_topos_hq.mov` — PASS
+- `tests/test_videos/2K_topos_lt.mov` — PASS
+- `tests/test_videos/2K_topos_proxy.mov` — PASS
+- `tests/test_videos/2K_topos_standard.mov` — PASS
+- `tests/test_videos/4K_DNxHR 444 10bit.mov` — PASS
+- `tests/test_videos/4K_DNxHR 444 12bit.mov` — PASS
+- `tests/test_videos/4K_DNxHR HQX 10bit.mov` — PASS
+- `tests/test_videos/4K_DNxHR HQX 12-bit.mov` — PASS
+- `tests/test_videos/4K_DNxHR HQX 12bit.mov` — PASS
+- `tests/test_videos/4K_H264.mov` — PASS
+- `tests/test_videos/4K_H265.mov` — PASS
+- `tests/test_videos/4K_prores422HQ.mov` — PASS
+- `tests/test_videos/4K_prores422HQ.topos` — NOT_MEDIA（reasons: TOPOS_PROJECT_PACKAGE_DETECTED）
+- `tests/test_videos/4K_prores422LT.mov` — PASS
+- `tests/test_videos/4K_prores422Proxy.mov` — PASS
+- `tests/test_videos/4K_prores4444.mov` — PASS
+- `tests/test_videos/4K_prores4444XQ.mov` — PASS
+- `tests/test_videos/4K_topos.mov` — PASS
+- `tests/test_videos/4K_topos_4444.mov` — PASS
+- `tests/test_videos/4K_topos_4444xq.mov` — PASS
+- `tests/test_videos/4K_topos_hq.mov` — PASS
+- `tests/test_videos/4K_topos_lt.mov` — PASS
+- `tests/test_videos/4K_topos_proxy.mov` — PASS
+- `tests/test_videos/4K_topos_standard.mov` — PASS
+- `tests/test_videos/tracking_fixtures/occlusion.mp4` — PASS
+- `tests/test_videos/tracking_fixtures/perspective.mp4` — PASS
+- `tests/test_videos/tracking_fixtures/translation.mp4` — PASS
+- `tests/test_videos/tracking_fixtures/trs.mp4` — PASS

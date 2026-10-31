@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "selection_policy": "paired_random",
+  "description": "Source-scene pool for transition preview GIF generation.",
+  "randomization": {
+    "select_pair_as_unit": true,
+    "allow_reverse_order": true,
+    "never_change_scene_within_a_rendered_gif": true
+  },
+  "pairs": [
+    {
+      "id": "nature_cinematic",
+      "label": "Nature / Cinematic",
+      "first": "scene_a1_lake_blue.png",
+      "second": "scene_a2_desert_warm.png"
+    },
+    {
+      "id": "urban_gallery",
+      "label": "Urban / Gallery",
+      "first": "scene_b1_city_blue.png",
+      "second": "scene_b2_gallery_warm.png"
+    },
+    {
+      "id": "botanical_geometry",
+      "label": "Botanical / Geometry",
+      "first": "scene_c1_greenhouse.png",
+      "second": "scene_c2_magenta_geometry.png"
+    },
+    {
+      "id": "portrait_city_cafe",
+      "label": "Portrait / City + Cafe",
+      "content": "people",
+      "first": "scene_d1_cool_portrait.png",
+      "second": "scene_d2_warm_portrait.png"
+    },
+    {
+      "id": "portrait_botanical_courtyard",
+      "label": "Portrait / Botanical + Courtyard",
+      "content": "people",
+      "first": "scene_e1_deep_skin_portrait.png",
+      "second": "scene_e2_warm_mature_portrait.png"
+    },
+    {
+      "id": "portrait_studio_contrast",
+      "label": "Portrait / Studio Contrast",
+      "content": "people",
+      "first": "scene_f1_high_key_portrait.png",
+      "second": "scene_f2_low_key_portrait.png"
+    }
+  ]
+}

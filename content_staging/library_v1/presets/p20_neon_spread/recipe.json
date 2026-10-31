@@ -1,0 +1,24 @@
+{
+  "recipe_id": "P20",
+  "name": "霓虹扩散",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合霓虹/电子乐画面；低 threshold + 高 intensity，注意能量溢出",
+  "component": "Soft_Glow_Bloom（生产插件 plugins/Soft_Glow_Bloom.tglsl）",
+  "dependencies": {
+    "plugin_id": "Soft_Glow_Bloom",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "threshold": 0.25,
+    "radius": 0.85,
+    "intensity": 0.6
+  },
+  "notes": "生产柔光插件高增益档；参数已对真实插件 schema 校验。"
+}

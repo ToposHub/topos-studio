@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "KI-Workflow"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "Wählen Sie oben eine Vorlage oder legen Sie Assets hier ab",
+      "zoom": "Zoom: {percent} %"
+    },
+    "toolbar": {
+      "template": "Vorlage",
+      "load": "Laden",
+      "clear": "Leeren",
+      "form": "Formular",
+      "canvas": "Leinwand",
+      "run": "Ausführen",
+      "cancel": "Abbrechen"
+    },
+    "gallery": {
+      "title": "Workflow-Vorlage wählen",
+      "use": "Verwenden"
+    },
+    "form": {
+      "title": "Parameter",
+      "title_with_name": "{name} · Parameter",
+      "node_section": "Knoten: {node}",
+      "no_params": "Diese Vorlage hat keine einstellbaren Parameter — einfach ausführen",
+      "advanced_edit": "Erweiterte Bearbeitung (Leinwand)",
+      "back_to_gallery": "Zurück zu den Vorlagen",
+      "back_to_gallery_tooltip": "Zurück zur Vorlagengalerie; der aktuelle Workflow bleibt erhalten (Leeren verwirft ihn)"
+    },
+    "status": {
+      "idle": "Inaktiv",
+      "queued": "In Warteschlange",
+      "running": "Läuft",
+      "cached": "Zwischengespeichert",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen",
+      "waiting_input": "Wartet",
+      "skipped": "Übersprungen",
+      "not_assembled": "Status: nicht assembliert",
+      "no_plan": "Noch kein Plan"
+    },
+    "actions": {
+      "preview_plan": "Plan vorschauen",
+      "request_approval": "Genehmigung anfordern",
+      "apply_approved_plan": "Genehmigten Plan anwenden"
+    },
+    "inspector": {
+      "no_selection": "<b>(keine Auswahl)</b>"
+    },
+    "node_search": {
+      "placeholder": "Knoten suchen…"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+/Users/testuser/Documents/vscode/topos_1/src/features/color/core/the_decompiler.py:177: RuntimeWarning: overflow encountered in power
+  np.power(b_mid, gm_pow, out=b_mid)
+/Users/testuser/Documents/vscode/topos_1/bench_out/extended_real_tests_20260917/real_topos_color_tools.json
+grading passed 207.205 
+curves passed 40.222 
+hsl_curve passed 26.337 
+lut3d passed 22.87 
+mixer passed 66.438 
+warper passed 29.78 
+soft_clip passed 75.585 
+blur_sharpen passed 13.664 
+film_grain passed 30.024 
+qualifier passed 33.121 
+mask_shapes passed 15.315 
+blend_modes passed 11.2 
+scopes_histogram passed 15.176 
+denoise passed 527.052 
+tracker covered_by_unit_and_tracking_service_tests - 
+auto_color covered_by_unit_tests_and_color_controller - 
+color_plugins blocked_by_design - 
+raw_develop not_applicable - 

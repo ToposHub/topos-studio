@@ -1,0 +1,38 @@
+{
+  "mode": "file",
+  "file": "tests/media/fixtures/test_h264_sdr.mp4",
+  "size": "1920x1080",
+  "decode": {
+    "p50": 2.5545,
+    "p95": 9.4084,
+    "mean": 3.0125,
+    "n": 33
+  },
+  "metal_import": {
+    "p50": 0.1076,
+    "p95": 0.2012,
+    "mean": 0.13,
+    "n": 33
+  },
+  "convert_encode": {
+    "p50": 0.2252,
+    "p95": 0.4328,
+    "mean": 0.2794,
+    "n": 33
+  },
+  "gpu_wait": {
+    "p50": 0.628,
+    "p95": 0.7572,
+    "mean": 0.6379,
+    "n": 33
+  },
+  "total": {
+    "p50": 3.4154,
+    "p95": 10.6665,
+    "mean": 4.0598,
+    "n": 33
+  },
+  "timestamp": "2026-09-11T19:40:52",
+  "device": "AMD Radeon RX 6800",
+  "platform_note": "Intel + AMD 6900XT 降级路径（A′ 主目标机待复测）"
+}

@@ -1,0 +1,37 @@
+{
+  "component": "X13 pixelate_bridge",
+  "method": "手算：8x4（H=4），A 行=[10,20,30,40,50,60,70,80]、B 行=[80,70,60,50,40,30,20,10]（灰度，行复制）。cell_eff = cell·(p/switch)（In 前半）等剖面；块中心采样：块 b=[floor((i+0.5)/c)]，src=floor((b+0.5)·c−0.5)。c=2 → src={0,2,4,6}；c=3 → src={1,4,7}；c=4 → src={1,5}；c=1 → 恒等。独立枚举推演（纯 Python，不复用核代码），精确相等。",
+  "params_default": {"cell": 16, "source_switch": 0.5, "direction": "In"},
+  "fixtures": {
+    "a_row": [10, 20, 30, 40, 50, 60, 70, 80],
+    "b_row": [80, 70, 60, 50, 40, 30, 20, 10],
+    "a_rows_vertical": [[0], [100], [200], [300]]
+  },
+  "vectors": [
+    {"fixture": "8x4", "params": {"cell": 4, "source_switch": 0.5, "direction": "In"}, "progress": 0.25,
+     "expected_grid_rows": [[10, 10, 30, 30, 50, 50, 70, 70], [10, 10, 30, 30, 50, 50, 70, 70], [10, 10, 30, 30, 50, 50, 70, 70], [10, 10, 30, 30, 50, 50, 70, 70]],
+     "note": "In p=0.25：c_eff=4·0.5=2 → A 列对取左列 {0,2,4,6}"},
+    {"fixture": "8x4", "params": {"cell": 4, "source_switch": 0.5, "direction": "In"}, "progress": 0.375,
+     "expected_grid_rows": [[20, 20, 20, 50, 50, 50, 80, 80], [20, 20, 20, 50, 50, 50, 80, 80], [20, 20, 20, 50, 50, 50, 80, 80], [20, 20, 20, 50, 50, 50, 80, 80]],
+     "note": "In p=0.375：c_eff=3 → 块中心 src={1,4,7}。冲突记录：初版手推误记 src={1,4,7}→值 {20,40,70}，独立脚本重推 a[4]=50、a[7]=80（下标从 0 计）"},
+    {"fixture": "8x4", "params": {"cell": 4, "source_switch": 0.5, "direction": "In"}, "progress": 0.5,
+     "expected_grid_rows": [[70, 70, 70, 70, 30, 30, 30, 30], [70, 70, 70, 70, 30, 30, 30, 30], [70, 70, 70, 70, 30, 30, 30, 30], [70, 70, 70, 70, 30, 30, 30, 30]],
+     "note": "p=switch：换源 B、c_eff=4（峰值粗化）→ src={1,5}"},
+    {"fixture": "8x4", "params": {"cell": 4, "source_switch": 0.5, "direction": "In"}, "progress": 0.75,
+     "expected_grid_rows": [[80, 80, 60, 60, 40, 40, 20, 20], [80, 80, 60, 60, 40, 40, 20, 20], [80, 80, 60, 60, 40, 40, 20, 20], [80, 80, 60, 60, 40, 40, 20, 20]],
+     "note": "In p=0.75：B 侧细化 c_eff=4·(1−0.5)=2"},
+    {"fixture": "8x4", "params": {"cell": 4, "source_switch": 0.5, "direction": "Out"}, "progress": 0.5,
+     "expected_grid_rows": [[80, 70, 60, 50, 40, 30, 20, 10], [80, 70, 60, 50, 40, 30, 20, 10], [80, 70, 60, 50, 40, 30, 20, 10], [80, 70, 60, 50, 40, 30, 20, 10]],
+     "note": "Out p=0.5：镜像剖面 c_eff=4·(1−1)=0→1 → B 恒等（switch 处最细，峰值在两端）"},
+    {"fixture": "8x4", "params": {"cell": 4, "source_switch": 0.5, "direction": "Out"}, "progress": 0.25,
+     "expected_grid_rows": [[10, 10, 30, 30, 50, 50, 70, 70], [10, 10, 30, 30, 50, 50, 70, 70], [10, 10, 30, 30, 50, 50, 70, 70], [10, 10, 30, 30, 50, 50, 70, 70]],
+     "note": "Out p=0.25：c_eff=4·(1−0.5)=2（与 In p=0.25 同块度，方向剖面互为镜像）"},
+    {"fixture": "8x4-vertical", "params": {"cell": 4, "source_switch": 0.5, "direction": "In"}, "progress": 0.25,
+     "expected_grid_rows": [[0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0], [200, 200, 200, 200, 200, 200, 200, 200], [200, 200, 200, 200, 200, 200, 200, 200]],
+     "note": "垂直块：A 行均匀 0/100/200/300，c_eff=2 → 行对 {0,1}←行0、{2,3}←行2"},
+    {"fixture": "8x4", "params": {"cell": 4, "source_switch": 0.5}, "progress": 0.0, "expected_endpoint": "A",
+     "note": "端点比特级：p=0 → A 原样"},
+    {"fixture": "8x4", "params": {"cell": 4, "source_switch": 0.5}, "progress": 1.0, "expected_endpoint": "B",
+     "note": "端点比特级：p=1 → B 原样"}
+  ]
+}

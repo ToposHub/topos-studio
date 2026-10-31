@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 27 items
+
+tests/edit/test_generator_transaction_boundary.py ...................... [ 81%]
+.....                                                                    [100%]
+
+============================== 27 passed in 7.51s ==============================

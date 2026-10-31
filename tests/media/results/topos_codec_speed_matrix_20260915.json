@@ -1,0 +1,687 @@
+{
+  "schema": "topos.codec_speed_matrix.v1",
+  "created_at": "2026-09-15T12:57:10.562698+08:00",
+  "host": {
+    "platform": "macOS-15.3.1-x86_64-i386-64bit-Mach-O",
+    "machine": "x86_64",
+    "processor": "i386"
+  },
+  "codec_library": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.0.1.0.dylib",
+  "codec_library_sha256": "fdfced5c4219454769e2b209ac5d7249d243bc9d9885a2888b9c8d1768e56bb0",
+  "git_head": "0a1ea0d76c8252eecdeacf424f61e998ad05d81e",
+  "decode_mov": {
+    "frames": 96,
+    "threads": 16,
+    "scope": "Topos MOV packet read + decode; wrapper allocates/copies, native reuses preallocated planes",
+    "rows": [
+      {
+        "video": "2K_topos_proxy.mov",
+        "wrapper": {
+          "avg_ms": 2.73,
+          "p50_ms": 2.44,
+          "p95_ms": 3.92,
+          "fps": 366.3
+        },
+        "native": {
+          "avg_ms": 1.37,
+          "p50_ms": 1.36,
+          "p95_ms": 1.61,
+          "fps": 730.8
+        }
+      },
+      {
+        "video": "2K_topos_lt.mov",
+        "wrapper": {
+          "avg_ms": 3.39,
+          "p50_ms": 3.32,
+          "p95_ms": 4.03,
+          "fps": 294.7
+        },
+        "native": {
+          "avg_ms": 2.0,
+          "p50_ms": 1.94,
+          "p95_ms": 2.47,
+          "fps": 498.8
+        }
+      },
+      {
+        "video": "2K_topos_standard.mov",
+        "wrapper": {
+          "avg_ms": 3.93,
+          "p50_ms": 3.83,
+          "p95_ms": 4.99,
+          "fps": 254.6
+        },
+        "native": {
+          "avg_ms": 2.49,
+          "p50_ms": 2.46,
+          "p95_ms": 3.26,
+          "fps": 400.9
+        }
+      },
+      {
+        "video": "2K_topos_hq.mov",
+        "wrapper": {
+          "avg_ms": 4.76,
+          "p50_ms": 4.66,
+          "p95_ms": 5.94,
+          "fps": 209.9
+        },
+        "native": {
+          "avg_ms": 3.33,
+          "p50_ms": 3.26,
+          "p95_ms": 4.41,
+          "fps": 300.1
+        }
+      },
+      {
+        "video": "2K_topos_4444.mov",
+        "wrapper": {
+          "avg_ms": 7.82,
+          "p50_ms": 7.69,
+          "p95_ms": 9.48,
+          "fps": 127.9
+        },
+        "native": {
+          "avg_ms": 5.46,
+          "p50_ms": 5.4,
+          "p95_ms": 6.71,
+          "fps": 183.2
+        }
+      },
+      {
+        "video": "2K_topos_4444xq.mov",
+        "wrapper": {
+          "avg_ms": 9.22,
+          "p50_ms": 9.14,
+          "p95_ms": 10.18,
+          "fps": 108.4
+        },
+        "native": {
+          "avg_ms": 6.74,
+          "p50_ms": 6.64,
+          "p95_ms": 7.46,
+          "fps": 148.5
+        }
+      },
+      {
+        "video": "4K_topos_proxy.mov",
+        "wrapper": {
+          "avg_ms": 9.28,
+          "p50_ms": 9.05,
+          "p95_ms": 10.13,
+          "fps": 107.8
+        },
+        "native": {
+          "avg_ms": 4.76,
+          "p50_ms": 4.65,
+          "p95_ms": 5.64,
+          "fps": 210.0
+        }
+      },
+      {
+        "video": "4K_topos_lt.mov",
+        "wrapper": {
+          "avg_ms": 11.99,
+          "p50_ms": 11.75,
+          "p95_ms": 13.88,
+          "fps": 83.4
+        },
+        "native": {
+          "avg_ms": 7.04,
+          "p50_ms": 6.85,
+          "p95_ms": 8.96,
+          "fps": 142.1
+        }
+      },
+      {
+        "video": "4K_topos_standard.mov",
+        "wrapper": {
+          "avg_ms": 14.04,
+          "p50_ms": 13.59,
+          "p95_ms": 16.42,
+          "fps": 71.2
+        },
+        "native": {
+          "avg_ms": 8.83,
+          "p50_ms": 8.68,
+          "p95_ms": 10.62,
+          "fps": 113.3
+        }
+      },
+      {
+        "video": "4K_topos_hq.mov",
+        "wrapper": {
+          "avg_ms": 17.07,
+          "p50_ms": 16.81,
+          "p95_ms": 18.94,
+          "fps": 58.6
+        },
+        "native": {
+          "avg_ms": 11.9,
+          "p50_ms": 11.75,
+          "p95_ms": 13.57,
+          "fps": 84.0
+        }
+      },
+      {
+        "video": "4K_topos_4444.mov",
+        "wrapper": {
+          "avg_ms": 27.46,
+          "p50_ms": 27.26,
+          "p95_ms": 30.02,
+          "fps": 36.4
+        },
+        "native": {
+          "avg_ms": 19.45,
+          "p50_ms": 19.22,
+          "p95_ms": 21.81,
+          "fps": 51.4
+        }
+      },
+      {
+        "video": "4K_topos_4444xq.mov",
+        "wrapper": {
+          "avg_ms": 30.2,
+          "p50_ms": 29.81,
+          "p95_ms": 32.75,
+          "fps": 33.1
+        },
+        "native": {
+          "avg_ms": 21.34,
+          "p50_ms": 21.19,
+          "p95_ms": 22.85,
+          "fps": 46.9
+        }
+      }
+    ]
+  },
+  "pure_codec": {
+    "frames": 48,
+    "scope": "raw planar source; encode timing excludes source decode, frame extraction and MOV mux; decode uses reusable native views",
+    "rows": [
+      {
+        "label": "current_2K_422",
+        "family": "422",
+        "src_fmt": "yuv422p10le",
+        "width": 1920,
+        "height": 1080,
+        "frames": 48,
+        "bit_depth": 10,
+        "rows": [
+          {
+            "tier": "proxy",
+            "target_frame_bytes": 75448,
+            "bytes": 3655338,
+            "bpp": 0.29379967206790125,
+            "target_bpp": 0.29108,
+            "ratio": 1.009343383495607,
+            "mbps": 15.230575,
+            "encode_secs": 0.09080481499768212,
+            "fps": 528.6063299751809,
+            "realtime": 21.144253199007235,
+            "qp0": 87,
+            "qp_mean": 86.22916666666667,
+            "qp_min": 86,
+            "qp_max_seen": 87,
+            "decode_secs": 0.06332978000136791,
+            "decode_fps": 757.9372610952258,
+            "decode_realtime": 30.317490443809035,
+            "prores_ref": {
+              "profile": "0",
+              "bytes": 9781297,
+              "wall": 1.4063188350010023,
+              "fps": 34.13166261117863,
+              "realtime": 1.3652665044471453,
+              "mbps": 40.75540416666667,
+              "bpp": 0.7861767779063786
+            },
+            "speed_vs_prores": 15.487271628017744
+          },
+          {
+            "tier": "lt",
+            "target_frame_bytes": 243842,
+            "bytes": 11630463,
+            "bpp": 0.9348044463734568,
+            "target_bpp": 0.94075,
+            "ratio": 0.9936799855152345,
+            "mbps": 48.4602625,
+            "encode_secs": 0.12521496399131138,
+            "fps": 383.34076431416537,
+            "realtime": 15.333630572566614,
+            "qp0": 79,
+            "qp_mean": 78.04166666666667,
+            "qp_min": 77,
+            "qp_max_seen": 79,
+            "decode_secs": 0.09423447299923282,
+            "decode_fps": 509.3677342514642,
+            "decode_realtime": 20.374709370058568,
+            "prores_ref": {
+              "profile": "1",
+              "bytes": 21822912,
+              "wall": 1.6449642529987614,
+              "fps": 29.17996540806054,
+              "realtime": 1.1671986163224215,
+              "mbps": 90.9288,
+              "bpp": 1.7540277777777777
+            },
+            "speed_vs_prores": 13.137121958625526
+          },
+          {
+            "tier": "standard",
+            "target_frame_bytes": 389567,
+            "bytes": 18516334,
+            "bpp": 1.4882598701131686,
+            "target_bpp": 1.50296,
+            "ratio": 0.9902192141595043,
+            "mbps": 77.15139166666667,
+            "encode_secs": 0.16302105100476183,
+            "fps": 294.44050142087434,
+            "realtime": 11.777620056834973,
+            "qp0": 75,
+            "qp_mean": 75.0,
+            "qp_min": 75,
+            "qp_max_seen": 75,
+            "decode_secs": 0.12156998999853386,
+            "decode_fps": 394.8342843540489,
+            "decode_realtime": 15.793371374161957,
+            "prores_ref": {
+              "profile": "2",
+              "bytes": 31127762,
+              "wall": 1.3900171220011543,
+              "fps": 34.53194873664307,
+              "realtime": 1.381277949465723,
+              "mbps": 129.69900833333335,
+              "bpp": 2.501909882973251
+            },
+            "speed_vs_prores": 8.526611216367094
+          },
+          {
+            "tier": "hq",
+            "target_frame_bytes": 660846,
+            "bytes": 31922901,
+            "bpp": 2.5658195891203706,
+            "target_bpp": 2.54956,
+            "ratio": 1.0063774098747904,
+            "mbps": 133.0120875,
+            "encode_secs": 0.2251855840004282,
+            "fps": 213.15751722325496,
+            "realtime": 8.526300688930199,
+            "qp0": 72,
+            "qp_mean": 71.0625,
+            "qp_min": 70,
+            "qp_max_seen": 72,
+            "decode_secs": 0.19289922000098159,
+            "decode_fps": 248.8345987078421,
+            "decode_realtime": 9.953383948313684,
+            "prores_ref": {
+              "profile": "3",
+              "bytes": 46308470,
+              "wall": 1.4651006960011728,
+              "fps": 32.76225322328396,
+              "realtime": 1.3104901289313586,
+              "mbps": 192.95195833333335,
+              "bpp": 3.7220670974794237
+            },
+            "speed_vs_prores": 6.506192225868183
+          }
+        ]
+      },
+      {
+        "label": "current_2K_44410",
+        "family": "444",
+        "src_fmt": "yuv444p10le",
+        "width": 1920,
+        "height": 1080,
+        "frames": 48,
+        "bit_depth": 10,
+        "rows": [
+          {
+            "tier": "pro444",
+            "target_frame_bytes": 1105060,
+            "bytes": 52692783,
+            "bpp": 4.23520953896605,
+            "target_bpp": 4.26335,
+            "ratio": 0.99339944854775,
+            "mbps": 219.5532625,
+            "encode_secs": 0.43168000298101106,
+            "fps": 111.19347588151182,
+            "realtime": 4.447739035260472,
+            "qp0": 75,
+            "qp_mean": 74.5,
+            "qp_min": 74,
+            "qp_max_seen": 75,
+            "decode_secs": 0.2556669890000194,
+            "decode_fps": 187.7442222311945,
+            "decode_realtime": 7.50976888924778,
+            "prores_ref": {
+              "profile": "4444",
+              "bytes": 69811626,
+              "wall": 3.1937317660012923,
+              "fps": 15.029440014650428,
+              "realtime": 0.6011776005860171,
+              "mbps": 290.881775,
+              "bpp": 5.611145351080247
+            },
+            "speed_vs_prores": 7.398377835310059
+          }
+        ]
+      },
+      {
+        "label": "current_2K_44412",
+        "family": "444",
+        "src_fmt": "yuv444p12le",
+        "width": 1920,
+        "height": 1080,
+        "frames": 48,
+        "bit_depth": 12,
+        "rows": [
+          {
+            "tier": "pro444",
+            "target_frame_bytes": 1105060,
+            "bytes": 53408177,
+            "bpp": 4.292709699717078,
+            "target_bpp": 4.26335,
+            "ratio": 1.0068865328244405,
+            "mbps": 222.53407083333335,
+            "encode_secs": 0.4311542849900434,
+            "fps": 111.32905707085449,
+            "realtime": 4.45316228283418,
+            "qp0": 79,
+            "qp_mean": 78.52083333333333,
+            "qp_min": 78,
+            "qp_max_seen": 79,
+            "decode_secs": 0.2693552099990484,
+            "decode_fps": 178.20334717182408,
+            "decode_realtime": 7.128133886872963,
+            "prores_ref": {
+              "profile": "4444",
+              "bytes": 69824946,
+              "wall": 3.495331983001961,
+              "fps": 13.73260114730941,
+              "realtime": 0.5493040458923764,
+              "mbps": 290.937275,
+              "bpp": 5.6122159529320985
+            },
+            "speed_vs_prores": 8.106916954525172
+          },
+          {
+            "tier": "extreme",
+            "target_frame_bytes": 1629808,
+            "bytes": 80103497,
+            "bpp": 6.438359776877572,
+            "target_bpp": 6.28784,
+            "ratio": 1.0239382326645672,
+            "mbps": 333.7645708333334,
+            "encode_secs": 0.4819694740144769,
+            "fps": 99.59136955333032,
+            "realtime": 3.983654782133213,
+            "qp0": 76,
+            "qp_mean": 75.04166666666667,
+            "qp_min": 75,
+            "qp_max_seen": 76,
+            "decode_secs": 0.31789731699973345,
+            "decode_fps": 150.99215197226798,
+            "decode_realtime": 6.039686078890719,
+            "prores_ref": {
+              "profile": "4444xq",
+              "bytes": 103844166,
+              "wall": 2.4366701709986955,
+              "fps": 19.69901407720138,
+              "realtime": 0.7879605630880552,
+              "mbps": 432.684025,
+              "bpp": 8.346528260030864
+            },
+            "speed_vs_prores": 5.055652489156411
+          }
+        ]
+      },
+      {
+        "label": "current_4K_422",
+        "family": "422",
+        "src_fmt": "yuv422p10le",
+        "width": 3840,
+        "height": 2160,
+        "frames": 48,
+        "bit_depth": 10,
+        "rows": [
+          {
+            "tier": "proxy",
+            "target_frame_bytes": 301792,
+            "bytes": 14516333,
+            "bpp": 0.2916894330311214,
+            "target_bpp": 0.29108,
+            "ratio": 1.0020936959980808,
+            "mbps": 60.484720833333334,
+            "encode_secs": 0.3309052370132122,
+            "fps": 145.05663444088523,
+            "realtime": 5.802265377635409,
+            "qp0": 76,
+            "qp_mean": 75.04166666666667,
+            "qp_min": 74,
+            "qp_max_seen": 78,
+            "decode_secs": 0.24585273399861762,
+            "decode_fps": 195.23882943791014,
+            "decode_realtime": 7.809553177516405,
+            "prores_ref": {
+              "profile": "0",
+              "bytes": 19974264,
+              "wall": 3.037673122002161,
+              "fps": 15.801568527018706,
+              "realtime": 0.6320627410807482,
+              "mbps": 83.2261,
+              "bpp": 0.4013604359567901
+            },
+            "speed_vs_prores": 9.179888325191042
+          },
+          {
+            "tier": "lt",
+            "target_frame_bytes": 975370,
+            "bytes": 48282482,
+            "bpp": 0.9701823318544238,
+            "target_bpp": 0.94075,
+            "ratio": 1.031286029077251,
+            "mbps": 201.17700833333333,
+            "encode_secs": 0.38848423999661463,
+            "fps": 123.55713580663732,
+            "realtime": 4.942285432265493,
+            "qp0": 69,
+            "qp_mean": 67.83333333333333,
+            "qp_min": 65,
+            "qp_max_seen": 73,
+            "decode_secs": 0.33303603700187523,
+            "decode_fps": 144.12854666454527,
+            "decode_realtime": 5.765141866581811,
+            "prores_ref": {
+              "profile": "1",
+              "bytes": 71222415,
+              "wall": 4.435479719002615,
+              "fps": 10.821828311908849,
+              "realtime": 0.43287313247635395,
+              "mbps": 296.7600625,
+              "bpp": 1.4311345606674384
+            },
+            "speed_vs_prores": 11.417399375174824
+          },
+          {
+            "tier": "standard",
+            "target_frame_bytes": 1558269,
+            "bytes": 74905743,
+            "bpp": 1.5051469063464507,
+            "target_bpp": 1.50296,
+            "ratio": 1.0014550662335995,
+            "mbps": 312.1072625,
+            "encode_secs": 0.49221803099135286,
+            "fps": 97.51776037811027,
+            "realtime": 3.9007104151244105,
+            "qp0": 66,
+            "qp_mean": 65.16666666666667,
+            "qp_min": 64,
+            "qp_max_seen": 69,
+            "decode_secs": 0.4261967239981459,
+            "decode_fps": 112.62404729373006,
+            "decode_realtime": 4.504961891749202,
+            "prores_ref": {
+              "profile": "2",
+              "bytes": 102834654,
+              "wall": 3.537357332999818,
+              "fps": 13.569451848194854,
+              "realtime": 0.5427780739277942,
+              "mbps": 428.477725,
+              "bpp": 2.066347053433642
+            },
+            "speed_vs_prores": 7.186565932733905
+          },
+          {
+            "tier": "hq",
+            "target_frame_bytes": 2643384,
+            "bytes": 127246478,
+            "bpp": 2.5568752813143005,
+            "target_bpp": 2.54956,
+            "ratio": 1.00286923285363,
+            "mbps": 530.1936583333334,
+            "encode_secs": 0.7048490919951291,
+            "fps": 68.09968338631514,
+            "realtime": 2.7239873354526054,
+            "qp0": 64,
+            "qp_mean": 62.083333333333336,
+            "qp_min": 60,
+            "qp_max_seen": 66,
+            "decode_secs": 0.5734603319979215,
+            "decode_fps": 83.70238937498816,
+            "decode_realtime": 3.3480955749995265,
+            "prores_ref": {
+              "profile": "3",
+              "bytes": 157149381,
+              "wall": 4.186780883999745,
+              "fps": 11.464655383193662,
+              "realtime": 0.45858621532774646,
+              "mbps": 654.7890875,
+              "bpp": 3.157740584008488
+            },
+            "speed_vs_prores": 5.939967762672068
+          }
+        ]
+      },
+      {
+        "label": "current_4K_44410",
+        "family": "444",
+        "src_fmt": "yuv444p10le",
+        "width": 3840,
+        "height": 2160,
+        "frames": 48,
+        "bit_depth": 10,
+        "rows": [
+          {
+            "tier": "pro444",
+            "target_frame_bytes": 4420241,
+            "bytes": 214861095,
+            "bpp": 4.317392758969907,
+            "target_bpp": 4.26335,
+            "ratio": 1.0126761253403795,
+            "mbps": 895.2545625,
+            "encode_secs": 1.4631740700060618,
+            "fps": 32.80539273075085,
+            "realtime": 1.3122157092300342,
+            "qp0": 71,
+            "qp_mean": 70.33333333333333,
+            "qp_min": 70,
+            "qp_max_seen": 71,
+            "decode_secs": 0.9021213989981334,
+            "decode_fps": 53.20791642156725,
+            "decode_realtime": 2.12831665686269,
+            "prores_ref": {
+              "profile": "4444",
+              "bytes": 276334438,
+              "wall": 8.283723467997334,
+              "fps": 5.794495698153049,
+              "realtime": 0.23177982792612195,
+              "mbps": 1151.3934916666667,
+              "bpp": 5.552630650398663
+            },
+            "speed_vs_prores": 5.661475034178958
+          }
+        ]
+      },
+      {
+        "label": "current_4K_44412",
+        "family": "444",
+        "src_fmt": "yuv444p12le",
+        "width": 3840,
+        "height": 2160,
+        "frames": 48,
+        "bit_depth": 12,
+        "rows": [
+          {
+            "tier": "pro444",
+            "target_frame_bytes": 4420241,
+            "bytes": 207474739,
+            "bpp": 4.1689722182034465,
+            "target_bpp": 4.26335,
+            "ratio": 0.97786299933232,
+            "mbps": 864.4780791666667,
+            "encode_secs": 1.4721899419964757,
+            "fps": 32.60448847714985,
+            "realtime": 1.304179539085994,
+            "qp0": 75,
+            "qp_mean": 75.0,
+            "qp_min": 75,
+            "qp_max_seen": 75,
+            "decode_secs": 0.9008715969976038,
+            "decode_fps": 53.28173311265765,
+            "decode_realtime": 2.131269324506306,
+            "prores_ref": {
+              "profile": "4444",
+              "bytes": 276941333,
+              "wall": 9.45769044500048,
+              "fps": 5.075234834459372,
+              "realtime": 0.20300939337837487,
+              "mbps": 1153.9222208333335,
+              "bpp": 5.564825524852109
+            },
+            "speed_vs_prores": 6.424232481968092
+          },
+          {
+            "tier": "extreme",
+            "target_frame_bytes": 6519233,
+            "bytes": 310385975,
+            "bpp": 6.236858101048097,
+            "target_bpp": 6.28784,
+            "ratio": 0.9918919853317032,
+            "mbps": 1293.2748958333334,
+            "encode_secs": 1.493522701002803,
+            "fps": 32.13878166550206,
+            "realtime": 1.2855512666200823,
+            "qp0": 69,
+            "qp_mean": 69.0,
+            "qp_min": 69,
+            "qp_max_seen": 69,
+            "decode_secs": 1.0182441840006504,
+            "decode_fps": 47.13996971866754,
+            "decode_realtime": 1.8855987887467014,
+            "prores_ref": {
+              "profile": "4444xq",
+              "bytes": 378092031,
+              "wall": 7.208094824,
+              "fps": 6.659179876516009,
+              "realtime": 0.2663671950606404,
+              "mbps": 1575.3834625,
+              "bpp": 7.5973353708526234
+            },
+            "speed_vs_prores": 4.826237203599406
+          }
+        ]
+      }
+    ]
+  },
+  "sources": {
+    "422": "tests/test_videos/*_prores422HQ.mov",
+    "44410": "tests/test_videos/*_DNxHR 444 10bit.mov",
+    "44412": "tests/test_videos/*_DNxHR 444 12bit.mov"
+  },
+  "notes": [
+    "All generated Topos files are 96-frame, 25 fps MOVs in tests/test_videos and passed manifest validation.",
+    "The 4:4:4 speed harness resolves historical labels pro444/extreme to product ids 4444/4444xq.",
+    "Native rows are the best estimate of codec throughput; wrapper rows include Python binding and packet/object overhead."
+  ]
+}

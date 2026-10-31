@@ -1,0 +1,92 @@
+// --- Topos Plugin Metadata ---
+// @name Anamorphic Streak
+// @i18n_name Anamorphic_Streak
+// @author Topos Team
+// @version 1.0
+// @description Horizontal anamorphic lens streak: highlight-gated taps along +/-X with distance falloff, quality presets and tintable streak color
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost medium
+// @param select streak_quality "Streak Quality" 1 "14 Taps" "22 Taps" "30 Taps"
+// @param slider streak_reach "Streak Reach" 0.5 0.0 1.0
+// @param slider highlight_threshold "Highlight Threshold" 0.55 0.0 1.0
+// @param slider intensity "Intensity" 0.4 0.0 1.0
+// @param color streak_tint "Streak Tint" 0.55 0.70 1.00
+// -----------------------------
+//
+// Anamorphic Streak —— 变形镜头横向拉丝。
+//
+// 原理：柱面镜头在强光源上留下"长、直、冷色"的水平散射光带。本插件
+// 对当前像素沿 +/-X 两个方向各取 N 个 tap，每个 tap 以"该采样自身的
+// 高光超出量"（luma - threshold 的线性超出部分）加权累加，并按到中心
+// 的距离平方衰减，最后归一化成一条过像素的水平光带。
+//
+// 设计要点（对照 STYLE_NOTES / 红线）：
+// - tap 数为 select 三档（14/22/30），经 STREAK_ACCUMULATE 宏展开成三个
+//   编译期常量循环分支（Radial_Blur_Pro 同款惯例），单次 int 分支调度；
+// - 高光门控在 scene-linear 域线性外推：超阈值部分线性参与、低于阈值
+//   贡献为 0，max 只作用于门控权重，绝不触碰输出基色（HDR 安全）；
+// - 采样 UV 一律钳到半纹素边界（clamp-to-edge 保险），分母全部下限守护；
+// - Delta 输出惯例（HighPass_Retouch 模式）：光带在 u_input_tex 上计算，
+//   以增量形式叠加到已调色 color 上，上游调色正确堆叠；
+// - 参数 ABI：@param 以裸名引用，由 shader_compiler 改写为 u_P<n>_<name>；
+//   禁止引用任何未声明的 u_* 标识符（P0-COL-01）。
+
+// Rec.709 亮度系数（scene-linear 域门控用）
+const vec3 STREAK_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+// 双侧水平 tap 累加宏。N 在每个调用点展开为字面常量，保证所有循环上限
+// 编译期可知。依赖外层作用域变量：uv / span_uv / min_uv / max_uv。
+#define STREAK_ACCUMULATE(N)                                                   \
+    vec3 acc = vec3(0.0);                                                      \
+    float w_sum = 0.0;                                                         \
+    for (int i = 0; i < N; i++) {                                              \
+        float t = (float(i) + 0.5) / float(N);                                 \
+        vec2 off = vec2(span_uv * t, 0.0);                                     \
+        float w = 1.0 - t;                                                     \
+        w = w * w;                                                             \
+        vec3 s_pos = texture(u_input_tex, clamp(uv + off, min_uv, max_uv)).rgb;\
+        vec3 s_neg = texture(u_input_tex, clamp(uv - off, min_uv, max_uv)).rgb;\
+        float e_pos = max(dot(s_pos, STREAK_LUMA_W) - highlight_threshold, 0.0);\
+        float e_neg = max(dot(s_neg, STREAK_LUMA_W) - highlight_threshold, 0.0);\
+        acc += (s_pos * e_pos + s_neg * e_neg) * w;                            \
+        w_sum += w;                                                            \
+    }                                                                          \
+    return acc / max(w_sum * 2.0, 0.001);
+
+// quality: select 索引经早退 if 链调度到编译期 tap 数分支
+vec3 anamorphic_streak(vec2 uv, float span_uv, vec2 min_uv, vec2 max_uv,
+                       int quality) {
+    if (quality == 0) { STREAK_ACCUMULATE(14) }
+    else if (quality == 1) { STREAK_ACCUMULATE(22) }
+    else { STREAK_ACCUMULATE(30) }
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度 / 零行程为纯直通
+    if (intensity < 0.001 || streak_reach < 0.001) return color;
+
+    // 分辨率无关的半纹素边界；分母下限守护
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 safe_size = max(tex_size, vec2(1.0));
+    vec2 half_texel = 0.5 / safe_size;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+
+    // 行程：单侧最长画幅宽度的 25%（4K 下约 960 px）
+    float span_px = streak_reach * 0.25 * safe_size.x;
+    float span_uv = span_px / safe_size.x;
+
+    vec3 streak = anamorphic_streak(uv, span_uv, min_uv, max_uv, streak_quality);
+
+    // 加性输出（线性域加法对 HDR 单调、无折返），tint 决定拉丝色相，
+    // 冷色默认 0.55/0.70/1.00 对应经典柱面镜散射
+    return color + streak * streak_tint * intensity;
+}

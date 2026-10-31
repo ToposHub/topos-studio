@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 12 items
+
+tests/edit/test_edit_track_mutation_preserves_effect_chain.py .......... [ 83%]
+..                                                                       [100%]
+
+============================= 12 passed in 19.80s ==============================

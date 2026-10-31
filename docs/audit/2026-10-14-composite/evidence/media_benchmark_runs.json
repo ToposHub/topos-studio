@@ -1,0 +1,197 @@
+[
+  {
+    "file": "2K_DNxHR 444 10bit.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_DNxHR 444 12bit.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_DNxHR HQX 10bit.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_DNxHR HQX 12bit.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_H265.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_h264.mp4",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_prores422.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_prores422HQ.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_prores422LT.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_prores422Proxy.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_prores4444.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_prores4444XQ.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_topos_422.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_topos_422_HQ.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_topos_422_LT.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_topos_422_Proxy.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_topos_4444.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_topos_4444_XQ.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_DNxHR 444 10bit.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_DNxHR 444 12bit.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_DNxHR HQX 10bit.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_DNxHR HQX 12bit.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_H264.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_H265.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_prores422HQ.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_prores422LT.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_prores422Proxy.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_prores4444.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_prores4444XQ.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_topos_422.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_topos_422_HQ.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_topos_422_LT.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_topos_422_Proxy.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_topos_4444.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "4K_topos_4444_XQ.mov",
+    "profile": "baseline",
+    "returncode": 0
+  },
+  {
+    "file": "2K_H265.mov",
+    "profile": "grade_blur_merge",
+    "returncode": 0
+  },
+  {
+    "file": "4K_H265.mov",
+    "profile": "grade_blur_merge",
+    "returncode": 0
+  },
+  {
+    "file": "4K_prores4444.mov",
+    "profile": "grade_blur_merge",
+    "returncode": 0
+  },
+  {
+    "file": "4K_topos_422_Proxy.mov",
+    "profile": "grade_blur_merge",
+    "returncode": 0
+  }
+]

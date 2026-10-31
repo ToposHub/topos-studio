@@ -1,0 +1,62 @@
+[DRIVER] auto-dismiss dialog: ProjectManagerDialog
+[DRIVER] booted page=Color video=2K_H265.mov seconds=15.0
+[DRIVER] asset imported fps=25.0 frames=487
+[DRIVER] switch attempt 0 failed (composite_id=), retrying
+[DRIVER] graph wired: src→merge.A=True constant→merge.B=True merge→output=True
+[DRIVER] first frame after 1 emissions; current_frame=0 total=720
+
+===== RESULTS =====
+mode=page duration=15.0s still_playing_at_end=True
+viewer emissions: 356  rate=23.7/s
+render submits:   1  (completed/submit = 35600%)
+playhead: start=3 end=360 expected≈360
+viewer max gap: 0.26s @t=2.3s
+viewer gaps > 1s: 0 []
+playhead stalls > 1s (while playing): 0 []
+
+resource pool: created=18 reused=696 active=12 pooled=6 mem=190MB
+
+per-second: t | playhead | emissions
+    0s | frame    23 | 23 emissions
+    1s | frame    46 | 24 emissions
+    2s | frame    71 | 21 emissions
+    3s | frame    95 | 24 emissions
+    4s | frame   119 | 24 emissions
+    5s | frame   143 | 24 emissions
+    6s | frame   167 | 24 emissions
+    7s | frame   190 | 24 emissions
+    8s | frame   215 | 24 emissions
+    9s | frame   238 | 24 emissions
+   10s | frame   263 | 24 emissions
+   11s | frame   287 | 24 emissions
+   12s | frame   311 | 24 emissions
+   13s | frame   335 | 24 emissions
+   14s | frame   359 | 24 emissions
+   15s | frame   360 | 0 emissions
+[DRIVE] frames=356 eval=1655.5ms wait=36.7ms render=597.7ms sleep=11246.5ms scope=1481.2ms retries=8 (per-frame avg: eval=4.7 wait=0.1 render=1.7 sleep=31.6 scope=4.2)
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+2026-10-14 10:53:57.250 Python[61146:1945135] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 206 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.app.controllers.composite_controller: [CompClip] Failed to remember active comp clip: Comp clip not found: 3a2bd14a-8a7d-418c-b43e-dd5da20f6b27
+[WARNING] src.features.composite.render.compute_shader_manager: Compute shaders unavailable: OpenGL 4.1 detected, requires 4.3+. Large-radius effects will use fragment shader fallback (slower).
+[WARNING] src.features.composite.render.compute_shader_manager: Metal compute bridge available but disabled by default: fragment fallback is faster for large-radius effects (see tests/media/results/metal_compute_ab.md). Set TOPOS_METAL_COMPUTE=1 to force the Metal path.
+[WARNING] src.features.composite.render.composite_renderer: [COMPOSITE-RENDER] graph produced no valid output; request_id=1 timeline_backed=True dynamic_source=True nodes=3 connections=2 color_tex=0 color_size=0x0
+[WARNING] src.features.composite.adapters.main_window_adapter: [COMPOSITE-PRESENT] empty renderer output; viewer cleared request_id=1 timeline_backed=False
+[WARNING] src.app.controllers.composite_controller: [CompClip] Failed to remember active comp clip: Comp clip not found: 3a2bd14a-8a7d-418c-b43e-dd5da20f6b27
+Fatal Python error: Segmentation fault
+
+
+Extension modules: PyQt6.QtCore, PyQt6.QtGui, PyQt6.QtWidgets, PyQt6.QtNetwork, PyQt6.QtPrintSupport, PyQt6.QtWebChannel, PyQt6.QtWebEngineCore, PyQt6.QtWebEngineWidgets, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg

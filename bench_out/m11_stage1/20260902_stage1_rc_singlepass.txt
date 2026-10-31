@@ -1,0 +1,34 @@
+# 阶段 1 验收：帧间反馈单遍码控（2026-09-02，i9-9900K，同窗 stash A/B）
+
+## 实现
+- src/shared/export/topos_rate_control.py：ToposRateFeedback（比例项 8·log2(bytes/target)
+  每帧钳 ±4 + 第 4 帧后弱积分 0.25 消稳态残差；首帧 sized 定标 q* 唯一起点）
+- topos_encoder._encode_packet：生产路径（qp 覆盖/无目标/探测路径不变）rate 档
+  首帧 sized 定标 → 此后单遍固定 qp + 帧字节反馈
+
+## 产品路径 A/B（ToposVideoEncoder 含 mux/Python 每帧开销，预热 2 帧不计）
+4K 标准源 hq（24 帧）：
+  反馈单遍 t16: 19.64 fps  avg=3913.1 KiB（目标 3932，−0.5%）  PSNR 63.58 dB
+  sized 基线 t16: 15.18 fps  avg=3741.4 KiB（−4.9% 欠靶）      PSNR 63.29 dB
+  → +29%；码率贴靶 +4.6% 字节换来 +0.29 dB
+用户素材 1080p→4K 放大 hq（150 帧，重噪内容）：
+  反馈单遍 t16: 19.79 fps  avg=3935.4 KiB（+0.1%）             PSNR 65.98 dB
+  sized 基线 t16: 15.93 fps  avg=3741.5 KiB（−4.9%）           PSNR 65.43 dB
+  → +24%；PSNR +0.55 dB（sized 因 q 粒度系统性欠靶，RC 骑在目标上）
+
+## 内核口径（直接 ctypes，此前实测）
+sized 稳态 32.90 fps → 固定 qp 单遍 59.72 fps = 1.81x；产品路径增益被
+每帧 Python 平面拷贝/打包稀释为 +24~29% —— 全额 1.81x 需阶段 3
+（导出流水线化 + 零拷贝平面传递）兑现。
+
+## 语义与契约
+- 档位语义：长期均值贴目标（单帧可浮动）；确定性保持（同帧序列 → 同输出，
+  双文件 sha256 测试钉死）
+- 测试：控制器模型单测 4 项（收敛/变复杂度/钳位/确定性）+ 产品级 2 项
+  （真实 2K 素材均值 0.85~1.15 + 序列字节确定性），6/6 通过
+- 套件：tests/media + tests/deliver = 1850 passed / 8 failed（8 项均为
+  预存环境问题：夹具 manifest ×6、vt_zero_copy ×1、probe_fix ×1，stash 基线复现）
+
+## 结论
+阶段 1 完成并超额：速度 +24~29%（产品）/1.81x（内核），码率从系统性
+−4.9% 欠靶修到 ±0.5%，画质同码率下 +0.3~0.55 dB。

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 2 items
+
+tests/edit/test_audio_waveform_lifecycle.py ..                           [100%]
+
+============================== 2 passed in 6.20s ===============================

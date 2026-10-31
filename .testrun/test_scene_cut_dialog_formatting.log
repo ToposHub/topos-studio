@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 1 item
+
+tests/edit/test_scene_cut_dialog_formatting.py .                         [100%]
+
+============================== 1 passed in 9.89s ===============================

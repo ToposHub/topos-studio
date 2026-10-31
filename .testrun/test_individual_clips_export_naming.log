@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_individual_clips_export_naming.py ......                 [100%]
+
+============================== 6 passed in 9.90s ===============================

@@ -1,0 +1,551 @@
+{
+ "manifest": {
+  "schema": "bench_manifest.v1",
+  "topos_version": "0.1.0",
+  "dylib_commit_embedded": "c0f7068d",
+  "git_head": "c0f7068d",
+  "git_dirty": false,
+  "dylib_path": "/Users/testuser/Documents/vscode/topos/native/topos_codec/build/release/topos_codec.dylib",
+  "dylib_sha256": "00be27d22417558150ef20a2cacd5936178ab674319498de0b2c25d4e1e9bc2d",
+  "abi_version": 2,
+  "slice_threads": 16,
+  "simd_avx2": true,
+  "simd_neon": false,
+  "cpu": "Genuine Intel(R) 0000",
+  "os": "darwin",
+  "python": "3.12.14"
+ },
+ "meta": {
+  "threads": 16,
+  "frames": 96,
+  "runs": 3,
+  "fps": 25.0,
+  "pyav": "18.1.0",
+  "pyav_ffmpeg": "8.1.2",
+  "entropy": "v2"
+ },
+ "groups": [
+  {
+   "res": "2k",
+   "family": "422",
+   "frames_total": 96,
+   "measure": 96,
+   "cells": [
+    {
+     "res": "2k",
+     "family": "422",
+     "codec": "topos",
+     "variant": "proxy",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 43.39,
+     "bpp": 0.837,
+     "enc_ms": 10.23,
+     "enc_fps": 97.7,
+     "dec_ms": 2.67,
+     "dec_fps": 374.9,
+     "chroma_qp_offset": 0,
+     "enc_s": [
+      0.958,
+      0.982,
+      1.062
+     ],
+     "dec_s": [
+      0.0026,
+      0.0027,
+      0.0028
+     ],
+     "psnr_y": 59.238,
+     "ssim_y": 0.99891,
+     "frames_measured": 96
+    },
+    {
+     "res": "2k",
+     "family": "422",
+     "codec": "topos",
+     "variant": "lt",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 86.3,
+     "bpp": 1.665,
+     "enc_ms": 12.48,
+     "enc_fps": 80.1,
+     "dec_ms": 3.63,
+     "dec_fps": 275.7,
+     "chroma_qp_offset": 0,
+     "enc_s": [
+      1.192,
+      1.198,
+      1.25
+     ],
+     "dec_s": [
+      0.0036,
+      0.0036,
+      0.0038
+     ],
+     "psnr_y": 62.63,
+     "ssim_y": 0.99947,
+     "frames_measured": 96
+    },
+    {
+     "res": "2k",
+     "family": "422",
+     "codec": "topos",
+     "variant": "standard",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 131.03,
+     "bpp": 2.528,
+     "enc_ms": 13.56,
+     "enc_fps": 73.7,
+     "dec_ms": 4.46,
+     "dec_fps": 224.0,
+     "chroma_qp_offset": 0,
+     "enc_s": [
+      1.292,
+      1.302,
+      1.305
+     ],
+     "dec_s": [
+      0.0044,
+      0.0045,
+      0.0045
+     ],
+     "psnr_y": 65.165,
+     "ssim_y": 0.99969,
+     "frames_measured": 96
+    },
+    {
+     "res": "2k",
+     "family": "422",
+     "codec": "topos",
+     "variant": "hq",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 190.86,
+     "bpp": 3.682,
+     "enc_ms": 17.51,
+     "enc_fps": 57.1,
+     "dec_ms": 6.26,
+     "dec_fps": 159.6,
+     "chroma_qp_offset": 0,
+     "enc_s": [
+      1.671,
+      1.681,
+      1.746
+     ],
+     "dec_s": [
+      0.0061,
+      0.0063,
+      0.0064
+     ],
+     "psnr_y": 68.606,
+     "ssim_y": 0.99986,
+     "frames_measured": 96
+    }
+   ],
+   "rd_deltas": [
+    {
+     "tier": "proxy",
+     "mbps": 43.39,
+     "psnr_y": 59.238,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    },
+    {
+     "tier": "lt",
+     "mbps": 86.3,
+     "psnr_y": 62.63,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    },
+    {
+     "tier": "standard",
+     "mbps": 131.03,
+     "psnr_y": 65.165,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    },
+    {
+     "tier": "hq",
+     "mbps": 190.86,
+     "psnr_y": 68.606,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    }
+   ],
+   "speed_pairs": []
+  },
+  {
+   "res": "2k",
+   "family": "44410",
+   "frames_total": 96,
+   "measure": 96,
+   "cells": [
+    {
+     "res": "2k",
+     "family": "44410",
+     "codec": "topos",
+     "variant": "pro444",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 297.66,
+     "bpp": 5.742,
+     "enc_ms": 23.46,
+     "enc_fps": 42.6,
+     "dec_ms": 6.42,
+     "dec_fps": 155.9,
+     "chroma_qp_offset": 4,
+     "enc_s": [
+      2.176,
+      2.253,
+      2.354
+     ],
+     "dec_s": [
+      0.0062,
+      0.0064,
+      0.0065
+     ],
+     "psnr_y": 55.814,
+     "ssim_y": 0.99831,
+     "frames_measured": 96
+    }
+   ],
+   "rd_deltas": [
+    {
+     "tier": "pro444",
+     "mbps": 297.66,
+     "psnr_y": 55.814,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    }
+   ],
+   "speed_pairs": []
+  },
+  {
+   "res": "2k",
+   "family": "44412",
+   "frames_total": 96,
+   "measure": 96,
+   "cells": [
+    {
+     "res": "2k",
+     "family": "44412",
+     "codec": "topos",
+     "variant": "extreme",
+     "bit_depth": 12,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 464.81,
+     "bpp": 8.966,
+     "enc_ms": 29.8,
+     "enc_fps": 33.6,
+     "dec_ms": 7.46,
+     "dec_fps": 134.0,
+     "chroma_qp_offset": 4,
+     "enc_s": [
+      2.845,
+      2.861,
+      2.871
+     ],
+     "dec_s": [
+      0.0074,
+      0.0075,
+      0.0076
+     ],
+     "psnr_y": 60.394,
+     "ssim_y": 0.99943,
+     "frames_measured": 96
+    }
+   ],
+   "rd_deltas": [
+    {
+     "tier": "extreme",
+     "mbps": 464.81,
+     "psnr_y": 60.394,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    }
+   ],
+   "speed_pairs": []
+  },
+  {
+   "res": "4k",
+   "family": "422",
+   "frames_total": 96,
+   "measure": 48,
+   "cells": [
+    {
+     "res": "4k",
+     "family": "422",
+     "codec": "topos",
+     "variant": "proxy",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 208.83,
+     "bpp": 1.007,
+     "enc_ms": 32.18,
+     "enc_fps": 31.1,
+     "dec_ms": 6.16,
+     "dec_fps": 162.3,
+     "chroma_qp_offset": 0,
+     "enc_s": [
+      3.043,
+      3.09,
+      3.265
+     ],
+     "dec_s": [
+      0.0061,
+      0.0062,
+      0.0062
+     ],
+     "psnr_y": 57.087,
+     "ssim_y": 0.99756,
+     "frames_measured": 48
+    },
+    {
+     "res": "4k",
+     "family": "422",
+     "codec": "topos",
+     "variant": "lt",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 346.27,
+     "bpp": 1.67,
+     "enc_ms": 40.14,
+     "enc_fps": 24.9,
+     "dec_ms": 8.56,
+     "dec_fps": 116.8,
+     "chroma_qp_offset": 0,
+     "enc_s": [
+      3.832,
+      3.853,
+      3.867
+     ],
+     "dec_s": [
+      0.0085,
+      0.0086,
+      0.0087
+     ],
+     "psnr_y": 58.869,
+     "ssim_y": 0.99827,
+     "frames_measured": 48
+    },
+    {
+     "res": "4k",
+     "family": "422",
+     "codec": "topos",
+     "variant": "standard",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 522.05,
+     "bpp": 2.518,
+     "enc_ms": 44.77,
+     "enc_fps": 22.3,
+     "dec_ms": 11.61,
+     "dec_fps": 86.1,
+     "chroma_qp_offset": 0,
+     "enc_s": [
+      4.273,
+      4.298,
+      4.35
+     ],
+     "dec_s": [
+      0.0116,
+      0.0116,
+      0.0121
+     ],
+     "psnr_y": 60.916,
+     "ssim_y": 0.99892,
+     "frames_measured": 48
+    },
+    {
+     "res": "4k",
+     "family": "422",
+     "codec": "topos",
+     "variant": "hq",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 763.98,
+     "bpp": 3.684,
+     "enc_ms": 54.74,
+     "enc_fps": 18.3,
+     "dec_ms": 15.49,
+     "dec_fps": 64.6,
+     "chroma_qp_offset": 0,
+     "enc_s": [
+      5.061,
+      5.255,
+      5.395
+     ],
+     "dec_s": [
+      0.0155,
+      0.0155,
+      0.0155
+     ],
+     "psnr_y": 63.406,
+     "ssim_y": 0.99942,
+     "frames_measured": 48
+    }
+   ],
+   "rd_deltas": [
+    {
+     "tier": "proxy",
+     "mbps": 208.83,
+     "psnr_y": 57.087,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    },
+    {
+     "tier": "lt",
+     "mbps": 346.27,
+     "psnr_y": 58.869,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    },
+    {
+     "tier": "standard",
+     "mbps": 522.05,
+     "psnr_y": 60.916,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    },
+    {
+     "tier": "hq",
+     "mbps": 763.98,
+     "psnr_y": 63.406,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    }
+   ],
+   "speed_pairs": []
+  },
+  {
+   "res": "4k",
+   "family": "44410",
+   "frames_total": 96,
+   "measure": 48,
+   "cells": [
+    {
+     "res": "4k",
+     "family": "44410",
+     "codec": "topos",
+     "variant": "pro444",
+     "bit_depth": 10,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 1179.13,
+     "bpp": 5.686,
+     "enc_ms": 75.64,
+     "enc_fps": 13.2,
+     "dec_ms": 20.58,
+     "dec_fps": 48.6,
+     "chroma_qp_offset": 4,
+     "enc_s": [
+      6.988,
+      7.261,
+      7.543
+     ],
+     "dec_s": [
+      0.0204,
+      0.0206,
+      0.0209
+     ],
+     "psnr_y": 60.047,
+     "ssim_y": 0.99918,
+     "frames_measured": 48
+    }
+   ],
+   "rd_deltas": [
+    {
+     "tier": "pro444",
+     "mbps": 1179.13,
+     "psnr_y": 60.047,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    }
+   ],
+   "speed_pairs": []
+  },
+  {
+   "res": "4k",
+   "family": "44412",
+   "frames_total": 96,
+   "measure": 48,
+   "cells": [
+    {
+     "res": "4k",
+     "family": "44412",
+     "codec": "topos",
+     "variant": "extreme",
+     "bit_depth": 12,
+     "supplementary": false,
+     "entropy": "v2",
+     "mbps": 1863.46,
+     "bpp": 8.987,
+     "enc_ms": 85.33,
+     "enc_fps": 11.7,
+     "dec_ms": 26.93,
+     "dec_fps": 37.1,
+     "chroma_qp_offset": 4,
+     "enc_s": [
+      8.09,
+      8.192,
+      8.412
+     ],
+     "dec_s": [
+      0.0269,
+      0.0269,
+      0.027
+     ],
+     "psnr_y": 67.96,
+     "ssim_y": 0.99986,
+     "frames_measured": 48
+    }
+   ],
+   "rd_deltas": [
+    {
+     "tier": "extreme",
+     "mbps": 1863.46,
+     "psnr_y": 67.96,
+     "prores_interp_db": null,
+     "delta_vs_prores_db": null,
+     "dnxhr_interp_db": null,
+     "delta_vs_dnxhr_db": null
+    }
+   ],
+   "speed_pairs": []
+  }
+ ]
+}

@@ -1,0 +1,72 @@
+[
+ {
+  "id": "DOC-001",
+  "source": "plan-04",
+  "type": "i18n-gap",
+  "severity": "Major",
+  "title": "711 处 UI 硬编码字符串未走 I18N（composite/ui 占 357，5 个面板完全未接入）",
+  "location": "src/features/*/ui 等",
+  "evidence": "docs/i18n-audit-2026-09-28.md",
+  "recommendation": "按审计报告分模块接入 I18N.tr（第 2 轮）",
+  "confidence": "high",
+  "effort": "L",
+  "round": 1,
+  "status": "open"
+ },
+ {
+  "id": "DOC-002",
+  "source": "plan-04",
+  "type": "i18n-gap",
+  "severity": "Suggestion",
+  "title": "8 个非中英 locale 的 209 个历史键为英文回退（本轮已补齐为 en 原文，待母语翻译）",
+  "location": "src/shared/i18n/locales/",
+  "evidence": "docs/i18n-audit-2026-09-28.md",
+  "recommendation": "安排母语翻译",
+  "confidence": "high",
+  "effort": "M",
+  "round": 1,
+  "status": "open"
+ },
+ {
+  "id": "DOC-003",
+  "source": "plan-04",
+  "type": "doc-gap",
+  "severity": "Suggestion",
+  "title": "49 项归档候选文档待人工确认后移动（本计划只列不移）",
+  "location": "docs/",
+  "evidence": "docs/2026-09-28-docs-info-architecture.md",
+  "recommendation": "人工确认后归档至 plans/archive 惯例位置",
+  "confidence": "high",
+  "effort": "M",
+  "round": 1,
+  "status": "open"
+ },
+ {
+  "id": "DOC-004",
+  "source": "plan-04",
+  "type": "risk",
+  "severity": "Suggestion",
+  "title": "metal/context.py 存在既有重复 import numpy（docstring 批次按红线未动）",
+  "location": "src/shared/gpu/metal/context.py:31/33",
+  "evidence": "docs/architecture/shared-foundations.md 附录",
+  "recommendation": "清理批次处理",
+  "confidence": "high",
+  "effort": "S",
+  "round": 1,
+  "status": "open"
+ },
+ {
+  "id": "DOC-005",
+  "source": "plan-04",
+  "type": "doc-gap",
+  "severity": "Suggestion",
+  "title": "架构文档揭示的跨模块质量债（AUD-0201 ColorOutput 立即释放不一致等）需与 plan-01 台账合并跟踪",
+  "location": "docs/architecture/",
+  "evidence": "docs/architecture/color-rendering.md",
+  "recommendation": "并入 REMEDIATION_PLAN 对应条目",
+  "confidence": "high",
+  "effort": "S",
+  "round": 1,
+  "status": "open"
+ }
+]

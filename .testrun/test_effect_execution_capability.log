@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 10 items
+
+tests/edit/test_effect_execution_capability.py ..........                [100%]
+
+============================= 10 passed in 10.62s ==============================

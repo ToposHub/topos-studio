@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_source_viewer_playback_backpressure.py .......           [100%]
+
+============================== 7 passed in 25.43s ==============================

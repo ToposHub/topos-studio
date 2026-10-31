@@ -1,0 +1,167 @@
+{
+  "action": {
+    "export_srt": "Untertitel exportieren (SRT)...",
+    "queue_start": "Video-Warteschlange starten",
+    "queue_stop": "Video-Warteschlange stoppen"
+  },
+  "panel": {
+    "deliver_video_batch": "Video-Stapelexport"
+  },
+  "deliver": {
+    "export_stems": "Spuren exportieren…",
+    "export_stems_tooltip": "Exportiert Audiospuren / Busse / D-M-E-Gruppen als separate WAV-Spuren",
+    "export_chapters": "Kapitel exportieren…",
+    "export_chapters_tooltip": "Exportiert Timeline-Kapitelmarkierungen als YouTube-Kapiteltext oder FFMetadata",
+    "video": {
+      "settings_title": "Video-Lieferung",
+      "source_range": "Quelle & Bereich",
+      "video_settings": "Video",
+      "audio_delivery": "Audio & Lieferung",
+      "no_project": "(kein Projekt)",
+      "output_dir_placeholder": "Ausgabeverzeichnis",
+      "select_output_dir": "Ausgabeverzeichnis auswählen",
+      "add_to_queue": "Zur Video-Warteschlange hinzufügen",
+      "add_and_start": "Hinzufügen & starten",
+      "alpha": "Alphakanal",
+      "profile_default": "(Standard)",
+      "preflight_ok": "Bereit zum Hinzufügen",
+      "project": "Projekt",
+      "timeline": "Timeline",
+      "range": "Bereich",
+      "frames": "Bilder",
+      "duration": "Dauer",
+      "container": "Container",
+      "codec": "Codec",
+      "profile": "Profil",
+      "profile_tooltip": "Encoder-Profil. Auto wählt das Standard-Kompatibilitätsprofil des Codecs.",
+      "aspect_lock": "Seitenverhältnis sperren",
+      "resolution": "Auflösung",
+      "size": "Größe",
+      "frame_rate": "Bildrate",
+      "custom_fps": "Benutzerdefinierte FPS",
+      "quality_mode": "Qualitätsmodus",
+      "quality": "Qualität",
+      "quality_crf": "Qualität (CRF)",
+      "quality_crf_hint": "CRF ist einheitenlos; niedrigere Werte bedeuten höhere Qualität.",
+      "crf_18": "CRF 18 · Hohe Qualität",
+      "crf_20": "CRF 20 · Blu-ray-Qualität",
+      "crf_23": "CRF 23 · Empfohlen",
+      "crf_28": "CRF 28 · Kleinere Datei",
+      "crf_30": "CRF 30 · Vorschau",
+      "quality_bitrate_hint": "Zieldurchschnittliche Video-Bitrate in kbps; die tatsächliche Bitrate kann variieren.",
+      "quality_cbr_hint": "Feste Video-Bitrate in kbps; minimale und maximale Raten sind beschränkt.",
+      "quality_auto_hint": "Der Encoder wählt die Qualität automatisch.",
+      "estimated_size": "Geschätzte Größe",
+      "estimated_size_hint": "Geschätzt aus Ausgabedauer × Video-Bitrate ÷ 8; Audio und Container-Overhead sind nicht enthalten.",
+      "filename_placeholder": "Timeline-Name",
+      "quality_auto": "Auto",
+      "quality_vbr": "VBR",
+      "quality_cbr": "CBR",
+      "quality_bitrate": "Bitrate",
+      "color_space": "Farbraum",
+      "bit_depth": "Bittiefe",
+      "audio_codec": "Audio-Codec",
+      "sample_rate": "Abtastrate",
+      "audio_bitrate": "Audio-Bitrate",
+      "subtitles": "Untertitel",
+      "output_dir": "Ausgabeordner",
+      "filename": "Dateiname",
+      "if_exists": "Bei Vorhandensein",
+      "allow_placeholders": "Platzhalter-Clips erlauben",
+      "allow_placeholders_hint": "Platzhalter-Clips blockieren normalerweise die Lieferung. Aktivieren, um trotzdem zu exportieren; Platzhalter werden als Farbalken gerendert."
+    },
+    "preset": {
+      "web_h264": {
+        "title": "Web H.264",
+        "subtitle": "MP4 · H.264 · 1080p"
+      },
+      "mobile_h264": {
+        "title": "Mobil",
+        "subtitle": "MP4 · H.264 · 1080×1920"
+      },
+      "master_prores422": {
+        "title": "Master",
+        "subtitle": "MOV · ProRes 422 · UHD"
+      },
+      "master_prores4444": {
+        "title": "Master (Alpha)",
+        "subtitle": "MOV · ProRes 4444 · 4:4:4"
+      },
+      "hevc_uhd": {
+        "title": "HEVC 4K",
+        "subtitle": "MP4 · HEVC · 3840×2160"
+      },
+      "dnxhr_sq": {
+        "title": "DNxHR SQ",
+        "subtitle": "MOV · DNxHR SQ · 1080p"
+      },
+      "custom": {
+        "title": "Benutzerdefiniert",
+        "subtitle": "Aktuelle Einstellungen"
+      }
+    },
+    "queue": {
+      "title": "Video-Render-Warteschlange",
+      "start": "Warteschlange starten",
+      "pause": "Pausieren",
+      "resume": "Fortsetzen",
+      "cancel_current": "Laufenden abbrechen",
+      "clear_completed": "Abgeschlossene löschen",
+      "more": "Mehr",
+      "float": "Panel lösen",
+      "return_to_deliver": "Zurück zur Lieferung",
+      "empty_title": "Noch keine Video-Exportaufgaben",
+      "empty_hint": "Wählen Sie oben eine Timeline und eine Videovoreinstellung und klicken Sie auf „Zur Video-Warteschlange hinzufügen“.",
+      "tasks": "Aufgaben",
+      "running": "rendert",
+      "pending": "ausstehend",
+      "done": "fertig",
+      "failed": "fehlgeschlagen",
+      "status_pending": "Ausstehend",
+      "status_running": "Rendert",
+      "status_done": "Fertig",
+      "status_failed": "Fehlgeschlagen",
+      "status_cancelled": "Abgebrochen",
+      "status_paused": "Pausiert",
+      "status_needs_relink": "Neuverknüpfung nötig",
+      "no_audio": "kein Audio",
+      "action_cancel": "Abbrechen",
+      "action_open": "Öffnen",
+      "action_retry": "Erneut versuchen",
+      "action_remove": "Entfernen",
+      "action_edit": "Einstellungen bearbeiten",
+      "action_relink": "Timeline neu verknüpfen",
+      "col_status": "Status",
+      "col_source": "Quelle",
+      "col_preset": "Voreinstellung",
+      "col_output": "Ausgabedatei",
+      "col_video": "Video",
+      "col_audio": "Audio",
+      "col_progress": "Fortschritt",
+      "col_state": "Zustand",
+      "col_actions": "Aktionen"
+    },
+    "subtitle": {
+      "off": "Aus",
+      "burn": "Einbrennen",
+      "sidecar": "Begleitdatei"
+    },
+    "conflict": {
+      "ask": "Fragen",
+      "overwrite": "Überschreiben",
+      "auto_number": "Automatisch nummerieren",
+      "skip": "Überspringen"
+    },
+    "timeline_unnamed": "Unbenannt",
+    "frames_suffix": " Frames",
+    "px_suffix": " px",
+    "fps_suffix": " fps",
+    "kbps_suffix": " kbps",
+    "w_label": "W",
+    "h_label": "H",
+    "colors_suffix": " Farben",
+    "gif_colors_label": "GIF-Farben",
+    "qc_title": "QC für Mehrfachversionen",
+    "close": "Schließen"
+  }
+}

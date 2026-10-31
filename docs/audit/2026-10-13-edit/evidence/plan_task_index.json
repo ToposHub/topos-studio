@@ -1,0 +1,566 @@
+{
+  "date": "2026-10-14",
+  "problems": [
+    {
+      "ids": "INT-14",
+      "priority": "P0",
+      "evidence": "G+S",
+      "problem": "双击素材进入 Source 即因缺少 glUniform4f 退出；下一处 glUniform1f 也缺失",
+      "implementation": "同时补 OpenGL import 和 facade API，增加调用契约检查；绘制失败进入明确错误状态",
+      "acceptance": "CPU/GPU首帧、缩放、flip、切源、关闭均不崩且有正确图像",
+      "phase": "A"
+    },
+    {
+      "ids": "INT-01",
+      "priority": "P0",
+      "evidence": "G+Q",
+      "problem": "波纹工具无拖动单击右边缘仍提交 end=0，本次产生未捕获 TimelineOperationError",
+      "implementation": "按下初始化 final；阈值内/无变更不提交；失败统一恢复预览并提示",
+      "acceptance": "左右单击、拖回原位、上次操作后再单击均无命令/异常",
+      "phase": "A"
+    },
+    {
+      "ids": "C01",
+      "priority": "P1",
+      "evidence": "G+M",
+      "problem": "向左 Roll 后撤销抛片段重叠异常，历史被堵住",
+      "implementation": "左右 clip、转场/标记使用完整快照原子恢复",
+      "acceptance": "±delta、连续三次 undo/redo 的完整 to_dict 复原",
+      "phase": "B"
+    },
+    {
+      "ids": "C02",
+      "priority": "P1",
+      "evidence": "M；G未恢复原形",
+      "problem": "在片段中间 Insert 的 undo 不还原原片段，留下洞/残片",
+      "implementation": "保存跨点切分与所有 follower 的 before/after；redo复用ID",
+      "acceptance": "100帧片在40插10，再undo恢复单一100帧且无洞",
+      "phase": "B"
+    },
+    {
+      "ids": "C03",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "多跨度波纹删除跨轨少移或undo只恢复中间位置",
+      "implementation": "在原坐标系求累计delta，每对象仅存最初before与最终after",
+      "acceptance": "50→30→undo50；30→10，含多个离散删除范围",
+      "phase": "B"
+    },
+    {
+      "ids": "C04",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "有FPS元数据时 reverse 被正速度有理映射忽略",
+      "implementation": "显式使用 SpeedParams.reverse，与有理数/PTS逆映射共用规则",
+      "acceptance": "source100–199倒放首3帧199/198/197，各入口一致",
+      "phase": "C"
+    },
+    {
+      "ids": "C05",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "倒放/分段速度切分改变原画面，尾帧重复或右段回到1x",
+      "implementation": "实现 direction-aware clip slice，切速度点、重定位base和easing",
+      "acceptance": "切分前后逐帧source序列相同，身份变化不改内容",
+      "phase": "C"
+    },
+    {
+      "ids": "C06/INT-12",
+      "priority": "P1",
+      "evidence": "Q+M",
+      "problem": "2x鼠标Trim把timeline帧当source帧，snap覆盖正确源区间",
+      "implementation": "Item只报timeline边界，preview/commit都调用同一time-map service",
+      "acceptance": "2x裁10timeline帧等于20source帧，开关snap同值",
+      "phase": "C"
+    },
+    {
+      "ids": "C07/FE-B04",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "混合FPS变速与源Insert/Overwrite/Append时长算错",
+      "implementation": "用Fraction按源秒时长×timelineFPS÷speed求placement与ripple",
+      "acceptance": "30fps的120帧→24fps下2x恰48；30源帧1s恰24",
+      "phase": "C"
+    },
+    {
+      "ids": "C08",
+      "priority": "P1",
+      "evidence": "M实际release handler",
+      "problem": "波纹Trim只改视频，仍链接的音频保持旧长度",
+      "implementation": "A/V editing unit 原子ripple事务，伙伴与follower完整预检",
+      "acceptance": "V/A100→80同时变化，任一锁定/冲突整体拒绝",
+      "phase": "B/C"
+    },
+    {
+      "ids": "C09/INT-05",
+      "priority": "P1",
+      "evidence": "Q+M；链接为S",
+      "problem": "锁轨仍能菜单变速/禁用，未锁主clip还能修改锁住的伙伴",
+      "implementation": "统一 affected editing-unit 锁守卫；UI/属性/API共用 allowed/reason",
+      "acceptance": "所有内容写操作不绕锁；拒绝时无半提交/历史/revision",
+      "phase": "A/B"
+    },
+    {
+      "ids": "C10",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "带40帧淡出片段切分/缩到20帧抛 ValueError",
+      "implementation": "统一fade envelope slice策略，快照保存并恢复全部fade",
+      "acceptance": "blade/trim/speed/slide缩短不崩，undo恢复原40帧fade",
+      "phase": "B/C"
+    },
+    {
+      "ids": "C11",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "Split/Delete自动删相关转场，undo不能恢复",
+      "implementation": "事务包括referencing transitions；切分迁移头尾、undo完整回填",
+      "acceptance": "头尾/双边/音频转场及params、IDs均可完整恢复",
+      "phase": "B"
+    },
+    {
+      "ids": "C12",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "移动和同步跟随后转场仍在旧绝对时间，sequence已不合法",
+      "implementation": "用clip edge/seam锚或统一time-transform重求转场中心",
+      "acceptance": "move/ripple/roll后 validate_timeline零转场错误",
+      "phase": "B"
+    },
+    {
+      "ids": "C13",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "移动片段后绝对关键帧留旧时间，原首帧动画变终值",
+      "implementation": "统一clip-local动画或全入口平移clip/effect keys，迁移旧schema",
+      "acceptance": "move/duplicate/nest/ripple后局部曲线不意外变化",
+      "phase": "C"
+    },
+    {
+      "ids": "C14",
+      "priority": "P1",
+      "evidence": "M；G基础slide",
+      "problem": "Slide吞掉原间隙，逆向slide式undo无法恢复fade/gap",
+      "implementation": "保存主/邻片完整快照；明确gap政策，原子恢复",
+      "acceptance": "有gap及fade80→50的slide undo恢复gap与fade80",
+      "phase": "B"
+    },
+    {
+      "ids": "C15",
+      "priority": "P2",
+      "evidence": "M",
+      "problem": "切分后右半的clip marker仍属于左半",
+      "implementation": "slice按内容位置重新绑定marker，保存before归属",
+      "acceptance": "marker在正确半段，后续移动跟随正确对象",
+      "phase": "C"
+    },
+    {
+      "ids": "C16",
+      "priority": "P2",
+      "evidence": "M",
+      "problem": "跨轨Sync Lock只移动clip，scoped marker不跟随",
+      "implementation": "follower transform一起处理marker/keys/transitions",
+      "acceptance": "clip50→40时marker55→45；undo和保存一致",
+      "phase": "B/C"
+    },
+    {
+      "ids": "INT-02",
+      "priority": "P1",
+      "evidence": "G+Q",
+      "problem": "拖动中Esc清选中，松手仍提交移动",
+      "implementation": "把所有item动作纳入InteractionSession；取消释放grab并恢复快照",
+      "acceptance": "Esc/换工具/失焦后release无提交，所有ghost/snap消失",
+      "phase": "A"
+    },
+    {
+      "ids": "INT-03",
+      "priority": "P1",
+      "evidence": "G+Q",
+      "problem": "手型H在片段上移动内容，空白框选；中键也不平移",
+      "implementation": "press路由优先HAND/临时中键pan，隔离编辑item",
+      "acceptance": "空白/clip/字幕/转场上只滚屏、不改模型/selection/undo",
+      "phase": "A"
+    },
+    {
+      "ids": "INT-04",
+      "priority": "P1",
+      "evidence": "G+Q",
+      "problem": "局部Blade无锁检查；右键也切片段",
+      "implementation": "仅左键切分，right menu/middle pan；domain再校验锁",
+      "acceptance": "锁轨和右击无切分；正常与Shift全轨语义一致",
+      "phase": "A"
+    },
+    {
+      "ids": "INT-06",
+      "priority": "P2",
+      "evidence": "G+Q",
+      "problem": "触控板水平/像素滚动无效，Ctrl+x方向事件反而zoom-out",
+      "implementation": "pixelDelta优先、x/y归一化、zero delta不缩放、pointer anchor",
+      "acceptance": "Mac惯性与鼠标均顺手，缩放鼠标下帧误差≤1帧",
+      "phase": "A/D"
+    },
+    {
+      "ids": "INT-07",
+      "priority": "P2",
+      "evidence": "Q+S",
+      "problem": "快捷键显式清空后仍回默认B；N登记名称与Snap行为不一致",
+      "implementation": "区分不存在与空binding，统一ActionRegistry与提示文案",
+      "acceptance": "清空/改键/重启不误触，提示随用户按键更新",
+      "phase": "D"
+    },
+    {
+      "ids": "INT-08",
+      "priority": "P2",
+      "evidence": "Q",
+      "problem": "已禁用片段菜单仍显示Disable Clip",
+      "implementation": "用唯一is_enabled状态生成menu，统一批量混合态",
+      "acceptance": "启用/禁用/Undo/Redo菜单与真实状态一致",
+      "phase": "D"
+    },
+    {
+      "ids": "INT-09",
+      "priority": "P1",
+      "evidence": "Q",
+      "problem": "Shift框选重复加入同一ID，虚假multi-selection",
+      "implementation": "Selection及command builder稳定去重，primary纳入不变量",
+      "acceptance": "重复框选10次仍一个对象，复制/删除只处理一次",
+      "phase": "A"
+    },
+    {
+      "ids": "INT-10",
+      "priority": "P2",
+      "evidence": "Q",
+      "problem": "字幕不参与Fit Selection/上下边界跳转",
+      "implementation": "建立统一timeline object range iterator，明确visible/target scope",
+      "acceptance": "subtitle100–200：50按Down到100；字幕选中可Fit",
+      "phase": "D"
+    },
+    {
+      "ids": "INT-11",
+      "priority": "P2",
+      "evidence": "Q集成",
+      "problem": "删除有字幕cue轨不询问，而媒体轨询问",
+      "implementation": "统一track content summary，cue/transition/binding计数",
+      "acceptance": "取消无修改，确认后删除，undo恢复内容与绑定",
+      "phase": "D"
+    },
+    {
+      "ids": "INT-13",
+      "priority": "P2",
+      "evidence": "Q",
+      "problem": "Properties多选被set_clip截成第一片段，无mixed状态",
+      "implementation": "SelectionContext保持全部IDs；mixed widgets+兼容参数Macro",
+      "acceptance": "两片段批量更改/Reset，单步undo各自旧值",
+      "phase": "D"
+    },
+    {
+      "ids": "FE-B01",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "改序列FPS只缩放媒体，字幕/动画/标记/自动化错时",
+      "implementation": "统一sequence timebase transform，source帧坐标保持不变",
+      "acceptance": "24↔48与fractional FPS，各序列域实时时间误差≤1目标帧",
+      "phase": "C"
+    },
+    {
+      "ids": "FE-B02",
+      "priority": "P1",
+      "evidence": "S",
+      "problem": "序列设置旁路Undo与revision，仅改缓存/dirty",
+      "implementation": "UpdateTimelineSettings原子工程事务同步ref/sequence/cache",
+      "acceptance": "一次undo恢复设置与payload，旧AI plan失效",
+      "phase": "B"
+    },
+    {
+      "ids": "FE-B03",
+      "priority": "P1",
+      "evidence": "G+S",
+      "problem": "源Append实测仅V没有A；Insert/Overwrite同单clip路由",
+      "implementation": "SourceEditService统一stream patch、媒体类型与linked命令",
+      "acceptance": "有声视频三个入口都V/A；纯音频落A，一步undo",
+      "phase": "B/C"
+    },
+    {
+      "ids": "FE-B05",
+      "priority": "P2",
+      "evidence": "G+S",
+      "problem": "Clear后工具条仍启用；I=O单帧范围被禁用",
+      "implementation": "统一range_changed，open/clear/close均发，有效I≤O",
+      "acceptance": "清空立即禁用；单帧可插1帧，切源不残留状态",
+      "phase": "A/D"
+    },
+    {
+      "ids": "FE-B06",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "多机位A→B→A累计角度同步offset",
+      "implementation": "映射到group公共时间，减active offset后加target offset",
+      "acceptance": "frame20回A源20，不是30；grid与节目同帧",
+      "phase": "C"
+    },
+    {
+      "ids": "FE-B07",
+      "priority": "P1",
+      "evidence": "S",
+      "problem": "多机位同步/部分创建不Undo、不dirty/revision，失败可能先改资产",
+      "implementation": "预检后Create/UpdateMulticam project command，结果带generation",
+      "acceptance": "锁轨创建失败不改工程，同步可undo/保存，旧worker不污染",
+      "phase": "B"
+    },
+    {
+      "ids": "FE-B08",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "创建Nest丢音轨volume/pan/mute/FX/routing，动画未减start",
+      "implementation": "完整track复制与routing映射，统一动画/automation time transform",
+      "acceptance": "原静音仍静音，PCM/画面/局部动画在嵌套前后相同",
+      "phase": "B/C"
+    },
+    {
+      "ids": "FE-B09",
+      "priority": "P1",
+      "evidence": "S已声明",
+      "problem": "创建Nest增加asset/child并替换父，却无法单步撤销",
+      "implementation": "跨project+sequences复合事务，引用计数/导航随历史恢复",
+      "acceptance": "Nest→Undo→Redo无孤儿，父/子/asset/ref完整恢复",
+      "phase": "B"
+    },
+    {
+      "ids": "FE-B10",
+      "priority": "P1",
+      "evidence": "M",
+      "problem": "relink/replace/update_proxy把工程revision7重置0",
+      "implementation": "用replace保留字段；只有commit边界单调递增",
+      "acceptance": "纯helper仍7，提交8，undo/redo仍单调，旧plan被拒绝",
+      "phase": "B"
+    },
+    {
+      "ids": "FE-B11",
+      "priority": "P1",
+      "evidence": "S竞态",
+      "problem": "换源pop任务映射后，旧代理success/error因expected=None被接收",
+      "implementation": "project+asset+fingerprint+generation+job token严格匹配",
+      "acceptance": "换源/删除Undo/切工程乱序回调不污染新对象",
+      "phase": "B"
+    },
+    {
+      "ids": "FE-B12",
+      "priority": "P1",
+      "evidence": "M+S调用链",
+      "problem": "Replace未probe，video换jpg还保留video旧FPS/时长/尺寸",
+      "implementation": "后台probe、usage-index校验源窗与媒体类型，预览批准后事务提交",
+      "acceptance": "短源/跨类型有明确处置，元数据正确，undo还原旧素材",
+      "phase": "B/C"
+    },
+    {
+      "ids": "FE-B13",
+      "priority": "P1",
+      "evidence": "M+S",
+      "problem": "fractional FPS源/节目/字幕时间码用实际fps浮算，相互不一致",
+      "implementation": "全UI使用既有Rational SMPTE converter，显式NDF/DF",
+      "acceptance": "29.97 frame29为:29；1799为00:00:59:29(NDF)，roundtrip无漂移",
+      "phase": "C/D"
+    },
+    {
+      "ids": "FE-B14",
+      "priority": "P2",
+      "evidence": "S",
+      "problem": "能力表仍把已有Stem Export写成无UI/休眠",
+      "implementation": "registry entry与菜单、backend自动契约校验，统一帮助/AI manifest",
+      "acceptance": "实际能力状态与当前入口一致，缺依赖仅降级单项",
+      "phase": "D"
+    },
+    {
+      "ids": "FE-B15",
+      "priority": "P1",
+      "evidence": "S精度缺口",
+      "problem": "样本峰值被标为True Peak/dBTP，QC指标误导",
+      "implementation": "有状态4x插值true-peak estimator；无实现则标Sample Peak dBFS",
+      "acceptance": "参考intersample信号与跨block测试，manifest正确标指标类型",
+      "phase": "C"
+    },
+    {
+      "ids": "APP-01",
+      "priority": "P1",
+      "evidence": "G+S",
+      "problem": "多步手动剪辑后timeline/project revision一直0，AI乐观锁看不见人工修改",
+      "implementation": "将UI command commit/undo/redo与EditProjectService统一；revision单调，ref/cache同提交",
+      "acceptance": "人工任意编辑后旧base_revision plan拒绝；1次macro仅增1",
+      "phase": "B"
+    },
+    {
+      "ids": "APP-02",
+      "priority": "P2",
+      "evidence": "G+S；设计问题",
+      "problem": "默认linked selection开时局部Blade只切V，右段脱链，左段继续挂完整A",
+      "implementation": "定义局部与linked editing-unit切分策略；联动切分或显式安全解链，勿保留误导链",
+      "acceptance": "左右V/A组对应正确，后续trim/move不裁错整音频；Shift策略不回归",
+      "phase": "B/C"
+    },
+    {
+      "ids": "APP-03",
+      "priority": "P2",
+      "evidence": "G体验",
+      "problem": "1440×1000初始时间线dock仅102px，头/尺后几乎看不清轨道；中英UI混杂",
+      "implementation": "新布局按可用高度设置可操作初值/最小轨区；用户手动布局优先；统一I18N与工具提示",
+      "acceptance": "1280×800/1440×900/1920×1080可见V/A与工具；saved layout不反复被强制覆盖",
+      "phase": "D"
+    }
+  ],
+  "features": [
+    {
+      "id": "FE-F01",
+      "priority": "P1",
+      "feature": "源剪辑完整工作流：stream patch、单端/全源、3/4点、Replace/Match Frame",
+      "existing": "已有I/O和三个编辑入口，当前音频/FPS分叉",
+      "dependencies": "B/C；源mapper与联动事务"
+    },
+    {
+      "id": "FE-F02",
+      "priority": "P2",
+      "feature": "双/四画面Trim Monitor：roll/ripple/slip/slide两端与邻接画面",
+      "existing": "已有单帧trim preview信号",
+      "dependencies": "C/D；后台decode与session generation"
+    },
+    {
+      "id": "FE-F03",
+      "priority": "P2",
+      "feature": "Edit动画Dope Sheet/Curve、多点/Bezier/复制粘贴",
+      "existing": "已有关键帧按钮/模型/command",
+      "dependencies": "C；动画时域迁移"
+    },
+    {
+      "id": "FE-F04",
+      "priority": "P1",
+      "feature": "实时preserve_pitch与导出保调一致",
+      "existing": "已有离线WSOLA，实时尚未完整",
+      "dependencies": "C；streaming WSOLA与audio graph"
+    },
+    {
+      "id": "FE-F05",
+      "priority": "P3",
+      "feature": "可选光流变速/插帧，scene cut与遮挡处理",
+      "existing": "模型字段存在，当前UI隐藏后端未实现",
+      "dependencies": "E；可选backend和GPU资源能力"
+    },
+    {
+      "id": "FE-F06",
+      "priority": "P1/P2",
+      "feature": "LUFS/峰值Normalize + 可调Auto Duck完整工作流",
+      "existing": "已有analyzer/gain/DSP，没有完整UI/engine链",
+      "dependencies": "C/D；真峰值/worker/cache/FX registry"
+    },
+    {
+      "id": "FE-F07",
+      "priority": "P1/P2",
+      "feature": "Nest成熟化：事务Undo、变速音频/子转场、breadcrumb/Unnest",
+      "existing": "已有嵌套预览、1x音频flatten和导出",
+      "dependencies": "B/C/D；recursive time-map/audio graph"
+    },
+    {
+      "id": "FE-F08",
+      "priority": "P1/P2",
+      "feature": "Multicam成熟化：公共时基、TC/marker同步、多路proxy动态网格、音频切角",
+      "existing": "已有波形同步、静帧网格、1–9切角",
+      "dependencies": "B/C/D；group schema与decode预算"
+    },
+    {
+      "id": "FE-F09",
+      "priority": "P2",
+      "feature": "字幕工作区直接编辑、Speaker/Status/时间、词级拆分、批量翻译",
+      "existing": "已有字幕属性编辑/服务/交付与AI翻译provider",
+      "dependencies": "D；caption commands/worker/revision"
+    },
+    {
+      "id": "FE-F10",
+      "priority": "P2",
+      "feature": "代理集中队列、进度、cancel/retry、容量与缓存搬迁",
+      "existing": "已有ProxyPolicy/生成器/磁盘代理",
+      "dependencies": "B/D；先修job token"
+    },
+    {
+      "id": "FE-F11",
+      "priority": "P2",
+      "feature": "多版本备份、历史恢复预览、恢复副本与损坏工程工具",
+      "existing": "已有固定bak和autosave恢复",
+      "dependencies": "D；异步snapshot/atomic IO/retention"
+    },
+    {
+      "id": "FE-F12",
+      "priority": "P2/P3",
+      "feature": "交换保真矩阵、降级报告/渲染替代，可选AAF音频/EDL",
+      "existing": "已有FCPXML/OTIO受控子集，非完全缺失",
+      "dependencies": "E；核心time-map修复与第三方实机验收"
+    },
+    {
+      "id": "FE-F13",
+      "priority": "P2",
+      "feature": "人工逐词文本剪辑：选词剪、lift/extract、停顿编辑",
+      "existing": "已有ASR、transcript、语义索引和AI口播规则",
+      "dependencies": "D；word evidence+linked/sync事务"
+    },
+    {
+      "id": "FE-F14",
+      "priority": "P2",
+      "feature": "能力发现/帮助/诊断一处真实来源",
+      "existing": "已有registry和Effect Catalog，部分声明过期",
+      "dependencies": "D；入口和backend契约"
+    },
+    {
+      "id": "UI-GAP-01",
+      "priority": "P2",
+      "feature": "片段/多选/复制/字幕拖至边缘自动滚屏与自动卷轨",
+      "existing": "播放头有跟随；编辑拖动边缘计时器缺",
+      "dependencies": "D；统一interaction session"
+    },
+    {
+      "id": "UI-GAP-02",
+      "priority": "P2",
+      "feature": "媒体组±1/±10帧微移与精确Move时间码弹窗",
+      "existing": "字幕已有nudge，A/V不完整",
+      "dependencies": "B/D；editing-unit collision/lock"
+    },
+    {
+      "id": "UI-GAP-04",
+      "priority": "P2",
+      "feature": "多选mixed Inspector和Paste Attributes/批量兼容效果",
+      "existing": "目前Inspector只保留primary，blend有特判",
+      "dependencies": "D；SelectionContext+schema兼容Macro"
+    },
+    {
+      "id": "UI-GAP-06",
+      "priority": "P2",
+      "feature": "source/timeline/program/text/modal统一动作与焦点上下文",
+      "existing": "已有部分shortcut scopes；本次未证明JKL偷文本",
+      "dependencies": "D；真实窗口focus矩阵，先验证再修"
+    },
+    {
+      "id": "DOMAIN-01",
+      "priority": "P1",
+      "feature": "统一时间变换事务：slice/move/trim/ripple/roll/slide附属状态一起变换",
+      "existing": "目前多套运算各自漏状态",
+      "dependencies": "B/C；不可变planner+完整before/after"
+    },
+    {
+      "id": "DOMAIN-02",
+      "priority": "P2",
+      "feature": "跨edit-point长音床/字幕Sync Scope和冲突预览",
+      "existing": "同步锁只处理起点在编辑点之后的媒体",
+      "dependencies": "B/C；统一slice与字幕word timing"
+    },
+    {
+      "id": "DOMAIN-03",
+      "priority": "P1/P2",
+      "feature": "SourceAvailability素材handles服务与预览余量提示",
+      "existing": "现有边界检查散落，部分command不提供source max",
+      "dependencies": "C/D；媒体/图像/生成器/嵌套不同政策"
+    },
+    {
+      "id": "DOMAIN-04",
+      "priority": "P1",
+      "feature": "编辑事务组合回归矩阵与真实app验收门禁",
+      "existing": "基础tests多，但真实事件/组合边界漏测",
+      "dependencies": "A至E持续；source indices、undo全payload、资源取消"
+    }
+  ]
+}

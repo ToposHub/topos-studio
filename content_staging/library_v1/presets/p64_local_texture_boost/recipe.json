@@ -1,0 +1,29 @@
+{
+  "recipe_id": "P64",
+  "name": "局部质感增强",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "高频增益提质感：高频过 grade 增益后加回；小 radius 保细节带",
+  "component": "C21 frequency_separation（暂存节点 lib1_frequency_separation）＋生产 grade/merge",
+  "dependencies": {
+    "component_id": "C21",
+    "component_slug": "frequency_separation",
+    "component_kind": "node",
+    "node_type": "lib1_frequency_separation",
+    "aux_node_types": [
+      "grade",
+      "merge"
+    ]
+  },
+  "params": {
+    "radius": 4.0,
+    "filter": "Box",
+    "mode": "LowHigh"
+  },
+  "notes": "C21 frequency_separation 暂存组件＋生产 grade/merge 组成质感增强宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；局部化经通用 mask 输入在应用期接线，重组经 merge(add) 为暂存级近似。"
+}

@@ -1,0 +1,51 @@
+preserve-pitch stretch failed for clip c: name 'np' is not defined
+clip c preserve-pitch 预解码失败，回退变调路径
+{
+  "nonzero_start_0": {
+    "first": 0.010009765625,
+    "last": 0.165985107421875,
+    "std_tail_1s": 0.022516703233122826,
+    "expected_first": 0.009999999776482582,
+    "expected_last": 0.1659986972808838,
+    "peak": 0.165985107421875
+  },
+  "nonzero_start_25": {
+    "first": 0.04901123046875,
+    "last": 0.165985107421875,
+    "std_tail_1s": 0.012581647373735905,
+    "expected_first": 0.049000080674886703,
+    "expected_last": 0.20499877631664276,
+    "peak": 0.165985107421875
+  },
+  "nonzero_start_100": {
+    "first": 0.165985107421875,
+    "last": 0.165985107421875,
+    "std_tail_1s": 0.0,
+    "expected_first": 0.16600032150745392,
+    "expected_last": 0.3219990134239197,
+    "peak": 0.165985107421875
+  },
+  "reverse_tail": {
+    "last_frame_std": 0.0,
+    "last_frame_first": 0.010009765625,
+    "last_frame_last": 0.010009765625,
+    "previous_frame_std": 0.0004504698736127466
+  },
+  "mixedfps": {
+    "first_frame_pair": [
+      0,
+      1,
+      0.0
+    ],
+    "frame25_source": 50,
+    "at_1_second": 0.0880126953125,
+    "expected_1s": 0.049000080674886703,
+    "last": 0.1644287109375,
+    "expected_2s": 0.08799935132265091
+  },
+  "preserve_pitch_parity": {
+    "master_hz": 880.0,
+    "stem_hz": 880.0,
+    "max_diff": 0.0
+  }
+}

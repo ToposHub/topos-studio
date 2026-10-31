@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 13 items
+
+tests/edit/test_composite_direct_entry_does_not_mutate_project.py ...... [ 46%]
+.......                                                                  [100%]
+
+============================== 13 passed in 7.72s ==============================

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_preview_view_transform.py ....                           [100%]
+
+============================== 4 passed in 6.79s ===============================

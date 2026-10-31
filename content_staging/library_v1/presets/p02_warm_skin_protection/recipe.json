@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P02",
+  "name": "暖肤保护",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合彩色灯光/混色温人像；skin_protection 保持 0.8 以上，vibrance 0.3 左右起步",
+  "component": "F03 protected_vibrance（暂存组件 content_staging/library_v1/filters/protected_vibrance）",
+  "dependencies": {
+    "component_id": "F03",
+    "component_slug": "protected_vibrance",
+    "component_kind": "filter"
+  },
+  "params": {
+    "saturation": 0.15,
+    "vibrance": 0.35,
+    "skin_hue_center": 20.0,
+    "skin_hue_width": 30.0,
+    "skin_protection": 0.9
+  },
+  "notes": "依赖暂存组件（L10 未接缝）：载荷为组件参数载荷，非已可应用宿主载荷。与生产 Vibrance_Saturation 的差量在肤色保护权重与亮度保护。"
+}

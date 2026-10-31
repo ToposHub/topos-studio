@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<TangentWave fileType="PanelMap" fileVersion="3.0">
+    <Panels>
+        <Panel type="Element-Bt">
+            <Mode id="0x00010004">
+                <ControlBank id="Button">
+                    <Bank>
+                        <Control type="Button" number="0"><Mapping mode="Std"><Key>0x00020001</Key></Mapping></Control>
+                    </Bank>
+                </ControlBank>
+            </Mode>
+        </Panel>
+    </Panels>
+</TangentWave>

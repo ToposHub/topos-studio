@@ -1,0 +1,9 @@
+============================= test session starts ==============================
+collected 17 items
+
+tests/deliver/test_m10_consumer_fields.py .....                          [ 29%]
+tests/deliver/test_m21_multi_version_qc_panel.py ....                    [ 52%]
+tests/deliver/test_m21_sidecar_wiring.py ........                        [100%]
+
+============================== 17 passed in 2.27s ==============================
+

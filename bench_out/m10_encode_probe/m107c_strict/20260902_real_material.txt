@@ -1,0 +1,15 @@
+== 2K_topos 1920x1080 hq sized t8，32 帧 ==
+  fps 30.47  wall/帧 32.8 ms
+  probe 编码次数: p50 4.0  p95 4  max 4  均值 4.00
+  bytes/target 误差: 中位 +15.16%  p95 +16.04%  最差 +11.25%  超 target 帧数 32/32
+  qp: min 63 中位 63 max 63
+
+== 4K_prores422HQ 3840x2160 hq sized t8，16 帧 ==
+  fps 6.82  wall/帧 146.7 ms
+  probe 编码次数: p50 7.0  p95 7  max 7  均值 7.00
+  bytes/target 误差: 中位 -4.77%  p95 -1.05%  最差 -9.25%  超 target 帧数 0/16
+  qp: min 55 中位 55 max 56
+
+== 对照：改动前（0f404603 = 6.2 之前 + R6 搜索，TOPOS_CODEC_LIB 交错） ==
+2K: fps 18.40, probe 10, qp 63 钉死（tier 目标在该合成素材不可达，strict 同语义）
+4K: fps 5.26, probe 10, qp 57-58, 误差中位 -22.85%

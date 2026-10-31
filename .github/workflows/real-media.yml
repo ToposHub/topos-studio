@@ -1,0 +1,121 @@
+name: real-media
+
+# N04（2026-09-27 复验计划）：可执行的真实媒体回归作业。
+#
+# 为什么是 self-hosted：媒体语料不入库且不可在 CI 内确定性重建——
+# tools/generate_topos_baseline_corpus.py 依赖不入库的 4K_prores4444.mov
+# 母版与 Apple 原生 ProRes 基准集（见 tests/test_videos/README.md）。
+# GitHub 托管 runner 永远没有素材 → 旧作业（ubuntu-latest）的指纹/测试
+# 步骤从未真正执行。因此本作业面向【已布置语料的固定基准机】：
+#
+#   runner 标签：self-hosted + topos-media
+#   预置条件（一次性）：
+#     1) python3.12、cmake（≥3.20）、C 编译器
+#     2) 素材目录 $TOPOS_MEDIA_DIR（默认 <workspace>/../topos-media），
+#        内容为 tools/generate_topos_baseline_corpus.py 与 freeze 清单的
+#        全部产物（冻结指纹校验不过会显式红）
+#     3) 首次运行自动创建 .venv 并安装 requirements.txt
+#
+# 缺素材（目录不存在/为空）→ staging 步骤显式失败（红）并打印布置指引，
+# 不允许真实媒体覆盖以 skip 静默缩水；素材齐全时 native 库本地构建、
+# 双清单零漂移、画质门禁与严格媒体测试全量真实执行。
+on:
+  workflow_dispatch:
+
+jobs:
+  real-media-regression:
+    runs-on: [self-hosted, topos-media]
+    timeout-minutes: 120
+    env:
+      TOPOS_REAL_MEDIA_STRICT: "1"
+      TOPOS_MEDIA_DIR: ${{ github.workspace }}/../topos-media
+    steps:
+      - name: Checkout (no clean — 不删除工作区已布置的语料)
+        uses: actions/checkout@v4
+        with:
+          clean: false
+          fetch-depth: 1
+
+      - name: Stage frozen corpus from TOPOS_MEDIA_DIR (fail red if absent)
+        run: |
+          MEDIA_DIR="${TOPOS_MEDIA_DIR:-$HOME/topos-media}"
+          echo "media source dir: $MEDIA_DIR"
+          if [ ! -d "$MEDIA_DIR" ]; then
+            echo "::error::素材目录不存在：$MEDIA_DIR"
+            echo "::error::请在固定基准机上先运行 tools/generate_topos_baseline_corpus.py"
+            echo "::error::与 tools/freeze_benchmark_media_manifest.py（见 tests/test_videos/README.md），"
+            echo "::error::产物放入 \$TOPOS_MEDIA_DIR 后重新触发本作业。"
+            exit 1
+          fi
+          mkdir -p tests/test_videos
+          staged=0
+          for f in "$MEDIA_DIR"/*.mov "$MEDIA_DIR"/*.mp4; do
+            [ -f "$f" ] || continue
+            ln "$f" "tests/test_videos/$(basename "$f")" 2>/dev/null \
+              || cp -f "$f" "tests/test_videos/$(basename "$f")"
+            staged=$((staged+1))
+          done
+          echo "staged $staged media files"
+          if [ "$staged" -lt 36 ]; then
+            echo "::error::素材不完整（期望 ≥36 个文件，实际 $staged）——后续清单校验会给出缺失明细"
+            exit 1
+          fi
+
+      - name: Precondition — frozen corpus must exist (fail red, never skip)
+        run: |
+          missing=0
+          for f in \
+            tests/test_videos/2K_topos_422_Proxy.mov \
+            tests/test_videos/2K_topos_422_HQ.mov \
+            tests/test_videos/2K_topos_4444.mov \
+            tests/test_videos/4K_topos_422_Proxy.mov \
+            tests/test_videos/4K_topos_422_HQ.mov \
+            tests/test_videos/4K_topos_4444.mov \
+            tests/test_videos/2K_h264.mp4; do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f（先在固定基准机运行 tools/generate_topos_baseline_corpus.py 重建语料）"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Set up python venv (self-hosted 复用，缺失才创建)
+        run: |
+          if [ ! -x .venv/bin/python ]; then
+            python3.12 -m venv .venv
+          fi
+          .venv/bin/python -m pip install --upgrade pip -q
+          .venv/bin/python -m pip install -r requirements.txt -q
+
+      - name: Build native codec library (tests load it via candidate paths)
+        run: |
+          cmake -S native/topos_codec -B native/topos_codec/build/release \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/topos_codec/build/release -j "$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
+
+      - name: Frozen media manifest check (C03)
+        run: |
+          .venv/bin/python tools/freeze_benchmark_media_manifest.py --check
+
+      - name: Recompute quality with this runner's actual native library (G00)
+        run: |
+          .venv/bin/python tools/measure_topos_baseline_quality.py --tag recal-p5 --stride 5
+
+      - name: Bound-library quality gate (C03/G00)
+        run: |
+          .venv/bin/python tools/verify_topos_quality_gates.py --require-media
+
+      - name: Real-media tests (strict — missing media fails, never skips)
+        run: |
+          .venv/bin/python -m pytest -q \
+            tests/media/test_topos_probe_unification.py \
+            tests/media/test_topos_export_audio.py \
+            tests/media/test_topos_reimport_playback.py \
+            tests/media/test_topos_direct_delivery.py \
+            tests/media/test_topos_source_export_passthrough.py \
+            tests/media/test_render_cache_planar_passthrough.py \
+            tests/edit/test_adjustment_clip_delivery.py \
+            tests/edit/test_effect_quality_param_lifecycle.py \
+            tests/edit/test_native_gpu_bridge_eligibility.py \
+            tests/export/test_topos_slice_rows_and_stage_report.py \
+            --no-header -p no:cacheprovider -ra

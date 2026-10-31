@@ -1,0 +1,4855 @@
+{
+  "ok": true,
+  "result": {
+    "window": [
+      1440,
+      1000
+    ],
+    "buttons": [
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "View",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Guides",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "maskBtn",
+        "text": "",
+        "tip": "Toggle Alpha Mask Preview (Shift+H)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "fitBtn",
+        "text": "",
+        "tip": "Fit to Window",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "splitBtn",
+        "text": "",
+        "tip": "Toggle Split View (\\\\)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "降级",
+        "tip": "播放时自动降级重型效果以保持流畅性\n关闭此选项将在播放时也保持完整质量（可能影响帧率）",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "maskBtn",
+        "text": "遮罩",
+        "tip": "切换 Alpha 遮罩预览 (Shift+H)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "适合",
+        "tip": "适合窗口 (0)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "对比",
+        "tip": "切换擦除对比 (\\\\)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "I",
+        "tip": "设置入点 (I)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "O",
+        "tip": "设置出点 (O)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "清除",
+        "tip": "清除入/出点",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "第一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "上一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "播放/暂停",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "下一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "最后一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "循环",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_params",
+        "text": "⚙",
+        "tip": "显示/隐藏跟踪分析参数",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_title_menu",
+        "text": "⋯",
+        "tip": "跟踪器选项",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "tracker_tool_point",
+        "text": "•",
+        "tip": "点跟踪",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "tracker_tool_region",
+        "text": "□",
+        "tip": "区域跟踪",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "tracker_tool_planar",
+        "text": "◇",
+        "tip": "平面/透视跟踪",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "tracker_tool_camera3d",
+        "text": "3D",
+        "tip": "3D 摄像机跟踪（暂未开放）",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "tracker_channel",
+        "text": "平移 X",
+        "tip": "平移 X",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "tracker_channel",
+        "text": "平移 Y",
+        "tip": "平移 Y",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "tracker_channel",
+        "text": "缩放",
+        "tip": "缩放",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "tracker_channel",
+        "text": "旋转",
+        "tip": "旋转",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "tracker_channel",
+        "text": "3D",
+        "tip": "3D 摄像机跟踪尚未开放",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_segment",
+        "text": "片段",
+        "tip": "整段轨迹",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_segment",
+        "text": "帧",
+        "tip": "参考帧附近轨迹",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_transport_button",
+        "text": "|◀",
+        "tip": "首帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_transport_button",
+        "text": "◀",
+        "tip": "前一帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_transport_button",
+        "text": "▶",
+        "tip": "后一帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_transport_button",
+        "text": "▶|",
+        "tip": "最后一帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_primary",
+        "text": "◀◀",
+        "tip": "从当前帧向参考帧跟踪",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_transport_button",
+        "text": "◀|",
+        "tip": "准确向后跟踪一帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_primary",
+        "text": "↔",
+        "tip": "根据播放头位置完成前向和后向跟踪",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_transport_button",
+        "text": "|▶",
+        "tip": "准确向前跟踪一帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_primary",
+        "text": "▶▶",
+        "tip": "从参考帧向前跟踪",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_danger",
+        "text": "■",
+        "tip": "取消跟踪",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_transport_button",
+        "text": "↔",
+        "tip": "前向 + 后向跟踪",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_transport_button",
+        "text": "↻",
+        "tip": "仅重新跟踪失败帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "显示点",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "显示路径",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "显示搜索框",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "平移 X",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "平移 Y",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "缩放",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "旋转",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "交互模式",
+        "tip": "交互模式",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_icon_action",
+        "text": "◉",
+        "tip": "显示/隐藏画布跟踪覆盖层",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_danger",
+        "text": "⌫",
+        "tip": "删除手动修正",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_icon_action",
+        "text": "↺",
+        "tip": "重置当前帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "tracker_icon_action",
+        "text": "⇧",
+        "tip": "导出逐帧透视四角 JSON",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset All Denoise Parameters",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "gradingApplyBtn",
+        "text": "重置时域历史",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "调试叠加（运动置信度）",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "gradingApplyBtn",
+        "text": "应用降噪",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset All Deblur Parameters",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "gradingApplyBtn",
+        "text": "应用去模糊",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "M",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "R",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "G",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "B",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "Pick color from image to add control point",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "重置所有曲线",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset 亮度",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset 饱和度",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset 色相",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset Grid",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "从图像中拾取颜色以添加控制点",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "重置当前曲线",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "FX",
+        "tip": "Toggle all FX on/off",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "DY",
+        "tip": "Open Dynamics panel",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "EQ",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "mute_btn",
+        "text": "M",
+        "tip": "静音",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset All Sharpen Parameters",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset All Blur Parameters",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "重置所有胶片颗粒参数",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "单色颗粒",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "动画（随帧变化）",
+        "tip": "启用后颗粒种子随帧号确定推进：同一帧重渲一致，逐帧颗粒图案变化",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "换种子",
+        "tip": "更换颗粒图案种子（确定性，重渲一致）",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset All Mask Parameters",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": " 圆形",
+        "tip": "添加圆形窗口",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": " 矩形",
+        "tip": "添加矩形窗口",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": " 曲线",
+        "tip": "添加曲线窗口",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": " 渐变",
+        "tip": "添加渐变窗口",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": " 群组",
+        "tip": "添加群组窗口",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "移除背景",
+        "tip": "Auto Remove Background (BiRefNet)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "智能画笔",
+        "tip": "Interactive Segmentation (SAM)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": " 画笔",
+        "tip": "Draw mask with brush (B to toggle, [ ] to resize, E for eraser)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": " 橡皮擦",
+        "tip": "Toggle Eraser Mode (E) - Subtract from mask",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "发送到跟踪器",
+        "tip": "Send selected window to Tracker / 用跟踪器跟踪当前窗口",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "颜色叠加",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "picker_normal_btn",
+        "text": "拾取",
+        "tip": "正常拾取：首次点击重置范围，拖动时扩展",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "picker_add_btn",
+        "text": "+",
+        "tip": "添加拾取：扩展范围以包含所选颜色",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "picker_sub_btn",
+        "text": "-",
+        "tip": "减去拾取：缩小范围以排除所选颜色",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "反转",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "重置所有限定器参数",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "高亮",
+        "tip": "以原图+灰底显示限定区域",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "黑场",
+        "tip": "以原图+黑底显示限定区域",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "灰度",
+        "tip": "显示纯灰度 matte（白=选中）",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "gradingApplyBtn",
+        "text": "导入 LUT",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "反编译",
+        "tip": "将选定的 LUT 反编译为调色参数",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "重置",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset All Parameters",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "Reset All RAW Parameters",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "设置",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "▼",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "重置为默认",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "▼",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "重置为默认",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "浏览...",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "▼",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "重置为默认",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "▼",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "重置为默认",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "▼",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "重置为默认",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "Cancel Export",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "暂停",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "PrimaryButton",
+        "text": "开始导出",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "✂ 裁切",
+        "tip": "激活/关闭裁切工具 (快捷键：C)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "重置所有裁切参数（裁切框、旋转）(快捷键：Shift+R)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "限定在画内",
+        "tip": "开启时裁切框限定在图像范围内；关闭时允许自由拖拽超出画布，实现画布扩展效果",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "重置旋转角度为 0 (快捷键：R)",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "New script (Ctrl+N)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "Open script (Ctrl+O)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "Save script",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "脚本",
+        "tip": "Browse and manage scripts",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": " 运行",
+        "tip": "Run script (F5)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": " 停止",
+        "tip": "Stop running script",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "清空输出",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Close search bar (Esc)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Find previous (Shift+Enter)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Find next (Enter)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "替换",
+        "tip": "Replace current match",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "全部",
+        "tip": "Replace all matches",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "≡",
+        "tip": "Toggle replace mode",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "上级目录",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "新建文件夹",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "抓取静帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "删除",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "◀",
+        "tip": "上一镜 (Up)",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "▶",
+        "tip": "下一镜 (Down)",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Toggle Bins Panel",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Search / Filter",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Ascending",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "List View",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Grid View",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Offline Assets - Click to Relink",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Enable AI Media Analysis",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "返回上级",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "I",
+        "tip": "Mark In (I)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "O",
+        "tip": "Mark Out (O)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Clear",
+        "tip": "Clear In/Out Points",
+        "visible": true,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Jump to Start",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Previous Frame",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Play/Pause",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Next Frame",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Jump to End",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "View",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Guides",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Transform Tool (move/scale/rotate)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "maskBtn",
+        "text": "",
+        "tip": "Toggle Alpha Mask Preview (Shift+H)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "fitBtn",
+        "text": "",
+        "tip": "Fit to Window",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "splitBtn",
+        "text": "",
+        "tip": "Toggle Split View (\\\\)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "previewQualityMenu",
+        "text": "流畅",
+        "tip": "预览代理分辨率",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "跳到开头 (Home)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "上一帧 (←)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "播放/暂停 (Space)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "下一帧 (→)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "跳到结尾 (End)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "循环 (L)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "选择工具 (A)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "修剪工具 (T)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "刀片工具 (B)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "涟漪工具 (R)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "比例拉伸工具 (Shift+R) — 拖动片段边缘改变时长，速度按比例换算",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "滚动工具 (W)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "滑动工具 (Y)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "滑移工具 (U)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "手形工具 (H)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "缩放工具 (Z)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "吸附（N）",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "链接选择 - 即将推出",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "显示标记 - 即将推出",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "在播放头插入片段",
+        "visible": true,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "在播放头覆盖片段",
+        "visible": true,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "在时间线末尾追加片段",
+        "visible": true,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "覆盖",
+        "tip": "覆盖模式：拖放素材覆盖落点内容（Shift+B 切换为插入模式）",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "音频混音器",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "缩小",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "放大",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "适合视图（F）",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Graphic EQ",
+        "tip": "Graphic EQ\nMulti-band graphic equalizer (open panel for full curve)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Limiter",
+        "tip": "Limiter\nBrick-wall limiter to prevent clipping",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Compressor",
+        "tip": "Compressor\nDynamic range compressor",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Reverb",
+        "tip": "Reverb\nSchroeder FDN reverb (room / hall / plate)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Delay",
+        "tip": "Delay\nDelay with feedback and ping-pong",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Saturation",
+        "tip": "Saturation\nHarmonic saturation / waveshaper",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Stereo Imager",
+        "tip": "Stereo Imager\nMid/Side stereo width control",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Noise Gate",
+        "tip": "Noise Gate\nGate signals below a threshold",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Cross Dissolve",
+        "tip": "Cross Dissolve\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Dip To Color",
+        "tip": "Dip To Color\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Blur Dissolve",
+        "tip": "Blur Dissolve\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Defocus Dissolve",
+        "tip": "Defocus Dissolve\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Film Dissolve",
+        "tip": "Film Dissolve\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Smooth Cut",
+        "tip": "Smooth Cut\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Wipe",
+        "tip": "Wipe\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Slide Left",
+        "tip": "Slide Left\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Slide Right",
+        "tip": "Slide Right\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Slide Up",
+        "tip": "Slide Up\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Slide Down",
+        "tip": "Slide Down\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Wipe From Left",
+        "tip": "Wipe From Left\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Wipe From Top",
+        "tip": "Wipe From Top\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Circle",
+        "tip": "Iris Circle\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Diamond",
+        "tip": "Iris Diamond\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Hexagon",
+        "tip": "Iris Hexagon\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Plus",
+        "tip": "Iris Plus\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Square",
+        "tip": "Iris Square\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Ellipse",
+        "tip": "Iris Ellipse\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Triangle",
+        "tip": "Iris Triangle\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Arrow",
+        "tip": "Iris Arrow\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Star",
+        "tip": "Iris Star\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Iris Heart",
+        "tip": "Iris Heart\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Motion Blur Left",
+        "tip": "Motion Blur Left\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Motion Blur Right",
+        "tip": "Motion Blur Right\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Motion Blur Up",
+        "tip": "Motion Blur Up\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Motion Blur Down",
+        "tip": "Motion Blur Down\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Whip Pan Left",
+        "tip": "Whip Pan Left\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Whip Pan Right",
+        "tip": "Whip Pan Right\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Zoom Blur In",
+        "tip": "Zoom Blur In\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Zoom Blur Out",
+        "tip": "Zoom Blur Out\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Spin Blur CW",
+        "tip": "Spin Blur CW\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Spin Blur CCW",
+        "tip": "Spin Blur CCW\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "RGB Split Left",
+        "tip": "RGB Split Left\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "RGB Split Right",
+        "tip": "RGB Split Right\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Constant Power",
+        "tip": "Constant Power\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Linear (Equal Gain)",
+        "tip": "Linear (Equal Gain)\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Equal Power (3dB)",
+        "tip": "Equal Power (3dB)\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_TransitionPreviewButton",
+        "name": "",
+        "text": "Fade (to Silence)",
+        "tip": "Fade (to Silence)\nTransition",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Blur",
+        "tip": "Blur\nBox / Gaussian / Bilateral / Motion / Bokeh blur with per-channel mask and mix.",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Sharpen",
+        "tip": "Sharpen\nUnsharp-mask sharpening with threshold and channel mode.",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Denoise",
+        "tip": "Denoise\nBilateral-filter denoise with luma/chroma mode.",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Edge Detect",
+        "tip": "Edge Detect\nEdge detection (Sobel/Laplacian/Prewitt/Canny).",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Erode / Dilate",
+        "tip": "Erode / Dilate\nMorphological erode/dilate with iteration control.",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Defocus",
+        "tip": "Defocus\nLens defocus / bokeh blur.",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Glow",
+        "tip": "Glow\nBloom/glow with threshold, tint and intensity.",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Adjustment Clip",
+        "tip": "Adjustment Clip\nCreate a clip that applies its effects to all tracks below it",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Solid Color",
+        "tip": "Solid Color\nCreate a clip that paints a flat color frame",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "假红外",
+        "tip": "假红外\nFalse-color infrared look: luminous red foliage, sunken skies, dreamy inverse-luma glow",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "双边皮肤平滑",
+        "tip": "双边皮肤平滑\n",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "白平衡进阶",
+        "tip": "白平衡进阶\nTemperature/tint white balance in scene-linear with channel-gain or exact luma-preserving correction modes",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "哑光肤色平滑",
+        "tip": "哑光肤色平滑\nSkin-tone selective matte smoothing via YCbCr skin detection and skin-gated frequency separation with texture keep-back",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "角落漏光",
+        "tip": "角落漏光\nCorner-originated light leak: aspect-corrected soft falloff from a selectable frame corner, additive in scene-linear",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "光圈散焦",
+        "tip": "光圈散焦\nDefocus blur with selectable iris: staggered-ring circular disc or aligned-ring hexagonal aperture, compile-time shell presets",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "边缘描墨",
+        "tip": "边缘描墨\nSobel outline inking: 8-neighbor gradient magnitude on selectable luma source, soft-thresholded into a tintable ink overlay",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "漂白旁路",
+        "tip": "漂白旁路\nBleach bypass look: high-contrast, low-saturation silver film response",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "饱和度 / 活泼度",
+        "tip": "饱和度 / 活泼度\nSplit saturation and vibrance control: chroma gain plus low-saturation-weighted vibrance boost with exact 709 luma preservation",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "通道混合",
+        "tip": "通道混合\nPer-channel RGB mixing matrix: three output gains plus six signed crosstalk sliders, applied linearly with strength blend",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "线性运动模糊",
+        "tip": "线性运动模糊\nDirectional linear motion blur: centered tap line along a user angle with compile-time sample-count presets",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "三路色调",
+        "tip": "三路色调\nSeparate tint grading for shadows, midtones and highlights with smooth luminance zone blending and HDR-safe multiplicative color gains",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "信号毛刺",
+        "tip": "信号毛刺\nDigital signal glitch: hash-activated horizontal band displacement with RGB channel split, deterministic per band",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "变形镜头拉丝",
+        "tip": "变形镜头拉丝\nHorizontal anamorphic lens streak: highlight-gated taps along +/-X with distance falloff, quality presets and tintable streak color",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "万花筒镜像",
+        "tip": "万花筒镜像\nFold-mirror kaleidoscope: horizontal / vertical / quad folding about an adjustable axis plus diagonal reflection, mix-controlled",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "径向模糊 Pro",
+        "tip": "径向模糊 Pro\nZoom/radial blur along center-to-pixel rays with compile-time sample-count presets and adjustable center",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "色彩空间转换器",
+        "tip": "色彩空间转换器\nProfessional color space and gamma converter with tone mapping and white point adaptation",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "像素块",
+        "tip": "像素块\nMosaic pixelation with per-block center sampling, linear color quantization and optional 4x4 ordered dither",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "日转夜转换",
+        "tip": "日转夜转换\nHeuristic day-for-night look: luminance-weighted exposure pull-down, cool temperature shift, sky highlight protection and a slight moonlight blue lift; HDR-safe with no output clamping",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "扩展光晕",
+        "tip": "扩展光晕\nHighlight diffusion glow with hue-adjustable tint (halation variant, alternating-direction ring kernel)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "交叉冲洗",
+        "tip": "交叉冲洗\nCross-process film look family: crossed rational channel curves with dye-fog crosstalk between channels",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "反锐化锐化",
+        "tip": "反锐化锐化\nUnsharp mask sharpening: compile-time 3x3/5x5 inverse-distance kernel, radius to 8 px and edge-gated detail amplification",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "Warm Tint",
+        "tip": "Warm Tint\nAdds a gentle warm tint; declares OpenGL export support (W06 deliverable-plugin slice).",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "网点印刷",
+        "tip": "网点印刷\nHalftone print screening: rotated constant-matrix dot lattice, luminance-sized dots with soft anti-aliased coverage",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "镜头畸变",
+        "tip": "镜头畸变\nRadial lens distortion (barrel/pincushion) with r2 polynomial remap, manual zoom compensation and auto-zoom framing guard",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "柔光泛光",
+        "tip": "柔光泛光\nThreshold-based soft glow and bloom with multi-pass ring blur approximation",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "渐变曝光滤镜",
+        "tip": "渐变曝光滤镜\nRotatable graduated ND exposure filter: smoothstep feathered linear ramp of exposure stops along a user angle",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "多形状暗角",
+        "tip": "多形状暗角\nMulti-shape vignette (ellipse / rectangle / circle) with smoothstep feather, strength blend and mean-preserving luma compensation",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "CRT 扫描线",
+        "tip": "CRT 扫描线\nCRT display emulation: triangle-wave scanlines and offset-triangle aperture grille mask, brightness-neutral multiplicative gains",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "移轴焦点",
+        "tip": "移轴焦点\nTilt-shift miniature look: orientation-selectable focus band with smoothstep falloff driving a fixed 17-tap disc blur radius",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "高通磨皮",
+        "tip": "高通磨皮\nFrequency-domain skin retouching using high-pass filtering (band-stop filter)",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "棱镜色散",
+        "tip": "棱镜色散\nRotatable radial RGB dispersion: channel-split sampling grows with center distance and adjustable edge falloff",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "双色调",
+        "tip": "双色调\nDuotone/tritone luminance ramp: linear shadow-to-highlight color map with detail keep-back and selectable luma source",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "胶片光晕",
+        "tip": "胶片光晕\n",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_EffectPreviewButton",
+        "name": "",
+        "text": "胶片颗粒",
+        "tip": "胶片颗粒\nFilm-style monochrome grain: smooth hash value-noise lattice modulated by luminance, with shadow/highlight bias",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "_MotionGraphicPreviewButton",
+        "name": "",
+        "text": "Particle Flow Background",
+        "tip": "Particle Flow Background\nCyan particle streams with soft glows over a dark grid, usable as an animated backdrop for video content.",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Search effects",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "Find",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "Replace All",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "Split",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "Merge",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "⟳",
+        "tip": "Refresh devices",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "Loop record",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "Input monitor",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "Calibrate",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "▶ Audition",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "★ Mark Best",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "Replace Selected Clip",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "波形同步",
+        "tip": "互相关各角度开头音频段，自动对齐（约数秒）",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "assistant_conversation_title",
+        "text": "新对话",
+        "tip": "点击修改当前会话标题",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "上下文",
+        "tip": "检查本次模型看到的上下文（token/优先级/可排除）",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "assistant_overflow",
+        "text": "⋯",
+        "tip": "更多操作",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "返回",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "批准 Brief",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "重试",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "⌃",
+        "tip": "展开或收起活动详情",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "assistant_add_button",
+        "text": "+",
+        "tip": "添加图片、视频、音频、PDF、文档或上下文操作",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "assistant_conversation_selector",
+        "text": "普通对话 · 可提议 ⌄",
+        "tip": "选择对话模式和权限",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "assistant_model_reasoning_selector",
+        "text": "未配置 · 中 ⌄",
+        "tip": "选择模型和推理强度",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "assistant_send",
+        "text": "↑",
+        "tip": "发送",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "View",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Guides",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "maskBtn",
+        "text": "",
+        "tip": "Toggle Alpha Mask Preview (Shift+H)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "fitBtn",
+        "text": "",
+        "tip": "Fit to Window",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "splitBtn",
+        "text": "",
+        "tip": "Toggle Split View (\\\\)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "channelBtn",
+        "text": "RGB",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "renderPassBtn",
+        "text": "Beauty",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Select (Q)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Move (W)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Rotate (E)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Scale (R)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Model",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Point",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Edge",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Polygon",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "I",
+        "tip": "设置入点 (I)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "O",
+        "tip": "设置出点 (O)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "清除",
+        "tip": "清除入/出点",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "第一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "上一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "播放/暂停",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "下一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "最后一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "循环",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "⬅ Back",
+        "tip": "Exit the current group edit view (also Esc)",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "+ Constant",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "+ Merge",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "+ Blur",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "+ Transform",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "⋯",
+        "tip": "Settings",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "收起/展开小地图",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "compositeEmptyStateCreateButton",
+        "text": "新建合成片段",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Toggle search (Ctrl+F)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Settings",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "设置",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "Copy",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "Export JSON",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "qt_toolbar_ext_button",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "转到起始帧",
+        "tip": "转到起始帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "上一帧",
+        "tip": "上一帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "播放",
+        "tip": "播放（右键：变速/往复 / right-click: speed & ping-pong）",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "下一帧",
+        "tip": "下一帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "转到结束帧",
+        "tip": "转到结束帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "上一个关键帧",
+        "tip": "上一个关键帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "下一个关键帧",
+        "tip": "下一个关键帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "在当前帧添加关键帧 (Ctrl/Cmd+K)",
+        "tip": "在当前帧添加关键帧 (Ctrl/Cmd+K)",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "删除当前帧的关键帧",
+        "tip": "删除当前帧的关键帧",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "适配时间范围",
+        "tip": "适配时间范围",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "将选中关键帧适配到视图",
+        "tip": "将选中关键帧适配到视图",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "缩小",
+        "tip": "缩小",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "放大",
+        "tip": "放大",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "播放头居中",
+        "tip": "播放头居中",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "吸附到帧 / 关键帧 / 工作区边界",
+        "tip": "吸附到帧 / 关键帧 / 工作区边界",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "曲线编辑器 (Shift+F3)",
+        "tip": "曲线编辑器 (Shift+F3)",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Nodes",
+        "tip": "Nodes view — show the compositing node graph",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Layers",
+        "tip": "Layers view — show the AE-style layer stack",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "全部展开",
+        "tip": "全部展开",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "全部折叠",
+        "tip": "全部折叠",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Clear property search",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ExpressionEnabledButton",
+        "text": "Disable",
+        "tip": "Enable or disable expression",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ExpressionEditorCollapseButton",
+        "text": "×",
+        "tip": "Collapse expression editor",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "KeyframesEmptyStateCreateButton",
+        "text": "新建合成片段",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "qt_toolbar_ext_button",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "转到起始帧",
+        "tip": "转到起始帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "上一帧",
+        "tip": "上一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "播放",
+        "tip": "播放",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "下一帧",
+        "tip": "下一帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "转到结束帧",
+        "tip": "转到结束帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "上一个关键帧",
+        "tip": "上一个关键帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "下一个关键帧",
+        "tip": "下一个关键帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "适配曲线",
+        "tip": "Fit all visible curves",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Focus selected",
+        "tip": "Fit the selected curve to the chart",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Show all",
+        "tip": "Show all",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Hide all",
+        "tip": "Hide all",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Auto",
+        "tip": "Auto",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "平滑",
+        "tip": "平滑",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "线性",
+        "tip": "线性",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "水平",
+        "tip": "水平",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "阶梯",
+        "tip": "阶梯",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "Broken",
+        "tip": "Broken",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "刷新",
+        "tip": "重新扫描当前合成图中的显式资产路径",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "收集到目录…",
+        "tip": "复制已解析依赖并将图中的路径写回为可移植路径",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "搜索目录…",
+        "tip": "添加离线素材搜索目录并保存到当前合成图",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "展开",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "收起",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "选择",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "选择",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "选择",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "选择",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "选择",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "还原材质",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "暂停",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "继续",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "取消当前",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "清除已完成",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "QueueMoreButton",
+        "text": "⋯",
+        "tip": "更多",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "PrimaryButton",
+        "text": "渲染全部",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "另存为预设…",
+        "tip": "把当前设置面板状态保存为自定义预设（Presets/User/export）",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "浏览",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QRadioButton",
+        "name": "",
+        "text": "单一片段",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QRadioButton",
+        "name": "",
+        "text": "逐片段输出",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QRadioButton",
+        "name": "",
+        "text": "自定义名称",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QRadioButton",
+        "name": "",
+        "text": "时间线名称",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "使用唯一文件名",
+        "tip": "附加各片段标识",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QRadioButton",
+        "name": "",
+        "text": "前缀",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QRadioButton",
+        "name": "",
+        "text": "后缀",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "文件名附加源帧号",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "允许占位片段导出",
+        "tip": "含占位片段的时间线默认禁止交付。勾选后仍可导出，占位片段将以彩条形式渲染进成片。",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "包含音频",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "Stems 多音轨（角色分组容器轨）",
+        "tip": "轨 0 为主混音（兼容视图）；时间线上标注了角色（对白/音乐/…）",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "锁定宽高比",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QCheckBox",
+        "name": "",
+        "text": "Alpha 通道",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QPushButton",
+        "name": "PrimaryButton",
+        "text": "加入视频队列",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "加入并开始",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "重置全部色调区间饱和度",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Reset LIFT",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Reset GAMMA",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "Reset GAIN",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "关键帧模式：开启后，调色参数修改会在当前帧记录关键帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "在当前帧为所有已动画参数记录关键帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "删除当前帧的所有调色关键帧",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "reset_btn",
+        "text": "",
+        "tip": "重置全部调色参数",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_floatbutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QAbstractButton",
+        "name": "qt_dockwidget_closebutton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "Hide Layer",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "❄",
+        "tip": "栅格化图层 (缓存AI计算)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "Reset Layer Adjustments",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "Remove Layer",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "添加图层",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "删除选中",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "上移",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "下移",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "复制图层参数 (Ctrl+Shift+C)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "粘贴图层参数 (Ctrl+V)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "",
+        "tip": "复制为新图层 (Ctrl+D)",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "qt_menubar_ext_button",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "qt_toolbar_ext_button",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "文件 (F)",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "编辑 (E)",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "特效 (X)",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "窗口 (W)",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "",
+        "text": "更多 (M)",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "素材库",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "剪辑",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "调色",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "合成",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "交付",
+        "tip": "",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "Reset All Layer Adjustments",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "首选项...",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "",
+        "tip": "打开项目管理器...",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "导出",
+        "tip": "导出图像",
+        "visible": true,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "暂停",
+        "tip": "暂停/继续视频导出",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QPushButton",
+        "name": "",
+        "text": "取消",
+        "tip": "取消视频导出",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": false
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollLeftButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      },
+      {
+        "class": "QToolButton",
+        "name": "ScrollRightButton",
+        "text": "",
+        "tip": "",
+        "visible": false,
+        "enabled": true
+      }
+    ],
+    "panels": [
+      [
+        "_current_timeline_sequences",
+        "dict"
+      ],
+      [
+        "timeline_preview_renderer",
+        "NoneType"
+      ],
+      [
+        "audio_mixer_panel",
+        "AudioMixerPanel"
+      ],
+      [
+        "color_timeline_clip_strip",
+        "TimelineClipStrip"
+      ],
+      [
+        "program_viewer_widget",
+        "ProgramViewerWidget"
+      ],
+      [
+        "source_viewer_widget",
+        "SourceViewerWidget"
+      ],
+      [
+        "timeline_panel",
+        "TimelinePanel"
+      ],
+      [
+        "edit_properties_panel",
+        "EditPropertiesPanel"
+      ],
+      [
+        "caption_workspace_panel",
+        "CaptionWorkspacePanel"
+      ],
+      [
+        "dock_audio_mixer",
+        "PanelDockWidget"
+      ],
+      [
+        "dock_color_timeline_clips",
+        "PanelDockWidget"
+      ],
+      [
+        "dock_program_viewer",
+        "PanelDockWidget"
+      ],
+      [
+        "dock_source_viewer",
+        "PanelDockWidget"
+      ],
+      [
+        "dock_edit_timeline",
+        "PanelDockWidget"
+      ],
+      [
+        "dock_caption_workspace",
+        "PanelDockWidget"
+      ]
+    ],
+    "source": [
+      [
+        "_source_viewer",
+        "SourceViewerWidget"
+      ]
+    ]
+  }
+}

@@ -1,0 +1,789 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.1.0",
+  "description": "P5-2 标准素材矩阵性能目标定义；1.1.0 新增 p95 百分位目标类型（P0-02，供迁移门禁使用，向后兼容）",
+  "config": {
+    "measurement_iterations": {
+      "open_test": 5,
+      "seek_test": 10,
+      "decode_test": 100,
+      "playback_test": 300
+    },
+    "tolerance_percent": {
+      "fps": 5.0,
+      "time_ms": 10.0,
+      "drop_rate": 20.0
+    },
+    "hardware_requirements": {
+      "min_cpu_cores": 4,
+      "min_gpu_memory_mb": 1024,
+      "min_system_memory_mb": 8192
+    }
+  },
+  "performance_targets": {
+    "p52_h264_8bit_420_1080p": {
+      "fixture_id": "h264_8bit_420_1080p",
+      "description": "H.264 8-bit 4:2:0 1080p 性能目标",
+      "targets": {
+        "open_ms": {
+          "type": "max_ms",
+          "value": 200.0,
+          "tolerance_percent": 10.0,
+          "description": "打开时间 < 200ms",
+          "phase": "P5-2"
+        },
+        "seek_ms": {
+          "type": "max_ms",
+          "value": 50.0,
+          "tolerance_percent": 10.0,
+          "description": "随机 seek 时间 < 50ms",
+          "phase": "P5-2"
+        },
+        "hw_decode_fps": {
+          "type": "min_fps",
+          "value": 60.0,
+          "tolerance_percent": 5.0,
+          "description": "硬件解码帧率 >= 60fps",
+          "phase": "P5-2",
+          "requirement": "需要硬件解码器支持"
+        },
+        "cpu_decode_fps": {
+          "type": "min_fps",
+          "value": 30.0,
+          "tolerance_percent": 10.0,
+          "description": "CPU 解码帧率 >= 30fps（fallback）",
+          "phase": "P5-2",
+          "requirement": "fallback 路径"
+        },
+        "proxy_decode_fps": {
+          "type": "min_fps",
+          "value": 120.0,
+          "tolerance_percent": 5.0,
+          "description": "Proxy 解码帧率 >= 120fps (50% scale)",
+          "phase": "P5-2",
+          "proxy_scale": 0.5
+        },
+        "displayed_fps": {
+          "type": "min_fps",
+          "value": 29.97,
+          "tolerance_percent": 5.0,
+          "description": "实际显示帧率 >= 视频帧率",
+          "phase": "P5-2"
+        },
+        "drop_rate": {
+          "type": "max_drop_rate",
+          "value": 0.01,
+          "tolerance_percent": 50.0,
+          "description": "丢帧率 <= 1%",
+          "phase": "P5-2"
+        },
+        "gpu_upload_ms": {
+          "type": "max_ms",
+          "value": 5.0,
+          "tolerance_percent": 20.0,
+          "description": "GPU 上传时间 < 5ms",
+          "phase": "P5-2"
+        },
+        "memory_mb": {
+          "type": "max_mb",
+          "value": 100.0,
+          "tolerance_percent": 20.0,
+          "description": "内存使用 < 100MB",
+          "phase": "P5-2"
+        }
+      },
+      "test_scenarios": [
+        "hw_acceleration",
+        "proxy_playback",
+        "seek_accuracy"
+      ]
+    },
+    "p52_h264_8bit_420_4k": {
+      "fixture_id": "h264_8bit_420_4k",
+      "description": "H.264 8-bit 4:2:0 4K 性能目标",
+      "targets": {
+        "open_ms": {
+          "type": "max_ms",
+          "value": 300.0,
+          "tolerance_percent": 10.0,
+          "description": "打开时间 < 300ms",
+          "phase": "P5-2"
+        },
+        "seek_ms": {
+          "type": "max_ms",
+          "value": 100.0,
+          "tolerance_percent": 10.0,
+          "description": "随机 seek 时间 < 100ms",
+          "phase": "P5-2"
+        },
+        "hw_decode_fps": {
+          "type": "min_fps",
+          "value": 30.0,
+          "tolerance_percent": 5.0,
+          "description": "硬件解码帧率 >= 30fps",
+          "phase": "P5-2",
+          "requirement": "需要硬件解码器支持"
+        },
+        "cpu_decode_fps": {
+          "type": "min_fps",
+          "value": 12.0,
+          "tolerance_percent": 15.0,
+          "description": "CPU 解码帧率 >= 12fps（fallback）",
+          "phase": "P5-2",
+          "requirement": "fallback 路径"
+        },
+        "proxy_decode_fps": {
+          "type": "min_fps",
+          "value": 60.0,
+          "tolerance_percent": 5.0,
+          "description": "Proxy 解码帧率 >= 60fps (50% scale)",
+          "phase": "P5-2",
+          "proxy_scale": 0.5
+        },
+        "displayed_fps": {
+          "type": "min_fps",
+          "value": 30.0,
+          "tolerance_percent": 5.0,
+          "description": "实际显示帧率 >= 视频帧率",
+          "phase": "P5-2"
+        },
+        "drop_rate": {
+          "type": "max_drop_rate",
+          "value": 0.02,
+          "tolerance_percent": 50.0,
+          "description": "丢帧率 <= 2%",
+          "phase": "P5-2"
+        },
+        "gpu_upload_ms": {
+          "type": "max_ms",
+          "value": 15.0,
+          "tolerance_percent": 20.0,
+          "description": "GPU 上传时间 < 15ms",
+          "phase": "P5-2"
+        },
+        "memory_mb": {
+          "type": "max_mb",
+          "value": 200.0,
+          "tolerance_percent": 20.0,
+          "description": "内存使用 < 200MB",
+          "phase": "P5-2"
+        }
+      },
+      "test_scenarios": [
+        "hw_acceleration",
+        "proxy_playback",
+        "4k_performance"
+      ]
+    },
+    "p52_h265_10bit_420_4k": {
+      "fixture_id": "h265_10bit_420_4k",
+      "description": "H.265 10-bit 4:2:0 4K HDR 性能目标",
+      "targets": {
+        "open_ms": {
+          "type": "max_ms",
+          "value": 400.0,
+          "tolerance_percent": 15.0,
+          "description": "打开时间 < 400ms",
+          "phase": "P5-2"
+        },
+        "seek_ms": {
+          "type": "max_ms",
+          "value": 150.0,
+          "tolerance_percent": 10.0,
+          "description": "随机 seek 时间 < 150ms（Long GOP）",
+          "phase": "P5-2",
+          "note": "Long GOP 结构导致 seek 较慢"
+        },
+        "hw_decode_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 5.0,
+          "description": "硬件解码帧率 >= 24fps",
+          "phase": "P5-2",
+          "requirement": "需要 HDR 硬件解码器支持"
+        },
+        "cpu_decode_fps": {
+          "type": "min_fps",
+          "value": 6.0,
+          "tolerance_percent": 20.0,
+          "description": "CPU 解码帧率 >= 6fps（fallback）",
+          "phase": "P5-2",
+          "requirement": "fallback 路径，HDR CPU 解码较慢"
+        },
+        "proxy_decode_fps": {
+          "type": "min_fps",
+          "value": 30.0,
+          "tolerance_percent": 10.0,
+          "description": "Proxy 解码帧率 >= 30fps (25% scale)",
+          "phase": "P5-2",
+          "proxy_scale": 0.25,
+          "note": "HDR 素材需要更小 proxy scale"
+        },
+        "displayed_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 5.0,
+          "description": "实际显示帧率 >= 视频帧率",
+          "phase": "P5-2"
+        },
+        "drop_rate": {
+          "type": "max_drop_rate",
+          "value": 0.05,
+          "tolerance_percent": 50.0,
+          "description": "丢帧率 <= 5%（允许更高因 HDR 复杂性）",
+          "phase": "P5-2"
+        },
+        "hdr_tone_mapping_ms": {
+          "type": "max_ms",
+          "value": 5.0,
+          "tolerance_percent": 20.0,
+          "description": "HDR tone mapping 时间 < 5ms",
+          "phase": "P5-2"
+        },
+        "memory_mb": {
+          "type": "max_mb",
+          "value": 300.0,
+          "tolerance_percent": 20.0,
+          "description": "内存使用 < 300MB",
+          "phase": "P5-2"
+        }
+      },
+      "test_scenarios": [
+        "hw_acceleration",
+        "hdr_handling",
+        "fallback_strategy"
+      ]
+    },
+    "p52_prores_422_hq_1080p": {
+      "fixture_id": "prores_422_hq_1080p",
+      "description": "ProRes 422 HQ 1080p 性能目标",
+      "targets": {
+        "open_ms": {
+          "type": "max_ms",
+          "value": 150.0,
+          "tolerance_percent": 10.0,
+          "description": "打开时间 < 150ms",
+          "phase": "P5-2"
+        },
+        "seek_ms": {
+          "type": "max_ms",
+          "value": 30.0,
+          "tolerance_percent": 10.0,
+          "description": "随机 seek 时间 < 30ms（I-frame only）",
+          "phase": "P5-2",
+          "note": "I-frame only 编码，seek 极快"
+        },
+        "cpu_decode_fps": {
+          "type": "min_fps",
+          "value": 60.0,
+          "tolerance_percent": 5.0,
+          "description": "CPU 解码帧率 >= 60fps",
+          "phase": "P5-2"
+        },
+        "v3_full_decode_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 5.0,
+          "description": "v3 全分辨率解码帧率 >= 24fps（不降级）",
+          "phase": "P5-2",
+          "note": "v3 规则：ProRes 不降级到 proxy"
+        },
+        "proxy_decode_fps": {
+          "type": "min_fps",
+          "value": 120.0,
+          "tolerance_percent": 5.0,
+          "description": "Proxy 解码帧率 >= 120fps (50% scale)",
+          "phase": "P5-2",
+          "proxy_scale": 0.5,
+          "note": "仅用于测试，实际播放 v3 不降级"
+        },
+        "displayed_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 5.0,
+          "description": "实际显示帧率 >= 视频帧率",
+          "phase": "P5-2"
+        },
+        "drop_rate": {
+          "type": "max_drop_rate",
+          "value": 0.01,
+          "tolerance_percent": 50.0,
+          "description": "丢帧率 <= 1%",
+          "phase": "P5-2"
+        },
+        "gpu_upload_ms": {
+          "type": "max_ms",
+          "value": 8.0,
+          "tolerance_percent": 20.0,
+          "description": "GPU 上传时间 < 8ms",
+          "phase": "P5-2"
+        },
+        "memory_mb": {
+          "type": "max_mb",
+          "value": 150.0,
+          "tolerance_percent": 20.0,
+          "description": "内存使用 < 150MB",
+          "phase": "P5-2"
+        }
+      },
+      "test_scenarios": [
+        "intra_codec",
+        "v3_no_downgrade",
+        "cpu_decode"
+      ]
+    },
+    "p52_prores_422_hq_4k": {
+      "fixture_id": "prores_422_hq_4k",
+      "description": "ProRes 422 HQ 4K 性能目标",
+      "targets": {
+        "open_ms": {
+          "type": "max_ms",
+          "value": 200.0,
+          "tolerance_percent": 10.0,
+          "description": "打开时间 < 200ms",
+          "phase": "P5-2"
+        },
+        "seek_ms": {
+          "type": "max_ms",
+          "value": 50.0,
+          "tolerance_percent": 10.0,
+          "description": "随机 seek 时间 < 50ms",
+          "phase": "P5-2"
+        },
+        "cpu_decode_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 10.0,
+          "description": "CPU 解码帧率 >= 24fps",
+          "phase": "P5-2"
+        },
+        "v3_full_decode_fps": {
+          "type": "min_fps",
+          "value": 12.0,
+          "tolerance_percent": 15.0,
+          "description": "v3 全分辨率解码帧率 >= 12fps",
+          "phase": "P5-2",
+          "note": "4K ProRes v3 可能降级，需测试阈值"
+        },
+        "proxy_decode_fps": {
+          "type": "min_fps",
+          "value": 48.0,
+          "tolerance_percent": 5.0,
+          "description": "Proxy 解码帧率 >= 48fps (50% scale)",
+          "phase": "P5-2",
+          "proxy_scale": 0.5
+        },
+        "displayed_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 5.0,
+          "description": "实际显示帧率 >= 视频帧率",
+          "phase": "P5-2"
+        },
+        "drop_rate": {
+          "type": "max_drop_rate",
+          "value": 0.02,
+          "tolerance_percent": 50.0,
+          "description": "丢帧率 <= 2%",
+          "phase": "P5-2"
+        },
+        "gpu_upload_ms": {
+          "type": "max_ms",
+          "value": 25.0,
+          "tolerance_percent": 20.0,
+          "description": "GPU 上传时间 < 25ms",
+          "phase": "P5-2"
+        },
+        "memory_mb": {
+          "type": "max_mb",
+          "value": 400.0,
+          "tolerance_percent": 20.0,
+          "description": "内存使用 < 400MB",
+          "phase": "P5-2"
+        }
+      },
+      "test_scenarios": [
+        "intra_codec",
+        "4k_performance",
+        "v3_threshold_test"
+      ]
+    },
+    "p52_prores_4444_1080p": {
+      "fixture_id": "prores_4444_1080p",
+      "description": "ProRes 4444 with Alpha 1080p 性能目标",
+      "targets": {
+        "open_ms": {
+          "type": "max_ms",
+          "value": 180.0,
+          "tolerance_percent": 10.0,
+          "description": "打开时间 < 180ms",
+          "phase": "P5-2"
+        },
+        "seek_ms": {
+          "type": "max_ms",
+          "value": 40.0,
+          "tolerance_percent": 10.0,
+          "description": "随机 seek 时间 < 40ms",
+          "phase": "P5-2"
+        },
+        "cpu_decode_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 10.0,
+          "description": "CPU 解码帧率 >= 24fps（含 alpha）",
+          "phase": "P5-2",
+          "note": "12-bit + alpha 导致解码较慢"
+        },
+        "proxy_decode_fps": {
+          "type": "min_fps",
+          "value": 48.0,
+          "tolerance_percent": 10.0,
+          "description": "Proxy 解码帧率 >= 48fps (50% scale)",
+          "phase": "P5-2",
+          "proxy_scale": 0.5
+        },
+        "alpha_channel_detected": {
+          "type": "boolean",
+          "value": true,
+          "description": "检测到 Alpha 通道",
+          "phase": "P5-2"
+        },
+        "alpha_blend_correct": {
+          "type": "visual_test",
+          "description": "Alpha 混合正确性验证",
+          "phase": "P5-2"
+        },
+        "displayed_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 5.0,
+          "description": "实际显示帧率 >= 视频帧率",
+          "phase": "P5-2"
+        },
+        "memory_mb": {
+          "type": "max_mb",
+          "value": 200.0,
+          "tolerance_percent": 20.0,
+          "description": "内存使用 < 200MB",
+          "phase": "P5-2"
+        }
+      },
+      "test_scenarios": [
+        "alpha_handling",
+        "high_bit_depth",
+        "fallback_strategy"
+      ]
+    },
+    "p52_prores_4444_4k": {
+      "fixture_id": "prores_4444_4k",
+      "description": "ProRes 4444 with Alpha 4K 性能目标",
+      "targets": {
+        "open_ms": {
+          "type": "max_ms",
+          "value": 300.0,
+          "tolerance_percent": 15.0,
+          "description": "打开时间 < 300ms",
+          "phase": "P5-2"
+        },
+        "seek_ms": {
+          "type": "max_ms",
+          "value": 80.0,
+          "tolerance_percent": 10.0,
+          "description": "随机 seek 时间 < 80ms",
+          "phase": "P5-2"
+        },
+        "cpu_decode_fps": {
+          "type": "min_fps",
+          "value": 12.0,
+          "tolerance_percent": 20.0,
+          "description": "CPU 解码帧率 >= 12fps",
+          "phase": "P5-2",
+          "note": "4K 12-bit + alpha 解码较慢"
+        },
+        "proxy_decode_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 15.0,
+          "description": "Proxy 解码帧率 >= 24fps (25% scale)",
+          "phase": "P5-2",
+          "proxy_scale": 0.25
+        },
+        "alpha_channel_detected": {
+          "type": "boolean",
+          "value": true,
+          "description": "检测到 Alpha 通道",
+          "phase": "P5-2"
+        },
+        "alpha_blend_correct": {
+          "type": "visual_test",
+          "description": "Alpha 混合正确性验证",
+          "phase": "P5-2"
+        },
+        "displayed_fps": {
+          "type": "min_fps",
+          "value": 24.0,
+          "tolerance_percent": 10.0,
+          "description": "实际显示帧率 >= 视频帧率",
+          "phase": "P5-2",
+          "note": "允许更大 tolerance 因复杂性"
+        },
+        "memory_mb": {
+          "type": "max_mb",
+          "value": 500.0,
+          "tolerance_percent": 20.0,
+          "description": "内存使用 < 500MB",
+          "phase": "P5-2"
+        }
+      },
+      "test_scenarios": [
+        "alpha_handling",
+        "high_bit_depth",
+        "4k_alpha",
+        "fallback_strategy"
+      ]
+    },
+    "p52_dnxhr_hqx_4k": {
+      "fixture_id": "dnxhr_hqx_4k",
+      "description": "DNxHR HQX 4K 性能目标",
+      "targets": {
+        "open_ms": {
+          "type": "max_ms",
+          "value": 180.0,
+          "tolerance_percent": 10.0,
+          "description": "打开时间 < 180ms",
+          "phase": "P5-2"
+        },
+        "seek_ms": {
+          "type": "max_ms",
+          "value": 40.0,
+          "tolerance_percent": 10.0,
+          "description": "随机 seek 时间 < 40ms（I-frame only）",
+          "phase": "P5-2"
+        },
+        "cpu_decode_fps": {
+          "type": "min_fps",
+          "value": 30.0,
+          "tolerance_percent": 10.0,
+          "description": "CPU 解码帧率 >= 30fps",
+          "phase": "P5-2"
+        },
+        "proxy_decode_fps": {
+          "type": "min_fps",
+          "value": 60.0,
+          "tolerance_percent": 5.0,
+          "description": "Proxy 解码帧率 >= 60fps (50% scale)",
+          "phase": "P5-2",
+          "proxy_scale": 0.5
+        },
+        "displayed_fps": {
+          "type": "min_fps",
+          "value": 25.0,
+          "tolerance_percent": 5.0,
+          "description": "实际显示帧率 >= 视频帧率",
+          "phase": "P5-2"
+        },
+        "drop_rate": {
+          "type": "max_drop_rate",
+          "value": 0.01,
+          "tolerance_percent": 50.0,
+          "description": "丢帧率 <= 1%",
+          "phase": "P5-2"
+        },
+        "gpu_upload_ms": {
+          "type": "max_ms",
+          "value": 20.0,
+          "tolerance_percent": 20.0,
+          "description": "GPU 上传时间 < 20ms",
+          "phase": "P5-2"
+        },
+        "memory_mb": {
+          "type": "max_mb",
+          "value": 300.0,
+          "tolerance_percent": 20.0,
+          "description": "内存使用 < 300MB",
+          "phase": "P5-2"
+        }
+      },
+      "test_scenarios": [
+        "intra_codec",
+        "mxf_handling",
+        "4k_performance"
+      ]
+    },
+    "p52_nv12_shader": {
+      "fixture_id": "nv12_sample_1080p",
+      "description": "NV12 YUV Shader 正确性测试目标",
+      "targets": {
+        "yuv_to_rgb_conversion": {
+          "type": "shader_test",
+          "test_points": [
+            {"y": 16, "u": 128, "v": 128, "expected_r": 0, "expected_g": 0, "expected_b": 0, "description": "Black"},
+            {"y": 235, "u": 128, "v": 128, "expected_r": 255, "expected_g": 255, "expected_b": 255, "description": "White"},
+            {"y": 126, "u": 128, "v": 128, "expected_r": 126, "expected_g": 126, "expected_b": 126, "description": "Mid-gray"},
+            {"y": 82, "u": 90, "v": 240, "expected_r": 255, "expected_g": 0, "expected_b": 0, "description": "Red"},
+            {"y": 144, "u": 54, "v": 34, "expected_r": 0, "expected_g": 255, "expected_b": 0, "description": "Green"},
+            {"y": 41, "u": 240, "v": 110, "expected_r": 0, "expected_g": 0, "expected_b": 255, "description": "Blue"}
+          ],
+          "tolerance": 2,
+          "description": "BT.709 YUV to RGB 转换正确性",
+          "phase": "P5-2"
+        },
+        "chroma_interpolation": {
+          "type": "visual_test",
+          "description": "色度插值正确性（半像素偏移）",
+          "phase": "P5-2",
+          "test_method": "visual_inspection"
+        },
+        "color_range_handling": {
+          "type": "range_test",
+          "tv_range_min": {"y": 16, "u": 16, "v": 16},
+          "tv_range_max": {"y": 235, "u": 240, "v": 240},
+          "full_range_min": {"y": 0, "u": 0, "v": 0},
+          "full_range_max": {"y": 255, "u": 255, "v": 255},
+          "description": "TV Range vs Full Range 处理",
+          "phase": "P5-2"
+        }
+      },
+      "test_scenarios": [
+        "yuv_shader_correctness",
+        "hw_decode_output_format"
+      ]
+    },
+    "p52_p010_shader": {
+      "fixture_id": "p010_sample_1080p",
+      "description": "P010 (10-bit NV12) YUV Shader 正确性测试目标",
+      "targets": {
+        "yuv_to_rgb_conversion_10bit": {
+          "type": "shader_test",
+          "test_points": [
+            {"y": 64, "u": 512, "v": 512, "expected_r": 0, "expected_g": 0, "expected_b": 0, "description": "Black (10-bit)"},
+            {"y": 940, "u": 512, "v": 512, "expected_r": 1023, "expected_g": 1023, "expected_b": 1023, "description": "White (10-bit)"},
+            {"y": 512, "u": 512, "v": 512, "expected_r": 512, "expected_g": 512, "expected_b": 512, "description": "Mid-gray (10-bit)"}
+          ],
+          "tolerance": 4,
+          "description": "10-bit BT.709 YUV to RGB 转换",
+          "phase": "P5-2"
+        },
+        "pq_transfer_function": {
+          "type": "shader_test",
+          "test_points": [
+            {"input": 0.0, "expected": 0.0, "description": "PQ EOTF: black"},
+            {"input": 0.01, "expected_approx": 0.08, "description": "PQ EOTF: near black"},
+            {"input": 0.5, "expected_approx": 0.52, "description": "PQ EOTF: mid"},
+            {"input": 1.0, "expected": 1.0, "description": "PQ EOTF: peak"}
+          ],
+          "tolerance": 0.01,
+          "description": "PQ EOTF 曲线正确性",
+          "phase": "P5-2"
+        },
+        "bt2020_to_bt709_gamut_mapping": {
+          "type": "gamut_test",
+          "description": "BT.2020 色域映射到 BT.709",
+          "phase": "P5-2",
+          "test_method": "gamut_boundary_check"
+        }
+      },
+      "test_scenarios": [
+        "yuv_shader_correctness",
+        "hdr_shader",
+        "hw_decode_output_format"
+      ]
+    }
+  },
+  "target_types": {
+    "max_ms": {
+      "description": "最大时间（毫秒）",
+      "check": "actual <= value + tolerance",
+      "unit": "ms"
+    },
+    "max_p95_ms": {
+      "description": "p95 分位时间上限（毫秒），迁移门禁（p95 不得退化超阈值）使用的百分位模型",
+      "check": "percentile(actual_samples, 95) <= value + tolerance",
+      "unit": "ms"
+    },
+    "min_p95_fps": {
+      "description": "p95 分位有效帧率下限（fps），由帧时 p95 折算",
+      "check": "1000.0 / percentile(frame_ms_samples, 95) >= value - tolerance",
+      "unit": "fps"
+    },
+    "min_fps": {
+      "description": "最小帧率",
+      "check": "actual >= value - tolerance",
+      "unit": "fps"
+    },
+    "max_drop_rate": {
+      "description": "最大丢帧率",
+      "check": "actual <= value + tolerance",
+      "unit": "ratio (0-1)"
+    },
+    "max_mb": {
+      "description": "最大内存（MB）",
+      "check": "actual <= value + tolerance",
+      "unit": "MB"
+    },
+    "shader_test": {
+      "description": "Shader 正确性测试",
+      "check": "point-wise comparison with tolerance",
+      "unit": "pixels"
+    },
+    "visual_test": {
+      "description": "视觉测试",
+      "check": "manual inspection or automated visual diff",
+      "unit": "pass/fail"
+    },
+    "boolean": {
+      "description": "布尔值检查",
+      "check": "actual == expected",
+      "unit": "true/false"
+    }
+  },
+  "validation_rules": {
+    "all_fixtures": {
+      "description": "所有素材必须满足的基本目标",
+      "targets": {
+        "open_ms": {"max": 500.0, "description": "打开时间上限"},
+        "memory_stable": {"description": "长时间播放内存不增长"},
+        "texture_stable": {"description": "长时间播放纹理不增长"}
+      }
+    },
+    "hw_decode_required": {
+      "description": "需要硬件解码器",
+      "fixtures": ["h264_8bit_420_1080p", "h264_8bit_420_4k", "h265_10bit_420_4k"],
+      "fallback_on_missing": true
+    },
+    "alpha_required": {
+      "description": "需要 Alpha 通道支持",
+      "fixtures": ["prores_4444_1080p", "prores_4444_4k"],
+      "fallback_strategy": "convert_to_rgb_with_alpha"
+    }
+  },
+  "hardware_requirements": {
+    "hw_decode": {
+      "description": "硬件解码器要求",
+      "platforms": {
+        "macos": {
+          "min_version": "10.15",
+          "features": ["VideoToolbox", "ProRes HW decode"],
+          "supported_codecs": ["h264", "hevc", "prores"]
+        },
+        "windows": {
+          "min_version": "10",
+          "features": ["DXVA2", "D3D11VA"],
+          "supported_codecs": ["h264", "hevc"]
+        },
+        "linux": {
+          "features": ["VA-API", "NVDEC"],
+          "supported_codecs": ["h264", "hevc"]
+        }
+      }
+    },
+    "hdr": {
+      "description": "HDR 处理要求",
+      "requirements": [
+        "10-bit shader support",
+        "PQ/HLG transfer function implementation",
+        "BT.2020 gamut mapping"
+      ]
+    }
+  }
+}

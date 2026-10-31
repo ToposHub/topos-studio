@@ -1,0 +1,17 @@
+{
+  "mode": "headless_pipeline",
+  "pipeline_version": "v3",
+  "playback_path": "v3_session",
+  "decode_path": "cpu_planar_yuv",
+  "proxy_kind": "memory_proxy",
+  "ui_tick_p95_ms": 0.0,
+  "displayed_fps_ratio": 0.0,
+  "render_queue_p95": 0,
+  "dropped_frames_stable_percent": 0.0,
+  "passes_davinci_thresholds": false,
+  "fixture_id": "synthetic_1080p_h264_short",
+  "timestamp": "2026-05-19T00:09:25.203235",
+  "video_properties": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 

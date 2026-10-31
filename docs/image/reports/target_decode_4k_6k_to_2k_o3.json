@@ -1,0 +1,75 @@
+{
+  "schema": "topos-image-target-decode-benchmark/2",
+  "date": "2026-09-08",
+  "git_commit": "ea091fcf",
+  "host": {
+    "os": "macOS 15.3.1",
+    "cpu": "Intel Core i9-9900K",
+    "physical_cores": 8,
+    "logical_cpus": 16,
+    "memory_gib": 32,
+    "build": "native release",
+    "cache": "hot",
+    "native_slice_threads": "default"
+  },
+  "input": {
+    "content": "deterministic mixed synthetic frame",
+    "profile": "Image Preview / YUV422 / 10-bit / VLC / qp58 / rdo-off",
+    "target_size": [2048, 1080],
+    "iterations": 20,
+    "warmup": 3,
+    "fps_formula": "1000 / p50_or_p95_ms",
+    "scope": "same-process ToposImageCodec decode call; excludes GPU upload and present"
+  },
+  "results": [
+    {
+      "case": "2k_full",
+      "source": [2048, 1080],
+      "target": [2048, 1080],
+      "native_target": false,
+      "p50_ms": 10.012,
+      "p95_ms": 13.549,
+      "p99_ms": 13.549,
+      "max_ms": 14.655,
+      "mean_ms": 10.592,
+      "p50_fps": 99.88,
+      "p95_fps": 73.81
+    },
+    {
+      "case": "4k_to_2k",
+      "source": [4096, 2160],
+      "target": [2048, 1080],
+      "native_target": true,
+      "p50_ms": 39.185,
+      "p95_ms": 39.806,
+      "p99_ms": 39.806,
+      "max_ms": 39.823,
+      "mean_ms": 39.270,
+      "p50_fps": 25.52,
+      "p95_fps": 25.12,
+      "vs_2k_p50_fps_delta_percent": -74.45,
+      "vs_2k_p50_latency_ratio": 3.91
+    },
+    {
+      "case": "6k_to_2k",
+      "source": [6144, 3240],
+      "target": [2048, 1080],
+      "native_target": true,
+      "p50_ms": 78.493,
+      "p95_ms": 93.116,
+      "p99_ms": 93.116,
+      "max_ms": 101.190,
+      "mean_ms": 80.726,
+      "p50_fps": 12.74,
+      "p95_fps": 10.74,
+      "vs_2k_p50_fps_delta_percent": -87.25,
+      "vs_2k_p50_latency_ratio": 7.84
+    }
+  ],
+  "interpretation": [
+    "Native target-size output geometry was 2048x1080 for both high-resolution sources.",
+    "The target path still reads and entropy-decodes the complete compressed source packet; it does not skip 4K/6K compressed data.",
+    "On this host, 4K-to-2K is only just above 24 fps at p95 before color conversion, upload, scheduling, and present; 6K-to-2K is below real-time 24/25 fps.",
+    "This benchmark demonstrates functional target-size reconstruction, but not production-ready 4K/6K-to-2K playback performance."
+  ]
+}

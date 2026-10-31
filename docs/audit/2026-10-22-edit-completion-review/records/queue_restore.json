@@ -1,0 +1,16 @@
+{
+  "initial_status": "pending",
+  "after_set_project": [
+    {
+      "status": "needs_relink",
+      "error": "Timeline not found in the current project"
+    }
+  ],
+  "after_promote": [
+    {
+      "status": "needs_relink",
+      "error": "Timeline not found in the current project"
+    }
+  ],
+  "context_resolves": true
+}

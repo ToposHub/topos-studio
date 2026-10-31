@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 2 items
+
+tests/test_topos_oiio_contract.py ..                                     [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/topos_oiio_contract.xml -
+============================== 2 passed in 1.78s ===============================

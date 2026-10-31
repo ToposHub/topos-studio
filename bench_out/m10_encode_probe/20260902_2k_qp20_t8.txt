@@ -1,0 +1,7 @@
+== 1920x1080 qp20 t8，24 帧 ==
+  wall avg 40.6 ms  (24.66 fps)
+  产品拆分: python输入 1.8  native 30.9  mux 6.91  其它 1.0 ms
+  native闭合: prep 0.0 + probe 0.0 + final 0.0 + 自检 3.3 = 3.3 ms
+  CPU/帧: fill 28.0  probe量化 0.0  DCT 0.0  entropy 54.3  crc 3.18  | 串行: pad 1.28 copy 0.73 asm 0.68  合计 88.1 ms
+  占比: probe量化 0%  fill 32%  DCT 0%  entropy 62%  crc 4%  串行 3%
+  有效并行: 2.2x（CPU 合计/产品墙钟）

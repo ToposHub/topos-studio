@@ -1,0 +1,40 @@
+[
+  {
+    "file": "smoke-3c477b9c.mp4",
+    "streams": [
+      {
+        "type": "video",
+        "codec": "h264",
+        "duration": "25088",
+        "time_base": "1/12800"
+      }
+    ],
+    "decoded_video_frames": 49,
+    "first_frame_mean": 91.18065972222222,
+    "first_frame_std": 53.72485262638514,
+    "first_frame_min": 0,
+    "first_frame_max": 255
+  },
+  {
+    "file": "smoke-dc66b83a.mp4",
+    "streams": [
+      {
+        "type": "video",
+        "codec": "h264",
+        "duration": "25088",
+        "time_base": "1/12800"
+      },
+      {
+        "type": "audio",
+        "codec": "aac",
+        "duration": "95104",
+        "time_base": "1/48000"
+      }
+    ],
+    "decoded_video_frames": 49,
+    "first_frame_mean": 91.18065972222222,
+    "first_frame_std": 53.72485262638514,
+    "first_frame_min": 0,
+    "first_frame_max": 255
+  }
+]

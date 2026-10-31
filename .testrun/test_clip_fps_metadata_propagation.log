@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 10 items
+
+tests/edit/test_clip_fps_metadata_propagation.py ..........              [100%]
+
+============================== 10 passed in 7.07s ==============================

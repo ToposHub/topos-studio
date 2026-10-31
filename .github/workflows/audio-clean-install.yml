@@ -1,0 +1,137 @@
+# Audio Clean-Install Regression CI (RMA-01 阶段 A1)
+#
+# 目的：在全新的虚拟环境里安装项目依赖，再跑音频核心回归，确保 SciPy 等 DSP 后端
+# 真的被交付（而不是开发机已预装）。审计文档（RMA-01）的 34 个失败正是由
+# "requirements 声明了 scipy 但目标环境未安装"导致的 capability 静默降级。
+#
+# 本 workflow 与 product-matrix.yml（template 模式、手动触发）解耦：
+# - push 到 main/dev 和 PR 时自动触发，保证音频回归常绿。
+# - clean install：不复用缓存里预装的科学计算包，强制 `pip install -r requirements.txt`。
+#
+# 验收门槛（计划表 A1）：SciPy backend present 回归全绿；缺后端时 EQ/LUFS/normalize
+# 不能静默继续（由 test_audio_export_preflight / test_audio_capabilities 覆盖）。
+
+name: Audio Clean-Install Regression
+
+on:
+  push:
+    branches: [main, develop, dev, fix-ui]
+    paths:
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'src/features/edit/core/**'
+      - 'src/features/edit/ui/edit_page.py'
+      - 'src/app/controllers/edit_controller.py'
+      - 'src/shared/ui/audio_mixer/**'
+      - 'tests/edit/**'
+      - '.github/workflows/audio-clean-install.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'src/features/edit/core/**'
+      - 'tests/edit/**'
+  workflow_dispatch:  # 允许手动触发
+
+permissions:
+  contents: read
+
+jobs:
+  clean-install-audio-regression:
+    name: Clean install + audio regression (py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 覆盖 pyproject 声明的最低支持版本 (3.10) 与 CI 基线 (3.12)
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Create clean virtual environment
+        # RMA-01 核心：不复用任何预装包，从零安装 requirements + dev 依赖。
+        run: |
+          python -m venv .venv-ci
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            .venv-ci/Scripts/python -m pip install --upgrade pip
+          else
+            .venv-ci/bin/python -m pip install --upgrade pip
+          fi
+
+      - name: Install project dependencies (clean)
+        # 必须在全新环境成功安装 scipy，否则下游 DSP 测试会被 capability gate 静默降级。
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            PY=.venv-ci/Scripts/python
+          else
+            PY=.venv-ci/bin/python
+          fi
+          $PY -m pip install -r requirements.txt
+          $PY -m pip install pytest pytest-qt
+
+      - name: Verify SciPy backend present (RMA-01 gate)
+        # 显式断言 scipy 可导入且 audio_capabilities 探测为 available。
+        # 这是"clean install 真的交付了 DSP 后端"的直接证据。
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            PY=.venv-ci/Scripts/python
+          else
+            PY=.venv-ci/bin/python
+          fi
+          $PY -c "import scipy; from scipy.signal import lfilter; print('scipy', scipy.__version__)"
+          $PY -c "from src.features.edit.core.audio_capabilities import probe_audio_capabilities; c=probe_audio_capabilities(check_output_device=False); assert c.scipy.available, 'scipy backend missing after clean install'; assert c.eq_lufs_available; print('DSP backend OK')"
+
+      - name: Run audio core regression
+        # P0/P1 音频核心回归。任何用例失败都不应以 capability fallback 作为发布豁免。
+        # RMA-13/D3: 所有 RMA oracle（RMA-01~RMA-12）纳入 CI，按 ID 可追溯。
+        #   RMA-01 导出 preflight      : test_audio_export_preflight
+        #   RMA-02/05 snapshot+路由校验 : test_audio_graph_snapshot / test_audio_graph_validation
+        #   RMA-03 clip speed/fade      : test_clip_audio_fade / test_clip_speed_fade_realtime
+        #   RMA-04 solo 闭包            : test_solo_audible_closure
+        #   RMA-06 Bus 完整路由         : test_audio_bus_routing / test_bus_full_routing
+        #   RMA-07 自动化边界           : test_audio_automation / test_automation_boundaries
+        #   RMA-08 声像语义             : test_pan_semantics
+        #   RMA-09 声道布局             : test_channel_layout_truth
+        #   RMA-11 录音事务             : test_recording_manager / test_record_arm_wiring
+        #                                   / test_recording_import_transaction
+        #   RMA-12 健康报告             : test_audio_health_report / test_audio_capabilities
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            PY=.venv-ci/Scripts/python
+          else
+            PY=.venv-ci/bin/python
+          fi
+          $PY -m pytest -q \
+            tests/edit/test_audio_capabilities.py \
+            tests/edit/test_audio_graph_snapshot.py \
+            tests/edit/test_audio_graph_parity.py \
+            tests/edit/test_audio_export_parity.py \
+            tests/edit/test_audio_export_preflight.py \
+            tests/edit/test_audio_graph_validation.py \
+            tests/edit/test_audio_bus_routing.py \
+            tests/edit/test_audio_bus_registration.py \
+            tests/edit/test_bus_full_routing.py \
+            tests/edit/test_audio_automation.py \
+            tests/edit/test_automation_boundaries.py \
+            tests/edit/test_clip_audio_fade.py \
+            tests/edit/test_clip_speed_fade_realtime.py \
+            tests/edit/test_solo_audible_closure.py \
+            tests/edit/test_pan_semantics.py \
+            tests/edit/test_channel_layout_truth.py \
+            tests/edit/test_loudness_analyzer.py \
+            tests/edit/test_loudness_delivery.py \
+            tests/edit/test_recording_manager.py \
+            tests/edit/test_record_arm_wiring.py \
+            tests/edit/test_recording_import_transaction.py \
+            tests/edit/test_audio_health_report.py \
+            tests/edit/test_mixer_placeholder_entrances_disabled.py
+

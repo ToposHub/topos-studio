@@ -1,0 +1,40 @@
+{
+  "6558ba98-fdbb-4b21-8e22-bd37ffd700ae": {
+    "schema_version": 2,
+    "stack_id": "6558ba98-fdbb-4b21-8e22-bd37ffd700ae",
+    "asset_id": "h264_asset",
+    "name": "AI H264 Look",
+    "grading_params": {
+      "exposure": 0.2,
+      "contrast": 0.12,
+      "saturation": 0.16,
+      "gain": [
+        0.03,
+        0.0,
+        -0.03
+      ]
+    },
+    "curves_data": {},
+    "hsl_curve_data": {},
+    "mixer_params": {},
+    "soft_clip_params": {
+      "enabled": false,
+      "high": 1.0,
+      "white_point": 1.1,
+      "shoulder_strength": 1.0,
+      "low": 0.0,
+      "black_point": -0.1,
+      "toe_strength": 1.0,
+      "exposure": 0.0
+    },
+    "lut_path": null,
+    "lut_intensity": 1.0,
+    "created_at": 1789637891.956885,
+    "modified_at": 1789637891.956959,
+    "scope": "clip_local",
+    "source_kind": "timeline_clip",
+    "timeline_id": null,
+    "clip_id": null,
+    "trackings": {}
+  }
+}

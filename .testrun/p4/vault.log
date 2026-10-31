@@ -1,0 +1,157 @@
+============================= test session starts ==============================
+collected 281 items
+
+tests/vault/test_advanced_search.py ..............                       [  4%]
+tests/vault/test_asr_integration.py .......                              [  7%]
+tests/vault/test_audio_features_step.py .........                        [ 10%]
+tests/vault/test_db.py .................                                 [ 16%]
+tests/vault/test_face_step.py ...........                                [ 20%]
+tests/vault/test_fingerprint.py .........                                [ 23%]
+tests/vault/test_logging_and_history.py ..................               [ 30%]
+tests/vault/test_model_pack_integration.py ......                        [ 32%]
+tests/vault/test_model_specs.py .........                                [ 35%]
+tests/vault/test_paths.py ..........                                     [ 39%]
+tests/vault/test_perf_ivf.py ....s..                                     [ 41%]
+tests/vault/test_phased_orchestrator.py ..........                       [ 45%]
+tests/vault/test_pipeline.py ..........                                  [ 48%]
+tests/vault/test_pipeline_steps.py .........                             [ 51%]
+tests/vault/test_providers.py .............                              [ 56%]
+tests/vault/test_query_service.py ..........                             [ 60%]
+tests/vault/test_real_provider_contracts.py ..................           [ 66%]
+tests/vault/test_real_providers.py ..........                            [ 70%]
+tests/vault/test_relink.py ..........                                    [ 73%]
+tests/vault/test_vault_bridge.py ............                            [ 77%]
+tests/vault/test_vault_client.py ..........                              [ 81%]
+tests/vault/test_vector_search.py ......                                 [ 83%]
+tests/vault/test_vector_store.py ......................                  [ 91%]
+tests/vault/test_visual_video_step.py ...........                        [ 95%]
+tests/vault/test_watcher.py FFFFFFFFFFF..                                [100%]
+
+=================================== FAILURES ===================================
+___________________________ test_watchdog_available ____________________________
+tests/vault/test_watcher.py:21: in test_watchdog_available
+    assert is_watchdog_available() is True
+E   assert False is True
+E    +  where False = <function is_watchdog_available at 0x3398daf20>()
+_____________________ test_created_event_indexes_new_file ______________________
+tests/vault/test_watcher.py:34: in test_created_event_indexes_new_file
+    watcher = VaultWatcher(repo, [str(sample_files["image"].parent)])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/topos_vault/watcher.py:125: in __init__
+    raise RuntimeError("watchdog 未安装，无法监听。pip install watchdog")
+E   RuntimeError: watchdog 未安装，无法监听。pip install watchdog
+___________________ test_created_event_skips_already_indexed ___________________
+tests/vault/test_watcher.py:49: in test_created_event_skips_already_indexed
+    watcher = VaultWatcher(repo, [str(sample_files["image"].parent)])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/topos_vault/watcher.py:125: in __init__
+    raise RuntimeError("watchdog 未安装，无法监听。pip install watchdog")
+E   RuntimeError: watchdog 未安装，无法监听。pip install watchdog
+_____________________ test_created_event_skips_temp_files ______________________
+tests/vault/test_watcher.py:69: in test_created_event_skips_temp_files
+    watcher = VaultWatcher(repo, [str(tmp_path)])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/topos_vault/watcher.py:125: in __init__
+    raise RuntimeError("watchdog 未安装，无法监听。pip install watchdog")
+E   RuntimeError: watchdog 未安装，无法监听。pip install watchdog
+______________________ test_created_event_skips_non_media ______________________
+tests/vault/test_watcher.py:81: in test_created_event_skips_non_media
+    watcher = VaultWatcher(repo, [str(tmp_path)])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/topos_vault/watcher.py:125: in __init__
+    raise RuntimeError("watchdog 未安装，无法监听。pip install watchdog")
+E   RuntimeError: watchdog 未安装，无法监听。pip install watchdog
+___________________________ test_moved_event_relinks ___________________________
+tests/vault/test_watcher.py:98: in test_moved_event_relinks
+    watcher = VaultWatcher(repo, [str(sample_files["image"].parent)])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/topos_vault/watcher.py:125: in __init__
+    raise RuntimeError("watchdog 未安装，无法监听。pip install watchdog")
+E   RuntimeError: watchdog 未安装，无法监听。pip install watchdog
+____________________ test_moved_event_to_untracked_creates _____________________
+tests/vault/test_watcher.py:122: in test_moved_event_to_untracked_creates
+    watcher = VaultWatcher(repo, [str(sample_files["image"].parent)])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/topos_vault/watcher.py:125: in __init__
+    raise RuntimeError("watchdog 未安装，无法监听。pip install watchdog")
+E   RuntimeError: watchdog 未安装，无法监听。pip install watchdog
+_______________________ test_deleted_event_marks_missing _______________________
+tests/vault/test_watcher.py:144: in test_deleted_event_marks_missing
+    watcher = VaultWatcher(repo, [str(sample_files["image"].parent)])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/topos_vault/watcher.py:125: in __init__
+    raise RuntimeError("watchdog 未安装，无法监听。pip install watchdog")
+E   RuntimeError: watchdog 未安装，无法监听。pip install watchdog
+_______________________ test_deleted_event_skips_unknown _______________________
+tests/vault/test_watcher.py:158: in test_deleted_event_skips_unknown
+    watcher = VaultWatcher(repo, [str(tmp_path)])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/topos_vault/watcher.py:125: in __init__
+    raise RuntimeError("watchdog 未安装，无法监听。pip install watchdog")
+E   RuntimeError: watchdog 未安装，无法监听。pip install watchdog
+_____________________________ test_cli_watch_once ______________________________
+tests/vault/test_watcher.py:176: in test_cli_watch_once
+    assert rc == 0
+E   assert 1 == 0
+----------------------------- Captured stderr call -----------------------------
+错误：watchdog 未安装。pip install watchdog
+__________________ test_cli_watch_once_skips_already_indexed ___________________
+tests/vault/test_watcher.py:194: in test_cli_watch_once_skips_already_indexed
+    assert rc == 0  # 不崩
+    ^^^^^^^^^^^^^^
+E   assert 1 == 0
+----------------------------- Captured stderr call -----------------------------
+错误：watchdog 未安装。pip install watchdog
+错误：watchdog 未安装。pip install watchdog
+=============================== warnings summary ===============================
+tests/vault/test_asr_integration.py::test_vault_backend_forces_vault_provider
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/audioread/rawread.py:16: DeprecationWarning: 'aifc' is deprecated and slated for removal in Python 3.13
+    import aifc
+
+tests/vault/test_asr_integration.py::test_vault_backend_forces_vault_provider
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/audioread/rawread.py:17: DeprecationWarning: 'audioop' is deprecated and slated for removal in Python 3.13
+    import audioop
+
+tests/vault/test_asr_integration.py::test_vault_backend_forces_vault_provider
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/audioread/rawread.py:19: DeprecationWarning: 'sunau' is deprecated and slated for removal in Python 3.13
+    import sunau
+
+tests/vault/test_asr_integration.py::test_vault_backend_forces_vault_provider
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/gi/overrides/__init__.py:159: PyGIDeprecationWarning: GLib.unix_signal_add_full is deprecated; use GLibUnix.signal_add_full instead
+    value = getattr(proxy, attr)
+
+tests/vault/test_asr_integration.py: 3 warnings
+tests/vault/test_pipeline.py: 7 warnings
+tests/vault/test_pipeline_steps.py: 3 warnings
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/apps/topos_vault/pipeline/audio_features_step.py:167: UserWarning: PySoundFile failed. Trying audioread instead.
+    y, sr = librosa.load(path, sr=target_sr, mono=True,
+
+tests/vault/test_asr_integration.py: 3 warnings
+tests/vault/test_pipeline.py: 7 warnings
+tests/vault/test_pipeline_steps.py: 3 warnings
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/librosa/core/audio.py:184: FutureWarning: librosa.core.audio.__audioread_load
+  	Deprecated as of librosa version 0.10.0.
+  	It will be removed in librosa version 1.0.
+    y, sr_native = __audioread_load(path, offset, duration, dtype)
+
+tests/vault/test_audio_features_step.py::test_bpm_detected_for_synthesized_beat
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/apps/topos_vault/pipeline/audio_features_step.py:188: FutureWarning: librosa.beat.tempo
+  	This function was moved to 'librosa.feature.rhythm.tempo' in librosa version 0.10.0.
+  	This alias will be removed in librosa version 1.0.
+    tempo = tempo_fn(onset_envelope=onset_env, sr=sr)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/vault.xml -
+=========================== short test summary info ============================
+FAILED tests/vault/test_watcher.py::test_watchdog_available - assert False is...
+FAILED tests/vault/test_watcher.py::test_created_event_indexes_new_file - Run...
+FAILED tests/vault/test_watcher.py::test_created_event_skips_already_indexed
+FAILED tests/vault/test_watcher.py::test_created_event_skips_temp_files - Run...
+FAILED tests/vault/test_watcher.py::test_created_event_skips_non_media - Runt...
+FAILED tests/vault/test_watcher.py::test_moved_event_relinks - RuntimeError: ...
+FAILED tests/vault/test_watcher.py::test_moved_event_to_untracked_creates - R...
+FAILED tests/vault/test_watcher.py::test_deleted_event_marks_missing - Runtim...
+FAILED tests/vault/test_watcher.py::test_deleted_event_skips_unknown - Runtim...
+FAILED tests/vault/test_watcher.py::test_cli_watch_once - assert 1 == 0
+FAILED tests/vault/test_watcher.py::test_cli_watch_once_skips_already_indexed
+=========== 11 failed, 269 passed, 1 skipped, 31 warnings in 15.11s ============

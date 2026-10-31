@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 20 items
+
+tests/test_batch_c_quality_perf.py ....................                  [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/batch_c_quality_perf.xml -
+============================== 20 passed in 1.45s ==============================

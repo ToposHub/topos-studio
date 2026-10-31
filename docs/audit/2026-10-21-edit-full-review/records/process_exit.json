@@ -1,0 +1,8 @@
+{
+  "terminal_session_id": 47981,
+  "exit_code": 0,
+  "close_route": "MainWindow.close, production orderly shutdown",
+  "save_before_close": true,
+  "gpu_shutdown_warning": "GPU render thread did not exit within 2000ms; destruction deferred until process exit",
+  "interpretation": "Process ended; resource cleanup did not meet its timeout. Included in U06, not counted as a separate issue."
+}

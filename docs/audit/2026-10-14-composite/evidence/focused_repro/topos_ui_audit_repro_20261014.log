@@ -1,0 +1,12 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 258 ms. Replace uses of missing font family "Sans Serif" with one that exists to avoid this cost. 
+U-01 layer sync result: None True
+U-02 undo A available: True
+U-02 B rotation after A undo: 0.0
+U-03 after batch undo: [(10.0, 0.0), (10.0, 0.0)]
+U-04 immediate undo: 10.0 3.0 pending= ('b1', 'scale', 0.0, 3.0)
+U-04 after pending flush undo description: Undo: Change scale
+U-05 empty load retains nodes: ['shared', 'b1', 'b2'] fps/duration= 24.0 48

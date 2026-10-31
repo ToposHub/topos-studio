@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 21 items
+
+tests/edit/test_caption_timeline_integration.py .....................    [100%]
+
+============================== 21 passed in 6.89s ==============================

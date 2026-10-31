@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_effect_pass_runner_fallback_lifecycle.py ...             [100%]
+
+============================== 3 passed in 10.13s ==============================

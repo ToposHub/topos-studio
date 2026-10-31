@@ -1,0 +1,13 @@
+{
+  "8a02083c-728c-486f-9b59-ec8ad1ed1e8a": {
+    "bin_id": "8a02083c-728c-486f-9b59-ec8ad1ed1e8a",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "50b7b063-9048-4729-bd25-4a4ea74169e5",
+      "22be3fcf-e70a-4462-a760-3cd5ae3c8845",
+      "d3f08b7f-daa9-473c-a933-3b207ec839e2"
+    ],
+    "timeline_ids": []
+  }
+}

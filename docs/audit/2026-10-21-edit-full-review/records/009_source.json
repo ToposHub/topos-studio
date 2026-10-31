@@ -1,0 +1,130 @@
+{
+  "ok": true,
+  "result": {
+    "assets": [
+      {
+        "file": "2K_h264.mp4",
+        "fps": 25.0,
+        "frames": 1572,
+        "audio": 2,
+        "type": "video"
+      },
+      {
+        "file": "2K_H265.mov",
+        "fps": 25.0,
+        "frames": 487,
+        "audio": 2,
+        "type": "video"
+      },
+      {
+        "file": "2K_prores422.mov",
+        "fps": 25.0,
+        "frames": 487,
+        "audio": 2,
+        "type": "video"
+      },
+      {
+        "file": "4K_H264.mov",
+        "fps": 25.0,
+        "frames": 743,
+        "audio": 2,
+        "type": "video"
+      },
+      {
+        "file": "4K_H265.mov",
+        "fps": 25.0,
+        "frames": 487,
+        "audio": 2,
+        "type": "video"
+      },
+      {
+        "file": "4K_prores422Proxy.mov",
+        "fps": 25.0,
+        "frames": 487,
+        "audio": 2,
+        "type": "video"
+      },
+      {
+        "file": "2K_DNxHR HQX 10bit.mov",
+        "fps": 25.0,
+        "frames": 487,
+        "audio": 2,
+        "type": "video"
+      },
+      {
+        "file": "2K_topos_422_LT.mov",
+        "fps": 25.0,
+        "frames": 487,
+        "audio": 2,
+        "type": "video"
+      },
+      {
+        "file": "2K_Prores4444_Alpha.mov",
+        "fps": 25.0,
+        "frames": 153,
+        "audio": 2,
+        "type": "video"
+      }
+    ],
+    "source": {
+      "asset": "30f16ea0-95a6-4901-b14f-83018aa68323",
+      "frame": 0,
+      "visible": true,
+      "toolbar": true
+    },
+    "views": [
+      [
+        "_view_mode",
+        "ViewMode"
+      ],
+      [
+        "_pending_timeline_frame_previews",
+        "dict"
+      ],
+      [
+        "_pending_timeline_image_previews",
+        "dict"
+      ],
+      [
+        "_tree_items_by_path",
+        "dict"
+      ],
+      [
+        "_tree_index_dirty",
+        "bool"
+      ],
+      [
+        "btn_list_view",
+        "QToolButton"
+      ],
+      [
+        "btn_grid_view",
+        "QToolButton"
+      ],
+      [
+        "bin_tree",
+        "BinTreeWidget"
+      ],
+      [
+        "view_container",
+        "QWidget"
+      ],
+      [
+        "tree",
+        "AssetTreeWidget"
+      ],
+      [
+        "grid_view",
+        "AssetListView"
+      ],
+      [
+        "grid_delegate",
+        "GridDelegate"
+      ],
+      [
+        "_column_grid",
+        "ColumnGridController"
+      ]
+    ]
+  }
+}

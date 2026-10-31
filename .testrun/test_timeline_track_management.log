@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 16 items
+
+tests/edit/test_timeline_track_management.py ................            [100%]
+
+============================== 16 passed in 4.31s ==============================

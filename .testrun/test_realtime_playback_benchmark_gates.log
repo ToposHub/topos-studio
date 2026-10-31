@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 9 items
+
+tests/edit/test_realtime_playback_benchmark_gates.py .........           [100%]
+
+============================== 9 passed in 33.71s ==============================

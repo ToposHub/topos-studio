@@ -1,0 +1,32 @@
+{
+  "dc66b83a-5075-4050-b2d2-2a764ec2f400": {
+    "timeline_id": "dc66b83a-5075-4050-b2d2-2a764ec2f400",
+    "name": "Timeline 1",
+    "fps": 25.0,
+    "width": 1920,
+    "height": 1080,
+    "sample_rate": 48000,
+    "format_settings": {
+      "media_pool_preview_asset_id": "8d00dabe-18a6-4c6e-945e-a21d7e4b8404",
+      "media_pool_preview_frame": 228
+    },
+    "created_at": 0.0
+  },
+  "3c477b9c-f485-40a1-b174-3d061889ad5d": {
+    "timeline_id": "3c477b9c-f485-40a1-b174-3d061889ad5d",
+    "name": "Audit Source Edits",
+    "fps": 25.0,
+    "width": 1920,
+    "height": 1080,
+    "sample_rate": 48000,
+    "format_settings": {
+      "pixel_aspect_ratio": 1.0,
+      "field_order": "progressive",
+      "display_format": "timecode",
+      "audio_track_type": "stereo",
+      "audio_display_format": "samples",
+      "start_timecode": "00:00:00:00"
+    },
+    "created_at": 1791933170.082473
+  }
+}

@@ -1,0 +1,167 @@
+{
+  "action": {
+    "export_srt": "Exportar Legendas (SRT)...",
+    "queue_start": "Iniciar Fila de Vídeo",
+    "queue_stop": "Parar Fila de Vídeo"
+  },
+  "panel": {
+    "deliver_video_batch": "Exportação em Lote de Vídeo"
+  },
+  "deliver": {
+    "export_stems": "Exportar Stems…",
+    "export_stems_tooltip": "Exporta faixas de áudio / barramentos / grupos D-M-E como stems WAV separados",
+    "export_chapters": "Exportar Capítulos…",
+    "export_chapters_tooltip": "Exporta marcadores de capítulo da linha do tempo como texto de capítulos YouTube ou FFMetadata",
+    "video": {
+      "settings_title": "Entrega de Vídeo",
+      "source_range": "Origem & Intervalo",
+      "video_settings": "Vídeo",
+      "audio_delivery": "Áudio & Entrega",
+      "no_project": "(nenhum projeto)",
+      "output_dir_placeholder": "Diretório de saída",
+      "select_output_dir": "Selecionar Diretório de Saída",
+      "add_to_queue": "Adicionar à Fila de Vídeo",
+      "add_and_start": "Adicionar & Iniciar",
+      "alpha": "Canal alfa",
+      "profile_default": "(padrão)",
+      "preflight_ok": "Pronto para adicionar",
+      "project": "Projeto",
+      "timeline": "Linha do Tempo",
+      "range": "Intervalo",
+      "frames": "Quadros",
+      "duration": "Duração",
+      "container": "Contêiner",
+      "codec": "Codec",
+      "profile": "Perfil",
+      "profile_tooltip": "Perfil do codificador. Automático seleciona o perfil de compatibilidade padrão do codec.",
+      "aspect_lock": "Bloquear proporção",
+      "resolution": "Resolução",
+      "size": "Tamanho",
+      "frame_rate": "Taxa de quadros",
+      "custom_fps": "QPS personalizado",
+      "quality_mode": "Modo de qualidade",
+      "quality": "Qualidade",
+      "quality_crf": "Qualidade (CRF)",
+      "quality_crf_hint": "O CRF não tem unidade; valores menores significam maior qualidade.",
+      "crf_18": "CRF 18 · Alta qualidade",
+      "crf_20": "CRF 20 · Qualidade Blu-ray",
+      "crf_23": "CRF 23 · Recomendado",
+      "crf_28": "CRF 28 · Arquivo menor",
+      "crf_30": "CRF 30 · Pré-visualização",
+      "quality_bitrate_hint": "Taxa de bits média de vídeo alvo em kbps; a taxa real pode variar.",
+      "quality_cbr_hint": "Taxa de bits de vídeo fixa em kbps; as taxas mínima e máxima são restringidas.",
+      "quality_auto_hint": "O codificador escolhe a qualidade automaticamente.",
+      "estimated_size": "Tamanho est.",
+      "estimated_size_hint": "Estimado a partir da duração de saída × taxa de bits de vídeo ÷ 8; áudio e sobrecarga do contêiner não estão incluídos.",
+      "filename_placeholder": "Nome da linha do tempo",
+      "quality_auto": "Auto",
+      "quality_vbr": "VBR",
+      "quality_cbr": "CBR",
+      "quality_bitrate": "Taxa de bits",
+      "color_space": "Espaço de cor",
+      "bit_depth": "Profundidade de bits",
+      "audio_codec": "Codec de áudio",
+      "sample_rate": "Taxa de amostragem",
+      "audio_bitrate": "Taxa de bits do áudio",
+      "subtitles": "Legendas",
+      "output_dir": "Dir. de saída",
+      "filename": "Nome de arquivo",
+      "if_exists": "Se existir",
+      "allow_placeholders": "Permitir espaços reservados",
+      "allow_placeholders_hint": "Clipes de espaço reservado normalmente bloqueiam a entrega. Ative para exportar mesmo assim; os espaços reservados são renderizados como barras de cores na saída."
+    },
+    "preset": {
+      "web_h264": {
+        "title": "Web H.264",
+        "subtitle": "MP4 · H.264 · 1080p"
+      },
+      "mobile_h264": {
+        "title": "Celular",
+        "subtitle": "MP4 · H.264 · 1080×1920"
+      },
+      "master_prores422": {
+        "title": "Master",
+        "subtitle": "MOV · ProRes 422 · UHD"
+      },
+      "master_prores4444": {
+        "title": "Master (Alfa)",
+        "subtitle": "MOV · ProRes 4444 · 4:4:4"
+      },
+      "hevc_uhd": {
+        "title": "HEVC 4K",
+        "subtitle": "MP4 · HEVC · 3840×2160"
+      },
+      "dnxhr_sq": {
+        "title": "DNxHR SQ",
+        "subtitle": "MOV · DNxHR SQ · 1080p"
+      },
+      "custom": {
+        "title": "Personalizado",
+        "subtitle": "Configurações atuais"
+      }
+    },
+    "queue": {
+      "title": "Fila de Renderização de Vídeo",
+      "start": "Iniciar Fila",
+      "pause": "Pausar",
+      "resume": "Retomar",
+      "cancel_current": "Cancelar Atual",
+      "clear_completed": "Limpar Concluídos",
+      "more": "Mais",
+      "float": "Flutuar Painel",
+      "return_to_deliver": "Voltar à Entrega",
+      "empty_title": "Nenhuma tarefa de exportação de vídeo ainda",
+      "empty_hint": "Escolha uma linha do tempo e uma predefinição de vídeo acima, depois clique em “Adicionar à Fila de Vídeo”.",
+      "tasks": "tarefas",
+      "running": "renderizando",
+      "pending": "pendentes",
+      "done": "concluídas",
+      "failed": "falharam",
+      "status_pending": "Pendente",
+      "status_running": "Renderizando",
+      "status_done": "Concluído",
+      "status_failed": "Falhou",
+      "status_cancelled": "Cancelado",
+      "status_paused": "Pausado",
+      "status_needs_relink": "Reconexão Necessária",
+      "no_audio": "sem áudio",
+      "action_cancel": "Cancelar",
+      "action_open": "Abrir",
+      "action_retry": "Tentar novamente",
+      "action_remove": "Remover",
+      "action_edit": "Editar Configurações",
+      "action_relink": "Reconectar Linha do Tempo",
+      "col_status": "Status",
+      "col_source": "Origem",
+      "col_preset": "Predefinição",
+      "col_output": "Arquivo de Saída",
+      "col_video": "Vídeo",
+      "col_audio": "Áudio",
+      "col_progress": "Progresso",
+      "col_state": "Estado",
+      "col_actions": "Ações"
+    },
+    "subtitle": {
+      "off": "Desligado",
+      "burn": "Incorporar",
+      "sidecar": "Arquivo separado"
+    },
+    "conflict": {
+      "ask": "Perguntar",
+      "overwrite": "Sobrescrever",
+      "auto_number": "Numeração automática",
+      "skip": "Pular"
+    },
+    "timeline_unnamed": "Sem nome",
+    "frames_suffix": " quadros",
+    "px_suffix": " px",
+    "fps_suffix": " fps",
+    "kbps_suffix": " kbps",
+    "w_label": "W",
+    "h_label": "H",
+    "colors_suffix": " cores",
+    "gif_colors_label": "Cores do GIF",
+    "qc_title": "QC de múltiplas versões",
+    "close": "Fechar"
+  }
+}

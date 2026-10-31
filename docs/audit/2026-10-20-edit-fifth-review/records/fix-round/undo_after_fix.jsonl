@@ -1,0 +1,6 @@
+UNDO {"name": "initial", "counts": {"video": 1, "audio": 1}}
+UNDO {"name": "after_split", "counts": {"video": 2, "audio": 2}}
+UNDO {"name": "menu_undo_enabled", "on": true, "redo": false, "undo_text": "Undo Split 2 clips at frame 100", "redo_text": "重做\t⇧⌘Z", "undo_shortcut": "Ctrl+Z"}
+UNDO {"name": "cmd_z", "counts": {"video": 2, "audio": 2}, "menu_undo_enabled": true}
+UNDO {"name": "ctrl_z", "counts": {"video": 1, "audio": 1}}
+UNDO {"name": "cmd_shift_z", "counts": {"video": 1, "audio": 1}}

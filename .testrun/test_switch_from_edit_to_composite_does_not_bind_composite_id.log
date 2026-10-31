@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 10 items
+
+tests/edit/test_switch_from_edit_to_composite_does_not_bind_composite_id.py . [ 10%]
+.........                                                                [100%]
+
+============================== 10 passed in 6.32s ==============================

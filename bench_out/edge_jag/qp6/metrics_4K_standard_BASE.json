@@ -1,0 +1,74 @@
+{
+ "generated_at": "2026-09-21T10:53:21.951207+00:00",
+ "note": "边缘锯齿取证：ref=母版 reformat（bicubic）；grid_residual_ratio>1.2 表示误差集中在 8×8 块界；stair_axis_ratio>0.6 表示残差轴向化（阶梯）；sharpness_retention<1 表示边缘锐度损失。",
+ "pairs": [
+  {
+   "size": "4K",
+   "tier": "standard",
+   "frames": [
+    100,
+    300
+   ],
+   "prores": "4K_prores422.mov",
+   "topos": "4K_topos_standard.mov",
+   "per_frame": {
+    "100": {
+     "edge_pct": 6.8,
+     "prores": {
+      "psnr_all": 60.69,
+      "psnr_edge": 59.42,
+      "mae_edge": 0.79,
+      "sharpness_retention": 0.932,
+      "grid_residual_ratio": 1.061,
+      "stair_axis_ratio": 0.348
+     },
+     "topos": {
+      "psnr_all": 51.19,
+      "psnr_edge": 49.38,
+      "mae_edge": 2.66,
+      "sharpness_retention": 0.748,
+      "grid_residual_ratio": 1.156,
+      "stair_axis_ratio": 0.374
+     }
+    },
+    "300": {
+     "edge_pct": 7.7,
+     "prores": {
+      "psnr_all": 56.55,
+      "psnr_edge": 54.46,
+      "mae_edge": 1.5,
+      "sharpness_retention": 0.959,
+      "grid_residual_ratio": 1.232,
+      "stair_axis_ratio": 0.377
+     },
+     "topos": {
+      "psnr_all": 51.3,
+      "psnr_edge": 48.78,
+      "mae_edge": 2.9,
+      "sharpness_retention": 0.963,
+      "grid_residual_ratio": 1.275,
+      "stair_axis_ratio": 0.364
+     }
+    }
+   },
+   "mean": {
+    "prores": {
+     "psnr_all": 58.62,
+     "psnr_edge": 56.94,
+     "mae_edge": 1.145,
+     "sharpness_retention": 0.946,
+     "grid_residual_ratio": 1.147,
+     "stair_axis_ratio": 0.362
+    },
+    "topos": {
+     "psnr_all": 51.245,
+     "psnr_edge": 49.08,
+     "mae_edge": 2.78,
+     "sharpness_retention": 0.855,
+     "grid_residual_ratio": 1.216,
+     "stair_axis_ratio": 0.369
+    }
+   }
+  }
+ ]
+}

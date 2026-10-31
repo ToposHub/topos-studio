@@ -1,0 +1,160 @@
+// --- Topos Plugin Metadata ---
+// @name Soft Glow Bloom
+// @i18n_name Soft_Glow_Bloom
+// @author Topos Team
+// @version 1.0
+// @description Threshold-based soft glow and bloom with multi-pass ring blur approximation
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost medium
+// @param slider threshold "Threshold" 0.5 0.0 1.0
+// @param slider radius "Glow Radius" 0.5 0.0 1.0
+// @param slider intensity "Blend Intensity" 0.5 0.0 1.0
+// -----------------------------
+//
+// Soft Glow Bloom - 阈值式柔光/泛光
+//
+// 管线：亮度软阈值提取亮部（HDR 安全，不 clamp）
+//     → 常量循环上限的多 pass 环形模糊（无 render target 的 bloom 近似）
+//     → 加法混合回原图（delta 输出模式，保持上游调色叠加）
+//
+// 参数 ABI：本文件声明的 @param 变量由引擎以裸名注入并重命名为
+// u_P<n>_<name>；除 u_input_tex / u_tex_size / u_aspect_ratio 外禁止引用
+// 任何未声明的 u_* 标识符（P0-COL-01：会导致整层被渲染循环静默跳过）。
+
+// ====== SECTION 1: CONSTANTS ======
+
+// 红线 #2：for 循环上限必须是编译期常量。radius 滑杆只改变每 pass 的
+// 步长与"激活"的 pass 数量（循环体内 break 收敛），永不改变循环上限。
+const int NUM_RING_TAPS = 8;   // 每个 ring pass 的固定采样数（45 度环）
+const int MAX_BLUR_PASSES = 4; // 叠加 ring pass 数的编译期硬上限
+
+// Rec.709 scene-linear 亮度权重（开放标准，非商标名）
+const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);
+
+// 8 个固定单位圆方向（45 度步进）。const 表避免每个 tap 两次三角函数，
+// 每个 pass 只需一次旋转（<= 2 * MAX_BLUR_PASSES = 8 次 trig/像素）。
+const vec2 RING_DIRS[8] = vec2[8](
+    vec2( 1.00000000,  0.00000000),
+    vec2( 0.70710678,  0.70710678),
+    vec2( 0.00000000,  1.00000000),
+    vec2(-0.70710678,  0.70710678),
+    vec2(-1.00000000,  0.00000000),
+    vec2(-0.70710678, -0.70710678),
+    vec2( 0.00000000, -1.00000000),
+    vec2( 0.70710678, -0.70710678)
+);
+
+// ====== SECTION 2: BRIGHT-PASS EXTRACTION (HDR SAFE) ======
+
+// scene-linear 亮度上的软膝阈值提取。
+// 红线 #3：输入 color 可为负、可远大于 1.0（HDR），此处绝不 clamp 到
+// [0,1]——提取权重（0..1 的 smoothstep）单独决定贡献量，负亮度自然
+// 得到权重 0，超白高光按原始能量完整进入泛光。
+vec3 extractBright(vec3 c, float thresh_lum) {
+    float lum = dot(c, LUMA_709);
+    // 软膝：权重在 [thresh - knee, thresh + knee] 间平滑爬升，
+    // knee 守护 > 0.0 保证 smoothstep 两个边缘严格递增（防 NaN）。
+    float knee = max(thresh_lum * 0.4, 0.001);
+    float w = smoothstep(thresh_lum - knee, thresh_lum + knee, lum);
+    return c * w;
+}
+
+// ====== SECTION 3: MULTI-PASS RING BLUR APPROXIMATION ======
+
+// 无 render target 的 bloom 近似：以中心为原点叠加最多 MAX_BLUR_PASSES
+// 个 ring pass，每个 pass 在目标核半径的一个等分 sub-radius 上对亮部
+// 图层采样。pass 权重按 1/(i+2) 衰减形成近似高斯 falloff；相邻 pass
+// 用黄金角旋转错开，8 tap/ring 达到接近 16 tap 未旋转环的圆盘覆盖。
+// Tap 预算：1 中心 + 8 * passes <= 33（与 32-tap bilateral 同预算档）。
+vec3 glowBlur(vec2 uv, vec2 tex_offset, float radius_pix, int num_passes,
+              float thresh_lum) {
+    // 中心 tap（亮部图层）
+    vec3 accum = extractBright(texture(u_input_tex, uv).rgb, thresh_lum);
+    float sum_weight = 1.0;
+
+    for (int pass_i = 0; pass_i < MAX_BLUR_PASSES; pass_i++) {
+        if (pass_i >= num_passes) break; // 动态提前收敛，循环上限保持 const
+
+        // 本 pass 的 sub-radius：目标核半径的等分（num_passes 为运行期
+        // 标量，只出现在除法里，不触碰循环边界）。
+        float pass_radius = radius_pix * (float(pass_i) + 1.0) / float(num_passes);
+        // pass 权重：1/2, 1/3, 1/4, 1/5 - 近似高斯的同心衰减
+        float pass_weight = 1.0 / (float(pass_i) + 2.0);
+
+        // 黄金角旋转错开相邻 ring 的采样相位
+        float rot = 2.39996322972 * float(pass_i);
+        float cr = cos(rot);
+        float sr = sin(rot);
+
+        for (int t = 0; t < NUM_RING_TAPS; t++) {
+            vec2 dir = RING_DIRS[t];
+            vec2 rotated = vec2(dir.x * cr - dir.y * sr,
+                                dir.x * sr + dir.y * cr);
+            vec2 sample_offset = rotated * pass_radius * tex_offset;
+            accum += extractBright(texture(u_input_tex, uv + sample_offset).rgb,
+                                   thresh_lum) * pass_weight;
+            sum_weight += pass_weight;
+        }
+    }
+
+    // 红线 #4：分母下限守护
+    return accum / max(sum_weight, 0.001);
+}
+
+// ====== SECTION 4: MAIN ======
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出（红线 #5）
+    if (intensity < 0.001) return color;
+
+    // 分辨率无关：实时取物理分辨率（优于缓存 u_tex_size）
+    vec2 current_size = vec2(textureSize(u_input_tex, 0));
+    vec2 tex_offset = 1.0 / current_size;
+
+    // Delta 输出基线：效果基于未调色的 u_input_tex 计算，
+    // 最后以增量形式应用到已调色的 color 上（空间采样类核心惯例）。
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    // ---- 参数映射（分辨率无关） ----
+    // Threshold：滑杆 0-1 → scene-linear 软膝中心亮度 0.25-2.5。
+    // 二次曲线在漫反射白附近的常用区段提供更细的控制分辨率；
+    // 上限 2.5 覆盖 HDR 超白（>1.0）高光。
+    float thresh_lum = 0.25 + threshold * threshold * 2.25;
+
+    // Radius：图像宽度的 0.4%-3.0%（4K 下约 15-115 px），
+    // 与 HighPass_Retouch 低频提取的半径档位一致。
+    float radius_ratio = 0.004 + radius * 0.026;
+    float radius_pix = max(2.0, current_size.x * radius_ratio);
+
+    // 激活的 ring pass 数随半径增长（四分位映射 1/2/3/4 个 pass）：
+    // 小半径 = 紧致核心光晕，大半径 = 宽阔弥散 halo。
+    // 表达式全 float 运算后经 int() 截断；min 上限保证结果不超过
+    // MAX_BLUR_PASSES。
+    int num_passes = int(1.0 + min(radius, 0.9999) * 3.999);
+
+    // ---- 亮部提取 + 多 pass 环形模糊 ----
+    vec3 glow = glowBlur(uv, tex_offset, radius_pix, num_passes, thresh_lum);
+
+    // 泛光轻度去饱和（固定向亮度收敛 25%），避免高饱和 halo；
+    // 只作用于 glow 增量，不触碰基色。
+    float glow_lum = dot(glow, LUMA_709);
+    glow = mix(vec3(glow_lum), glow, 0.75);
+
+    // ---- 合成（加法混合，delta 输出模式） ----
+    // 感知强度曲线（全文件唯一 pow）：让滑杆手感线性。
+    float glow_gain = 1.0 - pow(1.0 - intensity, 1.5);
+
+    vec3 result = original_color + glow * glow_gain;
+
+    // 增量应用到已调色画面；不 clamp——显示域压缩归 soft-clip 阶段
+    //（HDR 红线 #3）。
+    return color + (result - original_color);
+}

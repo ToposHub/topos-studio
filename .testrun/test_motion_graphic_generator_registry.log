@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_motion_graphic_generator_registry.py ....                [100%]
+
+============================== 4 passed in 11.52s ==============================

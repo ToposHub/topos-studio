@@ -1,0 +1,134 @@
+{
+  "ok": true,
+  "result": {
+    "program_before": {
+      "id": "4ae47de0-843c-4ab2-98fc-caa87534093f",
+      "name": "Round7 second timeline",
+      "rev": 2,
+      "frames": 200,
+      "tracks": [
+        {
+          "id": "86b48170-dbc9-44ec-a47a-10e2ba3a8b61",
+          "clips": [
+            {
+              "id": "7f41b5d8-acb0-4cde-adc6-72b1ef66f6b1",
+              "start": 0,
+              "end": 100
+            },
+            {
+              "id": "bd2b6b63-136b-4a48-9b15-2600d6e2041b",
+              "start": 100,
+              "end": 200
+            }
+          ]
+        },
+        {
+          "id": "28c4d5ee-f016-4af3-8934-8769f9ecc868",
+          "clips": [
+            {
+              "id": "48ba1155-7d92-4e73-bbae-73d787899745",
+              "start": 0,
+              "end": 100
+            },
+            {
+              "id": "0d9910d4-f230-4b68-90f0-f7bf616c0252",
+              "start": 100,
+              "end": 200
+            }
+          ]
+        }
+      ]
+    },
+    "selected": {
+      "combo": "7c10ee77-f401-4e86-82f4-32beccf728db",
+      "draft": {
+        "id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "name": "Timeline 1",
+        "rev": 8,
+        "frames": 50,
+        "tracks": [
+          {
+            "id": "51c1c1fd-ce73-4e82-b95c-7658a9cdfdcb",
+            "clips": [
+              {
+                "id": "443cadfb-97bf-48db-bd5b-853ad187d917",
+                "start": 0,
+                "end": 50
+              }
+            ]
+          },
+          {
+            "id": "58c5b9b3-05b2-4a18-aed4-a4e6704cc805",
+            "clips": [
+              {
+                "id": "be44bb59-56cb-4d11-b39b-8ce055712f34",
+                "start": 0,
+                "end": 50
+              }
+            ]
+          }
+        ]
+      },
+      "program": {
+        "id": "4ae47de0-843c-4ab2-98fc-caa87534093f",
+        "name": "Round7 second timeline",
+        "rev": 2,
+        "frames": 200,
+        "tracks": [
+          {
+            "id": "86b48170-dbc9-44ec-a47a-10e2ba3a8b61",
+            "clips": [
+              {
+                "id": "7f41b5d8-acb0-4cde-adc6-72b1ef66f6b1",
+                "start": 0,
+                "end": 100
+              },
+              {
+                "id": "bd2b6b63-136b-4a48-9b15-2600d6e2041b",
+                "start": 100,
+                "end": 200
+              }
+            ]
+          },
+          {
+            "id": "28c4d5ee-f016-4af3-8934-8769f9ecc868",
+            "clips": [
+              {
+                "id": "48ba1155-7d92-4e73-bbae-73d787899745",
+                "start": 0,
+                "end": 100
+              },
+              {
+                "id": "0d9910d4-f230-4b68-90f0-f7bf616c0252",
+                "start": 100,
+                "end": 200
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "queue": [
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_custom_h264.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_after_edit.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_nested.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_nonactive.mp4"
+      }
+    ]
+  }
+}

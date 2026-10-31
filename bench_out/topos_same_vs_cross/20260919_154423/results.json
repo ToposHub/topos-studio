@@ -1,0 +1,283 @@
+{
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_hq.mov",
+  "source_meta": {
+    "codec": "topos",
+    "pix_fmt": "yuv422p10le",
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 96
+  },
+  "frames": 96,
+  "reps": 5,
+  "matrix": [
+    {
+      "name": "topos_proxy",
+      "codec": "topos_proxy",
+      "desc": "同族：Topos 422 HQ → Topos 422 Proxy（档位下调）",
+      "runs": [
+        {
+          "ok": true,
+          "wall_s": 2.4722738769996795,
+          "overall_fps": 38.83064934395715,
+          "segment_fps": 112.26083950729047,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 0
+        },
+        {
+          "ok": true,
+          "wall_s": 1.0056058000045596,
+          "overall_fps": 95.46484318165699,
+          "segment_fps": 118.5800149929382,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 1
+        },
+        {
+          "ok": true,
+          "wall_s": 0.8615007160042296,
+          "overall_fps": 111.43345352661167,
+          "segment_fps": 119.17332759698812,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 2
+        },
+        {
+          "ok": true,
+          "wall_s": 0.7630611319982563,
+          "overall_fps": 125.8090550996894,
+          "segment_fps": 137.95139817013325,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 3
+        },
+        {
+          "ok": true,
+          "wall_s": 0.8018742200001725,
+          "overall_fps": 119.71952409191974,
+          "segment_fps": 124.65230662873088,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 7200409,
+          "rep": 4
+        }
+      ],
+      "overall_fps_median": 111.43345352661167,
+      "overall_fps_max": 125.8090550996894,
+      "segment_fps_median": 119.17332759698812,
+      "verify": {
+        "codec": "topos",
+        "pix_fmt": "yuv422p10le",
+        "decoded_frames": 96,
+        "fps": 25.0
+      },
+      "frames_ok": true
+    },
+    {
+      "name": "topos_hq",
+      "codec": "topos_hq",
+      "desc": "同族同档：Topos 422 HQ → Topos 422 HQ（对照）",
+      "runs": [
+        {
+          "ok": true,
+          "wall_s": 1.1990297279990045,
+          "overall_fps": 80.06473714393151,
+          "segment_fps": 89.62377853469565,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 0
+        },
+        {
+          "ok": true,
+          "wall_s": 1.2636735639971448,
+          "overall_fps": 75.96898656037479,
+          "segment_fps": 80.2606836684427,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 1
+        },
+        {
+          "ok": true,
+          "wall_s": 1.253655278000224,
+          "overall_fps": 76.57607452754876,
+          "segment_fps": 82.84555271820214,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 2
+        },
+        {
+          "ok": true,
+          "wall_s": 1.1892299710016232,
+          "overall_fps": 80.72450437752124,
+          "segment_fps": 87.50351072917047,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 3
+        },
+        {
+          "ok": true,
+          "wall_s": 1.155353982001543,
+          "overall_fps": 83.0914174318151,
+          "segment_fps": 93.1104005329023,
+          "delivery_path": "topos_direct_planar_cpu_encode",
+          "hw_fallback_reason": "",
+          "output_bytes": 65257118,
+          "rep": 4
+        }
+      ],
+      "overall_fps_median": 80.06473714393151,
+      "overall_fps_max": 83.0914174318151,
+      "segment_fps_median": 87.50351072917047,
+      "verify": {
+        "codec": "topos",
+        "pix_fmt": "yuv422p10le",
+        "decoded_frames": 96,
+        "fps": 25.0
+      },
+      "frames_ok": true
+    },
+    {
+      "name": "prores_422",
+      "codec": "prores_422",
+      "desc": "跨族 CPU：→ ProRes 422",
+      "runs": [
+        {
+          "ok": true,
+          "wall_s": 11.114500735995534,
+          "overall_fps": 8.637365031529795,
+          "segment_fps": 9.60324182652316,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 87751192,
+          "rep": 0
+        },
+        {
+          "ok": true,
+          "wall_s": 10.033471593997092,
+          "overall_fps": 9.567974464335522,
+          "segment_fps": 9.979679967508657,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 87751192,
+          "rep": 1
+        },
+        {
+          "ok": true,
+          "wall_s": 10.328476208000211,
+          "overall_fps": 9.294691498213503,
+          "segment_fps": 9.616399137795213,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 87751192,
+          "rep": 2
+        },
+        {
+          "ok": true,
+          "wall_s": 9.871063667997078,
+          "overall_fps": 9.725395684686047,
+          "segment_fps": 10.162536936802889,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 87751192,
+          "rep": 3
+        },
+        {
+          "ok": true,
+          "wall_s": 11.032464436997543,
+          "overall_fps": 8.701591611577054,
+          "segment_fps": 8.794398758023151,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 87751192,
+          "rep": 4
+        }
+      ],
+      "overall_fps_median": 9.294691498213503,
+      "overall_fps_max": 9.725395684686047,
+      "segment_fps_median": 9.616399137795213,
+      "verify": {
+        "codec": "prores",
+        "pix_fmt": "yuv422p10le",
+        "decoded_frames": 96,
+        "fps": 0.0
+      },
+      "frames_ok": true
+    },
+    {
+      "name": "h264",
+      "codec": "h264",
+      "desc": "跨族硬编：→ H.264 (20 Mbps VBR)",
+      "runs": [
+        {
+          "ok": true,
+          "wall_s": 12.633951905998401,
+          "overall_fps": 7.598572538052856,
+          "segment_fps": 8.189517308968234,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 9507087,
+          "rep": 0
+        },
+        {
+          "ok": true,
+          "wall_s": 12.163211559003685,
+          "overall_fps": 7.892652325769755,
+          "segment_fps": 7.9624113493025614,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 9507087,
+          "rep": 1
+        },
+        {
+          "ok": true,
+          "wall_s": 12.06594795199635,
+          "overall_fps": 7.956274996538212,
+          "segment_fps": 8.032298177984675,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 9507087,
+          "rep": 2
+        },
+        {
+          "ok": true,
+          "wall_s": 12.262965358000656,
+          "overall_fps": 7.82844909020046,
+          "segment_fps": 8.076328163327197,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 9507087,
+          "rep": 3
+        },
+        {
+          "ok": true,
+          "wall_s": 11.395359982998343,
+          "overall_fps": 8.424481555934182,
+          "segment_fps": 8.61492253288679,
+          "delivery_path": "",
+          "hw_fallback_reason": "",
+          "output_bytes": 9507087,
+          "rep": 4
+        }
+      ],
+      "overall_fps_median": 7.892652325769755,
+      "overall_fps_max": 8.424481555934182,
+      "segment_fps_median": 8.076328163327197,
+      "verify": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "decoded_frames": 96,
+        "fps": 0.0
+      },
+      "frames_ok": true
+    }
+  ]
+}

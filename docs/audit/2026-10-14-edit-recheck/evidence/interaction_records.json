@@ -1,0 +1,1999 @@
+[
+  {
+    "name": "startup",
+    "page": "Edit",
+    "platform": "cocoa",
+    "qt": "6.10.0",
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/01-empty.png"
+  },
+  {
+    "name": "initial_layout",
+    "window": [
+      1440,
+      1000
+    ],
+    "timeline_dock": 102,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/01-normal-empty.png"
+  },
+  {
+    "name": "real_media_import",
+    "drop": true,
+    "asset_count": 3,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/02-media.png"
+  },
+  {
+    "name": "source_first_frame",
+    "loaded": "50b7b063-9048-4729-bd25-4a4ea74169e5",
+    "viewer_type": "SourceViewer",
+    "paint_failed": false,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/03-source-first-frame.png"
+  },
+  {
+    "name": "source_valid_range",
+    "range": [
+      0,
+      100
+    ],
+    "buttons": [
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "name": "source_clear_range",
+    "range": [
+      null,
+      null
+    ],
+    "buttons": [
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "name": "source_single_frame_range",
+    "range": [
+      100,
+      100
+    ],
+    "buttons": [
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "name": "linked_drop",
+    "accepted": true,
+    "state": {
+      "revision": 1,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "project_revision": 1,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/04-linked.png"
+  },
+  {
+    "name": "ordinary_trim",
+    "state": {
+      "revision": 1,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "project_revision": 1
+  },
+  {
+    "name": "ordinary_trim_undo",
+    "state": {
+      "revision": 2,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": []
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": []
+        }
+      ]
+    },
+    "project_revision": 2
+  },
+  {
+    "name": "ordinary_trim_redo",
+    "state": {
+      "revision": 3,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "project_revision": 3
+  },
+  {
+    "name": "blade_link_policy",
+    "state": {
+      "revision": 4,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "linked_selection": true,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/05-blade-link-policy.png"
+  },
+  {
+    "name": "geometry",
+    "viewport": [
+      1432,
+      283
+    ],
+    "video_points": [
+      [
+        "85ca6313-350f-457d-b896-5b773e7dd429",
+        [
+          277,
+          117
+        ]
+      ],
+      [
+        "549299d7-5194-490d-a542-de45025dc3a2",
+        [
+          881,
+          117
+        ]
+      ]
+    ],
+    "viewer_attrs": [
+      [
+        "viewer",
+        "SourceViewer"
+      ]
+    ],
+    "scene_focus": null
+  },
+  {
+    "name": "trim_coordinates",
+    "start": [
+      1425,
+      117
+    ],
+    "start_visible": true,
+    "target": [
+      489,
+      117
+    ]
+  },
+  {
+    "name": "right_trim_recheck",
+    "before": {
+      "revision": 4,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 4,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "interaction": "InteractionState.IDLE",
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/06-right-trim.png"
+  },
+  {
+    "name": "roll_preview",
+    "interaction": "InteractionState.IDLE",
+    "roll_preview": true,
+    "point": [
+      334,
+      117
+    ],
+    "visible": true
+  },
+  {
+    "name": "roll_escape_release",
+    "before": {
+      "revision": 4,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 5,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 188,
+              "in": 0,
+              "source_duration": 188,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 188,
+              "end": 1572,
+              "in": 188,
+              "source_duration": 1384,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "roll_preview": false,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/07-roll-esc-release.png"
+  },
+  {
+    "name": "roll_undo",
+    "state": {
+      "revision": 6,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "move_escape_release",
+    "before": {
+      "revision": 6,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 6,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "hand_tool",
+    "before": {
+      "revision": 6,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 6,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "scroll_before": 0,
+    "scroll_after": 45
+  },
+  {
+    "name": "multi_properties_inventory",
+    "selected": [
+      "85ca6313-350f-457d-b896-5b773e7dd429",
+      "549299d7-5194-490d-a542-de45025dc3a2"
+    ],
+    "context": [
+      "85ca6313-350f-457d-b896-5b773e7dd429",
+      "549299d7-5194-490d-a542-de45025dc3a2"
+    ],
+    "controls": [],
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/08-multi-properties.png"
+  },
+  {
+    "name": "tabbar_inventory",
+    "tabs": [
+      {
+        "visible": true,
+        "current": 0,
+        "tabs": [
+          [
+            "Program",
+            0
+          ],
+          [
+            "Source",
+            1
+          ]
+        ]
+      },
+      {
+        "visible": true,
+        "current": 0,
+        "tabs": [
+          [
+            "Properties",
+            0
+          ],
+          [
+            "AI assistant",
+            1
+          ],
+          [
+            "信息",
+            2
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "name": "source_visible_pixels",
+    "visible": true,
+    "viewer_visible": true,
+    "paint_failed": false,
+    "frame": 100,
+    "texture": "3",
+    "shared_texture": null,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/09-source-visible.png"
+  },
+  {
+    "name": "source_playback",
+    "before": 100,
+    "after": 126,
+    "paint_failed": false,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/10-source-play.png"
+  },
+  {
+    "name": "section_inventory",
+    "sections": [
+      [
+        "clip:85ca6313-350f-457d-b896-5b773e7dd429:transform",
+        [
+          [
+            "translate_x",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            true
+          ],
+          [
+            "translate_y",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            true
+          ],
+          [
+            "scale_x",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            1.0,
+            true
+          ],
+          [
+            "scale_y",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            1.0,
+            true
+          ],
+          [
+            "rotation",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            true
+          ],
+          [
+            "pivot_mode",
+            "ChevronComboBox",
+            "NoneType",
+            null,
+            null,
+            true
+          ],
+          [
+            "pivot_x",
+            "DragValue",
+            "NoneType",
+            null,
+            0.0,
+            true
+          ],
+          [
+            "pivot_y",
+            "DragValue",
+            "NoneType",
+            null,
+            0.0,
+            true
+          ]
+        ]
+      ],
+      [
+        "clip:85ca6313-350f-457d-b896-5b773e7dd429:crop",
+        [
+          [
+            "left",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            true
+          ],
+          [
+            "right",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            true
+          ],
+          [
+            "top",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            true
+          ],
+          [
+            "bottom",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            true
+          ],
+          [
+            "feather",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            true
+          ]
+        ]
+      ],
+      [
+        "clip:85ca6313-350f-457d-b896-5b773e7dd429:speed",
+        [
+          [
+            "speed",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            1.0,
+            true
+          ],
+          [
+            "reverse",
+            "QCheckBox",
+            "NoneType",
+            "",
+            null,
+            true
+          ],
+          [
+            "preserve_pitch",
+            "QCheckBox",
+            "NoneType",
+            "",
+            null,
+            true
+          ]
+        ]
+      ],
+      [
+        "clip:85ca6313-350f-457d-b896-5b773e7dd429:raw",
+        [
+          [
+            "wb_gain_r",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            1.0,
+            false
+          ],
+          [
+            "wb_gain_g",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            1.0,
+            false
+          ],
+          [
+            "wb_gain_b",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            1.0,
+            false
+          ],
+          [
+            "exposure_stops",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            false
+          ],
+          [
+            "black_level",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            0.0,
+            false
+          ],
+          [
+            "color_space",
+            "ChevronComboBox",
+            "NoneType",
+            null,
+            null,
+            false
+          ],
+          [
+            "gamma",
+            "ChevronComboBox",
+            "NoneType",
+            null,
+            null,
+            false
+          ]
+        ]
+      ],
+      [
+        "clip:85ca6313-350f-457d-b896-5b773e7dd429:opacity",
+        [
+          [
+            "value",
+            "DragValue",
+            "ToposClickableSlider",
+            null,
+            100.0,
+            true
+          ]
+        ]
+      ]
+    ]
+  },
+  {
+    "name": "transform_widget",
+    "type": "DragValue",
+    "visible": true,
+    "value": 0.0,
+    "context": [
+      "85ca6313-350f-457d-b896-5b773e7dd429"
+    ]
+  },
+  {
+    "name": "multi_transform_edit",
+    "before": [
+      [
+        "85ca6313-350f-457d-b896-5b773e7dd429",
+        0.0,
+        1.0
+      ],
+      [
+        "549299d7-5194-490d-a542-de45025dc3a2",
+        0.0,
+        1.0
+      ]
+    ],
+    "after": [
+      [
+        "85ca6313-350f-457d-b896-5b773e7dd429",
+        99.0,
+        1.0
+      ],
+      [
+        "549299d7-5194-490d-a542-de45025dc3a2",
+        0.0,
+        1.0
+      ]
+    ],
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/11-multi-transform.png"
+  },
+  {
+    "name": "trim_interior_edge",
+    "start": [
+      892,
+      117
+    ],
+    "before": {
+      "revision": 7,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 7,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/12-trim-interior-edge.png"
+  },
+  {
+    "name": "runtime",
+    "python": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 17.0.0 (clang-1700.6.3.2)]",
+    "qt_runtime": "6.10.2",
+    "qt_compiled": "6.10.0",
+    "platform": "cocoa"
+  },
+  {
+    "name": "selection_api",
+    "methods": [
+      [
+        "set_selection",
+        "(selection: 'TimelineSelection') -> 'None'"
+      ]
+    ],
+    "selected": [
+      "549299d7-5194-490d-a542-de45025dc3a2"
+    ]
+  },
+  {
+    "name": "stack_label",
+    "label": "Update transform.translate_x"
+  },
+  {
+    "name": "trim_pressed",
+    "mode": null,
+    "pending": false,
+    "is_dragging": false,
+    "interaction": "InteractionState.IDLE",
+    "point": [
+      890,
+      117
+    ]
+  },
+  {
+    "name": "trim_preview_state",
+    "mode": null,
+    "duration": 1423,
+    "source": 1423,
+    "interaction": "InteractionState.IDLE"
+  },
+  {
+    "name": "trim_tool_release",
+    "before": {
+      "revision": 7,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 7,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/13-trim-tool.png"
+  },
+  {
+    "name": "hit_diagnosis",
+    "point": [
+      890,
+      106
+    ],
+    "local": [
+      646.8423942220707,
+      30.5
+    ],
+    "shape_contains": true,
+    "item_at": "ClipItem",
+    "item_at_id": "549299d7-5194-490d-a542-de45025dc3a2",
+    "locked": false,
+    "tool": "EditTool.TRIM",
+    "map_scene": [
+      288.15760577792935,
+      75.5
+    ]
+  },
+  {
+    "name": "precise_right_trim",
+    "before": {
+      "revision": 7,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 7,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "98c6be0e-d148-47ee-a3bd-7ba42b9bad16",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "85ca6313-350f-457d-b896-5b773e7dd429",
+              "start": 0,
+              "end": 149,
+              "in": 0,
+              "source_duration": 149,
+              "speed": 1.0,
+              "link": "948f5306-9861-4eb7-8d04-509c85625e3e"
+            },
+            {
+              "id": "549299d7-5194-490d-a542-de45025dc3a2",
+              "start": 149,
+              "end": 1572,
+              "in": 149,
+              "source_duration": 1423,
+              "speed": 1.0,
+              "link": null
+            }
+          ]
+        },
+        {
+          "id": "310b48cc-230c-4c35-8171-f8413809708f",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "948f5306-9861-4eb7-8d04-509c85625e3e",
+              "start": 0,
+              "end": 1572,
+              "in": 0,
+              "source_duration": 1572,
+              "speed": 1.0,
+              "link": "85ca6313-350f-457d-b896-5b773e7dd429"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/14-precise-trim.png"
+  },
+  {
+    "name": "multi_selected_fixture",
+    "selected": [
+      "85ca6313-350f-457d-b896-5b773e7dd429",
+      "549299d7-5194-490d-a542-de45025dc3a2"
+    ],
+    "context": [
+      "85ca6313-350f-457d-b896-5b773e7dd429",
+      "549299d7-5194-490d-a542-de45025dc3a2"
+    ]
+  },
+  {
+    "name": "multi_edit_real_control",
+    "context": [
+      "85ca6313-350f-457d-b896-5b773e7dd429",
+      "549299d7-5194-490d-a542-de45025dc3a2"
+    ],
+    "before": [
+      [
+        "85ca6313-350f-457d-b896-5b773e7dd429",
+        99.0
+      ],
+      [
+        "549299d7-5194-490d-a542-de45025dc3a2",
+        0.0
+      ]
+    ],
+    "after": [
+      [
+        "85ca6313-350f-457d-b896-5b773e7dd429",
+        55.0
+      ],
+      [
+        "549299d7-5194-490d-a542-de45025dc3a2",
+        0.0
+      ]
+    ],
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/15-two-selected-one-edit.png"
+  },
+  {
+    "name": "locked_property_real_control",
+    "locked": true,
+    "before": [
+      [
+        "85ca6313-350f-457d-b896-5b773e7dd429",
+        55.0
+      ],
+      [
+        "549299d7-5194-490d-a542-de45025dc3a2",
+        0.0
+      ]
+    ],
+    "after": [
+      [
+        "85ca6313-350f-457d-b896-5b773e7dd429",
+        77.0
+      ],
+      [
+        "549299d7-5194-490d-a542-de45025dc3a2",
+        0.0
+      ]
+    ],
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/16-locked-property.png"
+  },
+  {
+    "name": "source_append_empty",
+    "state": {
+      "revision": 1,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "55e12f08-d885-49d9-a0a2-a39af2d7aca3",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "79c3705a-c339-4517-a2e0-6ff6c7bc782d"
+            }
+          ]
+        },
+        {
+          "id": "3a00d0e6-124d-49f5-994a-fda945ddb916",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "79c3705a-c339-4517-a2e0-6ff6c7bc782d",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "source_append_second",
+    "state": {
+      "revision": 2,
+      "fps": "25/1",
+      "playhead": 0,
+      "tracks": [
+        {
+          "id": "55e12f08-d885-49d9-a0a2-a39af2d7aca3",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "79c3705a-c339-4517-a2e0-6ff6c7bc782d"
+            },
+            {
+              "id": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e",
+              "start": 50,
+              "end": 100,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "7b531962-7d51-4309-a5de-91c8281aa1e1"
+            }
+          ]
+        },
+        {
+          "id": "3a00d0e6-124d-49f5-994a-fda945ddb916",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "79c3705a-c339-4517-a2e0-6ff6c7bc782d",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8"
+            },
+            {
+              "id": "7b531962-7d51-4309-a5de-91c8281aa1e1",
+              "start": 50,
+              "end": 100,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/17-source-appended-av.png"
+  },
+  {
+    "name": "source_overwrite_occupied",
+    "before": {
+      "revision": 2,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "55e12f08-d885-49d9-a0a2-a39af2d7aca3",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "79c3705a-c339-4517-a2e0-6ff6c7bc782d"
+            },
+            {
+              "id": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e",
+              "start": 50,
+              "end": 100,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "7b531962-7d51-4309-a5de-91c8281aa1e1"
+            }
+          ]
+        },
+        {
+          "id": "3a00d0e6-124d-49f5-994a-fda945ddb916",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "79c3705a-c339-4517-a2e0-6ff6c7bc782d",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8"
+            },
+            {
+              "id": "7b531962-7d51-4309-a5de-91c8281aa1e1",
+              "start": 50,
+              "end": 100,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 2,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "55e12f08-d885-49d9-a0a2-a39af2d7aca3",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "79c3705a-c339-4517-a2e0-6ff6c7bc782d"
+            },
+            {
+              "id": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e",
+              "start": 50,
+              "end": 100,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "7b531962-7d51-4309-a5de-91c8281aa1e1"
+            }
+          ]
+        },
+        {
+          "id": "3a00d0e6-124d-49f5-994a-fda945ddb916",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "79c3705a-c339-4517-a2e0-6ff6c7bc782d",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8"
+            },
+            {
+              "id": "7b531962-7d51-4309-a5de-91c8281aa1e1",
+              "start": 50,
+              "end": 100,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/18-overwrite-failure.png"
+  },
+  {
+    "name": "source_insert_internal",
+    "before": {
+      "revision": 2,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "55e12f08-d885-49d9-a0a2-a39af2d7aca3",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "79c3705a-c339-4517-a2e0-6ff6c7bc782d"
+            },
+            {
+              "id": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e",
+              "start": 50,
+              "end": 100,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "7b531962-7d51-4309-a5de-91c8281aa1e1"
+            }
+          ]
+        },
+        {
+          "id": "3a00d0e6-124d-49f5-994a-fda945ddb916",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "79c3705a-c339-4517-a2e0-6ff6c7bc782d",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8"
+            },
+            {
+              "id": "7b531962-7d51-4309-a5de-91c8281aa1e1",
+              "start": 50,
+              "end": 100,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "revision": 3,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "55e12f08-d885-49d9-a0a2-a39af2d7aca3",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "79c3705a-c339-4517-a2e0-6ff6c7bc782d"
+            },
+            {
+              "id": "e7c22fb7-c34c-4135-b5bd-18837031f2be",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": null
+            },
+            {
+              "id": "c84050d9-71be-4b7f-ad8e-aba8c6f5a621",
+              "start": 29,
+              "end": 60,
+              "in": 19,
+              "source_duration": 31,
+              "speed": 1.0,
+              "link": "79c3705a-c339-4517-a2e0-6ff6c7bc782d"
+            },
+            {
+              "id": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e",
+              "start": 60,
+              "end": 110,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "7b531962-7d51-4309-a5de-91c8281aa1e1"
+            }
+          ]
+        },
+        {
+          "id": "3a00d0e6-124d-49f5-994a-fda945ddb916",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "79c3705a-c339-4517-a2e0-6ff6c7bc782d",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8"
+            },
+            {
+              "id": "7b531962-7d51-4309-a5de-91c8281aa1e1",
+              "start": 60,
+              "end": 110,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e"
+            }
+          ]
+        }
+      ]
+    },
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/19-insert-audio-fallback.png"
+  },
+  {
+    "name": "recheck_last_state",
+    "state": {
+      "revision": 3,
+      "fps": "25/1",
+      "playhead": 19,
+      "tracks": [
+        {
+          "id": "55e12f08-d885-49d9-a0a2-a39af2d7aca3",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8",
+              "start": 0,
+              "end": 19,
+              "in": 0,
+              "source_duration": 19,
+              "speed": 1.0,
+              "link": "79c3705a-c339-4517-a2e0-6ff6c7bc782d"
+            },
+            {
+              "id": "e7c22fb7-c34c-4135-b5bd-18837031f2be",
+              "start": 19,
+              "end": 29,
+              "in": 100,
+              "source_duration": 10,
+              "speed": 1.0,
+              "link": null
+            },
+            {
+              "id": "c84050d9-71be-4b7f-ad8e-aba8c6f5a621",
+              "start": 29,
+              "end": 60,
+              "in": 19,
+              "source_duration": 31,
+              "speed": 1.0,
+              "link": "79c3705a-c339-4517-a2e0-6ff6c7bc782d"
+            },
+            {
+              "id": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e",
+              "start": 60,
+              "end": 110,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "7b531962-7d51-4309-a5de-91c8281aa1e1"
+            }
+          ]
+        },
+        {
+          "id": "3a00d0e6-124d-49f5-994a-fda945ddb916",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "79c3705a-c339-4517-a2e0-6ff6c7bc782d",
+              "start": 0,
+              "end": 50,
+              "in": 0,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "2c9b1f97-0f36-4a42-98d0-4520e347e4c8"
+            },
+            {
+              "id": "7b531962-7d51-4309-a5de-91c8281aa1e1",
+              "start": 60,
+              "end": 110,
+              "in": 50,
+              "source_duration": 50,
+              "speed": 1.0,
+              "link": "b7ecd20d-5684-4ecc-902c-1e7ec9d17f2e"
+            }
+          ]
+        }
+      ]
+    },
+    "project_revision": 3
+  },
+  {
+    "name": "save_reload",
+    "saved": true,
+    "timeline_count": 2,
+    "loaded_count": 2,
+    "timeline_payload_equal": false,
+    "project_revision_before": 3,
+    "project_revision_after": 3,
+    "asset_count": 3,
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/audit-scratch.topos"
+  },
+  {
+    "name": "program_playback",
+    "start": 0,
+    "end": 46,
+    "playing": true,
+    "ready_frames": 44,
+    "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/20-program-playback.png"
+  },
+  {
+    "name": "save_reload_diff",
+    "diffs": [
+      {
+        "path": "/f22c5492-fcfb-40b2-9355-edc3217c48d5/video_tracks/0/clips/2/linked_clip_id",
+        "before": "79c3705a-c339-4517-a2e0-6ff6c7bc782d",
+        "after": null
+      }
+    ]
+  }
+]

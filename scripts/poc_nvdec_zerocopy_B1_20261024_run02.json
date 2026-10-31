@@ -1,0 +1,164 @@
+{
+  "schema": "poc_nvdec_zerocopy/1",
+  "date": "2026-10-24T12:28:57",
+  "pyav": "18.1.0",
+  "phases": [
+    {
+      "phase": "capability",
+      "status": "ok",
+      "hwdevices_available": [
+        "cuda",
+        "dxva2",
+        "qsv",
+        "d3d11va",
+        "d3d12va",
+        "amf"
+      ],
+      "codec_configs": {
+        "h264": [
+          {
+            "device_type": "dxva2",
+            "sw_format": "dxva2_vld"
+          },
+          {
+            "device_type": "d3d11va",
+            "sw_format": "d3d11"
+          },
+          {
+            "device_type": "d3d12va",
+            "sw_format": "d3d12"
+          },
+          {
+            "device_type": "cuda",
+            "sw_format": "cuda"
+          }
+        ],
+        "hevc": [
+          {
+            "device_type": "dxva2",
+            "sw_format": "dxva2_vld"
+          },
+          {
+            "device_type": "d3d11va",
+            "sw_format": "d3d11"
+          },
+          {
+            "device_type": "d3d12va",
+            "sw_format": "d3d12"
+          },
+          {
+            "device_type": "cuda",
+            "sw_format": "cuda"
+          }
+        ]
+      }
+    },
+    {
+      "phase": "matrix",
+      "status": "ok",
+      "h264_nv12_cuda_download": {
+        "frames": 24,
+        "frame_formats": [
+          "nv12"
+        ],
+        "cpu_bytes": 298598400,
+        "hw_owned": false,
+        "close_ok": true
+      },
+      "h264_nv12_cuda_resident": {
+        "frames": 24,
+        "frame_formats": [
+          "cuda"
+        ],
+        "cpu_bytes": 0,
+        "hw_owned": true,
+        "first_frame": {
+          "format": "cuda",
+          "width": 3840,
+          "height": 2160,
+          "device_id": 0
+        },
+        "consumption_probe": {
+          "planes": "ok n=2",
+          "dlpack_device": "ok (2, 0)",
+          "dlpack": "ok capsule=PyCapsule",
+          "to_ndarray": "ok（若为设备内存则值得怀疑，逐帧核对）"
+        },
+        "close_ok": true
+      },
+      "h264_nv12_d3d11va_resident": {
+        "status": "error",
+        "error": "InvalidDataError: [Errno 1094995529] Invalid data found when processing input: 'avcodec_send_packet()'"
+      },
+      "h265_p010_cuda_resident": {
+        "frames": 24,
+        "frame_formats": [
+          "cuda"
+        ],
+        "cpu_bytes": 0,
+        "hw_owned": true,
+        "first_frame": {
+          "format": "cuda",
+          "width": 3840,
+          "height": 2160,
+          "device_id": 0
+        },
+        "consumption_probe": {
+          "planes": "ok n=2",
+          "dlpack_device": "ok (2, 0)",
+          "dlpack": "ok capsule=PyCapsule",
+          "to_ndarray": "unavailable: ValueError: Conversion to numpy array with format `p010le` is not yet supported"
+        },
+        "close_ok": true
+      },
+      "h265_p010_d3d11va_resident": {
+        "status": "error",
+        "error": "MemoryError: [Errno 12] Cannot allocate memory: 'avcodec_send_packet()'"
+      }
+    },
+    {
+      "phase": "lifetime",
+      "status": "ok",
+      "rounds": [
+        {
+          "round": 0,
+          "decoded_all_frames": 743,
+          "eof_close_ok": true
+        },
+        {
+          "round": 1,
+          "decoded_all_frames": 743,
+          "eof_close_ok": true
+        }
+      ]
+    },
+    {
+      "phase": "correctness_cuda",
+      "status": "ok",
+      "frames_compared": 6,
+      "y_plane_md5_matches": 6,
+      "reference_meta": {
+        "pitch": 3840,
+        "row_bytes": 3840,
+        "height": 2160
+      },
+      "resident_first_capsule": {
+        "capsule_name": "dltensor",
+        "device_type": 2,
+        "device_id": 0,
+        "ndim": 2,
+        "itemsize": 1,
+        "shape": [
+          2160,
+          3840
+        ],
+        "strides": [
+          4096,
+          1
+        ]
+      },
+      "byte_equal_verdict": true
+    }
+  ],
+  "issues": []
+}

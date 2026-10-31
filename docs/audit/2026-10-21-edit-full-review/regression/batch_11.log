@@ -1,0 +1,34 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 353 items
+
+tests/edit/test_clip_timeline_color_frame_mapping.py ................... [  5%]
+.................                                                        [ 10%]
+tests/edit/test_clip_transform_handle_controller.py ....                 [ 11%]
+tests/edit/test_clip_transform_matrix_parity.py ..................       [ 16%]
+tests/edit/test_color_stack.py ........................................  [ 27%]
+tests/edit/test_color_stack_preview_grade.py ...                         [ 28%]
+tests/edit/test_commands_no_duplicate_definitions.py .......             [ 30%]
+tests/edit/test_comp_clip_promotion_lifecycle.py ....................    [ 36%]
+tests/edit/test_comp_clip_reset.py .......................               [ 42%]
+tests/edit/test_comp_clip_settings.py ...................                [ 48%]
+tests/edit/test_comp_clip_settings_dialog_ui.py .....                    [ 49%]
+tests/edit/test_comp_clip_timeline_export.py ............                [ 52%]
+tests/edit/test_comp_clip_timeline_preview.py .......................... [ 60%]
+..........                                                               [ 63%]
+tests/edit/test_composite_direct_entry_does_not_mutate_project.py ...... [ 64%]
+.......                                                                  [ 66%]
+tests/edit/test_composite_failure_no_silent_fallback.py ...              [ 67%]
+tests/edit/test_composite_graph_data.py ................................ [ 76%]
+.........................                                                [ 83%]
+tests/edit/test_consolidate.py ..............                            [ 87%]
+tests/edit/test_content_state_transactions.py ..........                 [ 90%]
+tests/edit/test_crop_render_stage.py ....................                [ 96%]
+tests/edit/test_custom_transitions.py .............                      [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_11.xml -
+============================= 353 passed in 11.36s =============================

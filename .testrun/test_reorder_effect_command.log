@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_reorder_effect_command.py ......                         [100%]
+
+============================== 6 passed in 6.24s ===============================

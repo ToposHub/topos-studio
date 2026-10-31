@@ -1,0 +1,152 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 1330 items
+
+tests/edit/test_timeline_clip_speed.py ............                      [  0%]
+tests/edit/test_timeline_color_grade_lut.py ....                         [  1%]
+tests/edit/test_timeline_command_regressions.py ........................ [  3%]
+.......................                                                  [  4%]
+tests/edit/test_timeline_context_menu_guards.py ..                       [  4%]
+tests/edit/test_timeline_copy_paste.py ...........                       [  5%]
+tests/edit/test_timeline_decode_scheduler.py ........................... [  7%]
+.................                                                        [  9%]
+tests/edit/test_timeline_disable_shortcut.py ..                          [  9%]
+tests/edit/test_timeline_effect_drop_target.py ...                       [  9%]
+tests/edit/test_timeline_export.py ...............................sssss. [ 12%]
+.......                                                                  [ 12%]
+tests/edit/test_timeline_export_effects.py ............................. [ 14%]
+                                                                         [ 14%]
+tests/edit/test_timeline_export_planar_passthrough.py .................. [ 16%]
+.....................................                                    [ 19%]
+tests/edit/test_timeline_external_file_drop.py .......                   [ 19%]
+tests/edit/test_timeline_frame_mapper.py ...................             [ 20%]
+tests/edit/test_timeline_gpu_compositor.py ...................           [ 22%]
+tests/edit/test_timeline_gpu_export_renderer.py ........................ [ 24%]
+...........................                                              [ 26%]
+tests/edit/test_timeline_graphics_backend_selection.py .....             [ 26%]
+tests/edit/test_timeline_hit_and_drop.py ........................        [ 28%]
+tests/edit/test_timeline_interaction_stopgaps.py .............           [ 29%]
+tests/edit/test_timeline_link_integrity.py .........                     [ 30%]
+tests/edit/test_timeline_linked_av_regressions.py ...............        [ 31%]
+tests/edit/test_timeline_marker.py ..................                    [ 32%]
+tests/edit/test_timeline_metal_effect_coverage.py ...................... [ 34%]
+............................................                             [ 37%]
+tests/edit/test_timeline_metal_export_renderer.py ...................... [ 39%]
+........................................................................ [ 44%]
+..............                                                           [ 45%]
+tests/edit/test_timeline_metal_prefetch.py ...                           [ 45%]
+tests/edit/test_timeline_occlusion.py .................................. [ 48%]
+.................................                                        [ 50%]
+tests/edit/test_timeline_occlusion_export_seam.py .........              [ 51%]
+tests/edit/test_timeline_occlusion_preview_seam.py ...........           [ 52%]
+tests/edit/test_timeline_occlusion_real_media.py .............           [ 53%]
+tests/edit/test_timeline_ops.py ........................................ [ 56%]
+....                                                                     [ 56%]
+tests/edit/test_timeline_p7_regression.py .s............................ [ 58%]
+..........                                                               [ 59%]
+tests/edit/test_timeline_panel_auto_cache_playback.py ...                [ 59%]
+tests/edit/test_timeline_panel_zoom_coalescing.py .......                [ 60%]
+tests/edit/test_timeline_playhead_style.py .                             [ 60%]
+tests/edit/test_timeline_preview_renderer.py ........................... [ 62%]
+........................................................................ [ 67%]
+....................ERROR: Render error for frame 18: Failed to composite layers
+...ERROR: Render error for frame 0: Failed to composite layers
+..........ERROR: Render error for frame 50: Failed to composite layers
+.ERROR: Render error for frame 50: Failed to composite layers
+....................ERROR: Render error for frame 0: Failed to composite layers
+ERROR: Render error for frame 99: Failed to composite layers
+.ERROR: Render error for frame 0: Failed to composite layers
+.ERROR: Render error for frame 0: Failed to composite layers
+.                [ 72%]
+tests/edit/test_timeline_range_bar.py .........................          [ 74%]
+tests/edit/test_timeline_render_plan.py ................................ [ 76%]
+........................                                                 [ 78%]
+tests/edit/test_timeline_ripple_delete.py ......                         [ 78%]
+tests/edit/test_timeline_shortcuts_migration.py .......                  [ 79%]
+tests/edit/test_timeline_single_layer_fast_path.py .....                 [ 79%]
+tests/edit/test_timeline_thumbnail_recovery.py ...                       [ 79%]
+tests/edit/test_timeline_thumbnail_scheduler.py ....................     [ 81%]
+tests/edit/test_timeline_tool_acceptance.py ..................           [ 82%]
+tests/edit/test_timeline_track_management.py ................            [ 83%]
+tests/edit/test_timeline_transport_shortcuts.py ..                       [ 84%]
+tests/edit/test_timeline_ux_stopgaps.py ..s..F.                          [ 84%]
+tests/edit/test_timeline_view_layout.py ................................ [ 87%]
+......................................                                   [ 89%]
+tests/edit/test_timeline_visibility_render.py ...........                [ 90%]
+tests/edit/test_title_templates.py .............                         [ 91%]
+tests/edit/test_topos_package_log_roundtrip.py ....                      [ 92%]
+tests/edit/test_track_header_controls.py ...                             [ 92%]
+tests/edit/test_track_lock_guard_and_source_range.py ........            [ 92%]
+tests/edit/test_track_sync_lock.py ...........                           [ 93%]
+tests/edit/test_transition_and_slide_transactions.py .........           [ 94%]
+tests/edit/test_transition_double_click.py .................             [ 95%]
+tests/edit/test_transition_effects.py .....                              [ 96%]
+tests/edit/test_transition_mask_gpu.py ......                            [ 96%]
+tests/edit/test_transition_preview_mode.py F...                          [ 96%]
+tests/edit/test_trim_professional.py ..............................      [ 99%]
+tests/edit/test_workspace_presets.py .............                       [100%]
+
+=================================== FAILURES ===================================
+_________________ test_set_clips_keeps_full_selection_context __________________
+tests/edit/test_timeline_ux_stopgaps.py:177: in test_set_clips_keeps_full_selection_context
+    EditPropertiesPanel.set_clips(panel, [a, b], fps=24.0)
+src/features/edit/ui/edit_properties_panel.py:2194: in set_clips
+    self.refresh_clip_widgets_from_snapshots()
+src/features/edit/ui/edit_properties_panel.py:2568: in refresh_clip_widgets_from_snapshots
+    section = self._sections.get(f"clip:{clip_id}:{group}")
+              ^^^^^^^^^^^^^^
+E   RuntimeError: super-class __init__() of type EditPropertiesPanel was never called
+_______________ test_transition_library_defaults_to_static_icons _______________
+tests/edit/test_transition_preview_mode.py:22: in test_transition_library_defaults_to_static_icons
+    assert panel._transition_preview_mode == "icon"
+E   AssertionError: assert 'animated' == 'icon'
+E
+E     - icon
+E     + animated
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/validation/edit-batch-7.xml -
+=========================== short test summary info ============================
+FAILED tests/edit/test_timeline_ux_stopgaps.py::test_set_clips_keeps_full_selection_context
+FAILED tests/edit/test_transition_preview_mode.py::test_transition_library_defaults_to_static_icons
+================== 2 failed, 1321 passed, 7 skipped in 51.10s ==================
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed
+INFO: VtSession: destroyed

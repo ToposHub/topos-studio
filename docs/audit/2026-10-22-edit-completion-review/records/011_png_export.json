@@ -1,0 +1,118 @@
+{
+  "ok": true,
+  "result": {
+    "codecs": [
+      [
+        "PNG Sequence",
+        "png_sequence"
+      ],
+      [
+        "TIFF Sequence",
+        "tiff_sequence"
+      ],
+      [
+        "Topos Image Sequence",
+        "topos_image_sequence"
+      ]
+    ],
+    "preflight": "PreflightResult(issues=[PreflightIssue(severity='warning', code='audio.codec_incompatible', message='Audio codec “aac” is not supported in “”. Consider mkv, mov, mp4, webm.', field='audio.codec')])",
+    "built": [
+      {
+        "schema_version": 4,
+        "job_id": "67a1c67c-21bf-4acc-8ba2-25dffa765d33",
+        "project_id": "5250842e-6e01-469b-a395-11783ddb7ccc",
+        "project_name": "Round7Audit20261022",
+        "project_revision": 9,
+        "timeline_id": "7c10ee77-f401-4e86-82f4-32beccf728db",
+        "timeline_name": "Timeline 1",
+        "source_kind": "timeline",
+        "range_type": "custom",
+        "start_frame": 0,
+        "end_frame": 3,
+        "preset_id": "custom",
+        "video_config": {
+          "container": "",
+          "codec": "png_sequence",
+          "profile": null,
+          "resolution": [
+            320,
+            180
+          ],
+          "fps": null,
+          "quality_mode": "vbr",
+          "quality_value": 12000000,
+          "gif_color_count": 256,
+          "pixel_format": "yuv420p",
+          "color_space": "rec709",
+          "bit_depth": 8,
+          "alpha": false,
+          "alpha_budget_policy": "record",
+          "extra": {}
+        },
+        "audio_config": {
+          "include_audio": true,
+          "codec": "aac",
+          "sample_rate": 44100,
+          "bitrate": 128,
+          "channels": 2,
+          "stems": []
+        },
+        "subtitle_config": {
+          "mode": "off",
+          "track_id": null
+        },
+        "naming_config": {
+          "render_mode": "single_clip",
+          "filename_use": "custom",
+          "custom_name": "round7_gui_png",
+          "file_suffix": "",
+          "unique_filenames": true,
+          "unique_filename_position": "suffix",
+          "unique_filename_digits": 4,
+          "add_source_frame_count": false,
+          "frame_handles": 0
+        },
+        "output_path": "/tmp/topos-round7-gui/exports/round7_gui_png",
+        "overwrite_policy": "ask",
+        "allow_placeholder_clips": false,
+        "status": "pending",
+        "progress": 0.0,
+        "export_fps": 0.0,
+        "error": "",
+        "retry_count": 0,
+        "created_at": 1792632287.7031438,
+        "started_at": 0.0,
+        "finished_at": 0.0,
+        "name": "round7_gui_png",
+        "unknown_fields": {}
+      }
+    ],
+    "queue": [
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_custom_h264.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_after_edit.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_nested.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_nonactive.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_gui_png"
+      }
+    ]
+  }
+}

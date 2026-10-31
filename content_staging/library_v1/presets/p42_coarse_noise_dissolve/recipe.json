@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P42",
+  "name": "粗噪溶解",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "大块噪斑溶解；scale 4–8，softness 0.06–0.12 让块斑边缘柔化",
+  "component": "X06 noise_dissolve（生产 lib1_noise_dissolve，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/noise_dissolve）",
+  "dependencies": {
+    "component_id": "X06",
+    "component_slug": "noise_dissolve",
+    "component_kind": "transition",
+    "transition_type": "lib1_noise_dissolve",
+    "user_json_base": false
+  },
+  "params": {
+    "noise_mode": "Value",
+    "scale": 6,
+    "seed": 3,
+    "softness": 0.08
+  },
+  "notes": "X06 生产 base lib1_noise_dissolve（transition_catalog 已注册）；base 不在 custom_transitions._BASE_TYPES 白名单（未接入），不产出用户转场 JSON。"
+}

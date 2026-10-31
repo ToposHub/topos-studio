@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "error": "'MediaPoolPanel' object has no attribute 'create_multicam_requested'",
+  "traceback": "Traceback (most recent call last):\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/scripts/interactive_session.py\", line 85, in poll_commands\n    exec(compile(source, str(path), \"exec\"), namespace)\n  File \"/tmp/topos-edit-audit-20261021/commands/023_multicam_nested.py\", line 5, in <module>\n    Each step runs in Qt's GUI thread. This driver only adds test instrumentation;\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'MediaPoolPanel' object has no attribute 'create_multicam_requested'. Did you mean: 'create_multicam_group_requested'?\n"
+}

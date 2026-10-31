@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+collected 17 items
+
+tests/shared/test_m17_gpu_scale_readback.py .....                        [ 29%]
+tests/shared/test_m18_bundle_abi_audit.py ......                         [ 64%]
+tests/shared/test_m18_bundle_abi_audit_pe.py ......                      [100%]
+
+=============================== warnings summary ===============================
+tests/shared/test_m17_gpu_scale_readback.py:15
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/shared/test_m17_gpu_scale_readback.py:15: PytestUnknownMarkWarning: Unknown pytest.mark.shared_core - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    pytestmark = pytest.mark.shared_core
+
+tests/shared/test_m18_bundle_abi_audit.py:14
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/shared/test_m18_bundle_abi_audit.py:14: PytestUnknownMarkWarning: Unknown pytest.mark.shared_core - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    pytestmark = pytest.mark.shared_core
+
+tests/shared/test_m18_bundle_abi_audit_pe.py:16
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/shared/test_m18_bundle_abi_audit_pe.py:16: PytestUnknownMarkWarning: Unknown pytest.mark.shared_core - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    pytestmark = pytest.mark.shared_core
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 17 passed, 3 warnings in 3.54s ========================
+

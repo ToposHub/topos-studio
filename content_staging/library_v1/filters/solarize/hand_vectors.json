@@ -1,0 +1,195 @@
+{
+  "component": "F17 solarize",
+  "method": "手算：按 README §公式逐式笔算（m=smoothstep(thr-h,thr+h,v) → fold=mix(v,2thr-v,m) → Luma 档亮度平移保色度 / RGB 档逐通道 → amount 混合），独立一次性脚本（纯 Python，smoothstep 分支直接展开）计算，与 oracle/GLSL 无代码复用；容差 1e-6（float64 语义）。",
+  "params": {
+    "threshold": 1.0,
+    "softness": 0.0,
+    "channel_mode": "Luma",
+    "amount": 1.0
+  },
+  "vectors": [
+    {
+      "input": [
+        0.3,
+        0.3,
+        0.3
+      ],
+      "expected": [
+        0.3,
+        0.3,
+        0.3
+      ],
+      "note": "luma=0.3<thr：不动（暗部保留）"
+    },
+    {
+      "input": [
+        2.0,
+        1.0,
+        0.5
+      ],
+      "expected": [
+        1.647,
+        0.647,
+        0.147
+      ],
+      "note": "luma=1.1765>thr→fold=0.8235：整色平移 Δ=-0.353（色度向量保留）"
+    },
+    {
+      "input": [
+        4.5,
+        4.5,
+        4.5
+      ],
+      "expected": [
+        -2.5,
+        -2.5,
+        -2.5
+      ],
+      "note": "超白 luma=4.5→fold=-2.5：线性折返无 clamp，HDR 折出负值（显式策略）"
+    },
+    {
+      "input": [
+        -0.25,
+        -0.3,
+        -0.2
+      ],
+      "expected": [
+        -0.25,
+        -0.3,
+        -0.2
+      ],
+      "note": "负值 luma=-0.2751<thr：原样保留（符号不翻、无裁剪）"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "params": {
+        "channel_mode": "RGB"
+      },
+      "input": [
+        2.0,
+        1.0,
+        0.5
+      ],
+      "expected": [
+        0.0,
+        1.0,
+        0.5
+      ],
+      "note": "RGB 档逐通道：2>1→0，1=thr→1（连续点），0.5<thr 不动"
+    },
+    {
+      "params": {
+        "channel_mode": "RGB"
+      },
+      "input": [
+        12.0,
+        0.1,
+        4.5
+      ],
+      "expected": [
+        -10.0,
+        0.1,
+        -2.5
+      ],
+      "note": "RGB 档 HDR：12→-10、4.5→-2.5（线性折返），0.1 不动"
+    },
+    {
+      "params": {
+        "softness": 0.5
+      },
+      "input": [
+        0.75,
+        0.75,
+        0.75
+      ],
+      "expected": [
+        0.828125,
+        0.828125,
+        0.828125
+      ],
+      "note": "软过渡 h=0.5：v=0.75 处 m=smoothstep(0.5,1.5,0.75)=0.15625，部分折返"
+    },
+    {
+      "params": {
+        "softness": 0.5
+      },
+      "input": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "expected": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "note": "同 softness v=1.5 在过渡带顶（m=1）：完全折返 0.5——软窗单调"
+    },
+    {
+      "params": {
+        "threshold": 2.0
+      },
+      "input": [
+        3.0,
+        2.0,
+        1.0
+      ],
+      "expected": [
+        2.7192,
+        1.7192,
+        0.7192
+      ],
+      "note": "阈值可调：thr=2 时 luma=2.1404→fold=1.8596，平移 Δ=-0.2808"
+    },
+    {
+      "params": {
+        "amount": 0.5
+      },
+      "input": [
+        2.0,
+        1.0,
+        0.5
+      ],
+      "expected": [
+        1.8235,
+        0.8235,
+        0.3235
+      ],
+      "note": "amount 混合：0.5×(原值+折返值)"
+    },
+    {
+      "params": {
+        "channel_mode": "RGB",
+        "softness": 0.3
+      },
+      "input": [
+        1.2,
+        0.9,
+        0.6
+      ],
+      "expected": [
+        0.8296296,
+        0.9518519,
+        0.6
+      ],
+      "note": "RGB+软过渡组合：h=0.3，r 在带上部 m=0.9259、g 在带内 m=0.2593、b 带外不动"
+    },
+    {
+      "params": {
+        "amount": 0.0
+      },
+      "input": [
+        4.5,
+        -0.25,
+        12.0
+      ],
+      "expected": [
+        4.5,
+        -0.25,
+        12.0
+      ],
+      "note": "amount=0 精确恒等（早退路径，含 HDR/负值）"
+    }
+  ]
+}

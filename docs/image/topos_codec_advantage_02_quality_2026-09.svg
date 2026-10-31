@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="2000" viewBox="0 0 1600 2000">
+  <title>TOPOS 优势 02：画质与创作空间</title>
+  <defs>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#03111d" stop-opacity=".36"/><stop offset=".52" stop-color="#04101d" stop-opacity=".91"/><stop offset="1" stop-color="#020811" stop-opacity=".98"/></linearGradient>
+    <linearGradient id="cyan" x1="0" x2="1"><stop stop-color="#40d9ff"/><stop offset="1" stop-color="#7ef0d1"/></linearGradient>
+    <linearGradient id="amber" x1="0" x2="1"><stop stop-color="#ffb44a"/><stop offset="1" stop-color="#ff6d8a"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#000" flood-opacity=".46"/></filter>
+    <style>
+      .cn{font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif}.white{fill:#f2f7fb}.muted{fill:#a9bdcb}.cyan{fill:#7fe6ff}.amber{fill:#ffc56a}.card{fill:#071725;fill-opacity:.91;stroke:#2b5870;stroke-width:2}.body{font-size:29px}.small{font-size:24px}
+    </style>
+  </defs>
+  <image x="0" y="0" width="1600" height="2000" preserveAspectRatio="xMidYMid slice" xlink:href="assets/topos_codec_poster_bg.png"/>
+  <rect width="1600" height="2000" fill="url(#shade)"/>
+  <g class="cn">
+    <text x="82" y="118" class="cyan" font-size="24" font-weight="800" letter-spacing="5">TOPOS CODEC / ADVANTAGE 02</text>
+    <text x="82" y="220" class="white" font-size="70" font-weight="800">画质优势：保留更完整的创作空间</text>
+    <text x="86" y="280" class="muted" font-size="29">从色度采样，到线性 HDR，再到相机 CFA，按创作阶段选择像素域。</text>
+    <rect x="82" y="325" width="440" height="7" rx="3" fill="url(#cyan)"/>
+  </g>
+
+  <g filter="url(#shadow)" class="cn">
+    <rect x="70" y="420" width="700" height="330" rx="26" class="card"/>
+    <rect x="70" y="420" width="11" height="330" rx="5" fill="url(#cyan)"/>
+    <text x="112" y="482" class="cyan" font-size="24" font-weight="800" letter-spacing="4">4:2:2 / EDITING</text>
+    <text x="112" y="540" class="white" font-size="43" font-weight="800">高效编辑与代理</text>
+    <text x="112" y="595" class="white body">Proxy · LT · 422 · HQ · LP</text>
+    <text x="112" y="643" class="muted small">保留时间线所需的色彩信息，兼顾体积与访问速度。</text>
+    <text x="112" y="690" class="muted small">适合剪辑、审片、远程流转与缓存。</text>
+
+    <rect x="830" y="420" width="700" height="330" rx="26" class="card"/>
+    <rect x="830" y="420" width="11" height="330" rx="5" fill="url(#amber)"/>
+    <text x="872" y="482" class="amber" font-size="24" font-weight="800" letter-spacing="4">4:4:4 / GBR</text>
+    <text x="872" y="540" class="white" font-size="43" font-weight="800">完整色度与键控空间</text>
+    <text x="872" y="595" class="white body">4444 · 4444 XQ · GBR 平面</text>
+    <text x="872" y="643" class="muted small">全色度分辨率，适合 VFX、抠像、合成与高质量交换。</text>
+    <text x="872" y="690" class="muted small">不用把色度细节提前压缩进 4:2:2。</text>
+
+    <rect x="70" y="800" width="700" height="330" rx="26" class="card"/>
+    <rect x="70" y="800" width="11" height="330" rx="5" fill="url(#amber)"/>
+    <text x="112" y="862" class="amber" font-size="24" font-weight="800" letter-spacing="4">CFA / RAW</text>
+    <text x="112" y="920" class="white" font-size="43" font-weight="800">保留传感器结构</text>
+    <text x="112" y="975" class="white body">12-bit LOG0 · 16-bit linear</text>
+    <text x="112" y="1023" class="muted small">四相位 R / Gr / Gb / B 平面直出，推迟 debayer 与 ISP 决策。</text>
+    <text x="112" y="1070" class="muted small">适合摄影机 RAW、归档和后期重解释。</text>
+
+    <rect x="830" y="800" width="700" height="330" rx="26" class="card"/>
+    <rect x="830" y="800" width="11" height="330" rx="5" fill="url(#cyan)"/>
+    <text x="872" y="862" class="cyan" font-size="24" font-weight="800" letter-spacing="4">HALF / LINEAR</text>
+    <text x="872" y="920" class="white" font-size="43" font-weight="800">线性 HDR 中间片</text>
+    <text x="872" y="975" class="white body">toos Low / Medium / High / Ultra</text>
+    <text x="872" y="1023" class="muted small">16-bit HALF · GBR 4:4:4 · transfer linear</text>
+    <text x="872" y="1070" class="muted small">适合线性合成、缓存与跨软件交换。</text>
+  </g>
+
+  <g class="cn">
+    <text x="82" y="1245" class="white" font-size="31" font-weight="800" letter-spacing="3">画质语义可追溯</text>
+    <line x1="82" y1="1280" x2="1518" y2="1280" stroke="#2d657f" stroke-width="2"/>
+    <g transform="translate(82 1370)"><circle r="24" fill="#11374a" stroke="#4bd7ef"/><text x="0" y="9" text-anchor="middle" class="cyan" font-size="25" font-weight="800">1</text><text x="52" y="8" class="white body" font-weight="700">同源输入</text><text x="52" y="49" class="muted small">比较不同档位时使用同一母版</text></g>
+    <g transform="translate(82 1490)"><circle r="24" fill="#3c2b19" stroke="#ffbc59"/><text x="0" y="9" text-anchor="middle" class="amber" font-size="25" font-weight="800">2</text><text x="52" y="8" class="white body" font-weight="700">同一像素语义</text><text x="52" y="49" class="muted small">位深、色度、传输函数明确记录</text></g>
+    <g transform="translate(82 1610)"><circle r="24" fill="#11374a" stroke="#4bd7ef"/><text x="0" y="9" text-anchor="middle" class="cyan" font-size="25" font-weight="800">3</text><text x="52" y="8" class="white body" font-weight="700">同一测量口径</text><text x="52" y="49" class="muted small">PSNR / SSIM / 多代 / 真实素材按门禁留证</text></g>
+
+    <rect x="830" y="1340" width="688" height="370" rx="24" fill="#071725" fill-opacity=".84" stroke="#2b5870"/>
+    <text x="872" y="1405" class="amber" font-size="28" font-weight="800">ProRes 风格命名，但不混淆能力</text>
+    <text x="872" y="1460" class="white body">422 Proxy / LT / 422 / HQ / LP</text>
+    <text x="872" y="1508" class="white body">4444 / 4444 XQ</text>
+    <text x="872" y="1570" class="muted small">档位名用于质量定位；位深、像素域、</text>
+    <text x="872" y="1607" class="muted small">容器与限制仍由能力清单和元数据定义。</text>
+    <text x="872" y="1662" class="cyan small" font-weight="700">不把“视觉透明”写成“所有路径数学无损”</text>
+    <rect x="82" y="1725" width="1436" height="170" rx="22" fill="#071725" fill-opacity=".84" stroke="#2b5870"/>
+    <text x="120" y="1780" class="amber" font-size="25" font-weight="800">公开 4K 同源基准 · 合成序列友好</text>
+    <text x="120" y="1822" class="white small" font-weight="700">TOPOS 16.7–45.1 ms/帧 · PNG ≈630 ms/帧 · 约快 14–38×；相对 JPEG 约快 3–7×</text>
+    <text x="120" y="1860" class="muted" font-size="21">422 Ultra ≈5.75 MB/帧、PSNR≈55.5 dB，接近 PNG8 体积，同时保留默认 10-bit 调色空间。</text>
+    <text x="82" y="1935" class="muted" font-size="20">TOPOS Codec V1 Preview · 画质结论以同源实测报告为准 · 02 / 05</text>
+  </g>
+</svg>

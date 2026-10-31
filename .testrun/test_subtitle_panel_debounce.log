@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 11 items
+
+tests/edit/test_subtitle_panel_debounce.py ...........                   [100%]
+
+============================= 11 passed in 29.92s ==============================

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_multicam_sync_result_dialog.py ......                    [100%]
+
+============================== 6 passed in 10.20s ==============================

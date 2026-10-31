@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 123 items
+
+tests/edit/test_round4_project_transactions.py ..........                [  8%]
+tests/edit/test_round4_settings_history.py ...........                   [ 17%]
+tests/edit/test_round4_interaction_commit.py ............                [ 26%]
+tests/edit/test_round3_a_roll_focus.py ....                              [ 30%]
+tests/edit/test_round3_a_interaction.py .............                    [ 40%]
+tests/edit/test_recheck_c_multiselect.py ....                            [ 43%]
+tests/edit/test_edit_properties_panel_layout.py ...................      [ 59%]
+tests/composite/test_drag_value_widget.py ....................           [ 75%]
+tests/composite/test_drag_value_math.py .........                        [ 82%]
+tests/app/test_edit_controller_timeline_management.py .....              [ 86%]
+tests/app/test_edit_controller_timeline_metadata.py ...                  [ 89%]
+tests/edit/test_revision_and_source_av_routing.py ......                 [ 94%]
+tests/edit/test_timeline_ux_stopgaps.py ..s....                          [100%]
+
+======================== 122 passed, 1 skipped in 5.64s ========================

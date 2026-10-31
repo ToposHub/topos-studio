@@ -1,0 +1,933 @@
+{
+  "nodes": {
+    "blur": {
+      "title": "模糊",
+      "description": "多类型模糊,支持单通道控制",
+      "blur_type": {
+        "box": "方框模糊 (Box)",
+        "gaussian": "高斯模糊 (Gaussian)",
+        "bilateral": "双边滤波 (Bilateral)",
+        "motion": "运动模糊 (Motion)",
+        "bokeh": "镜头模糊 (Bokeh)"
+      },
+      "edge_policy": {
+        "clamp": "钳制 (Clamp)",
+        "wrap": "环绕 (Wrap)",
+        "mirror": "镜像 (Mirror)"
+      },
+      "quality": {
+        "fast": "快速 (Fast)",
+        "normal": "标准 (Normal)",
+        "high": "高质量 (High)"
+      },
+      "aperture_blades": {
+        "circle": "圆形 (Circle)",
+        "5": "5 叶片",
+        "6": "6 叶片",
+        "8": "8 叶片"
+      },
+      "params": {
+        "blur_type": "模糊类型",
+        "radius_x": "半径 X",
+        "radius_y": "半径 Y",
+        "radius": "半径",
+        "angle": "角度",
+        "motion_source": "运动来源",
+        "shutter": "快门",
+        "edge_preserve": "边缘保留",
+        "aperture_blades": "光圈叶片",
+        "anamorphic": "变形拉伸",
+        "highlight_gain": "高光增益",
+        "edge_policy": "边缘策略",
+        "quality": "质量",
+        "channel_r": "红通道",
+        "channel_g": "绿通道",
+        "channel_b": "蓝通道",
+        "channel_a": "透明通道",
+        "mix": "混合",
+        "process_alpha": "处理 Alpha"
+      }
+    },
+    "transform": {
+      "title": "变换",
+      "pivot_mode": {
+        "center": "居中",
+        "custom": "自定义"
+      },
+      "filter": {
+        "linear": "线性 (双线性)",
+        "nearest": "最近邻 (硬边)"
+      },
+      "params": {
+        "translate_x": "位移 X",
+        "translate_y": "位移 Y",
+        "translate": "位移",
+        "scale_x": "缩放 X",
+        "scale_y": "缩放 Y",
+        "scale": "缩放",
+        "rotation": "旋转",
+        "pivot_mode": "轴心点模式",
+        "pivot_x": "轴心点 X",
+        "pivot_y": "轴心点 Y",
+        "pivot": "轴心点",
+        "filter": "采样方式"
+      }
+    },
+    "constant": {
+      "title": "纯色",
+      "mode": {
+        "solid": "纯色",
+        "checker": "棋盘格",
+        "gradient": "线性渐变",
+        "radial": "径向渐变"
+      },
+      "params": {
+        "width": "宽度",
+        "height": "高度",
+        "mode": "类型",
+        "color_r": "颜色 R",
+        "color_g": "颜色 G",
+        "color_b": "颜色 B",
+        "color_a": "颜色 A",
+        "color2_r": "颜色 2 R",
+        "color2_g": "颜色 2 G",
+        "color2_b": "颜色 2 B",
+        "color2_a": "颜色 2 A",
+        "checker_size": "棋盘格大小",
+        "start_x": "起点 X",
+        "start_y": "起点 Y",
+        "start": "起点",
+        "end_x": "终点 X",
+        "end_y": "终点 Y",
+        "end": "终点",
+        "center_x": "中心 X",
+        "center_y": "中心 Y",
+        "center": "中心",
+        "radial_radius": "径向半径",
+        "feather": "羽化",
+        "format_name": "格式",
+        "size_preset": "尺寸预设",
+        "color_hex": "颜色值",
+        "color2_hex": "颜色 2 值"
+      }
+    },
+    "merge": {
+      "title": "合并",
+      "blend_mode": {
+        "over": "覆盖 (Normal)",
+        "under": "衬底 (Under)",
+        "add": "相加 (Add)",
+        "subtract": "相减 (Subtract)",
+        "multiply": "正片叠底 (Multiply)",
+        "screen": "滤色 (Screen)",
+        "overlay": "叠加 (Overlay)",
+        "difference": "差值 (Difference)",
+        "divide": "划分 (Divide)",
+        "min": "最小值 (Min)",
+        "max": "最大值 (Max)",
+        "average": "平均 (Average)",
+        "copy": "复制 (Copy)",
+        "stencil": "模具 (Stencil)",
+        "mask": "遮罩 (Mask)",
+        "in": "内部 (In)",
+        "out": "外部 (Out)",
+        "atop": "之上 (Atop)",
+        "xor": "异或 (Xor)",
+        "color-dodge": "颜色减淡 (Color Dodge)",
+        "color-burn": "颜色加深 (Color Burn)",
+        "soft-light": "柔光 (Soft Light)",
+        "hard-light": "强光 (Hard Light)",
+        "linear-light": "线性光 (Linear Light)",
+        "hue": "色相 (Hue)",
+        "saturation": "饱和度 (Saturation)",
+        "color": "颜色 (Color)",
+        "luminosity": "明度 (Luminosity)"
+      },
+      "format_policy": {
+        "from_b": "跟随背景 (B)",
+        "from_a": "跟随前景 (A)",
+        "larger": "取较大",
+        "smaller": "取较小"
+      },
+      "bbox_policy": {
+        "union": "合并区域",
+        "intersection": "相交区域",
+        "a": "前景区域 (A)",
+        "b": "背景区域 (B)"
+      },
+      "alpha_policy": {
+        "auto": "自动",
+        "premult_force": "强制预乘",
+        "straight_force": "强制直通",
+        "output_straight": "输出直通"
+      },
+      "mask_channel": {
+        "luma": "亮度",
+        "red": "红 (R)",
+        "green": "绿 (G)",
+        "blue": "蓝 (B)",
+        "alpha": "透明度 (A)"
+      },
+      "params": {
+        "blend_mode": "混合模式",
+        "opacity": "不透明度",
+        "mix": "混合",
+        "format_policy": "格式策略",
+        "bbox_policy": "范围策略",
+        "alpha_policy": "Alpha 策略",
+        "alpha_clamp": "Alpha 钳制",
+        "mask_channel": "遮罩通道",
+        "mask_invert": "反转遮罩"
+      }
+    },
+    "crop": {
+      "title": "裁剪",
+      "outside": {
+        "black": "黑色",
+        "transparent": "透明",
+        "repeat": "重复",
+        "mirror": "镜像"
+      },
+      "params": {
+        "x": "X",
+        "y": "Y",
+        "width": "宽度",
+        "height": "高度",
+        "reformat": "改变画布尺寸",
+        "outside": "外部填充"
+      }
+    },
+    "cornerpin": {
+      "title": "四角定位 (CornerPin)",
+      "interpolation": {
+        "bilinear": "双线性 (Bilinear)",
+        "bicubic": "双三次 (Bicubic)"
+      },
+      "params": {
+        "to1_x": "到 1 X",
+        "to1_y": "到 1 Y",
+        "to2_x": "到 2 X",
+        "to2_y": "到 2 Y",
+        "to3_x": "到 3 X",
+        "to3_y": "到 3 Y",
+        "to4_x": "到 4 X",
+        "to4_y": "到 4 Y",
+        "from1_x": "从 1 X",
+        "from1_y": "从 1 Y",
+        "from2_x": "从 2 X",
+        "from2_y": "从 2 Y",
+        "from3_x": "从 3 X",
+        "from3_y": "从 3 Y",
+        "from4_x": "从 4 X",
+        "from4_y": "从 4 Y",
+        "interpolation": "采样方式"
+      }
+    },
+    "reformat": {
+      "title": "重设格式 (Reformat)",
+      "format_mode": {
+        "preset": "预设",
+        "custom": "自定义"
+      },
+      "preset": {
+        "SD NTSC": "SD NTSC",
+        "SD PAL": "SD PAL",
+        "HD 720": "HD 720",
+        "HD 1080": "HD 1080",
+        "HD 1080 Anamorphic": "HD 1080 变形",
+        "UHD 4K": "UHD 4K",
+        "DCI 4K": "DCI 4K",
+        "UHD 8K": "UHD 8K",
+        "Square 1024": "正方形 1024",
+        "Square 2048": "正方形 2048",
+        "Square 4096": "正方形 4096"
+      },
+      "resize_mode": {
+        "no_resize": "不缩放",
+        "fit": "适配 (Fit)",
+        "fill": "填充 (Fill)",
+        "distort": "拉伸 (Distort)",
+        "center_crop": "居中裁剪"
+      },
+      "filter": {
+        "nearest": "最近邻 (硬边)",
+        "linear": "线性 (双线性)",
+        "cubic": "三次 (Bicubic)",
+        "lanczos": "Lanczos (锐利)"
+      },
+      "params": {
+        "format_mode": "模式",
+        "preset": "预设",
+        "width": "宽度",
+        "height": "高度",
+        "resize_mode": "缩放方式",
+        "filter": "采样方式",
+        "preserve_bbox": "保留范围"
+      }
+    },
+    "glow": {
+      "title": "辉光 (Glow)",
+      "quality": {
+        "fast": "快速 (Fast)",
+        "normal": "标准 (Normal)",
+        "high": "高质量 (High)"
+      },
+      "params": {
+        "threshold": "阈值",
+        "radius": "半径",
+        "intensity": "强度",
+        "tint_r": "染色 R",
+        "tint_g": "染色 G",
+        "tint_b": "染色 B",
+        "mix": "混合",
+        "quality": "质量"
+      }
+    },
+    "shuffle": {
+      "title": "通道重排 (Shuffle)",
+      "r_from": {
+        "r": "红 (R)",
+        "g": "绿 (G)",
+        "b": "蓝 (B)",
+        "a": "透明 (A)",
+        "zero": "零 (0)",
+        "one": "一 (1)",
+        "luma": "亮度 (Luma)"
+      },
+      "g_from": {
+        "r": "红 (R)",
+        "g": "绿 (G)",
+        "b": "蓝 (B)",
+        "a": "透明 (A)",
+        "zero": "零 (0)",
+        "one": "一 (1)",
+        "luma": "亮度 (Luma)"
+      },
+      "b_from": {
+        "r": "红 (R)",
+        "g": "绿 (G)",
+        "b": "蓝 (B)",
+        "a": "透明 (A)",
+        "zero": "零 (0)",
+        "one": "一 (1)",
+        "luma": "亮度 (Luma)"
+      },
+      "a_from": {
+        "r": "红 (R)",
+        "g": "绿 (G)",
+        "b": "蓝 (B)",
+        "a": "透明 (A)",
+        "zero": "零 (0)",
+        "one": "一 (1)",
+        "luma": "亮度 (Luma)"
+      },
+      "params": {
+        "r_from": "红通道 ←",
+        "g_from": "绿通道 ←",
+        "b_from": "蓝通道 ←",
+        "a_from": "透明 ←"
+      }
+    },
+    "text": {
+      "title": "文字",
+      "description": "生成文字图层（字体、字号、对齐、描边、阴影）",
+      "per_char_mode": {
+        "fade": "淡入",
+        "slide_up": "向上滑入",
+        "slide_left": "向左滑入",
+        "scale_pop": "逐字弹出",
+        "rotate_in": "旋转入场",
+        "typewriter": "打字机"
+      },
+      "path_direction": {
+        "up": "上弯（拱形）",
+        "down": "下弯（碗形）"
+      },
+      "params": {
+        "text": "内容",
+        "caption_input_enabled": "受控字幕输入",
+        "caption_input_field": "字幕字段",
+        "font_family": "字体",
+        "font_size": "字号",
+        "font_weight": "字重",
+        "italic": "斜体",
+        "halign": "水平对齐",
+        "valign": "垂直对齐",
+        "letter_spacing": "字间距",
+        "line_spacing": "行间距",
+        "per_char_enable": "逐字动画",
+        "per_char_mode": "动画模式",
+        "per_char_delay": "字符间隔（帧）",
+        "per_char_overlap": "动画重叠",
+        "per_char_slide_distance": "滑入距离",
+        "per_char_rotation": "入场旋转",
+        "per_char_scale_from": "起始缩放",
+        "path_enable": "沿路径排布",
+        "path_radius": "弧线半径",
+        "path_arc_degrees": "弧线张角（0=自动）",
+        "path_direction": "弧线方向",
+        "translate_x": "位移 X",
+        "translate_y": "位移 Y",
+        "scale_x": "缩放 X",
+        "scale_y": "缩放 Y",
+        "rotation": "旋转",
+        "pivot_mode": "轴心模式",
+        "pivot_x": "轴心 X",
+        "pivot_y": "轴心 Y",
+        "filter": "滤波",
+        "fill_r": "填充 R",
+        "fill_g": "填充 G",
+        "fill_b": "填充 B",
+        "fill_a": "填充 A",
+        "outline_enable": "描边",
+        "outline_width": "描边宽度",
+        "outline_r": "描边 R",
+        "outline_g": "描边 G",
+        "outline_b": "描边 B",
+        "outline_a": "描边 A",
+        "shadow_enable": "阴影",
+        "shadow_offset_x": "阴影偏移 X",
+        "shadow_offset_y": "阴影偏移 Y",
+        "shadow_blur": "阴影模糊",
+        "shadow_r": "阴影 R",
+        "shadow_g": "阴影 G",
+        "shadow_b": "阴影 B",
+        "shadow_a": "阴影 A"
+      }
+    },
+    "paint": {
+      "title": "绘画",
+      "description": "绘画/克隆/擦除笔划图层（克隆修复、遮挡擦除、纯色涂抹）",
+      "params": {
+        "strokes": "笔划"
+      }
+    },
+    "particle": {
+      "title": "粒子",
+      "description": "无状态确定性 2D 粒子发射器（重力/风/湍流，弹道可复现）"
+    },
+    "mesh_warp": {
+      "title": "网格变形",
+      "description": "网格变形：拖拽格点做局部位移（AE Mesh Warp / Fusion Grid Warp）"
+    },
+    "keyer": {
+      "title": "抠像 (Keyer)",
+      "keyer_mode": {
+        "auto": "自动",
+        "chroma": "色度 (Chroma)",
+        "luma": "亮度 (Luma)",
+        "difference": "差值 (Difference)"
+      },
+      "despill_method": {
+        "none": "无",
+        "subtract": "减去",
+        "scale": "缩放"
+      },
+      "output_mode": {
+        "result": "结果",
+        "matte": "遮罩"
+      },
+      "params": {
+        "keyer_mode": "抠像方式",
+        "screen_color": "幕色",
+        "screen_color_r": "幕色 R",
+        "screen_color_g": "幕色 G",
+        "screen_color_b": "幕色 B",
+        "screen_color_hex": "幕色值",
+        "screen_balance": "色彩平衡",
+        "clip_black": "黑点",
+        "clip_white": "白点",
+        "gain": "增益",
+        "softness": "羽化",
+        "alpha_offset": "Alpha 偏移",
+        "despill_strength": "去溢出强度",
+        "despill_method": "去溢出方式",
+        "invert": "反转",
+        "output_mode": "输出方式"
+      }
+    },
+    "light_wrap": {
+      "title": "光包裹 (Light Wrap)",
+      "params": {
+        "width": "包裹宽度",
+        "intensity": "强度",
+        "brightness": "亮度",
+        "falloff": "衰减",
+        "source_alpha": "使用前景 Alpha"
+      }
+    },
+    "relight": {
+      "title": "重光照 (Relight)",
+      "light_type": {
+        "point": "点光源",
+        "directional": "平行光"
+      },
+      "params": {
+        "light_type": "光源类型",
+        "light_position_x": "光源位置 X",
+        "light_position_y": "光源位置 Y",
+        "light_position_z": "光源位置 Z",
+        "light_direction_x": "光照方向 X",
+        "light_direction_y": "光照方向 Y",
+        "light_direction_z": "光照方向 Z",
+        "intensity": "强度",
+        "color": "光源颜色",
+        "ambient": "环境光",
+        "normal_decode": "法线解码",
+        "normal_flip_y": "翻转法线 Y",
+        "normal_decode_options": {
+          "encoded": "编码 [0,1]",
+          "signed": "有符号 (-1~1)"
+        }
+      }
+    },
+    "cryptomatte_select": {
+      "title": "Cryptomatte 抠选 (Cryptomatte Select)",
+      "id_encoding": {
+        "rgba24": "RGBA24 分配器 ID",
+        "float_r": "Float R (标准 Cryptomatte)"
+      },
+      "output_mode": {
+        "matte": "Matte",
+        "isolate": "隔离显示"
+      },
+      "params": {
+        "id_encoding": "ID 编码",
+        "output_mode": "输出方式"
+      }
+    },
+    "zblur": {
+      "title": "深度模糊 (ZBlur)",
+      "depth_units": {
+        "normalized": "归一化深度",
+        "world": "世界距离"
+      },
+      "quality": {
+        "fast": "快速",
+        "normal": "正常",
+        "high": "高"
+      },
+      "params": {
+        "focus_distance": "焦点距离",
+        "focal_range": "景深范围",
+        "max_blur_radius": "最大模糊半径",
+        "bokeh_toggle": "光圈盘采样",
+        "depth_units": "深度单位",
+        "near": "近平面",
+        "far": "远平面",
+        "quality": "质量"
+      }
+    },
+    "fog": {
+      "title": "深度雾 (Fog)",
+      "depth_units": {
+        "normalized": "归一化深度",
+        "world": "世界距离"
+      },
+      "params": {
+        "color": "雾颜色",
+        "density": "浓度",
+        "start": "起始深度",
+        "end": "结束深度",
+        "depth_units": "深度单位",
+        "near": "近平面",
+        "far": "远平面"
+      }
+    },
+    "depth_matte": {
+      "title": "深度遮罩 (Depth Matte)",
+      "depth_units": {
+        "normalized": "归一化深度",
+        "world": "世界距离"
+      },
+      "params": {
+        "range_start": "区间起点",
+        "range_end": "区间终点",
+        "feather": "羽化",
+        "depth_units": "深度单位",
+        "near": "近平面",
+        "far": "远平面"
+      }
+    },
+    "godrays": {
+      "title": "体积光 (God Rays)",
+      "params": {
+        "light_x": "光源 X",
+        "light_y": "光源 Y",
+        "color": "光色",
+        "density": "密度",
+        "weight": "权重",
+        "decay": "衰减",
+        "samples": "采样数"
+      }
+    },
+    "chromatic_aberration": {
+      "title": "镜头色差 (Chromatic Aberration)",
+      "params": {
+        "offset_r": "R 偏移",
+        "offset_b": "B 偏移",
+        "center_x": "中心 X",
+        "center_y": "中心 Y",
+        "edge_boost": "边缘增强"
+      }
+    },
+    "vignette": {
+      "title": "暗角 (Vignette)",
+      "params": {
+        "amount": "强度",
+        "radius": "半径",
+        "softness": "柔和度",
+        "roundness": "圆度"
+      }
+    },
+    "lens_flare": {
+      "title": "镜头光晕 (Lens Flare)",
+      "blend_mode": {
+        "screen": "Screen",
+        "add": "叠加"
+      },
+      "params": {
+        "light_x": "光源 X",
+        "light_y": "光源 Y",
+        "color": "光色",
+        "intensity": "强度",
+        "ghost_count": "Ghost 数量",
+        "ghost_spacing": "Ghost 间距",
+        "ghost_decay": "Ghost 衰减",
+        "ghost_size": "Ghost 大小",
+        "halo_radius": "光环半径",
+        "halo_strength": "光环强度",
+        "streak_strength": "拉丝强度",
+        "streak_width": "拉丝宽度",
+        "use_occlusion": "遮挡感知",
+        "blend_mode": "混合方式"
+      }
+    },
+    "deflicker": {
+      "title": "去闪烁 (Deflicker)",
+      "window": {
+        "3": "3 帧",
+        "5": "5 帧",
+        "7": "7 帧",
+        "9": "9 帧"
+      },
+      "mode": {
+        "per_pixel": "逐像素",
+        "global_gain": "全局增益"
+      },
+      "params": {
+        "window": "窗口",
+        "percentile": "分位数",
+        "luma_only": "仅亮度",
+        "mode": "模式"
+      }
+    },
+    "ai_gen_expand": {
+      "title": "AI 生成扩展 (Gen Expand)",
+      "params": {
+        "prompt": "提示词",
+        "negative_prompt": "反向提示词",
+        "model": "模型",
+        "seed": "种子",
+        "strength": "强度",
+        "expand_left": "向左扩展",
+        "expand_top": "向上扩展",
+        "expand_right": "向右扩展",
+        "expand_bottom": "向下扩展"
+      }
+    },
+    "frame_interpolate": {
+      "title": "帧插值 (RIFE)",
+      "params": {
+        "t": "插值位置 t",
+        "hd_mode": "大图分块 (HD)"
+      }
+    },
+    "face_track": {
+      "title": "人脸跟踪 (Face Track)",
+      "params": {
+        "face_index": "脸序号"
+      }
+    },
+    "face_smooth": {
+      "title": "磨皮 (Face Smooth)",
+      "params": {
+        "strength": "强度",
+        "radius": "半径",
+        "luminance_only": "仅亮度"
+      }
+    },
+    "pointcloud3d": {
+      "title": "点云 (Point Cloud)",
+      "source": {
+        "file": "文件",
+        "tracker": "来自跟踪"
+      },
+      "color_mode": {
+        "flat": "纯色",
+        "vertex_color": "顶点色",
+        "depth_ramp": "深度渐变"
+      },
+      "params": {
+        "source": "数据源",
+        "file_path": "文件路径",
+        "output_width": "输出宽度",
+        "output_height": "输出高度",
+        "point_size": "点大小",
+        "color_mode": "着色",
+        "point_color": "点颜色",
+        "opacity": "不透明度"
+      }
+    },
+    "volume3d": {
+      "title": "体积 (Volume 3D)",
+      "params": {
+        "file_path": "体积文件",
+        "density_multiplier": "密度倍增",
+        "absorption_color": "吸收颜色",
+        "step_count": "步进数",
+        "output_width": "输出宽度",
+        "output_height": "输出高度"
+      }
+    },
+    "chroma_keyer": {
+      "title": "色度抠像 (Chroma Keyer)",
+      "output_mode": {
+        "result": "结果",
+        "matte": "遮罩"
+      },
+      "params": {
+        "screen_color_r": "幕色 R",
+        "screen_color_g": "幕色 G",
+        "screen_color_b": "幕色 B",
+        "tolerance": "容差",
+        "softness": "羽化",
+        "despill": "去溢出",
+        "edge_width": "边缘宽度",
+        "output_mode": "输出方式"
+      }
+    },
+    "luma_keyer": {
+      "title": "亮度抠像 (Luma Keyer)",
+      "output_mode": {
+        "result": "结果",
+        "matte": "遮罩"
+      },
+      "params": {
+        "black_point": "黑点",
+        "white_point": "白点",
+        "softness": "羽化",
+        "invert": "反转",
+        "output_mode": "输出方式"
+      }
+    },
+    "camera3d": {
+      "title": "相机",
+      "params": {
+        "camera_mode": "相机模式",
+        "cam_fov": "视野 (FOV)",
+        "cam_focal_length": "焦距 (mm)",
+        "cam_sensor_size": "传感器尺寸 (mm)",
+        "cam_near": "近裁剪面",
+        "cam_far": "远裁剪面",
+        "cam_lens_shift_x": "镜头偏移 X",
+        "cam_lens_shift_y": "镜头偏移 Y",
+        "cam_exposure": "曝光 (EV)",
+        "cam_focus_distance": "对焦距离",
+        "cam_fstop": "光圈 (f-stop)",
+        "cam_dof_enable": "景深",
+        "cam_show_safe_areas": "安全框"
+      }
+    },
+    "light3d": {
+      "title": "灯光",
+      "light_type": {
+        "directional": "平行光 (Directional)",
+        "point": "点光源 (Point)",
+        "spot": "聚光灯 (Spot)",
+        "ambient": "环境光 (Ambient)"
+      },
+      "params": {
+        "light_type": "灯光类型",
+        "light_pos_x": "位置 X",
+        "light_pos_y": "位置 Y",
+        "light_pos_z": "位置 Z",
+        "light_dir_x": "方向 X",
+        "light_dir_y": "方向 Y",
+        "light_dir_z": "方向 Z",
+        "light_color_r": "颜色 R",
+        "light_color_g": "颜色 G",
+        "light_color_b": "颜色 B",
+        "light_intensity": "强度",
+        "light_range": "影响范围",
+        "light_inner_cone": "内锥角",
+        "light_outer_cone": "外锥角",
+        "hdri_path": "HDRI 文件",
+        "use_ibl": "启用 IBL",
+        "env_intensity": "环境强度",
+        "icon_pos_x": "图标位置 X",
+        "icon_pos_y": "图标位置 Y",
+        "icon_pos_z": "图标位置 Z"
+      }
+    },
+    "model3d": {
+      "title": "3D 模型",
+      "size_mode": {
+        "fit_to_scene": "适配场景",
+        "real_world": "真实尺寸"
+      },
+      "source_unit": {
+        "m": "米",
+        "cm": "厘米",
+        "mm": "毫米",
+        "in": "英寸",
+        "ft": "英尺",
+        "custom": "自定义"
+      },
+      "axis_mode": {
+        "auto": "自动",
+        "y_up": "Y 轴向上",
+        "z_up": "Z 轴向上",
+        "none": "不修正"
+      },
+      "uv_v_mode": {
+        "auto": "自动",
+        "original": "原始",
+        "flip": "翻转 V"
+      },
+      "anim_play_mode": {
+        "loop": "循环",
+        "pingpong": "往返",
+        "once": "单次",
+        "clamp": "停在末帧"
+      },
+      "material_mode": {
+        "imported": "导入材质",
+        "override": "覆盖",
+        "mix": "混合"
+      },
+      "normal_format": {
+        "OpenGL": "OpenGL",
+        "DirectX": "DirectX"
+      },
+      "orm_layout": {
+        "glTF ORM": "glTF ORM",
+        "separate": "分离通道"
+      },
+      "texture_filter": {
+        "nearest": "最近邻",
+        "linear": "线性",
+        "mipmap": "Mipmap"
+      },
+      "texture_wrap": {
+        "repeat": "重复",
+        "clamp": "边缘钳制",
+        "mirror": "镜像"
+      },
+      "viewport_lod_mode": {
+        "auto": "自动",
+        "force_lod0": "强制 LOD 0",
+        "force_lod1": "强制 LOD 1",
+        "force_lod2": "强制 LOD 2"
+      },
+      "render_role": {
+        "solid": "实体",
+        "holdout": "挖空",
+        "shadow_catcher": "阴影捕捉",
+        "matte": "遮罩"
+      },
+      "params": {
+        "model_path": "模型文件",
+        "use_imported_model": "使用导入模型",
+        "size_mode": "尺寸模式",
+        "source_unit": "源单位",
+        "unit_scale": "单位缩放",
+        "axis_mode": "轴向模式",
+        "uv_v_mode": "UV V 模式",
+        "object_pos_x": "位置 X",
+        "object_pos_y": "位置 Y",
+        "object_pos_z": "位置 Z",
+        "object_rot_x": "旋转 X",
+        "object_rot_y": "旋转 Y",
+        "object_rot_z": "旋转 Z",
+        "mesh_scale": "缩放",
+        "anim_enabled": "启用动画",
+        "anim_time": "动画时间",
+        "anim_speed": "动画速度",
+        "anim_clip": "动画片段",
+        "anim_play_mode": "播放模式",
+        "anim_clip_name": "片段名称",
+        "anim_time_offset": "时间偏移",
+        "anim_start_frame": "起始帧",
+        "anim_end_frame": "结束帧",
+        "anim_fps": "动画帧率",
+        "material_mode": "材质模式",
+        "normal_format": "法线格式",
+        "orm_layout": "ORM 布局",
+        "texture_filter": "纹理过滤",
+        "texture_wrap": "纹理平铺",
+        "emissive_intensity": "自发光强度",
+        "viewport_lod_mode": "视口 LOD",
+        "render_role": "渲染角色",
+        "matte_id": "遮罩 ID",
+        "shadow_intensity": "阴影强度",
+        "shadow_softness": "阴影柔和度"
+      }
+    },
+    "scene3d": {
+      "title": "3D 场景",
+      "params": {
+        "width": "宽度",
+        "height": "高度"
+      }
+    }
+  },
+  "param_groups": {
+    "Blur": "模糊",
+    "Channels": "通道",
+    "Keying": "抠像",
+    "Screen": "幕色",
+    "Matte": "遮罩",
+    "Despill": "去溢出",
+    "Output": "输出"
+  },
+  "channels": {
+    "label": "通道"
+  },
+  "panel": {
+    "node_graph": "节点图",
+    "node_properties": "节点属性",
+    "performance": "性能",
+    "perf": "性能",
+    "composite_scopes": "示波器",
+    "keyframes": "关键帧",
+    "spline": "曲线",
+    "animation": "动画",
+    "import_report": "导入报告",
+    "asset_dependency": "资产依赖",
+    "scene_outliner": "场景大纲",
+    "material": "材质"
+  },
+  "keyframes": {
+    "prev_kf": "上一个关键帧",
+    "next_kf": "下一个关键帧",
+    "fit": "适配时间范围",
+    "zoom_in": "放大",
+    "expand_all": "全部展开",
+    "collapse_all": "全部折叠",
+    "pan": "滚动到播放头",
+    "unit_time": "时间",
+    "unit_frame": "帧",
+    "unit_seconds": "秒",
+    "unit_timecode": "时间码",
+    "empty": "暂无可动画参数"
+  },
+  "spline": {
+    "empty": "暂无曲线",
+    "fit": "适配曲线",
+    "smooth": "平滑",
+    "linear": "线性",
+    "flat": "水平",
+    "step": "阶梯"
+  }
+}

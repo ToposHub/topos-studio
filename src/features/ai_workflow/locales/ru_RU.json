@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "ИИ-workflow"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "Выберите шаблон выше или перетащите ассеты сюда",
+      "zoom": "Масштаб: {percent}%"
+    },
+    "toolbar": {
+      "template": "Шаблон",
+      "load": "Загрузить",
+      "clear": "Очистить",
+      "form": "Форма",
+      "canvas": "Холст",
+      "run": "Запустить",
+      "cancel": "Отмена"
+    },
+    "gallery": {
+      "title": "Выберите шаблон workflow",
+      "use": "Использовать"
+    },
+    "form": {
+      "title": "Параметры",
+      "title_with_name": "{name} · Параметры",
+      "node_section": "Нода: {node}",
+      "no_params": "У этого шаблона нет настраиваемых параметров — просто запустите",
+      "advanced_edit": "Расширенное редактирование (холст)",
+      "back_to_gallery": "К шаблонам",
+      "back_to_gallery_tooltip": "Возвращает в галерею шаблонов; текущий workflow сохраняется (кнопка «Очистить» его сбрасывает)"
+    },
+    "status": {
+      "idle": "Простой",
+      "queued": "В очереди",
+      "running": "Выполняется",
+      "cached": "Из кэша",
+      "succeeded": "Успешно",
+      "failed": "Ошибка",
+      "cancelled": "Отменено",
+      "waiting_input": "Ожидание",
+      "skipped": "Пропущено",
+      "not_assembled": "Состояние: не собрано",
+      "no_plan": "Плана пока нет"
+    },
+    "actions": {
+      "preview_plan": "Предпросмотр плана",
+      "request_approval": "Запросить утверждение",
+      "apply_approved_plan": "Применить утверждённый план"
+    },
+    "inspector": {
+      "no_selection": "<b>(ничего не выбрано)</b>"
+    },
+    "node_search": {
+      "placeholder": "Поиск узлов…"
+    }
+  }
+}

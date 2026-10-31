@@ -1,0 +1,26 @@
+{
+  "recipe_id": "P55",
+  "name": "晶胞揭示",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "晶胞生长揭示；cell_count 16 起步，edge_width 0.08–0.15",
+  "component": "X07 voronoi_reveal（生产 lib1_voronoi_reveal，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/voronoi_reveal）",
+  "dependencies": {
+    "component_id": "X07",
+    "component_slug": "voronoi_reveal",
+    "component_kind": "transition",
+    "transition_type": "lib1_voronoi_reveal",
+    "user_json_base": false
+  },
+  "params": {
+    "cell_count": "16",
+    "seed": 7,
+    "edge_width": 0.1
+  },
+  "notes": "X07 生产 base lib1_voronoi_reveal（transition_catalog 已注册，mask 口径核）；base 不在 custom_transitions._BASE_TYPES 白名单（未接入），不产出用户转场 JSON。"
+}

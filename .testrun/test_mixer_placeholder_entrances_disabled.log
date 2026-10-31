@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 5 items
+
+tests/edit/test_mixer_placeholder_entrances_disabled.py .....            [100%]
+
+============================== 5 passed in 25.16s ==============================

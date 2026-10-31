@@ -1,0 +1,60 @@
+# M11 阶段4：解码侧跨帧任务图（单批跨帧切片队列）证据（2026-09-02，i9-9900K 8C16T）
+
+## 机制
+- 逐帧解码 = 每帧一次 tc_parallel_for：broadcast 唤醒全部 worker + 汇合等待；
+  帧间还有 parse/熵表预热等串行段。并发多线程各自调单帧解码会被 tpool
+  id_base 挤位退化单线程（tpool.c 批区间钳位）→ 跨帧并行必须单批承载。
+- 新增公共 API（ABI 追加，不动既有结构）：
+  - tc_frame_decode_batch(packets, count, planes_out*, strides, infos)
+    —— 无状态批量；planes_out==NULL 查询模式（同单帧两段式）
+  - tc_decoder_decode_batch(dec, packets, count, plane_view*, infos)
+    —— context 批量（产品预取路径入口）
+- 内部：tc_decode_slices 重构为 prep/build_jobs/finalize + tc_decode_frames
+  跨帧核心（全部帧的切片任务进同一次池批次；total ≤ 512 走栈保单帧路径
+  稳态零分配，超限走堆，堆失败逐帧回退）。单帧路径行为位不变。
+
+## A/B 方法论（成对差分）
+- 同一进程内 seq 与 batch 相邻成对测量（~200ms 间隔），逐对比值中位数
+  消除机器慢漂移；20 对；输出正确性 sha256 逐平面对拍一致。
+- 口径 A「产品形态」：seq=packet_into+tc_frame_decode 逐帧（= 342.4 参考口径）；
+  batch=packet()（读+精确物化，成本计入）×N + 一次 decode_batch。
+- 口径 B「纯内核」：两侧均从预取 bytes 解码（无 IO/拷贝不对称）。
+
+## 结果（t8，成对中位 [IQR]）
+- 2K hq rate（36 帧，bs8）：
+  - 产品形态 343.1 → 370.0 fps，+5.5% [+3.0, +9.6]（20 对 18 正）
+  - 纯内核 390.6 → 429.4 fps，+10.4% [+8.0, +14.6] —— **越过阶段4 验收线 420**
+  - 对 ProRes 同窗 448.2：342/448=76% → 429/448=96%
+- 4K hq rate（24 帧，bs4）：
+  - 纯内核 98.5 → 103.4 fps，+5.2% [+2.3, +11.6]
+  - 产品形态 83.8 → 81.8 fps，−2.9% —— 包物化拷贝（hq 3.7MB/帧）吃掉收益；
+    产品预取线程本就持有逐包 bytes（无再拷贝），该负项是基准形态人为成本
+- t16（2K bs8）：seq 300.3（唤醒风暴随 worker 数放大）→ batch 362.3
+  （+20.6% vs t16 seq）；仍不及 t8+batch（379）→ t8 维持最优工作点
+- 批大小：2K 最优 8~9；4K 大批（12×25MB 输出工作集）转负 → 批大小应随
+  分辨率调小（4K 建议 ≤4~6）
+
+## 与原估算的偏差
+- 路线书原估 342 → 430~480（+26~40%）：实测机制收益 +5~10%（纯内核），
+  派发/唤醒占比被高估。残余并行度损失（t1→t8 理想 487 vs 实测 ~380-430）
+  在于每帧串行 parse、输出写带宽与 slice 尾部失衡，非派发开销。
+  429 fps 已达验收线；430~480 需上述新杠杆（后续候选）。
+
+## 门禁
+- C 差分（test_codec 新增）：3 帧不同几何/alpha 单批 vs 逐帧位一致（平面
+  memcmp + slice_status + conceal 计数）；带 stride 输出位一致；count==1
+  等价单帧；count==0 无操作；查询模式仅填几何；中帧 CRC 坏仅该帧 conceal
+  邻帧位不变；截断包整批拒绝；ctx 批量与无状态批量位一致；坏 plane view
+  仅拒该帧 + context 状态不污染
+- release 45/45 ✓（含 6 组 golden byte-exact）；ASan 45/45 ✓；TSan 45/45 ✓
+- Python：test_topos_binding +3 用例（17/17）；topos 相关套件 182 passed
+  / 6 skipped ✓（test_decode_soak_rss_converges 曾一次边界抖动 10396 vs
+  9396 KiB，单跑 3/3 + 组合复跑通过；单帧路径零新增堆分配，判定为
+  ru_maxrss 高水位噪声）
+
+## 复现
+- 成对 A/B 脚本（临时）：/tmp/bench_stage4_paired.py（产品形态）、
+  /tmp/bench_stage4_paired_kernel.py（纯内核）；码流为
+  bench_out/topos_vs_ref/20260902_065735_2k、20260902_065819_4k 既有产物
+  （与 342.4/81.4 参考同文件）。正式复现脚本入库待产品预取集成时一并
+  落 tools/（口径与验收随预取形态重定）。

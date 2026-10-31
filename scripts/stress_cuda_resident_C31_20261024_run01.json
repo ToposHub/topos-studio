@@ -1,0 +1,181 @@
+{
+  "schema": "stress_cuda_resident/1",
+  "date": "2026-10-24T16:36:00",
+  "phases": [
+    {
+      "phase": "sequential",
+      "status": "ok",
+      "seconds": 91.4,
+      "frames": 3960,
+      "fps": 43.3,
+      "errors": [],
+      "content_checks": [
+        {
+          "frame": 119,
+          "match": true
+        },
+        {
+          "frame": 239,
+          "match": true
+        },
+        {
+          "frame": 359,
+          "match": true
+        },
+        {
+          "frame": 479,
+          "match": true
+        },
+        {
+          "frame": 599,
+          "match": true
+        },
+        {
+          "frame": 19,
+          "match": true
+        },
+        {
+          "frame": 139,
+          "match": true
+        },
+        {
+          "frame": 259,
+          "match": true
+        },
+        {
+          "frame": 379,
+          "match": true
+        },
+        {
+          "frame": 499,
+          "match": true
+        },
+        {
+          "frame": 619,
+          "match": true
+        },
+        {
+          "frame": 39,
+          "match": true
+        },
+        {
+          "frame": 159,
+          "match": true
+        },
+        {
+          "frame": 279,
+          "match": true
+        },
+        {
+          "frame": 399,
+          "match": true
+        },
+        {
+          "frame": 519,
+          "match": true
+        },
+        {
+          "frame": 639,
+          "match": true
+        },
+        {
+          "frame": 59,
+          "match": true
+        },
+        {
+          "frame": 179,
+          "match": true
+        },
+        {
+          "frame": 299,
+          "match": true
+        },
+        {
+          "frame": 419,
+          "match": true
+        },
+        {
+          "frame": 539,
+          "match": true
+        },
+        {
+          "frame": 659,
+          "match": true
+        },
+        {
+          "frame": 79,
+          "match": true
+        },
+        {
+          "frame": 199,
+          "match": true
+        },
+        {
+          "frame": 319,
+          "match": true
+        },
+        {
+          "frame": 439,
+          "match": true
+        },
+        {
+          "frame": 559,
+          "match": true
+        },
+        {
+          "frame": 679,
+          "match": true
+        },
+        {
+          "frame": 99,
+          "match": true
+        },
+        {
+          "frame": 219,
+          "match": true
+        },
+        {
+          "frame": 339,
+          "match": true
+        },
+        {
+          "frame": 459,
+          "match": true
+        }
+      ],
+      "session_stats": {
+        "initialized": true,
+        "slots": 1,
+        "slots_in_use": 0,
+        "max_ring_size": 32,
+        "bind_count": 3960,
+        "fail_count": 0
+      }
+    },
+    {
+      "phase": "random_seek",
+      "status": "ok",
+      "seconds": 60.0,
+      "random_seeks": 1127,
+      "seeks_per_s": 18.8,
+      "errors": [],
+      "session_stats": {
+        "initialized": true,
+        "slots": 1,
+        "slots_in_use": 0,
+        "max_ring_size": 16,
+        "bind_count": 1127,
+        "fail_count": 0
+      }
+    },
+    {
+      "phase": "reopen_cycles",
+      "status": "ok",
+      "cycles": 8,
+      "ok_cycles": 8,
+      "errors": []
+    }
+  ],
+  "git_commit": "803b92f79",
+  "issues": []
+}

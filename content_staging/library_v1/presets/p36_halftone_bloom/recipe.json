@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P36",
+  "name": "网点展开",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "印刷/复古感衔接；spacing 8–16，angle 45° 经典网点",
+  "component": "X08 halftone_reveal（生产 lib1_halftone_reveal，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/halftone_reveal）",
+  "dependencies": {
+    "component_id": "X08",
+    "component_slug": "halftone_reveal",
+    "component_kind": "transition",
+    "transition_type": "lib1_halftone_reveal",
+    "user_json_base": false
+  },
+  "params": {
+    "spacing": 12,
+    "angle": 45.0,
+    "shape": "Dot",
+    "softness": 0.08
+  },
+  "notes": "X08 生产 base lib1_halftone_reveal（transition_catalog 已注册）；base 不在用户转场白名单，只产出转场实例载荷。"
+}

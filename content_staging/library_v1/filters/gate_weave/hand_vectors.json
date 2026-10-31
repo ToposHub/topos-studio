@@ -1,0 +1,110 @@
+{
+  "component": "F08 gate_weave",
+  "method": "手算：按 README 公式独立脚本推导（uint32 格点散列求 dx/dy → 像素空间刚体逆变换 suv → 像素中心制双线性，水平 ramp 上双线性=clamp 线性索引闭式），与 oracle/GLSL 无代码复用；容差 1e-6。夹具 A：8×4 水平灰度 ramp img[y][x]=x/7（RGB 同值）；夹具 B：64×32 ramp img=x/63（同 fixtures/gray_ramp_linear 语义）。seed=7 时 h32(11,7,7)=0.0215404、h32(23,5,7)=0.4401487 → A=0.02 下 dx=-0.0095692/dy=-0.0011970。",
+  "params": {
+    "amplitude_h": 0.02,
+    "amplitude_v": 0.0,
+    "rotation": 0.0,
+    "seed": 7,
+    "border_mode": "Freeze"
+  },
+  "vectors": [
+    {
+      "fixture": "A",
+      "pos": [2, 1],
+      "expected": 0.2966505,
+      "note": "纯水平位移（Ah=0.02, rotation=0, seed=7, Freeze）：suv.x=(2.5/8)+0.0095692=0.3220692 → (8·suv-0.5)/7"
+    },
+    {
+      "fixture": "A",
+      "pos": [0, 0],
+      "expected": 0.0109362,
+      "note": "同参数左缘：suv.x=0.0720692，未出界（Freeze/Black 同值）"
+    },
+    {
+      "fixture": "A",
+      "pos": [7, 3],
+      "expected": 1.0,
+      "note": "右缘：suv.x=0.9470692 → 索引 clip 到 7 → 1.0（Freeze 等价值）"
+    },
+    {
+      "fixture": "A",
+      "params": {
+        "amplitude_h": 0.0,
+        "amplitude_v": 0.0,
+        "rotation": 0.5
+      },
+      "pos": [4, 2],
+      "expected": 0.5720492,
+      "note": "纯微旋转 0.5°（位移 0）：绕中心 R(-θ)，中心偏移 v=(0.5,0.5)px"
+    },
+    {
+      "fixture": "A",
+      "params": {
+        "amplitude_h": 0.02,
+        "amplitude_v": 0.02,
+        "rotation": 0.1
+      },
+      "pos": [3, 1],
+      "expected": 0.4393843,
+      "note": "双向位移+微旋转组合：suv=(0.4469612,0.3763820)"
+    },
+    {
+      "fixture": "B",
+      "params": {
+        "amplitude_h": 0.02,
+        "amplitude_v": 0.02,
+        "rotation": 0.0
+      },
+      "pos": [0, 15],
+      "expected": 0.0097211,
+      "note": "64×32 上左缘（dx=-0.0095692·64≈-0.61px）：suv.x=0.0173817 界内，Freeze/Black 同值"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "fixture": "B",
+      "params": {
+        "amplitude_h": 0.02,
+        "amplitude_v": 0.02,
+        "rotation": 0.0,
+        "border_mode": "Freeze"
+      },
+      "pos": [63, 15],
+      "expected": 1.0,
+      "note": "右缘越界 suv.x=1.0017567>1：Freeze 钳半纹素 → 边列值 1.0"
+    },
+    {
+      "fixture": "B",
+      "params": {
+        "amplitude_h": 0.02,
+        "amplitude_v": 0.02,
+        "rotation": 0.0,
+        "border_mode": "Black"
+      },
+      "pos": [63, 15],
+      "expected": 0.0,
+      "note": "同位置 Black：suv 出 [0,1] → vec3(0)（Delta 惯例下 color-base=0）"
+    },
+    {
+      "fixture": "A",
+      "params": {
+        "seed": 8
+      },
+      "pos": [2, 1],
+      "expected": 0.2959123,
+      "note": "seed 改变位移：h32(11,7,8)→dx=-0.0089233，同像素不同输出"
+    },
+    {
+      "fixture": "A",
+      "params": {
+        "amplitude_h": 0.0,
+        "amplitude_v": 0.0,
+        "rotation": 0.0
+      },
+      "pos": [2, 1],
+      "expected": null,
+      "note": "amplitude 全 0 且 rotation=0 精确恒等（任意 seed，含 HDR 透传）"
+    }
+  ]
+}

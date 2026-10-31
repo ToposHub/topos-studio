@@ -1,0 +1,345 @@
+{
+  "$schema_version": 1,
+  "runner": "p0_benchmark_runner",
+  "protocol": {
+    "warmup_frames": 10,
+    "steady_frames": 120,
+    "seek_samples": 30,
+    "longrun_frames": 600,
+    "repeats": 1
+  },
+  "scenarios": [
+    "B-01"
+  ],
+  "started_at": "2026-09-16T00:57:05+0800",
+  "machine": {
+    "platform": "macOS-15.3.1-x86_64-i386-64bit",
+    "machine": "x86_64",
+    "python": "3.12.13",
+    "git_commit": "df8e28477b66c448ede2f1c359e0cde2c6fd8ba9"
+  },
+  "media": [
+    {
+      "file": "tests/test_videos/4K_topos.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 20.647,
+          "p95_ms": 106.944,
+          "max_ms": 116.533,
+          "mean_ms": 51.183
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 12.271,
+          "p95_ms": 14.165,
+          "max_ms": 16.325,
+          "mean_ms": 12.388,
+          "p50_fps": 81.49
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 12.082,
+          "p95_ms": 13.79,
+          "max_ms": 14.111,
+          "mean_ms": 12.094
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 12.182,
+          "p95_ms": 13.973,
+          "max_ms": 31.369,
+          "mean_ms": 12.355,
+          "rss_before_bytes": 158982144,
+          "rss_after_bytes": 159440896,
+          "rss_delta_bytes": 458752
+        }
+      },
+      "backend": "ToposMediaSource",
+      "meta": {
+        "codec": "topos",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 96
+      },
+      "wall_s": 9.84
+    },
+    {
+      "file": "tests/test_videos/4K_topos_hq.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 20.952,
+          "p95_ms": 21.674,
+          "max_ms": 21.754,
+          "mean_ms": 19.716
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 12.358,
+          "p95_ms": 13.868,
+          "max_ms": 16.246,
+          "mean_ms": 12.397,
+          "p50_fps": 80.92
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 12.118,
+          "p95_ms": 14.379,
+          "max_ms": 14.814,
+          "mean_ms": 12.323
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 12.324,
+          "p95_ms": 14.989,
+          "max_ms": 35.164,
+          "mean_ms": 12.67,
+          "rss_before_bytes": 200179712,
+          "rss_after_bytes": 200290304,
+          "rss_delta_bytes": 110592
+        }
+      },
+      "backend": "ToposMediaSource",
+      "meta": {
+        "codec": "topos",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 96
+      },
+      "wall_s": 9.66
+    },
+    {
+      "file": "tests/test_videos/4K_topos_lt.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 11.735,
+          "p95_ms": 16.169,
+          "max_ms": 16.661,
+          "mean_ms": 12.482
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 7.413,
+          "p95_ms": 9.441,
+          "max_ms": 10.5,
+          "mean_ms": 7.397,
+          "p50_fps": 134.9
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 6.517,
+          "p95_ms": 8.783,
+          "max_ms": 8.948,
+          "mean_ms": 6.931
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 7.038,
+          "p95_ms": 9.175,
+          "max_ms": 30.66,
+          "mean_ms": 7.284,
+          "rss_before_bytes": 226328576,
+          "rss_after_bytes": 226521088,
+          "rss_delta_bytes": 192512
+        }
+      },
+      "backend": "ToposMediaSource",
+      "meta": {
+        "codec": "topos",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 96
+      },
+      "wall_s": 5.59
+    },
+    {
+      "file": "tests/test_videos/4K_topos_standard.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 12.852,
+          "p95_ms": 17.748,
+          "max_ms": 18.293,
+          "mean_ms": 14.317
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 8.977,
+          "p95_ms": 11.399,
+          "max_ms": 13.7,
+          "mean_ms": 9.194,
+          "p50_fps": 111.4
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 9.701,
+          "p95_ms": 11.466,
+          "max_ms": 13.192,
+          "mean_ms": 9.549
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 9.006,
+          "p95_ms": 11.744,
+          "max_ms": 31.04,
+          "mean_ms": 9.24,
+          "rss_before_bytes": 244748288,
+          "rss_after_bytes": 244953088,
+          "rss_delta_bytes": 204800
+        }
+      },
+      "backend": "ToposMediaSource",
+      "meta": {
+        "codec": "topos",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 96
+      },
+      "wall_s": 7.08
+    },
+    {
+      "file": "tests/test_videos/4K_topos_proxy.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 7.448,
+          "p95_ms": 8.14,
+          "max_ms": 8.217,
+          "mean_ms": 7.391
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 4.637,
+          "p95_ms": 5.501,
+          "max_ms": 5.778,
+          "mean_ms": 4.796,
+          "p50_fps": 215.66
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 4.692,
+          "p95_ms": 5.811,
+          "max_ms": 6.89,
+          "mean_ms": 4.921
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 4.643,
+          "p95_ms": 5.403,
+          "max_ms": 21.054,
+          "mean_ms": 4.793,
+          "rss_before_bytes": 245035008,
+          "rss_after_bytes": 245039104,
+          "rss_delta_bytes": 4096
+        }
+      },
+      "backend": "ToposMediaSource",
+      "meta": {
+        "codec": "topos",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 96
+      },
+      "wall_s": 3.68
+    },
+    {
+      "file": "tests/test_videos/4K_topos_4444.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 24.068,
+          "p95_ms": 24.282,
+          "max_ms": 24.306,
+          "mean_ms": 23.951
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 20.154,
+          "p95_ms": 23.194,
+          "max_ms": 24.046,
+          "mean_ms": 20.331,
+          "p50_fps": 49.62
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 19.584,
+          "p95_ms": 22.537,
+          "max_ms": 23.53,
+          "mean_ms": 19.804
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 20.556,
+          "p95_ms": 24.208,
+          "max_ms": 44.706,
+          "mean_ms": 21.05,
+          "rss_before_bytes": 278482944,
+          "rss_after_bytes": 278867968,
+          "rss_delta_bytes": 385024
+        }
+      },
+      "backend": "ToposMediaSource",
+      "meta": {
+        "codec": "topos",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 96
+      },
+      "wall_s": 15.95
+    },
+    {
+      "file": "tests/test_videos/4K_topos_4444xq.mov",
+      "phases": {
+        "cold_first_frame": {
+          "n": 3,
+          "p50_ms": 29.736,
+          "p95_ms": 30.945,
+          "max_ms": 31.079,
+          "mean_ms": 29.251
+        },
+        "steady_sequential": {
+          "n": 120,
+          "p50_ms": 22.465,
+          "p95_ms": 25.036,
+          "max_ms": 27.511,
+          "mean_ms": 22.818,
+          "p50_fps": 44.51
+        },
+        "seek_random": {
+          "n": 30,
+          "p50_ms": 22.09,
+          "p95_ms": 23.877,
+          "max_ms": 24.466,
+          "mean_ms": 22.13
+        },
+        "longrun": {
+          "n": 600,
+          "p50_ms": 22.236,
+          "p95_ms": 24.692,
+          "max_ms": 49.322,
+          "mean_ms": 22.655,
+          "rss_before_bytes": 286388224,
+          "rss_after_bytes": 286400512,
+          "rss_delta_bytes": 12288
+        }
+      },
+      "backend": "ToposMediaSource",
+      "meta": {
+        "codec": "topos",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 96
+      },
+      "wall_s": 17.32
+    }
+  ]
+}

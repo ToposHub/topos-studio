@@ -1,0 +1,34 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Halation_Extended": {
+        "name": "扩展光晕",
+        "params": {
+          "strength": "强度",
+          "radius": "扩散半径",
+          "hue_shift": "晕染色相偏移",
+          "threshold": "高光阈值"
+        },
+        "desc": {
+          "short": "高光扩散晕影：色相可调的胶片光晕变体（ADR 交替方向环核）"
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Halation_Extended": {
+        "name": "Halation Extended",
+        "params": {
+          "strength": "Strength",
+          "radius": "Radius",
+          "hue_shift": "Hue Shift",
+          "threshold": "Highlight Threshold"
+        },
+        "desc": {
+          "short": "Highlight diffusion glow with hue-adjustable tint (ADR ring kernel)"
+        }
+      }
+    }
+  }
+}

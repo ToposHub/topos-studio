@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_program_viewer_shared_texture.py ....                    [100%]
+
+============================== 4 passed in 19.86s ==============================

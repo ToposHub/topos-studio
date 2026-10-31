@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_gpu_blur_channel_mask_contract.py ......                 [100%]
+
+============================== 6 passed in 17.00s ==============================

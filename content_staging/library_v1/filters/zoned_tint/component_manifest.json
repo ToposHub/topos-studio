@@ -1,0 +1,241 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "F04",
+  "dedup": "Three_Way_Tint 分界为编译期常量 [0.25,0.55]/[0.55,0.85]，本件 pivot/width 滑杆可动（content_staging/library_v1/specs/L00_ledger.md §1 F04 行）",
+  "host_min_contract": ".tglsl ABI 四类参数（3 color+7 slider）；发布名 LIB1_Zoned_Tint",
+  "image": {
+    "alpha": "premultiplied",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "filter",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "maximum": null,
+      "minimum": null,
+      "name": "shadow_color",
+      "neutral": true,
+      "options": [],
+      "ptype": "color",
+      "unit": "tint",
+      "validation": "0.5 灰=增益 1.0（中性锚点）"
+    },
+    {
+      "animatable": false,
+      "default": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "maximum": null,
+      "minimum": null,
+      "name": "midtone_color",
+      "neutral": true,
+      "options": [],
+      "ptype": "color",
+      "unit": "tint",
+      "validation": "同上"
+    },
+    {
+      "animatable": false,
+      "default": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "maximum": null,
+      "minimum": null,
+      "name": "highlight_color",
+      "neutral": true,
+      "options": [],
+      "ptype": "color",
+      "unit": "tint",
+      "validation": "同上"
+    },
+    {
+      "animatable": false,
+      "default": 0.35,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "shadow_strength",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "三强度全 0 早退精确恒等"
+    },
+    {
+      "animatable": false,
+      "default": 0.3,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "midtone_strength",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "同上"
+    },
+    {
+      "animatable": false,
+      "default": 0.35,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "highlight_strength",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "同上"
+    },
+    {
+      "animatable": false,
+      "default": 0.25,
+      "maximum": 0.4,
+      "minimum": 0.1,
+      "name": "shadow_pivot",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "tone",
+      "validation": "t=l/(l+0.18) 色调坐标中的 shadow/mid 分界中心"
+    },
+    {
+      "animatable": false,
+      "default": 0.75,
+      "maximum": 0.9,
+      "minimum": 0.5,
+      "name": "highlight_pivot",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "tone",
+      "validation": "mid/highlight 分界中心"
+    },
+    {
+      "animatable": false,
+      "default": 0.3,
+      "maximum": 0.5,
+      "minimum": 0.0,
+      "name": "shadow_width",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "tone",
+      "validation": "交叉过渡全宽（下限 1e-4 守护 smoothstep 等界）"
+    },
+    {
+      "animatable": false,
+      "default": 0.3,
+      "maximum": 0.5,
+      "minimum": 0.0,
+      "name": "highlight_width",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "tone",
+      "validation": "同上"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "zoned_tint",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_f04_zoned_tint.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "content_staging/library_v1/filters/zoned_tint/hand_vectors.json",
+    "known_limits": "pivot+width 极端设置可重叠（midtone 权重 clamp 守护，非 partition of unity 区间如实声明）；未验 GPU/Metal/CPU 导出/LUT",
+    "oracle": "content_staging/library_v1/references/zoned_tint_ref.py"
+  },
+  "version": "0.1.0"
+}

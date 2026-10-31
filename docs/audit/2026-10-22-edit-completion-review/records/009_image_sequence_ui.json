@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "error": "'VideoExportSettingsPanel' object has no attribute '_format_combo'",
+  "traceback": "Traceback (most recent call last):\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-22-edit-completion-review/scripts/interactive_session.py\", line 72, in poll\n    exec(compile(running.read_text(), str(path), 'exec'), namespace)\n  File \"/tmp/topos-round7-gui/commands/009_image_sequence_ui.py\", line 1, in <module>\n    \"\"\"Visible production app instrumentation for round-seven verification.\n                                                                            \nAttributeError: 'VideoExportSettingsPanel' object has no attribute '_format_combo'\n"
+}

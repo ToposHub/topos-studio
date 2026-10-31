@@ -1,0 +1,39 @@
+{
+  "recipe_id": "P13",
+  "name": "青橙克制",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合商业人像/预告片；分区强度压在 0.25 以内保持克制",
+  "component": "Three_Way_Tint（生产插件 plugins/Three_Way_Tint.tglsl）",
+  "dependencies": {
+    "plugin_id": "Three_Way_Tint",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "shadow_color": [
+      0.2,
+      0.36,
+      0.44
+    ],
+    "shadow_strength": 0.22,
+    "midtone_color": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "midtone_strength": 0.0,
+    "highlight_color": [
+      0.58,
+      0.42,
+      0.28
+    ],
+    "highlight_strength": 0.25
+  },
+  "notes": "青橙对比的低强度档：中间调零染色；参数已对真实插件 schema 校验。"
+}

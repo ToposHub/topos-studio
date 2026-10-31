@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 5 items
+
+tests/edit/test_motion_graphic_creation_entrypoints.py .....             [100%]
+
+============================== 5 passed in 21.51s ==============================

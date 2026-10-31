@@ -1,0 +1,219 @@
+{
+  "component": "F03 protected_vibrance",
+  "method": "手算：按 README §公式逐式笔算（709 luma/chroma 分解 → max/min 比值法 hue → 环形距离 smoothstep 软窗 → gain=1+sat+vib·(1-prot·w) → 亮度保持重组），独立一次性脚本（纯 Python，smoothstep 分段直接展开）计算，与 oracle/GLSL 无代码复用；容差 1e-6（float64 语义）。",
+  "params": {
+    "saturation": 0.0,
+    "vibrance": 1.0,
+    "skin_hue_center": 20.0,
+    "skin_hue_width": 25.0,
+    "skin_protection": 1.0
+  },
+  "vectors": [
+    {
+      "input": [
+        0.65,
+        0.5,
+        0.4
+      ],
+      "expected": [
+        0.65,
+        0.5,
+        0.4
+      ],
+      "note": "肤色簇 hue=24°，d=4<12.5 全保护：vibrance=1 零增益（精确逐位不变）"
+    },
+    {
+      "input": [
+        0.39934,
+        0.54934,
+        0.64934
+      ],
+      "expected": [
+        0.27401,
+        0.57401,
+        0.77401
+      ],
+      "note": "互补蓝 hue=204°，d=184 零保护：gain=2（与上向量同 luma 同色度幅值——幅值不参与保护）"
+    },
+    {
+      "input": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "expected": [
+        1.5102352,
+        -0.1377648,
+        -0.1377648
+      ],
+      "note": "纯红 hue=0°，d=20 落软窗过渡带（protect=0.352）：gain=1.648"
+    },
+    {
+      "input": [
+        12.0,
+        0.1,
+        4.5
+      ],
+      "expected": [
+        21.05238,
+        -2.74762,
+        6.05238
+      ],
+      "note": "HDR 混合色 hue≈337.8°，d≈42.2 零保护：gain=2 线性外推（负通道如实出现）"
+    },
+    {
+      "input": [
+        0.18,
+        0.18,
+        0.18
+      ],
+      "expected": [
+        0.18,
+        0.18,
+        0.18
+      ],
+      "note": "无彩色（delta<1e-6）chroma=0：增益无关，逐位不变"
+    },
+    {
+      "input": [
+        -0.25,
+        -0.3,
+        -0.2
+      ],
+      "expected": [
+        -0.21785,
+        -0.31785,
+        -0.11785
+      ],
+      "note": "负值 out-of-gamut：hue 同式成立（比值法），gain=2 线性外推"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "params": {
+        "saturation": 0.5
+      },
+      "input": [
+        0.65,
+        0.5,
+        0.4
+      ],
+      "expected": [
+        0.712665,
+        0.487665,
+        0.337665
+      ],
+      "note": "saturation 不受保护窗衰减：肤色 gain=1.5"
+    },
+    {
+      "params": {
+        "skin_protection": 0.0
+      },
+      "input": [
+        0.65,
+        0.5,
+        0.4
+      ],
+      "expected": [
+        0.77533,
+        0.47533,
+        0.27533
+      ],
+      "note": "protection=0 退化为均匀 vibrance（gain=2）"
+    },
+    {
+      "params": {},
+      "input": [
+        1.0,
+        0.75,
+        0.25
+      ],
+      "expected": [
+        1.1509516,
+        0.7389516,
+        -0.0850484
+      ],
+      "note": "暖橙 hue=40°，d=20 过渡带（protect=0.352，gain=1.648）：软窗非阶跃"
+    },
+    {
+      "params": {},
+      "input": [
+        1.0,
+        0.75,
+        0.8
+      ],
+      "expected": [
+        1.19324,
+        0.69324,
+        0.79324
+      ],
+      "note": "品红 hue=348°，d=32>25 跨零点外侧零保护：gain=2（默认窗不回绕到 348）"
+    },
+    {
+      "params": {
+        "skin_hue_width": 60.0
+      },
+      "input": [
+        1.0,
+        0.75,
+        0.8
+      ],
+      "expected": [
+        1.002462,
+        0.7492768,
+        0.7999139
+      ],
+      "note": "同 348° 但宽窗 60：d=32 落 [30,60] 过渡带（protect≈0.987）——环形回绕生效"
+    },
+    {
+      "params": {
+        "skin_hue_center": 0.0,
+        "skin_hue_width": 30.0
+      },
+      "input": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "expected": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "note": "center=0：纯红 d=0 全保护（中心可移出默认 20°）"
+    },
+    {
+      "params": {
+        "skin_protection": 0.5
+      },
+      "input": [
+        0.65,
+        0.5,
+        0.4
+      ],
+      "expected": [
+        0.712665,
+        0.487665,
+        0.337665
+      ],
+      "note": "protection=0.5：全保护窗内 gain=1+1·(1-0.5)=1.5（与 sat_only 数值一致、语义不同）"
+    },
+    {
+      "params": {
+        "saturation": 0.0,
+        "vibrance": 0.0
+      },
+      "input": [
+        12.0,
+        0.1,
+        4.5
+      ],
+      "expected": [
+        12.0,
+        0.1,
+        4.5
+      ],
+      "note": "sat=vib=0 精确恒等（早退路径，含 HDR 输入；默认参数即恒等）"
+    }
+  ]
+}

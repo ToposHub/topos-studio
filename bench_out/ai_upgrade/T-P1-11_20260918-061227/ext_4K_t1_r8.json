@@ -1,0 +1,46 @@
+{
+  "status": "ok",
+  "source": "4K_topos_proxy.mov",
+  "profile": "standard",
+  "slice_threads": 1,
+  "slice_rows": 8,
+  "frames": 48,
+  "warmup": 8,
+  "wall_s": 6.049854959004733,
+  "fps": 7.934074506787271,
+  "frame_ms_p50": 125.1107959978981,
+  "frame_ms_p95": 150.1189459959278,
+  "bytes_per_frame": 3801132.8125,
+  "output_bytes": 182454375,
+  "input_plane_means": {
+    "Y": 624.028,
+    "U": 505.419,
+    "V": 513.138
+  },
+  "roundtrip": {
+    "status": "ok",
+    "plane_mean_abs_delta": {
+      "Y": 0.0,
+      "U": 0.0,
+      "V": 0.0
+    },
+    "max_abs_delta": 0.0
+  },
+  "stage": {
+    "final_wall_ns": 0,
+    "prep_wall_ns": 0,
+    "pad_ns": 39000,
+    "asm_ns": 20919000,
+    "probe_wall_ns": 0,
+    "dct_ns": 0,
+    "copy_ns": 15780000,
+    "check_wall_ns": 129548000,
+    "fill_ns": 2611656000,
+    "probe_fill_ns": 0,
+    "crc_ns": 120741000,
+    "entropy_ns": 2949229000,
+    "slices": 4896,
+    "blocks": 12441600
+  },
+  "kind": "encode_stage_combo"
+}

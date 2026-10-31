@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 11 items
+
+tests/edit/test_media_pool_panel_refresh.py ...[mov,mp4,m4a,3gp,3g2,mj2 @ 0x7f98353e9a00] ........                  [100%]
+
+============================= 11 passed in 17.74s ==============================

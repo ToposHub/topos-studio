@@ -1,0 +1,13 @@
+{
+  "1938197d-12d6-4cca-99cb-4e4d5fa17378": {
+    "bin_id": "1938197d-12d6-4cca-99cb-4e4d5fa17378",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "8d00dabe-18a6-4c6e-945e-a21d7e4b8404",
+      "865fe588-f156-43c4-8ad7-787bf4cb9ef1",
+      "01d755c1-4a8c-428f-97fa-f700053c67a2"
+    ],
+    "timeline_ids": []
+  }
+}

@@ -1,0 +1,52 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 331 items
+
+tests/deliver/test_custom_export_presets.py ..........                   [  3%]
+tests/deliver/test_deliver_workspace_layout.py .....                     [  4%]
+tests/deliver/test_delivery_capability.py ........                       [  6%]
+tests/deliver/test_export_queue.py ..................                    [ 12%]
+tests/deliver/test_fix_deliver_aud3.py ....                              [ 13%]
+tests/deliver/test_fix_wd8g43_aud.py ..............................      [ 22%]
+tests/deliver/test_fix_wd9g44_aud.py ..........................          [ 30%]
+tests/deliver/test_gif_export.py ....                                    [ 31%]
+tests/deliver/test_quick_export_defaults.py .....                        [ 33%]
+tests/deliver/test_video_batch_export_dock.py .......                    [ 35%]
+tests/deliver/test_video_batch_export_panel.py ......................... [ 42%]
+...                                                                      [ 43%]
+tests/deliver/test_video_export_formats.py ....                          [ 45%]
+tests/deliver/test_video_export_job.py ..........................        [ 52%]
+tests/deliver/test_video_export_preflight.py ......................F     [ 59%]
+tests/deliver/test_video_export_topos_controls.py .............          [ 63%]
+tests/edit/test_audio_export_parity.py ............                      [ 67%]
+tests/edit/test_audio_timestretch.py ....................                [ 73%]
+tests/edit/test_audio_automation_recording.py .......                    [ 75%]
+tests/edit/test_audio_clip_effects.py ..........                         [ 78%]
+tests/edit/test_clip_audio_fade.py ..............                        [ 82%]
+tests/edit/test_clip_audio_gain.py ........                              [ 85%]
+tests/edit/test_caption_export.py .....                                  [ 86%]
+tests/edit/test_caption_quality.py ..                                    [ 87%]
+tests/edit/test_caption_global_style.py ......                           [ 89%]
+tests/edit/test_smooth_speed_ramp.py .........                           [ 91%]
+tests/edit/test_timeline_clip_speed.py ............                      [ 95%]
+tests/edit/test_export_video_effects_preflight.py .......                [ 97%]
+tests/edit/test_effect_render_operations.py ........                     [100%]
+
+=================================== FAILURES ===================================
+_ TestToposVideoOnlyPreflight.test_nested_audio_triggers_topos_video_only_preflight _
+tests/deliver/test_video_export_preflight.py:441: in test_nested_audio_triggers_topos_video_only_preflight
+    expanded = flatten_nested_audio_tracks(parent, resolver, asset_lookup)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/nested_sequence.py:873: in flatten_nested_audio_tracks
+    _expand(clip, root_path, 1)
+src/features/edit/core/nested_sequence.py:799: in _expand
+    if abs(float(child.fps) - float(sequence.fps)) > 1e-6:
+                 ^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'fps'
+=========================== short test summary info ============================
+FAILED tests/deliver/test_video_export_preflight.py::TestToposVideoOnlyPreflight::test_nested_audio_triggers_topos_video_only_preflight
+======================== 1 failed, 330 passed in 14.54s ========================

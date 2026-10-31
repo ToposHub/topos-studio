@@ -1,0 +1,109 @@
+{
+  "component": "F19 median_rank",
+  "method": "手算：5×5 灰梯度图（值 = i/24, i=0..24 行主序）上按 edge-clamp 邻域枚举 9/25 个样本排序取第 k 个；k = round(p*(n-1))。与 oracle/GLSL 无代码复用；容差 1e-6。",
+  "params_default": {
+    "kernel_size": "3x3",
+    "percentile": 0.5,
+    "channel_mode": "RGB",
+    "amount": 1.0
+  },
+  "fixture": "5x5 灰度图 gray(i,j) = (5*j + i)/24（RGB 同值）",
+  "vectors": [
+    {
+      "pos": [
+        2,
+        2
+      ],
+      "params": {},
+      "expected": 0.5,
+      "note": "3x3 中心：邻域 6..18/24，中值 12/24"
+    },
+    {
+      "pos": [
+        0,
+        0
+      ],
+      "params": {},
+      "expected": 0.0416667,
+      "note": "3x3 角落 edge pad：排序 [0,0,0,0,1,2,5,6,7]/24 中值 1/24"
+    },
+    {
+      "pos": [
+        2,
+        2
+      ],
+      "params": {
+        "percentile": 0.0
+      },
+      "expected": 0.25,
+      "note": "k=0 → 邻域最小 6/24"
+    },
+    {
+      "pos": [
+        2,
+        2
+      ],
+      "params": {
+        "percentile": 1.0
+      },
+      "expected": 0.75,
+      "note": "k=8 → 邻域最大 18/24"
+    },
+    {
+      "pos": [
+        2,
+        2
+      ],
+      "params": {
+        "kernel_size": "5x5"
+      },
+      "expected": 0.5,
+      "note": "5x5 中心：全图 25 值中值 12/24"
+    },
+    {
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "kernel_size": "5x5"
+      },
+      "expected": 0.0833333,
+      "note": "5x5 角落 edge pad：中值 2/24"
+    },
+    {
+      "pos": [
+        2,
+        0
+      ],
+      "params": {
+        "kernel_size": "5x5"
+      },
+      "expected": 0.1666667,
+      "note": "5x5 上边中点 (x=2,y=0)：中值 4/24"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "desc": "Luma 档",
+      "fixture": "3x3 灰 patch 行主序 0.1..0.9 且中心像素置 0.1（0.1 共出现两次）",
+      "params": {
+        "channel_mode": "Luma"
+      },
+      "pos": [
+        1,
+        1
+      ],
+      "expected": 0.4,
+      "note": "med_l=0.4（排序 [0.1,0.1,0.2,0.3,0.4,...] 第 5 个），out = 0.1*(0.4/0.1) 色度比例保持"
+    },
+    {
+      "desc": "mix=0 恒等",
+      "params": {
+        "amount": 0.0
+      },
+      "expected": null,
+      "note": "任意输入精确恒等（含 HDR）"
+    }
+  ]
+}

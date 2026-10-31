@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P35",
+  "name": "棋盘错落",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "活泼/游戏感衔接；rows=columns 6 起步，phase 0.25 两波错峰",
+  "component": "X03 checker_reveal（生产 lib1_checker_reveal，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/checker_reveal）",
+  "dependencies": {
+    "component_id": "X03",
+    "component_slug": "checker_reveal",
+    "component_kind": "transition",
+    "transition_type": "lib1_checker_reveal",
+    "user_json_base": false
+  },
+  "params": {
+    "rows": 6,
+    "columns": 6,
+    "phase": 0.25,
+    "softness": 0.05
+  },
+  "notes": "X03 生产 base lib1_checker_reveal（transition_catalog 已注册）；base 不在用户转场白名单，只产出转场实例载荷。"
+}

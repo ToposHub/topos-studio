@@ -1,0 +1,574 @@
+{
+  "meta": {
+    "topos_version": "0.1.0",
+    "topos_slice_threads": 16,
+    "frames": 96,
+    "runs": 3
+  },
+  "tiers": [
+    {
+      "id": "proxy",
+      "label": "topos 422 Proxy",
+      "cases": [
+        {
+          "name": "2K",
+          "w": 1920,
+          "h": 1080,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 0.8363191990001724,
+            "seconds_all": [
+              0.8604,
+              0.804,
+              0.8363
+            ],
+            "bytes": 240682,
+            "qp_frame0": 63
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 0.22355545900018114,
+            "seconds_all": [
+              0.2319,
+              0.2236,
+              0.221
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_proxy",
+            "seconds_median": 1.3239090320003015,
+            "seconds_all": [
+              1.3406,
+              1.3224,
+              1.3239
+            ],
+            "bytes": 63464
+          },
+          "decode_prores": {
+            "name": "prores_proxy",
+            "seconds_median": 0.276575903000321,
+            "seconds_all": [
+              0.2454,
+              0.2766,
+              0.2913
+            ]
+          }
+        },
+        {
+          "name": "4K",
+          "w": 3840,
+          "h": 2160,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 2.805395877999672,
+            "seconds_all": [
+              2.919,
+              2.76,
+              2.8054
+            ],
+            "bytes": 1556476,
+            "qp_frame0": 63
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 0.5981455159999314,
+            "seconds_all": [
+              0.5981,
+              0.5928,
+              0.5986
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_proxy",
+            "seconds_median": 4.1776755380001305,
+            "seconds_all": [
+              4.1686,
+              4.2037,
+              4.1777
+            ],
+            "bytes": 392019
+          },
+          "decode_prores": {
+            "name": "prores_proxy",
+            "seconds_median": 0.7173025689999122,
+            "seconds_all": [
+              0.7173,
+              0.6959,
+              0.7472
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "lt",
+      "label": "topos 422 LT",
+      "cases": [
+        {
+          "name": "2K",
+          "w": 1920,
+          "h": 1080,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 2.096652239999912,
+            "seconds_all": [
+              2.2247,
+              2.0967,
+              2.069
+            ],
+            "bytes": 427090,
+            "qp_frame0": 58
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 0.26202818599995226,
+            "seconds_all": [
+              0.2647,
+              0.262,
+              0.2502
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_lt",
+            "seconds_median": 1.785032511999816,
+            "seconds_all": [
+              1.7999,
+              1.7488,
+              1.785
+            ],
+            "bytes": 204612
+          },
+          "decode_prores": {
+            "name": "prores_lt",
+            "seconds_median": 0.3138838120003129,
+            "seconds_all": [
+              0.3139,
+              0.3284,
+              0.3015
+            ]
+          }
+        },
+        {
+          "name": "4K",
+          "w": 3840,
+          "h": 2160,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 3.3562441690000924,
+            "seconds_all": [
+              3.5787,
+              3.3562,
+              3.3079
+            ],
+            "bytes": 1769308,
+            "qp_frame0": 63
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 0.6776905070000794,
+            "seconds_all": [
+              0.6897,
+              0.6777,
+              0.6746
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_lt",
+            "seconds_median": 6.921948036000231,
+            "seconds_all": [
+              6.8131,
+              6.9445,
+              6.9219
+            ],
+            "bytes": 1434114
+          },
+          "decode_prores": {
+            "name": "prores_lt",
+            "seconds_median": 0.8620474029999059,
+            "seconds_all": [
+              0.9123,
+              0.8564,
+              0.862
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "standard",
+      "label": "topos 422",
+      "cases": [
+        {
+          "name": "2K",
+          "w": 1920,
+          "h": 1080,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 2.1026435379999384,
+            "seconds_all": [
+              2.1509,
+              2.1006,
+              2.1026
+            ],
+            "bytes": 646069,
+            "qp_frame0": 55
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 0.3161820160003117,
+            "seconds_all": [
+              0.3162,
+              0.3133,
+              0.3211
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_standard",
+            "seconds_median": 1.6915590779999548,
+            "seconds_all": [
+              1.7522,
+              1.6349,
+              1.6916
+            ],
+            "bytes": 303088
+          },
+          "decode_prores": {
+            "name": "prores_standard",
+            "seconds_median": 0.3381523150001158,
+            "seconds_all": [
+              0.3285,
+              0.3382,
+              0.3595
+            ]
+          }
+        },
+        {
+          "name": "4K",
+          "w": 3840,
+          "h": 2160,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 3.779949674999898,
+            "seconds_all": [
+              3.988,
+              3.7799,
+              3.6615
+            ],
+            "bytes": 2620787,
+            "qp_frame0": 60
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 0.7976223460000256,
+            "seconds_all": [
+              0.8246,
+              0.794,
+              0.7976
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_standard",
+            "seconds_median": 5.5163810959998045,
+            "seconds_all": [
+              5.4622,
+              5.5289,
+              5.5164
+            ],
+            "bytes": 2068200
+          },
+          "decode_prores": {
+            "name": "prores_standard",
+            "seconds_median": 0.9847543780001615,
+            "seconds_all": [
+              0.9498,
+              0.9848,
+              1.0064
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hq",
+      "label": "topos 422 HQ",
+      "cases": [
+        {
+          "name": "2K",
+          "w": 1920,
+          "h": 1080,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 2.205154924999988,
+            "seconds_all": [
+              2.288,
+              2.2052,
+              2.1652
+            ],
+            "bytes": 956216,
+            "qp_frame0": 52
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 0.4254806220001228,
+            "seconds_all": [
+              0.4247,
+              0.4405,
+              0.4255
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_hq",
+            "seconds_median": 1.5960111240001424,
+            "seconds_all": [
+              1.624,
+              1.5755,
+              1.596
+            ],
+            "bytes": 532327
+          },
+          "decode_prores": {
+            "name": "prores_hq",
+            "seconds_median": 0.35693993299992144,
+            "seconds_all": [
+              0.3905,
+              0.3569,
+              0.3487
+            ]
+          }
+        },
+        {
+          "name": "4K",
+          "w": 3840,
+          "h": 2160,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 3.8653112259999034,
+            "seconds_all": [
+              3.944,
+              3.7276,
+              3.8653
+            ],
+            "bytes": 3854717,
+            "qp_frame0": 56
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 1.0337415500002862,
+            "seconds_all": [
+              1.0337,
+              1.0428,
+              1.0282
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_hq",
+            "seconds_median": 6.516029943999911,
+            "seconds_all": [
+              6.4712,
+              6.5559,
+              6.516
+            ],
+            "bytes": 3241450
+          },
+          "decode_prores": {
+            "name": "prores_hq",
+            "seconds_median": 1.3835492420002993,
+            "seconds_all": [
+              1.3293,
+              1.4389,
+              1.3835
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pro444",
+      "label": "topos 4444",
+      "cases": [
+        {
+          "name": "2K",
+          "w": 1920,
+          "h": 1080,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 2.84546427999976,
+            "seconds_all": [
+              2.8664,
+              2.8455,
+              2.7543
+            ],
+            "bytes": 1525746,
+            "qp_frame0": 62
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 0.46238463999998203,
+            "seconds_all": [
+              0.4833,
+              0.4624,
+              0.4602
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_4444",
+            "seconds_median": 3.1012283380000554,
+            "seconds_all": [
+              3.1012,
+              3.0887,
+              3.2908
+            ],
+            "bytes": 1452175
+          },
+          "decode_prores": {
+            "name": "prores_4444",
+            "seconds_median": 0.7682396410000365,
+            "seconds_all": [
+              0.7091,
+              0.7802,
+              0.7682
+            ]
+          }
+        },
+        {
+          "name": "4K",
+          "w": 3840,
+          "h": 2160,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 5.637499117000061,
+            "seconds_all": [
+              6.2025,
+              5.6375,
+              5.3289
+            ],
+            "bytes": 5857650,
+            "qp_frame0": 59
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 1.7328650300000845,
+            "seconds_all": [
+              1.7811,
+              1.7329,
+              1.7075
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_4444",
+            "seconds_median": 11.055186438999954,
+            "seconds_all": [
+              11.7079,
+              11.0552,
+              11.0411
+            ],
+            "bytes": 5749393
+          },
+          "decode_prores": {
+            "name": "prores_4444",
+            "seconds_median": 2.417149290999987,
+            "seconds_all": [
+              2.3437,
+              2.4519,
+              2.4171
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "extreme",
+      "label": "topos 4444 XQ",
+      "cases": [
+        {
+          "name": "2K",
+          "w": 1920,
+          "h": 1080,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 3.944594436999978,
+            "seconds_all": [
+              4.2152,
+              3.9446,
+              3.87
+            ],
+            "bytes": 2923018,
+            "qp_frame0": 63
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 0.8223581580000427,
+            "seconds_all": [
+              0.8224,
+              0.8281,
+              0.7787
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_4444xq",
+            "seconds_median": 3.457295825000074,
+            "seconds_all": [
+              3.4396,
+              3.4573,
+              3.5479
+            ],
+            "bytes": 2144019
+          },
+          "decode_prores": {
+            "name": "prores_4444xq",
+            "seconds_median": 0.9504856170001403,
+            "seconds_all": [
+              0.8473,
+              0.9595,
+              0.9505
+            ]
+          }
+        },
+        {
+          "name": "4K",
+          "w": 3840,
+          "h": 2160,
+          "encode_topos": {
+            "name": "topos-sized",
+            "seconds_median": 7.074310041999979,
+            "seconds_all": [
+              7.3938,
+              7.0351,
+              7.0743
+            ],
+            "bytes": 9213977,
+            "qp_frame0": 58
+          },
+          "decode_topos": {
+            "name": "topos",
+            "seconds_median": 1.9004349609999736,
+            "seconds_all": [
+              2.1603,
+              1.8778,
+              1.9004
+            ]
+          },
+          "encode_prores": {
+            "name": "prores_4444xq",
+            "seconds_median": 12.096304491999945,
+            "seconds_all": [
+              12.0007,
+              12.3242,
+              12.0963
+            ],
+            "bytes": 7052131
+          },
+          "decode_prores": {
+            "name": "prores_4444xq",
+            "seconds_median": 2.7962743289999707,
+            "seconds_all": [
+              2.9342,
+              2.772,
+              2.7963
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

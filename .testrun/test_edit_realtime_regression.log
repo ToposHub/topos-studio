@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 13 items
+
+tests/edit/test_edit_realtime_regression.py .............                [100%]
+
+============================= 13 passed in 11.78s ==============================

@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "result": {
+    "dialog": {
+      "selected": [
+        "/tmp/topos-edit-audit-20261021/audit-review.topos"
+      ]
+    },
+    "exists": true,
+    "bytes": 17459,
+    "mw_filepath": "/tmp/topos-edit-audit-20261021/audit-review.topos",
+    "reload": {
+      "success": true,
+      "assets": 11,
+      "sequences": {
+        "5fc82fea-f2cb-48f7-ab46-8ab419cdb1f4": {
+          "type": "TimelineSequence",
+          "id": "5fc82fea-f2cb-48f7-ab46-8ab419cdb1f4",
+          "duration": 500,
+          "frame_count": null,
+          "revision": 26
+        },
+        "437fc843-1651-426c-af17-0295c5b4a4c3": {
+          "type": "TimelineSequence",
+          "id": "437fc843-1651-426c-af17-0295c5b4a4c3",
+          "duration": 300,
+          "frame_count": null,
+          "revision": 21
+        }
+      }
+    }
+  }
+}

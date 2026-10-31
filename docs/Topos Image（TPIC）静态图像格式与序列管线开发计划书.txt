@@ -1,0 +1,1014 @@
+【勘误 2026-09-21——本计划书为历史档案，以下事项以现行真相源为准】
+1. 扩展名：`.tpic` → `.toos`（ADR-I008 全量迁移，无兼容层）。
+2. profile 3：原"Image Lossless (reserved)" → 改派 **Image RAW（TRAW）**
+   （2026-09-13 拍板；无损语义由 RAW Linear 模式承载）。
+3. 档位命名：以 manifest / ADR / 单一注册表为准
+   （`src/shared/codec/topos_profiles.py` TOPOS_IMAGE_TIERS；命名规则
+   N-1~N-8 见两份白皮书）。
+# Topos Image（TPIC）静态图像格式与序列管线开发计划书
+
+## AI 分阶段工程实施计划
+
+项目名称：Topos Image Format & Sequence Pipeline
+
+正式文件扩展名：`.tpic`
+
+文件封装 Magic：`TPIM`
+
+内层图像压缩 Packet Magic：`TPIC`
+
+依赖：Topos Video Codec / `libtopos_codec`
+
+文档状态：规划草案，须在阶段 0 冻结为正式规范
+
+---
+
+## 0. 文档使用原则
+
+本文档用于指导 AI 和开发者按依赖顺序实现 Topos Image。它不是已经冻结的文件格式
+标准，也不表示文中所有目标已经由现有代码实现。
+
+执行时必须遵守以下规则：
+
+1. 每次只执行一个阶段；进入下一阶段前，当前阶段的规范、测试、交付物和验收门槛必须全部通过。
+2. 先冻结格式和错误语义，再写实现；先完成标量参考路径，再做 SIMD、并行、mmap 或 GPU 优化。
+3. 不复制第二份 DCT、量化、Golomb-Rice、Alpha 或 CRC 实现。图片层必须调用同一套
+   `libtopos_codec` 核心。
+4. 不得把用户草案中的性能数字当作已经实现的事实。所有速度、体积和内存结论必须来自可复现基准。
+5. 不得用有损颜色结果与无损 PNG 只比较体积后宣称“同等压缩”；必须同时报告质量、位深、Alpha
+   模式和测试素材。
+6. `.tpic` 文件格式版本与内层 `TPIC` codec packet 版本分别管理，不能因封装升级而偷偷改变
+   codec 语义。
+7. 任何来自文件的 offset、size、count、尺寸和元数据长度都必须先做 checked arithmetic 和硬上限校验。
+8. 核心库只处理 caller-provided planes、内存与 I/O callbacks；PNG、TIFF、DPX、OpenEXR、OIIO
+   等第三方依赖只能位于 CLI、适配器或插件层。
+9. 不允许静默丢失 Alpha、色彩元数据、未知关键 chunk 或输出精度；不支持时必须明确失败并给出诊断。
+10. 本计划不使用日历周期作为完成标准。开发由依赖与验收门槛推进，不以“四周完成”等时间承诺驱动。
+
+---
+
+## 1. 可行性结论与产品定位
+
+### 1.1 可行性结论
+
+方案可行，而且可以显著复用现有 Topos Video Codec 的工作：
+
+- 现有 `TPIC` elementary frame packet 已经是容器无关、单帧独立、自包含的压缩表示；
+- 现有整数变换、量化、Golomb-Rice、Alpha、slice、CRC、checked arithmetic、golden vectors、
+  fuzz 和 SIMD/并行框架可以继续使用；
+- 图片格式真正新增的主要部分是：静态图片文件封装、RGB/GBR 4:4:4 与 12-bit 能力、完整色彩
+  元数据、图片序列调度、ROI/大图策略和专业软件插件；
+- 图片实现不需要等待视频产品的 MOV、时间轴或 Micro-GOP 全部完成，但正式 VFX Profile 必须等待
+  对应的 RGB/GBR 4:4:4、10/12-bit codec 能力通过一致性门槛。
+
+### 1.2 产品定位
+
+Topos Image v1 面向：
+
+- VFX 合成中的扁平化 beauty RGB(A) 帧；
+- CG 渲染后的预览、审片、缓存与交付帧序列；
+- Topos Color / Edit / Composite 的高吞吐量中间缓存；
+- 10-bit / 12-bit 整数 RGB(A) 或 YUV(A) 静态素材；
+- 需要快速随机帧访问、Planar Alpha 和稳定 C ABI 的图片库。
+
+设计优先级依次为：
+
+1. 解码正确、格式可验证、错误有界；
+2. Alpha 与色彩语义可靠；
+3. 跨平台与跨实现兼容；
+4. 单帧低延迟和序列稳定吞吐；
+5. 文件体积；
+6. 生态插件覆盖。
+
+### 1.3 v1 非目标
+
+Topos Image v1 不承诺替代 OpenEXR 的全部专业能力，尤其不包含：
+
+- HALF / FLOAT 像素、负值、超过 1.0 的 scene-linear 浮点动态范围；
+- 任意命名 AOV、多层、多 part、多 view、deep samples；
+- Cryptomatte 的完整通道与元数据语义；
+- Photoshop 图层、智能对象、文字图层或 PSD 编辑结构；
+- RAW 相机马赛克、镜头元数据和相机厂商私有解释；
+- 浏览器原生解码；MyWebGallery 若需要直接显示，必须另做 WASM decoder 或服务端转码；
+- v1 首版的任意区域 tile/ROI 随机解码、mipmap 和纹理流送；
+- 用固定 350 fps、5–10 倍 PNG 或“零卡顿”作为所有机器都必须达到的产品承诺。
+
+若未来要覆盖 AOV、HALF/FLOAT、deep、multi-part 或 Cryptomatte，应建立独立的 Topos Image
+扩展版本，不得把整数 DCT 路径包装成这些能力。
+
+---
+
+## 2. 命名、扩展名与现有格式的边界
+
+### 2.1 正式扩展名
+
+静态图片唯一正式扩展名为 `.tpic`。
+
+`.topos` 已在当前项目中用于 Topos ZIP 工程包、单图调色工程和项目持久化。静态图片不得注册
+为 `.topos`，也不得把 `.topos` 作为图片格式别名，否则会造成：
+
+- 文件路由和双击关联冲突；
+- 工程保存与媒体导入语义冲突；
+- Nuke、OIIO、Photoshop 等按扩展名匹配插件时选择错误；
+- 现有项目测试、迁移和未知 payload 保留规则被破坏。
+
+建议后续注册：
+
+- MIME：`image/x-topos-picture`；
+- macOS UTI、Windows ProgID 和缩略图提供器使用独立标识；
+- 文件类型判断必须以 `TPIM` Magic 为最终依据，扩展名只作快速候选。
+
+### 2.2 两层格式
+
+```text
+.tpic 文件
+└─ TPIM File Envelope
+   ├─ 64-byte Preamble
+   ├─ Chunk Directory
+   ├─ IDSC 图像描述
+   ├─ PIXL 内层像素码流
+   │  └─ 一个完整 TPIC elementary frame packet
+   ├─ ICCP / OCIO / XMP / EXIF 等可选元数据
+   └─ THMB 等可选派生数据
+```
+
+文件层与 codec 层职责分离：
+
+- `TPIM` 负责文件尺寸、目录、静态图片语义、色彩配置、data/display window、元数据和扩展；
+- `TPIC` packet 负责颜色/Alpha 平面压缩、slice、量化、熵编码和重建；
+- 文件解析器不得重新实现 codec；codec 不知道文件路径、扩展名、ICC 或序列帧号。
+
+现有开发期 `topos_inspect` 帮助文本曾把裸 elementary packet 示例写成 `<file.tpic>`。正式格式冻结
+时必须完成命名迁移：`.tpic` 只表示以 `TPIM` 开头的 Topos Image 文件；裸 `TPIC` packet 使用
+`.tpkt` 测试后缀、现有 `.bin` corpus，或通过 `topos_inspect --raw-packet` 显式读取。CLI、README、
+golden、文件关联和内容探测不得让同一 `.tpic` 扩展名同时对应两种 Magic。
+
+### 2.3 最小兼容模式
+
+结构验证阶段允许将一个现有的 YUV 4:2:2 10-bit Standard `TPIC` packet 放入 `PIXL`
+chunk，用于验证 envelope、C ABI、golden、fuzz 和 CLI。
+
+该模式只能标记为开发兼容档，不能作为 VFX 专业 RGB 主档发布。
+
+---
+
+## 3. 现有 Codec 能力与新增前置条件
+
+### 3.1 当前已经能够复用的能力
+
+- 确定性整数 8×8 变换、量化与反量化；
+- 有界 Golomb-Rice 编解码，unary 前缀有硬上限；
+- slice 独立、slice CRC、frame header CRC；
+- 颜色 DCT 路径；
+- Alpha mode 1：全分辨率 16-bit、bit-exact；
+- Alpha mode 2：8/10/12-bit 有效精度的受限近似；
+- caller-provided planar uint16 buffer；
+- 标量参考路径、AVX2/NEON 分发和有界 slice 并行；
+- golden transform / bitstream / codec；
+- ASan、UBSan、fuzz、截断和损坏测试；
+- 颜色、Alpha 与总 payload 分项统计。
+
+### 3.2 当前不能视为已经完成的能力
+
+现有规范当前正式验收的主路径是：
+
+- YUV 4:2:2；
+- 10-bit；
+- Standard profile；
+- 最大 coded width / height 为 8192；
+- 单个 frame packet 最大 256 MiB；
+- slice 是全宽水平带，不是二维 tile。
+
+YUV 4:4:4、GBR 4:4:4、12-bit 与其他 Profiles 虽有预留，但在图片计划中必须作为新的开发与
+验收任务，不能在产品介绍中写成“已完成”。
+
+### 3.3 VFX 图片发布前置门槛
+
+正式 Topos Image v1 至少需要：
+
+1. `GBR/RGB 4:4:4 10-bit` codec profile 全链路通过；
+2. Alpha 的 straight / premultiplied 语义与宿主转换冻结；
+3. 色彩 metadata precedence 规则冻结；
+4. RGB(A) golden vectors、真实素材质量报告和多代测试通过；
+5. 12-bit 只有在独立整数界、码率、质量、ABI 和跨平台门槛通过后才登记为已支持；
+6. 8K 只有在 256 MiB packet 上限、峰值内存和高熵最坏输入测试通过后才登记为已支持。
+
+### 3.4 “无损”的准确用词
+
+当前颜色 DCT 路径只能称为有损、近无损或视觉无损，不能仅因为某些样本 round-trip 相同就称为
+绝对无损。
+
+真正的 Lossless RGB(A) 必须是独立 Profile：使用可逆颜色变换或不变换、可逆预测、Rice/raw
+escape，并在全部合法输入上 bit-exact。该 Profile 属于后续扩展，不是 v1 DCT Profile 的别名。
+
+Alpha mode 1 可以称为无损 Alpha；受限近似 Alpha 必须报告有效位深和最大绝对误差。
+
+---
+
+## 4. `.tpic` 文件格式规范草案
+
+### 4.1 全局规则
+
+- 所有多字节整数使用 big-endian；
+- 禁止直接序列化 C struct，必须按固定 offset 显式读写；
+- offset 和 size 使用 u64；
+- 所有 chunk 必须落在 `file_size` 内且互不重叠；
+- preamble、directory 和所有 chunk 必须有 CRC；CRC-32 算法直接复用现有 TPIC 的
+  IEEE 802.3 定义，不另造多项式或初始值；
+- CRC 用于损坏检测，不宣称提供密码学认证；
+- 未知 optional chunk 跳过并在可编辑 round-trip 中尽量保留；
+- 未知 critical chunk 必须返回 unsupported，不得猜测；
+- 同一语义只允许一个权威来源；重复字段冲突时硬错误；
+- 解析 header 和 directory 时不得分配像素平面。
+
+### 4.2 64-byte Preamble
+
+以下布局作为阶段 0 的冻结候选：
+
+| Offset | Size | Field | Type | 规则 |
+| ---: | ---: | --- | --- | --- |
+| 0 | 4 | magic | u8[4] | `TPIM` |
+| 4 | 2 | file_version_major | u16 | 不兼容变化提升 major |
+| 6 | 2 | file_version_minor | u16 | 向后兼容扩展提升 minor |
+| 8 | 4 | preamble_size | u32 | v1 必须为 64 |
+| 12 | 4 | flags | u32 | 未定义位必须为 0 |
+| 16 | 8 | file_size | u64 | 必须等于实际文件长度 |
+| 24 | 8 | directory_offset | u64 | 目录绝对偏移 |
+| 32 | 4 | directory_entry_size | u32 | v1 必须为 32 |
+| 36 | 4 | directory_count | u32 | 必须在硬上限内 |
+| 40 | 4 | primary_image_index | u32 | v1 必须为 0；为未来多图预留 |
+| 44 | 4 | compatibility_flags | u32 | 解码能力提示，不覆盖实际校验 |
+| 48 | 4 | header_crc32 | u32 | 对完整 64B 将本字段清零后计算 |
+| 52 | 4 | directory_crc32 | u32 | 对完整 directory 原始字节计算 |
+| 56 | 8 | reserved0 | u64 | 必须为 0 |
+
+用户草案原来的字段相加只有 63 字节，而且把 reserved 与 custom metadata 混在一起。正式格式不得
+使用“45B 自定义元数据”这种不可扩展结构。
+
+### 4.3 32-byte Directory Entry
+
+| Offset | Size | Field | Type | 规则 |
+| ---: | ---: | --- | --- | --- |
+| 0 | 4 | chunk_type | FourCC | 见 chunk 表 |
+| 4 | 4 | chunk_flags | u32 | critical / optional / preserve 等 |
+| 8 | 8 | chunk_offset | u64 | 绝对偏移，checked |
+| 16 | 8 | chunk_size | u64 | 有硬上限，checked |
+| 24 | 4 | chunk_crc32 | u32 | 对 chunk bytes 计算 |
+| 28 | 4 | reserved | u32 | 必须为 0 |
+
+目录项按 `chunk_offset` 升序；不得指向 preamble 或 directory 自身；不得重叠、别名或越界。
+
+### 4.4 首版 Chunk
+
+| FourCC | 必需性 | 用途 |
+| --- | --- | --- |
+| `IDSC` | critical / 必需 | 图片描述、窗口、通道、采样、Alpha、codec 版本、颜色摘要 |
+| `PIXL` | critical / 必需 | 一个完整 TPIC elementary frame packet |
+| `ICCP` | optional | 原始 ICC profile，带长度上限 |
+| `OCIO` | optional | OCIO colorspace 名称/配置标识提示，不内嵌任意可执行配置 |
+| `XMP ` | optional | XMP metadata，带长度和解析预算 |
+| `EXIF` | optional | EXIF metadata，带长度和嵌套限制 |
+| `THMB` | optional | 可丢弃缩略图，不作为主图真实性来源 |
+| `HASH` | optional | 可选强哈希，用于资产缓存与去重，不替代 chunk CRC |
+
+未来可预留 `TILE`、`TDIR`、`MIPM`、`AUXC`，但 v1 解码器不得假装支持。
+
+### 4.5 IDSC 必须表达的语义
+
+阶段 0 必须冻结 `IDSC` 的逐字段 offset、类型、字节序和校验顺序，至少包含：
+
+- display window：signed xMin、yMin、xMax、yMax；
+- data window：signed xMin、yMin、xMax、yMax；
+- origin 与 orientation；
+- pixel aspect ratio 的 numerator / denominator；
+- channel model：RGB、GBR、YUV、GRAY；
+- channel count、名称、顺序与语义；
+- sample kind：UINT、HALF、FLOAT；v1 只允许已实现的 UINT；
+- valid bit depth 与 container bits；
+- planar / packed；v1 codec payload 为 planar；
+- subsampling 与 chroma siting；
+- Alpha absent / straight / premultiplied；
+- Alpha mode、有效位深和误差上限；
+- codec id、payload major、payload minor 和 profile id；
+- color primaries、transfer、matrix、range；
+- ICCP / OCIO 等 chunk 的引用与优先级；
+- orientation 是否已规范化；
+- reserved 与 future extension 规则。
+
+`IDSC` 与内层 `TPIC` packet 对尺寸、pixel format、bit depth、Alpha 或颜色摘要的重复信息不一致时，
+解码器必须拒绝文件，不能任选一个值。
+
+v1 单 `PIXL` 模式中，`data_window` 的宽高必须严格等于 TPIC packet 的 visible width/height，且
+`display_window` 必须包含 `data_window`。data window 带非零或负原点时，只改变其在画布中的坐标，
+不能改变内层 plane 的存储尺寸；未来 sparse/tile 版本若改变此规则，必须提升文件版本。
+
+### 4.6 色彩元数据优先级
+
+阶段 0 必须把“样本解释”与“RGB 色彩表征”分成两层并冻结优先级：
+
+1. 内层 TPIC 的 pixel format、range、matrix 和 chroma siting 始终负责把存储样本正确重建为
+   RGB；ICC、OCIO 或文件层 metadata 绝不能覆盖这些数值解释规则；
+2. 对 GBR/RGB identity payload，不执行 YUV matrix，但仍遵守 bit depth、range 和通道顺序；
+3. 得到 RGB 后，有效 ICC profile 可作为该 RGB 的色彩表征权威，并保留结构化 CICP/H.273 摘要；
+4. 场景线性/VFX 工作流使用明确的 chromaticities + transfer + OCIO colorspace name；
+5. 没有 ICC 时按结构化 primaries/transfer 表征 RGB；元数据缺失则返回 unspecified，不得静默猜成 sRGB；
+6. ICC、结构化色彩标签和 OCIO 标识互相矛盾时，默认报错或明确 warning，不得默默改变像素。
+
+OCIO 名称只是颜色空间标识，不得让文件携带任意脚本、动态库路径或机器绝对路径。
+
+### 4.7 大图、8K 与 Tile 策略
+
+现有 TPIC packet 限制为最大 8192×8192、最大 256 MiB。高熵 8K RGBA 数据可能逼近 packet、
+输出内存和临时缓冲上限，因此 v1 不得笼统承诺“所有 8K 均支持”。
+
+阶段 0 必须在以下策略中作出正式决定：
+
+1. v1 限制到最坏输入测试已证明安全的尺寸和 Profile；
+2. 提升 packet 上限，并重新完成 OOM、fuzz、ABI、内存预算和跨平台审计；
+3. 在后续文件版本增加 tile/multi-payload，把图像分为多个独立 TPIC packet。
+
+推荐首版采用策略 1，结构中预留策略 3。Tile 版本应提供：二维 tile 坐标、独立 CRC、tile
+目录、ROI 查询、跨 tile 质量一致性、最大 tile 数与总解码预算。现有全宽 slice 不能直接宣称为 tile。
+
+---
+
+## 5. 图片 Profiles、像素与 Alpha
+
+### 5.1 建议 Profile 分层
+
+| Profile | 像素 | 位深 | Alpha | 定位 | 发布条件 |
+| --- | --- | ---: | --- | --- | --- |
+| Image Preview | YUV 4:2:2 | 10 | 无/受限近似 | 预览、图库、代理 | 可用现有 codec 做结构验证，质量复测后发布 |
+| Image HQ | GBR/RGB 4:4:4 | 10 | A16 无损默认；可选受限近似 | VFX beauty、贴图、缓存 | 444 10-bit 全门槛通过 |
+| Image XQ | GBR/RGB 4:4:4 | 12 | A16 无损默认；可选受限近似 | 高精度整数中间片 | 12-bit 全门槛通过 |
+| Image Lossless | RGB(A) 可逆 | 10/12/16 | 无损 | 精确缓存/归档 | 新可逆 profile 完成；不属于首版 DCT 路径 |
+
+Profile 名称和 ID 必须在阶段 0 正式冻结。图片 Profile 可以映射到 codec Profile，但不得复用名称
+掩盖不同的像素或质量语义。
+
+### 5.2 RGB 与 YUV 使用边界
+
+- VFX 合成主档默认使用 GBR/RGB 4:4:4 full-range；
+- YUV 4:2:2 只用于 Preview/Library 等体积优先场景；
+- 不能把 4:2:2 宣称为“色彩完全无损”；
+- RGB↔YUV 转换必须指定矩阵、range、舍入和 clipping 规则；
+- scene-linear 整数表示必须声明可表示范围，不能暗示拥有 HALF/FLOAT 的无限制 HDR 语义。
+
+### 5.3 Alpha 策略
+
+Alpha 为独立、全分辨率平面，不做色度式降采样，也不经过颜色 DCT 的死区量化。
+
+支持两类模式：
+
+- VFX Master：默认 A16 lossless，bit-exact；允许 Alpha 超过颜色 payload 的 20%–30%，但必须
+  报告实际空间增长；
+- Bounded Alpha：按 Profile 将 Alpha 目标控制在压缩后颜色 payload 的约 20%–30%，记录有效
+  位深、实际比例和最大绝对误差。
+
+不得让“Alpha 不超过 30%”成为所有内容的绝对无损承诺。随机 Alpha、噪声遮罩或复杂毛发可能无法
+同时满足无损和码率上限；调用方必须在“保持无损、允许增大”和“受限近似”之间显式选择。
+
+### 5.4 Straight / Premultiplied
+
+- 文件必须明确记录 straight 或 premultiplied；
+- Alpha 自身始终按线性覆盖率解释，不应用颜色 transfer function；
+- premultiply/unpremultiply 只在明确的线性颜色空间边界执行；
+- Alpha=0 时 RGB 的保留、归零或恢复策略必须冻结并测试；
+- 转换不得产生黑边、白边、Gamma 边缘或超过声明误差的污染；
+- 插件不得因宿主只支持某种 association 而静默修改文件语义。
+
+---
+
+## 6. 推荐代码与 ABI 结构
+
+### 6.1 代码布局
+
+推荐在现有核心中扩展，不创建算法分叉：
+
+```text
+native/topos_codec/
+├─ include/
+│  ├─ topos_codec.h
+│  └─ topos_image.h
+├─ src/image/
+│  ├─ image_container.c/.h
+│  ├─ image_reader.c/.h
+│  ├─ image_writer.c/.h
+│  ├─ image_metadata.c/.h
+│  └─ image_sequence_primitives.c/.h
+├─ src/codec/              # 继续作为唯一 codec 实现
+├─ tests/unit/             # image header/directory/metadata/ABI
+├─ tests/conformance/      # image golden files
+└─ tests/fuzz/             # image parser/decoder fuzz
+
+src/shared/
+├─ codec/topos_image_binding.py
+├─ media/topos_image_source.py
+└─ media/topos_image_sequence_source.py
+
+plugins/
+├─ oiio_topos/
+├─ nuke_topos/
+├─ photoshop_topos/
+└─ after_effects_topos/
+```
+
+若发行物需要命名为 `libtopos_image`，它只能是链接/包装同一核心的薄库，禁止复制数值表、DCT、
+Alpha、Rice 或错误码实现。
+
+### 6.2 稳定 C ABI
+
+所有公开结构继续使用：
+
+- 第一字段 `struct_size`；
+- 第二字段 `abi_version`；
+- 全 0 初始化；
+- reserved 字段；
+- 明确的 caller/library ownership；
+- 单 context 不可重入，多 context 可并发；
+- 失败、取消和释放语义明确。
+
+建议能力：
+
+- `tc_image_probe()`：只解析 preamble、directory 与 IDSC；
+- `tc_image_validate()`：结构与 CRC 验证，可选择是否深入验证 PIXL；
+- `tc_image_decode()`：解码到 caller-provided planes；
+- `tc_image_encode()`：从 caller-provided planes 写文件；
+- `tc_image_read_metadata()` / `tc_image_write_metadata()`；
+- `tc_image_query_required_buffer()`；
+- `tc_image_query_capabilities()`；
+- `tc_image_cancel()` 或 cooperative cancellation callback；
+- 明确的 destroy/close，不依赖进程退出回收。
+
+### 6.3 I/O 抽象
+
+核心使用 64-bit random-access callbacks：
+
+- read_at / write / seek_write；
+- length / flush / close；
+- 可选取消检查；
+- 短读、磁盘满、权限、网络断开和取消分别诊断；
+- 不在核心中依赖 `FILE*`、POSIX mmap 或 Windows HANDLE 的具体布局。
+
+基准路径优先使用 `pread`/普通 buffered I/O 或 Windows 等价能力。mmap 只是可选后端，因为它仍有
+page fault/page cache、地址空间、句柄和 NAS 行为差异，不能标记为自动零拷贝。
+
+64-byte 对齐是 CPU cache line 优化候选，不等于 NVMe 4K sector 对齐；普通 page-cache I/O 也不会
+因为 payload 64-byte 对齐自动得到更高磁盘吞吐。
+
+### 6.4 原子写与失败恢复
+
+写文件流程：
+
+1. 在目标同一文件系统创建唯一临时文件；
+2. 写 preamble 占位、chunks 与 directory；
+3. 回填 file_size、offset、CRC；
+4. flush/close 并重新 probe/validate；
+5. 按明确 overwrite policy 原子 rename；
+6. 失败或取消清理临时文件，不留下 0-byte 或半文件冒充成功结果。
+
+禁止编码失败后静默换成 TIFF/PNG 或偷偷改变扩展名。
+
+---
+
+## 7. AI 分阶段实施路线
+
+### 阶段 0：决策冻结与基线建立
+
+目标：把产品宣传草案变成可实现、可测试的工程契约。
+
+任务：
+
+- 冻结 `.tpic`，明确禁止图片使用 `.topos`；
+- 冻结 `TPIM` preamble、directory、chunk flags、unknown chunk 规则；
+- 冻结 `IDSC` 字段、metadata precedence、orientation 和窗口坐标；
+- 冻结 Profile ID、当前支持矩阵与非目标；
+- 选择 8K/256 MiB/tile 策略；
+- 冻结错误码、解析校验顺序、上限和安全预算；
+- 记录现有 TPIC codec 能力与待实现项；
+- 建立真实素材集与公开 benchmark protocol；
+- 把 open、read、decode、color convert、GPU upload、first present 分开计时。
+
+交付物：
+
+- `docs/image/topos_image_file_spec_v0.md`；
+- `docs/image/ADR-I001-stage0-decisions.md`；
+- `docs/image/benchmark_protocol.md`；
+- `docs/image/test_vector_manifest.json`；
+- `docs/image/risk_register.md`。
+
+验收门槛：
+
+- 64-byte 与 32-byte 布局逐 offset 相加正确；
+- 所有字段有类型、范围、字节序、默认值和错误语义；
+- 当前已实现与未来目标没有混写；
+- 没有 350 fps、5–10 倍 PNG、固定压缩率等未经测量的完成承诺；
+- 图片 `.tpic` 与工程 `.topos` 的路由不冲突。
+
+### 阶段 1：TPIM 文件解析器、Writer 与安全基础设施
+
+目标：先用现有合法 TPIC packet 完成图片 envelope，不改 codec 数学。
+
+任务：
+
+- 实现 preamble 显式 big-endian pack/unpack；
+- 实现 directory scan、排序、重叠/越界/重复检查；
+- 实现 chunk CRC 和 critical/optional 规则；
+- 实现 IDSC 最小字段；
+- 实现 PIXL 原样嵌入与提取；
+- 复用现有 checked arithmetic、allocator fault injection 与错误模型；
+- 建立 parser、writer、round-trip、truncation、bitflip、forged offset fuzz；
+- 冻结首批 `.tpic` golden files。
+
+交付物：
+
+- `topos_image.h` 最小 ABI；
+- `src/image/` parser/writer；
+- `golden_image_v1.bin` 或独立 golden 文件集合；
+- image fuzz corpus 与 deterministic replay。
+
+验收门槛：
+
+- 合法文件 parse→write 结果确定性一致；
+- 任意截断、随机输入、chunk overlap 和巨大 count 不越界、不死循环、不超预算分配；
+- 未知 optional chunk 可跳过，未知 critical chunk 干净拒绝；
+- IDSC 与 PIXL 冲突会稳定返回同一错误；
+- ASan、UBSan、OOM 和 fuzz 门禁通过。
+
+### 阶段 2：图片 Codec 前置能力——GBR/RGB 4:4:4 10-bit
+
+目标：交付第一个真正适合 VFX beauty frame 的图片主档。
+
+任务：
+
+- 在现有 codec spec 中正式启用 GBR 4:4:4 10-bit；
+- 冻结 plane order、identity matrix、full range、padding 和 stride；
+- 为 RGB/GBR 调整或新增量化矩阵，先测量再冻结；
+- 复用 slice、Rice、CRC 和并行路径；
+- 建立 RGB 合成/真实素材、极值、渐变、噪声、线条、肤色和色卡测试；
+- 进行多代编解码、通道偏色和 Alpha 边缘测试；
+- 扩展 scalar/SIMD/golden parity。
+- 运行现有 `native/topos_codec/run_tests.sh` 全门禁，复验旧 10-bit YUV 4:2:2 TPIC packet、
+  MOV/tpcC、Topos Video 与 Topos Color 解码/编码路径；
+- capability registry 必须只公开真正通过门槛的组合，旧应用不能因新字段存在而误登记未完成 Profile。
+
+验收门槛：
+
+- 标量参考输出跨平台一致；
+- SIMD 与标量重建一致，编码是否要求 bit-exact 由 spec 明确；
+- RGB channel order、range、identity matrix 无交换或隐式 YUV 转换；
+- 真实素材质量达到阶段 0 冻结的 Profile 基线；
+- Alpha mode 1 bit-exact，mode 2 满足误差与统计规则。
+- 旧 TPIC golden 字节、旧 MOV/tpcC 和现有 YUV422 视频路径无回归。
+
+### 阶段 3：12-bit Image XQ 与完整元数据
+
+目标：在不破坏 10-bit 解码的前提下启用 12-bit 整数图片档。
+
+任务：
+
+- 复核所有 transform、量化、反量化和重建中间值上界；
+- 增加 12-bit GBR/RGB golden 与极值向量；
+- 完成 ICCP、OCIO、XMP、EXIF 受限读写；
+- 实现 data/display window、pixel aspect、orientation；
+- 实现 metadata precedence 和冲突诊断；
+- 验证未知 optional metadata round-trip 保留策略。
+- 重跑全部旧 TPIC/MOV/golden、Topos Video 和 Topos Color 回归；12-bit capability 只在新旧门禁
+  同时通过后对应用层开放。
+
+验收门槛：
+
+- UBSan 下无有符号溢出或未定义移位；
+- 10-bit v1 文件仍由新解码器正确读取；
+- 12-bit 不被中间层降为 10/8-bit；
+- ICC/OCIO/CICP 往返不静默改写；
+- 所有 metadata 长度、嵌套、字符串和 allocation 有硬上限。
+
+### 阶段 4：完整 C ABI、CLI 与格式互转
+
+目标：让格式可独立验证和用于管线，而不依赖 Topos UI。
+
+任务：
+
+- 完成 probe/validate/encode/decode/metadata/capability ABI；
+- 完成 I/O callback、caller buffer、ownership、取消和错误详情；
+- 实现 `tpic probe|verify|encode|decode|benchmark`；
+- CLI 适配 PNG/TIFF/DPX/OpenEXR 时优先通过 OIIO 或成熟库；
+- 明确颜色转换、bit-depth conversion、dither 和 Alpha association 参数；
+- 实现原子写、overwrite、磁盘满和取消路径。
+
+验收门槛：
+
+- 不带第三方图像库也能构建核心；
+- CLI 的任何精度或色彩转换都必须显式显示；
+- PNG/TIFF/DPX/EXR round-trip 分别按其可表达能力验收；
+- 失败不会生成伪成功文件，也不会静默 fallback 为别的格式；
+- macOS arm64/x64、Windows x64 构建与 ABI smoke test 通过。
+
+### 阶段 5：Topos Color / Composite 单图集成
+
+目标：以现有媒体、色彩和 GPU 边界接入 `.tpic`。
+
+任务：
+
+- 在统一 format registry 注册 `.tpic` 为 image，不注册 `.topos`；
+- 实现内容 Magic probe，避免只依赖扩展名；
+- 增加 `ToposImageSource`，输出 planar uint16 `DecodedFrame/PlaneInfo`；
+- 复用现有 YUV/RGB GPU upload、HDR、straight/premultiplied 和 deferred release；
+- UI 只提交请求和状态，不直接解码或操作 OpenGL；
+- 导入、导出、缩略图、缓存和颜色管理使用同一 metadata 语义；
+- 明确 standalone image `.topos` 工程包引用 `.tpic` 素材的关系。
+
+验收门槛：
+
+- `.tpic` 与 `.topos` 工程路由完全区分；
+- decode→GPU→composite→export→decode 的颜色与 Alpha 符合定义；
+- 无 8-bit fallback、无 Alpha 静默压平；
+- 失败、取消、换图和关闭时 CPU/GPU 资源正确释放；
+- preview/export 语义一致。
+
+### 阶段 6：图片序列与有界预取
+
+目标：稳定读取 `frame_0001.tpic` 一类序列，不另建无界线程系统。
+
+任务：
+
+- 实现帧号解析：prefix、padding、start/end/step、负帧号；
+- 定义缺帧、重复、空洞、权限错误和文件被替换的策略；
+- 复用现有 `MediaSource`、`DecodedFrame`、`PlaneInfo`、`DecodeQueue` 和优先级模型；
+- 建立 `ToposImageSequenceSource`；
+- 预取使用 generation cancel、字节级内存上限、backpressure 和 seek flush；
+- 避免“帧级并行 × slice 并行”导致 CPU 过度订阅；
+- 分离 encoded cache、decoded plane cache、GPU texture cache；
+- 缓存 key 包含内容指纹、codec/file version、颜色解释和 decode options。
+
+验收门槛：
+
+- 1000+ 帧序列在顺播、跳帧、反向、随机拖动、取消时状态正确；
+- 队列、文件句柄、内存和线程数始终有界；
+- seek 后旧 generation 不得覆盖新帧；
+- 缺帧策略可配置且不伪造成功；
+- 冷/热缓存、NVMe/NAS 分别报告 p50/p95/p99 和峰值内存。
+
+### 阶段 7：I/O、SIMD 与并行优化
+
+目标：在正确性冻结后提高端到端吞吐，而不是只优化 header parse。
+
+任务顺序：
+
+1. 测量文件 open、directory、read、decode、conversion、upload、present；
+2. 消除重复分配、重复 CRC、无效颜色转换和多余 plane 拷贝；
+3. 调整帧级与 slice 级并行预算；
+4. 测试 buffered read、pread/ReadFile、批量打开与 read-ahead；
+5. 只有实测收益明确时增加 mmap backend；
+6. 评估 CPU plane pool 和生命周期协议；
+7. GPU 只作为可选后端，继续遵守现有 scalar/golden/fallback 规则；
+8. 若未来启用 tile，再评估 ROI 和 tile cache。
+
+验收门槛：
+
+- 优化不改变文件语义和重建结果；
+- 包装层相对直接 TPIC decode 的额外开销被单独报告并受控；
+- 报告 p50/p95/p99/max、CPU、内存、文件句柄、磁盘带宽和平均文件大小；
+- 用 `average_file_bytes × fps` 校验所需存储带宽，不能只写 fps；
+- mmap 若无收益或使 Windows/NAS 尾延迟恶化，保留普通 I/O 为默认；
+- 当前硬件未达到 350 fps 不影响 v1 正确性完成定义。
+
+### 阶段 8：OpenImageIO 插件
+
+目标：提供标准 ImageInput/ImageOutput 插件，不夸大宿主覆盖范围。
+
+任务：
+
+- 实现 `.tpic` 的 ImageInput / ImageOutput；
+- 映射 ImageSpec、channel names、alpha channel、data/full window、pixel aspect 和 metadata；
+- 支持 scanline 读写；v1 不支持 tile 时明确返回 capability=false；
+- 支持 OIIO IOProxy 时复用核心 random-access I/O；
+- 对不同 OIIO ABI、OS 和架构分别构建；
+- 使用 `oiiotool` 做 probe、convert、metadata 和像素测试。
+
+验收门槛：
+
+- OIIO 插件 ABI 不匹配时明确拒绝加载；
+- `oiiotool` RGB(A) 10/12-bit 往返符合格式能力；
+- Alpha association、channel order 和色彩 metadata 不丢失；
+- 明确文档化：只有能够发现并加载该插件的 OIIO 宿主才能使用 `.tpic`，不等于 Blender、Maya、
+  Nuke 自动获得支持。
+
+### 阶段 9：Nuke Reader / Writer
+
+目标：在明确的 Nuke SDK 与平台矩阵上提供独立 Reader/Writer。
+
+- 使用 NDK Reader/Writer；
+- 处理扩展名与 Magic tester；
+- 映射 channel、data/full window、pixel aspect、premult 和颜色空间；
+- 响应 host abort；
+- v1 整图解码时明确 ROI 限制，后续 tile 版本再做真正区域解码；
+- 对支持的 Nuke 版本、OS、arm64/x64 分别构建与测试。
+
+验收门槛：
+
+- 指定 Nuke 版本中单图、序列、Read、Write 和 render farm 无 UI 模式通过；
+- straight/premultiplied、data/full window、pixel aspect 和 colorspace 映射正确；
+- 缺帧、损坏文件、unsupported Profile 和 host abort 行为可诊断且无泄漏。
+
+### 阶段 10：Photoshop File Format Plug-in
+
+目标：为 Photoshop 提供扁平静态图片的打开与另存为能力。
+
+- 使用 Photoshop C++ 文件格式插件能力；
+- UXP 仅用于可选 UI/打包，不能假设纯 JavaScript 插件能实现底层文件格式；
+- 映射 Photoshop 8/16-bit 宿主缓冲与 Topos 10/12-bit 有效精度；
+- 明确 RGB、Alpha、ICC、orientation 和 flatten 语义；
+- 完成签名、公证、安装、升级和卸载测试。
+
+验收门槛：
+
+- 指定 Photoshop 版本的打开、另存为、取消和错误文件测试通过；
+- 8/16-bit 宿主缓冲映射可重复，不能把宿主 16-bit 工作缓冲误报为文件原生 16-bit；
+- ICC、Alpha 与 orientation 正确；明确不支持图层、智能对象和 PSD 编辑结构。
+
+### 阶段 11：After Effects Importer / Exporter
+
+目标：为 After Effects 提供独立的静态图/序列导入与导出能力。
+
+- 单独使用 AE SDK 的 importer/exporter 接口；
+- 支持静态图和序列帧号；
+- 映射 AE 像素格式、Alpha association、颜色管理和取消；
+- 不复用 Photoshop 插件包装冒充 AE 支持。
+
+验收门槛：
+
+- 指定 AE 版本中的导入、预览、序列、导出和无 UI 渲染通过；
+- 并发帧请求、缺帧、取消和错误文件行为稳定；
+- 宿主转换到 16-bit 或 float 工作缓冲时不误报为文件原生浮点；
+- 资源释放和颜色/Alpha 映射通过门槛；Photoshop 插件不能代替本阶段验收。
+
+所有宿主都必须各自列出支持版本与平台矩阵。文件关联是独立发行任务，不能用“插件能打开”等同于
+“系统双击已支持”。
+
+### 后续开发备注：Tile/ROI、大图与可逆颜色
+
+本备注内容不纳入首版完成条件，只有实际需求与基准证明后启动。
+
+候选能力：
+
+- `TDIR` + 多 `TILE` chunks；
+- 每 tile 一个独立 TPIC payload；
+- ROI 查询和选择性解码；
+- 超过 8192 的 canvas 与 data window；
+- mipmap/thumbnail 层级；
+- 独立 Lossless RGB(A) 可逆预测 Profile；
+- 任意辅助通道、HALF/FLOAT 或 AOV 的新 codec id；
+- 浏览器 WASM decoder 或服务端 thumbnail gateway。
+
+任何新增能力都必须提升对应 file/codec 版本，保留 v1 reader 对未知 optional/critical chunk 的既定行为。
+
+### 阶段 12：健壮性、分发与 SDK 收口
+
+任务：
+
+- Debug、Release、ASan、UBSan、fuzz、OOM 全门禁；
+- macOS arm64/x64、Windows x64 构建；Linux 用于 OIIO/Nuke 时加入；
+- ABI symbol/version 审计；
+- 恶意文件、metadata bomb、路径与临时文件安全；
+- 动态库签名、公证、安装包和卸载；
+- C/C++ SDK sample、API 文档和格式规范发布；
+- golden corpus 与兼容策略归档；
+- 第三方插件许可证和分发边界审计。
+
+验收门槛：
+
+- 旧 `.tpic` golden 在新版本持续通过；
+- 任意不可信输入不崩溃、不越界、不无界分配；
+- 正常、失败、取消、磁盘满和关闭路径无泄漏；
+- 安装后核心、CLI 和声明支持的宿主插件可被独立验证；
+- 所有宣传数字都能追溯到带环境说明的报告。
+
+---
+
+## 8. 测试与验收矩阵
+
+### 8.1 格式与安全
+
+- preamble 每个字段的边界值；
+- directory_count=0、最大值、溢出值；
+- offset+size 溢出、越界、重叠、别名、乱序；
+- 重复 critical chunk、缺失 IDSC/PIXL；
+- 未知 optional / critical chunk；
+- header、directory、chunk CRC 错误；
+- 任意字节截断；
+- overlong Rice unary 与恶意 TPIC payload；
+- 巨大 ICC/XMP/EXIF、深层嵌套、无终止字符串；
+- OOM fault injection、短读、磁盘满、权限错误；
+- 临时文件、原子替换和取消恢复；
+- fuzz corpus、ASan、UBSan、跨平台 golden。
+
+### 8.2 尺寸与像素
+
+- 1×1、奇数宽高、非 8 倍数、最大合法尺寸；
+- 1080p、2K、4K、接近 8K；
+- data window 小于/偏离 display window；
+- 10-bit 与 12-bit 极值、全黑、全白、中性灰；
+- RGB/GBR channel order；
+- YUV range、matrix、subsampling 和 chroma siting；
+- stride、padding、crop、orientation；
+- scalar/SIMD/thread-count parity。
+
+### 8.3 Alpha
+
+- 无 Alpha、全透明、全不透明；
+- 硬边、羽化、细毛发、烟雾、motion blur；
+- straight/premultiplied；
+- Alpha=0 且 RGB 非零；
+- 噪声/随机 Alpha 最坏码率；
+- mode 1 bit-exact；
+- mode 2 最大绝对误差、有效位深和 20%–30% 目标统计；
+- lossless Alpha 超预算时的警告/错误策略；
+- decode→GPU→composite→encode→decode。
+
+### 8.4 色彩与质量
+
+- sRGB、Rec.709、Display P3、Rec.2020；
+- gamma、linear、PQ、HLG 仅在 Profile 可表达时测试；
+- ICC、CICP/H.273、OCIO 名称一致与冲突；
+- 色卡、肤色、渐变、饱和色、细线、颗粒、CG beauty；
+- PSNR、SSIM、最大通道误差、均值偏移；
+- 多代编解码；
+- RGB→YUV→RGB 仅对 Preview Profile 单独报告；
+- 与 PNG/TIFF/DPX/EXR 比较时同时记录是否无损、位深、Alpha、颜色空间和文件大小。
+
+### 8.5 性能
+
+每项均报告 p50/p95/p99/max：
+
+- probe/header/directory；
+- 文件读取；
+- TPIC payload decode；
+- 色彩转换；
+- GPU upload；
+- first present；
+- 单帧冷启动；
+- 单帧热缓存；
+- 顺序播放、随机 seek、反向读取；
+- 单线程/多线程；
+- 无 Alpha/有 Alpha；
+- NVMe、SATA、NAS；
+- CPU、内存、page faults、文件句柄和磁盘带宽。
+
+当前可参考的历史基线是 i9-9900K、4 线程、4K 10-bit 无 Alpha 解码 p50 约 109.9 ms，
+4K+A12 约 170.7 ms。该数字只用于说明现有差距，必须在当前开发机器按正式 protocol 重测。
+
+“4K 350 fps / 2.8 ms”和“300 fps 磁盘读取”仅可作为远期研究方向。若未来提出此目标，必须同时证明
+输出内存带宽、平均压缩文件大小、存储带宽、线程数、功耗和尾延迟可成立。
+
+### 8.6 序列与资源
+
+- 1000+ 帧顺序、跳帧、反向和随机拖动；
+- 负帧号、不同 padding、空洞、重复和重命名；
+- 文件正在写入、被替换或截断；
+- generation cancel 与 stale result；
+- 队列 backpressure 和内存预算；
+- 帧并行与 slice 并行过度订阅；
+- 文件描述符、mmap、线程、CPU buffer、GPU texture 泄漏；
+- 应用关闭、项目切换和插件卸载。
+
+---
+
+## 9. 风险与处理策略
+
+| 风险 | 处理策略 |
+| --- | --- |
+| `.tpic` 与 `.topos` 混淆 | `.tpic` 是图片唯一扩展；`.topos` 永久保留工程包；Magic 二次验证 |
+| 外层 `TPIM` 与内层 `TPIC` 版本混淆 | 分离版本字段、能力查询和错误码；兼容矩阵写入 spec |
+| 复制 codec 导致视频/图片结果分叉 | 图片层只调用同一核心；薄库不得复制算法和数值表 |
+| 把预留能力写成已完成 | 支持矩阵由 conformance gate 驱动；未通过即不登记 |
+| YUV422 不适合 VFX RGB 主档 | Preview 才允许 422；Image HQ 以 GBR444 10-bit 为发布前置 |
+| DCT 被误称绝对无损 | 只称近无损/视觉无损；真正 lossless 另建可逆 Profile |
+| Alpha 预算损伤遮罩 | VFX 默认 A16 lossless；20%–30% 只约束 bounded 模式；超限显式诊断 |
+| ICC/OCIO/CICP 冲突 | 冻结 precedence；冲突报错/warning；禁止静默猜测 |
+| 8K 高熵包超过 256 MiB | 首版限尺寸或后续 tile；未做最坏测试前不宣传全 8K |
+| mmap 被误当零拷贝 | 普通 I/O 为基线；mmap 经平台/尾延迟实测后才启用 |
+| 64B 对齐被误当 NVMe 4K 对齐 | 分别处理 cache line 和存储块；普通 I/O 不作虚假承诺 |
+| 序列线程/内存失控 | bounded queue、字节预算、generation cancel、统一并行预算 |
+| 插件被宣传成所有宿主自动兼容 | OIIO/Nuke/Photoshop/AE 分别构建和验收 |
+| MyWebGallery 无法加载 native codec | 另做 WASM 或服务端转码，不混入 native v1 完成条件 |
+| 损坏文件触发大分配/死循环 | checked arithmetic、硬上限、流式解析、fuzz、OOM 门禁 |
+| 编码失败留下损坏文件 | 同文件系统临时文件、验证、原子 rename、失败清理 |
+| 性能数字脱离硬件与素材 | 固定 protocol、真实素材、p50/p95/p99、冷/热和阶段分项 |
+
+---
+
+## 10. AI 单阶段执行模板
+
+每次让 AI 实施时使用以下结构：
+
+```text
+当前只执行 Topos Image 阶段 N，不提前实现后续阶段。
+
+开始前：
+1. 阅读本计划、.clinerules、现有 image/file/codec spec 与相关 ADR；
+2. 检查 git status，保留其他 Agent 和用户的未提交改动；
+3. 列出本阶段依赖、受影响文件、现有调用点和测试；
+4. 确认当前 codec 支持矩阵，不把 reserved 能力当作 implemented。
+
+实施顺序：
+1. 先更新 spec / ADR / 错误语义；
+2. 编写或更新 focused tests 与 golden/fuzz corpus；
+3. 实现最小标量路径；
+4. 运行 Debug、ASan、UBSan、fuzz replay 和相关 Python tests；
+5. 只有正确性门禁通过后才做优化；
+6. 更新 benchmark、risk register 和当前状态表。
+
+约束：
+- 不复制 libtopos_codec 算法；
+- 不修改 .topos 工程包含义；
+- UI 不直接解码或操作 GPU；
+- 不静默转换位深、色彩、Alpha 或输出格式；
+- 所有输入 size/offset/count 必须有 checked arithmetic 和硬上限；
+- 正常、失败、取消和关闭路径都必须释放资源；
+- 不用未经测量的性能数字宣布完成。
+
+完成时输出：
+- 变更文件；
+- 关键设计决策；
+- 测试命令与结果；
+- 性能/质量数据及环境；
+- 剩余风险；
+- 是否满足本阶段全部门槛。
+```
+
+---
+
+## 11. 全项目完成定义
+
+Topos Image v1 只有同时满足以下条件才可标记完成：
+
+- `.tpic` / `TPIM` file specification、`IDSC`、chunk directory 和 C ABI 已版本化并冻结；
+- 图片 `.tpic` 与工程 `.topos` 在扩展名、Magic、路由、文件关联和测试中完全区分；
+- 文件层复用同一 TPIC codec，没有第二套 DCT/Rice/Alpha 分叉；
+- Image HQ 的 GBR/RGB 4:4:4 10-bit 路径通过 scalar、SIMD、golden 和真实素材门槛；
+- 12-bit 仅在对应门槛通过时列为支持；
+- Alpha lossless bit-exact，bounded 模式满足声明误差和统计规则；
+- ICC/CICP/OCIO、data/display window、orientation、pixel aspect 和 Alpha association 不静默丢失；
+- CLI 可 probe、verify、encode、decode、benchmark，并采用安全原子写；
+- Topos Color/Composite 可正确导入、显示、合成和导出 `.tpic`；
+- 图片序列在 seek、取消、缺帧和长序列下资源有界；
+- Debug、ASan、UBSan、OOM、fuzz、golden 和跨平台构建通过；
+- 性能和体积由可复现报告支持，不使用 350 fps 或 5–10 倍 PNG 等未经证明的宣传；
+- 已交付的 OIIO/Nuke/Photoshop/AE 插件逐宿主、逐平台验收，未交付者不计入核心格式完成条件；
+- SDK 文档明确支持矩阵、非目标、错误模型、所有权、线程安全和兼容策略。
+
+---
+
+## 12. 当前状态
+
+| 阶段 | 状态 | 说明 |
+| --- | --- | --- |
+| 0. 决策冻结与基线 | 待开始 | 本文是输入草案，尚未成为规范性 spec |
+| 1. TPIM parser/writer | 待开始 | 可使用现有 YUV422 10-bit TPIC packet 做结构验证 |
+| 2. RGB/GBR444 10-bit | 依赖 Codec | 正式 VFX Image HQ 的前置条件 |
+| 3. 12-bit 与完整元数据 | 依赖阶段 2 | 未通过前不得登记 12-bit 已支持 |
+| 4. C ABI、CLI、互转 | 待开始 | 核心保持第三方图像库零依赖 |
+| 5. Topos Color/Composite | 待开始 | 必须遵守现有媒体/GPU/项目边界 |
+| 6. Sequence 管线 | 待开始 | 复用现有 DecodeQueue，资源有界 |
+| 7. 性能优化 | 待开始 | 测量优先，mmap 可选 |
+| 8. OIIO 插件 | 待开始 | 不等于所有 OIIO 宿主自动兼容 |
+| 9. Nuke Reader/Writer | 后续独立立项 | 独立 SDK、平台矩阵和门槛 |
+| 10. Photoshop File Format | 后续独立立项 | 不与 Nuke/AE 合并验收 |
+| 11. After Effects I/O | 后续独立立项 | 不由 Photoshop 插件替代 |
+| 后续 Tile/ROI/Lossless RGB | 预留 | 不纳入 v1 核心完成条件 |
+| 12. 健壮性与分发 | 待开始 | 跨平台、fuzz、SDK、签名收口 |
+
+---
+
+## 13. 参考依据
+
+项目内依据：
+
+- `docs/专属极速帧内中间片编码引擎（Topos V2.0）.txt`；
+- `docs/codec/bitstream_spec_v1.md`；
+- `docs/codec/ADR-C004-stage4-codec.md`；
+- `docs/codec/ADR-C009-stage9-simd-parallel.md`；
+- `docs/codec/perf_report_stage9.md`；
+- `docs/codec/quality_report_scalar.md`；
+- `native/topos_codec/include/topos_codec.h`；
+- `src/shared/project/topos_project_io.py`；
+- `src/shared/media/format_registry.py`；
+- `.clinerules`。
+
+外部官方接口依据：
+
+- OpenImageIO Writing ImageIO Plugins：
+  `https://openimageio.readthedocs.io/en/main/writingplugins.html`
+- OpenImageIO ImageInput / ImageOutput：
+  `https://openimageio.readthedocs.io/en/latest/imageinput.html`
+  `https://openimageio.readthedocs.io/en/latest/imageoutput.html`
+- Foundry Nuke NDK Reader / Writer：
+  `https://learn.foundry.com/nuke/developers/131/ndkdevguide/2d/readerswriters.html`
+- Adobe Photoshop developer / C++ file format plug-in guidance：
+  `https://developer.adobe.com/photoshop/`
+  `https://developer.adobe.com/photoshop/uxp/guides/hybrid-plugins`
+
+这些外部资料只证明宿主提供相应扩展机制，不代表 Topos 插件已经完成，也不代表一个 OIIO 插件会
+自动出现在所有 Blender、Maya、Nuke 或 Adobe 安装中。

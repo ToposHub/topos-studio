@@ -1,0 +1,77 @@
+// --- Topos Plugin Metadata ---
+// @name Protected Vibrance
+// @i18n_name LIB1_Protected_Vibrance
+// @author Topos Library v1
+// @version 0.1.0
+// @description Saturation plus skin-hue-protected vibrance: HSV hue circular distance to a movable skin center soft-attenuates only the vibrance gain (not saturation, not by chroma magnitude); dual-zero sliders are exact identity
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider saturation "Saturation" 0.0 -1.0 1.0
+// @param slider vibrance "Vibrance" 0.0 0.0 1.0
+// @param separator
+// @param slider skin_hue_center "Skin Hue Center" 20.0 0.0 360.0
+// @param slider skin_hue_width "Skin Hue Width" 25.0 5.0 60.0
+// @param slider skin_protection "Skin Protection" 1.0 0.0 1.0
+// -----------------------------
+//
+// Protected Vibrance —— 肤色分区保护的自然饱和（L 计划 F03，LIB1）。
+//
+// 差量（对 Vibrance_Saturation，见 L00 台账 F03 行）：旧插件的"保护"
+// 权重是全画面**色度幅值**反比（低饱和加权），无色相区分——肤色与
+// 同亮度的彩色灯光被同等对待。本件保护权重来自 **HSV hue 与肤色中心
+// 的环形距离软窗**（中心/宽度可调），只衰减 vibrance 增益：
+// - 不保护 saturation 滑杆（用户显式全局意图）；
+// - 不按饱和度幅值加权（与旧件机器可辨：同幅值不同色相→不同增益）。
+//
+// 设计要点：
+// - hue 用 max/min 比值法（对负值/HDR 同式成立，无 clamp）；无彩色
+//   （delta<1e-6）标记 -1，不进保护窗（chroma=0 时增益本无作用）；
+// - 环形距离 d = |mod(h-center+180, 360) - 180|；软窗
+//   protect = 1 - smoothstep(0.5w, w, d)：[0, w/2] 全保护 → [w, 0] 零；
+//   色带跨 0/360 回绕（默认 center=20/w=25 → 有效带 ≈ 355..45）；
+// - 分解 color = luma + chroma（Rec.709 W），out = luma + chroma·gain：
+//   亮度按构造精确保持（dot(chroma,W)=0 的代数恒等）；
+// - gain 对 HDR/负值线性外推（无 clamp、无端点饱和）；
+// - saturation=vibrance=0 → 首行早退精确恒等（默认参数即恒等）；
+// - 纯逐像素：零采样/零循环；参数 ABI 裸名引用（编译期命名空间改写）。
+
+const vec3 PV_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+float pv_hue_deg(vec3 c) {
+    // max/min 比值法 HSV hue（度）；无彩色返回 -1（保护窗不适用）
+    float cmax = max(max(c.r, c.g), c.b);
+    float cmin = min(min(c.r, c.g), c.b);
+    float delta = cmax - cmin;
+    if (delta < 1e-6) return -1.0;
+    if (cmax == c.r) return 60.0 * mod((c.g - c.b) / delta, 6.0);
+    if (cmax == c.g) return 60.0 * ((c.b - c.r) / delta + 2.0);
+    return 60.0 * ((c.r - c.g) / delta + 4.0);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：双滑杆归零为纯直通
+    if (abs(saturation) < 0.001 && vibrance < 0.001) return color;
+
+    float luma = dot(color, PV_LUMA_W);
+    vec3 chroma = color - luma;
+
+    // 肤色保护软窗：hue 环形距离 → smoothstep 衰减（只作用于 vibrance）
+    float protect = 0.0;
+    float hue = pv_hue_deg(color);
+    if (hue >= 0.0) {
+        float d = abs(mod(hue - skin_hue_center + 180.0, 360.0) - 180.0);
+        float w = max(skin_hue_width, 5.0);
+        protect = 1.0 - smoothstep(0.5 * w, w, d);
+    }
+
+    float gain = 1.0 + saturation + vibrance * (1.0 - skin_protection * protect);
+    return luma + chroma * gain;
+}

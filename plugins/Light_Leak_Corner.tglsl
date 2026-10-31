@@ -1,0 +1,64 @@
+// --- Topos Plugin Metadata ---
+// @name Light Leak Corner
+// @i18n_name Light_Leak_Corner
+// @author Topos Team
+// @version 1.0
+// @description Corner-originated light leak: aspect-corrected soft falloff from a selectable frame corner, additive in scene-linear
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param select leak_corner "Leak Origin" 0 "Top Left" "Top Right" "Bottom Left" "Bottom Right"
+// @param slider leak_size "Leak Size" 0.65 0.05 1.0
+// @param slider strength "Strength" 0.5 0.0 1.0
+// @param separator
+// @param color leak_color "Leak Color" 1.00 0.72 0.42
+// -----------------------------
+//
+// Light Leak Corner —— 角落漏光。
+//
+// 原理：模拟胶片机身后盖/片门密封不严时从画幅角落进入的暖色漏光。
+// 在宽高比校正后的画幅坐标系里取选中角点，以 smoothstep 软边 + 平方
+// 衰减构造漏光掩码，按可选颜色加性叠加。
+//
+// 设计要点：
+// - 纯逐像素数学，零纹理采样、零循环、零三角函数（预览成本 low，
+//   确定性输出）；u_aspect_ratio 用于抵消 UV 拉伸，保证衰减为各向同性；
+// - m = (1 - smoothstep)^2 的平方衰减比线性更像真实窗口漏光
+//   （中心亮核 + 快速熄灭）；
+// - 加性输出在 scene-linear 域单调无折返（HDR 安全，超界由 soft-clip
+//   阶段处理）；漏光峰值幅度由 0.35 系数约束，默认参数下克制不过火；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (strength < 0.001) return color;
+
+    // 画幅中心坐标系（q.x 乘宽高比抵消 UV 拉伸，衰减保持各向同性）
+    vec2 q = (uv - 0.5) * vec2(u_aspect_ratio, 1.0);
+
+    // 选中角点在宽高比校正空间的位置（|x| <= aspect/2, |y| <= 0.5）
+    vec2 corner = vec2(u_aspect_ratio * 0.5, 0.5);
+    if (leak_corner == 1 || leak_corner == 3) {
+        corner.x = -corner.x;
+    }
+    if (leak_corner >= 2) {
+        corner.y = -corner.y;
+    }
+
+    // 软边漏光掩码：reach 随 leak_size 缩放（0.35 ~ 1.50 画幅高单位），
+    // 平方衰减产生亮核；m 是权重掩码，不参与内容色钳制
+    float d = distance(q, corner);
+    float reach = mix(0.35, 1.50, leak_size);
+    float m = 1.0 - smoothstep(0.0, reach, d);
+    m = m * m;
+
+    return color + leak_color * (m * strength * 0.35);
+}

@@ -1,0 +1,387 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 381 ms. Replace uses of missing font family "Sans Serif" with one that exists to avoid this cost. 
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+{
+  "transform": {
+    "initial": {
+      "title": "Properties (2 clips selected)",
+      "context": [
+        "c",
+        "d"
+      ],
+      "section_parameters": {
+        "translate_x": 10,
+        "translate_y": 0.0,
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "rotation": 0.0,
+        "pivot_mode": "center",
+        "pivot_x": 0.0,
+        "pivot_y": 0.0
+      }
+    },
+    "emissions": [],
+    "after": {
+      "c": {
+        "x": 99.0,
+        "opacity": 0.8
+      },
+      "d": {
+        "x": 99.0,
+        "opacity": 0.3
+      }
+    },
+    "undo_before": true,
+    "after_one_undo": {
+      "c": {
+        "x": 10,
+        "opacity": 0.8
+      },
+      "d": {
+        "x": 20,
+        "opacity": 0.3
+      }
+    },
+    "undo_remaining": false
+  },
+  "opacity": {
+    "initial": {
+      "title": "Properties (2 clips selected)",
+      "context": [
+        "c",
+        "d"
+      ],
+      "section_parameters": {
+        "value": 80.0
+      }
+    },
+    "emissions": [],
+    "after": {
+      "c": {
+        "x": 10,
+        "opacity": 0.5
+      },
+      "d": {
+        "x": 20,
+        "opacity": 0.5
+      }
+    },
+    "undo_before": true,
+    "after_one_undo": {
+      "c": {
+        "x": 10,
+        "opacity": 0.8
+      },
+      "d": {
+        "x": 20,
+        "opacity": 0.3
+      }
+    },
+    "undo_remaining": false
+  },
+  "transform_reset": {
+    "initial": {
+      "title": "Properties (2 clips selected)",
+      "context": [
+        "c",
+        "d"
+      ],
+      "section_parameters": {
+        "translate_x": 10,
+        "translate_y": 0.0,
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "rotation": 0.0,
+        "pivot_mode": "center",
+        "pivot_x": 0.0,
+        "pivot_y": 0.0
+      }
+    },
+    "emissions": [],
+    "after": {
+      "c": {
+        "x": 0.0,
+        "opacity": 0.8
+      },
+      "d": {
+        "x": 0.0,
+        "opacity": 0.3
+      }
+    },
+    "undo_before": true,
+    "after_one_undo": {
+      "c": {
+        "x": 10,
+        "opacity": 0.8
+      },
+      "d": {
+        "x": 20,
+        "opacity": 0.3
+      }
+    },
+    "undo_remaining": false
+  },
+  "opacity_reset": {
+    "initial": {
+      "title": "Properties (2 clips selected)",
+      "context": [
+        "c",
+        "d"
+      ],
+      "section_parameters": {
+        "value": 80.0
+      }
+    },
+    "emissions": [],
+    "after": {
+      "c": {
+        "x": 10,
+        "opacity": 1.0
+      },
+      "d": {
+        "x": 20,
+        "opacity": 1.0
+      }
+    },
+    "undo_before": true,
+    "after_one_undo": {
+      "c": {
+        "x": 10,
+        "opacity": 0.8
+      },
+      "d": {
+        "x": 20,
+        "opacity": 0.3
+      }
+    },
+    "undo_remaining": false
+  },
+  "anchor_0.1": [
+    {
+      "before": 13930.0,
+      "after": 13934.414419923722,
+      "error": 4.414419923721653,
+      "ppf": 0.10800597388923061,
+      "scroll": 912
+    },
+    {
+      "before": 13934.414419923722,
+      "after": 13930.214721362436,
+      "error": -4.1996985612859135,
+      "ppf": 0.11665290395761164,
+      "scroll": 1032
+    },
+    {
+      "before": 13930.214721362436,
+      "after": 13929.444231020952,
+      "error": -0.7704903414833097,
+      "ppf": 0.1259921049894873,
+      "scroll": 1162
+    },
+    {
+      "before": 13929.444231020952,
+      "after": 13933.08298677268,
+      "error": 3.6387557517282403,
+      "ppf": 0.13607900001743767,
+      "scroll": 1303
+    },
+    {
+      "before": 13933.08298677268,
+      "after": 13934.489601785624,
+      "error": 1.4066150129438029,
+      "ppf": 0.14697344922755984,
+      "scroll": 1455
+    }
+  ],
+  "anchor_0.2": [
+    {
+      "before": 6965.0,
+      "after": 6967.207209961861,
+      "error": 2.2072099618608263,
+      "ppf": 0.21601194777846122,
+      "scroll": 912
+    },
+    {
+      "before": 6967.207209961861,
+      "after": 6965.107360681218,
+      "error": -2.0998492806429567,
+      "ppf": 0.2333058079152233,
+      "scroll": 1032
+    },
+    {
+      "before": 6965.107360681218,
+      "after": 6964.722115510476,
+      "error": -0.3852451707416549,
+      "ppf": 0.2519842099789746,
+      "scroll": 1162
+    },
+    {
+      "before": 6964.722115510476,
+      "after": 6966.54149338634,
+      "error": 1.8193778758641201,
+      "ppf": 0.27215800003487534,
+      "scroll": 1303
+    },
+    {
+      "before": 6966.54149338634,
+      "after": 6967.244800892812,
+      "error": 0.7033075064719014,
+      "ppf": 0.2939468984551197,
+      "scroll": 1455
+    }
+  ],
+  "anchor_0.5": [
+    {
+      "before": 2786.0,
+      "after": 2786.8828839847442,
+      "error": 0.8828839847442396,
+      "ppf": 0.540029869446153,
+      "scroll": 912
+    },
+    {
+      "before": 2786.8828839847442,
+      "after": 2786.0429442724867,
+      "error": -0.8399397122575465,
+      "ppf": 0.5832645197880583,
+      "scroll": 1032
+    },
+    {
+      "before": 2786.0429442724867,
+      "after": 2785.8888462041905,
+      "error": -0.1540980682962072,
+      "ppf": 0.6299605249474365,
+      "scroll": 1162
+    },
+    {
+      "before": 2785.8888462041905,
+      "after": 2786.616597354536,
+      "error": 0.727751150345739,
+      "ppf": 0.6803950000871883,
+      "scroll": 1303
+    },
+    {
+      "before": 2786.616597354536,
+      "after": 2786.897920357125,
+      "error": 0.2813230025885787,
+      "ppf": 0.7348672461377992,
+      "scroll": 1455
+    }
+  ],
+  "anchor_1": [
+    {
+      "before": 1393.0,
+      "after": 1393.4414419923721,
+      "error": 0.4414419923721198,
+      "ppf": 1.080059738892306,
+      "scroll": 912
+    },
+    {
+      "before": 1393.4414419923721,
+      "after": 1393.0214721362433,
+      "error": -0.41996985612877324,
+      "ppf": 1.1665290395761165,
+      "scroll": 1032
+    },
+    {
+      "before": 1393.0214721362433,
+      "after": 1392.9444231020952,
+      "error": -0.0770490341481036,
+      "ppf": 1.259921049894873,
+      "scroll": 1162
+    },
+    {
+      "before": 1392.9444231020952,
+      "after": 1393.308298677268,
+      "error": 0.3638755751728695,
+      "ppf": 1.3607900001743767,
+      "scroll": 1303
+    },
+    {
+      "before": 1393.308298677268,
+      "after": 1393.4489601785624,
+      "error": 0.14066150129428934,
+      "ppf": 1.4697344922755984,
+      "scroll": 1455
+    }
+  ],
+  "anchor_3": [
+    {
+      "before": 464.3333333333333,
+      "after": 464.480480664124,
+      "error": 0.14714733079068765,
+      "ppf": 3.2401792166769185,
+      "scroll": 912
+    },
+    {
+      "before": 464.480480664124,
+      "after": 464.3404907120812,
+      "error": -0.13998995204281073,
+      "ppf": 3.4995871187283494,
+      "scroll": 1032
+    },
+    {
+      "before": 464.3404907120812,
+      "after": 464.3148077006984,
+      "error": -0.02568301138279594,
+      "ppf": 3.779763149684619,
+      "scroll": 1162
+    },
+    {
+      "before": 464.3148077006984,
+      "after": 464.4360995590893,
+      "error": 0.1212918583909186,
+      "ppf": 4.08237000052313,
+      "scroll": 1303
+    },
+    {
+      "before": 464.4360995590893,
+      "after": 464.48298672618745,
+      "error": 0.04688716709813434,
+      "ppf": 4.409203476826796,
+      "scroll": 1455
+    }
+  ],
+  "anchor_10": [
+    {
+      "before": 139.3,
+      "after": 139.34414419923723,
+      "error": 0.04414419923722335,
+      "ppf": 10.80059738892306,
+      "scroll": 912
+    },
+    {
+      "before": 139.34414419923723,
+      "after": 139.30214721362435,
+      "error": -0.04199698561288301,
+      "ppf": 11.665290395761165,
+      "scroll": 1032
+    },
+    {
+      "before": 139.30214721362435,
+      "after": 139.29444231020952,
+      "error": -0.0077049034148330975,
+      "ppf": 12.59921049894873,
+      "scroll": 1162
+    },
+    {
+      "before": 139.29444231020952,
+      "after": 139.33082986772678,
+      "error": 0.03638755751725853,
+      "ppf": 13.607900001743769,
+      "scroll": 1303
+    },
+    {
+      "before": 139.33082986772678,
+      "after": 139.34489601785623,
+      "error": 0.014066150129451671,
+      "ppf": 14.697344922755986,
+      "scroll": 1455
+    }
+  ]
+}

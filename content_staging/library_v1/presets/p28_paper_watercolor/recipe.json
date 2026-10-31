@@ -1,0 +1,26 @@
+{
+  "recipe_id": "P28",
+  "name": "纸纹水彩",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合水彩插画感；diffusion 0.4–0.7，edge_pigment 0.5 上下聚边",
+  "component": "F15 watercolor（暂存组件 content_staging/library_v1/filters/watercolor）",
+  "dependencies": {
+    "component_id": "F15",
+    "component_slug": "watercolor",
+    "component_kind": "filter"
+  },
+  "params": {
+    "diffusion": 0.6,
+    "edge_pigment": 0.55,
+    "paper_scale": 10.0,
+    "amount": 0.85
+  },
+  "notes": "依赖暂存组件（L11 未接缝）：局部扩散 + 颜料聚边 + 纸纹。"
+}

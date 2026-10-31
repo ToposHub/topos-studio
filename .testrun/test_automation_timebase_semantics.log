@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_automation_timebase_semantics.py ......                  [100%]
+
+============================== 6 passed in 23.36s ==============================

@@ -1,0 +1,16 @@
+============================= test session starts ==============================
+collected 9 items
+
+tests/edit/test_timeline_link_integrity.py ......F..                     [100%]
+
+=================================== FAILURES ===================================
+___________ test_variable_speed_change_keeps_linked_members_in_sync ____________
+tests/edit/test_timeline_link_integrity.py:168: in test_variable_speed_change_keeps_linked_members_in_sync
+    assert changed.get_clip_by_id("v0").timeline_duration == 75
+E   AssertionError: assert 100 == 75
+E    +  where 100 = ClipInstance(clip_id='v0', asset_id='asset_av', track_id='v1', timeline_start=0, timeline_duration=100, source_start=0...ne, _source_fps_num=None, _source_fps_den=None, _timeline_fps_num=None, _timeline_fps_den=None, _source_pts_index=None).timeline_duration
+E    +    where ClipInstance(clip_id='v0', asset_id='asset_av', track_id='v1', timeline_start=0, timeline_duration=100, source_start=0...ne, _source_fps_num=None, _source_fps_den=None, _timeline_fps_num=None, _timeline_fps_den=None, _source_pts_index=None) = get_clip_by_id('v0')
+E    +      where get_clip_by_id = TimelineSequence(timeline_id='tl1', name='Linked', fps=Rational(24, 1), width=1920, height=1080, sample_rate=48000, fo... range_end=None, master_volume=1.0, master_muted=False, master_automation={}, master_automation_mode='off', revision=0).get_clip_by_id
+=========================== short test summary info ============================
+FAILED tests/edit/test_timeline_link_integrity.py::test_variable_speed_change_keeps_linked_members_in_sync
+========================= 1 failed, 8 passed in 6.81s ==========================

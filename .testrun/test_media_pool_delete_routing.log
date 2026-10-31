@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 12 items
+
+tests/edit/test_media_pool_delete_routing.py .....OpenCV: Couldn't read video stream from file "/tmp/folder-delete-source.mp4"
+.......                [100%]
+
+============================= 12 passed in 22.44s ==============================

@@ -1,0 +1,158 @@
+{
+  "0.5": {
+    "p": [
+      520,
+      290
+    ],
+    "hrect": [
+      -10.0,
+      0.0,
+      20.0,
+      82.0
+    ],
+    "viewport": [
+      1398,
+      630
+    ],
+    "htool": "ROLL",
+    "hvisible": true,
+    "buttons": "MouseButton.LeftButton",
+    "items": [
+      "RollHandleItem",
+      "ClipItem"
+    ],
+    "focus": true,
+    "events_press": [
+      [
+        "l",
+        "r",
+        100
+      ]
+    ],
+    "state_during": "IDLE",
+    "preview": {
+      "l": [
+        100,
+        50,
+        0,
+        100
+      ],
+      "r": [
+        400,
+        50,
+        100,
+        100
+      ]
+    },
+    "committed": {
+      "l": [
+        100,
+        50,
+        0,
+        100
+      ],
+      "r": [
+        400,
+        50,
+        100,
+        100
+      ]
+    },
+    "expected": {
+      "l": [
+        100,
+        55
+      ],
+      "r": [
+        405,
+        45
+      ]
+    },
+    "focus_out": [
+      {
+        "reason": "ActiveWindowFocusReason",
+        "active_window": "TrimMonitorDialog",
+        "interaction": "ROLLING"
+      }
+    ],
+    "errors": []
+  },
+  "2": {
+    "p": [
+      520,
+      290
+    ],
+    "hrect": [
+      -10.0,
+      0.0,
+      20.0,
+      82.0
+    ],
+    "viewport": [
+      1398,
+      630
+    ],
+    "htool": "ROLL",
+    "hvisible": true,
+    "buttons": "MouseButton.LeftButton",
+    "items": [
+      "RollHandleItem",
+      "ClipItem"
+    ],
+    "focus": true,
+    "events_press": [
+      [
+        "l",
+        "r",
+        100
+      ]
+    ],
+    "state_during": "IDLE",
+    "preview": {
+      "l": [
+        100,
+        200,
+        0,
+        100
+      ],
+      "r": [
+        400,
+        200,
+        100,
+        100
+      ]
+    },
+    "committed": {
+      "l": [
+        100,
+        200,
+        0,
+        100
+      ],
+      "r": [
+        400,
+        200,
+        100,
+        100
+      ]
+    },
+    "expected": {
+      "l": [
+        100,
+        220
+      ],
+      "r": [
+        420,
+        180
+      ]
+    },
+    "focus_out": [
+      {
+        "reason": "ActiveWindowFocusReason",
+        "active_window": "TrimMonitorDialog",
+        "interaction": "ROLLING"
+      }
+    ],
+    "errors": []
+  }
+}

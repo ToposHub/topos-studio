@@ -1,0 +1,57 @@
+{
+  "meta": {
+    "generated": "2026-09-18 19:14:11",
+    "gl": {
+      "version": "4.1 ATI-6.1.13",
+      "renderer": "AMD Radeon RX 6800 OpenGL Engine"
+    },
+    "gl_require": 0,
+    "preview_frames": 1,
+    "export_frames": 1
+  },
+  "cases": [
+    {
+      "name": "chroma_keyer@hd",
+      "cold_ms": 465.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 63.75,
+        "std": 110.4182
+      },
+      "preview_ms": 5.3,
+      "preview_p90_ms": 5.3,
+      "export_ms": 41.5,
+      "res": "hd",
+      "node_type": "chroma_keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 1.51
+    }
+  ],
+  "video": [],
+  "baseline": {
+    "hd": {
+      "name": "baseline_hd",
+      "cold_ms": 898.5,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958
+      },
+      "preview_ms": 6.3,
+      "preview_p90_ms": 6.3,
+      "export_ms": 42.5
+    }
+  }
+}

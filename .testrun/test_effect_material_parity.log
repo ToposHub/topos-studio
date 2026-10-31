@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 16 items
+
+tests/edit/test_effect_material_parity.py ................               [100%]
+
+============================= 16 passed in 37.10s ==============================

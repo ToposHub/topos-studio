@@ -1,0 +1,59 @@
+# M11 阶段4 产品侧兑现：顺序读前批量预取证据（2026-09-02，i9-9900K 8C16T）
+
+## 机制
+- ToposMediaSource 内做同步读前批量预取（不加线程，单实例串行契约不变）：
+  - read_next_frame 顺序前进确认后（第二次顺序读起）一次
+    ToposDecoder.decode_views_batch 解 depth 帧进池化平面——阶段4 单批
+    跨帧切片队列在产品路径兑现；首帧即时返回，其余入缓存（后续顺序读
+    纯命中：零 ctypes 往返、零 IO、仅装配）。
+  - seek / read_frame 跳读自动失效缓存，首帧回单帧路径（随机拖拽不浪费
+    批量解码）；深度按"预取帧总平面字节数 ≤ 160 MiB"自适应并钳 [2,8]
+    （2K 422 ≈ 8、4K 422 ≈ 4）；TOPOS_READAHEAD=0/N 关闭/覆盖，
+    read_ahead 构造参数优先。
+  - 平面池容量 = depth + 2（消费方在飞持有余量）：持有 1-2 帧不释放时
+    批内分配仍池内滚动复用，不产生 np.zeros 临时分配 + 页错误。
+  - 错误语义与逐帧解码一致：payload 坏 slice 仍 §9 conceal 交付（计数
+    透传 extra）；批内结构损坏整批拒绝 → 回退本帧单帧——坏帧在轮到它
+    时按单帧语义报 MediaDecodeError，邻帧逐位不受污染。
+- 消费方（playback_clock / clip_decode_stream / edit_gpu_decode_manager /
+  export frame_provider）全部经 read_next_frame 顺序路径，透明受益。
+
+## A/B 方法论（成对差分，与 m11_stage4 同法）
+- 同进程相邻成对测量（off=read_ahead 0 逐帧，on=自动批量），每轮整遍
+  预热（建池/热页/分支）后 seek(0) 计 3 圈；消费形态 = deque(maxlen=2)
+  在飞持有（播放/导出 worker 稳态引用形态）；12 对取逐对 fps 比值中位数。
+- 素材 = 阶段4 同源 hq rate 码流（2K 1920×1080×36f / 4K 3840×2160×24f，
+  与 342.4/429.4 参考同文件）；IO（pread）在两条路径内对称计入。
+
+## 结果（产品路径 ToposMediaSource，t8 默认）
+- 2K：296.0 → 368.4 fps，**+24.3% [+22.2, +28.4]，12/12 对为正**
+  （缓存命中帧零 ctypes/IO，收益大于内核口径 +10.4%）
+- 4K：84.6 → 85.8 fps，+2.3% [+0.6, +3.6]，9/12 对为正
+  （跨轮复测中位 +0.9~+4.1% 恒正；内核 +5.2% 被批量包物化拷贝
+  （hq ~3.7MB/帧 string_at）部分吃掉——native 聚读 arena 可回收，后续候选）
+- 深度敏感性（4K，8 对）：depth 2 = −3.9%、depth 4（自动值）最优、
+  depth 6 = −2.0%（工作集 212MB 转负）→ 自适应公式方向正确
+- 在飞持有敏感性（2K，10 对）：池容量 depth（无余量）时 hold=2 收益
+  +10.6%（每批 2 组 np.zeros 临时分配 + 页错误）；池容量 depth+2 后
+  hold=2 与 hold=0 同为 **+24.9%**（持有不敏感）→ +2 余量为必要修复
+- 内存：2K 稳态当前 RSS 第 8 遍起平台化 ~195 MiB（池 10 组 ≈ 83 MiB
+  + Python/numpy 基线 + 瞬时包缓冲碎片），12 遍无持续增长；off 路径
+  ru_maxrss 收敛至 0 增量、on 路径高水位残留 ~1MB/遍为大 bytes 瞬时
+  分配（批量需各帧字节并行存活）vs off 复用单一 packet 缓冲——当前
+  RSS 平台化证实非泄漏。
+
+## 门禁
+- test_topos_source 21/21（18 旧 + 3 新）：
+  - 顺序 9 帧 read_ahead=4 vs =0 逐平面 bytes/pts/plane_infos/extra 全等；
+    批量调用计数钉死（1 单帧 + 2 批，缓存命中路径确实发生）；seek 后
+    单帧重启、跳读不触发批量
+  - 深度自适应（64×40 → 钳 8）+ TOPOS_READAHEAD=0 关闭 + 参数优先于环境
+  - 批内 payload 损坏 conceal 交付且与单帧同文件逐位一致；批内帧头损坏
+    整批拒绝 → 坏帧 MediaDecodeError、其后帧恢复批量且与参考一致
+- 关联套件：test_topos_alpha_pipeline + test_topos_timeline_export +
+  test_topos_binding 52/52；test_stage10_concurrency（并发播放/浸泡）3/3
+
+## 复现
+- .venv/bin/python tools/bench_topos_readahead.py --pairs 12 --loops 3
+  （默认素材=阶段4 同源码流，缺失时退回合成素材并明示不可比；
+  --movies/--depth 可覆盖）

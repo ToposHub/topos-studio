@@ -1,0 +1,23 @@
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_page.py", line 2776, in _on_timeline_source_overwrite
+    self._on_overwrite_requested(asset_id, in_frame, out_frame)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/edit_page.py", line 2722, in _on_overwrite_requested
+    success = self._timeline_panel.overwrite_clip(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_panel.py", line 2559, in overwrite_clip
+    return self.timeline_view.overwrite_clip(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py", line 16237, in overwrite_clip
+    self._execute_command(MacroCommand.create(
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/ui/timeline_view.py", line 5537, in _execute_command
+    new_timeline = self._command_stack.execute(command, self._timeline)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 4129, in execute
+    result = command.apply(timeline)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 10692, in apply
+    result = cmd.apply(current_timeline)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/edit/core/commands.py", line 248, in apply
+    raise ValueError(
+ValueError: New clip overlaps with 79c3705a-c339-4517-a2e0-6ff6c7bc782d at [0, 50)

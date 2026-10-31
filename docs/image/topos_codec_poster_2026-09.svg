@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="2000" viewBox="0 0 1600 2000">
+  <title>TOPOS 自研图像、视频与 RAW 编码规格海报</title>
+  <desc>TOPOS 视频 MOV、图片 TOOS、RAW 与浮点编码能力总览。</desc>
+  <defs>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#03111d" stop-opacity="0.20"/>
+      <stop offset="0.38" stop-color="#04101d" stop-opacity="0.86"/>
+      <stop offset="1" stop-color="#020811" stop-opacity="0.94"/>
+    </linearGradient>
+    <linearGradient id="cyanLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#40d9ff"/>
+      <stop offset="1" stop-color="#7ef0d1"/>
+    </linearGradient>
+    <linearGradient id="amberLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffb44a"/>
+      <stop offset="1" stop-color="#ff6d8a"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="22" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .cn { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+      .mono { font-family: "SFMono-Regular", "Cascadia Code", "Menlo", monospace; }
+      .white { fill: #f2f7fb; }
+      .muted { fill: #a9bdcb; }
+      .cyan { fill: #7fe6ff; }
+      .amber { fill: #ffc56a; }
+      .card { fill: #071725; fill-opacity: 0.88; stroke: #2b5870; stroke-width: 2; }
+      .tiny { font-size: 22px; letter-spacing: 1px; }
+      .body { font-size: 30px; }
+      .small { font-size: 26px; }
+    </style>
+  </defs>
+
+  <image x="0" y="0" width="1600" height="2000" preserveAspectRatio="xMidYMid slice" xlink:href="assets/topos_codec_poster_bg.png"/>
+  <rect x="0" y="0" width="1600" height="2000" fill="url(#shade)"/>
+
+  <!-- Header -->
+  <g class="cn">
+    <text x="82" y="146" class="white" font-size="112" font-weight="800" letter-spacing="10">TOPOS</text>
+    <rect x="86" y="184" width="210" height="7" rx="3" fill="url(#cyanLine)" filter="url(#softGlow)"/>
+    <text x="84" y="255" class="white" font-size="47" font-weight="700">自研图像 · 视频 · RAW 编码</text>
+    <text x="86" y="310" class="muted" font-size="27">一套面向调色、VFX、中间片与归档的原生编码栈</text>
+  </g>
+  <g class="cn" transform="translate(1110 103)">
+    <rect x="0" y="0" width="380" height="58" rx="29" fill="#0b2638" stroke="#367d9b"/>
+    <text x="190" y="38" text-anchor="middle" class="cyan" font-size="24" font-weight="700">MOV · .toos · C ABI · Python</text>
+  </g>
+
+  <!-- Video -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="405" width="1460" height="415" rx="28" class="card"/>
+    <rect x="70" y="405" width="12" height="415" rx="6" fill="url(#cyanLine)"/>
+  </g>
+  <g class="cn">
+    <text x="112" y="468" class="cyan" font-size="25" font-weight="700" letter-spacing="4">01 / VIDEO</text>
+    <text x="112" y="525" class="white" font-size="48" font-weight="800">视频编码 · MOV 容器</text>
+    <text x="112" y="570" class="muted small">ProRes 风格质量梯度，帧内访问友好；422 LP 使用微 GOP 载体。</text>
+
+    <text x="112" y="638" class="amber" font-size="28" font-weight="800">422 家族</text>
+    <text x="112" y="681" class="white body" font-weight="700">Topos 422 Proxy · 422 LT · 422 · 422 HQ · 422 LP</text>
+    <text x="112" y="727" class="amber" font-size="28" font-weight="800">4444 家族</text>
+    <text x="112" y="770" class="white body" font-weight="700">Topos 4444 · Topos 4444 XQ</text>
+
+    <g transform="translate(1035 500)">
+      <rect x="0" y="0" width="410" height="70" rx="35" fill="#0b2c3c" stroke="#3eb9d4"/>
+      <text x="205" y="45" text-anchor="middle" class="cyan" font-size="30" font-weight="800">10 / 12 / 16 bit</text>
+      <text x="205" y="101" text-anchor="middle" class="muted tiny">按档位与像素格式覆盖</text>
+      <rect x="0" y="143" width="410" height="116" rx="18" fill="#1e1c1a" stroke="#a06e3c"/>
+      <text x="205" y="181" text-anchor="middle" class="amber" font-size="24" font-weight="800">额外档位</text>
+      <text x="205" y="219" text-anchor="middle" class="white" font-size="25" font-weight="700">422 Net Proxy</text>
+      <text x="205" y="247" text-anchor="middle" class="muted" font-size="20">低带宽流转 / 远程预览</text>
+    </g>
+  </g>
+
+  <!-- Image -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="860" width="1460" height="435" rx="28" class="card"/>
+    <rect x="70" y="860" width="12" height="435" rx="6" fill="url(#amberLine)"/>
+  </g>
+  <g class="cn">
+    <text x="112" y="923" class="amber" font-size="25" font-weight="700" letter-spacing="4">02 / IMAGE</text>
+    <text x="112" y="980" class="white" font-size="48" font-weight="800">图片编码 · .toos</text>
+    <text x="112" y="1025" class="muted small">统一质量词：Low · Medium · High · Ultra　|　命名：toos &lt;Quality&gt; &lt;bit&gt;bit</text>
+
+    <g transform="translate(112 1070)">
+      <rect x="0" y="0" width="575" height="166" rx="18" fill="#0a2230" stroke="#27637b"/>
+      <text x="28" y="40" class="cyan" font-size="28" font-weight="800">10-bit 422 图片</text>
+      <text x="28" y="83" class="white body" font-weight="700">Low · Medium · High · Ultra</text>
+      <text x="28" y="126" class="muted small">GBR / YUV 预览与中间片路径</text>
+    </g>
+    <g transform="translate(718 1070)">
+      <rect x="0" y="0" width="560" height="166" rx="18" fill="#201b2d" stroke="#725a9b"/>
+      <text x="28" y="40" fill="#d6b8ff" font-size="28" font-weight="800">10-bit 444 + 12-bit</text>
+      <text x="28" y="83" class="white body" font-weight="700">444 High · 444 Ultra</text>
+      <text x="28" y="126" class="muted small">12-bit：Image XQ · GBR 4:4:4</text>
+    </g>
+    <text x="112" y="1272" class="muted tiny">当前正式预设按注册表发布；12-bit 不是 Low / Medium / High / Ultra 四档全部展开。</text>
+  </g>
+
+  <!-- RAW and float -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="1335" width="1460" height="405" rx="28" class="card"/>
+    <rect x="70" y="1335" width="12" height="405" rx="6" fill="url(#cyanLine)"/>
+  </g>
+  <g class="cn">
+    <text x="112" y="1398" class="cyan" font-size="25" font-weight="700" letter-spacing="4">03 / RAW + FLOAT</text>
+    <text x="112" y="1455" class="white" font-size="48" font-weight="800">RAW 与线性浮点</text>
+
+    <g transform="translate(112 1500)">
+      <text x="0" y="0" class="amber" font-size="29" font-weight="800">RAW · CFA / Bayer</text>
+      <text x="0" y="42" class="white small" font-weight="700">视频 → MOV　·　图片 → .toos</text>
+      <text x="0" y="82" class="white small" font-weight="700">12-bit：2:1 / 4:1 / 6:1 / 8:1 / 12:1 / 16:1</text>
+      <text x="0" y="119" class="white small" font-weight="700">16-bit：2:1 / 4:1 / 6:1 / 8:1 / 12:1 / 16:1</text>
+      <text x="0" y="157" class="muted small">12-bit LOG0 · 16-bit linear · 无 Alpha</text>
+    </g>
+    <g transform="translate(875 1500)">
+      <text x="0" y="0" class="cyan" font-size="29" font-weight="800">FLOAT · 线性 GBR</text>
+      <text x="0" y="42" class="white small" font-weight="700">toos Low / Medium / High / Ultra</text>
+      <text x="0" y="82" class="white small" font-weight="700">16-bit HALF · 4:4:4 · linear</text>
+      <text x="0" y="119" class="muted small">HDR 合成 / 缓存 / 中间片</text>
+      <text x="0" y="157" class="amber small" font-weight="700">32-bit float：扩展方向，当前未发布</text>
+    </g>
+  </g>
+
+  <!-- Advantages -->
+  <g class="cn">
+    <text x="82" y="1810" class="white" font-size="28" font-weight="800" letter-spacing="3">WHY TOPOS</text>
+    <line x1="82" y1="1840" x2="1518" y2="1840" stroke="#2d657f" stroke-width="2"/>
+    <g transform="translate(82 1890)">
+      <text x="0" y="0" class="cyan" font-size="24" font-weight="800">宽格式域</text>
+      <text x="0" y="38" class="muted" font-size="23">4:2:2 · 4:4:4 · GBR · CFA</text>
+    </g>
+    <g transform="translate(410 1890)">
+      <text x="0" y="0" class="cyan" font-size="24" font-weight="800">中间片友好</text>
+      <text x="0" y="38" class="muted" font-size="23">帧级访问 · 可编辑 · 可复验</text>
+    </g>
+    <g transform="translate(820 1890)">
+      <text x="0" y="0" class="cyan" font-size="24" font-weight="800">原生 SDK</text>
+      <text x="0" y="38" class="muted" font-size="23">C ABI · Python · CMake</text>
+    </g>
+    <g transform="translate(1160 1890)">
+      <text x="0" y="0" class="cyan" font-size="24" font-weight="800">工程化</text>
+      <text x="0" y="38" class="muted" font-size="23">确定性 · 有界并行 · 跨平台</text>
+    </g>
+    <text x="82" y="1980" class="muted" font-size="19">TOPOS Codec V1 Preview · 规格以项目 capability manifest 与 SDK 文档为准 · 2026.09</text>
+  </g>
+</svg>

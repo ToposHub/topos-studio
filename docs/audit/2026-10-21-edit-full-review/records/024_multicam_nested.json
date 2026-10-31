@@ -1,0 +1,675 @@
+{
+  "ok": true,
+  "result": {
+    "multicam_create": {
+      "before": {
+        "revision": 15,
+        "duration": 300,
+        "tracks": [
+          {
+            "name": "V1",
+            "type": "video",
+            "locked": false,
+            "clips": [
+              {
+                "id": "81fbf02c-2d53-4691-a501-16fa3c8da806",
+                "start": 0,
+                "end": 103,
+                "source": 100,
+                "duration": 103,
+                "linked": "ccb0631d-9707-4e82-bda2-418afb5fba6c"
+              },
+              {
+                "id": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7",
+                "start": 103,
+                "end": 200,
+                "source": 103,
+                "duration": 97,
+                "linked": "d86d537e-dcb3-4d2c-ae7f-c63703236c25"
+              },
+              {
+                "id": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276",
+                "start": 200,
+                "end": 300,
+                "source": 100,
+                "duration": 100,
+                "linked": "67678d39-b6dc-43d7-b662-0d38f8d99651"
+              }
+            ]
+          },
+          {
+            "name": "A1",
+            "type": "audio",
+            "locked": false,
+            "clips": [
+              {
+                "id": "ccb0631d-9707-4e82-bda2-418afb5fba6c",
+                "start": 0,
+                "end": 103,
+                "source": 100,
+                "duration": 103,
+                "linked": "81fbf02c-2d53-4691-a501-16fa3c8da806"
+              },
+              {
+                "id": "d86d537e-dcb3-4d2c-ae7f-c63703236c25",
+                "start": 103,
+                "end": 200,
+                "source": 103,
+                "duration": 97,
+                "linked": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7"
+              },
+              {
+                "id": "67678d39-b6dc-43d7-b662-0d38f8d99651",
+                "start": 200,
+                "end": 300,
+                "source": 100,
+                "duration": 100,
+                "linked": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276"
+              }
+            ]
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          }
+        ]
+      },
+      "after": {
+        "revision": 16,
+        "duration": 787,
+        "tracks": [
+          {
+            "name": "V1",
+            "type": "video",
+            "locked": false,
+            "clips": [
+              {
+                "id": "40a803f5-c17e-4d46-a37c-a3e96972bd74",
+                "start": 0,
+                "end": 487,
+                "source": 0,
+                "duration": 487,
+                "linked": null
+              },
+              {
+                "id": "81fbf02c-2d53-4691-a501-16fa3c8da806",
+                "start": 487,
+                "end": 590,
+                "source": 100,
+                "duration": 103,
+                "linked": "ccb0631d-9707-4e82-bda2-418afb5fba6c"
+              },
+              {
+                "id": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7",
+                "start": 590,
+                "end": 687,
+                "source": 103,
+                "duration": 97,
+                "linked": "d86d537e-dcb3-4d2c-ae7f-c63703236c25"
+              },
+              {
+                "id": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276",
+                "start": 687,
+                "end": 787,
+                "source": 100,
+                "duration": 100,
+                "linked": "67678d39-b6dc-43d7-b662-0d38f8d99651"
+              }
+            ]
+          },
+          {
+            "name": "A1",
+            "type": "audio",
+            "locked": false,
+            "clips": [
+              {
+                "id": "ccb0631d-9707-4e82-bda2-418afb5fba6c",
+                "start": 487,
+                "end": 590,
+                "source": 100,
+                "duration": 103,
+                "linked": "81fbf02c-2d53-4691-a501-16fa3c8da806"
+              },
+              {
+                "id": "d86d537e-dcb3-4d2c-ae7f-c63703236c25",
+                "start": 590,
+                "end": 687,
+                "source": 103,
+                "duration": 97,
+                "linked": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7"
+              },
+              {
+                "id": "67678d39-b6dc-43d7-b662-0d38f8d99651",
+                "start": 687,
+                "end": 787,
+                "source": 100,
+                "duration": 100,
+                "linked": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276"
+              }
+            ]
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          }
+        ]
+      }
+    },
+    "multicam_angle": {
+      "timeline": {
+        "revision": 17,
+        "duration": 787,
+        "tracks": [
+          {
+            "name": "V1",
+            "type": "video",
+            "locked": false,
+            "clips": [
+              {
+                "id": "40a803f5-c17e-4d46-a37c-a3e96972bd74",
+                "start": 0,
+                "end": 40,
+                "source": 0,
+                "duration": 40,
+                "linked": null
+              },
+              {
+                "id": "03176cb0-2a44-4902-91d1-7b77f851f09e",
+                "start": 40,
+                "end": 487,
+                "source": 40,
+                "duration": 447,
+                "linked": null
+              },
+              {
+                "id": "81fbf02c-2d53-4691-a501-16fa3c8da806",
+                "start": 487,
+                "end": 590,
+                "source": 100,
+                "duration": 103,
+                "linked": "ccb0631d-9707-4e82-bda2-418afb5fba6c"
+              },
+              {
+                "id": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7",
+                "start": 590,
+                "end": 687,
+                "source": 103,
+                "duration": 97,
+                "linked": "d86d537e-dcb3-4d2c-ae7f-c63703236c25"
+              },
+              {
+                "id": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276",
+                "start": 687,
+                "end": 787,
+                "source": 100,
+                "duration": 100,
+                "linked": "67678d39-b6dc-43d7-b662-0d38f8d99651"
+              }
+            ]
+          },
+          {
+            "name": "A1",
+            "type": "audio",
+            "locked": false,
+            "clips": [
+              {
+                "id": "ccb0631d-9707-4e82-bda2-418afb5fba6c",
+                "start": 487,
+                "end": 590,
+                "source": 100,
+                "duration": 103,
+                "linked": "81fbf02c-2d53-4691-a501-16fa3c8da806"
+              },
+              {
+                "id": "d86d537e-dcb3-4d2c-ae7f-c63703236c25",
+                "start": 590,
+                "end": 687,
+                "source": 103,
+                "duration": 97,
+                "linked": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7"
+              },
+              {
+                "id": "67678d39-b6dc-43d7-b662-0d38f8d99651",
+                "start": 687,
+                "end": 787,
+                "source": 100,
+                "duration": 100,
+                "linked": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276"
+              }
+            ]
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          }
+        ]
+      },
+      "assets": [
+        [
+          "30f16ea0-95a6-4901-b14f-83018aa68323",
+          0,
+          0,
+          40
+        ],
+        [
+          "9b70325c-f70a-47a5-8979-80af85d0c91e",
+          40,
+          40,
+          487
+        ],
+        [
+          "30f16ea0-95a6-4901-b14f-83018aa68323",
+          100,
+          487,
+          590
+        ],
+        [
+          "30f16ea0-95a6-4901-b14f-83018aa68323",
+          103,
+          590,
+          687
+        ],
+        [
+          "30f16ea0-95a6-4901-b14f-83018aa68323",
+          100,
+          687,
+          787
+        ]
+      ]
+    },
+    "multicam_angle_undo": {
+      "revision": 18,
+      "duration": 787,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "40a803f5-c17e-4d46-a37c-a3e96972bd74",
+              "start": 0,
+              "end": 487,
+              "source": 0,
+              "duration": 487,
+              "linked": null
+            },
+            {
+              "id": "81fbf02c-2d53-4691-a501-16fa3c8da806",
+              "start": 487,
+              "end": 590,
+              "source": 100,
+              "duration": 103,
+              "linked": "ccb0631d-9707-4e82-bda2-418afb5fba6c"
+            },
+            {
+              "id": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7",
+              "start": 590,
+              "end": 687,
+              "source": 103,
+              "duration": 97,
+              "linked": "d86d537e-dcb3-4d2c-ae7f-c63703236c25"
+            },
+            {
+              "id": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276",
+              "start": 687,
+              "end": 787,
+              "source": 100,
+              "duration": 100,
+              "linked": "67678d39-b6dc-43d7-b662-0d38f8d99651"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "ccb0631d-9707-4e82-bda2-418afb5fba6c",
+              "start": 487,
+              "end": 590,
+              "source": 100,
+              "duration": 103,
+              "linked": "81fbf02c-2d53-4691-a501-16fa3c8da806"
+            },
+            {
+              "id": "d86d537e-dcb3-4d2c-ae7f-c63703236c25",
+              "start": 590,
+              "end": 687,
+              "source": 103,
+              "duration": 97,
+              "linked": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7"
+            },
+            {
+              "id": "67678d39-b6dc-43d7-b662-0d38f8d99651",
+              "start": 687,
+              "end": 787,
+              "source": 100,
+              "duration": 100,
+              "linked": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276"
+            }
+          ]
+        },
+        {
+          "name": "audit",
+          "type": "subtitle",
+          "locked": false,
+          "clips": []
+        },
+        {
+          "name": "audit",
+          "type": "subtitle",
+          "locked": false,
+          "clips": []
+        }
+      ]
+    },
+    "multicam_create_undo": {
+      "revision": 19,
+      "duration": 300,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "81fbf02c-2d53-4691-a501-16fa3c8da806",
+              "start": 0,
+              "end": 103,
+              "source": 100,
+              "duration": 103,
+              "linked": "ccb0631d-9707-4e82-bda2-418afb5fba6c"
+            },
+            {
+              "id": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7",
+              "start": 103,
+              "end": 200,
+              "source": 103,
+              "duration": 97,
+              "linked": "d86d537e-dcb3-4d2c-ae7f-c63703236c25"
+            },
+            {
+              "id": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276",
+              "start": 200,
+              "end": 300,
+              "source": 100,
+              "duration": 100,
+              "linked": "67678d39-b6dc-43d7-b662-0d38f8d99651"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "ccb0631d-9707-4e82-bda2-418afb5fba6c",
+              "start": 0,
+              "end": 103,
+              "source": 100,
+              "duration": 103,
+              "linked": "81fbf02c-2d53-4691-a501-16fa3c8da806"
+            },
+            {
+              "id": "d86d537e-dcb3-4d2c-ae7f-c63703236c25",
+              "start": 103,
+              "end": 200,
+              "source": 103,
+              "duration": 97,
+              "linked": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7"
+            },
+            {
+              "id": "67678d39-b6dc-43d7-b662-0d38f8d99651",
+              "start": 200,
+              "end": 300,
+              "source": 100,
+              "duration": 100,
+              "linked": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276"
+            }
+          ]
+        },
+        {
+          "name": "audit",
+          "type": "subtitle",
+          "locked": false,
+          "clips": []
+        },
+        {
+          "name": "audit",
+          "type": "subtitle",
+          "locked": false,
+          "clips": []
+        }
+      ]
+    },
+    "nested_create": {
+      "child_ids": [
+        "8b683bb4-dc06-49ef-b047-f6e86605ca49"
+      ],
+      "timeline": {
+        "revision": 20,
+        "duration": 300,
+        "tracks": [
+          {
+            "name": "V1",
+            "type": "video",
+            "locked": false,
+            "clips": [
+              {
+                "id": "fd4cf724-eeb9-4b90-aca8-dd13740d9989",
+                "start": 0,
+                "end": 103,
+                "source": 0,
+                "duration": 103,
+                "linked": null
+              },
+              {
+                "id": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7",
+                "start": 103,
+                "end": 200,
+                "source": 103,
+                "duration": 97,
+                "linked": "d86d537e-dcb3-4d2c-ae7f-c63703236c25"
+              },
+              {
+                "id": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276",
+                "start": 200,
+                "end": 300,
+                "source": 100,
+                "duration": 100,
+                "linked": "67678d39-b6dc-43d7-b662-0d38f8d99651"
+              }
+            ]
+          },
+          {
+            "name": "A1",
+            "type": "audio",
+            "locked": false,
+            "clips": [
+              {
+                "id": "d86d537e-dcb3-4d2c-ae7f-c63703236c25",
+                "start": 103,
+                "end": 200,
+                "source": 103,
+                "duration": 97,
+                "linked": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7"
+              },
+              {
+                "id": "67678d39-b6dc-43d7-b662-0d38f8d99651",
+                "start": 200,
+                "end": 300,
+                "source": 100,
+                "duration": 100,
+                "linked": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276"
+              }
+            ]
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          }
+        ]
+      }
+    },
+    "nested_enter": {
+      "active": "8b683bb4-dc06-49ef-b047-f6e86605ca49",
+      "clips": {
+        "revision": 0,
+        "duration": 103,
+        "tracks": [
+          {
+            "name": "V1",
+            "type": "video",
+            "locked": false,
+            "clips": [
+              {
+                "id": "81fbf02c-2d53-4691-a501-16fa3c8da806",
+                "start": 0,
+                "end": 103,
+                "source": 100,
+                "duration": 103,
+                "linked": "ccb0631d-9707-4e82-bda2-418afb5fba6c"
+              }
+            ]
+          },
+          {
+            "name": "A1",
+            "type": "audio",
+            "locked": false,
+            "clips": [
+              {
+                "id": "ccb0631d-9707-4e82-bda2-418afb5fba6c",
+                "start": 0,
+                "end": 103,
+                "source": 100,
+                "duration": 103,
+                "linked": "81fbf02c-2d53-4691-a501-16fa3c8da806"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "nested_undo": {
+      "timeline": {
+        "revision": 21,
+        "duration": 300,
+        "tracks": [
+          {
+            "name": "V1",
+            "type": "video",
+            "locked": false,
+            "clips": [
+              {
+                "id": "81fbf02c-2d53-4691-a501-16fa3c8da806",
+                "start": 0,
+                "end": 103,
+                "source": 100,
+                "duration": 103,
+                "linked": "ccb0631d-9707-4e82-bda2-418afb5fba6c"
+              },
+              {
+                "id": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7",
+                "start": 103,
+                "end": 200,
+                "source": 103,
+                "duration": 97,
+                "linked": "d86d537e-dcb3-4d2c-ae7f-c63703236c25"
+              },
+              {
+                "id": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276",
+                "start": 200,
+                "end": 300,
+                "source": 100,
+                "duration": 100,
+                "linked": "67678d39-b6dc-43d7-b662-0d38f8d99651"
+              }
+            ]
+          },
+          {
+            "name": "A1",
+            "type": "audio",
+            "locked": false,
+            "clips": [
+              {
+                "id": "ccb0631d-9707-4e82-bda2-418afb5fba6c",
+                "start": 0,
+                "end": 103,
+                "source": 100,
+                "duration": 103,
+                "linked": "81fbf02c-2d53-4691-a501-16fa3c8da806"
+              },
+              {
+                "id": "d86d537e-dcb3-4d2c-ae7f-c63703236c25",
+                "start": 103,
+                "end": 200,
+                "source": 103,
+                "duration": 97,
+                "linked": "aa38a227-b1e4-445c-9100-9cc86c2dd2e7"
+              },
+              {
+                "id": "67678d39-b6dc-43d7-b662-0d38f8d99651",
+                "start": 200,
+                "end": 300,
+                "source": 100,
+                "duration": 100,
+                "linked": "d1f1c3e6-9f86-42b0-b9ea-1a4dc84f0276"
+              }
+            ]
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          },
+          {
+            "name": "audit",
+            "type": "subtitle",
+            "locked": false,
+            "clips": []
+          }
+        ]
+      },
+      "children": [
+        "5fc82fea-f2cb-48f7-ab46-8ab419cdb1f4",
+        "437fc843-1651-426c-af17-0295c5b4a4c3"
+      ]
+    }
+  }
+}

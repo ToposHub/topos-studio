@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "error": "'TimelineSequenceRef' object has no attribute 'duration_frames'",
+  "traceback": "Traceback (most recent call last):\n  File \"/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/scripts/interactive_session.py\", line 85, in poll_commands\n    exec(compile(source, str(path), \"exec\"), namespace)\n  File \"/tmp/topos-edit-audit-20261021/commands/028_delivery_context.py\", line 1, in <module>\n    \"\"\"Run the production entry point and accept local, reviewable audit steps.\n                                                                                \nAttributeError: 'TimelineSequenceRef' object has no attribute 'duration_frames'\n"
+}

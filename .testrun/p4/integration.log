@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+collected 13 items
+
+tests/integration/generation/test_provider_pack_e2e.py .                 [  7%]
+tests/integration/generation/test_real_provider_smoke.py s               [ 15%]
+tests/integration/mcp/test_local_ipc_host.py ..                          [ 30%]
+tests/integration/mcp/test_stdio_server.py .....                         [ 69%]
+tests/integration/test_teaching_animation_phase4.py ....                 [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/integration.xml -
+======================== 12 passed, 1 skipped in 2.87s =========================

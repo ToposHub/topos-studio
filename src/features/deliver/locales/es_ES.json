@@ -1,0 +1,167 @@
+{
+  "action": {
+    "export_srt": "Exportar subtítulos (SRT)...",
+    "queue_start": "Iniciar cola de vídeo",
+    "queue_stop": "Detener cola de vídeo"
+  },
+  "panel": {
+    "deliver_video_batch": "Exportación por lotes de vídeo"
+  },
+  "deliver": {
+    "export_stems": "Exportar pistas separadas…",
+    "export_stems_tooltip": "Exporta pistas / buses / grupos D-M-E de audio como pistas WAV separadas",
+    "export_chapters": "Exportar capítulos…",
+    "export_chapters_tooltip": "Exporta los marcadores de capítulo de la línea de tiempo como texto de capítulos de YouTube o FFMetadata",
+    "video": {
+      "settings_title": "Entrega de vídeo",
+      "source_range": "Origen y rango",
+      "video_settings": "Vídeo",
+      "audio_delivery": "Audio y entrega",
+      "no_project": "(sin proyecto)",
+      "output_dir_placeholder": "Directorio de salida",
+      "select_output_dir": "Seleccionar directorio de salida",
+      "add_to_queue": "Añadir a la cola de vídeo",
+      "add_and_start": "Añadir e iniciar",
+      "alpha": "Canal alfa",
+      "profile_default": "(predeterminado)",
+      "preflight_ok": "Listo para añadir",
+      "project": "Proyecto",
+      "timeline": "Línea de tiempo",
+      "range": "Rango",
+      "frames": "Fotogramas",
+      "duration": "Duración",
+      "container": "Contenedor",
+      "codec": "Códec",
+      "profile": "Perfil",
+      "profile_tooltip": "Perfil del codificador. Auto selecciona el perfil de compatibilidad predeterminado del códec.",
+      "aspect_lock": "Bloquear relación de aspecto",
+      "resolution": "Resolución",
+      "size": "Tamaño",
+      "frame_rate": "Velocidad de fotogramas",
+      "custom_fps": "FPS personalizados",
+      "quality_mode": "Modo de calidad",
+      "quality": "Calidad",
+      "quality_crf": "Calidad (CRF)",
+      "quality_crf_hint": "CRF no tiene unidades; valores más bajos significan mayor calidad.",
+      "crf_18": "CRF 18 · Alta calidad",
+      "crf_20": "CRF 20 · Calidad Blu-ray",
+      "crf_23": "CRF 23 · Recomendada",
+      "crf_28": "CRF 28 · Archivo más pequeño",
+      "crf_30": "CRF 30 · Vista previa",
+      "quality_bitrate_hint": "Tasa de bits media de vídeo objetivo en kbps; la real puede variar.",
+      "quality_cbr_hint": "Tasa de bits de vídeo fija en kbps; las tasas mínima y máxima están limitadas.",
+      "quality_auto_hint": "El codificador elige la calidad automáticamente.",
+      "estimated_size": "Tamaño estimado",
+      "estimated_size_hint": "Estimado a partir de la duración de salida × tasa de bits de vídeo ÷ 8; el audio y la sobrecarga del contenedor no se incluyen.",
+      "filename_placeholder": "Nombre de la línea de tiempo",
+      "quality_auto": "Auto",
+      "quality_vbr": "VBR",
+      "quality_cbr": "CBR",
+      "quality_bitrate": "Tasa de bits",
+      "color_space": "Espacio de color",
+      "bit_depth": "Profundidad de bits",
+      "audio_codec": "Códec de audio",
+      "sample_rate": "Frecuencia de muestreo",
+      "audio_bitrate": "Tasa de bits de audio",
+      "subtitles": "Subtítulos",
+      "output_dir": "Directorio de salida",
+      "filename": "Nombre de archivo",
+      "if_exists": "Si existe",
+      "allow_placeholders": "Permitir clips de marcador de posición",
+      "allow_placeholders_hint": "Los clips de posición normalmente bloquean la entrega. Actívalo para exportar igualmente; los marcadores se renderizan como barras de color."
+    },
+    "preset": {
+      "web_h264": {
+        "title": "Web H.264",
+        "subtitle": "MP4 · H.264 · 1080p"
+      },
+      "mobile_h264": {
+        "title": "Móvil",
+        "subtitle": "MP4 · H.264 · 1080×1920"
+      },
+      "master_prores422": {
+        "title": "Máster",
+        "subtitle": "MOV · ProRes 422 · UHD"
+      },
+      "master_prores4444": {
+        "title": "Máster (Alfa)",
+        "subtitle": "MOV · ProRes 4444 · 4:4:4"
+      },
+      "hevc_uhd": {
+        "title": "HEVC 4K",
+        "subtitle": "MP4 · HEVC · 3840×2160"
+      },
+      "dnxhr_sq": {
+        "title": "DNxHR SQ",
+        "subtitle": "MOV · DNxHR SQ · 1080p"
+      },
+      "custom": {
+        "title": "Personalizado",
+        "subtitle": "Ajustes actuales"
+      }
+    },
+    "queue": {
+      "title": "Cola de render de vídeo",
+      "start": "Iniciar cola",
+      "pause": "Pausar",
+      "resume": "Reanudar",
+      "cancel_current": "Cancelar actual",
+      "clear_completed": "Borrar completados",
+      "more": "Más",
+      "float": "Desacoplar panel",
+      "return_to_deliver": "Volver a Entrega",
+      "empty_title": "Aún no hay tareas de exportación de vídeo",
+      "empty_hint": "Elige arriba una línea de tiempo y un preajuste de vídeo y pulsa «Añadir a la cola de vídeo».",
+      "tasks": "tareas",
+      "running": "renderizando",
+      "pending": "pendiente",
+      "done": "hecho",
+      "failed": "fallido",
+      "status_pending": "Pendiente",
+      "status_running": "Renderizando",
+      "status_done": "Hecho",
+      "status_failed": "Fallido",
+      "status_cancelled": "Cancelado",
+      "status_paused": "En pausa",
+      "status_needs_relink": "Requiere revincular",
+      "no_audio": "sin audio",
+      "action_cancel": "Cancelar",
+      "action_open": "Abrir",
+      "action_retry": "Reintentar",
+      "action_remove": "Quitar",
+      "action_edit": "Editar ajustes",
+      "action_relink": "Vincular línea de tiempo de nuevo",
+      "col_status": "Estado",
+      "col_source": "Origen",
+      "col_preset": "Preajuste",
+      "col_output": "Archivo de salida",
+      "col_video": "Vídeo",
+      "col_audio": "Audio",
+      "col_progress": "Progreso",
+      "col_state": "Estado",
+      "col_actions": "Acciones"
+    },
+    "subtitle": {
+      "off": "Desactivado",
+      "burn": "Incrustado",
+      "sidecar": "Archivo separado"
+    },
+    "conflict": {
+      "ask": "Preguntar",
+      "overwrite": "Sobrescribir",
+      "auto_number": "Numeración automática",
+      "skip": "Omitir"
+    },
+    "timeline_unnamed": "Sin título",
+    "frames_suffix": " fotogramas",
+    "px_suffix": " px",
+    "fps_suffix": " fps",
+    "kbps_suffix": " kbps",
+    "w_label": "W",
+    "h_label": "H",
+    "colors_suffix": " colores",
+    "gif_colors_label": "Colores GIF",
+    "qc_title": "QC de múltiples versiones",
+    "close": "Cerrar"
+  }
+}

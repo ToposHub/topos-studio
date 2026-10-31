@@ -1,0 +1,12 @@
+{
+  "h264_timeline": {
+    "timeline_id": "h264_timeline",
+    "name": "AI Real H264 Timeline",
+    "fps": 25.0,
+    "width": 1920,
+    "height": 1080,
+    "sample_rate": 48000,
+    "format_settings": {},
+    "created_at": 1789637891.761289
+  }
+}

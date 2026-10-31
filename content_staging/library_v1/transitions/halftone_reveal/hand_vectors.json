@@ -1,0 +1,25 @@
+{
+  "component": "X08 halftone_reveal",
+  "method": "手算：8x4 像素中心 (i+0.5, j+0.5) → 旋转 (s,t)=(x·cosA−y·sinA, x·sinA+y·cosA) → 胞元中心距 d（Dot=欧氏、Square=切比雪夫，归一 spacing）→ r = p·√2 → mask = clamp((r+soft−d)/(2·max(soft,1e-6)))。angle=0/spacing=8 时 d=√(a²+b²)/16，a,b∈{1,3,5,7}（闭式：√26/16=0.3187 < r < √50/16=0.4419）。独立枚举推演（纯 Python/math，不复用核代码），容差 1e-6。",
+  "params_default": {"spacing": 16, "angle": 45.0, "shape": "Dot", "softness": 0.1},
+  "vectors": [
+    {"fixture": "8x4", "params": {"spacing": 8, "angle": 0.0, "shape": "Dot", "softness": 0.0}, "progress": 0.3,
+     "expected_grid_rows": [[0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 1, 1, 1, 1, 0, 0], [0, 1, 1, 1, 1, 1, 1, 0], [0, 1, 1, 1, 1, 1, 1, 0]],
+     "note": "Dot p=0.3：r=0.3·√2=0.4243；圆点扩张（d<r 揭示），上边缘行 |dv|=0.4375 全在外"},
+    {"fixture": "8x4", "params": {"spacing": 8, "angle": 0.0, "shape": "Square", "softness": 0.0}, "progress": 0.3,
+     "expected_grid_rows": [[0, 0, 0, 0, 0, 0, 0, 0], [0, 1, 1, 1, 1, 1, 1, 0], [0, 1, 1, 1, 1, 1, 1, 0], [0, 1, 1, 1, 1, 1, 1, 0]],
+     "note": "Square 切比雪夫距：(1,1) 类对角点（max=0.3125<r）纳入而 Dot（√50/16=0.4419>r）排除——两形状机器可辨"},
+    {"fixture": "8x4", "params": {"spacing": 8, "angle": 0.0, "shape": "Dot", "softness": 0.1}, "progress": 0.3,
+     "expected_grid_rows": [[0.0, 0.0, 0.241391247977, 0.411611652352, 0.411611652352, 0.241391247977, 0.0, 0.0], [0.0, 0.411611652352, 0.79914787642, 1.0, 1.0, 0.79914787642, 0.411611652352, 0.0], [0.241391247977, 0.79914787642, 1.0, 1.0, 1.0, 1.0, 0.79914787642, 0.241391247977], [0.411611652352, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.411611652352]],
+     "note": "羽化向量：(1,1) d=√50/16=0.441942 → (0.424264+0.1−0.441942)/0.2 = 0.411612"},
+    {"fixture": "8x4", "params": {"spacing": 4, "angle": 0.0, "shape": "Dot", "softness": 0.0}, "progress": 0.3,
+     "expected_grid_rows": [[0, 1, 1, 0, 0, 1, 1, 0], [1, 1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1], [0, 1, 1, 0, 0, 1, 1, 0]],
+     "note": "spacing=4（2 胞元宽）：中间两行 |dy|=0.125 距近全揭示——与 spacing=8 图案可辨（间距=频率独立）。冲突记录：初版手推误记中间行 |dy|=0.375，独立脚本重推为 0.125（行 1/2 贴块中心）"},
+    {"fixture": "8x4", "params": {"spacing": 8, "angle": 45.0, "shape": "Dot", "softness": 0.0}, "progress": 0.3,
+     "expected_grid_rows": [[0, 0, 1, 1, 1, 1, 1, 1], [0, 0, 0, 1, 1, 1, 1, 1], [1, 0, 0, 1, 1, 1, 1, 1], [1, 1, 1, 0, 0, 0, 0, 0]],
+     "note": "angle=45：网格旋转，揭示前沿沿对角——与 angle=0 机器可辨"},
+    {"fixture": "8x4", "params": {"spacing": 8}, "progress": 0.0, "expected_all": 0.0, "note": "端点精确：全 0"},
+    {"fixture": "8x4", "params": {"spacing": 8, "softness": 0.5}, "progress": 1.0, "expected_all": 1.0,
+     "note": "端点精确：全 1（且 r_max=√2 ≥ 胞元角距 √2/2 + max softness 0.5 → 无早退也已全覆盖）"}
+  ]
+}

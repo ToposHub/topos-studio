@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_subtitle_track_semantics.py ...                          [100%]
+
+============================== 3 passed in 21.95s ==============================

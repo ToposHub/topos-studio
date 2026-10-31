@@ -1,0 +1,63 @@
+{
+    "name": "基础调色",
+    "description": "基础调色模板：输入 → Grade → 输出。适合快速调整亮度、对比度。",
+    "version": 1,
+    "nodes": [
+        {
+            "id": "input_grade",
+            "type": "image_input",
+            "position": [0, 0],
+            "parameters": {},
+            "disabled": false
+        },
+        {
+            "id": "grade_node",
+            "type": "grade",
+            "position": [200, 0],
+            "parameters": {
+                "lift_r": 0.0,
+                "lift_g": 0.0,
+                "lift_b": 0.0,
+                "gamma_r": 1.0,
+                "gamma_g": 1.0,
+                "gamma_b": 1.0,
+                "gain_r": 1.0,
+                "gain_g": 1.0,
+                "gain_b": 1.0,
+                "offset_r": 0.0,
+                "offset_g": 0.0,
+                "offset_b": 0.0,
+                "blackpoint": 0.0,
+                "whitepoint": 1.0,
+                "multiply": 1.0,
+                "add": 0.0,
+                "mask_channels": "rgb",
+                "mix": 1.0
+            },
+            "disabled": false
+        },
+        {
+            "id": "output_grade",
+            "type": "output",
+            "position": [400, 0],
+            "parameters": {},
+            "disabled": false
+        }
+    ],
+    "connections": [
+        {
+            "src_idx": 0,
+            "src_port": "output",
+            "dst_idx": 1,
+            "dst_port": "image"
+        },
+        {
+            "src_idx": 1,
+            "src_port": "result",
+            "dst_idx": 2,
+            "dst_port": "input"
+        }
+    ],
+    "created_at": "2026-05-14T10:00:00",
+    "author": "Topos Color"
+}

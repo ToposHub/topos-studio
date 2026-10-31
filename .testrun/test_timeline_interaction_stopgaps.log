@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 13 items
+
+tests/edit/test_timeline_interaction_stopgaps.py .............           [100%]
+
+============================= 13 passed in 10.74s ==============================

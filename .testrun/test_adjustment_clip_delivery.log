@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 8 items
+
+tests/edit/test_adjustment_clip_delivery.py ........                     [100%]
+
+============================== 8 passed in 26.39s ==============================

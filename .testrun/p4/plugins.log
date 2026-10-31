@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+collected 185 items
+
+tests/plugins/test_plugin_batch1.py .................................... [ 19%]
+.................................................                        [ 45%]
+tests/plugins/test_plugin_batch2.py .................................... [ 65%]
+.......................                                                  [ 77%]
+tests/plugins/test_plugin_registry.py .................................. [ 96%]
+.......                                                                  [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/plugins.xml -
+============================= 185 passed in 13.17s =============================

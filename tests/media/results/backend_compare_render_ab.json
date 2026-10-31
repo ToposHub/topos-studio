@@ -1,0 +1,142 @@
+{
+  "schema": "topos.render_ab.v1",
+  "environment": {
+    "git_sha": "890ae51028484815eb30ef3cb5012a6ccb97f479",
+    "timestamp": "2026-09-11T07:42:56.266518",
+    "os": "macOS-15.3.1-x86_64-i386-64bit",
+    "machine": "x86_64",
+    "frames_per_batch": 300,
+    "reps": 5,
+    "workload": "3x3 gaussian -> USM -> lift/gamma/gain -> saturation"
+  },
+  "results": [
+    {
+      "size": "1920x1080",
+      "format": "bgra8",
+      "opengl": {
+        "backend": "opengl",
+        "device": "AMD Radeon RX 6800 OpenGL Engine",
+        "gl_version": "4.1 ATI-6.1.13",
+        "ms_per_frame_samples": [
+          0.2587781333333333,
+          0.2548693333333333,
+          0.25385226666666666,
+          0.25608800000000004,
+          0.25655146666666667
+        ],
+        "ms_per_frame_median": 0.25608800000000004
+      },
+      "metal": {
+        "backend": "metal",
+        "device": "AMD Radeon RX 6800",
+        "ms_per_frame_samples": [
+          0.04364900999765572,
+          0.04360662999412549,
+          0.04381996666173412,
+          0.0436312066631217,
+          0.043659883334233505
+        ],
+        "ms_per_frame_median": 0.04364900999765572
+      },
+      "metal_speedup_percent": 82.95546452873398,
+      "k1_threshold_percent": 15.0,
+      "k1_pass": true
+    },
+    {
+      "size": "1920x1080",
+      "format": "rgba16f",
+      "opengl": {
+        "backend": "opengl",
+        "device": "AMD Radeon RX 6800 OpenGL Engine",
+        "gl_version": "4.1 ATI-6.1.13",
+        "ms_per_frame_samples": [
+          0.3119973333333333,
+          0.31183999999999995,
+          0.31142719999999996,
+          0.3144944,
+          0.31800266666666666
+        ],
+        "ms_per_frame_median": 0.3119973333333333
+      },
+      "metal": {
+        "backend": "metal",
+        "device": "AMD Radeon RX 6800",
+        "ms_per_frame_samples": [
+          0.04795260000416116,
+          0.04851207332952375,
+          0.04755891666718526,
+          0.04852630666694798,
+          0.047593143329625796
+        ],
+        "ms_per_frame_median": 0.04795260000416116
+      },
+      "metal_speedup_percent": 84.63044555803003,
+      "k1_threshold_percent": 15.0,
+      "k1_pass": true
+    },
+    {
+      "size": "3840x2160",
+      "format": "bgra8",
+      "opengl": {
+        "backend": "opengl",
+        "device": "AMD Radeon RX 6800 OpenGL Engine",
+        "gl_version": "4.1 ATI-6.1.13",
+        "ms_per_frame_samples": [
+          0.8968768,
+          0.9013381333333332,
+          0.9576538666666669,
+          0.9550293333333334,
+          0.9560261333333333
+        ],
+        "ms_per_frame_median": 0.9550293333333334
+      },
+      "metal": {
+        "backend": "metal",
+        "device": "AMD Radeon RX 6800",
+        "ms_per_frame_samples": [
+          0.17681999333338658,
+          0.17637070666751242,
+          0.17662069666281846,
+          0.17780529333322193,
+          0.1764559700010674
+        ],
+        "ms_per_frame_median": 0.17662069666281846
+      },
+      "metal_speedup_percent": 81.50625425856187,
+      "k1_threshold_percent": 15.0,
+      "k1_pass": true
+    },
+    {
+      "size": "3840x2160",
+      "format": "rgba16f",
+      "opengl": {
+        "backend": "opengl",
+        "device": "AMD Radeon RX 6800 OpenGL Engine",
+        "gl_version": "4.1 ATI-6.1.13",
+        "ms_per_frame_samples": [
+          1.2501557333333333,
+          1.2887898666666666,
+          1.3063856,
+          1.3044549333333333,
+          1.3071712
+        ],
+        "ms_per_frame_median": 1.3044549333333333
+      },
+      "metal": {
+        "backend": "metal",
+        "device": "AMD Radeon RX 6800",
+        "ms_per_frame_samples": [
+          0.1974322400019446,
+          0.19642671000231834,
+          0.1967209966702891,
+          0.19604811666795285,
+          0.19604888333560666
+        ],
+        "ms_per_frame_median": 0.19642671000231834
+      },
+      "metal_speedup_percent": 84.9418554077311,
+      "k1_threshold_percent": 15.0,
+      "k1_pass": true
+    }
+  ]
+}

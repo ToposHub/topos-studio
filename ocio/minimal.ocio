@@ -1,0 +1,236 @@
+# Topos Color — minimal bundled OCIO config (sRGB / Rec.709 ↔ scene-linear).
+#
+# This is the fallback config used when the user enables OCIO but hasn't
+# supplied their own config.ocio. It defines the spaces the color-management
+# pipeline needs:
+#   - "lin"       : scene-linear working space (linear, no transfer function)
+#   - "srgb"      : sRGB-encoded stills (IEC 61966-2-1, full range)
+#   - "rec709"    : Rec.709 SDR video (BT.1886 ~gamma 2.4, limited range)
+#   - "bt2020_pq" : HDR10 (BT.2020 + PQ ST.2084)
+#   - "bt2020_hlg": HLG broadcast HDR (BT.2020 + ARIB STD-B67)
+#   - "display_p3": Display P3 D65 with sRGB transfer
+#
+# sRGB and Rec.709 share the BT.709 primaries; they differ in transfer
+# function (sRGB 2.2-ish vs BT.709 ~2.4) and intended range — exactly the
+# image-vs-video difference the color system must distinguish. Range
+# (full/limited) is handled in numpy around the OCIO transfer (OCIO itself
+# works on normalized [0,1]); the transfer function is expressed here.
+#
+# Transform style note (OCIO v2): the bundled BuiltinTransform registry does
+# NOT expose standalone "sRGB - EOTF" / "Rec.709 - EOTF" / "BT.1886" styles
+# in this OCIO build (probing confirms only CURVE - ST-2084_to_LINEAR,
+# CURVE - HLG-OETF-INVERSE, and IDENTITY exist). So the sRGB and Rec.709
+# curves are expressed with the parametric ExponentWithLinearTransform,
+# whose forward formula (c >= linSide: ((c+offset)/(1+offset))^gamma; below:
+# a derived continuous linear segment) is a piecewise power+linear curve:
+#   - sRGB transfer: gamma 2.4 + offset 0.055 — reproduces the exact IEC
+#     61966-2-1 EOTF inverse (verified sRGB(0.5)->0.2140 linear).
+#   - Rec.709 transfer: gamma 1/0.45 (=2.2222) + offset 0.099 — reproduces
+#     the exact BT.709 OETF inverse (code->linear), matching the GPU
+#     cs_transform shader and the BuiltinColorProvider math bit-for-bit
+#     (verified code 0.5->0.2596 linear at every sample within 1e-4).
+#     Rec.709 SDR encoded media is decoded with the BT.709 OETF inverse —
+#     NOT BT.1886 — so OCIO, GPU, and builtin agree on the same curve.
+#   - PQ uses the BuiltinTransform style "CURVE - ST-2084_to_LINEAR".
+#   - HLG uses the BuiltinTransform style "CURVE - HLG-OETF-INVERSE".
+# For a full cinematic pipeline (ACES, camera IDTs, log), point
+# ocio_config_path at a real ACES Studio Config instead.
+
+ocio_profile_version: 2.4
+
+search_path: ""
+strictparsing: false
+
+roles:
+  # Standard OCIO role aliases. 'scene_linear' is the working space; 'default'
+  # is REQUIRED by OCIO v2 (a config must carry either a 'default' role or a
+  # file_rules section — without it the config fails to load).
+  scene_linear: lin
+  data: lin
+  default: lin
+  color_picking: srgb
+  texture_paint: srgb
+  matte_paint: srgb
+
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: lin}
+    - !<View> {name: sRGB, colorspace: srgb}
+  Rec709:
+    - !<View> {name: Raw, colorspace: lin}
+    - !<View> {name: Rec709, colorspace: rec709}
+
+active_displays: [sRGB, Rec709]
+active_views: [sRGB, Rec709, Raw]
+
+colorspaces:
+  # ── Scene-linear working space (no transfer function) ──
+  - !<ColorSpace>
+    name: lin
+    family: ""
+    equalitygroup: ""
+    bitdepth: 32f
+    isdata: false
+    allocation: lg2
+    allocationvars: [-12, 12]
+
+  # ── ACEScg (AP1 primaries, scene-linear, ACES ~D60 white) ──
+  # to_reference converts ACEScg linear RGB into the config reference
+  # ("lin" = BT.709-gamut scene-linear, D65) with the standard published
+  # Bradford-adapted matrix — the same values as the BuiltinColorProvider's
+  # _AP1_TO_BT709 (verified identical to 1e-5 so OCIO and builtin agree).
+  # from_reference is the exact inverse (BT.709→ACEScg).
+  - !<ColorSpace>
+    name: acescg
+    aliases: [aces_cg, ap1_linear]
+    family: ""
+    equalitygroup: ""
+    bitdepth: 32f
+    isdata: false
+    allocation: lg2
+    allocationvars: [-12, 12]
+    to_reference: !<GroupTransform>
+      children:
+        - !<MatrixTransform> {matrix: [1.7050502, -0.6217914, -0.0832562, 0.0, -0.1302564, 1.1408043, -0.0105479, 0.0, -0.0240033, -0.1289187, 1.1529220, 0.0, 0.0, 0.0, 0.0, 1.0]}
+
+  # ── sRGB (display-referred, IEC 61966-2-1) ──
+  # to_reference applies the sRGB EOTF inverse (display → linear) via
+  # ExponentWithLinearTransform. With gamma=2.4, offset=0.055 this reproduces
+  # the exact piecewise IEC 61966-2-1 curve (verified: sRGB(0.5)→0.214 linear).
+  - !<ColorSpace>
+    name: srgb
+    family: ""
+    equalitygroup: ""
+    bitdepth: 8ui
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_reference: !<GroupTransform>
+      children:
+        - !<ExponentWithLinearTransform> {gamma: [2.4, 2.4, 2.4, 2.4], offset: [0.055, 0.055, 0.055, 0.055]}
+
+  # ── Rec.709 SDR video (BT.709 OETF) ──
+  # Rec.709-encoded media is decoded with the BT.709 camera OETF inverse
+  # (NOT BT.1886): L = E/4.5 for E < 0.081; L = ((E+0.099)/1.099)^(1/0.45)
+  # otherwise. ExponentWithLinearTransform with gamma=1/0.45, offset=0.099
+  # reproduces this piecewise curve exactly (the power branch dominates above
+  # the knee; the derived linear segment matches E/4.5 below it), so OCIO,
+  # the GPU cs_transform shader, and the BuiltinColorProvider agree to within
+  # 1e-4 at every sample. Range (limited 16-235) is handled in numpy around
+  # this transfer.
+  - !<ColorSpace>
+    name: rec709
+    family: ""
+    equalitygroup: ""
+    bitdepth: 8ui
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_reference: !<GroupTransform>
+      children:
+        - !<ExponentWithLinearTransform> {gamma: [2.2222244, 2.2222244, 2.2222244, 2.2222244], offset: [0.099, 0.099, 0.099, 0.099]}
+
+  # ── HDR / wide-gamut spaces (stage 2) ──
+  # BT.2020 + PQ (HDR10). to_reference decodes PQ codes → linear (nits) via
+  # the CURVE - ST-2084_to_LINEAR builtin, then gamut-converts BT.2020 → the
+  # BT.709 reference (the OCIO reference space uses BT.709 primaries). The
+  # gamut matrix is the INVERSE of the BT.709→BT.2020 matrix (ITU-R BT.2087):
+  # to_reference must map BT.2020 primaries → BT.709, i.e. BT.2020→BT.709.
+  # Range (limited) handled in numpy.
+  #
+  # P0-COLOR-05 nits scale: OCIO's CURVE - ST-2084_to_LINEAR normalises
+  # linear light to a 100-nit reference white (code 1.0 → 100.0, verified
+  # ratio 100.000 at every sample). The BuiltinColorProvider (_pq_to_linear_np)
+  # and the GPU cs_transform shader both emit ABSOLUTE nits (×10000). The
+  # ×100 matrix rescales OCIO to the same absolute-nits contract so all three
+  # engines agree within float tolerance (triple golden vector).
+  - !<ColorSpace>
+    name: bt2020_pq
+    family: ""
+    equalitygroup: ""
+    bitdepth: 16f
+    isdata: false
+    allocation: lg2
+    allocationvars: [-12, 12]
+    to_reference: !<GroupTransform>
+      children:
+        - !<BuiltinTransform> {style: CURVE - ST-2084_to_LINEAR}
+        - !<MatrixTransform> {matrix: [100, 0, 0, 0,
+                                       0, 100, 0, 0,
+                                       0, 0, 100, 0,
+                                       0, 0, 0, 1]}
+        - !<MatrixTransform> {matrix: [1.66049, -0.5876391, -0.0728516, 0,
+                                       -0.12455, 1.1329, -0.008347964, 0,
+                                       -0.01815112, -0.1005787, 1.11873, 0,
+                                       0, 0, 0, 1]}
+
+  # DCI-P3 (P3-D65) + PQ. Previously the descriptor mapped (smpte431,
+  # smpte2084) → bt2020_pq, which decoded P3 content through the BT.2020
+  # gamut — a silent colour shift. This space decodes PQ (same ×100 nits
+  # scale) then gamut-converts P3-D65 → BT.709, using the same matrix as
+  # display_p3 (inverse of the BT.709→P3 D65 row-major matrix).
+  - !<ColorSpace>
+    name: p3_pq
+    family: ""
+    equalitygroup: ""
+    bitdepth: 16f
+    isdata: false
+    allocation: lg2
+    allocationvars: [-12, 12]
+    to_reference: !<GroupTransform>
+      children:
+        - !<BuiltinTransform> {style: CURVE - ST-2084_to_LINEAR}
+        - !<MatrixTransform> {matrix: [100, 0, 0, 0,
+                                       0, 100, 0, 0,
+                                       0, 0, 100, 0,
+                                       0, 0, 0, 1]}
+        - !<MatrixTransform> {matrix: [1.22494, -0.2249402, 0, 0,
+                                       -0.04205748, 1.042057, 0, 0,
+                                       -0.01963761, -0.07863603, 1.098274, 0,
+                                       0, 0, 0, 1]}
+
+  # BT.2020 + HLG (broadcast HDR). to_reference decodes HLG OETF → linear via
+  # the CURVE - HLG-OETF-INVERSE builtin, then gamut-converts BT.2020 → BT.709.
+  #
+  # P0-COLOR-05 scale: OCIO's HLG-OETF-INVERSE emits relative scene light ×3
+  # (verified ratio builtin/ocio = 3.0000 at every sample; builtin and the GPU
+  # shader use the ARIB STD-B67 relative form E'^2/3 and (exp((E'-C)/A)+B)/12).
+  # The ×(1/3) matrix aligns OCIO with the other two engines.
+  - !<ColorSpace>
+    name: bt2020_hlg
+    family: ""
+    equalitygroup: ""
+    bitdepth: 16f
+    isdata: false
+    allocation: lg2
+    allocationvars: [-12, 12]
+    to_reference: !<GroupTransform>
+      children:
+        - !<BuiltinTransform> {style: CURVE - HLG-OETF-INVERSE}
+        - !<MatrixTransform> {matrix: [0.3333333333, 0, 0, 0,
+                                       0, 0.3333333333, 0, 0,
+                                       0, 0, 0.3333333333, 0,
+                                       0, 0, 0, 1]}
+        - !<MatrixTransform> {matrix: [1.66049, -0.5876391, -0.0728516, 0,
+                                       -0.12455, 1.1329, -0.008347964, 0,
+                                       -0.01815112, -0.1005787, 1.11873, 0,
+                                       0, 0, 0, 1]}
+
+  # DCI-P3 (Display P3 D65) with sRGB-like transfer — common modern-display
+  # wide gamut. to_reference decodes the sRGB transfer, then gamut-converts
+  # Display P3 → BT.709 reference (inverse of BT.709→P3 D65, row-major).
+  - !<ColorSpace>
+    name: display_p3
+    family: ""
+    equalitygroup: ""
+    bitdepth: 8ui
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_reference: !<GroupTransform>
+      children:
+        - !<ExponentWithLinearTransform> {gamma: [2.4, 2.4, 2.4, 2.4], offset: [0.055, 0.055, 0.055, 0.055]}
+        - !<MatrixTransform> {matrix: [1.22494, -0.2249402, 0, 0,
+                                       -0.04205748, 1.042057, 0, 0,
+                                       -0.01963761, -0.07863603, 1.098274, 0,
+                                       0, 0, 0, 1]}

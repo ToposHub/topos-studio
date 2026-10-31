@@ -1,0 +1,88 @@
+{
+  "date": "2026-09-12T06:45:13",
+  "purpose": "W3-01/02 shared texture roundtrip (AMD real machine)",
+  "steps": [
+    {
+      "step": "gl_context",
+      "ok": true,
+      "detail": "3.3.0 Core Profile Context 26.8.1.260806"
+    },
+    {
+      "step": "d3d11_create_device",
+      "ok": true,
+      "detail": "hr=0x00000000 fl=0xB000"
+    },
+    {
+      "step": "vtable_sanity_get_feature_level",
+      "ok": true,
+      "detail": "slot37=0xB000 expect 0xB000"
+    },
+    {
+      "step": "create_texture2d",
+      "ok": true,
+      "detail": "BGRA8 64x64"
+    },
+    {
+      "step": "get_proc_wglDXOpenDeviceNV",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "step": "wglDXOpenDeviceNV",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "step": "gl_gen_bind_texture",
+      "ok": true,
+      "detail": "name=1"
+    },
+    {
+      "step": "get_proc_wglDXRegisterObjectNV",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "step": "wglDXRegisterObjectNV",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "step": "wglDXLockObjectsNV",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "step": "gl_fbo_procs",
+      "ok": true,
+      "detail": "missing=[]"
+    },
+    {
+      "step": "fbo_attach_complete",
+      "ok": true,
+      "detail": "status=0x8CD5"
+    },
+    {
+      "step": "pixel_roundtrip",
+      "ok": true,
+      "detail": "rgba_match=False swapped_match=True gl[0,0]=[0, 0, 128, 255] d3d[0,0]=[128, 0, 0, 255]"
+    },
+    {
+      "step": "wglDXUnlockObjectsNV",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "step": "wglDXUnregisterObjectNV",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "step": "wglDXCloseDeviceNV",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "verdict": "shared_texture_roundtrip_ok",
+  "failed_at": null
+}

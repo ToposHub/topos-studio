@@ -1,0 +1,25 @@
+{
+  "recipe_id": "P01",
+  "name": "自然人像",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合中低反差人像；strength 0.6–0.9，肤色偏暖不偏品；强光比素材降到 0.5 以下",
+  "component": "White_Balance_Advanced（生产插件 plugins/White_Balance_Advanced.tglsl）",
+  "dependencies": {
+    "plugin_id": "White_Balance_Advanced",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "temperature": 0.08,
+    "tint": 0.02,
+    "wb_method": "Luma Preserving",
+    "strength": 0.85
+  },
+  "notes": "L18 批次首个自然人像配方：轻微暖移 + 亮度保持白平衡，避免通道增益伤肤色。参数已对真实插件 schema 校验；应用走既有 AddEffectCommand / 层插件实例机制。"
+}

@@ -1,0 +1,95 @@
+// --- Topos Plugin Metadata ---
+// @name Unsharp Sharpen
+// @i18n_name Unsharp_Sharpen
+// @author Topos Team
+// @version 1.0
+// @description Unsharp mask sharpening: compile-time 3x3/5x5 inverse-distance kernel, radius to 8 px and edge-gated detail amplification
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost medium
+// @param select kernel_size "Kernel Size" 0 "3x3" "5x5"
+// @param slider sharpen_amount "Sharpen Amount" 0.5 0.0 2.0
+// @param slider sharpen_radius "Radius" 0.3 0.0 1.0
+// @param separator
+// @param slider sharpen_threshold "Edge Threshold" 0.0 0.0 1.0
+// -----------------------------
+//
+// Unsharp Sharpen —— 反锐化掩模锐化。
+//
+// 原理：detail = original - low_pass，输出 = original + detail * amount
+// （经边缘门限整形）。低通核为距离倒数加权方阵：w = 1 / (1 + dx²+dy²)，
+// 中心权重最大、随距离平方衰减——比均匀盒式核的振铃更温和。
+// kernel_size select 在 3x3（9 tap）与 5x5（25 tap）两档间选择。
+//
+// 与 HighPass_Retouch（频率分离磨皮，带阻）、bilateral_skin_smooth
+// （边缘保持平滑）的差异：本插件是标准细节增强工具，放大高频而非
+// 去除，面向全画面细节/文字/植被清晰度。
+//
+// 设计要点：
+// - tap 数 select 两档经 USHARP_ACCUM 宏展开为编译期常量双层循环
+//   （Radial_Blur_Pro 同款惯例）；ex/ey 的 N/2 为 int 语义整数除法；
+// - 半径 1..8 px（sharpen_radius 映射），保证 25 tap 内采样密度充足
+//   不产生稀疏亮斑；
+// - 边缘门限 smoothstep 只作用于 detail 幅值权重（不钳制内容色）；
+//   sharpen_threshold = 0 时门限边缘 (0, 0.05) 仍严格递增，无 NaN；
+// - detail 可为负/超界，放大后照常 HDR 线性叠加（不 clamp 内容色）；
+//   Delta 输出惯例（detail x gate 直接叠加到已调色画面）；
+// - 采样 UV 钳半纹素；texel 分母下限守护；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+// 距离倒数加权低通累加宏。N 在调用点展开为字面常量（3 或 5），
+// 保证两层循环上限编译期可知。依赖外层变量：uv / step_px / min_uv / max_uv。
+#define USHARP_ACCUM(N)                                                        \
+    vec3 acc = vec3(0.0);                                                      \
+    float w_sum = 0.0;                                                         \
+    for (int dy = 0; dy < N; dy++) {                                           \
+        for (int dx = 0; dx < N; dx++) {                                       \
+            int ex = dx - N / 2;                                               \
+            int ey = dy - N / 2;                                               \
+            vec2 off = vec2(float(ex), float(ey)) * step_px;                   \
+            vec3 s = texture(u_input_tex, clamp(uv + off, min_uv, max_uv)).rgb;\
+            float w = 1.0 / (1.0 + float(ex * ex + ey * ey));                  \
+            acc += s * w;                                                      \
+            w_sum += w;                                                        \
+        }                                                                      \
+    }                                                                          \
+    return acc / w_sum;
+
+// kernel: select 索引经早退 if 链调度到编译期核尺寸分支
+vec3 unsharp_low_pass(vec2 uv, vec2 step_px, vec2 min_uv, vec2 max_uv,
+                      int kernel) {
+    if (kernel == 0) { USHARP_ACCUM(3) }
+    else { USHARP_ACCUM(5) }
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (sharpen_amount < 0.001) return color;
+
+    vec2 tex_size = vec2(textureSize(u_input_tex, 0));
+    vec2 safe_size = max(tex_size, vec2(1.0));
+    vec2 half_texel = 0.5 / safe_size;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+
+    // 半径映射：1..8 px（25 tap 核内的诚实采样密度）
+    vec2 step_px = (vec2(1.0) + vec2(sharpen_radius * 7.0)) / safe_size;
+
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+    vec3 blurred = unsharp_low_pass(uv, step_px, min_uv, max_uv, kernel_size);
+
+    // 高频 detail（可为负/超界）经边缘门限放大
+    vec3 detail = original_color - blurred;
+    float gate = smoothstep(sharpen_threshold, sharpen_threshold + 0.05,
+                            length(detail));
+
+    return color + detail * (sharpen_amount * gate);
+}

@@ -1,0 +1,23 @@
+# ==============================================================================
+# Topos Color - 可选 AI Worker 依赖 · 组合B「TTS 专用」（M01）
+# 计划：docs/upgrade_plan_M_mac_2026-10-24.md §M01
+# ==============================================================================
+# 覆盖：Qwen3-TTS 语音合成（src/features/edit/ai_editing/tts_provider.py）。
+#
+# 为什么单列：qwen-tts 全系（0.0.2–0.1.1）钉 transformers==4.57.3，与
+# qwen-asr 全系钉的 4.57.6 互斥（上游生态问题，任何版本组合都无法共存）。
+# ASR 主链（组合A，requirements-ai-worker.txt）与 TTS（本组合）只能分环境
+# 安装；各自 pip check=0。上游放宽 transformers 钉子后可并回单组合。
+# 构建：scripts/m01_build_envs.sh tts → .venv-m01-tts
+# ==============================================================================
+
+torch==2.2.2
+torchvision==0.17.2
+torchaudio==2.2.2
+numpy==1.26.4
+packaging<25
+transformers==4.57.3
+qwen-tts==0.1.1
+# numba/llvmlite：与组合A同因——最新 llvmlite 无 x86_64 macOS 轮子
+numba==0.60.0
+llvmlite==0.43.0

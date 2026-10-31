@@ -1,0 +1,24 @@
+{
+  "recipe_id": "P30",
+  "name": "海报量化",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "适合海报/波普风；levels 4–8，dither 开可减色带",
+  "component": "F18 posterize_shared（复用生产节点插件 posterize，plugins/node_plugins/posterize_plugin.py）",
+  "dependencies": {
+    "component_id": "F18",
+    "node_type": "posterize",
+    "node_plugin": "plugins/node_plugins/posterize_plugin.py"
+  },
+  "params": {
+    "levels": 6,
+    "channel_mode": "rgb",
+    "dither": true
+  },
+  "notes": "F18 posterize_shared 复用生产节点插件 posterize（plugins/node_plugins/posterize_plugin.py，NodePluginManager 可发现可建节点），不另造第二个 Posterize 实现；载荷为 Composite 节点参数快照。"
+}

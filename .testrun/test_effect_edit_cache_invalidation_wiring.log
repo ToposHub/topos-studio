@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_effect_edit_cache_invalidation_wiring.py ....            [100%]
+
+============================== 4 passed in 7.21s ===============================

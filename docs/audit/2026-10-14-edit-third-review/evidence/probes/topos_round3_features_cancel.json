@@ -1,0 +1,16 @@
+{
+  "cancel_requested": true,
+  "analyzer_calls": [
+    {
+      "progress_passed": false,
+      "cancel_seen_at_entry": false
+    },
+    {
+      "progress_passed": false,
+      "cancel_seen_at_entry": true
+    }
+  ],
+  "returned_pcm": true,
+  "report_write_calls": 1,
+  "last_report_published": true
+}

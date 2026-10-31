@@ -1,0 +1,130 @@
+{
+  "h264_composition": {
+    "composite_id": "h264_composition",
+    "source_clip_id": "h264_clip",
+    "source_asset_id": "h264_asset",
+    "source_asset_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_h264.mp4",
+    "name": "AI H264 Composite",
+    "nodes": [
+      {
+        "id": "31339a75",
+        "type": "timeline_clip_input",
+        "position": [
+          100,
+          200
+        ],
+        "parameters": {
+          "timeline_id": "",
+          "clip_id": "h264_clip",
+          "asset_id": "h264_asset",
+          "input_stage": "source_raw"
+        },
+        "disabled": false
+      },
+      {
+        "id": "6d2081d2",
+        "type": "topos_color",
+        "position": [
+          400,
+          200
+        ],
+        "parameters": {
+          "stack_source": "clip_stack",
+          "color_stack_id": "6558ba98-fdbb-4b21-8e22-bd37ffd700ae",
+          "role": "primary_clip_grade",
+          "source_clip_id": "h264_clip",
+          "source_timeline_id": "",
+          "linked": true,
+          "preset_id": "",
+          "embedded_stack": null,
+          "bypass": false,
+          "intensity": 1.0
+        },
+        "disabled": false
+      },
+      {
+        "id": "56783c35",
+        "type": "output",
+        "position": [
+          700,
+          200
+        ],
+        "parameters": {
+          "format_mode": "custom",
+          "output_name": "display",
+          "width": 1920,
+          "height": 1080,
+          "output_color_space": "same",
+          "alpha_policy": "keep",
+          "background_color": "0,0,0,0",
+          "resolution_mode": "auto"
+        },
+        "disabled": false
+      },
+      {
+        "id": "ai_composite_blur",
+        "type": "blur",
+        "position": [
+          0.0,
+          0.0
+        ],
+        "parameters": {
+          "blur_type": "gaussian",
+          "radius_x": 3.0,
+          "radius_y": 3.0,
+          "radius": 8.0,
+          "angle": 0.0,
+          "motion_source": "angle",
+          "shutter": 1.0,
+          "edge_preserve": 0.5,
+          "aperture_blades": "circle",
+          "anamorphic": 0.0,
+          "highlight_gain": 0.0,
+          "edge_policy": "clamp",
+          "quality": "normal",
+          "channel_r": true,
+          "channel_g": true,
+          "channel_b": true,
+          "channel_a": false,
+          "mix": 0.35,
+          "process_alpha": true
+        },
+        "disabled": false
+      }
+    ],
+    "connections": [
+      {
+        "src_node_id": "31339a75",
+        "src_port_name": "output",
+        "dst_node_id": "6d2081d2",
+        "dst_port_name": "image"
+      },
+      {
+        "src_node_id": "6d2081d2",
+        "src_port_name": "result",
+        "dst_node_id": "ai_composite_blur",
+        "dst_port_name": "image"
+      },
+      {
+        "src_node_id": "ai_composite_blur",
+        "src_port_name": "result",
+        "dst_node_id": "56783c35",
+        "dst_port_name": "image"
+      }
+    ],
+    "viewer_state": {},
+    "viewport_state": {},
+    "backdrops": {},
+    "sticky_notes": {},
+    "groups": {},
+    "created_at": 1789637892.011015,
+    "modified_at": 1789637892.0196748,
+    "width": 1920,
+    "height": 1080,
+    "clip_id": "h264_clip",
+    "source_refs": {
+      "original_asset_id": "h264_asset",
+      "original_clip_id": "h264_clip"
+    }
+  }
+}

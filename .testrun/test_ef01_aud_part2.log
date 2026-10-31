@@ -1,0 +1,45 @@
+============================= test session starts ==============================
+collected 48 items
+
+tests/edit/test_ef01_aud_part2.py ..FFF................................. [ 79%]
+..........                                                               [100%]
+
+=================================== FAILURES ===================================
+_ TestAud16506PrepositionStartFailureCleanup.test_start_failure_releases_reservation_and_event _
+tests/edit/test_ef01_aud_part2.py:175: in test_start_failure_releases_reservation_and_event
+    mgr, src = self._prepare_manager(monkeypatch)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/edit/test_ef01_aud_part2.py:168: in _prepare_manager
+    key = mgr._make_source_key(dsk, spec)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/edit_gpu_decode_manager.py:1665: in _make_source_key
+    source_spec.no_deblock,
+    ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'no_deblock'
+_ TestAud16506PrepositionStartFailureCleanup.test_closing_path_releases_reservation_and_event _
+tests/edit/test_ef01_aud_part2.py:185: in test_closing_path_releases_reservation_and_event
+    mgr, src = self._prepare_manager(monkeypatch)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/edit/test_ef01_aud_part2.py:168: in _prepare_manager
+    key = mgr._make_source_key(dsk, spec)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/edit_gpu_decode_manager.py:1665: in _make_source_key
+    source_spec.no_deblock,
+    ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'no_deblock'
+_ TestAud16506PrepositionStartFailureCleanup.test_healthy_start_still_registers _
+tests/edit/test_ef01_aud_part2.py:194: in test_healthy_start_still_registers
+    mgr, src = self._prepare_manager(monkeypatch)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/edit/test_ef01_aud_part2.py:168: in _prepare_manager
+    key = mgr._make_source_key(dsk, spec)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/edit_gpu_decode_manager.py:1665: in _make_source_key
+    source_spec.no_deblock,
+    ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'no_deblock'
+=========================== short test summary info ============================
+FAILED tests/edit/test_ef01_aud_part2.py::TestAud16506PrepositionStartFailureCleanup::test_start_failure_releases_reservation_and_event
+FAILED tests/edit/test_ef01_aud_part2.py::TestAud16506PrepositionStartFailureCleanup::test_closing_path_releases_reservation_and_event
+FAILED tests/edit/test_ef01_aud_part2.py::TestAud16506PrepositionStartFailureCleanup::test_healthy_start_still_registers
+======================== 3 failed, 45 passed in 27.50s =========================

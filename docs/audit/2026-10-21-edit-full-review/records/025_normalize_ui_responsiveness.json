@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "result": {
+    "media": "2K_h264.mp4",
+    "audio_duration_seconds": 60,
+    "analysis_elapsed_seconds": 0.982266872000082,
+    "heartbeat_during_analysis": 0,
+    "largest_heartbeat_gap_seconds": 0.997101579999935,
+    "analysis": [
+      true,
+      "Integrated：-17.8 LUFS（目标 -23）\nTrue Peak：3.1 dBTP（上限 -3）\n建议增益：-6.1 dB（受峰值上限约束）",
+      -6.052501619075161
+    ],
+    "method": "production normalize method on actual GUI thread; no decoder mock"
+  }
+}

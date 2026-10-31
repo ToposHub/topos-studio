@@ -1,0 +1,89 @@
+{
+  "legacy_move_undo": {
+    "original": 100,
+    "moved": 300,
+    "restored": 0,
+    "stored_old": null
+  },
+  "default_tick_rate": [
+    {
+      "start": 720,
+      "duration": 720
+    }
+  ],
+  "parent_end": [
+    {
+      "start": 48,
+      "duration": 192
+    }
+  ],
+  "media_frame_clock": {
+    "error": "TTML/XML subtitle file contains no timed paragraphs"
+  },
+  "media_frame_clock_mixed": [
+    {
+      "start": 0,
+      "duration": 48
+    }
+  ],
+  "invalid_tick": [
+    {
+      "start": 240000000000,
+      "duration": 240000000000
+    }
+  ],
+  "animated_static_edit": {
+    "static_x": 100,
+    "rendered_x_frame50": 0
+  },
+  "legacy_keyframe_range": {
+    "raw_values": [
+      -250,
+      -500
+    ],
+    "range": [
+      0,
+      100
+    ],
+    "sample0": 0,
+    "sample50": 0
+  },
+  "freeze_linked": {
+    "clips": [
+      {
+        "id": "vc",
+        "link": "ac",
+        "duration": 50,
+        "start": 0
+      },
+      {
+        "id": "f70dce8d-6dc7-41d1-917e-9d7a234ba711",
+        "link": null,
+        "duration": 50,
+        "start": 50
+      },
+      {
+        "id": "ac",
+        "link": "vc",
+        "duration": 100,
+        "start": 0
+      }
+    ],
+    "validation": []
+  },
+  "panel_second_keyframe_request": [
+    [
+      "c",
+      "transform.translate_x",
+      50,
+      0.0
+    ]
+  ],
+  "panel_display_x": 100.0,
+  "seek_display": {
+    "frame": 50,
+    "model_sample": 100,
+    "display": 0.0,
+    "diamond_value": 100
+  }
+}

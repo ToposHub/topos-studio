@@ -1,0 +1,34 @@
+============================= test session starts ==============================
+collected 324 items
+
+tests/core/test_batch_a_model.py .........................               [  7%]
+tests/core/test_batch_b_provenance.py ..................                 [ 13%]
+tests/core/test_component_lifecycle.py ...                               [ 14%]
+tests/core/test_components.py .....                                      [ 15%]
+tests/core/test_constraints.py ....................                      [ 21%]
+tests/core/test_content_localization.py ......F                          [ 24%]
+tests/core/test_devtools_property_mapping.py ........                    [ 26%]
+tests/core/test_fh01_html_layer.py ............                          [ 30%]
+tests/core/test_html_layer_commands.py ...........                       [ 33%]
+tests/core/test_html_page_deck.py ...............                        [ 38%]
+tests/core/test_motion_graphic_template_store.py .........               [ 41%]
+tests/core/test_scene_pages.py ..............................            [ 50%]
+tests/core/test_sg05_text_layout.py ................                     [ 55%]
+tests/core/test_sg07_graphics.py ....................                    [ 61%]
+tests/core/test_tm04_full_templates.py ................................. [ 71%]
+...............................                                          [ 81%]
+tests/core/test_w3_design_tokens.py ..........                           [ 84%]
+tests/core/test_w3_layout_tokens.py ...........                          [ 87%]
+tests/core/test_w3_templates.py ..................                       [ 93%]
+tests/core/test_w5_audio_composition.py ......................           [100%]
+
+=================================== FAILURES ===================================
+_________________ test_effects_panel_has_no_hardcoded_cjk_text _________________
+tests/core/test_content_localization.py:104: in test_effects_panel_has_no_hardcoded_cjk_text
+    assert not cjk, f"hardcoded CJK lines remain: {cjk[:5]}"
+E   AssertionError: hardcoded CJK lines remain: ['# AUD-19809: 标签页索引具名常量（addTab 顺序：0=Video、1=Transitions），', '# 上下文菜单不再用魔法数字判断当前是否转场页。', '# R23（第七轮审计）：宿主 item 可能已被 tree.clear() 销毁（视频/', '# 音频树重建未解绑时的延迟 resize）——目标守卫自解绑，不再把', '# wrapped C/C++ object deleted 抛进 Qt 槽。']
+E   assert not ['# AUD-19809: 标签页索引具名常量（addTab 顺序：0=Video、1=Transitions），', '# 上下文菜单不再用魔法数字判断当前是否转场页。', '# R23（第七轮审计）：宿主 item 可能已被 tr...目标守卫自解绑，不再把', '# wrapped C/C++ object deleted 抛进 Qt 槽。', '# AUD-19804: 防递归状态锁 —— 程序化更新控件（search_input.clear() 等）', ...]
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/core.xml -
+=========================== short test summary info ============================
+FAILED tests/core/test_content_localization.py::test_effects_panel_has_no_hardcoded_cjk_text
+======================== 1 failed, 323 passed in 2.38s =========================

@@ -1,0 +1,16 @@
+INFO: EditProjectIO initialized
+INFO: Project loaded: /tmp/topos-edit-audit-1020/out3/audit-project.topos, assets=1, timelines=1
+INFO: Project loaded from .topos package: /tmp/topos-edit-audit-1020/out3/audit-project.topos
+INFO: Timeline export graphics backend: opengl
+INFO: TimelineExporter initialized: timeline=Timeline 1, duration=1572 frames
+INFO: Starting export: range=[0, 48), total_frames=48, codec=ExportCodec.H264
+INFO: 使用 Apple VideoToolbox 硬件编码: h264_videotoolbox（输入 yuv420p；速度优先）
+INFO: Encoder opened: /tmp/topos-edit-audit-1020/out3/export-check.mp4, codec=h264_videotoolbox, pix_fmt=yuv420p
+INFO: Audio stream added: codec=aac, rate=48000, channels=2
+INFO: Rendering audio: 1 tracks + 0 buses, 92160 samples, 48000Hz
+INFO: Audio export complete (parallel render)
+INFO: Encoder closed: /tmp/topos-edit-audit-1020/out3/export-check.mp4, total_frames=48
+INFO: Export complete: success=True, frames_encoded=48
+INFO: Export manifest written: /tmp/topos-edit-audit-1020/out3/export-check.mp4.manifest.json
+EXPORT {"success": true, "output": "/tmp/topos-edit-audit-1020/out3/export-check.mp4", "frames": null, "error": null, "audio_omitted": false, "size": 50900}
+INFO: Service shutdown: 0 clips closed, 0 frames served total

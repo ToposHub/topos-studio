@@ -1,0 +1,33 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 221 items
+
+tests/edit/test_nested_audio_flatten.py ................                 [  7%]
+tests/edit/test_nested_sequence.py ...............                       [ 14%]
+tests/edit/test_nested_sequence_production.py ......................     [ 23%]
+tests/edit/test_new_timeline_dialog_settings.py .                        [ 24%]
+tests/edit/test_no_glfinish_hotpath.py ...                               [ 25%]
+tests/edit/test_open_in_composite_does_not_create_temporary_composition.py . [ 26%]
+............                                                             [ 31%]
+tests/edit/test_p2_09_session_pool.py .............                      [ 37%]
+tests/edit/test_packaged_resource_scan.py .....                          [ 39%]
+tests/edit/test_pan_semantics.py ........                                [ 43%]
+tests/edit/test_placeholder_clips.py ........                            [ 47%]
+tests/edit/test_playback_architecture_gates.py ............              [ 52%]
+tests/edit/test_playback_budget.py .............                         [ 58%]
+tests/edit/test_playback_debug_trace.py ......                           [ 61%]
+tests/edit/test_playback_hud.py ........                                 [ 64%]
+tests/edit/test_playback_state_bridge.py ..                              [ 65%]
+tests/edit/test_plugin_identity.py ..................................... [ 82%]
+..............                                                           [ 88%]
+tests/edit/test_plugin_manager_paths.py ..                               [ 89%]
+tests/edit/test_present_frame_integration.py .........                   [ 93%]
+tests/edit/test_present_protocol_cleanup.py ........                     [ 97%]
+tests/edit/test_preserve_pitch_ui.py ......                              [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_20.xml -
+============================= 221 passed in 11.60s =============================

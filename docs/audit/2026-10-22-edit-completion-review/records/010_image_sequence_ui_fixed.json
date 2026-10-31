@@ -1,0 +1,72 @@
+{
+  "ok": true,
+  "result": {
+    "containers": [
+      [
+        "MP4",
+        "mp4"
+      ],
+      [
+        "QuickTime",
+        "mov"
+      ],
+      [
+        "Matroska",
+        "mkv"
+      ],
+      [
+        "MXF",
+        "mxf"
+      ],
+      [
+        "AVI",
+        "avi"
+      ],
+      [
+        "WebM",
+        "webm"
+      ],
+      [
+        "GIF",
+        "gif"
+      ],
+      [
+        "图像序列目录",
+        ""
+      ]
+    ],
+    "codecs": [
+      [
+        "H.264",
+        "h264"
+      ],
+      [
+        "HEVC (H.265)",
+        "hevc"
+      ]
+    ],
+    "png_index": -1,
+    "queue": [
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_custom_h264.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_after_edit.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_nested.mp4"
+      },
+      {
+        "status": "done",
+        "error": "",
+        "path": "/tmp/topos-round7-gui/exports/round7_nonactive.mp4"
+      }
+    ]
+  }
+}

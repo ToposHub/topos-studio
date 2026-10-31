@@ -1,0 +1,57 @@
+{
+  "panel": {
+    "ai_workflow": "AI Workflow"
+  },
+  "workflow": {
+    "canvas": {
+      "empty_hint": "Select a template above or drop assets here",
+      "zoom": "Zoom: {percent}%"
+    },
+    "toolbar": {
+      "template": "Template",
+      "load": "Load",
+      "clear": "Clear",
+      "form": "Form",
+      "canvas": "Canvas",
+      "run": "Run",
+      "cancel": "Cancel"
+    },
+    "gallery": {
+      "title": "Choose a workflow template",
+      "use": "Use"
+    },
+    "form": {
+      "title": "Parameters",
+      "title_with_name": "{name} · Parameters",
+      "node_section": "Node: {node}",
+      "no_params": "This template has no tunable parameters — just Run it",
+      "advanced_edit": "Advanced edit (canvas)",
+      "back_to_gallery": "Back to templates",
+      "back_to_gallery_tooltip": "Return to the template gallery; the current workflow is kept (Clear discards it)"
+    },
+    "status": {
+      "idle": "Idle",
+      "queued": "Queued",
+      "running": "Running",
+      "cached": "Cached",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "waiting_input": "Waiting",
+      "skipped": "Skipped",
+      "not_assembled": "Status: not assembled",
+      "no_plan": "No plan yet"
+    },
+    "actions": {
+      "preview_plan": "Preview Plan",
+      "request_approval": "Request Approval",
+      "apply_approved_plan": "Apply Approved Plan"
+    },
+    "inspector": {
+      "no_selection": "<b>(no selection)</b>"
+    },
+    "node_search": {
+      "placeholder": "Search nodes…"
+    }
+  }
+}

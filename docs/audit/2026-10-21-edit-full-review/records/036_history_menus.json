@@ -1,0 +1,841 @@
+{
+  "ok": true,
+  "result": {
+    "menus": [
+      {
+        "path": "文件 (F)/新建项目 (N)\t⌘N",
+        "enabled": true,
+        "shortcut": "Ctrl+N"
+      },
+      {
+        "path": "文件 (F)/打开项目 (O)...\t⌘O",
+        "enabled": true,
+        "shortcut": "Ctrl+O"
+      },
+      {
+        "path": "文件 (F)/打开项目管理器...\t⇧⌘P",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+P"
+      },
+      {
+        "path": "文件 (F)/最近的项目/audit-review.topos",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/打开媒体...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/保存项目 (S)\t⌘S",
+        "enabled": true,
+        "shortcut": "Ctrl+S"
+      },
+      {
+        "path": "文件 (F)/项目另存为 (A)...\t⇧⌘S",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+S"
+      },
+      {
+        "path": "文件 (F)/关闭项目 (W)\t⌘W",
+        "enabled": true,
+        "shortcut": "Ctrl+W"
+      },
+      {
+        "path": "文件 (F)/工程依赖报告...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/Import Timeline (FCPXML/OTIO)...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/Export Timeline as FCPXML...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/Export Timeline as OTIO...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/Export Subtitle Tracks...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/导出 Stem 分轨...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/导出\t⌘E",
+        "enabled": true,
+        "shortcut": "Ctrl+E"
+      },
+      {
+        "path": "文件 (F)/",
+        "enabled": false,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/Recent Files/No Recent Files",
+        "enabled": false,
+        "shortcut": ""
+      },
+      {
+        "path": "文件 (F)/退出 (X)\t⌘Q",
+        "enabled": true,
+        "shortcut": "Ctrl+Q"
+      },
+      {
+        "path": "编辑 (E)/Undo Create Nested Sequence",
+        "enabled": true,
+        "shortcut": "Ctrl+Z"
+      },
+      {
+        "path": "编辑 (E)/Redo Create Nested Sequence",
+        "enabled": false,
+        "shortcut": "Ctrl+Shift+Z"
+      },
+      {
+        "path": "编辑 (E)/重置所有调整\t⇧⌘R",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+R"
+      },
+      {
+        "path": "编辑 (E)/语言/English",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/语言/简体中文",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/语言/日本語",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/语言/한국어",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/语言/Français",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/语言/Deutsch",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/语言/Español",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/语言/Português (Brasil)",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/语言/Русский",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/语言/Italiano",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/键盘快捷键...\t⌘K",
+        "enabled": true,
+        "shortcut": "Ctrl+K"
+      },
+      {
+        "path": "编辑 (E)/首选项...\t⌘,",
+        "enabled": true,
+        "shortcut": "Ctrl+,"
+      },
+      {
+        "path": "编辑 (E)/调整图像大小...\t⇧⌘I",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+I"
+      },
+      {
+        "path": "编辑 (E)/顺时针旋转 90°\t⌘]",
+        "enabled": true,
+        "shortcut": "Ctrl+]"
+      },
+      {
+        "path": "编辑 (E)/逆时针旋转 90°\t⌘[",
+        "enabled": true,
+        "shortcut": "Ctrl+["
+      },
+      {
+        "path": "编辑 (E)/水平翻转",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/垂直翻转",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/裁切工具...\tC",
+        "enabled": true,
+        "shortcut": "C"
+      },
+      {
+        "path": "编辑 (E)/图层 (L)/新建图层\t⇧⌘N",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+N"
+      },
+      {
+        "path": "编辑 (E)/图层 (L)/删除当前图层\t⇧⌘⌦",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+Del"
+      },
+      {
+        "path": "编辑 (E)/图层 (L)/重命名图层...\tF2",
+        "enabled": true,
+        "shortcut": "F2"
+      },
+      {
+        "path": "编辑 (E)/图层 (L)/切换图层可见性\t⌘D",
+        "enabled": true,
+        "shortcut": "Ctrl+D"
+      },
+      {
+        "path": "编辑 (E)/图层 (L)/Disable All Layers\t⌥D",
+        "enabled": true,
+        "shortcut": "Alt+D"
+      },
+      {
+        "path": "编辑 (E)/图层 (L)/重置当前图层\t⇧⌘L",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+L"
+      },
+      {
+        "path": "编辑 (E)/图层 (L)/复制图层参数\t⇧⌘C",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+C"
+      },
+      {
+        "path": "编辑 (E)/图层 (L)/粘贴图层参数\t⇧⌘V",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+V"
+      },
+      {
+        "path": "编辑 (E)/图层 (L)/复制图层\t⇧D",
+        "enabled": true,
+        "shortcut": "Shift+D"
+      },
+      {
+        "path": "编辑 (E)/时间线/Cut\t⌘X",
+        "enabled": true,
+        "shortcut": "Ctrl+X"
+      },
+      {
+        "path": "编辑 (E)/时间线/Copy\t⌘C",
+        "enabled": true,
+        "shortcut": "Ctrl+C"
+      },
+      {
+        "path": "编辑 (E)/时间线/Paste\t⌘V",
+        "enabled": true,
+        "shortcut": "Ctrl+V"
+      },
+      {
+        "path": "编辑 (E)/时间线/Ripple Delete\t⌦",
+        "enabled": true,
+        "shortcut": "Del"
+      },
+      {
+        "path": "编辑 (E)/时间线/Split at Playhead\t⇧⌘X",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+X"
+      },
+      {
+        "path": "编辑 (E)/时间线/Delete\t⌫",
+        "enabled": true,
+        "shortcut": "Backspace"
+      },
+      {
+        "path": "编辑 (E)/时间线/Insert\t,",
+        "enabled": true,
+        "shortcut": ","
+      },
+      {
+        "path": "编辑 (E)/时间线/Overwrite\t.",
+        "enabled": true,
+        "shortcut": "."
+      },
+      {
+        "path": "编辑 (E)/时间线/Append\t⇧A",
+        "enabled": true,
+        "shortcut": "Shift+A"
+      },
+      {
+        "path": "编辑 (E)/时间线/Add Marker\tM",
+        "enabled": true,
+        "shortcut": "M"
+      },
+      {
+        "path": "编辑 (E)/时间线/Scene Cut Detection...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/时间线/场景检测覆盖层",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "编辑 (E)/时间线/新建占位片段...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/显示特效面板\t⌥⌘E",
+        "enabled": true,
+        "shortcut": "Ctrl+Alt+E"
+      },
+      {
+        "path": "特效 (X)/Shader Effects/假红外",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/双边皮肤平滑",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/白平衡进阶",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/哑光肤色平滑",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/角落漏光",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/光圈散焦",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/边缘描墨",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/漂白旁路",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/饱和度 / 活泼度",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/通道混合",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/线性运动模糊",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/三路色调",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/信号毛刺",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/变形镜头拉丝",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/万花筒镜像",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/径向模糊 Pro",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/色彩空间转换器",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/像素块",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/日转夜转换",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/扩展光晕",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/交叉冲洗",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/反锐化锐化",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/Warm Tint",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/网点印刷",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/镜头畸变",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/柔光泛光",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/渐变曝光滤镜",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/多形状暗角",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/CRT 扫描线",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/移轴焦点",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/高通磨皮",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/棱镜色散",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/双色调",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/胶片光晕",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/Shader Effects/胶片颗粒",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "特效 (X)/AI Effects/AI Upscale 4X",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "调色 (C)/Reset Grade",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "调色 (C)/Capture Still",
+        "enabled": true,
+        "shortcut": "Ctrl+Alt+S"
+      },
+      {
+        "path": "合成 (O)/Render Composite",
+        "enabled": true,
+        "shortcut": "Ctrl+R"
+      },
+      {
+        "path": "交付 (D)/Export Current Source",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+E"
+      },
+      {
+        "path": "交付 (D)/Export Settings...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "交付 (D)/Export Timeline",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "交付 (D)/Export Composite Graph",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "交付 (D)/导出字幕 (SRT)...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "交付 (D)/开始视频队列",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "交付 (D)/停止视频队列",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Workspace/视口",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Workspace/文件",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Workspace/画廊",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Workspace/信息",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Workspace/图层",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/色轮",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/Timeline Clips",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/曲线",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/色彩映射",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/模糊/锐化",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/胶片颗粒",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/遮罩",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/限定器",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/Tracker",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/3D LUT",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/软裁切",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/Camera Raw",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/示波器",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/特效库",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/裁切",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/降噪",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Color/去模糊",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Edit/媒体池",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Edit/Source",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Edit/Program",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Edit/时间线",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Edit/Properties",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Edit/效果",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Edit/Audio Mixer",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Edit/AI assistant",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/合成",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/节点属性",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/示波器",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/关键帧",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/曲线",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/场景大纲",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/导入报告",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/材质",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/资产依赖",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Composite/性能",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Deliver/图片导出",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Deliver/Deliver",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/面板/Advanced/Script",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/重置为默认",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/保存布局...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/删除布局...",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "窗口 (W)/最小化\t⌘M",
+        "enabled": true,
+        "shortcut": "Ctrl+M"
+      },
+      {
+        "path": "窗口 (W)/最大化\t⇧⌘M",
+        "enabled": true,
+        "shortcut": "Ctrl+Shift+M"
+      },
+      {
+        "path": "窗口 (W)/切换全屏\tF11",
+        "enabled": true,
+        "shortcut": "F11"
+      },
+      {
+        "path": "窗口 (W)/脚本 (S)/没有已注册的操作",
+        "enabled": false,
+        "shortcut": ""
+      },
+      {
+        "path": "更多 (M)/关于 Topos Color",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "视图 (V)/时间线/Zoom In",
+        "enabled": true,
+        "shortcut": "Ctrl+="
+      },
+      {
+        "path": "视图 (V)/时间线/Zoom Out",
+        "enabled": true,
+        "shortcut": "Ctrl+-"
+      },
+      {
+        "path": "视图 (V)/时间线/Fit to Window",
+        "enabled": true,
+        "shortcut": "Shift+Z"
+      },
+      {
+        "path": "视图 (V)/时间线/Playback HUD",
+        "enabled": true,
+        "shortcut": ""
+      },
+      {
+        "path": "视图 (V)/时间线/Export Performance Report",
+        "enabled": true,
+        "shortcut": ""
+      }
+    ],
+    "status_receivers": 1,
+    "playback_state_receivers": 1,
+    "undo_enabled": true,
+    "marker_count": 1,
+    "marker_panel_visible": false,
+    "linked_toggle": {
+      "before": true,
+      "after": false
+    },
+    "stale_tooltips": {
+      "marker": "显示标记 - 即将推出",
+      "linked_selection": "链接选择 - 即将推出"
+    },
+    "loop_checked": true
+  }
+}

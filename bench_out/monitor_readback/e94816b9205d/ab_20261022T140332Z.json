@@ -1,0 +1,59 @@
+{
+  "args": {
+    "width": 3840,
+    "height": 2160,
+    "frames": 200,
+    "warmup": 30,
+    "target_fps": 25.0,
+    "monitor_target": "1920x1080",
+    "out": "bench_out/monitor_readback"
+  },
+  "result": {
+    "source": "3840x2160",
+    "monitor_target": "1920x1080",
+    "blit_only": {
+      "frames": 400,
+      "p50": 0.024,
+      "p95": 0.036,
+      "max": 0.081
+    },
+    "blit_plus_monitor_chain": {
+      "frames": 400,
+      "p50": 84.918,
+      "p95": 86.855,
+      "max": 95.119
+    },
+    "monitor_delta_p50_ms": 84.894,
+    "stages": {
+      "pbo_fetch": {
+        "frames": 459,
+        "p50": 6.076,
+        "p95": 6.793,
+        "max": 18.167
+      },
+      "rgba_to_qimage": {
+        "frames": 459,
+        "p50": 52.992,
+        "p95": 53.66,
+        "max": 58.632
+      },
+      "submit_qimage_copy": {
+        "frames": 459,
+        "p50": 3.337,
+        "p95": 3.811,
+        "max": 5.445
+      },
+      "bgra_convert": {
+        "frames": 459,
+        "p50": 16.079,
+        "p95": 18.14,
+        "max": 41.308
+      },
+      "bgra_out_bytes": [
+        8294400
+      ]
+    },
+    "readback_bytes_per_frame": 33177600,
+    "budget_ms": 40.0
+  }
+}

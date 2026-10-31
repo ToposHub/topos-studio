@@ -1,0 +1,220 @@
+{
+  "env": {
+    "schema": "bench_frame_budget.env.v1",
+    "recorded_at_utc": "2026-10-22T13:14:54.151326+00:00",
+    "python": "3.12.13",
+    "numpy": "1.26.4",
+    "moderngl": "5.12.0",
+    "platform": "darwin",
+    "av": "17.0.1",
+    "ffmpeg": {
+      "libavutil": "60.8.100",
+      "libavcodec": "62.11.100",
+      "libavformat": "62.3.100",
+      "libavdevice": "62.1.100",
+      "libavfilter": "11.4.100",
+      "libswscale": "9.1.100",
+      "libswresample": "6.1.100"
+    },
+    "pyqt6": "6.10.2",
+    "qt": "6.10.0",
+    "git": {
+      "head": "dc9114e9950d5f484a595af8d0b1b3efc5a22474",
+      "branch": "perf/a-playback",
+      "dirty_files": 2
+    },
+    "bench_manifest": {
+      "manifest": "light_no_topos",
+      "reason": "build_manifest unavailable: ManifestMismatch: dylib commit e77f85158 != 工作树目标 dc9114e99——请重建 native 库后再测量（P0-04）"
+    }
+  },
+  "args": {
+    "mode": "window",
+    "material": [],
+    "media_dir": "bench_out/frame_budget/media",
+    "generate_media": "",
+    "frames": 60,
+    "warmup": 20,
+    "target_fps": 25.0,
+    "snapshot_every": 0,
+    "out": "bench_out/frame_budget",
+    "allow_dirty": false
+  },
+  "result": {
+    "material": "hevc_2560x1440_10bit.mov",
+    "mode": "window",
+    "frames_requested": 60,
+    "frames_measured": 60,
+    "warmup": 20,
+    "target_fps": 25.0,
+    "wall_s": 3.455,
+    "presented_swaps": 82,
+    "presented_fps": 23.73,
+    "present_ms_p50": 2.026,
+    "route": {
+      "path": "hevc_2560x1440_10bit.mov",
+      "zero_copy_capability": {
+        "available": true,
+        "reason": ""
+      },
+      "decode_route": "macos_vt_planar",
+      "vt_fallback_reason": "",
+      "gl": {
+        "GL_RENDERER": "AMD Radeon RX 6900 XT OpenGL Engine",
+        "GL_VERSION": "4.1 ATI-6.1.13"
+      },
+      "eof_wraps": 1
+    },
+    "r16ui": {
+      "r16ui_self_test_passed": true,
+      "r16ui_disabled_reason": ""
+    },
+    "telemetry_summary": {
+      "frames": 60,
+      "window": 60,
+      "total_ms_mean": 18.564,
+      "total_ms_p50": 14.747,
+      "total_ms_p95": 34.109,
+      "total_ms_max": 254.638,
+      "decode_ms_mean": 17.219,
+      "decode_ms_p50": 13.407,
+      "decode_ms_p95": 32.741,
+      "composite_ms_mean": 0.0,
+      "composite_ms_p50": 0.0,
+      "composite_ms_p95": 0.0,
+      "upload_ms_mean": 1.346,
+      "upload_ms_p50": 1.338,
+      "upload_ms_p95": 1.45,
+      "present_ms_mean": 2.129,
+      "present_ms_p50": 2.092,
+      "present_ms_p95": 2.714,
+      "effective_fps": 53.87,
+      "master_requests": 0,
+      "realtime_master_requests": 0,
+      "cpu_qimage_frames": 0,
+      "wrong_source_frame": 0,
+      "stale_generation": 0,
+      "ring_hit_rate": 0.0,
+      "gpu_composite_frames": 0,
+      "miss_count": 0,
+      "source_kinds": {},
+      "session_total_frames": 60,
+      "wall_elapsed_s": 2.576,
+      "coverage": {
+        "decode": {
+          "samples": 60,
+          "coverage": 1.0
+        },
+        "import_upload": {
+          "samples": 60,
+          "coverage": 1.0
+        },
+        "composite": {
+          "samples": 0,
+          "coverage": 0.0
+        },
+        "present": {
+          "samples": 60,
+          "coverage": 1.0
+        },
+        "total": {
+          "samples": 60,
+          "coverage": 1.0
+        }
+      },
+      "enrich_misses": 20,
+      "present_outcome_counts": {}
+    },
+    "trace_summary": {
+      "page": "bench_frame_budget/window",
+      "total_frames": 80,
+      "gpu_frames": 0,
+      "cpu_fallback_frames": 80,
+      "cpu_to_ndarray_frames": 0,
+      "qimage_upload_frames": 0,
+      "sync_seek_frames": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "fallback_frames": 80,
+      "fallback_reasons": {},
+      "decode_path_counts": {},
+      "render_path_counts": {
+        "gpu_planar_upload": 80
+      },
+      "decode_avg_ms": 0.0,
+      "render_avg_ms": 0.0,
+      "total_avg_ms": 0.0,
+      "ui_thread_sync_decode_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "decode_saturation": {
+        "budget_ms": 33.3,
+        "buckets": {}
+      },
+      "transition_frames": {
+        "transition": {
+          "frames": 0
+        },
+        "non_transition": {
+          "frames": 80
+        }
+      },
+      "gpu_time": {
+        "measured_frames": 78,
+        "unavailable_frames": 2,
+        "gpu_submit_ms_p50": 0.067,
+        "gpu_submit_ms_p95": 0.086,
+        "gpu_submit_ms_max": 0.118
+      },
+      "pixel_copy_bytes": {
+        "cpu_upload": 663552000,
+        "cpu_download": 0,
+        "surface_map": 0,
+        "texture_write": 663552000,
+        "cross_device": 0
+      },
+      "deadline": {
+        "frames_with_deadline": 0,
+        "miss_frames": 0,
+        "miss_by_segment": {}
+      },
+      "present_status_counts": {
+        "displayed": 80
+      },
+      "readback_kind_counts": {},
+      "annotate": {
+        "merged": 298,
+        "missed": 0
+      },
+      "import_upload_coverage": {
+        "measured_frames": 60,
+        "not_applicable_frames": 0,
+        "unavailable_frames": 0,
+        "unset_frames": 20
+      }
+    },
+    "pixel_copies": {
+      "cpu_upload": {
+        "bytes": 884736000,
+        "events": 80
+      },
+      "cpu_download": {
+        "bytes": 0,
+        "events": 0
+      },
+      "surface_map": {
+        "bytes": 0,
+        "events": 0
+      },
+      "texture_write": {
+        "bytes": 884736000,
+        "events": 80
+      },
+      "cross_device": {
+        "bytes": 0,
+        "events": 0
+      }
+    },
+    "errors": [],
+    "ok": true
+  }
+}

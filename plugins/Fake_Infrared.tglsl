@@ -1,0 +1,155 @@
+// --- Topos Plugin Metadata ---
+// @name Fake Infrared
+// @i18n_name Fake_Infrared
+// @author Topos Team
+// @version 1.0
+// @description False-color infrared look: luminous red foliage, sunken skies, dreamy inverse-luma glow
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param select channel_map "Channel Map" 0 "Classic" "Amber" "Sky Swap"
+// @param slider glow "Glow Strength" 0.45 0.0 1.0
+// @param slider contrast "Contrast" 0.35 0.0 1.0
+// -----------------------------
+//
+// Fake Infrared - plan03 plugin library.
+//
+// Process contract: vec3 process(vec3 color, vec2 uv). `color` is the pixel
+// AFTER upstream grading, scene-linear, and may be < 0.0 or >> 1.0 (HDR).
+// The params declared in the metadata header are injected as uniforms under
+// their bare names (the shader compiler rewrites them per layer); the select
+// param arrives as an int index into its option table. Hard rule (P0-COL-01):
+// never reference an undeclared engine uniform here - a stray one fails GL
+// compilation and the render loop silently skips the whole layer. This is a
+// pure point operation: zero texture reads, zero loops, so none of the
+// engine-provided uniforms are used and the effect is trivially
+// deterministic (and per-mode LUT-able on export).
+//
+// Algorithm (false-color IR approximation, HDR-safe, signal never clamped):
+//   1. luma = Rec.709 dot(color). Never clamped: sub-black stays negative,
+//      HDR keeps growing.
+//   2. veg = max(G - max(R, B), 0): green-dominance cue, the vegetation
+//      heuristic. Mask domain, so the 0 floor is a legitimate guard.
+//   3. sky = max(B - G, 0): blue-over-green cue, the sky heuristic.
+//   4. ir = luma + veg * 1.6 - min(sky, max(luma, 0)) * 1.2: the synthesized
+//      IR record. Green-dominant foliage reads IR-bright, blue sky reads
+//      IR-dark. The sky cut is capped by the pixel luma, so `ir` can never
+//      dip below -0.2 * luma: bounded out-of-gamut dip (deep cinematic
+//      skies), no fold-back, no explosion on HDR input.
+//   5. remap = one of three channel mappings (select index):
+//        Classic  -> (ir, R, G): false-color record shift, foliage turns
+//                    red/magenta, skies teal-dark.
+//        Amber    -> (ir, mix(R, ir, 0.5), G): warmer orange-red foliage.
+//        Sky Swap -> (B, G, ir): R<->B exchange class mapping - blue sky
+//                    lands in R (fiery skies), IR record lands in B
+//                    (steel-blue foliage).
+//      All three mappings are neutral-grey preserving: (v,v,v) -> (v,v,v).
+//   6. contrast = per-channel pivot S-curve around 18% grey. signedPow
+//      keeps negative channels negative and HDR channels growing (in
+//      log-exposure terms this rotates the response into an S; same
+//      construction as the other color-look plugins in this library).
+//   7. glow = vegetation/dark-region heuristic veil with inverse-luma
+//      weighting: weight = dark_w * mix(0.4, 1.0, veg_w) where
+//      dark_w = 1 / (1 + max(luma, 0) * 6) (full at black, ~0.48 at 18%
+//      grey, -> 0 in HDR) and veg_w saturates the vegetation cue. Adds the
+//      bounded (<= 0.3 * glow) IR-red halation tint AFTER the S-curve so
+//      the two controls stay independent. NOTE this is a veiling glare:
+//      by design it lifts near-black pixels, so the deep-shadow response
+//      is softly non-monotone below ~0.001 scene-linear (bounded, invisible
+//      on any real display, intentional - it is the dreamy IR signature).
+//
+// There is no global strength param (the plan fixes exactly three params);
+// the channel remap IS the effect, so the early exit takes the form of a
+// fast path that skips the glow and S-curve math when both are neutral,
+// plus per-stage branch guards (bilateral_skin_smooth convention).
+
+// ====== SECTION 1: CONSTANTS ======
+// Rec.709 scene-linear luma weights (matches the engine luma convention).
+const vec3 LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+// S-curve anchor: 18% grey in scene-linear. Anchoring the pivot contrast
+// here leaves mid-grey exposure untouched and pushes everything else away.
+const float PIVOT = 0.18;
+// Pivot-contrast slope ceiling (contrast = 1.0), same ceiling as the other
+// color-look plugins: shadows crush, highlights expand, stays controllable.
+const float SLOPE_MAX = 2.0;
+// IR-record synthesis: how strongly the vegetation cue lifts the IR record.
+const float VEG_BOOST = 1.6;
+// IR-record synthesis: how strongly the luma-capped sky cue sinks it.
+const float SKY_CUT = 1.2;
+// Glow falloff: dark_w = 1 / (1 + luma * 6) - full weight at black,
+// ~0.48 at 18% grey, -> 0 for HDR highlights (denominator >= 1.0, safe).
+const float GLOW_FALLOFF = 6.0;
+// Veiling-glare ceiling in scene-linear units (glow = 1.0, weight = 1.0).
+// Bounded add on the signal path: monotone-friendly, no clamp needed.
+const float GLOW_MAX = 0.3;
+// IR halation tint: red-dominant pink veil (scene-linear, additive).
+const vec3 GLOW_TINT = vec3(1.0, 0.42, 0.52);
+
+// ====== SECTION 2: HELPERS ======
+// HDR-safe signed power: pivot contrast extended to negative (out-of-gamut)
+// and > 1.0 (HDR) values. pow() is undefined for x < 0 in GLSL, hence the
+// sign/abs split; the 1e-6 floor guards the pow domain against NaN when the
+// channel is exactly 0 (sign(0) = 0 kills the payload anyway).
+float signedPow(float x, float e) {
+    return sign(x) * pow(max(abs(x), 1e-6), e);
+}
+
+// False-color channel remap: early-return if chain per select index (the
+// project dispatch convention; one mapping per branch). Unknown indices
+// fall back to Classic, which is also the declared default.
+// Neutral-grey preserving in all three modes: grey (v,v,v) -> (v,v,v),
+// because ir(v,v,v) = v (veg = sky = 0).
+vec3 remapChannels(int mode, vec3 c, float ir) {
+    if (mode == 0) return vec3(ir, c.r, c.g);               // Classic
+    if (mode == 1) return vec3(ir, mix(c.r, ir, 0.5), c.g); // Amber
+    if (mode == 2) return vec3(c.b, c.g, ir);               // Sky Swap
+    return vec3(ir, c.r, c.g);
+}
+
+// ====== SECTION 3: MAIN ======
+vec3 process(vec3 color, vec2 uv) {
+    // --- 1. Heuristics on the graded pixel (scene-linear, no clamps) ---
+    float lum = dot(color, LUMA_W);
+    float veg = max(color.g - max(color.r, color.b), 0.0);  // mask domain
+    float sky = max(color.b - color.g, 0.0);                // mask domain
+    float ir = lum + veg * VEG_BOOST - min(sky, max(lum, 0.0)) * SKY_CUT;
+
+    // --- 2. False-color remap: always on, it is the effect itself ---
+    vec3 remapped = remapChannels(channel_map, color, ir);
+
+    // Fast path: both modifiers neutral -> pure channel remap, done.
+    if (glow < 0.001 && contrast < 0.001) return remapped;
+
+    // --- 3. Contrast: per-channel pivot S-curve around 18% grey ---
+    // Per-channel (not luma-ratio) on purpose: false-color output lives
+    // from its channel separation, and the mild saturation growth of a
+    // per-channel power is part of the IR look. Negative channels stay
+    // negative, HDR channels keep growing - no clamp anywhere.
+    vec3 result = remapped;
+    if (contrast > 0.001) {
+        float slope = mix(1.0, SLOPE_MAX, contrast);
+        result = PIVOT * vec3(signedPow(result.r / PIVOT, slope),
+                              signedPow(result.g / PIVOT, slope),
+                              signedPow(result.b / PIVOT, slope));
+    }
+
+    // --- 4. Glow: inverse-luma weighted vegetation/dark-region veil ---
+    // Applied after the S-curve so glow and contrast stay independent.
+    // dark_w: luma-inverse weight (the plan requirement) - strongest in
+    // the dark regions where the IR dreaminess lives. veg_w denominator
+    // has a 0.04 floor, so the divide is guarded by construction.
+    if (glow > 0.001) {
+        float dark_w = 1.0 / (1.0 + max(lum, 0.0) * GLOW_FALLOFF);
+        float veg_w = veg / (veg + 0.04);
+        float weight = dark_w * mix(0.4, 1.0, veg_w);
+        result += GLOW_TINT * (glow * GLOW_MAX * weight);
+    }
+    return result;
+}

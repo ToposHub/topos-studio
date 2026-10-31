@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_timeline_thumbnail_recovery.py ...                       [100%]
+
+============================== 3 passed in 5.80s ===============================

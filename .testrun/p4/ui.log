@@ -1,0 +1,200 @@
+============================= test session starts ==============================
+collected 2103 items
+
+tests/ui/test_ai_assistant_composer.py ................................. [  1%]
+...                                                                      [  1%]
+tests/ui/test_ai_assistant_panel_p0_integration.py ..................... [  2%]
+........                                                                 [  3%]
+tests/ui/test_ai_edit_assistant_dock.py ...........................      [  4%]
+tests/ui/test_ai_edit_assistant_m5_ui.py ........................        [  5%]
+tests/ui/test_ai_help_answer.py ........                                 [  5%]
+tests/ui/test_ai_job_decision_prefs.py ......................            [  6%]
+tests/ui/test_ai_result_card.py ..................                       [  7%]
+tests/ui/test_ai_skill_card.py ...................                       [  8%]
+tests/ui/test_ai_subpanels.py ............                               [  9%]
+tests/ui/test_ai_timeline_diff.py ........                               [  9%]
+tests/ui/test_ai_workflow_dialog_trigger.py .............                [ 10%]
+tests/ui/test_ai_workflow_dock_wiring.py .....                           [ 10%]
+tests/ui/test_ai_workflow_module.py ........                             [ 10%]
+tests/ui/test_align.py .............                                     [ 11%]
+tests/ui/test_animation_inspector_summary.py ..                          [ 11%]
+tests/ui/test_column_grid_panels.py ......                               [ 11%]
+tests/ui/test_composite_dock_floating_titlebar.py .......                [ 12%]
+tests/ui/test_composite_keyframe_preview_seek.py .......                 [ 12%]
+tests/ui/test_composite_keyframes_dock.py ..................             [ 13%]
+tests/ui/test_composite_keyframes_interaction.py .......                 [ 13%]
+tests/ui/test_composite_keyframes_panel.py ......                        [ 14%]
+tests/ui/test_composite_keyframes_polish.py .........                    [ 14%]
+tests/ui/test_composite_keyframes_undo.py ......                         [ 14%]
+tests/ui/test_composite_page_selection_attach.py ....                    [ 14%]
+tests/ui/test_developer_mode_prefs.py ...                                [ 15%]
+tests/ui/test_devtools_ownership_contract.py ..                          [ 15%]
+tests/ui/test_dock_context_menu.py .                                     [ 15%]
+tests/ui/test_editor_autokey.py .....                                    [ 15%]
+tests/ui/test_editor_html_preview.py .................                   [ 16%]
+tests/ui/test_editor_html_templates.py .........                         [ 16%]
+tests/ui/test_editor_multiselect.py ................                     [ 17%]
+tests/ui/test_ef03_aud_part1.py .....FF................................. [ 19%]
+...........                                                              [ 19%]
+tests/ui/test_ef03_aud_part2.py ........................................ [ 21%]
+..........................F...                                           [ 23%]
+tests/ui/test_factory_default_layout.py .....                            [ 23%]
+tests/ui/test_graph_bugfix_data_safety.py .........                      [ 23%]
+tests/ui/test_graph_bugfix_interaction.py ..........                     [ 24%]
+tests/ui/test_graph_bugfix_polish.py .......                             [ 24%]
+tests/ui/test_graph_cross_platform.py ............                       [ 25%]
+tests/ui/test_graph_editor_interaction.py .......                        [ 25%]
+tests/ui/test_graph_editor_layout.py ..............                      [ 26%]
+tests/ui/test_graph_editor_view.py ..................................... [ 28%]
+......................                                                   [ 29%]
+tests/ui/test_graph_expression_editor.py .......................         [ 30%]
+tests/ui/test_graph_markers_workarea.py ....................             [ 31%]
+tests/ui/test_graph_separate_expression_view.py ..........               [ 31%]
+tests/ui/test_graph_speed_and_transform_box.py .......................   [ 32%]
+tests/ui/test_graph_undo_transaction.py ........                         [ 33%]
+tests/ui/test_host_help_sources.py ...................                   [ 33%]
+tests/ui/test_html_inspector.py ........                                 [ 34%]
+tests/ui/test_keyframes_alt_drag_copy.py ........                        [ 34%]
+tests/ui/test_keyframes_button_and_playrange_sync.py ................... [ 35%]
+.......                                                                  [ 35%]
+tests/ui/test_keyframes_graph_mode.py .................................. [ 37%]
+............                                                             [ 38%]
+tests/ui/test_keyframes_panel_ae_nav.py ...........                      [ 38%]
+tests/ui/test_keyframes_panel_ae_style.py ..........................     [ 39%]
+tests/ui/test_keyframes_panel_animation_e2e.py ..........                [ 40%]
+tests/ui/test_keyframes_panel_layout_t36.py ......................       [ 41%]
+tests/ui/test_keyframes_panel_multiselect.py ..................          [ 42%]
+tests/ui/test_keyframes_panel_shared_selection.py .............          [ 42%]
+tests/ui/test_keyframes_panel_toolbar.py .................               [ 43%]
+tests/ui/test_keyframes_panel_transport_linkage.py ..........            [ 44%]
+tests/ui/test_keyframes_playhead_throttle.py .......                     [ 44%]
+tests/ui/test_keyframes_scroll_zoom.py ....                              [ 44%]
+tests/ui/test_keyframes_snap.py ............                             [ 45%]
+tests/ui/test_keyframes_spline_selection_sync.py .............           [ 45%]
+tests/ui/test_keyframes_tree_columns.py ........................         [ 47%]
+tests/ui/test_keyframes_tree_expression_status.py .............          [ 47%]
+tests/ui/test_layer_tree_model.py ..................                     [ 48%]
+tests/ui/test_localization_accessibility.py ............................ [ 49%]
+........................................................................ [ 53%]
+.......................................................                  [ 55%]
+tests/ui/test_m12_relink_auto_search.py ..                               [ 55%]
+tests/ui/test_mg_asset_library.py ............................           [ 57%]
+tests/ui/test_mg_keyframes_integration.py ......                         [ 57%]
+tests/ui/test_mg_keyframes_panel.py .................................... [ 59%]
+..                                                                       [ 59%]
+tests/ui/test_mg_package_catalog.py .......                              [ 59%]
+tests/ui/test_mg_preset_project_root.py .....                            [ 59%]
+tests/ui/test_mg_scene_pages_ui.py ................                      [ 60%]
+tests/ui/test_mg_shortcut_customization.py ......                        [ 61%]
+tests/ui/test_mg_user_journey_regressions.py ...........                 [ 61%]
+tests/ui/test_motion_graphic_manual_controls.py ........................ [ 62%]
+................                                                         [ 63%]
+tests/ui/test_p0_wiring_footer_drawer.py .............                   [ 64%]
+tests/ui/test_p0_wiring_jobs.py .....                                    [ 64%]
+tests/ui/test_p0_wiring_runtime.py .......                               [ 64%]
+tests/ui/test_p10_1_acceptance.py ..........                             [ 65%]
+tests/ui/test_p10_2_acceptance.py .........                              [ 65%]
+tests/ui/test_p1_acceptance.py .........                                 [ 65%]
+tests/ui/test_p1_chat_free_conversation.py ...............               [ 66%]
+tests/ui/test_p1_controller_deps.py ....                                 [ 66%]
+tests/ui/test_p1_help_wiring_acceptance.py .........                     [ 67%]
+tests/ui/test_p1_last_mile_acceptance.py .......                         [ 67%]
+tests/ui/test_p1_media_pool_selection.py ....FF...                       [ 68%]
+tests/ui/test_p1_panel_entries.py ...........                            [ 68%]
+tests/ui/test_p1_plan_cancel.py ....                                     [ 68%]
+tests/ui/test_p1_result_action_acceptance.py .......                     [ 69%]
+tests/ui/test_p1_result_action_adjust_params.py ...........              [ 69%]
+tests/ui/test_p1_result_action_dispatch.py ..........                    [ 70%]
+tests/ui/test_p1_result_card_acceptance.py .......                       [ 70%]
+tests/ui/test_p1_result_card_wiring.py .........                         [ 70%]
+tests/ui/test_p1_router_dispatch.py ...............                      [ 71%]
+tests/ui/test_p7_plugin_status_panel.py .                                [ 71%]
+tests/ui/test_p8_acceptance.py ............                              [ 72%]
+tests/ui/test_p9_acceptance.py .............                             [ 72%]
+tests/ui/test_panel_dividers.py ....s                                    [ 73%]
+tests/ui/test_panel_dock_integrity.py ............................       [ 74%]
+tests/ui/test_playback_hud.py ............................               [ 75%]
+tests/ui/test_realtime_fps_indicator.py .......                          [ 76%]
+tests/ui/test_scene_constraints_ui.py ............                       [ 76%]
+tests/ui/test_scene_view_raster.py .....                                 [ 76%]
+tests/ui/test_spline_axis_modes.py ..........                            [ 77%]
+tests/ui/test_spline_extrapolation.py .........                          [ 77%]
+tests/ui/test_spline_graph_redirect.py ........                          [ 78%]
+tests/ui/test_spline_multi_select.py .....                               [ 78%]
+tests/ui/test_spline_panel.py ..........                                 [ 78%]
+tests/ui/test_spline_snap.py .......                                     [ 79%]
+tests/ui/test_spline_tangent_input.py ........                           [ 79%]
+tests/ui/test_spline_tree_interaction.py .....                           [ 79%]
+tests/ui/test_spline_view_hit_test.py ..........                         [ 80%]
+tests/ui/test_spline_view_menu_hotkeys.py ...........                    [ 80%]
+tests/ui/test_spline_view_render.py ......                               [ 81%]
+tests/ui/test_spline_view_zoom_pan.py .......                            [ 81%]
+tests/ui/test_teaching_animation_phase3.py .......                       [ 81%]
+tests/ui/test_timeline_expression_editor.py ..........................   [ 82%]
+tests/ui/test_timeline_graphics_backend_prefs.py ..                      [ 83%]
+tests/ui/test_timeline_icons.py ........................................ [ 84%]
+........................                                                 [ 86%]
+tests/ui/test_timeline_time_display.py ................................. [ 87%]
+...........                                                              [ 88%]
+tests/ui/test_undo_stack.py ..............                               [ 88%]
+tests/ui/test_upgrade_menu_wiring.py ...                                 [ 89%]
+tests/ui/test_upgrade_panel_actions.py ....                              [ 89%]
+tests/ui/test_upgrade_panel_host.py ..........                           [ 89%]
+tests/ui/test_viewer_selection_system.py .......................         [ 90%]
+tests/ui/test_viewer_tool_system.py .................................... [ 92%]
+.......                                                                  [ 92%]
+tests/ui/test_workflow_canvas_adapter.py ...................             [ 93%]
+tests/ui/test_workflow_canvas_view.py ..........................         [ 94%]
+tests/ui/test_workflow_connection_item.py ..........                     [ 95%]
+tests/ui/test_workflow_gallery_form_entry.py ...............             [ 96%]
+tests/ui/test_workflow_inspector.py ..............                       [ 96%]
+tests/ui/test_workflow_node_item.py ................                     [ 97%]
+tests/ui/test_workflow_node_search.py ........                           [ 97%]
+tests/ui/test_workflow_panel.py ................................         [ 99%]
+tests/ui/test_workflow_run_controller.py ...........                     [100%]
+
+=================================== FAILURES ===================================
+_________ TestAud19412DecisionButtonGating.test_buttons_gated_by_state _________
+tests/ui/test_ef03_aud_part1.py:203: in test_buttons_gated_by_state
+    assert btns[lock_txt].isEnabled() is False
+           ^^^^^^^^^^^^^^
+E   KeyError: '锁定'
+____ TestAud19412DecisionButtonGating.test_reverted_buttons_always_enabled _____
+tests/ui/test_ef03_aud_part1.py:232: in test_reverted_buttons_always_enabled
+    assert btns["锁定"].isEnabled() is False, (
+           ^^^^^^^^^^
+E   KeyError: '锁定'
+_____ TestAud21410LayoutHotPath.test_scroll_ticks_coalesce_into_one_layout _____
+tests/ui/test_ef03_aud_part2.py:1313: in test_scroll_ticks_coalesce_into_one_layout
+    assert layout_calls["n"] == 1
+E   assert 0 == 1
+_____ test_media_pool_context_menu_scopes_tree_selection_to_clicked_asset ______
+tests/ui/test_p1_media_pool_selection.py:98: in test_media_pool_context_menu_scopes_tree_selection_to_clicked_asset
+    assert panel.tree.selectedItems() == [second]
+E   assert [<PyQt6.QtWid... 0x3440d1450>] == [<PyQt6.QtWid... 0x3440d1450>]
+E     
+E     At index 0 diff: <PyQt6.QtWidgets.QTreeWidgetItem object at 0x3440d1c70> != <PyQt6.QtWidgets.QTreeWidgetItem object at 0x3440d1450>
+E     Left contains one more item: <PyQt6.QtWidgets.QTreeWidgetItem object at 0x3440d1450>
+E     Use -v to get more diff
+____ test_media_pool_context_menu_scopes_grid_selection_to_clicked_subclip _____
+tests/ui/test_p1_media_pool_selection.py:142: in test_media_pool_context_menu_scopes_grid_selection_to_clicked_subclip
+    assert selected_indexes == [second_index]
+E   assert [<PyQt6.QtCor... 0x3498f7350>] == [<PyQt6.QtCor... 0x3498f70d0>]
+E     
+E     At index 0 diff: <PyQt6.QtCore.QModelIndex object at 0x3498f7cd0> != <PyQt6.QtCore.QModelIndex object at 0x3498f70d0>
+E     Left contains one more item: <PyQt6.QtCore.QModelIndex object at 0x3498f7350>
+E     Use -v to get more diff
+=============================== warnings summary ===============================
+tests/ui/test_ai_job_decision_prefs.py::test_preferences_page_add_profile
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/gi/overrides/__init__.py:159: PyGIDeprecationWarning: GLib.unix_signal_add_full is deprecated; use GLibUnix.signal_add_full instead
+    value = getattr(proxy, attr)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/ui.xml -
+=========================== short test summary info ============================
+FAILED tests/ui/test_ef03_aud_part1.py::TestAud19412DecisionButtonGating::test_buttons_gated_by_state
+FAILED tests/ui/test_ef03_aud_part1.py::TestAud19412DecisionButtonGating::test_reverted_buttons_always_enabled
+FAILED tests/ui/test_ef03_aud_part2.py::TestAud21410LayoutHotPath::test_scroll_ticks_coalesce_into_one_layout
+FAILED tests/ui/test_p1_media_pool_selection.py::test_media_pool_context_menu_scopes_tree_selection_to_clicked_asset
+FAILED tests/ui/test_p1_media_pool_selection.py::test_media_pool_context_menu_scopes_grid_selection_to_clicked_subclip
+======= 5 failed, 2097 passed, 1 skipped, 1 warning in 105.97s (0:01:45) =======

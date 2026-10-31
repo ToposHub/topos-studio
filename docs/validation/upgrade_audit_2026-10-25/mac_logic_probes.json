@@ -1,0 +1,75 @@
+{
+  "schema": "topos.upgrade_audit.mac_logic_probes.v1",
+  "scope": "helper probes; no GUI/GPU or platform acceptance",
+  "probes": {
+    "snapshot_scheduler_discards_result": {
+      "issue_present": true,
+      "reported_success": true,
+      "reported_backup_count": 1,
+      "persisted_snapshot_names": [],
+      "result_exported_by_tick": false
+    },
+    "shot_measure_reuses_current_cache": {
+      "issue_present": true,
+      "requested_clips": [
+        "a",
+        "b"
+      ],
+      "representative_frames": {
+        "a": 12,
+        "b": 40
+      },
+      "different_clips_return_same_cached_pixels": true,
+      "returned_current_cache_object": true
+    },
+    "layer_advanced_chain_unmarked": {
+      "issue_present": true,
+      "extra_params": [
+        {
+          "lift": [
+            0,
+            0,
+            0
+          ],
+          "gamma": [
+            0,
+            0,
+            0
+          ],
+          "gain": [
+            0,
+            0,
+            0
+          ],
+          "exposure": 0,
+          "temp": 0,
+          "tint": 0,
+          "contrast": 0,
+          "shadow": 0,
+          "highlights": 0,
+          "saturation": 0,
+          "vibrance": 0,
+          "mid_detail": 0,
+          "sharpness": 0,
+          "hue_shift": 0,
+          "lift_saturation": 0,
+          "gamma_saturation": 0,
+          "gain_saturation": 0,
+          "_chain_segment": "trim"
+        }
+      ],
+      "advanced_marked": false,
+      "extras_active": false
+    },
+    "snapshot_retained_source_not_archived": {
+      "issue_present": true,
+      "snapshot_names": [
+        "retained"
+      ],
+      "skipped_asset_ids": [
+        "a"
+      ],
+      "copied_asset_ids": []
+    }
+  }
+}

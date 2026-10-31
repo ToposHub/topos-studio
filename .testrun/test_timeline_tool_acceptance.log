@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 18 items
+
+tests/edit/test_timeline_tool_acceptance.py ..................           [100%]
+
+============================== 18 passed in 4.65s ==============================

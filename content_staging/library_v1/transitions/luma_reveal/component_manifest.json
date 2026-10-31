@@ -1,0 +1,176 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "X05",
+  "dedup": "内容驱动 mask（现有 33 转场 mask 全几何；L00 台账 X05 行，transition_mask.py 全文）",
+  "host_min_contract": "L03 mask 子门+内容源接缝（需把源图像亮度接进 mask 源）；注册 id lib1_luma_reveal",
+  "image": {
+    "alpha": "premultiplied",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "transition",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": "A",
+      "maximum": null,
+      "minimum": null,
+      "name": "source",
+      "neutral": false,
+      "options": [
+        "A",
+        "B"
+      ],
+      "ptype": "option",
+      "unit": "",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "threshold",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "luma",
+      "validation": "亮度偏置参考（0.5=不偏置）；NaN 拒绝"
+    },
+    {
+      "animatable": false,
+      "default": 0.2,
+      "maximum": 0.5,
+      "minimum": 0.01,
+      "name": "span",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "luma",
+      "validation": "软阈宽；NaN 拒绝"
+    },
+    {
+      "animatable": false,
+      "default": false,
+      "maximum": null,
+      "minimum": null,
+      "name": "invert",
+      "neutral": false,
+      "options": [],
+      "ptype": "bool",
+      "unit": "",
+      "validation": ""
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "缺省回退线性 dissolve（README 声明）",
+      "name": "a",
+      "required": true,
+      "role": "outgoing-source"
+    },
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "缺省回退线性 dissolve（README 声明）",
+      "name": "b",
+      "required": true,
+      "role": "incoming-source"
+    },
+    {
+      "data_type": "image",
+      "direction": "output",
+      "missing_behavior": "",
+      "name": "mask",
+      "required": true,
+      "role": "transition-mask"
+    }
+  ],
+  "resources": [],
+  "slug": "luma_reveal",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_x05_luma_reveal.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "/Users/testuser/Documents/vscode/topos_1/content_staging/library_v1/transitions/luma_reveal/hand_vectors.json",
+    "known_limits": "CPU 核+手算向量已验；GPU spec/GLSL/MSL 三端与真实命令/预览/导出链未验（L03 接缝）；图像缺省回退线性 dissolve；HDR>1 折叠到 1（端点仍精确）",
+    "oracle": "/Users/testuser/Documents/vscode/topos_1/content_staging/library_v1/transitions/luma_reveal/luma_reveal_core.py"
+  },
+  "version": "0.1.0"
+}

@@ -1,0 +1,23 @@
+{
+  "recipe_id": "P29",
+  "name": "四色渐变",
+  "component": "F16 gradient_map（plugin:LIB1_Gradient_Map / node lib1_gradient_map）",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "strength_hint": "适合中低反差风光/夜景；amount 0.6-1.0，高反差素材降到 0.5 以下",
+  "params": {
+    "stop_0": [0.02, 0.02, 0.05],
+    "stop_1": [0.10, 0.20, 0.45],
+    "stop_2": [0.90, 0.55, 0.25],
+    "stop_3": [1.00, 0.98, 0.90],
+    "pos_1": 0.33,
+    "pos_2": 0.66,
+    "interp_mode": "Linear",
+    "amount": 0.85
+  },
+  "dependencies": {
+    "plugin_id": "LIB1_Gradient_Map",
+    "min_plugin_version": "0.1.0"
+  },
+  "notes": "L05 首个滤镜类真预设：源 manifest 不冒充宿主格式；转换为 Edit 效果参数 / Color 层插件实例两类载荷（convert.py）。"
+}

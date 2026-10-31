@@ -1,0 +1,28 @@
+{
+  "schema": "topos-image-video-optimization-status/1",
+  "date": "2026-09-08",
+  "plan": "docs/topos_image_optimization_implementation_plan.md",
+  "branch": "fix-ui",
+  "stages": {
+    "O0": {"status": "done", "evidence": ["scripts/bench_topos_image.py", "docs/image/benchmark_schema.json", "tests/fixtures/topos_image/"]},
+    "O1": {"status": "done", "evidence": ["src/shared/media/color_decode.py", "docs/image/ADR-I014-color-semantics.md", "docs/image/reports/color_reference_o1.json"]},
+    "O2": {"status": "done", "evidence": ["docs/image/ADR-I015-quality-profiles.md", "scripts/validate_topos_image_profiles.py"]},
+    "O3": {"status": "done-with-target-size-boundary", "evidence": ["native/topos_codec/include/topos_codec.h", "native/topos_codec/src/codec/codec.c", "native/topos_codec/src/codec/color_store.h", "native/topos_codec/src/image/image_reader.c", "native/topos_codec/tests/unit/test_transform.c", "docs/image/ADR-I016-preview-decode.md", "docs/image/reports/target_decode_o3.json"], "deferred": ["entropy parsing still reads every slice; V3/V6 prediction still reconstructs source blocks; 8K/12K profile-specific benchmark and SIMD sampled kernel"]},
+    "O4": {"status": "done-with-boundary", "evidence": ["docs/image/ADR-I017-codec-throughput.md", "scripts/bench_topos_image.py"], "deferred": ["new SIMD implementation; existing native SIMD/slice/pool path is benchmarked"]},
+    "O5": {"status": "deferred-by-gate", "evidence": ["docs/image/ADR-I018-roi-tile-decision.md"], "deferred": ["TILE/TDIR waits for real ROI request distribution and RSS evidence"]},
+    "O6": {"status": "done", "evidence": ["src/shared/media/topos_image_sequence.py", "src/shared/media/factory.py", "src/shared/media/decode_queue.py", "tests/media/test_topos_image_sequence.py", "docs/image/ADR-I019-sequence-stability.md"]},
+    "O7": {"status": "done-with-platform-boundary", "evidence": ["scripts/topos_abi_smoke.py", "docs/image/SDK.md"]},
+    "O8": {"status": "bridge-delivered", "evidence": ["scripts/topos_ffmpeg_bridge.py", "tests/media/test_topos_ffmpeg_bridge.py", "plugins/oiio_topos/", "docs/image/ADR-I020-external-ecosystem.md"], "deferred": ["native FFmpeg demuxer/encoder and real OIIO SDK/NLE host round-trips"]},
+    "O9": {"status": "done-with-ci-boundary", "evidence": [".github/workflows/codec-matrix.yml", ".github/workflows/codec-release.yml", "native/topos_codec/scripts/package_codec.py", "native/topos_codec/scripts/check_exports.py", "scripts/topos_abi_smoke.py", "docs/image/ADR-I021-release-distribution.md"], "deferred": ["real runner green records, universal/Windows/Linux signing and notarization evidence"]},
+    "V0": {"status": "done", "evidence": ["docs/video/V0_baseline.md", "docs/video/benchmark_schema.json"]},
+    "V1": {"status": "done", "evidence": ["docs/video/V1_shared_semantics.md", "src/shared/media/topos_source.py"]},
+    "V2": {"status": "experimental-done", "evidence": ["docs/video/V2_V4_intra_experiments.md", "native/topos_codec/src/codec/intra.c"]},
+    "V3": {"status": "deferred", "evidence": ["docs/video/V3_V5_inter_deferred.md"], "deferred": ["I/P, DPB, motion compensation and GOP require a separate product line"]},
+    "V4": {"status": "experimental-done", "evidence": ["docs/video/V2_V4_intra_experiments.md", "native/topos_codec/src/entropy/range.c"]},
+    "V5": {"status": "deferred", "evidence": ["docs/video/V3_V5_inter_deferred.md"], "deferred": ["GOP/VBV/AQ/RDO requires V3 reference-frame semantics"]},
+    "V6": {"status": "done-intra", "evidence": ["docs/video/V6_V7_intra_release.md", "src/shared/media/topos_source.py"]},
+    "V7": {"status": "done-intra", "evidence": ["docs/video/V6_V7_intra_release.md", "src/shared/media/topos_frame_extract.py"]},
+    "V8": {"status": "partial", "evidence": ["docs/video/V8_V9_release_matrix.md", "docs/image/ADR-I020-external-ecosystem.md"], "deferred": ["FFmpeg and NLE host adapters"]},
+    "V9": {"status": "partial", "evidence": ["docs/video/V8_V9_release_matrix.md", "docs/image/ADR-I021-release-distribution.md"], "deferred": ["cross-platform installer/signing matrix and future inter major"]}
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "frames": 1572,
+  "compare_wall_s": 48.243,
+  "planes": [
+    {
+      "mse": 3.978092,
+      "psnr_db": 54.201,
+      "max_abs": 46,
+      "samples": 3259699200
+    },
+    {
+      "mse": 0.664558,
+      "psnr_db": 61.972,
+      "max_abs": 16,
+      "samples": 1629849600
+    },
+    {
+      "mse": 0.612717,
+      "psnr_db": 62.325,
+      "max_abs": 16,
+      "samples": 1629849600
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# T-P1-11 evidence command log (2026-09-18)
+# 1) stage matrix (36 combos, child-isolated, TOPOS_CODEC_PROFILE=1)
+TOPOS_CODEC_LIB="$PWD/native/topos_codec/build/release/topos_codec.0.1.0.dylib" .venv/bin/python scripts/bench_topos_encode_stage_matrix.py --workdir bench_out/ai_upgrade/T-P1-11_stage_matrix
+# 2) rows-axis extension (r8 at t1/4/8; r4 probe at t16), per-combo children
+.venv/bin/python scripts/bench_topos_encode_stage_matrix.py --child --source tests/test_videos/{2K,4K}_topos_proxy.mov --profile standard --threads {1,4,8,16} --rows {8,4} --frames 48 --warmup 8
+# 3) decode-side impact measurement (r16 vs r8 outputs, 48 frames)
+#    rows=16: 204.8 fps -> rows=8: 294.5 fps (2K standard, t16)
+# 4) anchors after default change (48 frames + 8 warmup)
+TOPOS_CODEC_LIB=... .venv/bin/python scripts/bench_topos_anchor_matrix.py --child --kind decode_encode --frames 48 --warmup 8 --emit-json anchor_codec_only_after.json   # fps=101.42
+TOPOS_CODEC_LIB=... .venv/bin/python scripts/bench_topos_anchor_matrix.py --child --kind timeline --scenario identity --group cpu_render --output-codec topos_proxy --frames 48 --warmup 8 --emit-json anchor_identity_topos_after.json   # fps=95.02
+# 5) tests (all green)
+TOPOS_CODEC_LIB=... QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/export/test_topos_slice_rows_and_stage_report.py tests/native/test_topos_binding.py tests/media/test_topos_export.py tests/export/test_export_stage_telemetry.py tests/media/test_topos_direct_delivery.py tests/edit/test_native_gpu_bridge_eligibility.py tests/media/test_topos_timeline_export.py tests/media/test_topos_source_export_passthrough.py tests/native/test_v8_roundtrip.py tests/native/test_v8_encode.py tests/export tests/media/test_topos_probe_unification.py tests/media/test_topos_lossless_boundary.py tests/media/test_topos_image_quality.py -q

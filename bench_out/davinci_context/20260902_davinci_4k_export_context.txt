@@ -1,0 +1,42 @@
+# 达芬奇 4K 导出对比上下文（2026-09-02，i9-9900K，用户实测 + 本机复现）
+
+## 任务口径（与达芬奇一致）
+源：/Users/testuser/Desktop/260603美由你定小样1.mov
+  H.264 1920x1080 yuv420p 8-bit 25fps，2912 帧，~20 Mbps
+任务：解码 → 放大 2x 至 3840x2160 → 10-bit 4:2:2 中间片编码导出
+样本：前 300 帧（12 秒）
+
+## 用户在达芬奇（Resolve）实测
+- ProRes 422 导出：~100 fps 平均
+- DNxHR 导出：~75 fps 平均
+
+## 本机复现（同任务）
+| 路径 | fps |
+|---|---|
+| ffmpeg prores_ks profile2（软件 ProRes 422，含解码+缩放） | ~14 |
+| ffmpeg dnxhr_sq | 配置失败未计（非重点） |
+| Topos 编码内核（预放大，t16）：proxy / standard / hq | 18.8 / 16.8 / 15.5 |
+| Topos 编码内核（预放大，t8）：proxy / standard / hq | 17.6 / 15.7 / 14.3 |
+| 解码+放大（PyAV swscale 420p8→4K 422p10，串行口径） | 32.6 |
+| Topos 整管线串行（解+放+编，hq t16） | 10.5 |
+| Topos 整管线流水线化（生产者线程解+放 ∥ 编码，hq t16） | 13.4 (+28%) |
+
+码率对照：ProRes 422 @4K25 规范 ≈ 147 Mbps；Topos proxy 档 @4K ≈ 176 Mbps
+（同量级）；standard ≈ 528 / hq ≈ 766 Mbps（更高画质定位）。hq_t8 实测
+输出 3.83 MB/帧 ≈ 766 Mbps ✓ 与档位目标一致。
+
+## 达芬奇 100 fps 的构成（为何快）
+1. 硬件解码：Intel UHD 630 / VideoToolbox 解 1080p H.264 专用硅电路，
+   不占 CPU 核（软件解码+swscale 才是我们的 32.6 fps 环节）。
+2. GPU 缩放+格式转换：Metal 上bicubic 2x 放大与 10-bit 4:2:2 转换近零成本。
+3. 自研 SIMD 编码器：Resolve 的 ProRes/DNxHR 编码器为手工 AVX2 + 帧级
+   线程，公开测试普遍为 ffmpeg prores_ks 的 5~10 倍——本机同任务 ffmpeg
+   软件 ProRes 仅 ~14 fps，达芬奇 100 fps 与此比例吻合。
+4. 全图流水线：解码/缩放/编码三段并发，各自独立线程池。
+
+## 结论
+- 同为纯软件栈时，Topos 编码内核（15.5~18.8 fps）≥ ffmpeg 软件 ProRes
+  （~14 fps）；达芬奇的 7 倍优势来自 NLE 专属架构（硬解+GPU+自研编码器+
+  流水线），不是 ProRes 编码本身比 Topos 轻。
+- Topos 产品路径可立即吃的两个免费收益：导出流水线化（实测 +28%）、
+  t16 线程（+8%）；GPU 渲染路径本就绕开 swscale 瓶颈。

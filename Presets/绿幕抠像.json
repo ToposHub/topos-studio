@@ -1,0 +1,53 @@
+{
+    "name": "绿幕抠像",
+    "description": "绿幕抠像基础模板：输入 → ChromaKeyer → 输出。参数已设置为标准绿色屏幕。",
+    "version": 1,
+    "nodes": [
+        {
+            "id": "input1",
+            "type": "image_input",
+            "position": [0, 0],
+            "parameters": {},
+            "disabled": false
+        },
+        {
+            "id": "chroma1",
+            "type": "chroma_keyer",
+            "position": [200, 0],
+            "parameters": {
+                "screen_color_r": 0.0,
+                "screen_color_g": 1.0,
+                "screen_color_b": 0.0,
+                "tolerance": 0.35,
+                "softness": 0.15,
+                "despill": true,
+                "edge_width": 2.0,
+                "output_mode": "result"
+            },
+            "disabled": false
+        },
+        {
+            "id": "output1",
+            "type": "output",
+            "position": [400, 0],
+            "parameters": {},
+            "disabled": false
+        }
+    ],
+    "connections": [
+        {
+            "src_idx": 0,
+            "src_port": "output",
+            "dst_idx": 1,
+            "dst_port": "image"
+        },
+        {
+            "src_idx": 1,
+            "src_port": "result",
+            "dst_idx": 2,
+            "dst_port": "input"
+        }
+    ],
+    "created_at": "2026-05-14T10:00:00",
+    "author": "Topos Color"
+}

@@ -1,0 +1,198 @@
+{
+ "generated_at": "2026-09-21T02:59:38.389839+00:00",
+ "note": "y_act_err_corr：Pearson(局部活动度,|量化误差|)——高=误差贴着边缘走（均匀 qp 签名）；u/v_psnr 为色度平面保真；rgb_luma_psnr_edge 为422→444 上采样 + BT.709 后的观感亮度边缘误差。",
+ "pairs": [
+  {
+   "size": "2K",
+   "tier": "proxy",
+   "frames": [
+    100,
+    300
+   ],
+   "per_frame": {
+    "100": {
+     "prores": {
+      "y_act_err_corr": 0.414,
+      "u_psnr": 55.54,
+      "v_psnr": 51.08,
+      "rgb_luma_psnr_edge": 42.18,
+      "rgb_luma_psnr_all": 47.85,
+      "rgb_mae_edge": 1.43
+     },
+     "topos": {
+      "y_act_err_corr": 0.359,
+      "u_psnr": 53.54,
+      "v_psnr": 49.59,
+      "rgb_luma_psnr_edge": 40.93,
+      "rgb_luma_psnr_all": 46.47,
+      "rgb_mae_edge": 1.71
+     }
+    },
+    "300": {
+     "prores": {
+      "y_act_err_corr": 0.221,
+      "u_psnr": 42.58,
+      "v_psnr": 41.6,
+      "rgb_luma_psnr_edge": 30.42,
+      "rgb_luma_psnr_all": 33.31,
+      "rgb_mae_edge": 5.99
+     },
+     "topos": {
+      "y_act_err_corr": 0.274,
+      "u_psnr": 42.22,
+      "v_psnr": 41.31,
+      "rgb_luma_psnr_edge": 29.68,
+      "rgb_luma_psnr_all": 33.3,
+      "rgb_mae_edge": 6.57
+     }
+    }
+   },
+   "mean": {
+    "prores": {
+     "y_act_err_corr": 0.318,
+     "u_psnr": 49.06,
+     "v_psnr": 46.34,
+     "rgb_luma_psnr_edge": 36.3,
+     "rgb_luma_psnr_all": 40.58,
+     "rgb_mae_edge": 3.71
+    },
+    "topos": {
+     "y_act_err_corr": 0.317,
+     "u_psnr": 47.88,
+     "v_psnr": 45.45,
+     "rgb_luma_psnr_edge": 35.305,
+     "rgb_luma_psnr_all": 39.885,
+     "rgb_mae_edge": 4.14
+    }
+   }
+  },
+  {
+   "size": "2K",
+   "tier": "standard",
+   "frames": [
+    100,
+    300
+   ],
+   "per_frame": {
+    "100": {
+     "prores": {
+      "y_act_err_corr": 0.483,
+      "u_psnr": 58.02,
+      "v_psnr": 53.94,
+      "rgb_luma_psnr_edge": 44.23,
+      "rgb_luma_psnr_all": 50.33,
+      "rgb_mae_edge": 1.07
+     },
+     "topos": {
+      "y_act_err_corr": 0.35,
+      "u_psnr": 55.76,
+      "v_psnr": 51.84,
+      "rgb_luma_psnr_edge": 43.66,
+      "rgb_luma_psnr_all": 48.65,
+      "rgb_mae_edge": 1.23
+     }
+    },
+    "300": {
+     "prores": {
+      "y_act_err_corr": 0.494,
+      "u_psnr": 48.89,
+      "v_psnr": 47.52,
+      "rgb_luma_psnr_edge": 36.53,
+      "rgb_luma_psnr_all": 40.86,
+      "rgb_mae_edge": 2.96
+     },
+     "topos": {
+      "y_act_err_corr": 0.289,
+      "u_psnr": 47.3,
+      "v_psnr": 46.19,
+      "rgb_luma_psnr_edge": 36.91,
+      "rgb_luma_psnr_all": 40.6,
+      "rgb_mae_edge": 2.85
+     }
+    }
+   },
+   "mean": {
+    "prores": {
+     "y_act_err_corr": 0.488,
+     "u_psnr": 53.455,
+     "v_psnr": 50.73,
+     "rgb_luma_psnr_edge": 40.38,
+     "rgb_luma_psnr_all": 45.595,
+     "rgb_mae_edge": 2.015
+    },
+    "topos": {
+     "y_act_err_corr": 0.32,
+     "u_psnr": 51.53,
+     "v_psnr": 49.015,
+     "rgb_luma_psnr_edge": 40.285,
+     "rgb_luma_psnr_all": 44.625,
+     "rgb_mae_edge": 2.04
+    }
+   }
+  },
+  {
+   "size": "2K",
+   "tier": "hq",
+   "frames": [
+    100,
+    300
+   ],
+   "per_frame": {
+    "100": {
+     "prores": {
+      "y_act_err_corr": 0.652,
+      "u_psnr": 59.26,
+      "v_psnr": 55.29,
+      "rgb_luma_psnr_edge": 45.06,
+      "rgb_luma_psnr_all": 52.45,
+      "rgb_mae_edge": 0.92
+     },
+     "topos": {
+      "y_act_err_corr": 0.432,
+      "u_psnr": 57.47,
+      "v_psnr": 53.87,
+      "rgb_luma_psnr_edge": 45.21,
+      "rgb_luma_psnr_all": 51.49,
+      "rgb_mae_edge": 0.94
+     }
+    },
+    "300": {
+     "prores": {
+      "y_act_err_corr": 0.703,
+      "u_psnr": 50.45,
+      "v_psnr": 49.19,
+      "rgb_luma_psnr_edge": 37.17,
+      "rgb_luma_psnr_all": 42.54,
+      "rgb_mae_edge": 2.77
+     },
+     "topos": {
+      "y_act_err_corr": 0.457,
+      "u_psnr": 49.42,
+      "v_psnr": 48.2,
+      "rgb_luma_psnr_edge": 37.8,
+      "rgb_luma_psnr_all": 42.42,
+      "rgb_mae_edge": 2.56
+     }
+    }
+   },
+   "mean": {
+    "prores": {
+     "y_act_err_corr": 0.677,
+     "u_psnr": 54.855,
+     "v_psnr": 52.24,
+     "rgb_luma_psnr_edge": 41.115,
+     "rgb_luma_psnr_all": 47.495,
+     "rgb_mae_edge": 1.845
+    },
+    "topos": {
+     "y_act_err_corr": 0.445,
+     "u_psnr": 53.445,
+     "v_psnr": 51.035,
+     "rgb_luma_psnr_edge": 41.505,
+     "rgb_luma_psnr_all": 46.955,
+     "rgb_mae_edge": 1.75
+    }
+   }
+  }
+ ]
+}

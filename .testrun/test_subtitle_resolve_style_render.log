@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 16 items
+
+tests/edit/test_subtitle_resolve_style_render.py ................        [100%]
+
+============================= 16 passed in 11.61s ==============================

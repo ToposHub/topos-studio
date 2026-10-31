@@ -1,0 +1,1245 @@
+{
+  "timestamp": "2026-06-29T03:18:08.820274",
+  "config": {
+    "videos": "tests/test_videos",
+    "steps": 12,
+    "target_size": "1280x720",
+    "warmup_wait_ms": 3500.0
+  },
+  "summary": {
+    "videos": 8,
+    "steps": 96,
+    "delivered": 84,
+    "dropped": 12,
+    "delivered_ratio": 0.875,
+    "deadline_misses": 56,
+    "deadline_miss_ratio": 0.5833333333333334,
+    "vt_delivered": 41,
+    "vt_delivered_ratio": 0.4880952380952381,
+    "latency_p50_ms": 84.52781649975805,
+    "latency_p90_ms": 173.82548400200903,
+    "latency_p95_ms": 187.59076698916033,
+    "latency_max_ms": 287.3885419976432,
+    "exact_frames": 73,
+    "exact_ratio": 0.8690476190476191,
+    "near_frames_12": 84,
+    "near_ratio_12": 1.0,
+    "frame_error_p95": 4,
+    "frame_error_max": 7,
+    "frame_types": {
+      "planar": 43,
+      "interactive_stale": 12,
+      "vt_planar": 41
+    }
+  },
+  "videos": [
+    {
+      "video_path": "tests/test_videos/2K_DNxHR HQX 12-bit.mov",
+      "frame_count": 743,
+      "target_size": "1280x720",
+      "steps": 12,
+      "warmup_wait_ms": 3500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 11,
+        "dropped": 1,
+        "delivered_ratio": 0.9166666666666666,
+        "deadline_misses": 2,
+        "deadline_miss_ratio": 0.16666666666666666,
+        "latency_p50_ms": 32.3872580047464,
+        "latency_p90_ms": 64.71282699203584,
+        "latency_p95_ms": 175.53640400001314,
+        "latency_max_ms": 175.53640400001314,
+        "exact_frames": 11,
+        "exact_ratio": 1.0,
+        "near_frames_12": 11,
+        "near_ratio_12": 1.0,
+        "frame_error_p95": 0,
+        "frame_error_max": 0,
+        "frame_types": {
+          "planar": 11,
+          "interactive_stale": 1
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 0,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 175.53640400001314,
+          "deadline_miss": true
+        },
+        {
+          "target": 689,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 689,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 64.71282699203584,
+          "deadline_miss": false
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 74,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 29.651718999957666,
+          "deadline_miss": false
+        },
+        {
+          "target": 583,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 583,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 32.3872580047464,
+          "deadline_miss": false
+        },
+        {
+          "target": 148,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 148,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 32.629435998387635,
+          "deadline_miss": false
+        },
+        {
+          "target": 185,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 94.23240700562019,
+          "deadline_miss": true
+        },
+        {
+          "target": 222,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 222,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 37.408306990982965,
+          "deadline_miss": false
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 371,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 34.84658199886326,
+          "deadline_miss": false
+        },
+        {
+          "target": 296,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 296,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 31.23202199640218,
+          "deadline_miss": false
+        },
+        {
+          "target": 265,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 265,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 30.387331993551925,
+          "deadline_miss": false
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 371,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 28.450141995563172,
+          "deadline_miss": false
+        },
+        {
+          "target": 159,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 159,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 28.51600399299059,
+          "deadline_miss": false
+        }
+      ]
+    },
+    {
+      "video_path": "tests/test_videos/2K_H265.mov",
+      "frame_count": 743,
+      "target_size": "1280x720",
+      "steps": 12,
+      "warmup_wait_ms": 3500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 11,
+        "dropped": 1,
+        "delivered_ratio": 0.9166666666666666,
+        "deadline_misses": 9,
+        "deadline_miss_ratio": 0.75,
+        "latency_p50_ms": 73.48111500323284,
+        "latency_p90_ms": 98.74589899845887,
+        "latency_p95_ms": 104.10876901005395,
+        "latency_max_ms": 104.10876901005395,
+        "exact_frames": 9,
+        "exact_ratio": 0.8181818181818182,
+        "near_frames_12": 11,
+        "near_ratio_12": 1.0,
+        "frame_error_p95": 1,
+        "frame_error_max": 1,
+        "frame_types": {
+          "vt_planar": 11,
+          "interactive_stale": 1
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 0,
+          "frame_error": 0,
+          "deadline_ms": 40.0,
+          "elapsed_ms": 26.089439998031594,
+          "deadline_miss": false
+        },
+        {
+          "target": 689,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 689,
+          "frame_error": 0,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 68.63988400436938,
+          "deadline_miss": true
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 74,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 104.10876901005395,
+          "deadline_miss": true
+        },
+        {
+          "target": 583,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 583,
+          "frame_error": 0,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 29.910444005508907,
+          "deadline_miss": false
+        },
+        {
+          "target": 148,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 148,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 98.0989350064192,
+          "deadline_miss": true
+        },
+        {
+          "target": 185,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 107.37091999908444,
+          "deadline_miss": true
+        },
+        {
+          "target": 222,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 222,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 98.74589899845887,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 370,
+          "frame_error": 1,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 75.85321900842246,
+          "deadline_miss": true
+        },
+        {
+          "target": 296,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 295,
+          "frame_error": 1,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 73.48111500323284,
+          "deadline_miss": true
+        },
+        {
+          "target": 265,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 265,
+          "frame_error": 0,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 72.1578060038155,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 371,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 76.26477399026044,
+          "deadline_miss": false
+        },
+        {
+          "target": 159,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 159,
+          "frame_error": 0,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 65.26551400020253,
+          "deadline_miss": true
+        }
+      ]
+    },
+    {
+      "video_path": "tests/test_videos/2K_h264.mp4",
+      "frame_count": 1572,
+      "target_size": "1280x720",
+      "steps": 12,
+      "warmup_wait_ms": 3500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 9,
+        "dropped": 3,
+        "delivered_ratio": 0.75,
+        "deadline_misses": 5,
+        "deadline_miss_ratio": 0.4166666666666667,
+        "latency_p50_ms": 54.40442400868051,
+        "latency_p90_ms": 67.66268599312752,
+        "latency_p95_ms": 82.48165401164442,
+        "latency_max_ms": 82.48165401164442,
+        "exact_frames": 8,
+        "exact_ratio": 0.8888888888888888,
+        "near_frames_12": 9,
+        "near_ratio_12": 1.0,
+        "frame_error_p95": 1,
+        "frame_error_max": 1,
+        "frame_types": {
+          "vt_planar": 9,
+          "interactive_stale": 3
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 0,
+          "frame_error": 0,
+          "deadline_ms": 40.0,
+          "elapsed_ms": 43.02733800432179,
+          "deadline_miss": true
+        },
+        {
+          "target": 1518,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 1517,
+          "frame_error": 1,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 67.66268599312752,
+          "deadline_miss": true
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 74,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 59.559690998867154,
+          "deadline_miss": false
+        },
+        {
+          "target": 1412,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 1412,
+          "frame_error": 0,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 39.90677998808678,
+          "deadline_miss": false
+        },
+        {
+          "target": 148,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 148,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 82.48165401164442,
+          "deadline_miss": false
+        },
+        {
+          "target": 392,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 392,
+          "frame_error": 0,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 54.40442400868051,
+          "deadline_miss": false
+        },
+        {
+          "target": 222,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 222,
+          "frame_error": 0,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 37.628648002282716,
+          "deadline_miss": false
+        },
+        {
+          "target": 1200,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 64.52008700580336,
+          "deadline_miss": true
+        },
+        {
+          "target": 296,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 96.69592599675525,
+          "deadline_miss": true
+        },
+        {
+          "target": 1094,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 1094,
+          "frame_error": 0,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 15.396032002172433,
+          "deadline_miss": false
+        },
+        {
+          "target": 785,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 785,
+          "frame_error": 0,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 59.83280099462718,
+          "deadline_miss": false
+        },
+        {
+          "target": 988,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 64.0,
+          "elapsed_ms": 66.70555300661363,
+          "deadline_miss": true
+        }
+      ]
+    },
+    {
+      "video_path": "tests/test_videos/2K_prores422HQ.mov",
+      "frame_count": 647,
+      "target_size": "1280x720",
+      "steps": 12,
+      "warmup_wait_ms": 3500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 10,
+        "dropped": 2,
+        "delivered_ratio": 0.8333333333333334,
+        "deadline_misses": 2,
+        "deadline_miss_ratio": 0.16666666666666666,
+        "latency_p50_ms": 46.00076000497211,
+        "latency_p90_ms": 56.724405993008986,
+        "latency_p95_ms": 57.12390299595427,
+        "latency_max_ms": 57.12390299595427,
+        "exact_frames": 10,
+        "exact_ratio": 1.0,
+        "near_frames_12": 10,
+        "near_ratio_12": 1.0,
+        "frame_error_p95": 0,
+        "frame_error_max": 0,
+        "frame_types": {
+          "planar": 10,
+          "interactive_stale": 2
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 0,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 51.265417991089635,
+          "deadline_miss": false
+        },
+        {
+          "target": 593,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 593,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 45.30461601098068,
+          "deadline_miss": false
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 74,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 36.90282900060993,
+          "deadline_miss": false
+        },
+        {
+          "target": 487,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 487,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 33.82703399984166,
+          "deadline_miss": false
+        },
+        {
+          "target": 148,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 148,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 39.8555510037113,
+          "deadline_miss": false
+        },
+        {
+          "target": 161,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 89.3335209984798,
+          "deadline_miss": true
+        },
+        {
+          "target": 222,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 222,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 57.12390299595427,
+          "deadline_miss": false
+        },
+        {
+          "target": 275,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 275,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 48.283683994668536,
+          "deadline_miss": false
+        },
+        {
+          "target": 296,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 94.93851999286562,
+          "deadline_miss": true
+        },
+        {
+          "target": 169,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 169,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 56.724405993008986,
+          "deadline_miss": false
+        },
+        {
+          "target": 323,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 323,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 46.696903998963535,
+          "deadline_miss": false
+        },
+        {
+          "target": 63,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 63,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 41.1410450033145,
+          "deadline_miss": false
+        }
+      ]
+    },
+    {
+      "video_path": "tests/test_videos/4K_DNxHR HQX 12-bit.mov",
+      "frame_count": 743,
+      "target_size": "1280x720",
+      "steps": 12,
+      "warmup_wait_ms": 3500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 11,
+        "dropped": 1,
+        "delivered_ratio": 0.9166666666666666,
+        "deadline_misses": 10,
+        "deadline_miss_ratio": 0.8333333333333334,
+        "latency_p50_ms": 98.63853499700781,
+        "latency_p90_ms": 135.35039499402046,
+        "latency_p95_ms": 287.3885419976432,
+        "latency_max_ms": 287.3885419976432,
+        "exact_frames": 11,
+        "exact_ratio": 1.0,
+        "near_frames_12": 11,
+        "near_ratio_12": 1.0,
+        "frame_error_p95": 0,
+        "frame_error_max": 0,
+        "frame_types": {
+          "planar": 11,
+          "interactive_stale": 1
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 0,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 96.53672599233687,
+          "deadline_miss": true
+        },
+        {
+          "target": 689,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 689,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 287.3885419976432,
+          "deadline_miss": true
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 74,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 121.87628100218717,
+          "deadline_miss": true
+        },
+        {
+          "target": 583,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 583,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 106.87662899727002,
+          "deadline_miss": true
+        },
+        {
+          "target": 148,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 148,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 100.02512201026548,
+          "deadline_miss": true
+        },
+        {
+          "target": 185,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 111.5443669987144,
+          "deadline_miss": true
+        },
+        {
+          "target": 222,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 222,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 135.35039499402046,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 371,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 97.94017500826158,
+          "deadline_miss": true
+        },
+        {
+          "target": 296,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 296,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 98.02500200748909,
+          "deadline_miss": true
+        },
+        {
+          "target": 265,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 265,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 98.63853499700781,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 371,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 80.33972600242123,
+          "deadline_miss": false
+        },
+        {
+          "target": 159,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 159,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 91.08280899818055,
+          "deadline_miss": false
+        }
+      ]
+    },
+    {
+      "video_path": "tests/test_videos/4K_H264.mov",
+      "frame_count": 743,
+      "target_size": "1280x720",
+      "steps": 12,
+      "warmup_wait_ms": 3500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 11,
+        "dropped": 1,
+        "delivered_ratio": 0.9166666666666666,
+        "deadline_misses": 6,
+        "deadline_miss_ratio": 0.5,
+        "latency_p50_ms": 121.49615600355901,
+        "latency_p90_ms": 159.96973899018485,
+        "latency_p95_ms": 161.5895750001073,
+        "latency_max_ms": 161.5895750001073,
+        "exact_frames": 9,
+        "exact_ratio": 0.8181818181818182,
+        "near_frames_12": 11,
+        "near_ratio_12": 1.0,
+        "frame_error_p95": 5,
+        "frame_error_max": 5,
+        "frame_types": {
+          "vt_planar": 11,
+          "interactive_stale": 1
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 0,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 30.664974998217076,
+          "deadline_miss": false
+        },
+        {
+          "target": 689,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 689,
+          "frame_error": 0,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 120.46090900548734,
+          "deadline_miss": true
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 69,
+          "frame_error": 5,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 159.96973899018485,
+          "deadline_miss": true
+        },
+        {
+          "target": 583,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 583,
+          "frame_error": 0,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 76.46247699449304,
+          "deadline_miss": false
+        },
+        {
+          "target": 148,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 148,
+          "frame_error": 0,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 161.5895750001073,
+          "deadline_miss": true
+        },
+        {
+          "target": 185,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 152.76094699220266,
+          "deadline_miss": true
+        },
+        {
+          "target": 222,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 222,
+          "frame_error": 0,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 142.77013200626243,
+          "deadline_miss": false
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 370,
+          "frame_error": 1,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 128.16880199534353,
+          "deadline_miss": true
+        },
+        {
+          "target": 296,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 296,
+          "frame_error": 0,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 121.49615600355901,
+          "deadline_miss": true
+        },
+        {
+          "target": 265,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 265,
+          "frame_error": 0,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 91.19200499844737,
+          "deadline_miss": false
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 371,
+          "frame_error": 0,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 127.4875509989215,
+          "deadline_miss": false
+        },
+        {
+          "target": 159,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 159,
+          "frame_error": 0,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 86.57397898787167,
+          "deadline_miss": false
+        }
+      ]
+    },
+    {
+      "video_path": "tests/test_videos/4K_H265.mov",
+      "frame_count": 743,
+      "target_size": "1280x720",
+      "steps": 12,
+      "warmup_wait_ms": 3500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 10,
+        "dropped": 2,
+        "delivered_ratio": 0.8333333333333334,
+        "deadline_misses": 10,
+        "deadline_miss_ratio": 0.8333333333333334,
+        "latency_p50_ms": 153.22167050180724,
+        "latency_p90_ms": 178.1004660006147,
+        "latency_p95_ms": 187.59076698916033,
+        "latency_max_ms": 187.59076698916033,
+        "exact_frames": 4,
+        "exact_ratio": 0.4,
+        "near_frames_12": 10,
+        "near_ratio_12": 1.0,
+        "frame_error_p95": 7,
+        "frame_error_max": 7,
+        "frame_types": {
+          "vt_planar": 10,
+          "interactive_stale": 2
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 0,
+          "frame_error": 0,
+          "deadline_ms": 88.0,
+          "elapsed_ms": 46.66106500371825,
+          "deadline_miss": false
+        },
+        {
+          "target": 689,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 689,
+          "frame_error": 0,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 148.1666449981276,
+          "deadline_miss": true
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 70,
+          "frame_error": 4,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 187.59076698916033,
+          "deadline_miss": true
+        },
+        {
+          "target": 583,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 583,
+          "frame_error": 0,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 60.13037799857557,
+          "deadline_miss": false
+        },
+        {
+          "target": 148,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 145,
+          "frame_error": 3,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 173.82548400200903,
+          "deadline_miss": true
+        },
+        {
+          "target": 185,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 170.23637000238523,
+          "deadline_miss": true
+        },
+        {
+          "target": 222,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 220,
+          "frame_error": 2,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 161.11082799034193,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 366,
+          "frame_error": 5,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 157.16523000446614,
+          "deadline_miss": true
+        },
+        {
+          "target": 296,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 134.18071799969766,
+          "deadline_miss": true
+        },
+        {
+          "target": 265,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 258,
+          "frame_error": 7,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 149.27811099914834,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 366,
+          "frame_error": 5,
+          "deadline_ms": 144.0,
+          "elapsed_ms": 178.1004660006147,
+          "deadline_miss": true
+        },
+        {
+          "target": 159,
+          "delivered": true,
+          "frame_type": "vt_planar",
+          "decoded_frame": 159,
+          "frame_error": 0,
+          "deadline_ms": 112.0,
+          "elapsed_ms": 146.3683710026089,
+          "deadline_miss": true
+        }
+      ]
+    },
+    {
+      "video_path": "tests/test_videos/4K_prores422HQ.mov",
+      "frame_count": 743,
+      "target_size": "1280x720",
+      "steps": 12,
+      "warmup_wait_ms": 3500.0,
+      "warmup_ready": true,
+      "summary": {
+        "delivered": 11,
+        "dropped": 1,
+        "delivered_ratio": 0.9166666666666666,
+        "deadline_misses": 12,
+        "deadline_miss_ratio": 1.0,
+        "latency_p50_ms": 165.00373699818738,
+        "latency_p90_ms": 193.19181000173558,
+        "latency_p95_ms": 201.9324319990119,
+        "latency_max_ms": 201.9324319990119,
+        "exact_frames": 11,
+        "exact_ratio": 1.0,
+        "near_frames_12": 11,
+        "near_ratio_12": 1.0,
+        "frame_error_p95": 0,
+        "frame_error_max": 0,
+        "frame_types": {
+          "planar": 11,
+          "interactive_stale": 1
+        }
+      },
+      "samples": [
+        {
+          "target": 0,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 0,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 131.91859600192402,
+          "deadline_miss": true
+        },
+        {
+          "target": 689,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 689,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 191.9352050026646,
+          "deadline_miss": true
+        },
+        {
+          "target": 74,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 74,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 157.10148100333754,
+          "deadline_miss": true
+        },
+        {
+          "target": 583,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 583,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 157.2529989934992,
+          "deadline_miss": true
+        },
+        {
+          "target": 148,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 148,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 157.9471159930108,
+          "deadline_miss": true
+        },
+        {
+          "target": 185,
+          "delivered": false,
+          "frame_type": "interactive_stale",
+          "decoded_frame": null,
+          "frame_error": null,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 113.48405299941078,
+          "deadline_miss": true
+        },
+        {
+          "target": 222,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 222,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 193.19181000173558,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 371,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 201.9324319990119,
+          "deadline_miss": true
+        },
+        {
+          "target": 296,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 296,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 171.9421760062687,
+          "deadline_miss": true
+        },
+        {
+          "target": 265,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 265,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 153.14523200504482,
+          "deadline_miss": true
+        },
+        {
+          "target": 371,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 371,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 183.19941899972036,
+          "deadline_miss": true
+        },
+        {
+          "target": 159,
+          "delivered": true,
+          "frame_type": "planar",
+          "decoded_frame": 159,
+          "frame_error": 0,
+          "deadline_ms": 96.0,
+          "elapsed_ms": 165.00373699818738,
+          "deadline_miss": true
+        }
+      ]
+    }
+  ]
+}

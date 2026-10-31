@@ -1,0 +1,106 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+QOpenGLWidget is not supported on this platform.
+qt.qpa.fonts: Populating font family aliases took 342 ms. Replace uses of missing font family "Sans Serif" with one that exists to avoid this cost. 
+This plugin does not support propagateSizeHints()
+Source edit: invalid In/Out points
+Source edit: invalid In/Out points
+Source edit: no source asset loaded
+{
+  "initial": {
+    "in_point": null,
+    "out_point": null,
+    "can_edit": false,
+    "buttons": [
+      false,
+      false,
+      false
+    ],
+    "get_source_edit_params": [
+      null,
+      null,
+      null
+    ]
+  },
+  "single_frame": {
+    "in_point": 15,
+    "out_point": 15,
+    "can_edit": true,
+    "buttons": [
+      true,
+      true,
+      true
+    ],
+    "get_source_edit_params": [
+      "synthetic_range",
+      15,
+      15
+    ]
+  },
+  "clear": {
+    "in_point": null,
+    "out_point": null,
+    "can_edit": false,
+    "buttons": [
+      false,
+      false,
+      false
+    ],
+    "get_source_edit_params": [
+      null,
+      null,
+      null
+    ]
+  },
+  "close": {
+    "in_point": null,
+    "out_point": null,
+    "can_edit": false,
+    "buttons": [
+      false,
+      false,
+      false
+    ],
+    "get_source_edit_params": [
+      null,
+      null,
+      null
+    ]
+  },
+  "range_changed": [
+    [
+      15,
+      null
+    ],
+    [
+      15,
+      15
+    ],
+    [
+      null,
+      null
+    ],
+    [
+      15,
+      null
+    ],
+    [
+      15,
+      15
+    ],
+    [
+      null,
+      null
+    ]
+  ],
+  "gl_facade": {
+    "used_apis": 37,
+    "missing": [],
+    "contract_errors": [],
+    "uniform1f_callable": true,
+    "uniform4f_callable": true,
+    "actual_gpu_pixels_tested": false
+  }
+}

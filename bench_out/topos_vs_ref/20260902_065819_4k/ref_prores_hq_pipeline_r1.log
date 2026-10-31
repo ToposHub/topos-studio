@@ -1,0 +1,55 @@
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'tests/test_videos/4K_prores422HQ.mov':
+  Metadata:
+    major_brand     : qt  
+    minor_version   : 512
+    compatible_brands: qt  
+    creation_time   : 2023-03-11T06:01:50.000000Z
+    encoder         : Blackmagic Design DaVinci Resolve Studio
+  Duration: 00:00:29.72, start: 0.000000, bitrate: 718167 kb/s
+  Stream #0:0[0x1]: Video: prores (HQ) (apch / 0x68637061), yuv422p10le(tv, bt709, progressive), 3840x2160, 716628 kb/s, SAR 1:1 DAR 16:9, 25 fps, 25 tbr, 12800 tbn (default)
+    Metadata:
+      creation_time   : 2023-03-11T06:01:50.000000Z
+      handler_name    : VideoHandler
+      vendor_id       : appl
+      encoder         : Apple ProRes 422 HQ
+      timecode        : 00:00:00:00
+  Stream #0:1[0x2]: Audio: pcm_s16le (lpcm / 0x6D63706C), 48000 Hz, stereo, s16, 1536 kb/s (default)
+    Metadata:
+      creation_time   : 2023-03-11T06:01:50.000000Z
+      handler_name    : SoundHandler
+      vendor_id       : [0][0][0][0]
+  Stream #0:2[0x3](eng): Data: none (tmcd / 0x64636D74), 0 kb/s
+    Metadata:
+      creation_time   : 2023-03-11T06:01:50.000000Z
+      handler_name    : TimeCodeHandler
+      timecode        : 00:00:00:00
+Stream mapping:
+  Stream #0:0 -> #0:0 (prores (native) -> prores (prores_ks))
+  Stream #0:1 -> #0:1 (pcm_s16le (native) -> aac (native))
+Press [q] to stop, [?] for help
+Output #0, mov, to '/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_vs_ref/20260902_065819_4k/ref_prores_hq_pipeline_r1.mov':
+  Metadata:
+    major_brand     : qt  
+    minor_version   : 512
+    compatible_brands: qt  
+    encoder         : Lavf62.12.100
+  Stream #0:0: Video: prores (HQ) (apch / 0x68637061), yuv422p10le(tv, bt709, progressive), 3840x2160 [SAR 1:1 DAR 16:9], q=2-31, 200 kb/s, 25 fps, 12800 tbn (default)
+    Metadata:
+      encoder         : Lavc62.28.100 prores_ks
+      creation_time   : 2023-03-11T06:01:50.000000Z
+      handler_name    : VideoHandler
+      vendor_id       : appl
+      timecode        : 00:00:00:00
+  Stream #0:1: Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 128 kb/s (default)
+    Metadata:
+      encoder         : Lavc62.28.100 aac
+      creation_time   : 2023-03-11T06:01:50.000000Z
+      handler_name    : SoundHandler
+      vendor_id       : [0][0][0][0]
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.50    
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:01.01    
+frame=    1 fps=0.7 q=-0.0 size=    3072KiB time=00:00:00.04 bitrate=629153.6kbits/s speed=0.0264x elapsed=0:00:01.51    
+frame=   16 fps=7.9 q=-0.0 size=   47104KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:02.02    
+[out#0/mov @ 0x7fe2a57071c0] video:76110KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.003310%
+frame=   24 fps=9.7 q=-0.0 Lsize=   76113KiB time=00:00:00.96 bitrate=649499.0kbits/s speed=0.386x elapsed=0:00:02.48    
+[aac @ 0x7fe2a57163c0] Qavg: 65536.000

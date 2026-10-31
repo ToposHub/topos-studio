@@ -1,0 +1,270 @@
+{
+  "status": "local_pilot_not_product_export",
+  "order": [
+    [
+      8,
+      12,
+      16
+    ],
+    [
+      16,
+      8,
+      12
+    ],
+    [
+      12,
+      16,
+      8
+    ]
+  ],
+  "rows": [
+    {
+      "round": 1,
+      "threads": 8,
+      "report_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010155729682Z/result.json",
+      "wall_ms_per_frame": 39.57609174995014,
+      "frame_wall_p95_ms": 48.233544,
+      "native_ms_per_frame": 33.2268698125,
+      "mux_ms_per_frame": 4.4182213125,
+      "process_peak_rss_bytes": 2352898048,
+      "manifest": {
+        "schema": "bench_manifest.v1",
+        "topos_version": "0.1.0",
+        "dylib_commit_embedded": "1d30609f",
+        "git_head": "1d30609f",
+        "git_dirty": true,
+        "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/perf_current/topos_codec.0.1.0.dylib",
+        "dylib_sha256": "7b0cc4d466b4d9da2b061b0df81eda04f9d44112a3b25a50bec7d8f1b4a3b05a",
+        "abi_version": 2,
+        "slice_threads": 16,
+        "simd_avx2": true,
+        "simd_neon": false,
+        "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+        "os": "darwin",
+        "python": "3.12.13"
+      }
+    },
+    {
+      "round": 1,
+      "threads": 12,
+      "report_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010206063591Z/result.json",
+      "wall_ms_per_frame": 33.57725356272567,
+      "frame_wall_p95_ms": 43.488196,
+      "native_ms_per_frame": 27.598084875,
+      "mux_ms_per_frame": 4.1876455,
+      "process_peak_rss_bytes": 2361479168,
+      "manifest": {
+        "schema": "bench_manifest.v1",
+        "topos_version": "0.1.0",
+        "dylib_commit_embedded": "1d30609f",
+        "git_head": "1d30609f",
+        "git_dirty": true,
+        "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/perf_current/topos_codec.0.1.0.dylib",
+        "dylib_sha256": "7b0cc4d466b4d9da2b061b0df81eda04f9d44112a3b25a50bec7d8f1b4a3b05a",
+        "abi_version": 2,
+        "slice_threads": 16,
+        "simd_avx2": true,
+        "simd_neon": false,
+        "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+        "os": "darwin",
+        "python": "3.12.13"
+      }
+    },
+    {
+      "round": 1,
+      "threads": 16,
+      "report_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010216428115Z/result.json",
+      "wall_ms_per_frame": 33.85882600014156,
+      "frame_wall_p95_ms": 41.626826,
+      "native_ms_per_frame": 27.333477125,
+      "mux_ms_per_frame": 4.605817,
+      "process_peak_rss_bytes": 2436497408,
+      "manifest": {
+        "schema": "bench_manifest.v1",
+        "topos_version": "0.1.0",
+        "dylib_commit_embedded": "1d30609f",
+        "git_head": "1d30609f",
+        "git_dirty": true,
+        "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/perf_current/topos_codec.0.1.0.dylib",
+        "dylib_sha256": "7b0cc4d466b4d9da2b061b0df81eda04f9d44112a3b25a50bec7d8f1b4a3b05a",
+        "abi_version": 2,
+        "slice_threads": 16,
+        "simd_avx2": true,
+        "simd_neon": false,
+        "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+        "os": "darwin",
+        "python": "3.12.13"
+      }
+    },
+    {
+      "round": 2,
+      "threads": 16,
+      "report_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010226829401Z/result.json",
+      "wall_ms_per_frame": 33.14655818758183,
+      "frame_wall_p95_ms": 40.631979,
+      "native_ms_per_frame": 26.90799875,
+      "mux_ms_per_frame": 4.5153490625,
+      "process_peak_rss_bytes": 2404892672,
+      "manifest": {
+        "schema": "bench_manifest.v1",
+        "topos_version": "0.1.0",
+        "dylib_commit_embedded": "1d30609f",
+        "git_head": "1d30609f",
+        "git_dirty": true,
+        "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/perf_current/topos_codec.0.1.0.dylib",
+        "dylib_sha256": "7b0cc4d466b4d9da2b061b0df81eda04f9d44112a3b25a50bec7d8f1b4a3b05a",
+        "abi_version": 2,
+        "slice_threads": 16,
+        "simd_avx2": true,
+        "simd_neon": false,
+        "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+        "os": "darwin",
+        "python": "3.12.13"
+      }
+    },
+    {
+      "round": 2,
+      "threads": 8,
+      "report_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010237314053Z/result.json",
+      "wall_ms_per_frame": 39.43383968771741,
+      "frame_wall_p95_ms": 48.907234,
+      "native_ms_per_frame": 33.130439,
+      "mux_ms_per_frame": 4.6876146875,
+      "process_peak_rss_bytes": 2399821824,
+      "manifest": {
+        "schema": "bench_manifest.v1",
+        "topos_version": "0.1.0",
+        "dylib_commit_embedded": "1d30609f",
+        "git_head": "1d30609f",
+        "git_dirty": true,
+        "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/perf_current/topos_codec.0.1.0.dylib",
+        "dylib_sha256": "7b0cc4d466b4d9da2b061b0df81eda04f9d44112a3b25a50bec7d8f1b4a3b05a",
+        "abi_version": 2,
+        "slice_threads": 16,
+        "simd_avx2": true,
+        "simd_neon": false,
+        "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+        "os": "darwin",
+        "python": "3.12.13"
+      }
+    },
+    {
+      "round": 2,
+      "threads": 12,
+      "report_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010247714249Z/result.json",
+      "wall_ms_per_frame": 34.36540668735688,
+      "frame_wall_p95_ms": 43.32076,
+      "native_ms_per_frame": 28.803975875,
+      "mux_ms_per_frame": 3.938206,
+      "process_peak_rss_bytes": 2358575104,
+      "manifest": {
+        "schema": "bench_manifest.v1",
+        "topos_version": "0.1.0",
+        "dylib_commit_embedded": "1d30609f",
+        "git_head": "1d30609f",
+        "git_dirty": true,
+        "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/perf_current/topos_codec.0.1.0.dylib",
+        "dylib_sha256": "7b0cc4d466b4d9da2b061b0df81eda04f9d44112a3b25a50bec7d8f1b4a3b05a",
+        "abi_version": 2,
+        "slice_threads": 16,
+        "simd_avx2": true,
+        "simd_neon": false,
+        "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+        "os": "darwin",
+        "python": "3.12.13"
+      }
+    },
+    {
+      "round": 3,
+      "threads": 12,
+      "report_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010258203388Z/result.json",
+      "wall_ms_per_frame": 37.001723437697365,
+      "frame_wall_p95_ms": 47.835331,
+      "native_ms_per_frame": 29.095805125,
+      "mux_ms_per_frame": 6.2811929375,
+      "process_peak_rss_bytes": 2369048576,
+      "manifest": {
+        "schema": "bench_manifest.v1",
+        "topos_version": "0.1.0",
+        "dylib_commit_embedded": "1d30609f",
+        "git_head": "1d30609f",
+        "git_dirty": true,
+        "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/perf_current/topos_codec.0.1.0.dylib",
+        "dylib_sha256": "7b0cc4d466b4d9da2b061b0df81eda04f9d44112a3b25a50bec7d8f1b4a3b05a",
+        "abi_version": 2,
+        "slice_threads": 16,
+        "simd_avx2": true,
+        "simd_neon": false,
+        "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+        "os": "darwin",
+        "python": "3.12.13"
+      }
+    },
+    {
+      "round": 3,
+      "threads": 16,
+      "report_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010308561185Z/result.json",
+      "wall_ms_per_frame": 34.14620925013878,
+      "frame_wall_p95_ms": 45.449991,
+      "native_ms_per_frame": 27.7868051875,
+      "mux_ms_per_frame": 4.52765525,
+      "process_peak_rss_bytes": 2405830656,
+      "manifest": {
+        "schema": "bench_manifest.v1",
+        "topos_version": "0.1.0",
+        "dylib_commit_embedded": "1d30609f",
+        "git_head": "1d30609f",
+        "git_dirty": true,
+        "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/perf_current/topos_codec.0.1.0.dylib",
+        "dylib_sha256": "7b0cc4d466b4d9da2b061b0df81eda04f9d44112a3b25a50bec7d8f1b4a3b05a",
+        "abi_version": 2,
+        "slice_threads": 16,
+        "simd_avx2": true,
+        "simd_neon": false,
+        "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+        "os": "darwin",
+        "python": "3.12.13"
+      }
+    },
+    {
+      "round": 3,
+      "threads": 8,
+      "report_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/e1_encode/1d30609f/7b0cc4d4/4232ea12/20260928T010319154355Z/result.json",
+      "wall_ms_per_frame": 39.17129012506848,
+      "frame_wall_p95_ms": 47.202871,
+      "native_ms_per_frame": 33.02901075,
+      "mux_ms_per_frame": 4.358778875,
+      "process_peak_rss_bytes": 2398552064,
+      "manifest": {
+        "schema": "bench_manifest.v1",
+        "topos_version": "0.1.0",
+        "dylib_commit_embedded": "1d30609f",
+        "git_head": "1d30609f",
+        "git_dirty": true,
+        "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/perf_current/topos_codec.0.1.0.dylib",
+        "dylib_sha256": "7b0cc4d466b4d9da2b061b0df81eda04f9d44112a3b25a50bec7d8f1b4a3b05a",
+        "abi_version": 2,
+        "slice_threads": 16,
+        "simd_avx2": true,
+        "simd_neon": false,
+        "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+        "os": "darwin",
+        "python": "3.12.13"
+      }
+    }
+  ],
+  "median_by_threads": {
+    "8": {
+      "mean_wall_ms": 39.43383968771741,
+      "p95_ms": 48.233544
+    },
+    "12": {
+      "mean_wall_ms": 34.36540668735688,
+      "p95_ms": 43.488196
+    },
+    "16": {
+      "mean_wall_ms": 33.85882600014156,
+      "p95_ms": 41.626826
+    }
+  }
+}

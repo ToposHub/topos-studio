@@ -1,0 +1,94 @@
+{
+  "component": "X12 page_curl",
+  "method": "手算独立脚本（纯 Python 标量逐像素）：x_c=1-p(1+r)；t<x_c-r 平铺 A、t∈[x_c-r,x_c] 卷区（φ=((x_c-t)/r)·π/2、弧长 s=r·(2/π)φ、源 x_c+s 镜像采样、背面 mix(A,back_color,sinφ)、shade=1-shadow·sinφ）、t>x_c 显 B。容差 1e-6。",
+  "params_default": {
+    "direction": "Left",
+    "radius": 0.25,
+    "back_color": [
+      0.85,
+      0.82,
+      0.78
+    ],
+    "shadow": 0.5
+  },
+  "vectors": [
+    {
+      "desc": "Left r=0.25 shadow=0 back=(1,0,0) p=0.5：x_c=0.375 卷区[0.125,0.375]（8x4 ramp）",
+      "params": {
+        "direction": "Left",
+        "radius": 0.25,
+        "shadow": 0.0,
+        "back_color": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "progress": 0.5,
+      "fixture": "8x4 A=i/7 B=10+i",
+      "expected_row0_ch0": [
+        0.0,
+        0.967377,
+        0.647248,
+        13.0,
+        14.0,
+        15.0,
+        16.0,
+        17.0
+      ],
+      "note": "i=1 u=0.1875：φ=67.5°、s=0.1875、src=0.5625→px4.0 精确→A=4/7=0.571429；wb=0.923880：R=0.571429·0.076120+1·0.923880=0.967377、G=0.043497"
+    },
+    {
+      "desc": "Right 镜像（同参数）",
+      "params": {
+        "direction": "Right",
+        "radius": 0.25,
+        "shadow": 0.0,
+        "back_color": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "progress": 0.5,
+      "fixture": "同上",
+      "expected_row0_ch0": [
+        10.0,
+        11.0,
+        12.0,
+        13.0,
+        14.0,
+        0.735436,
+        0.956503,
+        1.0
+      ],
+      "note": "t=1-x：卷区/平铺区镜像到左侧"
+    },
+    {
+      "desc": "端点 p=0",
+      "progress": 0.0,
+      "expected": "A 比特级拷贝",
+      "note": ""
+    },
+    {
+      "desc": "端点 p=1",
+      "progress": 1.0,
+      "expected": "B 比特级拷贝",
+      "note": ""
+    }
+  ],
+  "conflicts": [
+    {
+      "desc": "任务原文卷起线 x_c=1-(1-p)·(1+r) 在 p=0 得 -r（无平铺区、全图卷区/B）违反端点 p=0=A",
+      "resolution": "改为 x_c=1-p·(1+r)（p=0→1 右缘、p=1→-r 出画），区域指派原文保留；p=0 处卷区 [1-r,1] 部分越界仅发生于端点帧（early return 比特级，不受影响）"
+    },
+    {
+      "desc": "任务原文卷区 [x_c,x_c+r] 落在 B 侧且 x_src=x_c-r+sin(...) 与平铺区在 x_c 处不连续（x_c⁺ 显 A(x_c-r) vs x_c⁻ 显 A(x_c)）",
+      "resolution": "卷区改为覆盖平铺侧 [x_c-r,x_c]（页向后翻过平铺页）：φ=0 处显 A(x_c) 与物理连续；x>x_c 即显 B；采样坐标随 t 减小而增大 → 背面纹理镜像（『A 翻转』语义保真）"
+    },
+    {
+      "desc": "初算卷区期望把 A 样值写成索引 4（值域实为 4/7）",
+      "resolution": "独立重算 A(px=4.0)=0.571429；核与重算一致"
+    }
+  ]
+}

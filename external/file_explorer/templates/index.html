@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AssetDeck - 专业素材浏览器</title>
+    <!-- 立即设置深色背景，防止白屏闪烁 -->
+    <style>html, body { background: #121212 !important; }</style>
+    <!-- 核心资源引用 -->
+    <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap-icons.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/toastify/toastify.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='assets/css/style.css') }}?v={{ timestamp }}">
+    <link id="theme-stylesheet" rel="stylesheet" href="{{ url_for('static', filename='themes/' + current_theme + '.css') }}">
+</head>
+<body 
+    data-root="{{ root }}" 
+    data-start="{{ start_path }}" 
+    data-sidebar-width="{{ sidebar_width }}"
+    
+    data-view-mode="{{ init_view_mode }}"
+    data-card-size="{{ init_card_size }}"
+    data-sort-field="{{ init_sort_field }}"
+    data-sort-order="{{ init_sort_order }}"
+    data-filter-type="{{ init_filter_type }}"
+    data-filter-rating="{{ init_filter_rating }}"
+    data-smart-expanded="{{ init_smart_expanded }}"
+    data-library-expanded="{{ init_library_expanded }}"
+    data-sidebar-collapsed="{{ init_sidebar_collapsed }}"
+>
+
+<!-- 顶部菜单栏 (嵌入式模式下隐藏，功能已移入设置按钮) -->
+<div class="app-menubar" style="display:none;">
+    <div class="d-flex align-items-center me-4 text-white user-select-none" style="font-weight:600; font-size:15px; letter-spacing:0.5px;">
+        <i class="bi bi-stack me-2 text-primary"></i>AssetDeck
+    </div>
+    <!-- 文件菜单 -->
+    <div class="menu-item" data-action="toggleMenu" data-args='["$el"]'>
+        <span>文件</span>
+        <div class="dropdown-menu">
+            <div class="dropdown-item" data-action="reloadFiles"><i class="bi bi-arrow-clockwise me-2"></i>刷新</div>
+            <div class="dropdown-item" data-action="openFolderDialog"><i class="bi bi-folder2-open me-2"></i>打开目录...</div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-item" data-action="proxyClick" data-args='["#settingsMenuBtn"]'><i class="bi bi-gear me-2"></i>设置</div>
+        </div>
+    </div>
+    <!-- 编辑菜单 -->
+    <div class="menu-item" data-action="toggleMenu" data-args='["$el"]'>
+        <span>编辑</span>
+        <div class="dropdown-menu">
+            <div class="dropdown-item" data-action="copySelected">
+                <i class="bi bi-clipboard me-2"></i><span>复制</span>
+                <span class="ms-auto text-muted small ps-3">Ctrl+C</span>
+            </div>
+            <div class="dropdown-item" data-action="pasteFiles">
+                <i class="bi bi-clipboard-plus me-2"></i><span>粘贴</span>
+                <span class="ms-auto text-muted small ps-3">Ctrl+V</span>
+            </div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-item" data-action="selectAll">
+                <i class="bi bi-check-all me-2"></i><span>全选</span>
+                <span class="ms-auto text-muted small ps-3">Ctrl+A</span>
+            </div>
+            <div class="dropdown-item" data-action="window.clearSelection">
+                <i class="bi bi-x-circle me-2"></i><span>取消全选</span>
+            </div>
+            <div class="dropdown-item" data-action="invertSelection">
+                <i class="bi bi-arrow-left-right me-2"></i><span>反选</span>
+                <span class="ms-auto text-muted small ps-3">Ctrl+Shift+I</span>
+            </div>
+        </div>
+    </div>
+    <!-- 视图菜单 -->
+    <div class="menu-item" data-action="toggleMenu" data-args='["$el"]'>
+        <span>视图</span>
+        <div class="dropdown-menu">
+            <div class="dropdown-header text-muted small px-3 py-1">大小</div>
+            <div class="dropdown-item" data-action="setCardSize" data-args='["large"]'><i class="bi bi-card-image me-2"></i>大图</div>
+            <div class="dropdown-item" data-action="setCardSize" data-args='["medium"]'><i class="bi bi-grid me-2"></i>中等 (默认)</div>
+            <div class="dropdown-item" data-action="setCardSize" data-args='["small"]'><i class="bi bi-grid-3x3 me-2"></i>小图</div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-header text-muted small px-3 py-1">布局</div>
+            <div class="dropdown-item" data-action="switchLayout" data-args='["adaptive"]'><i class="bi bi-grid-3x3-gap me-2"></i>自适应视图</div>
+            <div class="dropdown-item" data-action="switchLayout" data-args='["grid"]'><i class="bi bi-square me-2"></i>网格视图</div>
+            <div class="dropdown-item" data-action="switchLayout" data-args='["waterfall"]'><i class="bi bi-columns-gap me-2"></i>瀑布流</div>
+            <div class="dropdown-item" data-action="switchLayout" data-args='["list"]'><i class="bi bi-list-ul me-2"></i>列表视图</div>
+            <div class="dropdown-item" data-action="switchLayout" data-args='["timeline"]'><i class="bi bi-clock-history me-2"></i>时间线视图</div>
+        </div>
+    </div>
+    <!-- 插件菜单 -->
+    <div class="menu-item" data-action="toggleMenu" data-args='["$el"]'>
+        <span>插件</span>
+        <div class="dropdown-menu" style="min-width: 200px;">
+            {{ ui_top_menu | safe }}
+            {% if ui_top_menu %}<div class="dropdown-divider"></div>{% endif %}
+            
+            <div class="dropdown-item" data-action="openPluginManager">
+                <i class="bi bi-grid-fill me-2"></i>插件中心
+            </div>
+        </div>
+    </div>
+    <!-- 帮助菜单 -->
+    <div class="menu-item" data-action="toggleMenu" data-args='["$el"]'>
+        <span>帮助</span>
+        <div class="dropdown-menu">
+            <div class="dropdown-item" data-action="showAboutModal">
+                <i class="bi bi-info-circle me-2"></i>关于
+            </div>
+        </div>
+    </div>
+    <!-- 主题切换 -->
+    <div class="menu-item ms-auto" data-action="toggleMenu" data-args='["$el"]'>
+        <span><i class="bi bi-palette me-2"></i>主题</span>
+        <div class="dropdown-menu" style="right: 0; left: auto;">
+            {% for theme in theme_list %}
+            <div class="dropdown-item" data-action="switchTheme" data-args='["{{ theme }}"]'>
+                <i class="bi bi-circle-fill me-2 {{ 'text-primary' if theme == current_theme else 'text-muted' }}"
+                   style="font-size: 8px;" id="icon-theme-{{ theme }}"></i>
+                <span>{{ theme }}{% if theme == 'toposcolor' %} <small class="text-muted">(默认)</small>{% endif %}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="explorer-container">
+    <!-- 左侧资源库面板 -->
+    <div class="sidebar-panel" id="sidebarPanel">
+        <div class="sidebar-resizer" id="sidebarResizer"></div>
+        <div class="file-toolbar border-0 justify-content-between pe-3">
+            <div class="d-flex align-items-center">
+                <i class="bi bi-layout-sidebar me-2 sidebar-hide-btn" data-action="toggleSidebar" title="折叠侧边栏"></i>
+                <h6 class="m-0 text-white small fw-bold">素材库</h6>
+            </div>
+            <i class="bi bi-folder2-open text-muted add-smart-btn" data-action="openCurrentFolderInSystem" title="在系统资源管理器中打开" style="font-size: 14px;"></i>
+        </div>
+        
+        <div class="sidebar-section mt-2">
+            <div class="sidebar-header d-flex justify-content-between align-items-center pe-3" style="cursor: pointer;" data-action="toggleCollectionList">
+                <div class="d-flex align-items-center">
+                    <span class="tree-toggler me-1" id="collectionListToggler" style="font-size: 14px; color: #808080;"><i class="bi bi-caret-right-fill"></i></span>
+                    <span class="fw-bold text-white-50" style="font-size: 13px; font-weight: 500 !important; color: #b0b0b0;">集合</span>
+                </div>
+                <i class="bi bi-plus-lg add-smart-btn" data-action="createCollection" data-stop title="新建集合（把文件拖进来即可添加成员）"></i>
+            </div>
+            <div id="collectionList" class="smart-list" style="display: none;"></div>
+        </div>
+
+        <div class="sidebar-section mt-2">
+            <div class="sidebar-header d-flex justify-content-between align-items-center pe-3" style="cursor: pointer;" data-action="toggleSmartFolders">
+                <div class="d-flex align-items-center">
+                    <span class="tree-toggler me-1" id="smartFolderToggler" style="font-size: 14px; color: #808080;"><i class="bi bi-caret-right-fill"></i></span>
+                    <span class="fw-bold text-white-50" style="font-size: 13px; font-weight: 500 !important; color: #b0b0b0;">智能文件夹</span>
+                </div>
+                <i class="bi bi-plus-lg add-smart-btn" data-action="openSmartBuilder" data-stop title="新建智能文件夹"></i>
+            </div>
+            <div id="smartFolderList" class="smart-list" style="display: none;"></div>
+        </div>
+
+        <div class="sidebar-section mt-2">
+            <div class="sidebar-header d-flex justify-content-between align-items-center pe-3" style="cursor: pointer;" data-action="toggleTagList">
+                <div class="d-flex align-items-center">
+                    <span class="tree-toggler me-1" id="tagListToggler" style="font-size: 14px; color: #808080;"><i class="bi bi-caret-right-fill"></i></span>
+                    <span class="fw-bold text-white-50" style="font-size: 13px; font-weight: 500 !important; color: #b0b0b0;">标签</span>
+                </div>
+                <i class="bi bi-arrow-clockwise add-smart-btn" data-action="loadTags" data-stop title="刷新标签"></i>
+            </div>
+            <div id="tagList" class="smart-list" style="display: none;"></div>
+        </div>
+
+        <!-- [U6/GAP-05] 应用内回收站视图入口 -->
+        <div class="sidebar-section mt-2">
+            <div class="sidebar-header d-flex justify-content-between align-items-center pe-3" id="trashSidebarItem" style="cursor: pointer;" data-action="openTrashView" title="删除的文件在此保留 30 天，可恢复">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-trash3 me-2" style="font-size: 13px; color: #808080;"></i>
+                    <span class="fw-bold text-white-50" style="font-size: 13px; font-weight: 500 !important; color: #b0b0b0;">回收站</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pinned Libraries Section -->
+        <div class="sidebar-section mt-2">
+            <div class="sidebar-header d-flex justify-content-between align-items-center pe-3" style="cursor: pointer;" data-action="togglePinnedLibraries">
+                <div class="d-flex align-items-center">
+                    <span class="tree-toggler me-1" id="libraryListToggler" style="font-size: 14px; color: #808080;"><i class="bi bi-caret-right-fill"></i></span>
+                    <span class="fw-bold text-white-50" style="font-size: 13px; font-weight: 500 !important; color: #b0b0b0;">我的素材库</span>
+                </div>
+                <i class="bi bi-plus-lg add-smart-btn" data-action="addLibrary" data-stop title="添加文件夹"></i>
+            </div>
+            <div id="pinnedLibraryList" class="smart-list" style="display: none;">
+                <!-- Pinned libraries will be loaded here -->
+            </div>
+        </div>
+
+        <!-- [V1/GAP-01] 全库索引状态（后台扫描进度 + 手动重建） -->
+        <div class="sidebar-section mt-2">
+            <div class="sidebar-header d-flex justify-content-between align-items-center pe-3">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-database me-2" style="font-size: 13px; color: #808080;"></i>
+                    <span class="fw-bold text-white-50" style="font-size: 13px; font-weight: 500 !important; color: #b0b0b0;">索引</span>
+                </div>
+                <i class="bi bi-arrow-clockwise add-smart-btn" data-action="startLibraryScan" data-stop title="重建全库索引（后台执行，新文件将进入全库搜索/智能文件夹）"></i>
+            </div>
+            <div class="px-3 py-1 text-white-50" id="scanStatusText" style="font-size: 11px;">索引就绪</div>
+        </div>
+
+        <div class="sidebar-header mt-1">
+            <span class="fw-bold text-white-50 ps-2" style="font-size: 13px; font-weight: 500 !important; color: #b0b0b0;">文件夹</span>
+        </div>
+        <div class="sidebar-tree custom-scrollbar" id="folderTree"></div>
+        {{ ui_sidebar_bottom | safe }}
+    </div>
+
+    <!-- 右侧主操作面板 -->
+    <div class="main-panel">
+        <!-- 导航工具栏 -->
+        <div class="file-toolbar">
+            <div class="d-flex align-items-center flex-grow-1 overflow-hidden">
+                <!-- 侧边栏切换按钮 (始终在最左侧) -->
+                <button id="sidebarToggleMini" class="nav-btn me-1 d-none" data-action="toggleSidebar" title="显示侧边栏">
+                    <i class="bi bi-layout-sidebar"></i>
+                </button>
+                <button class="nav-btn" data-action="goBack" id="btnBack" disabled><i class="bi bi-chevron-left"></i></button>
+                <button class="nav-btn" data-action="goForward" id="btnForward" disabled><i class="bi bi-chevron-right"></i></button>
+                <button class="nav-btn ms-1" data-action="goUp"><i class="bi bi-arrow-up"></i></button>
+                <input type="text" class="breadcrumb-path ms-2" id="pathDisplay" spellcheck="false" autocomplete="off">
+                <!-- [U7/GAP-13] 可点击面包屑：真实目录时替换路径输入框 -->
+                <div id="breadcrumbBar" class="breadcrumb-bar ms-2" style="display:none;"></div>
+                <button class="nav-btn" data-action="copyPath" id="btnCopyPath" title="复制路径" style="display:none;"><i class="bi bi-clipboard"></i></button>
+                <button class="nav-btn" data-action="togglePathEdit" id="btnEditPath" title="编辑路径"><i class="bi bi-pencil"></i></button>
+            </div>
+            <div class="search-container ms-2 me-2">
+                <i class="bi bi-search search-icon"></i>
+                <input type="text" id="searchInput" class="search-input" placeholder="搜索名称/标签/备注..." autocomplete="off">
+                <i class="bi bi-x-circle-fill search-clear" id="searchClear" data-action="clearSearch" style="display:none;"></i>
+                <!-- [U5/GAP-02] 全库搜索范围切换 -->
+                <select id="searchScope" class="search-scope" title="搜索范围">
+                    <option value="dir">目录</option>
+                    <option value="library">全库</option>
+                </select>
+                <span id="searchCount" class="text-muted ms-2" style="display:none;font-size:11px;white-space:nowrap;"></span>
+                <!-- [U5 收尾/GAP-02] 搜索历史下拉 + 保存为智能文件夹入口（仅搜索视图显示） -->
+                <i class="bi bi-folder-plus search-save-btn" id="saveSearchBtn" data-action="saveSearchAsSmartFolder" data-stop title="保存为智能文件夹" style="display:none;"></i>
+                <div id="searchHistoryPanel" class="search-history-panel" style="display:none;"></div>
+            </div>
+
+            <!-- 排序与筛选 -->
+            <div class="dropdown me-1">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle remove-caret" type="button" id="sortMenuBtn" data-bs-toggle="dropdown" aria-expanded="false" title="排序">
+                    <i class="bi bi-sort-down"></i>
+                </button>
+                <ul class="dropdown-menu shadow" aria-labelledby="sortMenuBtn">
+                    <li><h6 class="dropdown-header">排序方式</h6></li>
+                    <li><a class="dropdown-item active" href="#" data-prevent data-action="setSort" data-args='["name","$el"]'>名称</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setSort" data-args='["ext","$el"]'>扩展名</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setSort" data-args='["date","$el"]'>日期</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setSort" data-args='["size","$el"]'>大小</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setSort" data-args='["rating","$el"]'>评分</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="toggleSortOrder">
+                        <span id="sortOrderLabel"><i class="bi bi-arrow-down"></i> 升序 (A-Z)</span>
+                    </a></li>
+                </ul>
+            </div>
+
+            <div class="dropdown me-2">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle remove-caret" type="button" id="filterMenuBtn" data-bs-toggle="dropdown" aria-expanded="false" title="筛选">
+                    <i class="bi bi-funnel"></i>
+                </button>
+                <ul class="dropdown-menu shadow" aria-labelledby="filterMenuBtn" style="min-width: 200px;">
+                    <li><h6 class="dropdown-header">文件类型</h6></li>
+                    <li><a class="dropdown-item active" href="#" data-prevent data-action="setFilterType" data-args='["all","$el"]' data-filter-type="all">全部</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterType" data-args='["video","$el"]' data-filter-type="video">视频</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterType" data-args='["image","$el"]' data-filter-type="image">图片</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterType" data-args='["audio","$el"]' data-filter-type="audio">音频</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterType" data-args='["doc","$el"]' data-filter-type="doc">文档</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">最低评分</h6></li>
+                    <li><a class="dropdown-item active" href="#" data-prevent data-action="setFilterRating" data-args='[0,"$el"]' data-filter-rating="0">无限制</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterRating" data-args='[1,"$el"]' data-filter-rating="1"><i class="bi bi-star-fill text-warning me-1"></i>1星+</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterRating" data-args='[2,"$el"]' data-filter-rating="2"><i class="bi bi-star-fill text-warning me-1"></i>2星+</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterRating" data-args='[3,"$el"]' data-filter-rating="3"><i class="bi bi-star-fill text-warning me-1"></i>3星+</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterRating" data-args='[4,"$el"]' data-filter-rating="4"><i class="bi bi-star-fill text-warning me-1"></i>4星+</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterRating" data-args='[5,"$el"]' data-filter-rating="5"><i class="bi bi-star-fill text-warning me-1"></i>5星+</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">颜色标记 [U5]</h6></li>
+                    <li><a class="dropdown-item active" href="#" data-prevent data-action="setFilterColor" data-args='[0,"$el"]' data-filter-color="0">全部颜色</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterColor" data-args='[1,"$el"]' data-filter-color="1"><span class="color-dot c1 me-2"></span>红</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterColor" data-args='[2,"$el"]' data-filter-color="2"><span class="color-dot c2 me-2"></span>黄</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterColor" data-args='[3,"$el"]' data-filter-color="3"><span class="color-dot c3 me-2"></span>绿</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterColor" data-args='[4,"$el"]' data-filter-color="4"><span class="color-dot c4 me-2"></span>蓝</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterColor" data-args='[5,"$el"]' data-filter-color="5"><span class="color-dot c5 me-2"></span>紫</a></li>
+                    <li><h6 class="dropdown-header">自动颜色（图内主色）[V3]</h6></li>
+                    <li class="px-3 py-1"><div class="d-flex flex-wrap gap-1 align-items-center" id="domBucketRow">
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[""]' data-stop data-prevent title="全部" style="background:linear-gradient(135deg,#f00,#00f);"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[0]' data-stop data-prevent title="红" style="background:#e53935;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[1]' data-stop data-prevent title="橙" style="background:#fb8c00;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[2]' data-stop data-prevent title="黄" style="background:#fdd835;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[3]' data-stop data-prevent title="黄绿" style="background:#c0ca33;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[4]' data-stop data-prevent title="绿" style="background:#43a047;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[5]' data-stop data-prevent title="青绿" style="background:#00acc1;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[6]' data-stop data-prevent title="青" style="background:#039be5;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[7]' data-stop data-prevent title="蓝" style="background:#1e88e5;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[8]' data-stop data-prevent title="靛蓝" style="background:#3949ab;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[9]' data-stop data-prevent title="紫" style="background:#8e24aa;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[10]' data-stop data-prevent title="品红" style="background:#d81b60;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[11]' data-stop data-prevent title="玫红" style="background:#e91e63;"></span>
+                        <span class="color-dot dom-dot" data-action="setFilterDomBucket" data-args='[-1]' data-stop data-prevent title="黑白灰" style="background:#9e9e9e;"></span>
+                    </div></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">旗标 [U5]</h6></li>
+                    <li><a class="dropdown-item active" href="#" data-prevent data-action="setFilterFlag" data-args='["all","$el"]' data-filter-flag="all">全部</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterFlag" data-args='["pick","$el"]' data-filter-flag="pick"><i class="bi bi-flag-fill text-primary me-1"></i>已旗标</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterFlag" data-args='["noreject","$el"]' data-filter-flag="noreject"><i class="bi bi-eye me-1"></i>隐藏拒收</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">拍摄日期 [V1]</h6></li>
+                    <li class="px-3 py-1"><div class="d-flex gap-2">
+                        <input type="date" class="form-control form-control-sm bg-dark text-white border-secondary" data-change-action="setFilterDateFrom" title="起始日期（无拍摄日期的文件按修改时间参与筛选）">
+                        <input type="date" class="form-control form-control-sm bg-dark text-white border-secondary" data-change-action="setFilterDateTo" title="结束日期">
+                    </div></li>
+                    <li><h6 class="dropdown-header">最短时长 [V1]</h6></li>
+                    <li><a class="dropdown-item active" href="#" data-prevent data-action="setFilterDuration" data-args='[0,"$el"]' data-filter-duration="0">无限制</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterDuration" data-args='[10,"$el"]' data-filter-duration="10">≥ 10 秒</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterDuration" data-args='[60,"$el"]' data-filter-duration="60">≥ 1 分钟</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-action="setFilterDuration" data-args='[300,"$el"]' data-filter-duration="300">≥ 5 分钟</a></li>
+                </ul>
+            </div>
+
+            <!-- 设置按钮（整合菜单栏所有功能） -->
+            <div class="dropdown me-1">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle remove-caret" type="button" id="settingsMenuBtn" data-bs-toggle="dropdown" aria-expanded="false" title="设置">
+                    <i class="bi bi-gear"></i>
+                </button>
+                <ul class="dropdown-menu shadow" aria-labelledby="settingsMenuBtn" style="min-width: 220px; right: 0; left: auto;">
+                    <li><h6 class="dropdown-header">文件</h6></li>
+                    <li><a class="dropdown-item" href="#" data-action="reloadFiles" data-prevent data-stop><i class="bi bi-arrow-clockwise me-2"></i>刷新</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="openFolderDialog" data-prevent data-stop><i class="bi bi-folder2-open me-2"></i>打开目录...</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">编辑</h6></li>
+                    <li><a class="dropdown-item" href="#" data-action="copySelected" data-prevent data-stop>
+                        <i class="bi bi-clipboard me-2"></i>复制
+                        <span class="ms-auto text-muted small ps-3">Ctrl+C</span>
+                    </a></li>
+                    <li><a class="dropdown-item" href="#" data-action="pasteFiles" data-prevent data-stop>
+                        <i class="bi bi-clipboard-plus me-2"></i>粘贴
+                        <span class="ms-auto text-muted small ps-3">Ctrl+V</span>
+                    </a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="#" data-action="selectAll" data-prevent data-stop>
+                        <i class="bi bi-check-all me-2"></i>全选
+                        <span class="ms-auto text-muted small ps-3">Ctrl+A</span>
+                    </a></li>
+                    <li><a class="dropdown-item" href="#" data-action="window.clearSelection" data-prevent data-stop><i class="bi bi-x-circle me-2"></i>取消全选</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="invertSelection" data-prevent data-stop>
+                        <i class="bi bi-arrow-left-right me-2"></i>反选
+                        <span class="ms-auto text-muted small ps-3">Ctrl+Shift+I</span>
+                    </a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">元数据与撤销</h6></li>
+                    <li><a class="dropdown-item" href="#" data-action="undoLast" data-prevent data-stop>
+                        <i class="bi bi-arrow-counterclockwise me-2"></i>撤销
+                        <span class="ms-auto text-muted small ps-3">Ctrl+Z</span>
+                    </a></li>
+                    <li><a class="dropdown-item" href="#" data-action="exportMetaBackup" data-prevent data-stop><i class="bi bi-download me-2"></i>导出元数据备份</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="importMetaBackup" data-prevent data-stop><i class="bi bi-upload me-2"></i>导入元数据备份</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="openRelinkScan" data-prevent data-stop><i class="bi bi-link-45deg me-2"></i>失联元数据找回...</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="openDuplicatesModal" data-prevent data-stop><i class="bi bi-files me-2"></i>重复文件查找...</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="runXmpImport" data-prevent data-stop><i class="bi bi-box-arrow-in-down me-2"></i>从文件导入标记（XMP）...</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">工具 [V3]</h6></li>
+                    <li><a class="dropdown-item" href="#" data-action="openImportModal" data-prevent data-stop><i class="bi bi-download me-2"></i>导入素材...</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="openStatsModal" data-prevent data-stop><i class="bi bi-bar-chart me-2"></i>库统计...</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="openCacheModal" data-prevent data-stop><i class="bi bi-hdd me-2"></i>缓存管理...</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="openMapModal" data-prevent data-stop><i class="bi bi-globe me-2"></i>地图视图...</a></li>
+                    <li><a class="dropdown-item" href="#" data-action="toggleOcrEnabled" data-prevent data-stop><i class="bi bi-textarea-t me-2"></i><span id="ocrToggleLabel">启用图内文字识别（OCR）</span></a></li>
+                    <li><h6 class="dropdown-header">元数据写回（XMP）[V2]</h6></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-stop data-action="setMetaEmbedMode" data-args='["sidecar"]'><i class="bi bi-sticky me-2"></i>旁车 .xmp 文件（默认，不改原文件）</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-stop data-action="setMetaEmbedMode" data-args='["inplace"]'><i class="bi bi-file-earmark-code me-2"></i>直接写入文件</a></li>
+                    <li><a class="dropdown-item" href="#" data-prevent data-stop data-action="setMetaEmbedMode" data-args='["off"]'><i class="bi bi-slash-circle me-2"></i>关闭（仅存数据库）</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">主题</h6></li>
+                    {% for theme in theme_list %}
+                    <li><a class="dropdown-item" href="#" data-action="switchTheme" data-args='["{{ theme }}"]' data-prevent data-stop>
+                        <i class="bi bi-circle-fill me-2 {{ 'text-primary' if theme == current_theme else 'text-muted' }}" style="font-size: 8px;"></i>
+                        <span>{{ theme }}{% if theme == 'toposcolor' %} <small class="text-muted">(默认)</small>{% endif %}</span>
+                    </a></li>
+                    {% endfor %}
+                    <li><hr class="dropdown-divider"></li>
+                    {% if ui_top_menu %}
+                    <li><h6 class="dropdown-header">插件</h6></li>
+                    {{ ui_top_menu | safe }}
+                    <li><hr class="dropdown-divider"></li>
+                    {% endif %}
+                    <li><a class="dropdown-item" href="#" data-action="openPluginManager" data-prevent data-stop><i class="bi bi-grid-fill me-2"></i>插件中心</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="#" data-action="showAboutModal" data-prevent data-stop><i class="bi bi-info-circle me-2"></i>关于</a></li>
+                </ul>
+            </div>
+
+            <div id="selectionActions" class="d-none me-2" style="min-width: 70px;">
+                <!-- [U7/GAP-14/08] 选中工具栏：对比 / 批量旋转 / 批量移动 / 转码入口 -->
+                <button class="btn btn-outline-secondary btn-sm me-1" data-action="openCompareView" title="并排对比选中图片（2-4 张）"><i class="bi bi-layout-split"></i></button>
+                <button class="btn btn-outline-secondary btn-sm me-1" data-action="batchRotate" title="批量旋转 90°"><i class="bi bi-arrow-clockwise"></i></button>
+                <button class="btn btn-outline-secondary btn-sm me-1" data-action="batchMove" title="批量移动到..."><i class="bi bi-folder-symlink"></i></button>
+                <button class="btn btn-outline-secondary btn-sm me-1" data-action="launchFormatFactory" data-stop title="用格式工厂转码"><i class="bi bi-arrow-repeat"></i></button>
+                <button class="btn btn-outline-secondary btn-sm me-1" data-action="openExportModal" title="导出选中图片（尺寸/水印/预设）"><i class="bi bi-box-arrow-up-right"></i></button>
+                <button class="btn btn-danger btn-sm" data-action="batchDelete" style="width: 70px;">删除 <span id="selCount"></span></button>
+            </div>
+            <div class="d-flex align-items-center me-3" style="width: 120px;" title="调整视图大小">
+                <i class="bi bi-dash-lg small text-muted me-2" style="font-size: 10px;"></i>
+                <input type="range" class="form-range" id="sizeSlider" min="120" max="320" step="10">
+                <i class="bi bi-plus-lg small text-muted ms-2" style="font-size: 10px;"></i>
+            </div>
+            <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary" id="btn-view-adaptive" data-action="switchLayout" data-args='["adaptive"]' title="自适应"><i class="bi bi-grid-3x3-gap-fill"></i></button>
+                <button class="btn btn-outline-secondary" id="btn-view-grid" data-action="switchLayout" data-args='["grid"]' title="网格大图"><i class="bi bi-square-fill"></i></button>
+                <button class="btn btn-outline-secondary" id="btn-view-waterfall" data-action="switchLayout" data-args='["waterfall"]' title="瀑布流"><i class="bi bi-columns-gap"></i></button>
+                <button class="btn btn-outline-secondary" id="btn-view-list" data-action="switchLayout" data-args='["list"]' title="列表"><i class="bi bi-list-ul"></i></button>
+                <button class="btn btn-outline-secondary" id="btn-view-timeline" data-action="switchLayout" data-args='["timeline"]' title="时间线"><i class="bi bi-clock-history"></i></button>
+            </div>
+            <!-- [V3/GAP-11] 子文件夹内容聚合开关 -->
+            <button class="btn btn-outline-secondary btn-sm me-1" id="btnRecursive" data-action="toggleRecursiveList" data-stop title="显示子文件夹内容（聚合浏览）"><i class="bi bi-eye"></i></button>
+            <!-- [V1/GAP-02] 时间线时间基准切换（修改时间 | 拍摄时间） -->
+            <select id="timelineBaseSel" class="form-select form-select-sm bg-dark text-white border-secondary ms-2" data-change-action="setTimelineBase" title="时间线时间基准" style="width:auto; display:none; font-size:12px;">
+                <option value="mtime">按修改时间</option>
+                <option value="taken">按拍摄时间</option>
+            </select>
+            <button class="btn btn-outline-secondary btn-sm ms-2" data-action="togglePropertiesPanel" title="切换属性面板"><i class="bi bi-layout-sidebar-reverse"></i></button>
+            <button class="btn btn-primary btn-sm ms-2" data-action="reloadFiles"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+
+        <!-- 文件展示区域 -->
+        <div class="file-area custom-scrollbar" id="scrollContainer" data-drop-zone>
+            <div id="fileContainer" class="layout-adaptive"></div>
+            <div id="scrollSentinel" style="height:20px;"></div>
+            <div id="emptyState" class="text-center text-muted mt-5 d-none">空文件夹</div>
+        </div>
+    </div>
+
+    <!-- 右侧属性面板 -->
+    <div id="propertiesPanel" class="properties-panel">
+        <div class="panel-header">
+            <span class="panel-title fw-bold small text-white">属性</span>
+            <button class="btn btn-sm text-white-50" data-action="togglePropertiesPanel" data-args="[false]">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+        <div id="propContent" class="panel-content custom-scrollbar"></div>
+    </div>
+</div>
+
+<!-- [FUNC-17] 浮动播放器死块已删除：全库无 openCms/closeFloatingPlayer 之外的
+     任何代码能唤起它，且 openCms 也是死引用；视频播放由 Qt 侧引擎负责 -->
+
+<!-- 全屏预览 (CMS) -->
+<div id="cmsLightbox" style="display:none;">
+    <div class="cms-toolbar">
+        <div class="text-truncate text-white fw-bold small" style="max-width: 60%;" id="cmsTitle">Filename.jpg</div>
+        <div class="d-flex align-items-center gap-3">
+            <span id="cmsInfo" class="text-white-50 small font-monospace"></span>
+            <!-- [U7/GAP-12] 幻灯片放映：播放/暂停 + 间隔 -->
+            <select id="slideshowInterval" data-change-action="setSlideshowInterval" title="放映间隔" style="background:#252526;color:#aaa;border:1px solid #444;border-radius:4px;font-size:11px;">
+                <option value="1000">1s</option>
+                <option value="2000" selected>2s</option>
+                <option value="3000">3s</option>
+                <option value="5000">5s</option>
+            </select>
+            <button class="btn btn-sm btn-outline-light border-0" data-action="toggleSlideshow" id="slideshowBtn" title="幻灯片放映"><i class="bi bi-play-fill"></i></button>
+            <button class="btn btn-sm btn-outline-light border-0" data-action="resetZoom"><i class="bi bi-aspect-ratio"></i></button>
+            <!-- [BUG-P3-38] closeCms 死引用已移除：实际关闭逻辑在
+                 fe-render.js setupLightboxEvents 的 $('#cmsClose').onclick -->
+            <button id="cmsClose" class="btn-close btn-close-white"></button>
+        </div>
+    </div>
+    <div class="cms-viewport" id="cmsViewport">
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%;">
+            <img id="cmsImg" draggable="false">
+            <video id="cmsVideo" controls style="max-width:100%; max-height:100%; display:none;"></video>
+            <!-- [U7/GAP-11] 文本/Markdown 预览面板 -->
+            <div id="cmsText" class="cms-text-pane" style="display:none;"></div>
+            <div id="cmsVideoInfo" class="text-white-50 small font-monospace" style="margin-top:15px; text-align:center;"></div>
+        </div>
+        <div class="nav-arrow nav-prev" data-action="navigateFile" data-args="[-1]"><i class="bi bi-chevron-left"></i></div>
+        <div class="nav-arrow nav-next" data-action="navigateFile" data-args="[1]"><i class="bi bi-chevron-right"></i></div>
+    </div>
+</div>
+
+<!-- [U7/GAP-08] 对比视图（2-4 张并排、锁定缩放） -->
+<div id="compareView" style="display:none;">
+    <div class="cmp-toolbar">
+        <span id="cmpTitle" class="text-white-50 small me-auto"></span>
+        <button class="btn btn-sm btn-outline-light border-0" data-action="compareZoom" data-args='[0.8]' title="缩小"><i class="bi bi-zoom-out"></i></button>
+        <button class="btn btn-sm btn-outline-light border-0" data-action="compareZoom" data-args='[1.25]' title="放大"><i class="bi bi-zoom-in"></i></button>
+        <button class="btn btn-sm btn-outline-light border-0" data-action="compareZoom" data-args='[0]' title="重置"><i class="bi bi-aspect-ratio"></i></button>
+        <button class="btn-close btn-close-white ms-3" data-action="closeCompareView"></button>
+    </div>
+    <div id="cmpPanes" class="cmp-panes"></div>
+</div>
+
+<!-- [U7/GAP-09] 重复文件查找 -->
+<div class="modal fade" id="duplicatesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-white border-secondary">
+            <div class="modal-header py-2 border-secondary">
+                <h5 class="modal-title text-white small fw-bold">重复文件查找</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <input type="text" id="dupScanPath" class="form-control form-control-sm bg-dark text-white border-secondary flex-grow-1" placeholder="扫描目录">
+                    <button class="btn btn-sm btn-primary" data-action="runDuplicateScan">扫描</button>
+                </div>
+                <div id="dupSummary" class="text-white-50 small mb-2"></div>
+                <div id="dupResults" class="custom-scrollbar" style="max-height:55vh; overflow-y:auto;"></div>
+            </div>
+            <div class="modal-footer py-2 border-secondary bg-black bg-opacity-25">
+                <span class="text-white-50 small me-auto">每保留一份，其余移入回收站（可恢复）</span>
+                <button type="button" class="btn btn-outline-secondary btn-sm border-0" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger btn-sm" data-action="deleteDuplicateExtras">删除未保留项</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 右键上下文菜单 -->
+<div id="contextMenu" class="context-menu">
+    <div class="menu-item" id="ctx-open" data-action="handleMenuOpen"><i class="bi bi-box-arrow-up-right me-2"></i>打开</div>
+    <div class="menu-item" id="ctx-new-folder" data-action="handleMenuNewFolder" style="display:none;"><i class="bi bi-folder-plus me-2"></i>新建文件夹</div>
+    <div class="menu-item has-submenu" id="ctx-sys-open">
+        <div class="d-flex align-items-center w-100">
+            <i class="bi bi-laptop me-2"></i>
+            <span>打开方式</span>
+            <i class="bi bi-chevron-right ms-auto small text-muted"></i>
+        </div>
+        <div class="submenu" id="ctx-sys-submenu"></div>
+    </div>
+    <div class="menu-item" id="ctx-reveal" data-action="handleMenuReveal"><i class="bi bi-folder-symlink me-2"></i>在文件夹中显示</div>
+    <div class="menu-divider" id="ctx-div-mid"></div>
+    <div class="menu-item" id="ctx-rename" data-action="handleMenuRename" style="display:none;"><i class="bi bi-pencil-square me-2"></i>重命名</div>
+    <div class="menu-item" id="ctx-stack" data-action="stackSelected" style="display:none;"><i class="bi bi-layers me-2"></i>堆叠所选</div>
+    <div class="menu-item" id="ctx-unstack" data-action="unstackSelected" style="display:none;"><i class="bi bi-layers-half me-2"></i>取消堆叠</div>
+    <div class="menu-item text-warning" id="ctx-coll-remove" data-action="removeFromCollection" style="display:none;"><i class="bi bi-collection-remove me-2"></i>从集合移除</div>
+    <div class="menu-item" id="ctx-similar" data-action="runSimilarFromContext"><i class="bi bi-images me-2"></i>查找相似</div>
+    <div class="menu-item" id="ctx-lock" data-action="lockFolderFromContext" style="display:none;"><i class="bi bi-lock me-2"></i>设置密码保护</div>
+    <div class="menu-divider" id="ctx-div-1"></div>
+    <div class="menu-item" id="ctx-copy" data-action="handleMenuCopy"><i class="bi bi-clipboard me-2"></i>复制</div>
+    <div class="menu-item" id="ctx-paste" data-action="handleMenuPaste"><i class="bi bi-clipboard-plus me-2"></i>粘贴在此处</div>
+    <div class="menu-item" id="ctx-batch" data-action="showBatchProperties" style="display:none;"><i class="bi bi-collection me-2"></i>批量操作...</div>
+    {{ ui_context_menu | safe }}
+    <div class="menu-divider" id="ctx-div-2"></div>
+    <div class="menu-item text-danger" id="ctx-del" data-action="handleMenuDelete"><i class="bi bi-trash me-2"></i>删除</div>
+</div>
+
+<!-- 智能文件夹右键菜单 -->
+<div id="smartContextMenu" class="context-menu">
+    <div class="menu-item" data-action="handleSmartEdit"><i class="bi bi-pencil-square me-2"></i>编辑规则</div>
+    <div class="menu-divider"></div>
+    <div class="menu-item text-danger" data-action="handleSmartDelete"><i class="bi bi-trash me-2"></i>删除文件夹</div>
+</div>
+
+<!-- [V2/GAP-05] 集合右键菜单 -->
+<div id="collectionContextMenu" class="context-menu">
+    <div class="menu-item" data-action="handleCollRename"><i class="bi bi-pencil-square me-2"></i>重命名</div>
+    <div class="menu-divider"></div>
+    <div class="menu-item text-danger" data-action="handleCollDelete"><i class="bi bi-trash me-2"></i>删除集合</div>
+</div>
+
+<!-- 专业音频编辑器 -->
+<div id="proAudioPlayer" class="pro-audio-modal" style="display:none;">
+    <div class="pro-audio-header">
+        <div class="d-flex align-items-center">
+            <i class="bi bi-waveform text-primary me-2"></i>
+            <span id="proAudioTitle" class="small fw-bold"></span>
+        </div>
+        <button class="btn-close btn-close-white" data-action="closeProAudio"></button>
+    </div>
+    <div class="pro-audio-body">
+        <div id="wave-timeline" class="wave-timeline" style="margin-bottom: 5px;"></div>
+        <div id="wave-main" class="wave-main"></div>    
+        <div id="wave-spectrogram" class="wave-spectrogram" style="display:none; margin-top: 15px;"></div>
+    </div>
+    <div class="pro-audio-controls" style="display: flex; align-items: center; justify-content: space-between; padding: 0 40px;">
+        <div class="d-flex align-items-center gap-4" style="flex: 1; justify-content: flex-start;">
+            <div class="form-check form-switch m-0 d-flex align-items-center">
+                <input class="form-check-input" type="checkbox" id="specSw" onchange="AudioProPlugin.toggleSpectrogram(this.checked)">
+                <label class="form-check-label small text-white-50 ms-2" for="specSw">频谱</label>
+            </div>
+            <div class="d-flex align-items-center ms-2">
+                <i class="bi bi-volume-down text-white-50 me-2" style="font-size: 0.9rem;"></i>
+                <input type="range" class="pro-vol-slider" min="0" max="100" value="100" oninput="AudioProPlugin.setVolume(this.value)" title="音量">
+            </div>
+            <div class="d-flex align-items-center ms-2">
+                <i class="bi bi-zoom-in text-white-50 me-2" style="font-size: 0.8rem;"></i>
+                <input type="range" class="pro-vol-slider" min="10" max="1000" value="20" oninput="AudioProPlugin.state.ws.zoom(this.value)" title="波形缩放">
+            </div>
+        </div>
+        <div class="d-flex align-items-center" style="gap: 30px;">
+            <button class="btn p-0 text-white-50" id="proLoopBtn" data-action="AudioProPlugin.toggleLoop" title="循环模式"><i class="bi bi-repeat" id="proLoopIcon"></i></button>
+            <button class="btn p-0 text-white-50" style="font-size: 1.8rem;" data-action="AudioProPlugin.navigate" data-args="[-1]"><i class="bi bi-skip-start-circle"></i></button>
+            <button class="btn p-0" style="color: #007aff; font-size: 3.6rem; line-height: 1;" data-action="AudioProPlugin.togglePlay"><i class="bi bi-play-circle-fill" id="proPlayIcon"></i></button>
+            <button class="btn p-0 text-white-50" style="font-size: 1.8rem;" data-action="AudioProPlugin.navigate" data-args="[1]"><i class="bi bi-skip-end-circle"></i></button>
+        </div>
+        <div class="d-flex align-items-center" style="flex: 1; justify-content: flex-end; gap: 20px;">
+            <div class="d-flex align-items-baseline font-monospace me-2">
+                <span id="proTimeCurrent" style="color: #007aff; font-size: 1.3rem; font-weight: 600;">0:00.0</span>
+                <span class="mx-2 text-white-50" style="font-size: 1rem;">/</span>
+                <span id="proTimeTotal" class="text-white-50" style="font-size: 0.9rem;">0:00.0</span>
+            </div>
+            <button id="proTrimBtn" class="btn btn-primary rounded-pill px-3" data-action="AudioProPlugin.saveTrim"><i class="bi bi-scissors me-1"></i>截取</button>
+            <button class="btn btn-outline-light btn-sm rounded-pill px-3" style="border-color: rgba(255,255,255,0.2); font-weight: 500; height: 34px; background: rgba(255,255,255,0.1);" data-action="AudioProPlugin.clearSelection" title="清除选区"><i class="bi bi-x-lg me-1" style="font-size: 0.8rem;"></i>取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 粘贴进度条 -->
+<div id="pasteProgressPanel" class="paste-progress-panel">
+    <div class="d-flex justify-content-between mb-1">
+        <span class="small fw-bold"><i class="bi bi-files me-2"></i>正在复制文件...</span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="small font-monospace" id="pasteSpeed">0 MB/s</span>
+            <!-- [BUG-P2-06] 粘贴此前不可取消（CopyWorker._is_running 无处置 False） -->
+            <button class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size:11px;" data-action="cancelPaste" data-stop>取消</button>
+        </div>
+    </div>
+    <div class="progress" style="height: 6px; background: rgba(255,255,255,0.1);">
+        <div id="pasteProgressBar" class="progress-bar bg-primary" role="progressbar" style="width: 0%"></div>
+    </div>
+</div>
+
+<!-- 缩略图生成进度条 -->
+<div id="thumbProgressPanel" class="thumb-progress-panel">
+    <div class="d-flex align-items-center justify-content-between mb-1">
+        <span class="small fw-bold"><i class="bi bi-card-image me-2"></i>正在渲染缩略图...</span>
+        <span class="small font-monospace" id="thumbProgressText">0/0</span>
+    </div>
+    <div class="progress" style="height: 4px; background: rgba(255,255,255,0.1);">
+        <div id="thumbProgressBar" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+    </div>
+</div>
+
+<!-- Smart Folder Builder Modal -->
+<!-- 关于模态框 -->
+<div class="modal fade" id="aboutModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark border-secondary shadow-lg">
+            <div class="modal-header border-secondary bg-black bg-opacity-25">
+                <h5 class="modal-title text-white small fw-bold">关于 AssetDeck</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4 text-center">
+                <div class="mb-3">
+                    <i class="bi bi-stack text-primary" style="font-size: 3rem;"></i>
+                </div>
+                <h4 class="text-white mb-1">AssetDeck Pro</h4>
+                <p class="text-white-50 small mb-4">版本 v1.0.0</p>
+                <div class="text-start p-3 border border-secondary rounded bg-black bg-opacity-10">
+                    <p class="text-white-50 small mb-2">专业影视素材管理工具</p>
+                    <p class="text-white-50 small mb-0">致力于为影视工作者提供极速的文件浏览、元数据管理与媒体协作体验。</p>
+                </div>
+                <p class="text-white-50 small mt-4">© 2026 AssetDeck Team</p>
+            </div>
+            <div class="modal-footer border-secondary p-2 bg-black bg-opacity-25">
+                <button type="button" class="btn btn-primary btn-sm px-4" data-bs-dismiss="modal">确定</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="pluginManagerModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-dark border-secondary shadow-lg">
+            <div class="modal-header border-secondary bg-black bg-opacity-25">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-grid-fill text-primary me-2"></i>
+                    <h5 class="modal-title text-white small fw-bold">插件指挥中心</h5>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="plugin-list-container custom-scrollbar" style="max-height: 500px; padding: 20px;">
+                    <div id="pluginManagerList" class="d-flex flex-column gap-3">
+                        </div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary p-2 bg-black bg-opacity-25">
+                <span class="text-muted small me-auto ms-2" id="pluginCountLabel"></span>
+                <button type="button" class="btn btn-primary btn-sm px-4" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="smartBuilderModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark border-secondary shadow-lg">
+            <div class="modal-header border-secondary bg-black bg-opacity-25">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-gear-wide-connected text-primary me-2"></i>
+                    <h5 class="modal-title text-white small fw-bold">智能文件夹设置</h5>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-4">
+                    <label class="form-label text-muted small text-uppercase fw-bold mb-2">名称</label>
+                    <input type="text" id="smartFolderName" class="form-control bg-dark text-white border-secondary" placeholder="例如：我的精选视频">
+                </div>
+                
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="form-label text-muted small text-uppercase fw-bold m-0">筛选规则</label>
+                        <span class="badge bg-secondary bg-opacity-25 text-white-50 fw-normal">满足所有条件</span>
+                    </div>
+                    <div id="smartRulesContainer" class="p-2 border border-secondary rounded bg-black bg-opacity-10" style="min-height: 80px;"></div>
+                </div>
+                
+                <button class="btn btn-outline-primary btn-sm w-100 mt-2 border-dashed" data-action="addSmartRule" style="border-style: dashed;">
+                    <i class="bi bi-plus-lg me-1"></i>添加筛选条件
+                </button>
+            </div>
+            <div class="modal-footer border-secondary p-2 bg-black bg-opacity-25">
+                <button type="button" class="btn btn-outline-secondary btn-sm border-0" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm px-4" data-action="saveSmartFolder">保存配置</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- [U6/GAP-06] 元数据导入隐藏文件入口 + 失联元数据找回（re-link）模态框 -->
+<input type="file" id="metaImportInput" accept=".json,application/json" style="display:none;" data-change-action="handleMetaImportFile">
+<div class="modal fade" id="relinkModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg modal-dialog-centered">
+        <div class="modal-content bg-dark text-white border-secondary">
+            <div class="modal-header py-2 border-secondary">
+                <h5 class="modal-title text-white small fw-bold">失联元数据找回（re-link）</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-white-50 small mb-2">在应用外移动/重命名文件会让评分、标签等元数据失联。扫描会按「同名文件」在已添加的素材库中寻找唯一候选，勾选后一键把元数据接到新路径（缩略图一并迁移）。</div>
+                <div id="relinkCount" class="text-white-50 small mb-2"></div>
+                <div id="relinkList" class="custom-scrollbar" style="max-height:50vh; overflow-y:auto;"></div>
+            </div>
+            <div class="modal-footer py-2 border-secondary bg-black bg-opacity-25">
+                <button type="button" class="btn btn-outline-secondary btn-sm border-0" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm px-4" data-action="applyRelink">找回选中项</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- [U7/GAP-11] marked（Markdown 预览；纯文本回退 <pre>） -->
+<script src="{{ url_for('static', filename='vendor/marked/marked.min.js') }}"></script>
+<!-- [U9] DOMPurify：marked 输出消毒后再入 innerHTML（md 预览 XSS 防线） -->
+<script src="{{ url_for('static', filename='vendor/purify/purify.min.js') }}"></script>
+<!-- 脚本引用 -->
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/toastify/toastify.min.js') }}"></script>
+<script src="{{ url_for('static', filename='wavesurfer/wavesurfer.min.js') }}"></script>
+<script src="/static_plugin/audio_pro/regions.min.js"></script>
+<script src="/static_plugin/audio_pro/timeline.min.js"></script>
+<script src="/static_plugin/audio_pro/spectrogram.min.js"></script>
+<script src="/static_plugin/audio_pro/hover.min.js"></script>
+<script src="/static_plugin/audio_pro/zoom.min.js"></script>
+<script src="/static_plugin/audio_pro/audio_player.js"></script>
+<!-- [BUG-P1-12] tojson 过滤器对 </script>/单引号做 unicode 转义，任何插件注册名都安全
+     （旧 JSON.parse('...') 单引号包裹，插件名含 ' 即整段脚本解析失败、前端瘫痪） -->
+<script>window.FILE_HANDLERS = {{ file_handlers | tojson }};</script>
+<!-- [ARCH-13] 三模块 IIFE：state（状态/共享工具）→ render（DOM 构建）→ actions（行为/初始化） -->
+<script src="{{ url_for('static', filename='assets/js/fe-state.js') }}?v={{ timestamp }}"></script>
+<script src="{{ url_for('static', filename='assets/js/fe-render.js') }}?v={{ timestamp }}"></script>
+<script src="{{ url_for('static', filename='assets/js/fe-actions.js') }}?v={{ timestamp }}"></script>
+{% for js_file in plugin_js_files %}<script src="{{ js_file }}"></script>{% endfor %}
+</body>
+</html>
+
+<!-- [V3/GAP-12] 导入素材向导 -->
+<div class="modal fade" id="importModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content bg-dark text-white border-secondary">
+            <div class="modal-header py-2 border-secondary">
+                <h5 class="modal-title text-white small fw-bold">导入素材</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6"><label class="text-white-50 small mb-1">源目录（相机/SD卡/下载目录）</label>
+                        <input type="text" id="importSource" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="/Volumes/SD_CARD/DCIM"></div>
+                    <div class="col-md-6"><label class="text-white-50 small mb-1">目标目录（素材库内）</label>
+                        <input type="text" id="importDest" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder=""></div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-4"><label class="text-white-50 small mb-1">固定子目录（可选）</label>
+                        <input type="text" id="importSubdir" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="如：婚礼跟拍"></div>
+                    <div class="col-md-8"><label class="text-white-50 small mb-1">重命名模板（可选，如 <code>{date:taken:%Y%m%d}_{seq:3}</code>）</label>
+                        <input type="text" id="importTemplate" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder=""></div>
+                </div>
+                <div class="d-flex gap-4 small text-white-50">
+                    <div class="form-check"><input class="form-check-input" type="checkbox" id="importDateFolders" checked><label class="form-check-label" for="importDateFolders">按拍摄日期归档（YYYY/YYYY-MM-DD）</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" id="importSkipDup" checked><label class="form-check-label" for="importSkipDup">跳过重复（同名同大小）</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" id="importDelSource"><label class="form-check-label" for="importDelSource">导入后删除源（入系统废纸篓）</label></div>
+                </div>
+                <div id="importResult" class="small text-white-50 mt-2"></div>
+            </div>
+            <div class="modal-footer py-2 border-secondary bg-black bg-opacity-25">
+                <button type="button" class="btn btn-outline-secondary btn-sm border-0" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" data-action="runImport">开始导入</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- [V3/GAP-13] 库统计 -->
+<div class="modal fade" id="statsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-white border-secondary">
+            <div class="modal-header py-2 border-secondary">
+                <h5 class="modal-title text-white small fw-bold">库统计</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body" id="statsContent">
+                <div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"></div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- [V3/GAP-14] 缓存管理 -->
+<div class="modal fade" id="cacheModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark text-white border-secondary">
+            <div class="modal-header py-2 border-secondary">
+                <h5 class="modal-title text-white small fw-bold">缩略图缓存管理</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div id="cacheSizeInfo" class="small text-white-50 mb-3">统计中...</div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-sm btn-outline-secondary" data-action="runCacheCleanup" data-args='["all",90]'>清理 90 天未访问</button>
+                    <button class="btn btn-sm btn-outline-danger" data-action="runCacheCleanup" data-args='["all",0]'>全部清空（可重建）</button>
+                </div>
+                <div class="text-white-50 mt-2" style="font-size:11px;">缩略图清理后会在浏览时自动重新生成，不影响素材本体。</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- [V4/GAP-16] 地图视图（Leaflet CDN；离线时提示） -->
+<div class="modal fade" id="mapModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content bg-dark text-white border-secondary">
+            <div class="modal-header py-2 border-secondary">
+                <h5 class="modal-title text-white small fw-bold">地图视图（有 GPS 的素材）</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div id="mapDiv" style="height:55vh;border-radius:6px;background:#1a1a1a;"></div>
+                <div id="mapList" class="small text-white-50 mt-2" style="max-height:120px;overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- [V4/GAP-18] 导出（尺寸/格式/水印/预设） -->
+<div class="modal fade" id="exportModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark text-white border-secondary">
+            <div class="modal-header py-2 border-secondary">
+                <h5 class="modal-title text-white small fw-bold">导出选中图片（<span id="exportCount">0</span> 张）</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2 mb-2">
+                    <div class="col-6"><label class="text-white-50 small mb-1">目标目录</label>
+                        <input type="text" id="exportDest" class="form-control form-control-sm bg-dark text-white border-secondary"></div>
+                    <div class="col-3"><label class="text-white-50 small mb-1">格式</label>
+                        <select id="exportFormat" class="form-select form-select-sm bg-dark text-white border-secondary">
+                            <option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option>
+                        </select></div>
+                    <div class="col-3"><label class="text-white-50 small mb-1">质量</label>
+                        <input type="number" id="exportQuality" class="form-control form-control-sm bg-dark text-white border-secondary" value="90" min="1" max="100"></div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-3"><label class="text-white-50 small mb-1">最大宽</label>
+                        <input type="number" id="exportMaxW" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="原始"></div>
+                    <div class="col-3"><label class="text-white-50 small mb-1">最大高</label>
+                        <input type="number" id="exportMaxH" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="原始"></div>
+                    <div class="col-6"><label class="text-white-50 small mb-1">应用预设</label>
+                        <div class="d-flex gap-1">
+                            <select id="exportPresetSel" class="form-select form-select-sm bg-dark text-white border-secondary" data-change-action="applyExportPreset"></select>
+                            <button class="btn btn-sm btn-outline-secondary border-0" data-action="saveExportPreset" title="保存当前设置为预设"><i class="bi bi-save"></i></button>
+                        </div></div>
+                </div>
+                <div class="mb-2"><label class="text-white-50 small mb-1">文字水印（留空不加）</label>
+                    <div class="d-flex gap-2">
+                        <input type="text" id="exportWatermarkText" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="© 我的名字">
+                        <select id="exportWmPos" class="form-select form-select-sm bg-dark text-white border-secondary" style="max-width:110px;">
+                            <option value="br">右下</option><option value="bl">左下</option><option value="tr">右上</option>
+                            <option value="tl">左上</option><option value="center">居中</option><option value="tile">平铺</option>
+                        </select>
+                    </div></div>
+                <div id="exportResult" class="small text-white-50"></div>
+            </div>
+            <div class="modal-footer py-2 border-secondary bg-black bg-opacity-25">
+                <button type="button" class="btn btn-outline-secondary btn-sm border-0" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" data-action="runExport">开始导出</button>
+            </div>
+        </div>
+    </div>
+</div>

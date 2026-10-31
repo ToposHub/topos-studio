@@ -1,0 +1,72 @@
+// --- Topos Plugin Metadata ---
+// @name Solarize
+// @i18n_name LIB1_Solarize
+// @author Topos Library v1
+// @version 0.1.0
+// @description Threshold foldback solarization (v>thr -> 2*thr-v) with smoothstep soft transition, Luma/RGB channel modes and amount blend; linear foldback with no clamp (HDR inputs may fold negative, declared); amount 0 is exact identity
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider threshold "Threshold" 1.0 0.0 4.0
+// @param slider softness "Softness" 0.0 0.0 1.0
+// @param select channel_mode "Channels" 0 "Luma" "RGB"
+// @param slider amount "Amount" 1.0 0.0 1.0
+// -----------------------------
+//
+// Solarize —— 阈值折返太阳化（L 计划 F17，LIB1）。
+//
+// 差量（见 L00 台账 F17 行）：全库无 solarize——Invert 是全反相
+// (1-c)，不是阈值折返；本件为 v>thr → 2·thr−v 的折返 + 软过渡 +
+// Luma/RGB 通道两档 + amount 混合。
+//
+// 设计要点：
+// - 折返 fold(v) = 2·thr − v（线性、无 clamp：HDR 输入可折出负值，
+//   负值输入 v<thr 原样保留——**显式声明**的数学行为，不是裁剪）；
+// - 软过渡：m = smoothstep(thr−h, thr+h, v)，h = max(softness·thr, 1e-4)
+//   （下限守护 GLSL smoothstep 等界未定义；softness=0 为近似硬折返，
+//   v=thr 处 fold(v)=v 连续，无跳变）；out_v = mix(v, fold(v), m)；
+// - Luma 档：v=dot(c,W)（709），折返后整色平移 Δ=fold−luma（色度
+//   向量原样保留，亮度改变）；RGB 档：逐通道独立折返；
+// - threshold 下限 1e-4 守护（thr=0 时 h=0 且 2·0−v=−v 全反相语义
+//   退化为 Invert 类，不推荐但数学成立）；
+// - amount=0 → 首行早退精确恒等（默认参数非恒等——风格效果 bypass
+//   语义同 F16）；默认 threshold=1.0/softness=0/Luma/amount=1；
+// - 纯逐像素：零采样/零循环；参数名 threshold/softness/amount 均非
+//   GLSL 保留字（step/mix 等内建名不用于参数）。
+
+const vec3 SOL_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+float sol_fold(float v, float thr, float h) {
+    float m = smoothstep(thr - h, thr + h, v);
+    return mix(v, 2.0 * thr - v, m);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (amount < 0.001) return color;
+
+    float thr = max(threshold, 1e-4);
+    float h = max(softness * thr, 1e-4);
+
+    if (channel_mode == 0) {
+        // Luma 档：折返作用在 709 亮度上，色度向量平移保留
+        float luma = dot(color, SOL_LUMA_W);
+        float folded = sol_fold(luma, thr, h);
+        vec3 result = color + (folded - luma);
+        return mix(color, result, amount);
+    }
+
+    // RGB 档：逐通道独立折返
+    vec3 folded3 = vec3(
+        sol_fold(color.r, thr, h),
+        sol_fold(color.g, thr, h),
+        sol_fold(color.b, thr, h));
+    return mix(color, folded3, amount);
+}

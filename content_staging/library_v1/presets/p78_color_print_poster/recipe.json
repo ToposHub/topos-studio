@@ -1,0 +1,31 @@
+{
+  "recipe_id": "P78",
+  "name": "彩色套印海报",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "彩色套印海报：CMY 近似分色+套印偏移，叠于纸色底",
+  "component": "C06 halftone（暂存节点 lib1_halftone）＋生产 constant/merge",
+  "dependencies": {
+    "component_id": "C06",
+    "component_slug": "halftone",
+    "component_kind": "node",
+    "node_type": "lib1_halftone",
+    "aux_node_types": [
+      "constant",
+      "merge"
+    ]
+  },
+  "params": {
+    "cmyk_separation": "CMY approx",
+    "reg_offset_x": 1.0,
+    "reg_offset_y": 0.0,
+    "paper_base": 0.9,
+    "ink_amount": 0.85
+  },
+  "notes": "C06 halftone 暂存组件＋生产 constant/merge 组成套印海报宏模板（暂存，宿主图导入未接线，未接 L05 白名单）。"
+}

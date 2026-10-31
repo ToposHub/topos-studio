@@ -1,0 +1,55 @@
+{
+  "ok": true,
+  "result": {
+    "selection": "TimelineSelection(clip=b2edbd3a-9ad3-4525-9202-69a15afe875c)",
+    "sections": {
+      "clip:b2edbd3a-9ad3-4525-9202-69a15afe875c:transform": [
+        "translate_x",
+        "translate_y",
+        "scale_x",
+        "scale_y",
+        "rotation",
+        "pivot_mode",
+        "pivot_x",
+        "pivot_y"
+      ],
+      "clip:b2edbd3a-9ad3-4525-9202-69a15afe875c:crop": [
+        "left",
+        "right",
+        "top",
+        "bottom",
+        "feather"
+      ],
+      "clip:b2edbd3a-9ad3-4525-9202-69a15afe875c:speed": [
+        "speed",
+        "reverse",
+        "preserve_pitch"
+      ],
+      "clip:b2edbd3a-9ad3-4525-9202-69a15afe875c:raw": [
+        "wb_gain_r",
+        "wb_gain_g",
+        "wb_gain_b",
+        "exposure_stops",
+        "black_level",
+        "color_space",
+        "gamma"
+      ],
+      "clip:b2edbd3a-9ad3-4525-9202-69a15afe875c:opacity": [
+        "value"
+      ]
+    },
+    "keyframes": [],
+    "clip_id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+    "properties_visible": true,
+    "program_children": [
+      [
+        "_viewer_container",
+        "QWidget"
+      ],
+      [
+        "_viewer",
+        "ProgramViewer"
+      ]
+    ]
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_h264.mp4",
+  "source_probe": {
+    "codec": "h264",
+    "pix_fmt": "yuv420p",
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "frames_declared": 1572,
+    "has_audio": true,
+    "audio_codec": "aac",
+    "audio_rate": 48000
+  },
+  "output": "/Users/testuser/Documents/vscode/topos_1/bench_out/real_user_workflow_h264_full/ai_real_h264_workflow_export.mp4",
+  "project": "/Users/testuser/Documents/vscode/topos_1/bench_out/real_user_workflow_h264_full/ai_real_h264_workflow.topos",
+  "steps": [
+    {
+      "step": "真实 H264 素材探测",
+      "status": "passed",
+      "elapsed_s": 0.0638,
+      "detail": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "frames_declared": 1572,
+        "has_audio": true,
+        "audio_codec": "aac",
+        "audio_rate": 48000
+      }
+    },
+    {
+      "step": "创建项目、导入 H264 素材、创建时间线",
+      "status": "passed",
+      "elapsed_s": 0.0,
+      "detail": {
+        "project_id": "ee8a85fa-1627-4786-aafa-e43d7acd6fb7",
+        "asset_count": 1,
+        "timeline_count": 1,
+        "video_clips": 1,
+        "audio_clips": 1
+      }
+    },
+    {
+      "step": "剪辑：在 120 帧执行刀切",
+      "status": "passed",
+      "elapsed_s": 0.0,
+      "detail": {
+        "clip_ids": [
+          "h264_clip",
+          "h264_clip_right"
+        ],
+        "durations": [
+          120,
+          120
+        ]
+      }
+    },
+    {
+      "step": "加载效果：添加并设置 Gaussian Blur",
+      "status": "passed",
+      "elapsed_s": 0.0,
+      "detail": {
+        "effect_type": "blur",
+        "effect_params": {
+          "blur_type": "gaussian",
+          "radius_x": 6.0,
+          "radius_y": 6.0,
+          "radius": 8.0,
+          "angle": 0.0,
+          "motion_source": "angle",
+          "shutter": 1.0,
+          "edge_preserve": 0.5,
+          "aperture_blades": "circle",
+          "anamorphic": 0.0,
+          "highlight_gain": 0.0,
+          "edge_policy": "clamp",
+          "quality": "normal",
+          "channel_r": true,
+          "channel_g": true,
+          "channel_b": true,
+          "channel_a": false,
+          "mix": 1.0,
+          "process_alpha": true
+        }
+      }
+    },
+    {
+      "step": "调色：创建调色栈、写入参数并挂载到片段",
+      "status": "passed",
+      "elapsed_s": 0.0,
+      "detail": {
+        "stack_id": "6558ba98-fdbb-4b21-8e22-bd37ffd700ae",
+        "grading_params": {
+          "exposure": 0.2,
+          "contrast": 0.12,
+          "saturation": 0.16,
+          "gain": [
+            0.03,
+            0.0,
+            -0.03
+          ]
+        },
+        "clip_color_stack_id": "6558ba98-fdbb-4b21-8e22-bd37ffd700ae"
+      }
+    },
+    {
+      "step": "合成：创建 Composite 图、验证并应用 Blur 节点",
+      "status": "passed",
+      "elapsed_s": 0.0,
+      "detail": {
+        "node_count": 4,
+        "connection_count": 3,
+        "generation": 8,
+        "composite_id": "h264_composition",
+        "clip_linked": "h264_composition"
+      }
+    },
+    {
+      "step": "保存并重新加载项目",
+      "status": "passed",
+      "elapsed_s": 0.0001,
+      "detail": {
+        "project_path": "/Users/testuser/Documents/vscode/topos_1/bench_out/real_user_workflow_h264_full/ai_real_h264_workflow.topos",
+        "project_bytes": 5593,
+        "assets": 1,
+        "timelines": 1,
+        "compositions": 1,
+        "video_clips": 2,
+        "audio_clips": 1,
+        "effects": 1,
+        "color_stack_refs": 1
+      }
+    },
+    {
+      "step": "H264 生产导出（含音频）",
+      "status": "passed",
+      "elapsed_s": 0.0,
+      "detail": {
+        "success": true,
+        "error_code": "",
+        "cause": "",
+        "wall_s": 9.4316,
+        "fps": 25.446,
+        "hw_fallback_reason": "",
+        "output_exists": true,
+        "output_bytes": 22105859,
+        "probe": {
+          "codec": "h264",
+          "pix_fmt": "yuv420p",
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0,
+          "frames_declared": 240,
+          "has_audio": true,
+          "audio_codec": "aac",
+          "audio_rate": 48000
+        },
+        "decode_counts": {
+          "video_frames": 240,
+          "audio_frames": 451
+        }
+      }
+    }
+  ],
+  "all_passed": true
+}

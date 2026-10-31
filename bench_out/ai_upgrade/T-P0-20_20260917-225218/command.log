@@ -1,0 +1,8 @@
+$ pytest tests/export/test_export_stage_telemetry.py -q
+10 passed
+$ pytest tests/video/test_frame_trace_schema.py tests/edit/test_timeline_export.py tests/media/test_macos_gpu_encode_surface.py -q
+73 passed, 5 skipped
+$ pytest tests/export -q
+104 passed (+12 gpu_benchmark_report/stage_telemetry)
+$ pytest tests/media/test_topos_source_export_passthrough.py tests/edit/test_edit_gpu_pipeline.py -q
+5 passed（真实 2K_topos.mov 导出回归）

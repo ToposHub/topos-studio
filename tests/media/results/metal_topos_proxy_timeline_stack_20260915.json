@@ -1,0 +1,80 @@
+{
+  "backend_requested": "metal",
+  "mode": "stack",
+  "codec": "topos_proxy",
+  "blend_mode": "normal",
+  "gpu_render_enabled": true,
+  "render_path": "gpu",
+  "effect": "none",
+  "effect_radius": null,
+  "effect_blur_type": null,
+  "effect_edge_preserve": null,
+  "effect_edge_mode": null,
+  "effect_edge_kernel_size": null,
+  "effect_mode": null,
+  "frames_requested": 480,
+  "source": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_topos.mov",
+  "source_codec": "topos",
+  "second_source": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_topos.mov",
+  "second_source_codec": "topos",
+  "source_pixel_format": "yuv422p10le",
+  "source_resolution": [
+    1920,
+    1080
+  ],
+  "output_resolution": [
+    1280,
+    720
+  ],
+  "fps": 25.0,
+  "decoded_frame_calls": 480,
+  "decode_wall_s": 2.319821,
+  "metal_texture_frames": 0,
+  "metal_planar_frames": 480,
+  "gpu_yuv422_frames": 480,
+  "gpu_composite_attempts": 480,
+  "gpu_composite_successes": 480,
+  "gpu_render_calls": 480,
+  "gpu_render_wall_s": 2.915433,
+  "gpu_renderers": [
+    {
+      "renderer_id": 13068301472,
+      "class": "TimelineMetalExportRenderer",
+      "frames_rendered": 480,
+      "errors": 0,
+      "last_fallback_reason": null
+    }
+  ],
+  "render_frame_wall_s": 5.302674,
+  "encode_frame_wall_s": 0.668169,
+  "encoder_open_wall_s": 0.001489,
+  "encoder_close_wall_s": 0.002282,
+  "pre_scan_wall_s": 0.030459,
+  "render_encode_pipeline_eligible": true,
+  "encoder_create_wall_s": 0.00014052999904379249,
+  "encoder_name": "topos",
+  "hardware_encoder_engaged": false,
+  "export_wall_s": 11.371168,
+  "export_fps": 42.212,
+  "gpu_backend_resolved": "metal",
+  "output_path": "/tmp/topos_proxy_real_480_stack_yuv422_20260915/metal_stack_none_normal_480f_1280x720.mov",
+  "output_bytes": 16163565,
+  "output_probe": {
+    "codec_name": "topos",
+    "width": 1280,
+    "height": 720,
+    "avg_frame_rate": "25/1",
+    "pix_fmt": "yuv422p10le",
+    "nb_read_frames": 480
+  },
+  "frame_count_matches": true,
+  "frames_encoded_reported": 480,
+  "notes": [
+    "A real source is decoded by VideoFrameProviderService.",
+    "Two video tracks are composited at 100% and 55% opacity with normal blend mode; the top source is /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_topos.mov.",
+    "The complete timeline export includes decode, render, encode, mux, and close.",
+    "Metal uses VideoToolbox NV12/P010 CVMetalTexture input when available; unsupported formats fall back to CPU frames.",
+    "Metal emits native YUV422P10 planes on the GPU for the Topos 422 Proxy encoder; the CPU only forwards those planes to the native encoder. The final plane readback is still a synchronization boundary, not an encoder-native zero-copy surface path."
+  ],
+  "metal_fallback_reasons": []
+}

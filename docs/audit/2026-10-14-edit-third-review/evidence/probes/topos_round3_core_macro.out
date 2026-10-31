@@ -1,0 +1,4 @@
+
+CASE: Macro resurrects explicitly removed transition or deleted owner
+RemoveTransitionCommand clips: ['a', 'b'] trans: [('seam', 'a', 'b', 100)] validation: []
+DeleteClipCommand clips: ['b'] trans: [('seam', 'a', 'b', 100)] validation: ['Transition seam references non-existent left clip a']

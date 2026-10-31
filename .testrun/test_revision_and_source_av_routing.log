@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_revision_and_source_av_routing.py ......                 [100%]
+
+============================== 6 passed in 11.70s ==============================

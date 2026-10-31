@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 5 items
+
+tests/edit/test_timeline_graphics_backend_selection.py .....             [100%]
+
+============================== 5 passed in 8.28s ===============================

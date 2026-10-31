@@ -1,0 +1,18 @@
+{
+  "speed_2_trim_left": {
+    "timeline_start": 110,
+    "timeline_duration": 90,
+    "source_start": 110,
+    "source_duration": 190,
+    "speed": 2.0,
+    "source_last_frame": 288
+  },
+  "speed_2_trim_right": {
+    "timeline_start": 100,
+    "timeline_duration": 90,
+    "source_start": 100,
+    "source_duration": 190,
+    "speed": 2.0,
+    "source_last_frame": 278
+  }
+}

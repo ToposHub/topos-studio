@@ -1,0 +1,58 @@
+{
+  "date": "2026-09-12T10:30:51",
+  "machine": "AMD RX 6800 + Win11 26200",
+  "source": "4K_prores422HQ.mov",
+  "stages": [
+    {
+      "stage": "A 直填 plane.update（bgr48le 本体）",
+      "ms_per_frame": 9.919
+    },
+    {
+      "stage": "B reformat bgr48le→yuv420p10le（x265 路径）",
+      "ms_per_frame": 29.939
+    },
+    {
+      "stage": "C reformat bgr48le→p010le（AMF 10bit，单线程）",
+      "ms_per_frame": 33.245
+    },
+    {
+      "stage": "D reformat→p010le 分带并行 k=2（含拼装）",
+      "ms_per_frame": 45.586
+    },
+    {
+      "stage": "D reformat→p010le 分带并行 k=4（含拼装）",
+      "ms_per_frame": 52.557
+    },
+    {
+      "stage": "D reformat→p010le 分带并行 k=8（含拼装）",
+      "ms_per_frame": 62.768
+    }
+  ],
+  "e2e": [
+    {
+      "arm": "E hevc_amf 10bit（单线程转换）",
+      "fps": 22.6,
+      "amf": true,
+      "fallback_reason": ""
+    },
+    {
+      "arm": "G hevc_amf 10bit（3 路帧级并行转换）",
+      "fps": 29.8,
+      "amf": true,
+      "fallback_reason": ""
+    },
+    {
+      "arm": "H h264_amf 8bit（3 路帧级并行转换）",
+      "fps": 36.7,
+      "amf": true,
+      "fallback_reason": ""
+    },
+    {
+      "arm": "F libx265 10bit（kill switch 对照）",
+      "fps": 2.8,
+      "amf": false,
+      "fallback_reason": ""
+    }
+  ],
+  "banded_bitwise_equal": false
+}

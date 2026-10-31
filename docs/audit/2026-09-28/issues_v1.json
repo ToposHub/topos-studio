@@ -1,0 +1,3712 @@
+[
+ {
+  "id": "AUD-0200",
+  "sev": "Critical",
+  "downgraded": false,
+  "title": "`_do_bake_layer` 引用未定义变量 `render_request_id`，AI Bake 每次必然抛 NameError",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:6428",
+  "conf": "?",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0201",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`_ensure_color_output_fbo` 尺寸变化时立即释放仍在被 Composite/monitor 消费的 ColorOutput 纹理，未走 deferred-release",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:5797-5806",
+  "conf": "?",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0202",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`_yuv_rgb_output_cache` 按尺寸无限累积纹理，窗口多次缩放造成 GPU 内存持续增长",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:1255-1280",
+  "conf": "?",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0203",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "matte 重生成异常时缓存悬挂：旧 matte 已归还纹理池，但 `matte_cache` 仍保留可\"命中\"的旧条目",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:3299-3309（源分辨率路径，3432-3435 视口路径同样模式）",
+  "conf": "?",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0204",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`_last_scope_render_params` 浅拷贝长期持有 UI 侧可变 layer DTO，GPU scope lane 稍后在渲染线程直接复用",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:2917、1757-1777",
+  "conf": "?",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0205",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "legacy 裸帧路径用 `max() > 1.0` 启发式猜尺度，float32 HDR 帧会被整帧错误除以 255",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:5192-5197",
+  "conf": "中",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0206",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`load_prog` 吞掉着色器编译失败，后续代码用 `self.utility_shaders['keyer']` 等无守卫下标，失败后每帧 KeyError",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:812-821（3347/3443/3518/3604/3640 等消费点）",
+  "conf": "?",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0207",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_do_update_aux_tex` lut3d 上传失败时保留旧 LUT 纹理，GPU 状态与模型不一致",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:4104-4109",
+  "conf": "高",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0208",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_do_upload_baked_texture` / `_do_upload_ai_plugin_result` 缺形状校验，写入失败时新建纹理泄漏",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:6529-6547、6592-6626",
+  "conf": "?",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0209",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "池属 matte 纹理在 `_do_remove_layer`/`_do_clear_aux_tex`/`_cleanup` 中被直接 `.release()`，绕过 `fb_manager` 池记账",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:1108-1113、1130-1135、6008-6011",
+  "conf": "?",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0210",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "多处裸 `except:` 捕获（含 SystemExit/KeyboardInterrupt）",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:4179-4181、5881-5884",
+  "conf": "高",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0211",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`run()` 早退/初始化异常路径不执行 `_cleanup()`，泄漏离屏 surface 与共享上下文",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:429-437",
+  "conf": "?",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0212",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_do_render_video_frame` 在复制前直接改写调用方持有的 `render_params` 字典（跨线程写 UI 侧对象）",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:5229-5231",
+  "conf": "高",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0213",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_cleanup` 尾部 fbo_pair/tex_pair/pyramid/reference 释放无 try 包裹，单个失败中断剩余清理与 doneCurrent",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py:6206-6213",
+  "conf": "高",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0214",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "类型注解缺失（仅记录）",
+  "file": "N/A",
+  "loc": "src/features/color/core/async_renderer.py（示例：",
+  "conf": "高",
+  "batch": "batch-002"
+ },
+ {
+  "id": "AUD-0300",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "对比度反解在 hi 精确等于 0.18 时发生除零，产生 numpy RuntimeWarning",
+  "file": "N/A",
+  "loc": "src/features/color/core/auto_color.py:171",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0301",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "update() 四字段赋值非原子，跨线程直接读属性存在撕裂读可能",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_output.py:62",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0302",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "compute_proxy_size 缺少零尺寸/极端长宽比防御，int 截断可产生 0 维边",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_output.py:86",
+  "conf": "低",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0303",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "_convert_via_lcms 将 HDR float 图像 clamp 到 0..1 并经 8bit 中转；uint16 输入路径静默失败",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_manager.py:460",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0304",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "embed_icc 以默认参数重新编码 JPEG（quality 75），二次有损压缩且丢失 EXIF 等元数据",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_manager.py:365",
+  "conf": "高",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0305",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "apply_defaults_to_new_image 的 float 分支把 float16/float64 输入误走 /255 整数缩放路径",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_manager.py:424",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0306",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "ColorManager 单例 __new__ 无锁，并发首次实例化可产生双实例并重复执行昂贵初始化",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_manager.py:123",
+  "conf": "中",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0307",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "_get_pil_profile 不查 bundled profiles 目录，与 get_profile_for_space 的三级查找不一致，目标空间静默退化为 sRGB",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_manager.py:489",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0308",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_scan_system_profiles 的 os.listdir 无异常保护，目录列举失败会中断构造",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_manager.py:170",
+  "conf": "中",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0309",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "多处宽泛 `except Exception: pass` 静默吞错且无日志",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_manager.py:218",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0310",
+  "sev": "Major",
+  "downgraded": true,
+  "title": "CacheWarmer.start_warmup 在持有不可重入锁时调用 stop_warmup，必然死锁",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:1425",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0311",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "内存压力监控在内存\"正常\"时也每 5 秒清空缩略图缓存",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:1605",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0312",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`import psutil` 位于 try 块之外，psutil 缺失时监控线程直接崩溃，try 内 `except ImportError` 是死分支",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:1594",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0313",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "CacheConfig.max_memory_mb 定义但全模块未实现任何字节容量控制，缓存内存实际上限仅由\"条目数 × 单帧大小\"决定",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:357",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0314",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "LRUCache 字节统计系统性错误：覆盖同 key 不减旧值、evict 减的是\"当前插入条目\"的字节数、remove/invalidate_range 完全不减",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:455",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0315",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "GPUTextureCache 淘汰/清空只丢 Python 引用，无 release 或 deferred-release 回调，违背项目 GPU 资源释放架构",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:809",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0316",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "CacheManager._lock 定义后从未使用，复合操作（clear_all/update_config）非原子",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:1141",
+  "conf": "高",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0317",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "update_config/reset_stats 直接穿透访问子缓存私有 `_cache` 属性",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:1236",
+  "conf": "?",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0318",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "RenderPlanCache 的 get/put 从不传质量参数，RenderPlanCacheKey.quality 恒为默认 \"preview\"，不同质量层级的渲染计划互相覆盖",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:738",
+  "conf": "中",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0319",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "MemoryPressureMonitor.start/stop 的 _is_running 为无锁 check-then-act，可能双线程启动",
+  "file": "N/A",
+  "loc": "src/features/color/core/cache_manager.py:1560",
+  "conf": "高",
+  "batch": "batch-003"
+ },
+ {
+  "id": "AUD-0401",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "ColorSessionManager._session_history 只增不减，长期会话内存缓慢泄漏",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_session.py:513,532",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0402",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "from_dict/load_from_path 对损坏工程数据抛裸 ValueError，未转领域错误",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_session.py:424-438",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0403",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "get_save_target_region 三个分支返回完全相同字符串，与文档表格承诺不符",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_session.py:371-378",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0404",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "from_page_context 入参 context: Any 弱类型，帧字段 getattr 与 clip/asset 字段直接属性访问混用",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_session.py:276-307",
+  "conf": "高",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0405",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "embedded 模式丢弃 lut_path/lut_intensity，嵌入栈的 3D LUT 在 Composite 渲染中静默丢失",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_stack_render_service.py:125-131（对照 :94-95）",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0406",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "preset 模式数据源 project.color_presets 全库无填充方，且只提取 grading_params",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_stack_render_service.py:113-115",
+  "conf": "中",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0407",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "三种 stack_source 返回 dict 形状不一致（8 键 / 1 键 / 5 键），契约脆弱",
+  "file": "N/A",
+  "loc": "src/features/color/core/color_stack_render_service.py:88-96,113-115,125-131",
+  "conf": "高",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0408",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "upload_composition_uniforms 逐 uniform 宽泛 except Exception 且只记 debug 日志",
+  "file": "N/A",
+  "loc": "src/features/color/core/composition_uniforms.py:488-495",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0409",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "u_opacity/u_lut_intensity 用直接 float() 转换，显式 None 时抛 TypeError，与全文件 `or` 惯用法不一致",
+  "file": "N/A",
+  "loc": "src/features/color/core/composition_uniforms.py:362,398（对照 :376",
+  "conf": "中",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0410",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_changed 对 None/不可转值按\"已修改\"处理，交付报告可能误报操作启用",
+  "file": "N/A",
+  "loc": "src/features/color/core/delivery_matrix.py:171-180",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0411",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "类级共享 _session_cache/_current_model_path：denoise 与 deblur 双引擎交替使用时互清缓存，模型每次从磁盘重载，且跨 QThread 无锁",
+  "file": "N/A",
+  "loc": "src/features/color/core/denoise_engine.py:84-85,165-168",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0412",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "AI 降噪路径对 HDR 输入强制 clip [0,1]，>1.0 高光在结果中永久压平（Basic 路径明确支持 HDR，行为不一致）",
+  "file": "N/A",
+  "loc": "src/features/color/core/denoise_engine.py:180-181,205-213",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0413",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "cancel() 兜底 worker.terminate() 有进程级未定义行为风险，且 Basic 路径完全无协作取消检查点",
+  "file": "N/A",
+  "loc": "src/features/color/core/denoise_engine.py:645-658（对照 _run_classic_split_denoise:106-146 无任何 isInterruptionRequested）",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0414",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "apply_denoise 原地改写调用方 params dict（model_path 相对路径→绝对路径）",
+  "file": "N/A",
+  "loc": "src/features/color/core/denoise_engine.py:599-601",
+  "conf": "高",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0415",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_load_with_timeout 超时后悬挂的加载线程永不回收",
+  "file": "N/A",
+  "loc": "src/features/color/core/denoise_engine.py:359-367",
+  "conf": "高",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0416",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "用户取消经 error 信号通道上报，UI 会弹\"严重错误\"对话框",
+  "file": "N/A",
+  "loc": "src/features/color/core/denoise_engine.py:450-451（对照 color_controller.py:1541-1546）",
+  "conf": "?",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0417",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "多处公开方法与 Worker 方法缺类型注解",
+  "file": "N/A",
+  "loc": "src/features/color/core/denoise_engine.py:87-92,581,610",
+  "conf": "高",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0418",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "process_frame 每帧创建并释放 FBO，长序列 4K 导出存在分配churn",
+  "file": "N/A",
+  "loc": "src/features/color/core/export_denoise_bridge.py:136-140",
+  "conf": "高",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0419",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "VideoDenoiseParams.from_dict 解析失败完全静默直通，导出成片无降噪且日志无痕",
+  "file": "N/A",
+  "loc": "src/features/color/core/export_denoise_bridge.py:88-93",
+  "conf": "高",
+  "batch": "batch-004"
+ },
+ {
+  "id": "AUD-0501",
+  "sev": "Critical",
+  "downgraded": false,
+  "title": "历史快照与活动图层共享可变对象，undo/redo 静默失效",
+  "file": "N/A",
+  "loc": "src/features/color/core/history.py:136",
+  "conf": "?",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0502",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "flip_h/flip_v 只在 push_state 记录，undo()/redo() 的对侧栈状态不含翻转位，恢复路径也不回读",
+  "file": "N/A",
+  "loc": "src/features/color/core/history.py:77",
+  "conf": "?",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0503",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "copy_image=False 的引用共享依赖\"源图像永不就地变更\"的隐式约定",
+  "file": "N/A",
+  "loc": "src/features/color/core/history.py:45",
+  "conf": "中",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0504",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "current_image 为 None 时 undo/redo 仍弹出条目但不写对侧栈，该编辑层历史不可达",
+  "file": "N/A",
+  "loc": "src/features/color/core/history.py:76",
+  "conf": "高",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0505",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "类型注解缺失与隐式 Optional",
+  "file": "N/A",
+  "loc": "src/features/color/core/history.py:16",
+  "conf": "高",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0510",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "粘贴时同一 patch dict 对象复用到多个目标图层，目标间共享可变嵌套结构",
+  "file": "N/A",
+  "loc": "src/features/color/core/grade_clipboard.py:197",
+  "conf": "?",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0511",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "copy_grade 走 to_dict(None)，BITMAP 蒙版的 bitmap_data 被静默丢弃",
+  "file": "N/A",
+  "loc": "src/features/color/core/grade_clipboard.py:142",
+  "conf": "?",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0512",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "lut_intensity 恒被保留导致无 LUT 源也把 \"lut\" 计入 copied_categories，粘贴预览误报",
+  "file": "N/A",
+  "loc": "src/features/color/core/grade_clipboard.py:145",
+  "conf": "?",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0513",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "describe() 绕过 i18n 辅助函数直用硬编码标签",
+  "file": "N/A",
+  "loc": "src/features/color/core/grade_clipboard.py:213",
+  "conf": "高",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0520",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "from_dict 不校验 value 的类型/分量数，畸形工程数据延迟到渲染/保存期才崩溃",
+  "file": "N/A",
+  "loc": "src/features/color/core/grade_keyframes.py:84",
+  "conf": "?",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0521",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "Track.from_dict 捕获 TypeError/ValueError 后静默 continue，无日志吞掉畸形关键帧",
+  "file": "N/A",
+  "loc": "src/features/color/core/grade_keyframes.py:189",
+  "conf": "高",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0522",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "UI 编辑与导出线程共享 tracks 无同步，append→sort 间隙可读到中间态",
+  "file": "N/A",
+  "loc": "src/features/color/core/grade_keyframes.py:115",
+  "conf": "?",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0523",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "关键公共入口类型注解过宽",
+  "file": "N/A",
+  "loc": "src/features/color/core/grade_keyframes.py:64",
+  "conf": "高",
+  "batch": "batch-005"
+ },
+ {
+  "id": "AUD-0600",
+  "sev": "Critical",
+  "downgraded": false,
+  "title": "undo/redo 恢复图像后既不重新上传 GPU 纹理也不重置蒙版脏标记，视口继续渲染撤销前的旧图",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:4194-4225",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0601",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "resize_image 从不更新 img_full_original，全分辨率导出与坐标基准滞留旧尺寸",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:4230-4237（对照 set_image:691-699、rotate_image:4247）",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0602",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "apply_crop 不更新 img_source_full，随后的 flip/reset_flip 用未裁剪源图重建，裁剪结果被静默丢弃",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:4293-4357（对照 _apply_flip_state:4261-4275）",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0603",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "render_cached_image 临时替换 img_full_original 无 finally 恢复；嵌套事件循环期间被并发读取",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:4051-4061, 4091-4093",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0604",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "render_cached_image 将 float 图像 `(img_high * 255).astype(np.uint8)` 无 clip，HDR 值按模 256 回绕",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:4055",
+  "conf": "中",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0605",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "bake_layer 全分辨率数据不分数值类型一律除以 255，uint16/float HDR 源烘焙结果数值错误",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:4399-4404",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0606",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "request_sam_decode 跨线程信号发射可变列表（同一文件其他发射点都做了 .copy()）",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:1769-1779（对照 1799-1801、1848-1850）",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0607",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "_do_render_full_res 异常路径泄漏 GPU 纹理：3211 行之前创建的纹理未入 garbage 清单，mask/aux 纹理仅在正常路径释放",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:3058, 3086-3091, 3163-3181, 3211, 3281-3378, 3404-3434, 3444-3463",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0608",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "bake 进行中执行 unbake 会被异步 EXR 保存完成信号\"复活\"，且复活后的 bake 无 digest 记录、永不自动失效",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:4424-4454, 4642-4690, 4509-4523",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0609",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "_layer_render_data / _create_layer_snapshot 把 ndarray（curves_lut、hsl_curve_lut、warper_params、ai_matte）按引用传给渲染线程，破坏\"不可变 DTO\"承诺",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:69-90, 4705-4729",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0610",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "apply_changes 借道 set_image(is_new_file=True) 实现烘焙，触发\"新文件\"语义的一揽子副作用",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:1027-1036（对照 set_image:697-712）",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0611",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "_on_raw_update_finished 重解码替换源图像内容但不递增 _source_epoch，bake 前缀失效校验漏掉该路径",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:1953-1999（对照 set_image:682-683、_compute_prefix_digest:4492）",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0612",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "on_raw_params_changed 就地变异调用方 params dict 并将同一引用跨线程传给 RAW worker",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:1855-1882, 1943-1947",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0613",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "cs_map/gamma_map 大字面量在 4 处重复定义且每次渲染调用都重建",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:445-456, 1896-1905, 2843-2852, 3113-3122",
+  "conf": "高",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0614",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "remove_layer 不清理 ai_plugin_result_cache / _bake_prefix_digests / _pending_bake_digests 中的残留条目",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:1075-1093（对照 240-246）",
+  "conf": "高",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0615",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "裸 except / 宽泛 except 吞领域错误",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:747-752, 3444-3447, 3450-3463, 3749-3751",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0616",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "prog_raw / prog_pass 每次全分辨率渲染新建 program 且从不显式 release",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:3096, 3194-3206",
+  "conf": "高",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0617",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "scope 读回路径在拿不到 GL mutex 时仍读回并缓存黑帧",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:3963-3973（render_full_image_for_scope:4012-4025 同模式）",
+  "conf": "?",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0618",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_validate_baked_prefixes 在每次渲染（含 playback 帧）对每个 baked 层做全前缀 md5 摘要",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:2728, 4501-4533",
+  "conf": "中",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0619",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "大量公开方法缺少类型注解",
+  "file": "N/A",
+  "loc": "src/features/color/core/image_engine.py:668, 805, 1027, 1063-1204, 1389, 1854, 2001, 2698（部分参数有默认值但无注解）等",
+  "conf": "高",
+  "batch": "batch-006"
+ },
+ {
+  "id": "AUD-0700",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "位图缓存键使用 `id(bitmap_data)`，对象地址复用或原位修改导致陈旧蒙版渲染",
+  "file": "N/A",
+  "loc": "src/features/color/core/layer.py:85（另见 :115 同型）",
+  "conf": "中",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0701",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "反序列化链路对外部工程数据无结构验证，畸形数据在加载时直接抛未捕获异常",
+  "file": "N/A",
+  "loc": "src/features/color/core/layer.py:1141-1142（",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0702",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "PchipInterpolator 要求 xs 严格递增，重复 x 控制点在装有 scipy 时抛 ValueError，行为依赖运行环境",
+  "file": "N/A",
+  "loc": "src/features/color/core/layer.py:1148、:1194",
+  "conf": "中",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0703",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "apply_grade_patch 写入的 `ai_matte_file` 属性全仓库无读者，属死状态",
+  "file": "N/A",
+  "loc": "src/features/color/core/layer.py:744",
+  "conf": "高",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0704",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "reset_params 复位不彻底；copy_params_from 声称复制 film_grain_params 但该属性从不在 Layer 上初始化（死代码+误导文档）",
+  "file": "N/A",
+  "loc": "src/features/color/core/layer.py:516、:596、:652-653",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0705",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "to_dict 多处直接引用活模型可变对象，序列化产物与模型别名",
+  "file": "N/A",
+  "loc": "src/features/color/core/layer.py:938、:953、:967",
+  "conf": "高",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0706",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "AI matte/bitmap 落盘 PNG 时 float→uint8 无 clip，超界值经 astype 回绕将静默损坏资产",
+  "file": "N/A",
+  "loc": "src/features/color/core/layer.py:177、:981",
+  "conf": "中",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0707",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "公共方法普遍缺类型注解",
+  "file": "N/A",
+  "loc": "src/features/color/core/layer.py:27（",
+  "conf": "高",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0708",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "图层模型变更入口无通知机制，undo/revision 同步完全依赖调用方自觉",
+  "file": "N/A",
+  "loc": "src/features/color/core/layer.py:533-538、:674-755（apply_grade_patch）、:466-531（reset_params）",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0710",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`_hsv_to_rgb` 的 np.stack 混合数组与标量必抛 ValueError：mixer 激活或 hue_shift≠0 时 LUT 导出必然失败（已运行时复现）",
+  "file": "N/A",
+  "loc": "src/features/color/core/lut_exporter.py:651、:655、:659、:663、:667、:671（对照已修复的静态版 :363-373）；调用路径 :533-535（hue_shift）、:790+:826（mixer）",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0711",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "\"后台 worker\" 实为 UI 线程同步执行：线程空转、导出全程阻塞 UI",
+  "file": "N/A",
+  "loc": "src/features/color/core/lut_exporter.py:1031（对照 :976-981 的 moveToThread 声明）",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0712",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "导出的 .3dl 首行写 TITLE，自家 `parse_3dl` 也无法读回（round-trip 断裂），且不符合 Autodesk .3dl 规范",
+  "file": "N/A",
+  "loc": "src/features/color/core/lut_exporter.py:924-929（对照 src/shared/color/lut_loader.py:151-155）",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0713",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`_load_lut_file` 宽泛 except 静默吞掉 LUT 解析错误，已应用 LUT 损坏时导出悄悄丢失该效果",
+  "file": "N/A",
+  "loc": "src/features/color/core/lut_exporter.py:162-169（消费点 :437-441）",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0714",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "export_lut 每次连接回调不断开，同实例重复导出将累积连接、回调重复触发",
+  "file": "N/A",
+  "loc": "src/features/color/core/lut_exporter.py:1022-1028",
+  "conf": "高",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0715",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_extract_exportable_params` 对嵌套可变参数只做浅拷贝，与活图层共享内部 list/dict",
+  "file": "N/A",
+  "loc": "src/features/color/core/lut_exporter.py:1043、:1055、:1059",
+  "conf": "高",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0716",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "文件写出为三重 Python 循环逐行 f.write（65 档 27 万行），且最终硬 clip 到 [0,1] 使 HDR 档位在导出中丢失",
+  "file": "N/A",
+  "loc": "src/features/color/core/lut_exporter.py:898-904、:933-939",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0720",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "效果发射顺序完全信任调用方传入的 active_effects 顺序，不按声明的 composition 顺序排序或校验",
+  "file": "N/A",
+  "loc": "src/features/color/core/msl_composition.py:222-223（对照 :123-124 注释声明的固定顺序）",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0721",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "blend_modes 位未启用时 opacity/matte 完全不参与输出，opacity<1 的管线与 GL 基准分歧且无守卫",
+  "file": "N/A",
+  "loc": "src/features/color/core/msl_composition.py:224-231（对照 :19-21 docstring 的等价性前提）",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0730",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "facade 创建的真实 GL 资源不登记入 self.registry 台账，脱离 release/report 视图",
+  "file": "N/A",
+  "loc": "src/features/color/core/opengl_render_backend.py:123-149（对照 async_renderer.py:5937-5949 的登记实践）",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0731",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "release() 不做渲染线程守卫，registry.release_all 会在调用线程执行 release_fn，与 create_* 的严格守卫不对称",
+  "file": "N/A",
+  "loc": "src/features/color/core/opengl_render_backend.py:108-117",
+  "conf": "?",
+  "batch": "batch-007"
+ },
+ {
+  "id": "AUD-0800",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "共享插件注册表跨线程无锁读写：UI 线程 scan/pop 与渲染线程 get_plugin 并发",
+  "file": "N/A",
+  "loc": "src/features/color/core/plugin_manager.py:50, 72-97",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0801",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_parse_params 数值转换无容错，单行坏参数导致整个插件被丢弃",
+  "file": "N/A",
+  "loc": "src/features/color/core/plugin_manager.py:307-321",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0802",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "select 参数解析失败时产物缺少 default/options 键，下游静默回退索引 0",
+  "file": "N/A",
+  "loc": "src/features/color/core/plugin_manager.py:335-344",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0803",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": ".tglsl 与 .tai 同名（同 basename）时 .tai 静默覆盖 .tglsl 注册项",
+  "file": "N/A",
+  "loc": "src/features/color/core/plugin_manager.py:85-93",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0804",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "预览质量注册发生在参数解析之前，解析失败的插件在质量管理器留下残留注册",
+  "file": "N/A",
+  "loc": "src/features/color/core/plugin_manager.py:146-152",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0805",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "scan_plugins 增量合并不清理已删除插件文件的陈旧条目，reload_plugins 全仓无调用方",
+  "file": "N/A",
+  "loc": "src/features/color/core/plugin_manager.py:72-97, 509-520",
+  "conf": "高",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0806",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "插件目录缺失时 scan 副作用建目录，且 makedirs 失败会未捕获抛出",
+  "file": "N/A",
+  "loc": "src/features/color/core/plugin_manager.py:68-70",
+  "conf": "高",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0810",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "sidecar 写失败完全静默，模块无任何日志",
+  "file": "N/A",
+  "loc": "src/features/color/core/preset_meta.py:110-118, 157-165",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0811",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_to_uint8_bgr 不处理 float16/uint16 输入，JPEG 编码将静默失败",
+  "file": "N/A",
+  "loc": "src/features/color/core/preset_meta.py:138-145",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0812",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_resize_max 无异常保护，极端长宽比下 int() 归零使 cv2.error 逸出 write_still_images",
+  "file": "N/A",
+  "loc": "src/features/color/core/preset_meta.py:148-154, 178-189",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0820",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "DependencyReport.from_dict 不校验 entries 元素类型，损坏的外部 JSON 会以 AttributeError/ValueError 崩溃",
+  "file": "N/A",
+  "loc": "src/features/color/core/project_dependencies.py:133-138, 76-87",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0821",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_resolve_path 的存在性检查分支冗余，两个分支返回同一值",
+  "file": "N/A",
+  "loc": "src/features/color/core/project_dependencies.py:187-196",
+  "conf": "高",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0822",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "通过 getattr 访问 AIModelManager 私有 `_registry`，跨模块脆弱耦合",
+  "file": "N/A",
+  "loc": "src/features/color/core/project_dependencies.py:260-267",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0830",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "comp_cache 缓存键未包含插件内容哈希，插件文件运行期更新后渲染继续使用旧 program",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_compiler.py:253-258（对照 :84）",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0831",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "comp_cache 无容量上限与淘汰策略，GL program 随结构组合切换无限累积",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_compiler.py:133-134, 258-260, 403-404",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0832",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "插件源码正则改写是名字盲替换：@param 名与插件体内任意同名标识符冲突可致编译失败或语义破坏",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_compiler.py:306-313（对照 :320-323）",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0833",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "binding.index 默认 0 且编译入口不校验唯一性，手工构造的 bindings 可产生重复 process_P0",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_compiler.py:234-241, 300-313",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0834",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "编译失败不做负缓存，失败结构在渲染循环中反复重组装、重编译",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_compiler.py:402-424",
+  "conf": "中",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0835",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "plugin_bindings_from_instances 的非 dict 分支为死代码",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_compiler.py:110-114（对照 :42-45）",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0836",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "注释与事实不符：u_tex_size 实由 GRADING_SNIPPET 声明，而非 BLUR_SHARPEN_SNIPPET",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_compiler.py:283",
+  "conf": "高",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0837",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "类型注解缺失（Suggestion 级，仅记录）",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_compiler.py:132, 207-221, 426-430",
+  "conf": "高",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0840",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "HSV 转换对负值 HDR 颜色的防护不一致：hue_shift 与 HSL 曲线直接对可能为负的 color 做 rgb2hsv",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_nodes.py:168-172, 262-267（对照 MIXER :584-598、WARPER :628-646）",
+  "conf": "?",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0841",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "apply_blur_sharpen 的 USM 迭代循环边界为运行时值，违反项目\"for 循环边界必须是常量\"约定",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_nodes.py:538, 543",
+  "conf": "高",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0842",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "FILM_GRAIN_SNIPPET 头部注释错误声称 u_tex_size 由 BLUR_SHARPEN_SNIPPET 声明",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_nodes.py:739-740",
+  "conf": "高",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0843",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "亮度系数实为 BT.601 但注释声称 Rec.709，色度学口径不统一",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_nodes.py:266-267（同类用法 :72, :123, :152, :176, :460, :817）",
+  "conf": "高",
+  "batch": "batch-008"
+ },
+ {
+  "id": "AUD-0900",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "RenderSurfaceCache.get 创建失败后，已释放的旧表面残留缓存，可被后续复用（use-after-release）",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_denoise_gl.py:108-119",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0901",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "get() 忽略已缓存表面的 components/dtype 不匹配；total_bytes() 硬编码 comp=4/f2",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_denoise_gl.py:104-105, src/features/color/core/video_denoise_gl.py:139-145",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0902",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "QuadRenderer 以 program.glo 作 VAO 缓存键，存在 GL 对象名复用的误命中风险",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_denoise_gl.py:43-52",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0903",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "stats 字典跨线程快照读取与 window_frames 动态键插入存在竞态（dict 迭代中 resize）",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_denoise_pipeline.py:56-64, src/features/color/core/video_denoise_pipeline.py:183, src/features/color/core/video_denoise_pipeline.py:196",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0904",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "process_window 失败路径不计错误、不熔断，与 process 的 _note_error 行为不一致",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_denoise_pipeline.py:186-188",
+  "conf": "高",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0905",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "params property 返回内部可变对象，外部可绕过 sanitized/锁直接改参",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_denoise_pipeline.py:76-78",
+  "conf": "中",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0906",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "上采样细节恢复着色器含 `residual * keep * 0.0` 死代码",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_denoise_shaders.py:266",
+  "conf": "高",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0907",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "表面缓存键内嵌尺寸 + 缓存无淘汰策略，多分辨率场景 GPU 内存无上界累积",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_spatial_denoise.py:86, src/features/color/core/video_spatial_denoise.py:111-112, src/features/color/core/video_spatial_denoise.py:157-160, src/features/color/core/video_spatial_denoise.py:214",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0908",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "enhanced 上采样 pass 注释与代码不符（\"固定 0.5\" vs 实际传 p.detail_recovery）",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_spatial_denoise.py:194, src/features/color/core/video_spatial_denoise.py:203",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0909",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "类型注解不完整",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_spatial_denoise.py:37, src/features/color/core/video_spatial_denoise.py:55, src/features/color/core/video_spatial_denoise.py:210",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0910",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "blend mode 14（Color）是 HSV 恒等往返，退化为 Normal 混合，未保留 base 亮度",
+  "file": "N/A",
+  "loc": "src/features/color/core/shader_nodes_msl.py:709",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0911",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "apply_soft_clip 分支门控与 GPU 语义背离：丢失两条 elif 路径",
+  "file": "N/A",
+  "loc": "src/features/color/core/the_decompiler.py:263, src/features/color/core/the_decompiler.py:280",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0912",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "前向模型缺失 GPU 管线的\"暗部保护\"与 toe RGB 平衡两个处理级",
+  "file": "N/A",
+  "loc": "src/features/color/core/the_decompiler.py:182-192, src/features/color/core/the_decompiler.py:263-273",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0913",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "hue_shift 前 `np.clip(res, 0, 1)`，GPU 两侧均不 clip，HDR/负值区域 CPU/GPU 分叉",
+  "file": "N/A",
+  "loc": "src/features/color/core/the_decompiler.py:227",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0914",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "decompile 无输入校验且重计算可能阻塞调用线程",
+  "file": "N/A",
+  "loc": "src/features/color/core/the_decompiler.py:350-362",
+  "conf": "?",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-0915",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "类型注解缺失（GradingMath/Decompiler 公共方法均无注解）",
+  "file": "N/A",
+  "loc": "src/features/color/core/the_decompiler.py:20-21, src/features/color/core/the_decompiler.py:341, src/features/color/core/the_decompiler.py:350",
+  "conf": "高",
+  "batch": "batch-009"
+ },
+ {
+  "id": "AUD-1000",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`force_reset()` 后同一 clip/generation/params 下状态机永久卡死在 delta==0 分支，时域降噪静默失效",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_temporal_denoise.py:82-90（配合 :52-57、:150-154、:187-191）",
+  "conf": "?",
+  "batch": "batch-010"
+ },
+ {
+  "id": "AUD-1001",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`_replay_window` 对邻帧降采样使用当前帧尺寸作为 `u_texel`，混合分辨率时运动估计标定错误",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_temporal_denoise.py:405、:455、:460（对照契约 :301-311、自认 :469-471）",
+  "conf": "?",
+  "batch": "batch-010"
+ },
+ {
+  "id": "AUD-1002",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "运动估计失败路径不推进历史纹理，历史与 luma_prev/注释语义失配（单帧拖影）",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_temporal_denoise.py:231-235",
+  "conf": "?",
+  "batch": "batch-010"
+ },
+ {
+  "id": "AUD-1003",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "因果模式步骤 5 的历史推进是一次额外的全分辨率 f16 拷贝（4K 热路径每帧成本）",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_temporal_denoise.py:268-277",
+  "conf": "?",
+  "batch": "batch-010"
+ },
+ {
+  "id": "AUD-1004",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "多个核心方法参数/返回值缺类型注解",
+  "file": "N/A",
+  "loc": "src/features/color/core/video_temporal_denoise.py:193、:285、:313、:390-395、:415",
+  "conf": "?",
+  "batch": "batch-010"
+ },
+ {
+  "id": "AUD-1005",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "配置读取异常被吞为空列表，随后任何保存都会整体覆盖写回，永久丢失全部用户预设",
+  "file": "N/A",
+  "loc": "src/features/color/core/workspace_presets.py:187-191（配合 :231、:213）",
+  "conf": "?",
+  "batch": "batch-010"
+ },
+ {
+  "id": "AUD-1006",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`_write_user_workspaces` 静默吞掉写入异常且无日志，`save_user_workspace` 仍返回新 preset 造成保存成功假象",
+  "file": "N/A",
+  "loc": "src/features/color/core/workspace_presets.py:212-215、:238-240",
+  "conf": "?",
+  "batch": "batch-010"
+ },
+ {
+  "id": "AUD-1100",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "播放降级系统从未激活：全库无任何 `set_playback_state(True)` 调用",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:330",
+  "conf": "?",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1101",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "无锁共享可变状态 + 非线程安全的懒汉式全局单例",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:546",
+  "conf": "?",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1102",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "导出路径无任何保护，preview/export 语义一致性仅靠调用方约定",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:384",
+  "conf": "?",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1103",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "播放中重新启用降级后 `degraded_effects` 不重建，状态追踪与决策路径脱钩",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:464",
+  "conf": "?",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1104",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "降级参数为覆盖式合并而非钳制，可能反向增大计算量/改变画面",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:140",
+  "conf": "?",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1105",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "SKIP 路径硬编码 `{\"enabled\": False}`：丢弃全部原始参数，且使已注册的 `degradation_params` 成为死配置",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:132",
+  "conf": "?",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1106",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_apply_playback_degradation` 把注册表全部条目标记为已降级，UI 指示器误报",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:365",
+  "conf": "高",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1107",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "自定义阈值 API 与降级决策完全断链，设置阈值静默无效",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:484",
+  "conf": "?",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1108",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`last_degradation_time` 声明后永不更新（恒为 0.0）",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:280",
+  "conf": "高",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1109",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "HIGH/MEDIUM/LOW 三个降级分支实现完全相同，末尾 `return` 不可达；返回值所有权不一致",
+  "file": "N/A",
+  "loc": "src/shared/effects/preview_quality.py:136",
+  "conf": "?",
+  "batch": "batch-011"
+ },
+ {
+  "id": "AUD-1200",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "非 macOS 平台 AUTO compute 命中后续候选时误报 `metal_compute_unavailable` 作为回退原因",
+  "file": "N/A",
+  "loc": "src/shared/gpu/backend_selector.py:186-201",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1201",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "多个公共/内部函数参数缺少类型注解",
+  "file": "N/A",
+  "loc": "src/shared/gpu/backend_selector.py:141, 165-169, 213",
+  "conf": "高",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1202",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`from_dict` 对 `forced` 字段用 `bool()` 强转，字符串 `\"false\"` 会被判为 `True`",
+  "file": "N/A",
+  "loc": "src/shared/gpu/backend_types.py:154-157",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1203",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_major_minor` 对非数字开头的版本串抛未捕获 ValueError",
+  "file": "N/A",
+  "loc": "src/shared/gpu/capabilities.py:153-161",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1204",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "Metal 设备探测在同一次 capabilities 快照内执行两次",
+  "file": "N/A",
+  "loc": "src/shared/gpu/capabilities.py:113 与 459-461",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1205",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`detect_backend_capabilities` 无任何缓存，每次调用全量重探（含解码真实媒体文件的 VT probe）",
+  "file": "N/A",
+  "loc": "src/shared/gpu/capabilities.py:429-464（并见 213）",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1206",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_metal_device_available` 吞掉全部异常，\"不支持\"与\"探测失败\"不可区分",
+  "file": "N/A",
+  "loc": "src/shared/gpu/capabilities.py:128-133",
+  "conf": "高",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1207",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`wait_fence` 的 `timeout_ns` 语义错误：非零值传给 `glWaitSync` 违反 GL 规范（timeout 必须为 GL_TIMEOUT_IGNORED）",
+  "file": "N/A",
+  "loc": "src/shared/gpu/composite_gpu_frame_handle.py:193-204",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1208",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`release()` 回调异常被静默吞掉且无日志，\"恰好归还一次\"契约失去可观测性",
+  "file": "N/A",
+  "loc": "src/shared/gpu/composite_gpu_frame_handle.py:110-114",
+  "conf": "高",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1209",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`delete_fence` 吞掉 `glDeleteSync` 失败，GLsync 泄漏无诊断",
+  "file": "N/A",
+  "loc": "src/shared/gpu/composite_gpu_frame_handle.py:207-215",
+  "conf": "高",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1210",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`initialize` 完全忽略 `pyqt_context` 参数且无线程守卫，UI 线程调用即把 ModernGL 上下文绑到 UI 线程",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_backend.py:35-45",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1211",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`create_shared_context` 调用 `moderngl.create_context()`，不产生共享上下文",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_backend.py:47-49",
+  "conf": "高",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1212",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`cleanup()` 三处裸 `except:` 连 BaseException 一并吞掉",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_backend.py:118-131",
+  "conf": "高",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1213",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "未使用的 `QOpenGLWidget` 导入",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_backend.py:5",
+  "conf": "高",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1214",
+  "sev": "Major",
+  "downgraded": true,
+  "title": "`_do_pixel_probe` 从未在 ctx_b 上做任何验证：无上下文切换、无线程守卫，探测结果取决于调用线程的隐含当前上下文，且 `tex.release()` 会在当前上下文删除纹理",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_context_hub.py:77-105",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1215",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "单例与共享 dict 无任何同步保护",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_context_hub.py:27-38, 41-60, 111-120",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1216",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "注册的上下文持强引用且无 unregister，上下文销毁后 hub 残留死引用",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_context_hub.py:32-43, 117-120",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1217",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "模块 docstring 引用不存在的 `last_composite_ms` API",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_pass_timer.py:25（对照 116-124）",
+  "conf": "高",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1218",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "query `__enter__` 抛出时对象不释放（构造探测与每帧测量两条路径）",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_pass_timer.py:61-68, 151-171",
+  "conf": "?",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1219",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "每个 pass 每帧新建 query 对象，无池化",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_pass_timer.py:152-156",
+  "conf": "高",
+  "batch": "batch-012"
+ },
+ {
+  "id": "AUD-1300",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "release_fn 抛异常时台账条目已被 pop，泄漏资源从登记表中消失且无法重试",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_resource_registry.py:127（配合 132-141）",
+  "conf": "?",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1301",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "register 覆盖同名条目时静默丢弃旧 release_fn，旧资源成孤儿",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_resource_registry.py:74、87",
+  "conf": "高",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1302",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "release_all 的组名快照与逐组释放之间存在窗口，并发 register 的新组会被本次遍历遗漏",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gl_resource_registry.py:146-150",
+  "conf": "高",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1310",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_pool_cache` / `_points_vao_cache` 按尺寸键缓存且永不淘汰，所有历史尺寸的资源常驻至 release()",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gpu_scope_engine.py:145-153（缓存写入）、226-235（唯一释放点）、273-281（VAO 缓存）",
+  "conf": "?",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1311",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "wf_display 纹理被 waveform/parade/luma 三种输出复用，正确性依赖 scope_types 模式互斥这一跨模块不变量",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gpu_scope_engine.py:626-642",
+  "conf": "?",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1312",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "各 pass 修改 ctx.viewport 后不恢复进入前取值，GL 全局状态外泄给调用方",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gpu_scope_engine.py:324-328（写入）、464-466（仅 parade 部分恢复）",
+  "conf": "?",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1313",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "SCOPE_RANGE_MIN/MAX 与采样着色器中硬编码的 clamp(-0.1, 1.2) 跨文件重复维护，且 HDR >1.2 值在采样阶段即被压平",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gpu_scope_engine.py:44-46、367-368（佐证：gpu_scope.glsl:46，属其它批次文件）",
+  "conf": "?",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1314",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "部分公开/内部方法缺参数与返回类型注解",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gpu_scope_engine.py:267-268、333-339、600-601",
+  "conf": "?",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1315",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "release/换新路径的 `except Exception: pass` 共 7 处且零日志，销毁期 GL 错误完全不可见",
+  "file": "N/A",
+  "loc": "src/shared/gpu/gpu_scope_engine.py:161-163、178-180、230-233、239-242、245-248、251-254、258-260",
+  "conf": "高",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1320",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "metal_info_from_gpu 直接下标访问 gpu[\"devices\"]，缺键时抛 KeyError，违背模块\"失败路径都返回稳定 reason_code\"的承诺",
+  "file": "N/A",
+  "loc": "src/shared/gpu/host_gpu_info.py:83",
+  "conf": "?",
+  "batch": "batch-013"
+ },
+ {
+  "id": "AUD-1401",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "dispatch 异常路径静默丢弃整个累积 command buffer，已成功编码的 kernel 调用一并丢失且调用方无感知",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/context.py:366-385",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1402",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "PyObjC 路径全程无 autoreleasepool，工作线程上每次 dispatch/submit/read_texture 泄漏 autoreleased Metal 对象",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/context.py:366-380（dispatch）、387-424（submit）、451-495（read_texture）",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1403",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_last_gpu_time_ms` 在 submit 锁外读写，并发提交时诊断数据竞态",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/context.py:400-417",
+  "conf": "高",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1404",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`create_buffer_from_numpy` 实为双重拷贝，与「零额外拷贝语义」注释不符",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/context.py:185-196",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1405",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`compile_kernel` 以 kernel 名为缓存键，同名传入不同 MSL 源时返回陈旧 kernel",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/context.py:138-144",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1406",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`dispatch` 不校验 threads 正值与 group ≤ maxTotalThreadsPerThreadgroup，非法值直接落入 Metal 校验断言",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/context.py:353-361",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1407",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "模块级重复 `import numpy as np`，`read_texture` 内再次函数级导入",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/context.py:31-33、477",
+  "conf": "高",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1408",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`write_buffer` 对 Shared 存储 buffer 也调用 `didModifyRange_`（探测的是 selector 存在性而非 storage mode）",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/context.py:251-259",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1409",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`make_blur_params` / `make_erode_dilate_params` 无 isfinite 与数值域校验（与 kernels_color 的 build_* 标准不一致）",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels.py:274-291",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1410",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`make_erode_dilate_params` 的 operation 非法字符串静默映射为 dilate",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels.py:288",
+  "conf": "高",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1411",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`gaussian_blur_reference` 权重以 float64 计算后 cast float32，与 kernel 的 fp32 `exp` 存在 ulp 级偏差",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels.py:309-310",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1412",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`build_film_grain_params` 只校验 finite，不校验 tex_size > 0 与 visible_rect 数值域；tex_w=0 时 kernel 产生全图 NaN",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_color.py:223-227（校验）、143-144（kernel 消费）",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1413",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "全部 DCT 变体的 y 维度（gid.y / grp.y）无越界守卫，x 维度守卫不对称存在，依赖调用方派发精确 y 网格",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_dct.py:45（forward_dct）、134（forward_dct_tg）、169（forward_dct_prod）、215（forward_dct_tg4）、251（forward_dct_m8）",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1414",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "slice 版 `idx > 63` 发出未声明的 status=93u，与 docstring 状态集 {0,4,9,11} 及 segment 版同位置的 9u 不一致",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_dec.py:267（对照 524）",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1415",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`st.size = me[4] - prefix`（及 segment 的 `me[4] - 4u`）无符号下溢无防护，畸形 smeta 导致 GPU 越界读",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_dec.py:222、485",
+  "conf": "?",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1416",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "模块 docstring 内 smeta 布局自相矛盾：12×u32 与 13×u32 并存（实际为 13）",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_dec.py:22-25",
+  "conf": "高",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1417",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`quant_token` 的 grp.y 无越界守卫（与 AUD-1413 同类），依赖调用方 threads.y 精确等于带高×8",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_enc.py:52-53",
+  "conf": "中",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1418",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`histogram_cdf` 每线程重复线性扫描全通道 256 桶两次（total + cum），1024 线程共约 52 万次冗余读",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_histogram.py:75-79",
+  "conf": "高",
+  "batch": "batch-014"
+ },
+ {
+  "id": "AUD-1500",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "两个 MSL 源常量约 570 行逐字重复，存在版本漂移风险",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_idct.py:54-623 与 625-1195",
+  "conf": "?",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1501",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "params[7] 与 buffer(8) 槽位语义在不同 kernel 间漂移，装配侧易错",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_idct.py:440-446（ws: params[7]=off_stride, buffer(8)=row_slice）、545-546（wsd: params[7]=dc0）、1103-1104（wsd_v8: buffer(8)=blkseg）",
+  "conf": "?",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1502",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "CSR 偏移与 sblk0 无下溢/越界守卫，完全依赖上游装配契约",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_idct.py:1035-1038、1043（ws）；569-572（wsd）；249-250、260（sp）",
+  "conf": "低",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1510",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "位深仅校验下限（bd < 8），11–16 位深静默通过并生成错误码值域参数",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_video.py:109-111",
+  "conf": "高",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1511",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "非整数位深被 `int()` 静默截断",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/kernels_video.py:109",
+  "conf": "中",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1520",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "drain() 可快照到 submit() 预留的 None 槽并解引用 `.command_buffer`，关机路径崩溃",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/submission_scheduler.py:68、96-97、133-139",
+  "conf": "?",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1521",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "on_complete 回调异常未捕获，在 Metal completion 线程上逃逸",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/submission_scheduler.py:86-94",
+  "conf": "?",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1522",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "submit() 返回 None 的语义二义：容量满 vs context 提交失败",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/submission_scheduler.py:61-62、103-107",
+  "conf": "高",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1523",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_completed/_errors 无界增长，依赖调用方自觉 poll",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/submission_scheduler.py:84、116-121、123-125",
+  "conf": "?",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1524",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "drain() 不清理完成后的记账残留，wait_fn 异常中断剩余等待",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/submission_scheduler.py:135-139",
+  "conf": "中",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-1525",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "command_buffer 以裸 Any 贯穿全模块，弱化类型契约",
+  "file": "N/A",
+  "loc": "src/shared/gpu/metal/submission_scheduler.py:21、32、71、97",
+  "conf": "高",
+  "batch": "batch-015"
+ },
+ {
+  "id": "AUD-15400",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "节点持有模型 KeyframeTrack 活引用，导出线程与 UI 编辑并发读写竞态",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_renderer.py:77, 170, 310-339",
+  "conf": "?",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15401",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "render_bus_stage 丢弃 cycle_buses，环中 Bus 音频静默丢失且无日志",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_renderer.py:458",
+  "conf": "?",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15402",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "普通/Bus 轨路由到未知 bus 目标时行为不一致，普通轨音频写入孤儿缓冲后静默丢弃",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_renderer.py:405-418, 461-463, 547",
+  "conf": "?",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15403",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "configure_from_sequence 不清空旧节点/限幅器状态，非幂等",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_renderer.py:161-173",
+  "conf": "?",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15404",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "Bus pan automation 逐样本 Python 循环，导出热路径未向量化",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_renderer.py:526-531",
+  "conf": "高",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15405",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "mono 源 pan ramp 未 clip 到 [-1,1]，与 stereo 路径及静态路径不一致",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_renderer.py:356-364",
+  "conf": "中",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15406",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`audible: set = None` 类型注解应为 Optional[set]",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_renderer.py:200, 427",
+  "conf": "高",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15410",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "SnapshotHistory 无锁，却按文档契约供播放线程跨线程消费并遍历 live sequence",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_snapshot.py:322-327, 329-331, 351-359",
+  "conf": "?",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15411",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "needs_rebuild 每次全量重建快照 + sha256，作音频 block 边界调用成本过高",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_snapshot.py:104-131, 351-359",
+  "conf": "?",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15412",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "diff() 完全不比较 clips 字段",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_graph_snapshot.py:133-152",
+  "conf": "高",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15420",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "has_blocking 的 DSP 分支是死代码（pass），DSP 后端缺失既不阻断也不告警",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_health.py:158-168, 171-183, 231-236",
+  "conf": "?",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15421",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "output_device_available 可能取自\"跳过探测\"的缓存默认值，健康报告误报设备 OK",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_health.py:268",
+  "conf": "?",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15422",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "磁盘/目录探测使用无日志的宽泛 except，失败时降级为\"未知\"且不阻断",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_health.py:54-63, 73-84, 285-286",
+  "conf": "?",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15423",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "probe_dir_size_mb 同步 os.walk 整个缓存目录，大目录会卡住调用线程",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_health.py:74-82",
+  "conf": "中",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15424",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "build_audio_health_report 的 sequence 参数缺类型注解",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_health.py:245",
+  "conf": "高",
+  "batch": "batch-154"
+ },
+ {
+  "id": "AUD-15501",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "全局 `_av_resampler_cache` 无界增长，且以 `id(self)` 作键存在复用污染",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:143-163, 862, 1064-1075",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15502",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "类型注解缺失/裸泛型（维度 9）",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:287-290, 619, 937-938",
+  "conf": "高",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15503",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "多处宽泛/静默 `except`，其中 `ring.clear()` 失败被吞会掩盖重复播放旧样本的缺陷",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:949-956, 1116-1117, 1788-1791, 2325-2327, 3166-3169, 3273-3275",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15504",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`AudioDecoder.open()` 失败路径不关闭容器，`is_open` 语义被破坏",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:1027-1032, 1058-1062",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15505",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "mixer 锁内执行 `decoder.close()`（文件 IO），音频线程可能被 UI 操作拖住",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:1510-1516, 1539-1543",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15506",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "mix 热路径存在逐块 import、逐块 solo 闭包重算与 ramp 分配（维度 8）",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:2013-2019, 2083, 2128, 2151, 2208, 2412",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15507",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "AudioOutput 死代码：`_buffer`/`_buffer_mutex` 从未用于读写，`buffer_low`/`sync_error` 信号从未发射",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:2528-2529, 2562-2564, 2632, 2676, 2861",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15508",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "音频输出启动失败或设备中途丢失后，播放状态残留为 playing，无恢复也无通知",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:3041-3043, 2716-2721, 3084",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15509",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "设备格式回退后只同步时钟/帧率，解码器输出采样率与混音器采样率未同步，音频变调变速",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:3046-3065",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15510",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "直混兜底路径的 `mix_samples` 未被 try 包裹，异常会杀死整个播放线程",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:3260-3266, 3084-3085, 3214-3217",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15511",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "反压分支的 `msleep(5)` 位于\"仅首次\"日志守卫内，后续阻塞周期不再睡眠",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:3230-3241, 3298-3311",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15512",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "写入失败时 ring 中已读出的样本被直接丢弃，造成音频跳变",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:3257, 3289-3311",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15513",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "scrub 预览 worker 与播放启动存在竞态窗口，可在播放中扰动解码器位置并复位 DSP",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:3625-3634, 4232, 4269, 4370",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15514",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`stop()`/`quiesce_for_timeline_rebuild()` 从 UI 线程无界 `wait()` 音频线程",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:4440-4443, 4018-4024",
+  "conf": "中",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15515",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`resume()` 无状态守卫，停止态调用会误发 `state_changed(\"playing\")`",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:4416-4428",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15516",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`get_state()` 把\"暂停在帧 0\"误报为 STOPPED",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:4643-4648",
+  "conf": "高",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15517",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`get_progress()` 在 duration==1 时除以零",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:4650-4660",
+  "conf": "高",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15518",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`AudioVideoSynchronizer.set_sync_mode()` 重复调用 `setup()` 造成信号重复连接",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_playback.py:4760-4785",
+  "conf": "?",
+  "batch": "batch-155"
+ },
+ {
+  "id": "AUD-15600",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`sample_rate` 缺少正值校验，0/负值静默退化为最短帧长",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_timestretch.py:86-88, 100-102",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15601",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`WaveformCache.__new__` 单例无锁双重检查竞态",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_waveform.py:199-208",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15602",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "播放抢占丢弃已完成的波形，恢复后从头全量重解码",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_waveform.py:699-701, 1064-1067",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15603",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`generate_placeholder_waveform` 污染全局 `np.random` 且用进程随机 `hash()`",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_waveform.py:1530-1532",
+  "conf": "高",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15604",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "解码中途异常被吞后仍标记 `is_complete=True` 并写入磁盘缓存",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_waveform.py:842-843, 856-864",
+  "conf": "高",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15605",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`cancel_all` 在 GUI 线程无超时 `wait()`",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_waveform.py:1101-1107",
+  "conf": "中",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15606",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`peaks_max` 实为 |peak| 幅值包络，与 `WaveformData` 文档语义不符",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_waveform.py:74-75（文档）vs 616-619（实现）",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15607",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_on_extraction_failed` 可能清掉新请求刚注册的回调（丢通知竞态）",
+  "file": "N/A",
+  "loc": "src/features/edit/core/audio_waveform.py:1079（结合 969-981、719）",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15608",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`simplify_samples` 递归 Douglas-Peucker 无深度保护，噪声之字形采样触发 RecursionError，整段录制被上层静默丢弃",
+  "file": "N/A",
+  "loc": "src/features/edit/core/automation_recorder.py:71-97（结合 src/app/controllers/edit_controller.py:2434-2437）",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15609",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "Write 模式\"覆盖整段已录曲线\"未实现：默认命令只追加关键帧，旧关键帧残留导致新旧曲线混杂",
+  "file": "N/A",
+  "loc": "src/features/edit/core/automation_recorder.py:8-9（文档宣称）vs 219-253（实现）（结合 src/shared/keyframe.py:142-155、src/app/controllers/edit_controller.py:2443 附近）",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15610",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`record`/`stop` 无并发保护（当前仅 UI 线程使用，约束未文档化）",
+  "file": "N/A",
+  "loc": "src/features/edit/core/automation_recorder.py:169-184, 201-205",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15611",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "Touch 模式松手后的 release 时间回归未实现（文档描述与行为不符）",
+  "file": "N/A",
+  "loc": "src/features/edit/core/automation_recorder.py:9（文档）vs 172-179（实现）",
+  "conf": "中",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15612",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`param_bounds` 与 KeyframeTrack 值域重复定义，存在漂移风险",
+  "file": "N/A",
+  "loc": "src/features/edit/core/automation_recorder.py:229-234",
+  "conf": "高",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15613",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`blend_rgb` 无条件 clip(0,1)（含 normal 模式），GPU normal 分支不 clip——HDR 浮点域复用时 CPU/GPU 将分叉",
+  "file": "N/A",
+  "loc": "src/features/edit/core/blend_modes.py:213-222（对照 shaders/blend.glsl:88",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15614",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_read_blend_glsl` 吞 OSError 且零日志：blend.glsl 缺失时整个 GPU 预览初始化失败且根因不可见",
+  "file": "N/A",
+  "loc": "src/features/edit/core/blend_shader.py:33-38（结合 edit_gpu_preview_renderer.py:1625-1628 的无独立 try 的",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15615",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "RIFF 尺寸超过 4 GiB 时被静默 clamp，产出非法 WAV",
+  "file": "N/A",
+  "loc": "src/features/edit/core/bwf.py:147-152",
+  "conf": "高",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-15616",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`inject_bext_chunk` 不校验 chunk size 越过文件末尾，畸形输入仍\"成功\"",
+  "file": "N/A",
+  "loc": "src/features/edit/core/bwf.py:105-112, 137-139",
+  "conf": "?",
+  "batch": "batch-156"
+ },
+ {
+  "id": "AUD-1601",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "TextureLease 状态转移未统一纳入 pool 锁，渲染线程锁外 `mark_ready` 与锁内 `release_all`/`acquire_for_writing` 存在 check-then-act 竞态",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:162-170（及 29-44 协议图、424-433、439-441）",
+  "conf": "?",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1602",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`GpuPresentFrame.extra` 为可变 dict，随 frozen descriptor 跨线程按引用共享",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:256、296",
+  "conf": "中",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1603",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "消费端消失/迟到帧被丢弃时无 slot 回收路径：READY 态无超时、无 discard API，仅全局 `release_all` 兜底",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:377-401、424-433",
+  "conf": "?",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1604",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`register_slot` 重复 slot_id 静默覆盖旧 lease，可致 fence（GLsync）泄漏；且无尺寸/句柄校验",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:346-356",
+  "conf": "?",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1605",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`mark_in_viewer` 静默 no-op，Viewer 无法区分\"成功进入 IN_VIEWER\"与\"slot 已过期/不存在\"",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:403-410",
+  "conf": "中",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1606",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_reuse_violations` 计数器无任何递增路径，`assert_no_reuse_violations` 恒通过，验收机制空转",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:340、456、459-464",
+  "conf": "高",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1607",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "宽泛 `except Exception` 静默吞异常且无日志（`release_all` 与 `TextureLease.release` 的 fence 清理路径）",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:429-432、209-212",
+  "conf": "高",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1608",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "frozen dataclass 含 dict 字段导致 `hash()` 必然抛 TypeError",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:265、296",
+  "conf": "中",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1609",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "模块头部协议图与实现不符：`make_present_frame(fence=...)` 参数不存在，且图中调用顺序会触发状态检查异常",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:29-44（对 230-244）",
+  "conf": "高",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1610",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "acquire 失败热路径日志 f-string 与 `_state_summary()` 急切求值，debug 未启用也每帧分配",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:397-400",
+  "conf": "高",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-1611",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "类型注解使用裸 `tuple`/`dict` 泛型；`_size` 从不参与注册数量约束",
+  "file": "N/A",
+  "loc": "src/shared/gpu/present_frame.py:295、302、334-335、443、449",
+  "conf": "?",
+  "batch": "batch-016"
+ },
+ {
+  "id": "AUD-16200",
+  "sev": "Critical",
+  "downgraded": false,
+  "title": "InsertLinkedAssetCommand.undo 手工重建 TimelineSequence 丢弃 subtitle/master 等全部新字段",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:9839-9849",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16201",
+  "sev": "Critical",
+  "downgraded": false,
+  "title": "转场三命令用手工 EditTrack 构造，apply/undo 均重置轨道的 strip_eq/automation/sends/subtitle_clips 等 14+ 字段",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:11106-11120（AddTransition.apply）、11159-11173（AddTransition.undo）、11432-11446（RemoveTransition.apply）、11641-11655 与 11685-11699（UpdateTransition）",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16202",
+  "sev": "Critical",
+  "downgraded": false,
+  "title": "BatchDeleteCommand(ripple=True) 的 undo 误调 move_cmd.undo，片段回移全部退化为 no-op，随后恢复被删片段造成重叠损坏",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:10809-10830（对照正确写法 RippleDeleteCommand:10249-10255 用",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16203",
+  "sev": "Critical",
+  "downgraded": false,
+  "title": "OverwriteClipCommand.undo 的\"清除分裂残留\"启发式会删除同轨所有未受影响且 asset 不同的片段",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:12275-12286",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16204",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "CommandStack/ProjectCommandStack 在 undo 抛异常时丢失命令（先 pop 后执行，失败不回填）",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:3744-3746（CommandStack.undo）、6207-6209（ProjectCommandStack.undo）",
+  "conf": "高",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16205",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "系统性缺陷：apply 计算了旧值但不持久化（无 object.__setattr__、不返回 updated 命令），7 类命令 undo 为 no-op/抛错/错位",
+  "file": "N/A",
+  "loc": "",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16206",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "RemoveBusCommand.apply 删除指向该 Bus 的 sends，undo 不恢复（sends 永久丢失）",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:9204-9208（删除）、9217-9227（undo 仅恢复 bus 与 output_bus 路由）",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16207",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "UpdateSubtitleClipCommand：apply 在时序字段变更时同步 caption graphic，undo 不同步（副作用不对称）",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:8208-8209（apply 同步）、8216-8227（undo 无同步）",
+  "conf": "高",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16208",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "SwitchMulticamAngleCommand.undo 捕获 ValueError/AttributeError 后原样返回 timeline——栈状态推进但数据未回滚",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:2549-2553",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16209",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "MoveClipsOverwriteCommand 覆盖裁剪用 int() 截断量化速度映射，分数速度下保留段源窗口系统性漂移",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:1499-1518",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16210",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "MacroCommand.from_dict 仅识别 3 种子命令，其余静默丢弃——畸形/部分历史反序列化后宏残缺",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:10031-10040",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16211",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "AddEffectCommand.apply 不持久化生成的 effect 实例，undo 用\"最后一个同类型效果\"回退查找",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:12992-13021（apply 未存",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16212",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "AppendClipCommand.apply 用启发式识别\"新追加的片段\"，同素材多片段时 undo 可能删错片段",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:12414-12423",
+  "conf": "中",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16213",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "DeleteBinCommand.undo 只恢复 bin 记录本身，未快照/恢复 remove_bin 对子 bin 与资产归属的副作用",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:3974-3982（快照仅 5 个字段）、3988-4025（undo 仅重建该 bin）",
+  "conf": "中",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16214",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`typing.Tuple` 未导入却在 16+ 处注解中使用",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:28（",
+  "conf": "高",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16215",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "96 处 `object.__setattr__` 改写 frozen dataclass，模块级不可变契约名存实亡",
+  "file": "N/A",
+  "loc": "全文件 96 处（如 655、1034、2136-2138、3873、3981-3982、4197-4198、7925-7926、8201、8359-8361、14568 等）",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16216",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "9 个命令类缺少 from_dict（其一连 to_dict 都没有），历史一旦持久化将丢失/变形",
+  "file": "N/A",
+  "loc": "MoveClipToExistingTrackCommand:1156（无 to_dict/from_dict）、RetimeMotionGraphicClipCommand:1815、SwitchMulticamAngleCommand:2443、UpdateProxyPolicyCommand:5204（无 to_dict/from_dict）、SetClipLabelColorCommand:15258、SetClipWaveformDisplayCommand:15301、SetTimelineRangeCommand:15364、ToggleClipEnabledCommand:15400、SetClipLinkedCommand:15443（后五者为普通 class，均无序列化）",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16217",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "反序列化默认值与工厂默认值不一致；多类 to_dict 丢弃旧值快照",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:8086 vs 8100；5160-5170、5316-5327、5434-5446",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16218",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "多处 `except Exception: pass` 静默吞掉反序列化/恢复失败",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:7393-7397（ApplyMixSnapshot strip_eq）、8902-8906、8917-8921、9027-9031、9092-9096（automation 快照恢复）、9243-9246、9423-9427（from_dict）",
+  "conf": "高",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-16219",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "栈无命令合并（coalesce）与 revision 计数；AddTrackCommand/MoveTrackCommand 的 undo 回退按位置猜测",
+  "file": "N/A",
+  "loc": "src/features/edit/core/commands.py:3684-3728（CommandStack 无 merge/revision）、7692-7697（AddTrackCommand.undo 位置回退）、9598-9605（MoveTrackCommand 越界时静默 no-op）",
+  "conf": "?",
+  "batch": "batch-162"
+ },
+ {
+  "id": "AUD-1700",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "死代码：RenderSource 协议在全仓库无任何消费者",
+  "file": "N/A",
+  "loc": "src/shared/render/source.py:6-11",
+  "conf": "?",
+  "batch": "batch-017"
+ },
+ {
+  "id": "AUD-1701",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`get_current_output() -> Any` 返回类型过弱，削弱 shared 层协议的类型价值",
+  "file": "N/A",
+  "loc": "src/shared/render/source.py:25",
+  "conf": "高",
+  "batch": "batch-017"
+ },
+ {
+  "id": "AUD-1702",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "返回 GPU 资源时缺少所有权/线程亲和性契约",
+  "file": "N/A",
+  "loc": "src/shared/render/source.py:25-31",
+  "conf": "?",
+  "batch": "batch-017"
+ },
+ {
+  "id": "AUD-1703",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`is_available() == False` 时 `get_current_output()` 的契约未定义",
+  "file": "N/A",
+  "loc": "src/shared/render/source.py:17-31",
+  "conf": "高",
+  "batch": "batch-017"
+ },
+ {
+  "id": "AUD-2301",
+  "sev": "Critical",
+  "downgraded": false,
+  "title": "brush 工具遍历根级遮罩时对 MaskGroup 访问 `.type` 抛 AttributeError，槽内未捕获致进程崩溃",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:1174-1177（on_brush_toggled）、src/app/controllers/color_controller.py:1246-1249（on_brush_stroke_added）",
+  "conf": "?",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2302",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "遮罩增/删/清空/层级重组均不写 undo 栈，\"清空全部遮罩\"将永久销毁所有图层的 AI matte 且无确认",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:35-76（on_mask_shape_added）、78-92（on_mask_shape_removed）、183-225（on_all_masks_cleared）、1057-1114（on_mask_hierarchy_updated）、468-489（_on_tracker_pattern_committed）",
+  "conf": "?",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2303",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "三处视频降噪参数下发用 `except Exception: pass` 静默吞错，且越层直连 renderer 绕过 engine 统一入口",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:1441-1445（on_video_denoise_changed）、1457-1461（on_video_denoise_history_reset）、1470-1475（on_video_denoise_debug_overlay_toggled）",
+  "conf": "?",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2304",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "denoise/deblur 完成回调与重置在 UI 线程同步执行全图拷贝、双次 resize 与 EXR 磁盘写",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:1508-1527（on_denoise_finished）、1611-1626（on_deblur_finished）、1562-1568 / 1662-1667（两个 reset）",
+  "conf": "?",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2305",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "denoise/deblur 异步完成回调不校验任务上下文，结果可能落到切换后的文件/图层",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:1504-1539（on_denoise_finished）、1608-1638（on_deblur_finished）",
+  "conf": "?",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2306",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "激活 crop 时静默把工作图像替换为未 bake 的原图，退出（含取消）无恢复路径",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:1697-1704（on_crop_toggled）",
+  "conf": "?",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2307",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "LUT 反编译同步执行且用 `QApplication.processEvents()` 刷 UI，异常路径状态栏消息永久残留",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:1415-1428（on_decompile_lut_requested）",
+  "conf": "?",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2308",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "on_brush_params_changed 硬下标访问 params，缺键即 KeyError",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:1205-1208",
+  "conf": "高",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2309",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "控制器直接调用 FileIO / Layer / TrackerPanel 的私有成员",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:1007（",
+  "conf": "?",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2310",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "denoise 与 deblur 的四组处理器近乎完全复制（约 200 行）",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:1482-1545（on_denoise_requested/finished/error）vs 1586-1644（on_deblur_requested/finished/error）；1547-1580（on_denoise_reset_requested）vs 1646-1679（on_deblur_reset_requested）",
+  "conf": "高",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2311",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "大量处理器缺类型注解；on_mask_shape_selected 与 on_panel_shape_selected 逻辑重复",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_controller.py:35（",
+  "conf": "高",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2312",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "三处宽泛 `except Exception` 吞错且无日志，注册表读取失败时 workspace 功能静默失效",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_workspace_controller.py:31-34（_color_workspace_panel_descriptors）、163-166（_refresh_color_workspace_menu）、189-192（_workspace_status）",
+  "conf": "?",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2313",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "公共方法缺返回类型注解",
+  "file": "N/A",
+  "loc": "src/app/controllers/color_workspace_controller.py:65（get_color_workspace_presets）、152（color_workspace_menu_items）",
+  "conf": "高",
+  "batch": "batch-023"
+ },
+ {
+  "id": "AUD-2401",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "视频/序列渲染回调闭包直接操作 Qt 控件，跨线程调用安全性完全依赖 exporter 实现",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:1215-1270（另见 1053、1206）",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2402",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "重复启动渲染会静默覆盖 `_composite_render_exporter`，旧任务回调会清掉新任务的取消入口",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:1209、1240、1262、1278-1297",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2403",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`exporter.export()` 同步抛异常时进度条、取消过滤器、光标与状态栏消息全部残留",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:1182-1270（关键 1264-1270）；对照图像路径的 finally（1115-1116）",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2404",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "多处宽泛 except 吞错（含裸 pass 与 debug 级日志），可掩盖用户编辑丢失与旧帧缓存残留",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:178-181、203-207、415-435、1095-1098（另见 1283-1290 teardown）",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2405",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`_last_metadata` 属性存在但为 None 时，点击渲染输出即 AttributeError",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:924",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2406",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "工程文件图数据的数值字段未校验即 int() 强转，损坏数据可致页面切换/渲染输出崩溃",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:610-611、657-658、1307-1310",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2407",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`keep_linear=(ext == \"exr\")` 把 EXR 之外的一切格式都按显示编码处理，浮点 HDR 格式的线性语义被破坏",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:1061-1068、1084-1089",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2408",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "图数据加载路径无节点类型/连线完整性校验（渲染路径有 preflight，加载路径没有）",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:37-109、529-543（对照 961-1003 的",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2409",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "图变更经直接 `replace()` 写入 EditProject，不经 command 入口，本层不可见 undo/redo 覆盖",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:341-372",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2410",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "属性面板接收节点 `parameters` 的可变引用，`set_node` 程序化更新在本层无状态锁",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:459-468",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2411",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "8/16bit 量化用截断而非四舍五入，且未处理 NaN",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:1085-1089",
+  "conf": "高",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2412",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "Edit 页时每次图变更全量 `set_project` + `load_timeline` + 请求预览帧，无节流",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:401-437（触发链入口 372）",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2413",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "控制器越层访问 Feature 页面私有成员（`_renderer`、`node_graph`、`node_editor`、`_current_composite_id`）",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:131-138、447、856-858、938",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2414",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`replace()` 产生新 EditProject 后，`_timeline_clip_frame_provider` 持有的旧引用未刷新",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:366-372 对照 692-693、418-426",
+  "conf": "?",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2415",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "多个序列化/解析辅助方法缺少返回类型注解",
+  "file": "N/A",
+  "loc": "src/app/controllers/composite_controller.py:851、861、1301",
+  "conf": "高",
+  "batch": "batch-024"
+ },
+ {
+  "id": "AUD-2500",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "Composite 导出 fallback 在 UI 线程直接创建 GL context/纹理执行 GPU 操作，且 context 从不释放、makeCurrent 后无 doneCurrent",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:530-548, 608-609",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2501",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "视频导出无防重入：直接覆盖 `_video_exporter` 引用",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:933-934",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2502",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "未知 codec 在 UI 事件处理器中直接 `raise ValueError`，无用户可见反馈",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:861-865；调用链 export_file_as:1071-1079",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2503",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "VideoExporter 的进度/成功/失败回调直接操作 QWidget，若在 QThread 中被调用即跨线程 UI 操作",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:936-947, 949-977",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2504",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "RAW 批量导出白平衡提取失败时静默使用魔术值 [2.0, 1.0, 1.5, 1.0]，`except Exception: pass` 吞掉全部错误",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:1647-1656",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2505",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "批量导出在 UI 线程同步执行 `FileIO.load_image`（含 rawpy RAW 解码），阻塞主线程",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:1590-1593（调度链 1329-1330 / 1565 的 QTimer.singleShot 均在 UI 线程）",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2506",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "批量导出完成后的状态恢复用 `is not None` 判断，导出前为 None 的字段会残留最后一个批文件的状态",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:1771-1790（快照来源 1279-1295）",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2507",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "float32 图像导出 `.webp` 缺少 dtype 转换分支，保存失败被误报为渲染失败",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:151-160, 204-210, 1722-1731（ext 列表缺 '.webp'）；1736-1739 与 1526-1528",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2508",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "`_encode_composite_linear_to_srgb` 用宽泛 except 把色彩管理意外错误静默降级为 sRGB",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:64-82",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2509",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "批量导出无防重入：二次启动会覆盖引擎状态快照并重置进度",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:1279-1306",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2510",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "8bit/16bit 量化用截断而非四舍五入，系统性偏暗约 0.5 LSB",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:155, 157, 208, 210, 1726, 1728",
+  "conf": "高",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2511",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "dtype/格式转换逻辑在三个导出路径中重复三份",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:151-160, 204-210, 1722-1731",
+  "conf": "高",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2512",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`_restored_queue_settings` 写后从未读取（死状态）",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:1315, 1879",
+  "conf": "高",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2513",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "批量导出未注入 `preserve_metadata` 配置，与单文件导出行为不一致",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:1736-1737（对比 100-102, 183-185）",
+  "conf": "中",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2514",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "两处宽泛 except 静默吞错：`_open_export_folder` 的 `except Exception: pass` 与 render-thread 分支日志缺 traceback",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:622-630, 526-528",
+  "conf": "高",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2515",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "主要导出入口缺少参数/返回类型注解",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:92, 174, 225, 252, 787, 1013, 1083, 1252, 1588",
+  "conf": "高",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2516",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "批量暂停用 `processEvents + sleep(0.01)` 忙等轮询",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:1465-1471",
+  "conf": "高",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2517",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "`export_srt` 全部对话框以 None 为 parent",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:1090, 1097, 1112-1117, 1133, 1138, 1142",
+  "conf": "高",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-2518",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "composite 导出结果经过 sRGB 编码后再进入 `convert_for_export`，存在双重编码风险，需复核",
+  "file": "N/A",
+  "loc": "src/app/controllers/deliver_controller.py:130-149（panel）/ 190-202（quick）",
+  "conf": "?",
+  "batch": "batch-025"
+ },
+ {
+  "id": "AUD-3500",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "closeEvent 在弹出\"保存确认\"之前就关闭全部后台服务，用户取消关闭后应用处于半瘫痪状态",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:1911-1946（交叉验证 src/app/controllers/file_controller.py:6738-6740）",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3501",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "UpdateChecker 为 QThread，closeEvent 关闭路径从不停止/等待它",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:744-750（创建与 start）；src/app/main_window.py:1903-1946（closeEvent 无对应清理）",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3502",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "script_engine 在后台 QThread 运行用户脚本，关闭路径未调用其 stop API",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:1283-1288（创建）；src/app/main_window.py:1704-1705（存在 stop API）；src/app/main_window.py:1903-1946 与 file_controller.py closeEvent（均无停止调用）",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3503",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "denoise/deblur 处理线程（DenoiseWorker 为 QThread）无关闭停止路径",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:1719-1724（信号连接显示其为异步引擎）；src/app/main_window.py:1903-1946（closeEvent 未处理）",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3504",
+  "sev": "Major",
+  "downgraded": false,
+  "title": "Library ↔ Files 面板 directory_changed 双向互连，Library 侧 set_root_path 无同路径守卫，存在目录重载死循环风险",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:1509-1512（交叉验证 src/app/ui/library_panel.py:539-546、src/app/ui/files_panel.py:104,306-314）",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3505",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "类型注解引用未导入的名称 TimelinePreviewRenderer",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:429",
+  "conf": "高",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3506",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "启动路径大量宽泛 `except Exception` 静默降级，吞掉配置/特性开关错误",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:504-508、586-590、598-602、615-619、727-731、754-759、798-815（部分）；典型如 615-619",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3507",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "GPU/引擎初始化失败无降级处理，__init__ 直接崩溃",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:385-386、525-526",
+  "conf": "中",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3508",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "数值型配置一律用 `or` 兜底，显式 0 值被静默覆盖",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:386、392、1274-1277",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3509",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_create_pages_from_registry 中途失败时，已成功创建的页面 widget 成为孤儿",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:1145-1152",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3510",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "__init__ 签名注解与 None 默认值不符",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:334-335",
+  "conf": "高",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3511",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "快捷键处理中跨对象读取多个私有属性，破坏封装",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:981、1047、1068-1073",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3512",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "启动期 singleShot 定时器在窗口关闭后仍会触发，操作半关闭 UI",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:681、693、735、737、741、756、764",
+  "conf": "?",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3513",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "音频后端诊断在 UI 线程同步执行，可能阻塞启动后的交互",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:764、798-806",
+  "conf": "中",
+  "batch": "batch-035"
+ },
+ {
+  "id": "AUD-3514",
+  "sev": "Suggestion",
+  "downgraded": false,
+  "title": "_show_audio_backend_warning 的 caps 参数未使用；告警构建失败被静默吞掉",
+  "file": "N/A",
+  "loc": "src/app/main_window.py:817-838",
+  "conf": "高",
+  "batch": "batch-035"
+ }
+]

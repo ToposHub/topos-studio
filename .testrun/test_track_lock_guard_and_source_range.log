@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 8 items
+
+tests/edit/test_track_lock_guard_and_source_range.py ........            [100%]
+
+============================== 8 passed in 7.69s ===============================

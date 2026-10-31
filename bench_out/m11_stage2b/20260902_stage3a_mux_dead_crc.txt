@@ -1,0 +1,65 @@
+# M11-3a：编码侧剩余带宽项——mux 写路径死 CRC 摘除（2026-09-02 晚，i9-9900K）
+
+## 剖析（分段计时，产品口径 ToposVideoEncoder hq rate RC 单遍）
+口径：4K 用户素材放大（dbg_enc_probe_3840x2160_rate.mov 16 帧循环 150），
+t8，预热 3 帧，3 次重复。同帧内 perf_counter 包夹各段（同窗无漂移）；
+绑定层 ToposCodec.encode 以同体复刻插桩（packet_bound/_fill_frame_input/
+tc_frame_encode/string_at 分段）。
+
+| 段 | ms/帧 | 占比 |
+|---|---|---|
+| 内核 tc_frame_encode（t8） | 20.4~21.4 | ~78% |
+| mux add_packet | 3.2~3.5 | 12.5% |
+| prepare_planes（含 pmax 校验 1.70） | 1.95~1.97 | 7.3% |
+| string_at 输出拷贝 | 0.40~0.53 | 1.7% |
+| 绑定前备 + Python 壳 | ~0.1 | ~0.4% |
+
+产品路径实测 36.4~38.4 fps（26.1~27.5 ms/帧），与 3c 验收口径
+（38.7~40.6）一致。
+
+## 根因：mux add_packet 的整包 CRC 是死功
+- mov.c tc_mux_add_packet → tc_packet_scan：结构解析 + **逐 slice 全载荷
+  CRC32**。4K hq ~3.7MB/帧 @ ~1.1GB/s ≈ 3.3ms——与 mux 段实测吻合。
+- 但本函数从不读取 slice_crc_ok：算完即弃。写侧本就没有「CRC 坏拒收」
+  语义（scan 只填标志不检查）；真正消费 slice_crc_ok 的是编码自检
+  （codec.c 两处 §11.5）与 cli inspect。
+- 修复：tc_packet_scan → tc_packet_parse_structure（scan 内部即
+  parse_structure + CRC；结构/边界/tpcC 一致性校验逐项不变）。
+- 测试依赖核查：test_mov 全部 add_packet 拒收用例均为 tpcC 头一致性/
+  pts/截断类（结构路径），无 CRC 拒收用例。
+
+## 同窗成对 A/B（库身份标记子进程，序平衡 10 对，输出 sha256 对拍）
+- old（tc_packet_scan）：32.59 fps 中位
+- new（parse_structure）：34.61 fps 中位
+- **成对比值中位 1.066（+6.6%），10/10 对全正** [1.019~1.083]
+- 输出不变性：新旧 3×10 次导出 sha256 全部同一值
+  743a22f9dfde9a7d959965f400d63cd9cdcf48188df3cb0073bcc290cfe11d2e
+- 注：+6.6% 低于分段预测 ~12%——A/B 口径含 3 遍完整导出（finish 落盘）
+  且窗口更噪；成对比值不受影响。门 ≥3% 通过。
+
+## 门禁
+- release 45/45 ✓（含 6 组 golden byte-exact）
+- ASan 45/45 ✓（修复后源强制重编译复跑，消除 stash 窗口竞态）
+- TSan 45/45 ✓（同上）
+- Python：test_topos_export + test_topos_alpha_pipeline +
+  test_topos_binding 137 passed ✓
+
+## 剩余带宽账（修复后产品路径 ~24ms/帧构成）
+- 内核 t8 ~21ms（78%→~87%）：t16 口径矛盾复核见附录（待补）
+- pmax 码值域校验 1.70ms（~7%）：R1 审计守卫（防错位深静默编码），
+  削弱/摘除属正确性守卫变更——须先 ADR，本批不动
+- 输出拷贝 0.4ms + 壳 0.1ms：无收敛空间（单次精确拷贝已是下限）
+
+## 复现
+- 分段计时：/tmp/profile_enc_product.py（临时；口径已完整记录于本文件）
+- A/B：/tmp/bench_muxcrc_ab.py（old/new dylib = /tmp/libtopos_{old,new}.dylib）
+
+## 附录：内核 t8/t16 复核（qp20 固定，纯内核，成对 10 对）
+- t8: 18.29 fps | t16: 14.56 fps | **t16/t8 = 0.799（t16 慢 20.1%）**，
+  逐对 [0.707~0.826] 全负——编码在重载荷（大包）口径下 HT 同核争抢
+  entropy/fill，t8 维持正确工作点；产品导出 min(8,cpu) 策略不变。
+- 3c 证据「纯 C 15.12ms（66.1fps）@t16」为 **qp55 轻载荷**口径，
+  与产品 hq-rate RC（重载荷 ~3.2MB/帧，t8 内核 ~21ms）不可比——
+  此前疑似矛盾解除，无跨线程口径混比问题。
+- 换算参考：本 A/B qp20 包重约为 hq-rate 的 ~5 倍（2K 侧 qp20 902
+  vs rate 194 Mbps 同比例），故 54.7ms/帧绝对值远高于产品稳态。

@@ -1,0 +1,36 @@
+{
+  "schema": "phase5_regression_after_b21/1",
+  "date": "2026-10-24T16:56:43",
+  "groups": {
+    "media": {
+      "phase5": {
+        "tests": 3535,
+        "failures": 190,
+        "errors": 945,
+        "skipped": 185
+      },
+      "baseline_c01": {
+        "tests": 3503,
+        "failures": 190,
+        "errors": 945,
+        "skipped": 185
+      }
+    },
+    "edit": {
+      "phase5": {
+        "tests": 11201,
+        "failures": 69,
+        "errors": 0,
+        "skipped": 129
+      },
+      "baseline_c01": {
+        "tests": 13669,
+        "failures": 76,
+        "errors": 0,
+        "skipped": 221
+      }
+    }
+  },
+  "baseline": "C0.1 (testfarm/2026-10-24_machineB G2/G4)",
+  "verdict": "0 new regressions in both groups"
+}

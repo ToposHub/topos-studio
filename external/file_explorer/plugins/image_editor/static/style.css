@@ -1,0 +1,114 @@
+/* =========================================
+   Darkroom Global Styles (全局基础设置)
+   ========================================= */
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden !important;
+    background-color: #18181b !important; /* Zinc-950 */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+#editor-container {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #18181b !important;
+}
+
+/* =========================================
+   Filerobot UI 暴力覆盖 (The Nuclear Option)
+   ========================================= */
+
+/* 1. 核心修复：消除所有按钮的默认白色背景 */
+[class*="FilerobotImageEditor"] button,
+[class*="FilerobotImageEditor"] div[role="button"],
+[class*="FilerobotImageEditor"] div[class*="TabItem"] {
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* 2. 侧边栏 (Left Sidebar) 专门修复 */
+/* 选中状态给一个深灰色背景，区分状态 */
+[class*="FilerobotImageEditor"] div[class*="TabItem"][aria-selected="true"],
+[class*="FilerobotImageEditor"] button[aria-selected="true"] {
+    background-color: #27272a !important; /* Zinc-800 */
+    border-radius: 8px;
+}
+
+/* 3. 图标颜色强制变白 */
+[class*="FilerobotImageEditor"] svg {
+    fill: #f4f4f5 !important; /* 亮灰白 */
+    stroke: #f4f4f5 !important;
+}
+/* 特殊处理：有些图标是用 path 填充的 */
+[class*="FilerobotImageEditor"] svg path,
+[class*="FilerobotImageEditor"] svg circle,
+[class*="FilerobotImageEditor"] svg rect {
+    fill: #f4f4f5 !important;
+    stroke: none !important;
+}
+
+/* 4. 文本颜色强制变白 */
+[class*="FilerobotImageEditor"] label,
+[class*="FilerobotImageEditor"] span,
+[class*="FilerobotImageEditor"] p,
+[class*="FilerobotImageEditor"] div {
+    color: #e4e4e7 !important; /* Zinc-200 */
+    font-family: inherit !important;
+}
+
+/* 5. 顶部保存按钮 (Save) 特殊处理 */
+/* 我们希望它是蓝色的，且文字是白色的 */
+[class*="FilerobotImageEditor"] button[class*="Button-primary"],
+[class*="FilerobotImageEditor"] button:not([class*="TabItem"]):not([class*="IconButton"]) {
+    /* 这里尝试匹配保存按钮 */
+}
+
+/* 由于上面的规则太暴力，可能会误伤 Save 按钮，我们专门为 Save 按钮这种 Primary 样式的按钮加回背景 */
+/* Filerobot 的保存按钮通常在右上角，包含文字 "Save" */
+button[class*="Button-primary"] {
+    background-color: #0d6efd !important; /* Bootstrap Blue */
+    color: white !important;
+    border-radius: 4px !important;
+    padding: 6px 16px !important;
+}
+
+/* 6. 滑动条 (Sliders) 美化 */
+input[type=range] {
+    background: transparent !important;
+}
+/* 轨道背景 */
+input[type=range]::-webkit-slider-runnable-track {
+    background: #3f3f46 !important;
+    border-radius: 2px;
+}
+/* 滑块头部 */
+input[type=range]::-webkit-slider-thumb {
+    margin-top: -6px; /* 修正对齐 */
+    background: #0d6efd !important;
+    border: 2px solid #18181b !important;
+    box-shadow: 0 0 5px rgba(0,0,0,0.5);
+}
+
+/* 7. 输入框美化 */
+[class*="FilerobotImageEditor"] input[type="number"],
+[class*="FilerobotImageEditor"] input[type="text"] {
+    background-color: #27272a !important;
+    color: #fff !important;
+    border: 1px solid #3f3f46 !important;
+    border-radius: 4px;
+}
+[class*="FilerobotImageEditor"] input:focus {
+    border-color: #0d6efd !important;
+}
+
+/* 8. 消除可能存在的白色面板背景 */
+[class*="FilerobotImageEditor-App"] {
+    background-color: #18181b !important;
+}

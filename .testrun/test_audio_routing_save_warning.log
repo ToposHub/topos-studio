@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_audio_routing_save_warning.py .......                    [100%]
+
+============================== 7 passed in 5.84s ===============================

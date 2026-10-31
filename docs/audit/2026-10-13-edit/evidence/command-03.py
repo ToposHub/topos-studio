@@ -1,0 +1,20 @@
+from PyQt6.QtWidgets import QDockWidget
+from src.features.edit.ui.media_pool_panel import MIME_TYPE_MEDIA_POOL_ASSETS
+mw.resizeDocks([next(d for d in mw.findChildren(QDockWidget) if d.objectName()=='dockEditTimeline')],[350],Qt.Orientation.Vertical)
+wait(400)
+asset=mw._current_edit_project.get_asset_by_path(str(ROOT/'tests/test_videos/2K_h264.mp4'))
+# Real Qt drag/drop into V1; production handler constructs the linked A/V command.
+tv._configure_layout_engine()
+rect=tv._layout_engine.track_rect(tv._timeline.video_tracks[0].track_id)
+p=tv.mapFromScene(QPointF(tv._layout_engine.frame_to_x(0)+1,rect.center().y()))
+mime=QMimeData(); mime.setData(MIME_TYPE_MEDIA_POOL_ASSETS,json.dumps([asset.asset_id]).encode())
+enter=QDragEnterEvent(p,Qt.DropAction.CopyAction,mime,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
+QApplication.sendEvent(tv.viewport(),enter)
+move=QDragMoveEvent(p,Qt.DropAction.CopyAction,mime,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
+QApplication.sendEvent(tv.viewport(),move)
+drop=QDropEvent(QPointF(p),Qt.DropAction.CopyAction,mime,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
+QApplication.sendEvent(tv.viewport(),drop)
+wait(2500)
+click(panel.btn_zoom_fit)
+record('timeline_media_drop',point=[p.x(),p.y()],accepted=drop.isAccepted(),state=timeline_state(),screenshot=shot('03-linked-av'))
+record('media_grid_rows',rows=[(i,str(mw.media_pool_panel.asset_model.data(mw.media_pool_panel.asset_model.index(i,0),Qt.ItemDataRole.DisplayRole))) for i in range(mw.media_pool_panel.asset_model.rowCount())])

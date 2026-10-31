@@ -1,0 +1,34 @@
+{
+  "recipe_id": "P32",
+  "name": "柔双色调",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合轻色调包装；tone_amount 0.3–0.5 低染、tone_detail 0.4 以上保细节",
+  "component": "Duotone_Toner（生产插件 plugins/Duotone_Toner.tglsl）",
+  "dependencies": {
+    "plugin_id": "Duotone_Toner",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "shadow_color": [
+      0.1,
+      0.12,
+      0.18
+    ],
+    "highlight_color": [
+      0.94,
+      0.9,
+      0.84
+    ],
+    "tone_amount": 0.4,
+    "tone_detail": 0.5,
+    "luma_mode": "Rec.709 Luma"
+  },
+  "notes": "生产双色调插件低染档；参数已对真实插件 schema 校验。"
+}

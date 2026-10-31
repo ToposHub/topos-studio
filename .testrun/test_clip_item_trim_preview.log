@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_clip_item_trim_preview.py .......                        [100%]
+
+============================== 7 passed in 9.41s ===============================

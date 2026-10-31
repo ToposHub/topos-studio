@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_source_viewer_scrub_preview.py ...                       [100%]
+
+============================== 3 passed in 17.33s ==============================

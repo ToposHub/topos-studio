@@ -1,0 +1,79 @@
+{
+  "status": "ok",
+  "frames": 48,
+  "wall_s": 0.32614767999984906,
+  "fps": 147.17259371589648,
+  "frame_ms_p50": 6.482341500486655,
+  "frame_ms_p95": 9.541729001284693,
+  "stage": {
+    "pad_ns": 28000,
+    "fill_ns": 608153000,
+    "entropy_ns": 844112000,
+    "crc_ns": 37949000,
+    "copy_ns": 3195000,
+    "asm_ns": 4408000,
+    "slices": 1296,
+    "blocks": 3110400,
+    "dct_ns": 0,
+    "probe_fill_ns": 0,
+    "probe_wall_ns": 0,
+    "final_wall_ns": 0,
+    "check_wall_ns": 40467000
+  },
+  "output_bytes": 51590103,
+  "kind": "encode_only",
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+  "meta": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "fps_rational": [
+      25,
+      1
+    ],
+    "total_frames": 96,
+    "pixel_format": "yuv422p10le",
+    "bit_depth": 10,
+    "diagnostics": {
+      "decode_path": "context",
+      "decode_path_reason": "ok",
+      "native_target_decode": false,
+      "bitstream_major": 7,
+      "stream_compatibility": "unsupported_major",
+      "legacy_reduced_fallback": false,
+      "v7b_base_range_decode": false,
+      "v7b_base_range_samples": 0,
+      "decode_request_mode": null,
+      "decode_request_scale": null,
+      "read_ahead_depth": 0,
+      "read_ahead_stats": {
+        "batch_decodes": 0,
+        "prefetched_frames": 0,
+        "cache_hits": 0,
+        "cache_discarded": 0,
+        "batch_fallbacks": 0
+      },
+      "decode_workers_requested": 0,
+      "decode_workers_assigned": 16,
+      "decode_worker_budget": {
+        "capacity": 16,
+        "active": 1,
+        "assigned_total": 16,
+        "oversubscribed": false,
+        "leases": [
+          {
+            "key": "media:11976268912",
+            "role": "export",
+            "requested": 0,
+            "assigned": 16
+          }
+        ]
+      },
+      "metal_surface_frames": 0,
+      "metal_surface_failures": 0,
+      "metal_surface_active": false,
+      "plane_pool_entries": 5,
+      "frame_bytes_estimate": 8294400
+    }
+  }
+}

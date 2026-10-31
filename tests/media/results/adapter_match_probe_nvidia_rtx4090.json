@@ -1,0 +1,79 @@
+{
+  "date": "2026-09-12T12:05:59",
+  "plan_item": "W1-03 multi-GPU decode/render 适配器匹配实测",
+  "machine": {
+    "os": "win32",
+    "primary_vendor": "nvidia",
+    "adapters": [
+      {
+        "description": "NVIDIA GeForce RTX 4090",
+        "vendor_id": "0x10DE",
+        "device_id": "0x2684",
+        "dedicated_video_memory_mb": 24138,
+        "vendor_name": "nvidia",
+        "adapter_luid": "00011A8E-00000000"
+      },
+      {
+        "description": "Intel(R) UHD Graphics 770",
+        "vendor_id": "0x8086",
+        "device_id": "0xA780",
+        "dedicated_video_memory_mb": 128,
+        "vendor_name": "intel",
+        "adapter_luid": "00012C3B-00000000"
+      },
+      {
+        "description": "NVIDIA GeForce RTX 4090",
+        "vendor_id": "0x10DE",
+        "device_id": "0x2684",
+        "dedicated_video_memory_mb": 24138,
+        "vendor_name": "nvidia",
+        "adapter_luid": "0001CF5A-00000000"
+      },
+      {
+        "description": "Microsoft Basic Render Driver",
+        "vendor_id": "0x1414",
+        "device_id": "0x008C",
+        "dedicated_video_memory_mb": 0,
+        "vendor_name": "unknown",
+        "adapter_luid": "00012BCD-00000000"
+      }
+    ],
+    "duplicate_description_entries": [
+      {
+        "description": "NVIDIA GeForce RTX 4090",
+        "luid_a": "00011A8E-00000000",
+        "luid_b": "0001CF5A-00000000"
+      }
+    ]
+  },
+  "decode_side": {
+    "description": "NVIDIA GeForce RTX 4090",
+    "adapter_luid": "00011A8E-00000000"
+  },
+  "rule_verification": {
+    "same_luid": {
+      "match": true,
+      "reason": ""
+    },
+    "diff_luid": {
+      "match": false,
+      "reason": "adapter_mismatch:00010000-00000000|00011A8E-00000000"
+    }
+  },
+  "render_side": {
+    "probe_ok": true,
+    "decode_adapter": {
+      "description": "NVIDIA GeForce RTX 4090",
+      "vendor_id": "0x10DE",
+      "device_id": "0x2684",
+      "dedicated_video_memory_mb": 24138,
+      "vendor_name": "nvidia",
+      "adapter_luid": "00011A8E-00000000"
+    },
+    "decode_adapter_luid": "00011A8E-00000000",
+    "render_adapter_luid": "",
+    "match": false,
+    "reason": "render_adapter_unprobed"
+  },
+  "all_ok": true
+}

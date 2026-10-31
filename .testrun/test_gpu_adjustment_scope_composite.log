@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_gpu_adjustment_scope_composite.py .......                [100%]
+
+============================== 7 passed in 8.93s ===============================

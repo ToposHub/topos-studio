@@ -1,0 +1,79 @@
+{
+ "kind": "export_effects_matrix_bench",
+ "schema_version": 1,
+ "side": "t3_hevc10_hevc8_identity",
+ "git_rev": "c6fb567d",
+ "frames": 240,
+ "warmup": 30,
+ "runs": [
+  {
+   "warmup": "ok",
+   "frames_requested": 240,
+   "wall_s": 3.2949,
+   "status": "ok",
+   "fps": 72.841,
+   "frame_ms_p50": 11.331,
+   "frame_ms_p95": 16.453,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 3.3574,
+     "status": "ok",
+     "fps": 71.483,
+     "frame_ms_p50": 11.547,
+     "frame_ms_p95": 16.318,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 3.2949,
+     "status": "ok",
+     "fps": 72.841,
+     "frame_ms_p50": 11.331,
+     "frame_ms_p95": 16.453,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 72.841,
+   "config": {
+    "source": "hevc10",
+    "codec": "hevc8",
+    "scenario": "identity",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  }
+ ]
+}

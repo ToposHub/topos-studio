@@ -1,0 +1,95 @@
+// --- Topos Plugin Metadata ---
+// @name Gate Weave
+// @i18n_name LIB1_Gate_Weave
+// @author Topos Library v1
+// @version 0.1.0
+// @description Film gate weave simulation, static mode: whole-frame constant sub-pixel translation (seeded integer hash) plus micro-rotation about frame center, bilinear UV resample with Freeze (edge clamp) or Black out-of-frame border; no clock read, same seed = same offset every frame
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider amplitude_h "Horizontal Amplitude" 0.004 0.0 0.02
+// @param slider amplitude_v "Vertical Amplitude" 0.002 0.0 0.02
+// @param slider rotation "Rotation" 0.05 0.0 0.5
+// @param slider seed "Seed" 7.0 0.0 100.0
+// @param select border_mode "Border" 0 "Freeze" "Black"
+// -----------------------------
+//
+// Gate Weave —— 门片位移/微旋转模拟（L 计划 F08，LIB1，静态版）。
+//
+// 差量（L00 台账 F08 行）：全库无门片位移类（无重复）。确定性帧身份：
+// 不读系统时钟——位移由 seed 经整数格点散列决定。
+//
+// 算法（与 references/gate_weave_ref.py 逐式同构）：
+// - 整帧常量位移（静态：每帧同一位移，由 seed 决定）：
+//   dx = amplitude_h·(hash((11,7), seed) - 0.5)
+//   dy = amplitude_v·(hash((23,5), seed) - 0.5)      归一单位移
+//   hash 为 uint32 murmur3 风格格点散列（同 F07 常量族）；
+// - 像素空间刚体逆变换（各向同性旋转）：p=uv·texSize（像素中心），
+//   v = p - 0.5·texSize - (dx,dy)·texSize；
+//   suv_px = R(-θ)·v + 0.5·texSize，θ = radians(rotation)；
+//   suv = suv_px / texSize；
+// - 双线性重采样（Delta 惯例 out = color + (sample - base)）：
+//   Freeze：suv 钳到半纹素 [0.5/ts, 1-0.5/ts]（clamp-to-edge 等价）；
+//   Black：suv 出 [0,1]² 的像素输出 vec3(0.0)。
+//
+// 恒等：amplitude_h = amplitude_v = rotation = 0（精确零值早退——几何参数
+// 不用 <0.001 阈值早退，避免亚像素位移在阈值内被吞）。静态限制：动态
+// 逐帧抖动依赖正式 frame/seed 子门（L01 冻结，README 声明）。
+//
+// 参数 ABI 裸名引用；u_input_tex/u_tex_size 白名单（textureSize 取尺寸）。
+
+float gw_hash(uvec2 p, uint s) {
+    uint h = (p.x * 0x9E3779B1u) ^ (p.y * 0x85EBCA77u) ^ (s * 0xC2B2AE3Du);
+    h ^= h >> 15u;
+    h *= 0x2545F491u;
+    h ^= h >> 13u;
+    h *= 0x9E3779B1u;
+    h ^= h >> 16u;
+    return float(h) * (1.0 / 4294967296.0);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 精确零值早退：零位移+零旋转恒等（几何参数不用阈值早退）
+    if (amplitude_h == 0.0 && amplitude_v == 0.0 && rotation == 0.0) return color;
+
+    uint s = uint(int(seed));
+    float dx = amplitude_h * (gw_hash(uvec2(11u, 7u), s) - 0.5);
+    float dy = amplitude_v * (gw_hash(uvec2(23u, 5u), s) - 0.5);
+
+    vec2 ts = vec2(textureSize(u_input_tex, 0));
+    ts = max(ts, vec2(1.0));
+    float a = radians(rotation);
+    float cs = cos(a);
+    float sn = sin(a);
+
+    // 像素空间刚体逆变换（绕中心旋转 + 平移的逆）
+    vec2 p = uv * ts;
+    vec2 cp = vec2(0.5) * ts;
+    vec2 v = p - cp - vec2(dx, dy) * ts;
+    vec2 q = vec2(v.x * cs + v.y * sn, -v.x * sn + v.y * cs);
+    vec2 suv = (q + cp) / ts;
+
+    // 半纹素安全边界（clamp-to-edge 等价）
+    vec2 mn = vec2(0.5) / ts;
+    vec2 mx = vec2(1.0) - mn;
+
+    vec3 base = texture(u_input_tex, uv).rgb;
+    vec3 sampled;
+    if (border_mode == 1) {
+        if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) {
+            sampled = vec3(0.0);
+        } else {
+            sampled = texture(u_input_tex, clamp(suv, mn, mx)).rgb;
+        }
+    } else {
+        sampled = texture(u_input_tex, clamp(suv, mn, mx)).rgb;
+    }
+    return color + (sampled - base);
+}

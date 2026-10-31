@@ -1,0 +1,39 @@
+# M10-6.4 默认 slice_rows 32→16 证据（2026-09-02，i9-9900K 8C16T）
+
+## 动机：2K 解码瓶颈剖析
+- sample 采样（bench_out/m1063_kernel/profile_dec_2k_product.txt）：
+  t8 下 worker 有效利用率 ~56%，其余为帧间串行等待（barrier 尾部失衡 + demux）。
+- 根因：34 带（sr32）/8 线程 = 4.25 带/线程，带内 DC/熵链路串行 → 尾部失衡吞掉近半并行度。
+- 线程扩展（2K sr32 hq 码流，内核口径）：t1 60.96 / t2 121.11 / t4 218.95 /
+  t8 257.11 / t12 246.35 / t16 245.72 fps —— t8 后饱和，确认是调度粒度而非线程数问题。
+
+## slice_rows 粒度扫描（2K hq rate，内核解码）
+slice_rows= 64 (17 带): 171.89 fps
+slice_rows= 32 (34 带): 259.15 fps   ← 旧默认
+slice_rows= 16 (68 带): 382.25 fps   ← 新默认（+48%）
+slice_rows=  8 (135 带): 379.41 fps  ← 无进一步收益
+
+## 全代价矩阵（t8，rate 模式目标字节恒定；重负载窗口内 A/B 同窗）
+2k sr32: enc= 36.35 fps  avg=960.9 KiB  psnr=67.93 dB  dec=254.76 fps
+2k sr16: enc= 43.87 fps  avg=942.9 KiB  psnr=67.73 dB  dec=335.75 fps  (enc +21% / dec +32%)
+4k sr32: enc= 13.28 fps  avg=3747.5 KiB psnr=63.24 dB  dec= 83.85 fps
+4k sr16: enc= 14.46 fps  avg=3746.8 KiB psnr=63.24 dB  dec= 92.22 fps  (enc +9% / dec +10%)
+（2K PSNR −0.2 dB @67.7dB 档：率控重定位，视觉不可辨；4K 无变化）
+
+## 变更
+- include/topos_codec.h：TC_FRAME_DEFAULT_SLICE_ROWS 32u → 16u（产品 Python 端
+  默认本为 16，原生默认与产品对齐；旧码流按自身头字段解码，不受影响）
+- tests/conformance/golden_codec.c：slice_rows=0 用例显式钉 32——冻结字节与默认值解耦
+
+## 门禁
+- release 全部单测 + 6 组 golden（v1/bd12/pf444/gbr/profiles/vlc/mov）byte-exact ✓
+- ASan 全套 ✓（暴露并修复 alpha 越界写，见 codec 提交）
+- TSan 全套 ✓（vlc golden 首跑抖动，复跑通过）
+
+## 最终 vs 参照（同窗交错，t8，2026-09-02 ~07:00）
+2K：enc hq 42.49 ≈ ProRes 42.94 / DNxHR 42.24（追平）；standard 48.45 / proxy 53.75 反超
+2K 解码：topos 342.4 vs ProRes slice 448.2 / frame 449.2 / DNxHR 459.6（76%，余量为 ffmpeg
+  帧流水线架构差距——topos 同脚本基线 229.2 → 342.4 = +49%）
+4K：enc hq 13.11 vs ProRes 10.51 / DNxHR 8.18（+25%/+60% 反超）
+4K 解码：topos 81.4 vs ProRes slice 76.1 / frame 76.8（反超）/ DNxHR 90.6
+基准原始数据：bench_out/topos_vs_ref/20260902_065735_2k、20260902_065819_4k

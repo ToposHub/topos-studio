@@ -1,0 +1,51 @@
+{
+  "fixture_id": "synthetic_1080p_h264_short",
+  "timestamp": "2026-05-18T22:16:12.778258",
+  "mode": "dry",
+  "pipeline_version": "v2",
+  "video_properties": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 29.75,
+    "duration_s": 5.006
+  },
+  "ui_tick": {
+    "samples": 0,
+    "avg_ms": 0.0,
+    "p50_ms": 0.0,
+    "p95_ms": 0.0,
+    "max_ms": 0.0
+  },
+  "render_submit": {
+    "samples": 0,
+    "avg_ms": 0.0,
+    "p50_ms": 0.0,
+    "p95_ms": 0.0
+  },
+  "playback": {
+    "total_frames": 0,
+    "dropped_frames": 0,
+    "displayed_fps": 0.0,
+    "target_fps": 29.75
+  },
+  "seek": {
+    "samples": 0,
+    "median_ms": 0.0,
+    "p95_ms": 0.0
+  },
+  "gpu_texture": {
+    "count": 0,
+    "pool_size": 0
+  },
+  "memory": {
+    "current_mb": 0.0,
+    "peak_mb": 0.0
+  },
+  "test_info": {
+    "duration_s": 0.0,
+    "success": false
+  },
+  "errors": [
+    "测试失败: 'NoneType' object has no attribute 'processEvents'"
+  ]
+}

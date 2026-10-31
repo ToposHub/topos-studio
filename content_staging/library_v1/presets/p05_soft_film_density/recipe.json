@@ -1,0 +1,26 @@
+{
+  "recipe_id": "P05",
+  "name": "柔和胶片",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合中低反差叙事素材；density 0.4–0.8，amount 0.7–0.9",
+  "component": "F02 subtractive_density（暂存组件 content_staging/library_v1/filters/subtractive_density）",
+  "dependencies": {
+    "component_id": "F02",
+    "component_slug": "subtractive_density",
+    "component_kind": "filter"
+  },
+  "params": {
+    "density": 0.6,
+    "dye_coupling": 0.4,
+    "luma_protection": 0.3,
+    "amount": 0.85
+  },
+  "notes": "依赖暂存组件（L10 未接缝）：减色密度染料耦合产生胶片柔和感，与生产 Cross_Process 的差量在密度交叉污染模型。"
+}

@@ -1,0 +1,152 @@
+{
+  "schema": "topos.codec_vs_project.v1",
+  "created_at": "2026-09-15T12:18:19+0800",
+  "host": {
+    "platform": "Darwin",
+    "machine": "x86_64"
+  },
+  "codec_version": "ToposVersion(major=0, minor=1, patch=0, git_commit='822a93c1-dirty', build_target='x86_64-AppleClang', abi_version=2, struct_size=56)",
+  "direct_decode": {
+    "source": "tests/test_videos/2K_topos.mov",
+    "width": 1920,
+    "height": 1080,
+    "pixel_format": 0,
+    "bit_depth": 10,
+    "sample_count": 2912,
+    "frames": 111,
+    "warmup_frames": 8,
+    "wall_s": 0.5001122940011555,
+    "fps": 221.95015265860178,
+    "ms_per_frame": 4.505516162172572,
+    "checksum": 187,
+    "stage_stats": {
+      "scan_ns": 55000,
+      "crc_ns": 53607000,
+      "entropy_ns": 1143670382,
+      "dequant_idct_ns": 1930326618,
+      "output_ns": 0,
+      "alloc_ns": 0,
+      "blocks": 7192800,
+      "nonzero_ac": 82901174,
+      "dc_only_blocks": 576128,
+      "slices": 1665,
+      "packet_bytes_read": 118407622,
+      "segments_parsed": 1665,
+      "segments_skipped": 0,
+      "entropy_symbols": 180187948,
+      "coefficients_skipped": 0,
+      "idct_samples": 423467008,
+      "upload_bytes": 920678400,
+      "frames": 111,
+      "wall_ns": 477623000,
+      "p50_ns": 4357000,
+      "p95_ns": 4848000,
+      "p99_ns": 4918000
+    },
+    "planes": [
+      [
+        1920,
+        1080
+      ],
+      [
+        960,
+        1080
+      ],
+      [
+        960,
+        1080
+      ]
+    ],
+    "threads": 16
+  },
+  "direct_encode": {
+    "source": "/tmp/topos_codec_compare_project_20260915_run3/metal_sequential_none_480f_1280x720.mov",
+    "width": 1280,
+    "height": 720,
+    "frames": 120,
+    "qp": 89,
+    "entropy_reserved0": 8,
+    "wall_s": 0.09248138899783953,
+    "fps": 1297.5583660708571,
+    "ms_per_frame": 0.7706782416486627,
+    "packet_bytes_mean": 31540,
+    "packet_bytes_min": 31540,
+    "packet_bytes_max": 31540,
+    "stage_stats": {
+      "pad_ns": 30000,
+      "fill_ns": 289168000,
+      "entropy_ns": 135603000,
+      "crc_ns": 2092000,
+      "copy_ns": 408000,
+      "asm_ns": 174000,
+      "slices": 2160,
+      "blocks": 3456000,
+      "dct_ns": 0,
+      "probe_fill_ns": 0,
+      "prep_wall_ns": 0,
+      "probe_wall_ns": 0,
+      "final_wall_ns": 0,
+      "check_wall_ns": 1638000
+    },
+    "sized_probe": {
+      "target_bytes": 33674,
+      "frames": 8,
+      "wall_s": 0.016016868001315743,
+      "fps": 499.47343009524843,
+      "qp_values": [
+        88,
+        88,
+        88,
+        88,
+        88,
+        88,
+        88,
+        88
+      ],
+      "packet_bytes": [
+        32547,
+        32547,
+        32547,
+        32547,
+        32547,
+        32547,
+        32547,
+        32547
+      ]
+    }
+  },
+  "application_encoder_fixed_qp": {
+    "source": "/tmp/topos_codec_compare_project_20260915_run3/metal_sequential_none_480f_1280x720.mov",
+    "frames": 120,
+    "qp": 89,
+    "wall_s": 0.10035575300207711,
+    "fps": 1195.7460973614168,
+    "ms_per_frame": 0.8362979416839759,
+    "output_bytes": 3913167
+  },
+  "project_export": {
+    "metrics_file": "/tmp/topos_codec_compare_project_20260915_run3/metal_sequential_none_480f_1280x720.json",
+    "frames": 480,
+    "decode_wall_s": 2.473518,
+    "decode_fps": 194.0555920757399,
+    "gpu_render_wall_s": 1.463657,
+    "gpu_render_fps": 327.9456867285163,
+    "encode_frame_wall_s": 0.653436,
+    "encode_fps": 734.5784437955668,
+    "export_wall_s": 5.116211,
+    "export_fps": 93.819,
+    "output_bytes": 16163570
+  },
+  "comparison": {
+    "direct_decode_vs_project_decode": 1.143745203549582,
+    "direct_encode_vs_project_encode": 1.7663986426914096,
+    "application_fixed_qp_vs_project_encode": 1.6277990559905307,
+    "project_export_over_direct_encode": 0.07230426195323589
+  },
+  "notes": [
+    "Direct decode includes native Topos MOV packet I/O and decode_views into reusable caller-owned planes; it excludes timeline effects and Metal composition.",
+    "Direct encode uses one real decoded frame at the project's output resolution and the packet's representative per-frame QP; no synthetic content is used.",
+    "Application fixed-QP encode includes ToposVideoEncoder validation and MOV mux overhead; project export uses rate-control feedback and varying QP, so its encode stage is not a fixed-QP apples-to-apples run.",
+    "Project export includes decode, Metal render, frame scheduling, encode, mux, and finalization; export_fps is the end-to-end number."
+  ]
+}

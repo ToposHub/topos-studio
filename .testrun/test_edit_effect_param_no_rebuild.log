@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 1 item
+
+tests/edit/test_edit_effect_param_no_rebuild.py .                        [100%]
+
+============================== 1 passed in 7.58s ===============================

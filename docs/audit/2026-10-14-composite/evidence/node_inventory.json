@@ -1,0 +1,3898 @@
+{
+  "registry_count": 99,
+  "nodes": [
+    {
+      "type": "ai_denoise",
+      "class": "AIDenoiseNode",
+      "module": "src.features.composite.nodes.ai_denoise_node",
+      "display_name": "AI Denoise",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "strength",
+        "model"
+      ]
+    },
+    {
+      "type": "ai_expand",
+      "class": "AIExpandNode",
+      "module": "src.features.composite.nodes.ai_expand_node",
+      "display_name": "AI Expand",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "direction",
+        "amount",
+        "prompt",
+        "model"
+      ]
+    },
+    {
+      "type": "ai_gen_expand",
+      "class": "AIGenExpandNode",
+      "module": "src.features.composite.nodes.ai_gen_expand_node",
+      "display_name": "AI Gen Expand",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "prompt",
+        "negative_prompt",
+        "model",
+        "seed",
+        "strength",
+        "expand_left",
+        "expand_top",
+        "expand_right",
+        "expand_bottom",
+        "output_width",
+        "output_height"
+      ]
+    },
+    {
+      "type": "ai_generate",
+      "class": "AIGenerateNode",
+      "module": "src.features.composite.nodes.ai_generate_node",
+      "display_name": "AI Generate",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "prompt",
+        "negative_prompt",
+        "strength",
+        "model",
+        "output_width",
+        "output_height"
+      ]
+    },
+    {
+      "type": "ai_inpaint",
+      "class": "AIInpaintNode",
+      "module": "src.features.composite.nodes.ai_inpaint_node",
+      "display_name": "AI Inpaint",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "prompt",
+        "negative_prompt",
+        "strength",
+        "model"
+      ]
+    },
+    {
+      "type": "ai_remove",
+      "class": "AIRemoveNode",
+      "module": "src.features.composite.nodes.ai_remove_node",
+      "display_name": "AI Remove",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "strength",
+        "model",
+        "use_tiling",
+        "tile_size",
+        "overlap",
+        "blend"
+      ]
+    },
+    {
+      "type": "blend",
+      "class": "MergeNode",
+      "module": "src.features.composite.nodes.blend_node",
+      "display_name": "Merge",
+      "inputs": [
+        {
+          "name": "A",
+          "data_type": "image"
+        },
+        {
+          "name": "B",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "blend_mode",
+        "opacity",
+        "mix",
+        "format_policy",
+        "bbox_policy",
+        "alpha_policy",
+        "alpha_clamp",
+        "mask_channel",
+        "mask_invert"
+      ]
+    },
+    {
+      "type": "blur",
+      "class": "BlurNode",
+      "module": "src.features.composite.nodes.blur_node",
+      "display_name": "Blur",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "velocity",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "blur_type",
+        "radius_x",
+        "radius_y",
+        "radius",
+        "angle",
+        "motion_source",
+        "shutter",
+        "edge_preserve",
+        "aperture_blades",
+        "anamorphic",
+        "highlight_gain",
+        "edge_policy",
+        "quality",
+        "channel_r",
+        "channel_g",
+        "channel_b",
+        "channel_a",
+        "mix",
+        "process_alpha",
+        "mask_channel",
+        "mask_invert"
+      ]
+    },
+    {
+      "type": "camera3d",
+      "class": "Camera3DNode",
+      "module": "src.features.composite.nodes.camera3d_node",
+      "display_name": "Camera",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "display",
+          "data_type": "scene"
+        }
+      ],
+      "parameters": [
+        "camera_mode",
+        "cam_fov",
+        "cam_focal_length",
+        "cam_sensor_size",
+        "cam_filmback",
+        "cam_sensor_width",
+        "cam_gate_fit",
+        "cam_match_mode",
+        "cam_unit",
+        "cam_near",
+        "cam_far",
+        "cam_lens_shift_x",
+        "cam_lens_shift_y",
+        "cam_exposure",
+        "cam_dist",
+        "cam_orbit_yaw",
+        "cam_orbit_pitch",
+        "cam_target_x",
+        "cam_target_y",
+        "cam_target_z",
+        "cam_eye_x",
+        "cam_eye_y",
+        "cam_eye_z",
+        "cam_roll",
+        "cam_ortho_scale",
+        "cam_dof_enable",
+        "cam_focus_distance",
+        "cam_fstop",
+        "cam_show_safe_areas",
+        "width",
+        "height"
+      ]
+    },
+    {
+      "type": "cdl",
+      "class": "CDLNode",
+      "module": "src.features.composite.nodes.cdl_node",
+      "display_name": "CDL",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "slope_r",
+        "slope_g",
+        "slope_b",
+        "offset_r",
+        "offset_g",
+        "offset_b",
+        "power_r",
+        "power_g",
+        "power_b",
+        "saturation",
+        "cdl_path",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "channel_merge",
+      "class": "ChannelMergeNode",
+      "module": "src.features.composite.nodes.channel_merge_node",
+      "display_name": "Channel Merge",
+      "inputs": [
+        {
+          "name": "input_r",
+          "data_type": "image"
+        },
+        {
+          "name": "input_g",
+          "data_type": "image"
+        },
+        {
+          "name": "input_b",
+          "data_type": "image"
+        },
+        {
+          "name": "input_a",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "r_source",
+        "g_source",
+        "b_source",
+        "a_source",
+        "r_channel",
+        "g_channel",
+        "b_channel",
+        "a_channel",
+        "r_constant",
+        "g_constant",
+        "b_constant",
+        "a_constant",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "chroma_keyer",
+      "class": "ChromaKeyerNode",
+      "module": "src.features.composite.nodes.chroma_keyer_node",
+      "display_name": "ChromaKeyer",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "screen",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "screen_color_r",
+        "screen_color_g",
+        "screen_color_b",
+        "tolerance",
+        "softness",
+        "despill",
+        "edge_width",
+        "output_mode",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "chromatic_aberration",
+      "class": "ChromaticAberrationNode",
+      "module": "src.features.composite.nodes.chromatic_aberration_node",
+      "display_name": "Chromatic Aberration",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "offset_r",
+        "offset_b",
+        "center_x",
+        "center_y",
+        "edge_boost",
+        "cache_to_disk",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "clamp",
+      "class": "ClampNode",
+      "module": "src.features.composite.nodes.clamp_node",
+      "display_name": "Clamp",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mode",
+        "min",
+        "max",
+        "channels",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "color_correct",
+      "class": "ColorCorrectNode",
+      "module": "src.features.composite.nodes.color_correct_node",
+      "display_name": "Color Correct",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "exposure",
+        "contrast",
+        "saturation",
+        "hue_shift",
+        "temperature",
+        "tint",
+        "shadows_lifting_r",
+        "shadows_lifting_g",
+        "shadows_lifting_b",
+        "midtones_gamma_r",
+        "midtones_gamma_g",
+        "midtones_gamma_b",
+        "highlights_gain_r",
+        "highlights_gain_g",
+        "highlights_gain_b",
+        "channel_r",
+        "channel_g",
+        "channel_b",
+        "channel_a",
+        "mix"
+      ]
+    },
+    {
+      "type": "color_input",
+      "class": "COLORNode",
+      "module": "src.features.composite.nodes.color_node",
+      "display_name": "COLOR",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": []
+    },
+    {
+      "type": "colorlookup",
+      "class": "ColorLookupNode",
+      "module": "src.features.composite.nodes.colorlookup_node",
+      "display_name": "ColorLookup",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "master_curve",
+        "red_curve",
+        "green_curve",
+        "blue_curve",
+        "input_min",
+        "input_max",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "compare",
+      "class": "CompareNode",
+      "module": "src.features.composite.nodes.compare_node",
+      "display_name": "Compare",
+      "inputs": [
+        {
+          "name": "A",
+          "data_type": "image"
+        },
+        {
+          "name": "B",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mode",
+        "split_position",
+        "split_angle",
+        "wipe_position",
+        "show_difference_value",
+        "difference_scale",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "constant",
+      "class": "ConstantNode",
+      "module": "src.features.composite.nodes.constant_node",
+      "display_name": "Constant",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "width",
+        "height",
+        "mode",
+        "color",
+        "color2",
+        "color_r",
+        "color_g",
+        "color_b",
+        "color_a",
+        "color2_r",
+        "color2_g",
+        "color2_b",
+        "color2_a",
+        "checker_size",
+        "start_x",
+        "start_y",
+        "end_x",
+        "end_y",
+        "center_x",
+        "center_y",
+        "radial_radius",
+        "feather",
+        "format_name",
+        "size_preset",
+        "color_hex",
+        "color2_hex",
+        "_topos_color_space"
+      ]
+    },
+    {
+      "type": "copy_channel",
+      "class": "CopyChannelNode",
+      "module": "src.features.composite.nodes.copy_channel_node",
+      "display_name": "CopyChannel",
+      "inputs": [
+        {
+          "name": "A",
+          "data_type": "image"
+        },
+        {
+          "name": "B",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "src_channel",
+        "dst_channel",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "cornerpin",
+      "class": "CornerPinNode",
+      "module": "src.features.composite.nodes.cornerpin_node",
+      "display_name": "CornerPin",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "to1_x",
+        "to1_y",
+        "to2_x",
+        "to2_y",
+        "to3_x",
+        "to3_y",
+        "to4_x",
+        "to4_y",
+        "from1_x",
+        "from1_y",
+        "from2_x",
+        "from2_y",
+        "from3_x",
+        "from3_y",
+        "from4_x",
+        "from4_y",
+        "interpolation",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "crop",
+      "class": "CropNode",
+      "module": "src.features.composite.nodes.crop_node",
+      "display_name": "Crop",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "x",
+        "y",
+        "width",
+        "height",
+        "reformat",
+        "outside",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "cryptomatte_select",
+      "class": "CryptomatteSelectNode",
+      "module": "src.features.composite.nodes.cryptomatte_select_node",
+      "display_name": "Cryptomatte Select",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "id_encoding",
+        "output_mode",
+        "selected_ids",
+        "selected_names",
+        "manifest",
+        "cache_to_disk",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "cs_transform",
+      "class": "CSTransformNode",
+      "module": "src.features.composite.nodes.cs_transform_node",
+      "display_name": "CS Transform",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "direction",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "deep_merge",
+      "class": "DeepMergeNode",
+      "module": "src.features.composite.nodes.deep_merge_node",
+      "display_name": "Deep Merge",
+      "inputs": [
+        {
+          "name": "A",
+          "data_type": "image"
+        },
+        {
+          "name": "B",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "depth_mode",
+        "depth_tolerance",
+        "opacity",
+        "format_policy",
+        "bbox_policy"
+      ]
+    },
+    {
+      "type": "deflicker",
+      "class": "DeflickerNode",
+      "module": "src.features.composite.nodes.deflicker_node",
+      "display_name": "Deflicker",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "window",
+        "percentile",
+        "luma_only",
+        "mode",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "defocus",
+      "class": "DefocusNode",
+      "module": "src.features.composite.nodes.defocus_node",
+      "display_name": "Defocus",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mode",
+        "focal_x",
+        "focal_y",
+        "focal_size",
+        "max_radius",
+        "edge_policy",
+        "process_alpha",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "deformer3d",
+      "class": "Deformer3DNode",
+      "module": "src.features.composite.nodes.deformer3d_node",
+      "display_name": "Deformer3D",
+      "inputs": [
+        {
+          "name": "in",
+          "data_type": "scene"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "display",
+          "data_type": "scene"
+        }
+      ],
+      "parameters": [
+        "deformer_type",
+        "enabled",
+        "strength",
+        "axis",
+        "angle",
+        "amount",
+        "mode",
+        "center_x",
+        "center_y",
+        "center_z",
+        "frequency",
+        "amplitude",
+        "seed"
+      ]
+    },
+    {
+      "type": "degrain",
+      "class": "DeGrainNode",
+      "module": "src.features.composite.nodes.degrain_node",
+      "display_name": "DeGrain",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "grain_threshold",
+        "spatial_sigma",
+        "range_sigma",
+        "amount",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "denoise",
+      "class": "DenoiseNode",
+      "module": "src.features.composite.nodes.denoise_node",
+      "display_name": "Denoise",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "strength",
+        "radius",
+        "quality",
+        "luminance_only",
+        "chroma_only",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "depth_matte",
+      "class": "DepthMatteNode",
+      "module": "src.features.composite.nodes.depth_matte_node",
+      "display_name": "Depth Matte",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "depth",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "range_start",
+        "range_end",
+        "feather",
+        "depth_units",
+        "near",
+        "far",
+        "cache_to_disk",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "difference_keyer",
+      "class": "DifferenceKeyerNode",
+      "module": "src.features.composite.nodes.difference_keyer_node",
+      "display_name": "DifferenceKeyer",
+      "inputs": [
+        {
+          "name": "input_a",
+          "data_type": "image"
+        },
+        {
+          "name": "input_b",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "threshold",
+        "softness",
+        "gain",
+        "channel_mode",
+        "invert",
+        "output_mode",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "dissolve",
+      "class": "DissolveNode",
+      "module": "src.features.composite.nodes.dissolve_node",
+      "display_name": "Dissolve",
+      "inputs": [
+        {
+          "name": "A",
+          "data_type": "image"
+        },
+        {
+          "name": "B",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mix",
+        "format_policy",
+        "bbox_policy",
+        "mask_channel",
+        "mask_invert"
+      ]
+    },
+    {
+      "type": "dot",
+      "class": "DotNode",
+      "module": "src.features.composite.nodes.dot_node",
+      "display_name": "Dot",
+      "inputs": [
+        {
+          "name": "input",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "data_type": "image"
+        }
+      ],
+      "parameters": []
+    },
+    {
+      "type": "edge_detect",
+      "class": "EdgeDetectNode",
+      "module": "src.features.composite.nodes.edge_detect_node",
+      "display_name": "Edge Detect",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "method",
+        "threshold",
+        "threshold_high",
+        "direction",
+        "output_mode",
+        "invert",
+        "output_strength",
+        "kernel_size",
+        "preblur",
+        "channel",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "erode_dilate",
+      "class": "ErodeDilateNode",
+      "module": "src.features.composite.nodes.erode_dilate_node",
+      "display_name": "ErodeDilate",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "operation",
+        "size",
+        "iterations",
+        "edge_mode",
+        "channels",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "face_smooth",
+      "class": "FaceSmoothNode",
+      "module": "src.features.composite.nodes.face_smooth_node",
+      "display_name": "Face Smooth",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "strength",
+        "radius",
+        "luminance_only"
+      ]
+    },
+    {
+      "type": "face_track",
+      "class": "FaceTrackNode",
+      "module": "src.features.composite.nodes.face_track_node",
+      "display_name": "Face Track",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "landmarks",
+        "face_index",
+        "rerun_on_evaluate",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "file_output",
+      "class": "FileOutputNode",
+      "module": "src.features.composite.nodes.file_output_node",
+      "display_name": "File Output",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [],
+      "parameters": [
+        "file_path",
+        "format",
+        "bit_depth",
+        "color_space",
+        "channels",
+        "alpha_mode",
+        "aov_pass",
+        "compression",
+        "quality",
+        "exr_multipart"
+      ]
+    },
+    {
+      "type": "fog",
+      "class": "FogNode",
+      "module": "src.features.composite.nodes.fog_node",
+      "display_name": "Fog",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "depth",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "color",
+        "density",
+        "start",
+        "end",
+        "depth_units",
+        "near",
+        "far",
+        "cache_to_disk",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "frame_hold",
+      "class": "FrameHoldNode",
+      "module": "src.features.composite.nodes.frame_hold_node",
+      "display_name": "Frame Hold",
+      "inputs": [
+        {
+          "name": "input",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "hold_frame",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "frame_interpolate",
+      "class": "FrameInterpolateNode",
+      "module": "src.features.composite.nodes.frame_interpolate_node",
+      "display_name": "Frame Interpolate",
+      "inputs": [
+        {
+          "name": "frame_a",
+          "data_type": "image"
+        },
+        {
+          "name": "frame_b",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "t",
+        "hd_mode",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "geo3d",
+      "class": "Geo3DNode",
+      "module": "src.features.composite.nodes.geo3d_node",
+      "display_name": "Geo3D",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "display",
+          "data_type": "scene"
+        }
+      ],
+      "parameters": [
+        "primitive",
+        "mesh_scale",
+        "instance_enabled",
+        "grid_x",
+        "grid_z",
+        "spacing",
+        "object_pos_x",
+        "object_pos_y",
+        "object_pos_z",
+        "object_rot_x",
+        "object_rot_y",
+        "object_rot_z",
+        "metallic",
+        "roughness",
+        "object_color_r",
+        "object_color_g",
+        "object_color_b",
+        "render_role",
+        "matte_id",
+        "shadow_intensity",
+        "shadow_softness"
+      ]
+    },
+    {
+      "type": "glow",
+      "class": "GlowNode",
+      "module": "src.features.composite.nodes.glow_node",
+      "display_name": "Glow",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "threshold",
+        "radius",
+        "intensity",
+        "tint_r",
+        "tint_g",
+        "tint_b",
+        "mix",
+        "quality",
+        "mask_channel",
+        "mask_invert"
+      ]
+    },
+    {
+      "type": "godrays",
+      "class": "GodRaysNode",
+      "module": "src.features.composite.nodes.godrays_node",
+      "display_name": "God Rays",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "light_x",
+        "light_y",
+        "color",
+        "density",
+        "weight",
+        "decay",
+        "samples",
+        "cache_to_disk"
+      ]
+    },
+    {
+      "type": "grade",
+      "class": "GradeNode",
+      "module": "src.features.composite.nodes.grade_node",
+      "display_name": "Grade",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "lift_r",
+        "lift_g",
+        "lift_b",
+        "gamma_r",
+        "gamma_g",
+        "gamma_b",
+        "gain_r",
+        "gain_g",
+        "gain_b",
+        "offset_r",
+        "offset_g",
+        "offset_b",
+        "blackpoint",
+        "whitepoint",
+        "multiply",
+        "add",
+        "mask_channels",
+        "mix"
+      ]
+    },
+    {
+      "type": "grain",
+      "class": "GrainNode",
+      "module": "src.features.composite.nodes.grain_node",
+      "display_name": "Grain",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "grain_size",
+        "intensity",
+        "grain_type",
+        "color_grain",
+        "luminance_only",
+        "seed",
+        "animate",
+        "animation_speed",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "group",
+      "class": "GroupNode",
+      "module": "src.features.composite.nodes.group_node",
+      "display_name": "Group",
+      "inputs": [
+        {
+          "name": "input_1",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output_1",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "group_name",
+        "is_expanded",
+        "group_color"
+      ]
+    },
+    {
+      "type": "huecorrect",
+      "class": "HueCorrectNode",
+      "module": "src.features.composite.nodes.huecorrect_node",
+      "display_name": "Hue Correct",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "hue_shift",
+        "saturation_mult",
+        "brightness_mult",
+        "range_low",
+        "range_high",
+        "range_softness",
+        "mix"
+      ]
+    },
+    {
+      "type": "image_input",
+      "class": "ImageInputNode",
+      "module": "src.features.composite.nodes.image_input_node",
+      "display_name": "Image Input",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "file_path",
+        "exr_part",
+        "exr_extra_channels",
+        "asset_id",
+        "media_role",
+        "color_space",
+        "premultiplied",
+        "missing_policy",
+        "width",
+        "height",
+        "raw_bit_depth",
+        "frame_start",
+        "frame_end",
+        "frame_padding"
+      ]
+    },
+    {
+      "type": "invert",
+      "class": "InvertNode",
+      "module": "src.features.composite.nodes.invert_node",
+      "display_name": "Invert",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "invert_r",
+        "invert_g",
+        "invert_b",
+        "invert_a",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "keyer",
+      "class": "KeyerNode",
+      "module": "src.features.composite.nodes.keyer_node",
+      "display_name": "Keyer",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "reference",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "keyer_mode",
+        "screen_color_r",
+        "screen_color_g",
+        "screen_color_b",
+        "screen_color_hex",
+        "screen_balance",
+        "clip_black",
+        "clip_white",
+        "gain",
+        "softness",
+        "alpha_offset",
+        "despill_strength",
+        "despill_method",
+        "invert",
+        "output_mode",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "keymix",
+      "class": "KeymixNode",
+      "module": "src.features.composite.nodes.keymix_node",
+      "display_name": "Keymix",
+      "inputs": [
+        {
+          "name": "A",
+          "data_type": "image"
+        },
+        {
+          "name": "B",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "lens_distortion",
+      "class": "LensDistortionNode",
+      "module": "src.features.composite.nodes.lens_distortion_node",
+      "display_name": "Lens Distortion",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mode",
+        "k1",
+        "k2",
+        "k3",
+        "p1",
+        "p2",
+        "center_x",
+        "center_y",
+        "edge_mode",
+        "filter_enabled",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "lens_flare",
+      "class": "LensFlareNode",
+      "module": "src.features.composite.nodes.lens_flare_node",
+      "display_name": "Lens Flare",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "light_x",
+        "light_y",
+        "color",
+        "intensity",
+        "ghost_count",
+        "ghost_spacing",
+        "ghost_decay",
+        "ghost_size",
+        "halo_radius",
+        "halo_strength",
+        "streak_strength",
+        "streak_width",
+        "use_occlusion",
+        "blend_mode",
+        "cache_to_disk",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "light3d",
+      "class": "Light3DNode",
+      "module": "src.features.composite.nodes.light3d_node",
+      "display_name": "Light",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "display",
+          "data_type": "scene"
+        }
+      ],
+      "parameters": [
+        "light_type",
+        "light_color_r",
+        "light_color_g",
+        "light_color_b",
+        "light_intensity",
+        "light_dir_x",
+        "light_dir_y",
+        "light_dir_z",
+        "light_pos_x",
+        "light_pos_y",
+        "light_pos_z",
+        "light_range",
+        "light_decay_mode",
+        "light_inner_cone",
+        "light_outer_cone",
+        "icon_pos_x",
+        "icon_pos_y",
+        "icon_pos_z",
+        "light_shadow_enable",
+        "light_shadow_quality",
+        "light_shadow_bias",
+        "light_shadow_softness",
+        "light_unit",
+        "ies_profile",
+        "ies_enabled",
+        "hdri_path",
+        "use_ibl",
+        "env_intensity"
+      ]
+    },
+    {
+      "type": "light_wrap",
+      "class": "LightWrapNode",
+      "module": "src.features.composite.nodes.light_wrap_node",
+      "display_name": "Light Wrap",
+      "inputs": [
+        {
+          "name": "background",
+          "data_type": "image"
+        },
+        {
+          "name": "foreground",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "width",
+        "intensity",
+        "brightness",
+        "falloff",
+        "source_alpha",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "luma_keyer",
+      "class": "LumaKeyerNode",
+      "module": "src.features.composite.nodes.luma_keyer_node",
+      "display_name": "LumaKeyer",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "black_point",
+        "white_point",
+        "softness",
+        "invert",
+        "output_mode",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "lut",
+      "class": "LutNode",
+      "module": "src.features.composite.nodes.lut_node",
+      "display_name": "LUT",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "lut_path",
+        "intensity",
+        "input_range_min",
+        "input_range_max",
+        "output_range_min",
+        "output_range_max",
+        "mix"
+      ]
+    },
+    {
+      "type": "mask",
+      "class": "MaskNode",
+      "module": "src.features.composite.nodes.mask_node",
+      "display_name": "Mask",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        },
+        {
+          "name": "matte",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mask_type",
+        "center_x",
+        "center_y",
+        "width",
+        "height",
+        "rotation",
+        "feather",
+        "invert",
+        "output_mode",
+        "sides",
+        "output_width",
+        "output_height",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "mask_merge",
+      "class": "MaskMergeNode",
+      "module": "src.features.composite.nodes.mask_merge_node",
+      "display_name": "MaskMerge",
+      "inputs": [
+        {
+          "name": "A",
+          "data_type": "image"
+        },
+        {
+          "name": "B",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        },
+        {
+          "name": "matte",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "operation",
+        "invert_a",
+        "invert_b",
+        "opacity_a",
+        "opacity_b",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "matte",
+      "class": "MatteNode",
+      "module": "src.features.composite.nodes.matte_node",
+      "display_name": "Matte",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "low_threshold",
+        "high_threshold",
+        "low_softness",
+        "high_softness",
+        "invert",
+        "output_mode",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "matte_cleanup",
+      "class": "MatteCleanupNode",
+      "module": "src.features.composite.nodes.matte_cleanup_node",
+      "display_name": "MatteCleanup",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "operation",
+        "size",
+        "blur_amount",
+        "black_point",
+        "white_point",
+        "gamma",
+        "invert",
+        "channels",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "merge",
+      "class": "MergeNode",
+      "module": "src.features.composite.nodes.blend_node",
+      "display_name": "Merge",
+      "inputs": [
+        {
+          "name": "A",
+          "data_type": "image"
+        },
+        {
+          "name": "B",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "blend_mode",
+        "opacity",
+        "mix",
+        "format_policy",
+        "bbox_policy",
+        "alpha_policy",
+        "alpha_clamp",
+        "mask_channel",
+        "mask_invert"
+      ]
+    },
+    {
+      "type": "mesh_warp",
+      "class": "WarpNode",
+      "module": "src.features.composite.nodes.warp_node",
+      "display_name": "Mesh Warp",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "grid_size",
+        "edge_mode",
+        "offsets",
+        "mask_channel",
+        "mask_invert",
+        "mix",
+        "warp_point_0_dx",
+        "warp_point_0_dy",
+        "warp_point_1_dx",
+        "warp_point_1_dy",
+        "warp_point_2_dx",
+        "warp_point_2_dy",
+        "warp_point_3_dx",
+        "warp_point_3_dy",
+        "warp_point_4_dx",
+        "warp_point_4_dy",
+        "warp_point_5_dx",
+        "warp_point_5_dy",
+        "warp_point_6_dx",
+        "warp_point_6_dy",
+        "warp_point_7_dx",
+        "warp_point_7_dy",
+        "warp_point_8_dx",
+        "warp_point_8_dy",
+        "warp_point_9_dx",
+        "warp_point_9_dy",
+        "warp_point_10_dx",
+        "warp_point_10_dy",
+        "warp_point_11_dx",
+        "warp_point_11_dy",
+        "warp_point_12_dx",
+        "warp_point_12_dy",
+        "warp_point_13_dx",
+        "warp_point_13_dy",
+        "warp_point_14_dx",
+        "warp_point_14_dy",
+        "warp_point_15_dx",
+        "warp_point_15_dy",
+        "warp_point_16_dx",
+        "warp_point_16_dy",
+        "warp_point_17_dx",
+        "warp_point_17_dy",
+        "warp_point_18_dx",
+        "warp_point_18_dy",
+        "warp_point_19_dx",
+        "warp_point_19_dy",
+        "warp_point_20_dx",
+        "warp_point_20_dy",
+        "warp_point_21_dx",
+        "warp_point_21_dy",
+        "warp_point_22_dx",
+        "warp_point_22_dy",
+        "warp_point_23_dx",
+        "warp_point_23_dy",
+        "warp_point_24_dx",
+        "warp_point_24_dy"
+      ]
+    },
+    {
+      "type": "model3d",
+      "class": "Model3DNode",
+      "module": "src.features.composite.nodes.model3d_node",
+      "display_name": "Model3D",
+      "inputs": [
+        {
+          "name": "base_color_in",
+          "data_type": "image"
+        },
+        {
+          "name": "normal_in",
+          "data_type": "image"
+        },
+        {
+          "name": "metallic_in",
+          "data_type": "image"
+        },
+        {
+          "name": "roughness_in",
+          "data_type": "image"
+        },
+        {
+          "name": "ao_in",
+          "data_type": "image"
+        },
+        {
+          "name": "emissive_in",
+          "data_type": "image"
+        },
+        {
+          "name": "mask_in",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "display",
+          "data_type": "scene"
+        }
+      ],
+      "parameters": [
+        "model_path",
+        "use_imported_model",
+        "size_mode",
+        "source_unit",
+        "unit_scale",
+        "axis_mode",
+        "uv_v_mode",
+        "object_pos_x",
+        "object_pos_y",
+        "object_pos_z",
+        "object_rot_x",
+        "object_rot_y",
+        "object_rot_z",
+        "mesh_scale",
+        "anim_enabled",
+        "anim_time",
+        "anim_speed",
+        "anim_clip",
+        "anim_play_mode",
+        "anim_clip_name",
+        "anim_time_offset",
+        "anim_start_frame",
+        "anim_end_frame",
+        "anim_fps",
+        "material_mode",
+        "normal_format",
+        "orm_layout",
+        "texture_filter",
+        "texture_wrap",
+        "emissive_intensity",
+        "material_overrides",
+        "morph_weights",
+        "viewport_lod_mode",
+        "hidden_mesh_ids",
+        "locked_mesh_ids",
+        "solo_mesh_id",
+        "render_role",
+        "matte_id",
+        "shadow_intensity",
+        "shadow_softness"
+      ]
+    },
+    {
+      "type": "motion_graphic",
+      "deferred": true
+    },
+    {
+      "type": "noise",
+      "class": "NoiseNode",
+      "module": "src.features.composite.nodes.noise_node",
+      "display_name": "Noise",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "noise_type",
+        "scale",
+        "octaves",
+        "persistence",
+        "lacunarity",
+        "seed",
+        "output_channels",
+        "animate",
+        "animation_speed",
+        "width",
+        "height",
+        "offset_x",
+        "offset_y"
+      ]
+    },
+    {
+      "type": "noop",
+      "class": "NoOpNode",
+      "module": "src.features.composite.nodes.noop_node",
+      "display_name": "NoOp",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "label"
+      ]
+    },
+    {
+      "type": "normalize",
+      "class": "NormalizeNode",
+      "module": "src.features.composite.nodes.normalize_node",
+      "display_name": "Normalize",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mode",
+        "input_min",
+        "input_max",
+        "output_min",
+        "output_max",
+        "percentile_low",
+        "percentile_high",
+        "clamp_output",
+        "channels",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "output",
+      "class": "OutputNode",
+      "module": "src.features.composite.nodes.output_node",
+      "display_name": "Output",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [],
+      "parameters": [
+        "format_mode",
+        "output_name",
+        "width",
+        "height",
+        "output_color_space",
+        "alpha_policy",
+        "background_color",
+        "motion_blur_shutter"
+      ]
+    },
+    {
+      "type": "paint",
+      "class": "PaintNode",
+      "module": "src.features.composite.nodes.paint_node",
+      "display_name": "Paint",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "strokes",
+        "output_width",
+        "output_height",
+        "brush_type",
+        "brush_size",
+        "brush_feather",
+        "brush_opacity",
+        "brush_color_r",
+        "brush_color_g",
+        "brush_color_b",
+        "brush_color_a",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "particle",
+      "class": "ParticleNode",
+      "module": "src.features.composite.nodes.particle_node",
+      "display_name": "Particles",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "region",
+        "region_width",
+        "region_height",
+        "rate",
+        "seed",
+        "lifetime",
+        "lifetime_variance",
+        "speed",
+        "speed_variance",
+        "direction",
+        "spread",
+        "gravity_x",
+        "gravity_y",
+        "wind_x",
+        "wind_y",
+        "turb_amount",
+        "turb_scale",
+        "size_start",
+        "size_end",
+        "opacity_start",
+        "opacity_end",
+        "shape",
+        "color_r",
+        "color_g",
+        "color_b",
+        "output_width",
+        "output_height",
+        "particle_cap"
+      ]
+    },
+    {
+      "type": "pointcloud3d",
+      "class": "PointCloud3DNode",
+      "module": "src.features.composite.nodes.pointcloud3d_node",
+      "display_name": "Point Cloud 3D",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "source",
+        "file_path",
+        "track_data",
+        "output_width",
+        "output_height",
+        "point_size",
+        "color_mode",
+        "point_color",
+        "opacity"
+      ]
+    },
+    {
+      "type": "precomp",
+      "class": "PrecompNode",
+      "module": "src.features.composite.nodes.precomp_node",
+      "display_name": "Precomp",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "child_stack_id",
+        "precomp_name",
+        "frame_offset",
+        "speed",
+        "hold_frame"
+      ]
+    },
+    {
+      "type": "premult",
+      "class": "PremultNode",
+      "module": "src.features.composite.nodes.premult_node",
+      "display_name": "Premult",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "ramp",
+      "class": "RampNode",
+      "module": "src.features.composite.nodes.ramp_node",
+      "display_name": "Ramp",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "ramp_type",
+        "start_x",
+        "start_y",
+        "end_x",
+        "end_y",
+        "start_r",
+        "start_g",
+        "start_b",
+        "start_a",
+        "end_r",
+        "end_g",
+        "end_b",
+        "end_a",
+        "extend_mode",
+        "width",
+        "height",
+        "center_x",
+        "center_y",
+        "radius",
+        "angle_start",
+        "angle_end",
+        "corner0_r",
+        "corner0_g",
+        "corner0_b",
+        "corner0_a",
+        "corner1_r",
+        "corner1_g",
+        "corner1_b",
+        "corner1_a",
+        "corner2_r",
+        "corner2_g",
+        "corner2_b",
+        "corner2_a",
+        "corner3_r",
+        "corner3_g",
+        "corner3_b",
+        "corner3_a"
+      ]
+    },
+    {
+      "type": "reformat",
+      "class": "ReformatNode",
+      "module": "src.features.composite.nodes.reformat_node",
+      "display_name": "Reformat",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "format_mode",
+        "preset",
+        "width",
+        "height",
+        "resize_mode",
+        "filter",
+        "preserve_bbox",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "relight",
+      "class": "RelightNode",
+      "module": "src.features.composite.nodes.relight_node",
+      "display_name": "Relight",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "normal",
+          "data_type": "image"
+        },
+        {
+          "name": "position",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "light_type",
+        "light_position_x",
+        "light_position_y",
+        "light_position_z",
+        "light_direction_x",
+        "light_direction_y",
+        "light_direction_z",
+        "intensity",
+        "color",
+        "ambient",
+        "normal_decode",
+        "normal_flip_y",
+        "specular",
+        "roughness",
+        "cache_to_disk",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "remove_channels",
+      "class": "RemoveChannelsNode",
+      "module": "src.features.composite.nodes.remove_channels_node",
+      "display_name": "Remove Channels",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "remove_r",
+        "remove_g",
+        "remove_b",
+        "remove_a",
+        "fill_value",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "retime",
+      "class": "RetimeNode",
+      "module": "src.features.composite.nodes.retime_node",
+      "display_name": "Retime",
+      "inputs": [
+        {
+          "name": "input",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "speed",
+        "use_optical_flow",
+        "reverse",
+        "loop_mode",
+        "loop_in",
+        "loop_out",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "roto_shape",
+      "class": "RotoShapeNode",
+      "module": "src.features.composite.nodes.roto_shape_node",
+      "display_name": "Roto Shape",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        },
+        {
+          "name": "matte",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "shape_type",
+        "points",
+        "center_x",
+        "center_y",
+        "width",
+        "height",
+        "rotation",
+        "feather",
+        "opacity",
+        "invert",
+        "output_mode",
+        "output_width",
+        "output_height",
+        "mask_channel",
+        "mask_invert",
+        "mix",
+        "roto_point_0_x",
+        "roto_point_0_y",
+        "roto_point_0_c1_x",
+        "roto_point_0_c1_y",
+        "roto_point_0_c2_x",
+        "roto_point_0_c2_y",
+        "roto_point_1_x",
+        "roto_point_1_y",
+        "roto_point_1_c1_x",
+        "roto_point_1_c1_y",
+        "roto_point_1_c2_x",
+        "roto_point_1_c2_y",
+        "roto_point_2_x",
+        "roto_point_2_y",
+        "roto_point_2_c1_x",
+        "roto_point_2_c1_y",
+        "roto_point_2_c2_x",
+        "roto_point_2_c2_y",
+        "roto_point_3_x",
+        "roto_point_3_y",
+        "roto_point_3_c1_x",
+        "roto_point_3_c1_y",
+        "roto_point_3_c2_x",
+        "roto_point_3_c2_y"
+      ]
+    },
+    {
+      "type": "scene3d",
+      "class": "Scene3DNode",
+      "module": "src.features.composite.nodes.scene3d_node",
+      "display_name": "Scene3D",
+      "inputs": [
+        {
+          "name": "in",
+          "data_type": "scene"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "display",
+          "data_type": "image"
+        },
+        {
+          "name": "depth",
+          "data_type": "image"
+        },
+        {
+          "name": "normal",
+          "data_type": "image"
+        },
+        {
+          "name": "position",
+          "data_type": "image"
+        },
+        {
+          "name": "uv",
+          "data_type": "image"
+        },
+        {
+          "name": "object_id",
+          "data_type": "image"
+        },
+        {
+          "name": "material_id",
+          "data_type": "image"
+        },
+        {
+          "name": "motion_vector",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "width",
+        "height",
+        "format_name"
+      ]
+    },
+    {
+      "type": "set_alpha",
+      "class": "SetAlphaNode",
+      "module": "src.features.composite.nodes.set_alpha_node",
+      "display_name": "SetAlpha",
+      "inputs": [
+        {
+          "name": "rgba",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "rgba",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mode",
+        "value"
+      ]
+    },
+    {
+      "type": "sharpen",
+      "class": "SharpenNode",
+      "module": "src.features.composite.nodes.sharpen_node",
+      "display_name": "Sharpen",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "amount",
+        "radius",
+        "threshold",
+        "channels",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "shuffle",
+      "class": "ShuffleNode",
+      "module": "src.features.composite.nodes.shuffle_node",
+      "display_name": "Shuffle",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "r_from",
+        "g_from",
+        "b_from",
+        "a_from",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "switch",
+      "class": "SwitchNode",
+      "module": "src.features.composite.nodes.switch_node",
+      "display_name": "Switch",
+      "inputs": [
+        {
+          "name": "input0",
+          "data_type": "image"
+        },
+        {
+          "name": "input1",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "which",
+        "input_count"
+      ]
+    },
+    {
+      "type": "text",
+      "class": "TextNode",
+      "module": "src.features.composite.nodes.text_node",
+      "display_name": "Text",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "width",
+        "height",
+        "text",
+        "caption_input_enabled",
+        "caption_input_field",
+        "font_family",
+        "font_size",
+        "font_weight",
+        "italic",
+        "halign",
+        "valign",
+        "letter_spacing",
+        "line_spacing",
+        "per_char_enable",
+        "per_char_mode",
+        "per_char_delay",
+        "per_char_overlap",
+        "per_char_slide_distance",
+        "per_char_rotation",
+        "per_char_scale_from",
+        "path_enable",
+        "path_radius",
+        "path_arc_degrees",
+        "path_direction",
+        "translate_x",
+        "translate_y",
+        "scale_x",
+        "scale_y",
+        "rotation",
+        "pivot_mode",
+        "pivot_x",
+        "pivot_y",
+        "filter",
+        "fill_r",
+        "fill_g",
+        "fill_b",
+        "fill_a",
+        "outline_enable",
+        "outline_width",
+        "outline_r",
+        "outline_g",
+        "outline_b",
+        "outline_a",
+        "shadow_enable",
+        "shadow_offset_x",
+        "shadow_offset_y",
+        "shadow_blur",
+        "shadow_r",
+        "shadow_g",
+        "shadow_b",
+        "shadow_a",
+        "format_name",
+        "size_preset",
+        "fill_hex",
+        "outline_hex",
+        "shadow_hex"
+      ]
+    },
+    {
+      "type": "time_offset",
+      "class": "TimeOffsetNode",
+      "module": "src.features.composite.nodes.time_offset_node",
+      "display_name": "Time Offset",
+      "inputs": [
+        {
+          "name": "input",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "frame_offset",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "timeline_clip_input",
+      "class": "TimelineClipInputNode",
+      "module": "src.features.composite.nodes.timeline_clip_input_node",
+      "display_name": "Timeline Clip Input",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "output",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "timeline_id",
+        "clip_id",
+        "asset_id",
+        "input_stage"
+      ]
+    },
+    {
+      "type": "topos_color",
+      "class": "ToposColorNode",
+      "module": "src.features.composite.nodes.topos_color_node",
+      "display_name": "Topos Color",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "stack_source",
+        "color_stack_id",
+        "role",
+        "source_clip_id",
+        "source_timeline_id",
+        "linked",
+        "preset_id",
+        "embedded_stack",
+        "bypass",
+        "intensity",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "tracker",
+      "class": "TrackerNode",
+      "module": "src.features.composite.nodes.tracker_node",
+      "display_name": "Tracker",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mode",
+        "reference_frame",
+        "center_x",
+        "center_y",
+        "size_x",
+        "size_y",
+        "track_data",
+        "stabilize_window",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "transform",
+      "class": "TransformNode",
+      "module": "src.features.composite.nodes.transform_node",
+      "display_name": "Transform",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "translate_x",
+        "translate_y",
+        "scale_x",
+        "scale_y",
+        "rotation",
+        "motion_blur",
+        "shutter",
+        "samples",
+        "shutter_offset",
+        "pivot_mode",
+        "pivot_x",
+        "pivot_y",
+        "filter",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "unpremult",
+      "class": "UnpremultNode",
+      "module": "src.features.composite.nodes.unpremult_node",
+      "display_name": "Unpremult",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "vectorblur",
+      "class": "VectorBlurNode",
+      "module": "src.features.composite.nodes.vectorblur_node",
+      "display_name": "VectorBlur",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "velocity",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "shutter",
+        "use_project_shutter",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "video_frame",
+      "class": "VideoFrameNode",
+      "module": "src.features.composite.nodes.video_frame_node",
+      "display_name": "Video Frame",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "file_path",
+        "asset_id",
+        "media_role",
+        "frame_number",
+        "time_offset",
+        "source_in",
+        "source_out",
+        "speed",
+        "hold",
+        "cache_frames",
+        "loop",
+        "color_space",
+        "premultiplied",
+        "missing_policy",
+        "fps",
+        "total_frames",
+        "video_width",
+        "video_height",
+        "bit_depth",
+        "is_hdr",
+        "clip_id"
+      ]
+    },
+    {
+      "type": "vignette",
+      "class": "VignetteNode",
+      "module": "src.features.composite.nodes.vignette_node",
+      "display_name": "Vignette",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "amount",
+        "radius",
+        "softness",
+        "roundness",
+        "cache_to_disk",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    },
+    {
+      "type": "volume3d",
+      "class": "Volume3DNode",
+      "module": "src.features.composite.nodes.volume3d_node",
+      "display_name": "Volume 3D",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "file_path",
+        "density_multiplier",
+        "absorption_color",
+        "step_count",
+        "output_width",
+        "output_height"
+      ]
+    },
+    {
+      "type": "zblur",
+      "class": "ZBlurNode",
+      "module": "src.features.composite.nodes.zblur_node",
+      "display_name": "ZBlur",
+      "inputs": [
+        {
+          "name": "image",
+          "data_type": "image"
+        },
+        {
+          "name": "depth",
+          "data_type": "image"
+        },
+        {
+          "name": "mask",
+          "data_type": "image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "data_type": "image"
+        }
+      ],
+      "parameters": [
+        "focus_distance",
+        "focal_range",
+        "max_blur_radius",
+        "bokeh_toggle",
+        "depth_units",
+        "near",
+        "far",
+        "quality",
+        "cache_to_disk",
+        "mask_channel",
+        "mask_invert",
+        "mix"
+      ]
+    }
+  ],
+  "categories": {
+    "Input": [
+      [
+        "image_input",
+        "<class 'src.features.composite.nodes.image_input_node.ImageInputNode'>"
+      ],
+      [
+        "constant",
+        "<class 'src.features.composite.nodes.constant_node.ConstantNode'>"
+      ],
+      [
+        "video_frame",
+        "<class 'src.features.composite.nodes.video_frame_node.VideoFrameNode'>"
+      ],
+      [
+        "timeline_clip_input",
+        "<class 'src.features.composite.nodes.timeline_clip_input_node.TimelineClipInputNode'>"
+      ],
+      [
+        "text",
+        "<class 'src.features.composite.nodes.text_node.TextNode'>"
+      ],
+      [
+        "noise",
+        "<class 'src.features.composite.nodes.noise_node.NoiseNode'>"
+      ],
+      [
+        "ramp",
+        "<class 'src.features.composite.nodes.ramp_node.RampNode'>"
+      ]
+    ],
+    "Output": [
+      [
+        "output",
+        "<class 'src.features.composite.nodes.output_node.OutputNode'>"
+      ],
+      [
+        "file_output",
+        "<class 'src.features.composite.nodes.file_output_node.FileOutputNode'>"
+      ]
+    ],
+    "Keyer": [
+      [
+        "keyer",
+        "<class 'src.features.composite.nodes.keyer_node.KeyerNode'>"
+      ],
+      [
+        "chroma_keyer",
+        "<class 'src.features.composite.nodes.chroma_keyer_node.ChromaKeyerNode'>"
+      ],
+      [
+        "luma_keyer",
+        "<class 'src.features.composite.nodes.luma_keyer_node.LumaKeyerNode'>"
+      ],
+      [
+        "difference_keyer",
+        "<class 'src.features.composite.nodes.difference_keyer_node.DifferenceKeyerNode'>"
+      ],
+      [
+        "light_wrap",
+        "<class 'src.features.composite.nodes.light_wrap_node.LightWrapNode'>"
+      ],
+      [
+        "cryptomatte_select",
+        "<class 'src.features.composite.nodes.cryptomatte_select_node.CryptomatteSelectNode'>"
+      ],
+      [
+        "matte_cleanup",
+        "<class 'src.features.composite.nodes.matte_cleanup_node.MatteCleanupNode'>"
+      ]
+    ],
+    "Merge": [
+      [
+        "blend",
+        "<class 'src.features.composite.nodes.blend_node.MergeNode'>"
+      ],
+      [
+        "merge",
+        "<class 'src.features.composite.nodes.blend_node.MergeNode'>"
+      ],
+      [
+        "deep_merge",
+        "<class 'src.features.composite.nodes.deep_merge_node.DeepMergeNode'>"
+      ],
+      [
+        "keymix",
+        "<class 'src.features.composite.nodes.keymix_node.KeymixNode'>"
+      ],
+      [
+        "premult",
+        "<class 'src.features.composite.nodes.premult_node.PremultNode'>"
+      ],
+      [
+        "unpremult",
+        "<class 'src.features.composite.nodes.unpremult_node.UnpremultNode'>"
+      ],
+      [
+        "matte",
+        "<class 'src.features.composite.nodes.matte_node.MatteNode'>"
+      ],
+      [
+        "dissolve",
+        "<class 'src.features.composite.nodes.dissolve_node.DissolveNode'>"
+      ],
+      [
+        "switch",
+        "<class 'src.features.composite.nodes.switch_node.SwitchNode'>"
+      ]
+    ],
+    "Transform": [
+      [
+        "transform",
+        "<class 'src.features.composite.nodes.transform_node.TransformNode'>"
+      ],
+      [
+        "reformat",
+        "<class 'src.features.composite.nodes.reformat_node.ReformatNode'>"
+      ],
+      [
+        "crop",
+        "<class 'src.features.composite.nodes.crop_node.CropNode'>"
+      ],
+      [
+        "cornerpin",
+        "<class 'src.features.composite.nodes.cornerpin_node.CornerPinNode'>"
+      ],
+      [
+        "tracker",
+        "<class 'src.features.composite.nodes.tracker_node.TrackerNode'>"
+      ]
+    ],
+    "Channel": [
+      [
+        "shuffle",
+        "<class 'src.features.composite.nodes.shuffle_node.ShuffleNode'>"
+      ],
+      [
+        "copy_channel",
+        "<class 'src.features.composite.nodes.copy_channel_node.CopyChannelNode'>"
+      ],
+      [
+        "channel_merge",
+        "<class 'src.features.composite.nodes.channel_merge_node.ChannelMergeNode'>"
+      ],
+      [
+        "set_alpha",
+        "<class 'src.features.composite.nodes.set_alpha_node.SetAlphaNode'>"
+      ],
+      [
+        "remove_channels",
+        "<class 'src.features.composite.nodes.remove_channels_node.RemoveChannelsNode'>"
+      ]
+    ],
+    "Color": [
+      [
+        "grade",
+        "<class 'src.features.composite.nodes.grade_node.GradeNode'>"
+      ],
+      [
+        "color_correct",
+        "<class 'src.features.composite.nodes.color_correct_node.ColorCorrectNode'>"
+      ],
+      [
+        "cs_transform",
+        "<class 'src.features.composite.nodes.cs_transform_node.CSTransformNode'>"
+      ],
+      [
+        "huecorrect",
+        "<class 'src.features.composite.nodes.huecorrect_node.HueCorrectNode'>"
+      ],
+      [
+        "lut",
+        "<class 'src.features.composite.nodes.lut_node.LutNode'>"
+      ],
+      [
+        "topos_color",
+        "<class 'src.features.composite.nodes.topos_color_node.ToposColorNode'>"
+      ],
+      [
+        "colorlookup",
+        "<class 'src.features.composite.nodes.colorlookup_node.ColorLookupNode'>"
+      ],
+      [
+        "cdl",
+        "<class 'src.features.composite.nodes.cdl_node.CDLNode'>"
+      ]
+    ],
+    "Filter": [
+      [
+        "lens_distortion",
+        "<class 'src.features.composite.nodes.lens_distortion_node.LensDistortionNode'>"
+      ],
+      [
+        "mesh_warp",
+        "<class 'src.features.composite.nodes.warp_node.WarpNode'>"
+      ],
+      [
+        "blur",
+        "<class 'src.features.composite.nodes.blur_node.BlurNode'>"
+      ],
+      [
+        "glow",
+        "<class 'src.features.composite.nodes.glow_node.GlowNode'>"
+      ],
+      [
+        "denoise",
+        "<class 'src.features.composite.nodes.denoise_node.DenoiseNode'>"
+      ],
+      [
+        "grain",
+        "<class 'src.features.composite.nodes.grain_node.GrainNode'>"
+      ],
+      [
+        "vectorblur",
+        "<class 'src.features.composite.nodes.vectorblur_node.VectorBlurNode'>"
+      ],
+      [
+        "degrain",
+        "<class 'src.features.composite.nodes.degrain_node.DeGrainNode'>"
+      ],
+      [
+        "sharpen",
+        "<class 'src.features.composite.nodes.sharpen_node.SharpenNode'>"
+      ],
+      [
+        "erode_dilate",
+        "<class 'src.features.composite.nodes.erode_dilate_node.ErodeDilateNode'>"
+      ],
+      [
+        "defocus",
+        "<class 'src.features.composite.nodes.defocus_node.DefocusNode'>"
+      ],
+      [
+        "edge_detect",
+        "<class 'src.features.composite.nodes.edge_detect_node.EdgeDetectNode'>"
+      ],
+      [
+        "relight",
+        "<class 'src.features.composite.nodes.relight_node.RelightNode'>"
+      ],
+      [
+        "zblur",
+        "<class 'src.features.composite.nodes.zblur_node.ZBlurNode'>"
+      ],
+      [
+        "fog",
+        "<class 'src.features.composite.nodes.fog_node.FogNode'>"
+      ],
+      [
+        "godrays",
+        "<class 'src.features.composite.nodes.godrays_node.GodRaysNode'>"
+      ],
+      [
+        "chromatic_aberration",
+        "<class 'src.features.composite.nodes.chromatic_aberration_node.ChromaticAberrationNode'>"
+      ],
+      [
+        "vignette",
+        "<class 'src.features.composite.nodes.vignette_node.VignetteNode'>"
+      ],
+      [
+        "lens_flare",
+        "<class 'src.features.composite.nodes.lens_flare_node.LensFlareNode'>"
+      ],
+      [
+        "deflicker",
+        "<class 'src.features.composite.nodes.deflicker_node.DeflickerNode'>"
+      ]
+    ],
+    "Mask": [
+      [
+        "mask",
+        "<class 'src.features.composite.nodes.mask_node.MaskNode'>"
+      ],
+      [
+        "mask_merge",
+        "<class 'src.features.composite.nodes.mask_merge_node.MaskMergeNode'>"
+      ],
+      [
+        "roto_shape",
+        "<class 'src.features.composite.nodes.roto_shape_node.RotoShapeNode'>"
+      ],
+      [
+        "depth_matte",
+        "<class 'src.features.composite.nodes.depth_matte_node.DepthMatteNode'>"
+      ]
+    ],
+    "Paint": [
+      [
+        "paint",
+        "<class 'src.features.composite.nodes.paint_node.PaintNode'>"
+      ]
+    ],
+    "Particle": [
+      [
+        "particle",
+        "<class 'src.features.composite.nodes.particle_node.ParticleNode'>"
+      ]
+    ],
+    "Utility": [
+      [
+        "invert",
+        "<class 'src.features.composite.nodes.invert_node.InvertNode'>"
+      ],
+      [
+        "clamp",
+        "<class 'src.features.composite.nodes.clamp_node.ClampNode'>"
+      ],
+      [
+        "normalize",
+        "<class 'src.features.composite.nodes.normalize_node.NormalizeNode'>"
+      ],
+      [
+        "compare",
+        "<class 'src.features.composite.nodes.compare_node.CompareNode'>"
+      ],
+      [
+        "dot",
+        "<class 'src.features.composite.nodes.dot_node.DotNode'>"
+      ],
+      [
+        "noop",
+        "<class 'src.features.composite.nodes.noop_node.NoOpNode'>"
+      ]
+    ],
+    "Time": [
+      [
+        "time_offset",
+        "<class 'src.features.composite.nodes.time_offset_node.TimeOffsetNode'>"
+      ],
+      [
+        "frame_hold",
+        "<class 'src.features.composite.nodes.frame_hold_node.FrameHoldNode'>"
+      ],
+      [
+        "frame_interpolate",
+        "<class 'src.features.composite.nodes.frame_interpolate_node.FrameInterpolateNode'>"
+      ],
+      [
+        "retime",
+        "<class 'src.features.composite.nodes.retime_node.RetimeNode'>"
+      ]
+    ],
+    "AI": [
+      [
+        "ai_generate",
+        "<class 'src.features.composite.nodes.ai_generate_node.AIGenerateNode'>"
+      ],
+      [
+        "ai_gen_expand",
+        "<class 'src.features.composite.nodes.ai_gen_expand_node.AIGenExpandNode'>"
+      ],
+      [
+        "ai_inpaint",
+        "<class 'src.features.composite.nodes.ai_inpaint_node.AIInpaintNode'>"
+      ],
+      [
+        "ai_expand",
+        "<class 'src.features.composite.nodes.ai_expand_node.AIExpandNode'>"
+      ],
+      [
+        "ai_remove",
+        "<class 'src.features.composite.nodes.ai_remove_node.AIRemoveNode'>"
+      ],
+      [
+        "ai_denoise",
+        "<class 'src.features.composite.nodes.ai_denoise_node.AIDenoiseNode'>"
+      ],
+      [
+        "face_track",
+        "<class 'src.features.composite.nodes.face_track_node.FaceTrackNode'>"
+      ],
+      [
+        "face_smooth",
+        "<class 'src.features.composite.nodes.face_smooth_node.FaceSmoothNode'>"
+      ]
+    ],
+    "Group": [
+      [
+        "group",
+        "<class 'src.features.composite.nodes.group_node.GroupNode'>"
+      ],
+      [
+        "precomp",
+        "<class 'src.features.composite.nodes.precomp_node.PrecompNode'>"
+      ]
+    ],
+    "3D": [
+      [
+        "scene3d",
+        "<class 'src.features.composite.nodes.scene3d_node.Scene3DNode'>"
+      ],
+      [
+        "camera3d",
+        "<class 'src.features.composite.nodes.camera3d_node.Camera3DNode'>"
+      ],
+      [
+        "light3d",
+        "<class 'src.features.composite.nodes.light3d_node.Light3DNode'>"
+      ],
+      [
+        "geo3d",
+        "<class 'src.features.composite.nodes.geo3d_node.Geo3DNode'>"
+      ],
+      [
+        "model3d",
+        "<class 'src.features.composite.nodes.model3d_node.Model3DNode'>"
+      ],
+      [
+        "deformer3d",
+        "<class 'src.features.composite.nodes.deformer3d_node.Deformer3DNode'>"
+      ],
+      [
+        "pointcloud3d",
+        "<class 'src.features.composite.nodes.pointcloud3d_node.PointCloud3DNode'>"
+      ],
+      [
+        "volume3d",
+        "<class 'src.features.composite.nodes.volume3d_node.Volume3DNode'>"
+      ]
+    ]
+  }
+}

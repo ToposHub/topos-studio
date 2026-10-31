@@ -1,0 +1,1460 @@
+[
+  {
+    "timeline": "Timeline 1",
+    "output": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/smoke-ddb1f549.mp4",
+    "outcome": {
+      "success": true,
+      "cancelled": false,
+      "error_code": "",
+      "cause": "",
+      "audio_omitted": false,
+      "hw_fallback_reason": "",
+      "stage_telemetry": {
+        "schema": "topos-export-stage-telemetry/1",
+        "schema_version": 1,
+        "export_id": "timeline:/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/smoke-ddb1f549.mp4:32838423171798",
+        "pipeline": "timeline",
+        "delivery_path": "",
+        "stages": [
+          {
+            "name": "probe",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "decode",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "cpu_to_gpu_upload",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "render",
+            "backend": "opengl",
+            "sample_count": 49,
+            "wall_p50_ms": 1.8650850033736788,
+            "wall_p95_ms": 4.8242889970424585,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "gpu_to_cpu_download",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "encode_submit",
+            "backend": "cpu_encoder",
+            "sample_count": 49,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "encode",
+            "backend": "h264",
+            "sample_count": 49,
+            "wall_p50_ms": 0.5965759992250241,
+            "wall_p95_ms": 1.2684440007433295,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "mux",
+            "backend": "container_writer",
+            "sample_count": 1,
+            "wall_p50_ms": 12.657597006182186,
+            "wall_p95_ms": 12.657597006182186,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "queue_wait",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          }
+        ],
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_root_cause": "cpu_encoder_surface_path",
+        "native_encode_stage_stats": null,
+        "frame_attributions": [
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 0,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 1,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 2,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 3,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 4,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 5,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 6,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 7,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 8,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 9,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 10,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 11,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 12,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 13,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 14,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 15,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 16,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 17,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 18,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 19,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 20,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 21,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 22,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 23,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 24,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 25,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 26,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 27,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 28,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 29,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 30,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 31,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 32,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 33,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 34,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 35,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 36,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 37,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 38,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 39,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 40,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 41,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 42,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 43,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 44,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 45,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 46,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 47,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 48,
+            "origin": ""
+          }
+        ],
+        "full_gpu": false,
+        "full_gpu_blockers": [
+          "stage_missing:decode",
+          "stage_backend_cpu:render:opengl",
+          "stage_backend_cpu:encode_submit:cpu_encoder",
+          "encode_backend_cpu:h264",
+          "cpu_path_marker:cpu_encoder_surface_path"
+        ]
+      },
+      "delivery_path": ""
+    }
+  },
+  {
+    "timeline": "Round4 Timeline",
+    "output": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/smoke-8a7d115c.mp4",
+    "outcome": {
+      "success": true,
+      "cancelled": false,
+      "error_code": "",
+      "cause": "",
+      "audio_omitted": false,
+      "hw_fallback_reason": "",
+      "stage_telemetry": {
+        "schema": "topos-export-stage-telemetry/1",
+        "schema_version": 1,
+        "export_id": "timeline:/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/smoke-8a7d115c.mp4:32840666741212",
+        "pipeline": "timeline",
+        "delivery_path": "",
+        "stages": [
+          {
+            "name": "probe",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "decode",
+            "backend": "provider_session",
+            "sample_count": 49,
+            "wall_p50_ms": 5.168399999092799,
+            "wall_p95_ms": 9.230201998434495,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "cpu_to_gpu_upload",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "render",
+            "backend": "opengl",
+            "sample_count": 49,
+            "wall_p50_ms": 24.699551999219693,
+            "wall_p95_ms": 29.04526999918744,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "gpu_to_cpu_download",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "encode_submit",
+            "backend": "cpu_encoder",
+            "sample_count": 49,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "encode",
+            "backend": "h264",
+            "sample_count": 49,
+            "wall_p50_ms": 0.46268200094345957,
+            "wall_p95_ms": 3.175685000314843,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "mux",
+            "backend": "container_writer",
+            "sample_count": 1,
+            "wall_p50_ms": 12.644331996852998,
+            "wall_p95_ms": 12.644331996852998,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "queue_wait",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          }
+        ],
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_root_cause": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+        "native_encode_stage_stats": null,
+        "frame_attributions": [
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 0,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 0,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 0,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 1,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 1,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 2,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 2,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 3,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 3,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 4,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 4,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 5,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 5,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 6,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 6,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 7,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 7,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 8,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 8,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 9,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 9,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 10,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 10,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 11,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 11,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 12,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 12,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 13,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 13,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 14,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 14,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 15,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 15,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 16,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 16,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 17,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 17,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 18,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 18,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 19,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 19,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 20,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 20,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 21,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 21,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 22,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 22,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 23,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 23,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 24,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 24,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 25,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 25,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 26,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 26,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 27,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 27,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 28,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 28,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 29,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 29,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 30,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 30,
+            "origin": ""
+          },
+          {
+            "reason": "adaptive_policy:cpu_preferred_single_layer_trivial_composite",
+            "stage": "",
+            "frame_index": 31,
+            "origin": ""
+          }
+        ],
+        "full_gpu": false,
+        "full_gpu_blockers": [
+          "stage_backend_cpu:decode:provider_session",
+          "stage_backend_cpu:render:opengl",
+          "stage_backend_cpu:encode_submit:cpu_encoder",
+          "encode_backend_cpu:h264",
+          "fallback_root_cause:adaptive_policy:cpu_preferred_single_layer_trivial_composite"
+        ]
+      },
+      "delivery_path": ""
+    }
+  },
+  {
+    "timeline": "Nested Round4 Timeline",
+    "output": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/smoke-e60618f3.mp4",
+    "outcome": {
+      "success": true,
+      "cancelled": false,
+      "error_code": "",
+      "cause": "",
+      "audio_omitted": false,
+      "hw_fallback_reason": "",
+      "stage_telemetry": {
+        "schema": "topos-export-stage-telemetry/1",
+        "schema_version": 1,
+        "export_id": "timeline:/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session3/smoke-e60618f3.mp4:32843565258706",
+        "pipeline": "timeline",
+        "delivery_path": "",
+        "stages": [
+          {
+            "name": "probe",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "decode",
+            "backend": "provider_session",
+            "sample_count": 49,
+            "wall_p50_ms": 4.47753700427711,
+            "wall_p95_ms": 7.81911400554236,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "cpu_to_gpu_upload",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "render",
+            "backend": "opengl",
+            "sample_count": 49,
+            "wall_p50_ms": 22.875499998917803,
+            "wall_p95_ms": 28.046321000147145,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "gpu_to_cpu_download",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "encode_submit",
+            "backend": "cpu_encoder",
+            "sample_count": 49,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "encode",
+            "backend": "h264",
+            "sample_count": 49,
+            "wall_p50_ms": 0.52203700033715,
+            "wall_p95_ms": 2.250040997751057,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "mux",
+            "backend": "container_writer",
+            "sample_count": 1,
+            "wall_p50_ms": 13.169593999919016,
+            "wall_p95_ms": 13.169593999919016,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          },
+          {
+            "name": "queue_wait",
+            "backend": "none",
+            "sample_count": 0,
+            "wall_p50_ms": null,
+            "wall_p95_ms": null,
+            "gpu_submit_ms": null,
+            "gpu_submit_p50_ms": null,
+            "gpu_submit_p95_ms": null,
+            "gpu_wait_ms": null,
+            "cpu_upload_bytes": 0,
+            "cpu_download_bytes": 0,
+            "fallback_reason": null
+          }
+        ],
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0,
+        "fallback_root_cause": "cpu_encoder_surface_path",
+        "native_encode_stage_stats": null,
+        "frame_attributions": [
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 0,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 1,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 2,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 3,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 4,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 5,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 6,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 7,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 8,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 9,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 10,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 11,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 12,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 13,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 14,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 15,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 16,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 17,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 18,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 19,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 20,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 21,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 22,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 23,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 24,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 25,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 26,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 27,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 28,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 29,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 30,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 31,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 32,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 33,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 34,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 35,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 36,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 37,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 38,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 39,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 40,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 41,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 42,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 43,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 44,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 45,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 46,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 47,
+            "origin": ""
+          },
+          {
+            "reason": "cpu_encoder_surface_path",
+            "stage": "",
+            "frame_index": 48,
+            "origin": ""
+          }
+        ],
+        "full_gpu": false,
+        "full_gpu_blockers": [
+          "stage_backend_cpu:decode:provider_session",
+          "stage_backend_cpu:render:opengl",
+          "stage_backend_cpu:encode_submit:cpu_encoder",
+          "encode_backend_cpu:h264",
+          "cpu_path_marker:cpu_encoder_surface_path"
+        ]
+      },
+      "delivery_path": ""
+    }
+  }
+]

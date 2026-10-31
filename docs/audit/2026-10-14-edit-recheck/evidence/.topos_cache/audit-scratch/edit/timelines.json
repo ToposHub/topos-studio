@@ -1,0 +1,32 @@
+{
+  "6ec50b8b-31b1-4dbf-8d7f-1913e786e1d0": {
+    "timeline_id": "6ec50b8b-31b1-4dbf-8d7f-1913e786e1d0",
+    "name": "Timeline 1",
+    "fps": 25.0,
+    "width": 1920,
+    "height": 1080,
+    "sample_rate": 48000,
+    "format_settings": {
+      "media_pool_preview_asset_id": "50b7b063-9048-4729-bd25-4a4ea74169e5",
+      "media_pool_preview_frame": 1101
+    },
+    "created_at": 0.0
+  },
+  "f22c5492-fcfb-40b2-9355-edc3217c48d5": {
+    "timeline_id": "f22c5492-fcfb-40b2-9355-edc3217c48d5",
+    "name": "Recheck Source AV",
+    "fps": 25.0,
+    "width": 1920,
+    "height": 1080,
+    "sample_rate": 48000,
+    "format_settings": {
+      "pixel_aspect_ratio": 1.0,
+      "field_order": "progressive",
+      "display_format": "timecode",
+      "audio_track_type": "stereo",
+      "audio_display_format": "samples",
+      "start_timecode": "00:00:00:00"
+    },
+    "created_at": 1791971320.484735
+  }
+}

@@ -1,0 +1,41 @@
+[DRIVER] auto-dismiss dialog: ProjectManagerDialog
+[DRIVER] booted page=Color video=2K_H265.mov seconds=15.0
+[DRIVER] asset imported fps=25.0 frames=487
+[DRIVER] switch attempt 0 failed (composite_id=), retrying
+[DRIVER] graph wired: src→merge.A=True constant→merge.B=True merge→output=True
+[DRIVER] first frame after 1 emissions; current_frame=0 total=720
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+2026-10-14 10:49:33.017 Python[60747:1935970] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 218 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.app.controllers.composite_controller: [CompClip] Failed to remember active comp clip: Comp clip not found: 21cdee19-2828-4e4c-ab73-a5b9d3d1528b
+[WARNING] src.features.composite.render.compute_shader_manager: Compute shaders unavailable: OpenGL 4.1 detected, requires 4.3+. Large-radius effects will use fragment shader fallback (slower).
+[WARNING] src.features.composite.render.compute_shader_manager: Metal compute bridge available but disabled by default: fragment fallback is faster for large-radius effects (see tests/media/results/metal_compute_ab.md). Set TOPOS_METAL_COMPUTE=1 to force the Metal path.
+[WARNING] src.features.composite.render.composite_renderer: [COMPOSITE-RENDER] graph produced no valid output; request_id=1 timeline_backed=True dynamic_source=True nodes=3 connections=2 color_tex=0 color_size=0x0
+[WARNING] src.features.composite.adapters.main_window_adapter: [COMPOSITE-PRESENT] empty renderer output; viewer cleared request_id=1 timeline_backed=False
+[WARNING] src.app.controllers.composite_controller: [CompClip] Failed to remember active comp clip: Comp clip not found: 21cdee19-2828-4e4c-ab73-a5b9d3d1528b
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/app/controllers/composite_controller.py", line 179, in _on_composite_frame_ready
+    self._composite_adapter.handle_frame_ready(request_id, tex_id, width, height)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/adapters/main_window_adapter.py", line 409, in handle_frame_ready
+    self._present_frame_to_viewer(request_id, tex_id, width, height)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/adapters/main_window_adapter.py", line 438, in _present_frame_to_viewer
+    self._maybe_submit_gpu_scope_demand(request_id)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/src/features/composite/adapters/main_window_adapter.py", line 535, in _maybe_submit_gpu_scope_demand
+    renderer.submit(CompositeCommand.RENDER_GPU_SCOPE, demand)
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color02/tests/benchmark/drive_real_app_composite_playback.py", line 325, in counted_submit
+    if data and data.get("request") is not None:
+                ^^^^^^^^
+AttributeError: 'ScopeDemand' object has no attribute 'get'

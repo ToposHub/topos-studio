@@ -1,0 +1,72 @@
+{
+  "audit_date": "2026-10-24",
+  "started_utc": "2026-10-24T11:08:27.351534+00:00",
+  "head": "9e05556c3a3e6d900e7db1d7d3a14ae68552a87c",
+  "platform": "macOS-15.3.1-x86_64-i386-64bit",
+  "machine": "x86_64",
+  "python": "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+  "pytest_command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/edit/test_f81_project_snapshots.py",
+    "tests/edit/test_f82_review_comments.py",
+    "tests/edit/test_f83_audition.py",
+    "tests/deliver/test_f93_version_compiler.py",
+    "tests/edit/ai_editing/test_f91_filler_removal.py",
+    "tests/edit/test_audio_sync_binding.py",
+    "tests/edit/test_color_group.py",
+    "tests/edit/test_color_versions.py",
+    "tests/color/test_qualifier_keyframes.py",
+    "tests/shared/test_f64_frame_manifest.py",
+    "tests/edit/test_proxy_cache_product_loop.py",
+    "tests/edit/test_realtime_playback_telemetry.py",
+    "-q",
+    "--no-header",
+    "-p",
+    "no:cacheprovider"
+  ],
+  "pytest_exit_code": 0,
+  "pip_check_exit_code": 1,
+  "scope": "isolated focused logic tests; no true GUI/GPU/Windows runtime validation",
+  "environment_overrides": {
+    "QT_QPA_PLATFORM": "offscreen",
+    "TOPOS_HEADLESS_GL": "1",
+    "TOPOS_TEST_MODE": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "python_version": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 17.0.0 (clang-1700.6.3.2)]",
+  "runtime_versions": {
+    "av": "17.0.1",
+    "numpy": "1.26.4",
+    "PyQt6": "6.10.2",
+    "PyQt6-Qt6": "6.10.2",
+    "moderngl": "5.12.0",
+    "onnxruntime": "1.23.2",
+    "packaging": "26.3",
+    "pyannote-core": "6.0.1",
+    "lightning": "2.4.0",
+    "qwen-tts": "0.1.1",
+    "transformers": "4.57.6"
+  },
+  "logic_probe_command": [
+    ".venv/bin/python",
+    "docs/validation/upgrade_2026-10-24/reproduce_logic_gaps.py"
+  ],
+  "logic_probe_groups": 9,
+  "logic_probe_issues_observed": 9,
+  "python_executable": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/bin/python",
+  "focused_test_result": "142 passed in 7.48s",
+  "prior_f_plan_checked": 45,
+  "prior_f_plan_total": 53,
+  "old_plans_modified": false,
+  "plan_review_v2": {
+    "head": "9e05556c3a3e6d900e7db1d7d3a14ae68552a87c",
+    "additional_probe_groups": 4,
+    "observed_helper_or_model_gaps": 4,
+    "prior_142_tests_rerun": false,
+    "gui_gpu_windows_rerun": false,
+    "review_record": "docs/validation/upgrade_2026-10-24/plan_review_v2.json",
+    "portable_source_index": "docs/validation/upgrade_2026-10-24/portable_source_index.json"
+  }
+}

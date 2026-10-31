@@ -1,0 +1,28 @@
+============================= test session starts ==============================
+collected 191 items
+
+tests/benchmark/test_benchmark_projects.py ..............F.              [  8%]
+tests/benchmark/test_benchmark_runner.py .......                         [ 12%]
+tests/benchmark/test_caption_performance.py ......                       [ 15%]
+tests/benchmark/test_check_codec_budget_aud6.py ..............           [ 22%]
+tests/benchmark/test_fix_bench_scripts_aud5.py ......................... [ 35%]
+.................                                                        [ 44%]
+tests/benchmark/test_fix_bench_w6_aud6.py .............................. [ 60%]
+...................                                                      [ 70%]
+tests/benchmark/test_fix_bench_wd1r_g1.py .............................. [ 85%]
+...........                                                              [ 91%]
+tests/benchmark/test_latency.py ......                                   [ 94%]
+tests/benchmark/test_playback_performance.py ....                        [ 96%]
+tests/benchmark/test_renderer_queue.py ...                               [ 98%]
+tests/benchmark/test_ui_tick.py ...                                      [100%]
+
+=================================== FAILURES ===================================
+____________ TestBenchmarkProjects.test_scenario_prefix_resolution _____________
+tests/benchmark/test_benchmark_projects.py:83: in test_scenario_prefix_resolution
+    assert seq.fps == 25
+E   AssertionError: assert Rational(25, 1) == 25
+E    +  where Rational(25, 1) = TimelineSequence(timeline_id='989eda9e-ab73-524e-93e6-69322622e31a', name='E01_single_track', fps=Rational(25, 1), wid... range_end=None, master_volume=1.0, master_muted=False, master_automation={}, master_automation_mode='off', revision=0).fps
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/benchmark.xml -
+=========================== short test summary info ============================
+FAILED tests/benchmark/test_benchmark_projects.py::TestBenchmarkProjects::test_scenario_prefix_resolution
+======================== 1 failed, 190 passed in 30.15s ========================

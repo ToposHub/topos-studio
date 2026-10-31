@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 13 items
+
+tests/edit/test_edit_effects_panel_drag_inject.py .............          [100%]
+
+============================= 13 passed in 53.76s ==============================

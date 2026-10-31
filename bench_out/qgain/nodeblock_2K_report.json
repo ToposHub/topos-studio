@@ -1,0 +1,63 @@
+{
+ "generated_at": "2026-09-21T16:19:34.678536+00:00",
+ "master": "tests/test_videos/4K_prores4444.mov",
+ "patch": [],
+ "reference": "母版 reformat（bicubic）→ YUV 4:2:2 10-bit limited",
+ "note": "grid>1.2 = 误差在 8×8 块界（色块）；stair>0.6 = 残差轴向化（锯齿）；sharp<1 = 高频能量损失（颗粒掩蔽变弱）。",
+ "results": [
+  {
+   "tag": "nodeblock",
+   "size": "2K",
+   "tier": "proxy",
+   "frames": 487,
+   "threads": null,
+   "profile": {
+    "target_bpp": 0.64483,
+    "chroma_qp_offset": 0,
+    "qmatrix_id": 4
+   },
+   "file_bytes": 81207209,
+   "video_bytes": 81200602,
+   "video_mbps": 33.35,
+   "enc_fps": 26.8,
+   "dec_fps": 602.1,
+   "to_pos": false,
+   "y_psnr": 40.037,
+   "u_psnr": 46.572,
+   "v_psnr": 45.288,
+   "y_psnr_edge": 36.365,
+   "y_mae_edge": 16.379,
+   "sharp": 0.838,
+   "block_h": 3.878,
+   "block_v": 4.37,
+   "block_h_ratio": 13.625,
+   "block_v_ratio": 12.981,
+   "grid": 1.268,
+   "stair": 0.369,
+   "rgb_psnr": 36.825,
+   "rgb_mae": 3.47,
+   "prores": {
+    "file": "2K_prores422Proxy.mov",
+    "bytes": 95714182,
+    "video_bytes": 90098672,
+    "video_mbps": 37.0,
+    "y_psnr": 39.862,
+    "u_psnr": 47.014,
+    "v_psnr": 45.219,
+    "y_psnr_edge": 35.633,
+    "y_mae_edge": 15.555,
+    "sharp": 1.398,
+    "block_h": 4.277,
+    "block_v": 3.909,
+    "block_h_ratio": 8.414,
+    "block_v_ratio": 6.65,
+    "grid": 1.312,
+    "stair": 0.348,
+    "rgb_psnr": 36.68,
+    "rgb_mae": 3.319
+   },
+   "video_bytes_ratio": 0.9012,
+   "file_bytes_ratio": 0.8484
+  }
+ ]
+}

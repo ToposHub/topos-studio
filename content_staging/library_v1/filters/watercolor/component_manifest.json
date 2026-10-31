@@ -1,0 +1,165 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "F15",
+  "dedup": "全库无水彩/扩散模型（L00 台账 F15 行）；blur+saturation 冒充被禁止——本项三要素：梯度反向扩散+边缘聚边+程序纸纹",
+  "host_min_contract": ".tglsl ABI（slider×4）；u_input_tex 邻域采样（Sobel 8+扩散 8 tap）；uint 字面量依赖宿主 #version 330；发布名 LIB1_Watercolor",
+  "image": {
+    "alpha": "premultiplied",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "filter",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "diffusion",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "NaN 拒绝；位移 ∝ diffusion（tap j 位移 (j+1)*diffusion*em px，≤8px 有界）；0=扩散级精确恒等"
+    },
+    {
+      "animatable": false,
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "edge_pigment",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "NaN 拒绝；边缘带内饱和度增益 (1+w)、亮度增益 (1+0.5w)（字面实现，增益有界 ≤2x/≤1.5x）"
+    },
+    {
+      "animatable": false,
+      "default": 8.0,
+      "maximum": 16.0,
+      "minimum": 2.0,
+      "name": "paper_scale",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "pixel",
+      "validation": "NaN 拒绝；纸纹格距（下限守护 max(cell,2)）"
+    },
+    {
+      "animatable": false,
+      "default": 1.0,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "name": "amount",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "ratio",
+      "validation": "NaN 拒绝；amount=0 精确恒等（bypass）"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [
+    {
+      "kind": "procedural",
+      "license": "in-file procedural: murmur3-style uint32 lattice hash (fixtures/_lattice_hash 的 uint32 同式缩减, fixed seed 0)",
+      "missing": "无需外部资源（程序生成）",
+      "name": "paper_value_noise",
+      "sha256": ""
+    }
+  ],
+  "slug": "watercolor",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_f15_watercolor.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "content_staging/library_v1/filters/watercolor/hand_vectors.json",
+    "known_limits": "单 pass 扩散近似（真多 pass 迭代扩散需原生 renderer，多 pass 红线）；聚边为工作单'饱和度/亮度提升'字面实现（物理聚边变暗留待参数化后续）；ROI padding ≤9px（8px 扩散+1px Sobel）；uint hash GPU 位一致性未验；邻域+位置依赖 LUT 不可表达；CPU/Metal 导出未验",
+    "oracle": "content_staging/library_v1/references/watercolor_ref.py"
+  },
+  "version": "0.1.0"
+}

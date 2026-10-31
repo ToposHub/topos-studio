@@ -1,0 +1,47 @@
+{
+    "name": "模糊柔化",
+    "description": "模糊柔化效果模板：输入 → Blur → 输出。适合柔化图像边缘。",
+    "version": 1,
+    "nodes": [
+        {
+            "id": "blur_input",
+            "type": "image_input",
+            "position": [0, 0],
+            "parameters": {},
+            "disabled": false
+        },
+        {
+            "id": "blur_node",
+            "type": "blur",
+            "position": [200, 0],
+            "parameters": {
+                "radius": 5.0,
+                "quality": 3
+            },
+            "disabled": false
+        },
+        {
+            "id": "blur_output",
+            "type": "output",
+            "position": [400, 0],
+            "parameters": {},
+            "disabled": false
+        }
+    ],
+    "connections": [
+        {
+            "src_idx": 0,
+            "src_port": "output",
+            "dst_idx": 1,
+            "dst_port": "image"
+        },
+        {
+            "src_idx": 1,
+            "src_port": "output",
+            "dst_idx": 2,
+            "dst_port": "input"
+        }
+    ],
+    "created_at": "2026-05-14T10:00:00",
+    "author": "Topos Color"
+}

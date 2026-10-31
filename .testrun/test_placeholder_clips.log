@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 8 items
+
+tests/edit/test_placeholder_clips.py ........                            [100%]
+
+============================== 8 passed in 9.93s ===============================

@@ -1,0 +1,56 @@
+{
+  "env": {
+    "schema": "bench_frame_budget.env.v1",
+    "recorded_at_utc": "2026-10-22T14:10:14.251447+00:00",
+    "python": "3.12.13",
+    "numpy": "1.26.4",
+    "moderngl": "5.12.0",
+    "platform": "darwin",
+    "av": "17.0.1",
+    "ffmpeg": {
+      "libavutil": "60.8.100",
+      "libavcodec": "62.11.100",
+      "libavformat": "62.3.100",
+      "libavdevice": "62.1.100",
+      "libavfilter": "11.4.100",
+      "libswscale": "9.1.100",
+      "libswresample": "6.1.100"
+    },
+    "pyqt6": "6.10.2",
+    "qt": "6.10.0",
+    "git": {
+      "head": "e94816b9205d5c4986fcd6def9390b51ff0d6107",
+      "branch": "perf/a-playback",
+      "dirty_files": 5
+    },
+    "bench_manifest": {
+      "manifest": "light_no_topos",
+      "reason": "build_manifest unavailable: ManifestMismatch: dylib commit e77f85158 != 工作树目标 e94816b92——请重建 native 库后再测量（P0-04）"
+    }
+  },
+  "args": {
+    "mode": "offscreen",
+    "material": [
+      "tests/test_videos/2K_topos_422_HQ.mov"
+    ],
+    "media_dir": "",
+    "generate_media": "",
+    "frames": 60,
+    "warmup": 20,
+    "target_fps": 25.0,
+    "snapshot_every": 0,
+    "zero_copy_probe": false,
+    "out": "bench_out/frame_budget",
+    "allow_dirty": false
+  },
+  "result": {
+    "material": "2K_topos_422_HQ.mov",
+    "mode": "offscreen",
+    "ok": false,
+    "errors": [
+      {
+        "error": "MediaOpenError: Failed to open media: 'VideoStream' object has no attribute 'width'"
+      }
+    ]
+  }
+}

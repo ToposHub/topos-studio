@@ -1,0 +1,16 @@
+============================= test session starts ==============================
+collected 154 items
+
+tests/motion/test_easing.py ...........................                  [ 17%]
+tests/motion/test_expression_cross_process_golden.py ..                  [ 18%]
+tests/motion/test_interpolate.py .....................                   [ 32%]
+tests/motion/test_presets.py .................                           [ 43%]
+tests/motion/test_sequence.py ...............                            [ 53%]
+tests/motion/test_spring.py .............                                [ 61%]
+tests/motion/test_time_range.py ..............                           [ 70%]
+tests/motion/test_w1_s1_vertical_slice.py ..............                 [ 79%]
+tests/motion/test_w6_expression.py ..........................            [ 96%]
+tests/motion/test_w6_expression_runtime.py .....                         [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/motion.xml -
+============================= 154 passed in 3.99s ==============================

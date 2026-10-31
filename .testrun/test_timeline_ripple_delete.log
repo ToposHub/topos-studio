@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_timeline_ripple_delete.py ......                         [100%]
+
+============================== 6 passed in 4.98s ===============================

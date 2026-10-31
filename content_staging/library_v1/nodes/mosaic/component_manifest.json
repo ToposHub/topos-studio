@@ -1,0 +1,153 @@
+{
+  "capabilities": {
+    "color/lut_bake/cpu/animated": "untested",
+    "color/lut_bake/cpu/static": "untested",
+    "color/lut_bake/gpu_gl/animated": "untested",
+    "color/lut_bake/gpu_gl/static": "untested",
+    "color/lut_bake/metal/animated": "untested",
+    "color/lut_bake/metal/static": "untested",
+    "color/preview/cpu/animated": "untested",
+    "color/preview/cpu/static": "untested",
+    "color/preview/gpu_gl/animated": "untested",
+    "color/preview/gpu_gl/static": "untested",
+    "color/preview/metal/animated": "untested",
+    "color/preview/metal/static": "untested",
+    "color/video_export/cpu/animated": "untested",
+    "color/video_export/cpu/static": "untested",
+    "color/video_export/gpu_gl/animated": "untested",
+    "color/video_export/gpu_gl/static": "untested",
+    "color/video_export/metal/animated": "untested",
+    "color/video_export/metal/static": "untested",
+    "composite/lut_bake/cpu/animated": "untested",
+    "composite/lut_bake/cpu/static": "untested",
+    "composite/lut_bake/gpu_gl/animated": "untested",
+    "composite/lut_bake/gpu_gl/static": "untested",
+    "composite/lut_bake/metal/animated": "untested",
+    "composite/lut_bake/metal/static": "untested",
+    "composite/preview/cpu/animated": "untested",
+    "composite/preview/cpu/static": "untested",
+    "composite/preview/gpu_gl/animated": "untested",
+    "composite/preview/gpu_gl/static": "untested",
+    "composite/preview/metal/animated": "untested",
+    "composite/preview/metal/static": "untested",
+    "composite/video_export/cpu/animated": "untested",
+    "composite/video_export/cpu/static": "untested",
+    "composite/video_export/gpu_gl/animated": "untested",
+    "composite/video_export/gpu_gl/static": "untested",
+    "composite/video_export/metal/animated": "untested",
+    "composite/video_export/metal/static": "untested",
+    "edit/lut_bake/cpu/animated": "untested",
+    "edit/lut_bake/cpu/static": "untested",
+    "edit/lut_bake/gpu_gl/animated": "untested",
+    "edit/lut_bake/gpu_gl/static": "untested",
+    "edit/lut_bake/metal/animated": "untested",
+    "edit/lut_bake/metal/static": "untested",
+    "edit/preview/cpu/animated": "untested",
+    "edit/preview/cpu/static": "untested",
+    "edit/preview/gpu_gl/animated": "untested",
+    "edit/preview/gpu_gl/static": "untested",
+    "edit/preview/metal/animated": "untested",
+    "edit/preview/metal/static": "untested",
+    "edit/video_export/cpu/animated": "untested",
+    "edit/video_export/cpu/static": "untested",
+    "edit/video_export/gpu_gl/animated": "untested",
+    "edit/video_export/gpu_gl/static": "untested",
+    "edit/video_export/metal/animated": "untested",
+    "edit/video_export/metal/static": "untested"
+  },
+  "component_id": "C05",
+  "dedup": "无 mosaic 节点；复用 Pixel_Blocks.tglsl 块中心采样；差量：grid origin/mask/border/非整块边缘未纳入（L00 台账 C05 行）",
+  "host_min_contract": "node_type lib1_mosaic；marker dispatch（base_evaluator lib1_ 分支）+ GLSL 未接线（L16 草案；patches/proposal_l04_node_seams.md）",
+  "image": {
+    "alpha": "straight",
+    "input_space": "scene-linear",
+    "output_range": "unbounded",
+    "output_space": "scene-linear",
+    "precision": "float32",
+    "sampling_border": "clamp-half-texel",
+    "spatial_unit": "frame-normalized"
+  },
+  "kind": "node",
+  "pack_id": "topos_library_v1",
+  "params": [
+    {
+      "animatable": false,
+      "default": 8.0,
+      "maximum": 64.0,
+      "minimum": 1.0,
+      "name": "block_px",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "px",
+      "validation": ""
+    },
+    {
+      "animatable": false,
+      "default": 8.0,
+      "maximum": 32.0,
+      "minimum": 2.0,
+      "name": "levels",
+      "neutral": false,
+      "options": [],
+      "ptype": "float",
+      "unit": "levels",
+      "validation": "levels=32 时量化阶宽 1/32（近似恒等）"
+    },
+    {
+      "animatable": false,
+      "default": false,
+      "maximum": null,
+      "minimum": null,
+      "name": "dither",
+      "neutral": false,
+      "options": [],
+      "ptype": "bool",
+      "unit": "",
+      "validation": "Bayer 4x4 有序抖动"
+    }
+  ],
+  "ports": [
+    {
+      "data_type": "image",
+      "direction": "input",
+      "missing_behavior": "no-op：返回空输出（marker 协议）",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    },
+    {
+      "data_type": "image",
+      "direction": "output",
+      "missing_behavior": "",
+      "name": "image",
+      "required": true,
+      "role": "image"
+    }
+  ],
+  "resources": [],
+  "slug": "mosaic",
+  "status": "component_ready",
+  "time": {
+    "dynamic_gate": "",
+    "fps": [
+      0,
+      1
+    ],
+    "frame_sampling": "n/a",
+    "seed_policy": "fixed-param-default",
+    "time_domain": "static",
+    "time_origin": "effect-time-0"
+  },
+  "unknown_version_policy": "preserve-payload-warn",
+  "verification": {
+    "commands": [
+      ".venv/bin/python -m pytest tests/content_library_v1/test_c05_mosaic.py -v"
+    ],
+    "gpu_evidence": "",
+    "hand_vectors": "tests/content_library_v1/test_c05_mosaic.py（≥3 独立手算向量/复用项透传断言）",
+    "known_limits": "节点类+marker 草案；dispatch/GLSL/registry/capability 未接线（L04/L16 集成）——仅声明不是完成。block=1+dither off+levels=32 仅近似恒等（|out−in|≤1/64；精确恒等需 levels→∞ 超参数域）；oracle 钉 NEAREST（GPU LINEAR 差异 L02 声明）",
+    "oracle": "content_staging/library_v1/references/mosaic_ref.py"
+  },
+  "version": "0.1.0"
+}

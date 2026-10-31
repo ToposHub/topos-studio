@@ -1,0 +1,15 @@
+== 2026-09-02 M10-6 批次总收益（Mac-Pro 8P/16L，hq tier t8）==
+-- 编码 sized（产品口径含 Python 输入转换+mux）--
+  fps 34.44  wall/帧 29.0 ms
+  probe 编码次数: p50 4.0  p95 4  max 4  均值 4.00
+  bytes/target 误差: 中位 +15.16%  p95 +16.04%  最差 +11.25%  超 target 帧数 32/32
+  qp: min 63 中位 63 max 63
+
+  fps 8.79  wall/帧 113.7 ms
+  probe 编码次数: p50 7.0  p95 7  max 7  均值 7.00
+  bytes/target 误差: 中位 -4.77%  p95 -1.05%  最差 -9.25%  超 target 帧数 0/16
+  qp: min 55 中位 55 max 56
+
+-- 解码（同线程口径，确认无回归）--
+2k topos t8: 278.0 fps
+4k topos t8: 72.9 fps

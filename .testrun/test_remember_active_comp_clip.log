@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 10 items
+
+tests/edit/test_remember_active_comp_clip.py ..........                  [100%]
+
+============================== 10 passed in 6.39s ==============================

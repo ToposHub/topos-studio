@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 5 items
+
+tests/edit/test_batch_mute_solo_macro.py .....                           [100%]
+
+============================== 5 passed in 6.38s ===============================

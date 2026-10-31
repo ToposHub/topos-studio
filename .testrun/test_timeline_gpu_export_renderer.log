@@ -1,0 +1,33 @@
+============================= test session starts ==============================
+collected 51 items
+
+tests/edit/test_timeline_gpu_export_renderer.py ......................F. [ 47%]
+..F.F......................                                              [100%]
+
+=================================== FAILURES ===================================
+_________________ test_gpu_grade_bit_exact_vs_cpu_grading_math _________________
+tests/edit/test_timeline_gpu_export_renderer.py:787: in test_gpu_grade_bit_exact_vs_cpu_grading_math
+    assert diff.max() <= 2, f"maxdiff {diff.max()}"
+E   AssertionError: maxdiff 179
+E   assert 179 <= 2
+E    +  where 179 = <built-in method max of numpy.ndarray object at 0x2ff951470>()
+E    +    where <built-in method max of numpy.ndarray object at 0x2ff951470> = array([[[  0,   0, 179],\n        [  0,   0, 179],\n        [  0,   0, 179],\n        ...,\n        [  0,   0, 179],\n     ...[  0,   0, 179],\n        ...,\n        [  0,   0, 179],\n        [  0,   0, 179],\n        [  0,   0, 179]]], dtype=int16).max
+____________________ test_gpu_u16_delivery_parity_and_dtype ____________________
+tests/edit/test_timeline_gpu_export_renderer.py:948: in test_gpu_u16_delivery_parity_and_dtype
+    assert diff_g.max() <= 8, f"graded maxdiff {diff_g.max()} code16"
+E   AssertionError: graded maxdiff 45936 code16
+E   assert 45936 <= 8
+E    +  where 45936 = <built-in method max of numpy.ndarray object at 0x30006d7d0>()
+E    +    where <built-in method max of numpy.ndarray object at 0x30006d7d0> = array([[[    0,     0, 45936],\n        [    0,     0, 45936],\n        [    0,     0, 45936],\n        ...,\n        [   ...       ...,\n        [    0,     0, 45936],\n        [    0,     0, 45936],\n        [    0,     0, 45936]]], dtype=int32).max
+______________________ test_gpu_multi_layer_stack_parity _______________________
+tests/edit/test_timeline_gpu_export_renderer.py:1056: in test_gpu_multi_layer_stack_parity
+    assert diff.max() <= 4, f"maxdiff {diff.max()}"
+E   AssertionError: maxdiff 64
+E   assert 64 <= 4
+E    +  where 64 = <built-in method max of numpy.ndarray object at 0x30006e250>()
+E    +    where <built-in method max of numpy.ndarray object at 0x30006e250> = array([[[ 0,  0, 63],\n        [ 0,  1, 63],\n        [ 0,  0, 63],\n        ...,\n        [ 0,  0, 63],\n        [ 0,  0, ...3],\n        [ 0,  0, 63],\n        ...,\n        [ 0,  0, 62],\n        [ 0,  0, 62],\n        [ 0,  0, 62]]], dtype=int16).max
+=========================== short test summary info ============================
+FAILED tests/edit/test_timeline_gpu_export_renderer.py::test_gpu_grade_bit_exact_vs_cpu_grading_math
+FAILED tests/edit/test_timeline_gpu_export_renderer.py::test_gpu_u16_delivery_parity_and_dtype
+FAILED tests/edit/test_timeline_gpu_export_renderer.py::test_gpu_multi_layer_stack_parity
+======================== 3 failed, 48 passed in 22.19s =========================

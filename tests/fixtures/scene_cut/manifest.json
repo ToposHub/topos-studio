@@ -1,0 +1,153 @@
+{
+  "version": "1.0",
+  "generated_at": "1780506906.8243554",
+  "fixtures": {
+    "hard_cut": {
+      "filename": "hard_cut_24fps.mp4",
+      "fps": 24.0,
+      "width": 640,
+      "height": 480,
+      "total_frames": 300,
+      "expected_cuts": [
+        100,
+        200
+      ],
+      "expected_cut_count": 2,
+      "description": "Red/Blue/Green solid color scene transitions",
+      "metadata": {}
+    },
+    "flash_no_cut": {
+      "filename": "flash_no_cut_24fps.mp4",
+      "fps": 24.0,
+      "width": 640,
+      "height": 480,
+      "total_frames": 300,
+      "expected_cuts": [],
+      "expected_cut_count": 0,
+      "description": "Single-frame white flash without actual cut",
+      "metadata": {
+        "flash_frame": 150
+      }
+    },
+    "dissolve": {
+      "filename": "dissolve_24fps.mp4",
+      "fps": 24.0,
+      "width": 640,
+      "height": 480,
+      "total_frames": 212,
+      "expected_cuts": [
+        100
+      ],
+      "expected_cut_count": 1,
+      "description": "12-frame dissolve transition between scenes",
+      "metadata": {
+        "dissolve_start": 100,
+        "dissolve_end": 112,
+        "dissolve_frames": 12
+      }
+    },
+    "black_gap": {
+      "filename": "black_gap_24fps.mp4",
+      "fps": 24.0,
+      "width": 640,
+      "height": 480,
+      "total_frames": 340,
+      "expected_cuts": [
+        120,
+        240
+      ],
+      "expected_cut_count": 2,
+      "description": "Black frames between scene transitions",
+      "metadata": {
+        "black_gaps": [
+          [
+            100,
+            120
+          ],
+          [
+            220,
+            240
+          ]
+        ]
+      }
+    },
+    "fast_pan": {
+      "filename": "fast_pan_24fps.mp4",
+      "fps": 24.0,
+      "width": 640,
+      "height": 480,
+      "total_frames": 300,
+      "expected_cuts": [],
+      "expected_cut_count": 0,
+      "description": "Continuous fast horizontal motion without cuts",
+      "metadata": {
+        "motion_speed": 10
+      }
+    },
+    "vfr_cut": {
+      "filename": "vfr_cut_24fps.mp4",
+      "fps": 24.0,
+      "width": 640,
+      "height": 480,
+      "total_frames": 360,
+      "expected_cuts": [
+        80,
+        200,
+        260
+      ],
+      "expected_cut_count": 3,
+      "description": "Variable frame rate with scene cuts (CFR base)",
+      "metadata": {
+        "vfr_simulation": "Test harness should simulate variable PTS"
+      }
+    },
+    "duplicate_frames": {
+      "filename": "duplicate_frames_24fps.mp4",
+      "fps": 24.0,
+      "width": 640,
+      "height": 480,
+      "total_frames": 210,
+      "expected_cuts": [
+        110
+      ],
+      "expected_cut_count": 1,
+      "description": "Repeated frames to test false positive suppression",
+      "metadata": {
+        "duplicate_frames": [
+          9,
+          19,
+          29,
+          39,
+          49,
+          59,
+          69,
+          79,
+          89,
+          99
+        ]
+      }
+    },
+    "black_fade": {
+      "filename": "black_fade_24fps.mp4",
+      "fps": 24.0,
+      "width": 640,
+      "height": 480,
+      "total_frames": 220,
+      "expected_cuts": [
+        140
+      ],
+      "expected_cut_count": 1,
+      "description": "Fade to black and fade from black transitions",
+      "metadata": {
+        "fade_out": [
+          80,
+          100
+        ],
+        "fade_in": [
+          120,
+          140
+        ]
+      }
+    }
+  }
+}

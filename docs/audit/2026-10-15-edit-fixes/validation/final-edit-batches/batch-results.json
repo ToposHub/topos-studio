@@ -1,0 +1,51 @@
+[
+  {
+    "label": "edit-batch-1",
+    "files": 90,
+    "returncode": 0,
+    "timed_out": false,
+    "seconds": 21.68
+  },
+  {
+    "label": "edit-batch-2",
+    "files": 90,
+    "returncode": 0,
+    "timed_out": false,
+    "seconds": 38.69
+  },
+  {
+    "label": "edit-batch-3",
+    "files": 90,
+    "returncode": 0,
+    "timed_out": false,
+    "seconds": 35.97
+  },
+  {
+    "label": "edit-batch-4",
+    "files": 90,
+    "returncode": 1,
+    "timed_out": false,
+    "seconds": 65.15
+  },
+  {
+    "label": "edit-batch-5",
+    "files": 90,
+    "returncode": 1,
+    "timed_out": false,
+    "seconds": 54.57
+  },
+  {
+    "label": "edit-batch-6",
+    "files": 90,
+    "returncode": 0,
+    "timed_out": false,
+    "seconds": 59.61
+  },
+  {
+    "label": "edit-batch-7",
+    "files": 64,
+    "returncode": 0,
+    "timed_out": false,
+    "seconds": 63.11
+  }
+]

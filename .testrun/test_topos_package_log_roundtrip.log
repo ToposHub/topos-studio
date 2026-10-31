@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_topos_package_log_roundtrip.py ....                      [100%]
+
+============================== 4 passed in 5.06s ===============================

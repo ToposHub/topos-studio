@@ -1,0 +1,322 @@
+{
+  "date": "2026-08-29",
+  "machine": {
+    "platform": "macOS-15.3.1-x86_64-i386-64bit",
+    "macos": "15.3.1",
+    "python": "3.12.13",
+    "machine": "x86_64",
+    "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "cores": "16",
+    "pyav": "17.0.1"
+  },
+  "frames_per_asset": 120,
+  "assets": [
+    {
+      "name": "2K_H264",
+      "file": "tests/test_videos/2K_h264.mp4",
+      "probe": {
+        "codec": "h264",
+        "profile": "High",
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "frames": 1572,
+        "duration_s": 62.88,
+        "size_mb": 50.1,
+        "bitrate_mbps": 6.7
+      },
+      "ffmpeg": {
+        "n": 120,
+        "p50_ms": 0.68,
+        "p95_ms": 1.99,
+        "worst_steady_ms": 39.26,
+        "open_ms": 26.8,
+        "total_s": 0.14,
+        "throughput_fps": 874.5
+      },
+      "vt": {
+        "n": 120,
+        "p50_ms": 3.02,
+        "p95_ms": 4.31,
+        "worst_steady_ms": 33.03,
+        "open_ms": 616.5,
+        "total_s": 0.41,
+        "throughput_fps": 290.2
+      }
+    },
+    {
+      "name": "2K_H265",
+      "file": "tests/test_videos/2K_H265.mov",
+      "probe": {
+        "codec": "hevc",
+        "profile": "Main 10",
+        "pix_fmt": "yuv420p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "frames": 743,
+        "duration_s": 29.72,
+        "size_mb": 30.5,
+        "bitrate_mbps": 8.6
+      },
+      "ffmpeg": {
+        "n": 120,
+        "p50_ms": 1.08,
+        "p95_ms": 6.11,
+        "worst_steady_ms": 52.77,
+        "open_ms": 1.5,
+        "total_s": 0.28,
+        "throughput_fps": 430.8
+      },
+      "vt": {
+        "n": 120,
+        "p50_ms": 3.12,
+        "p95_ms": 10.85,
+        "worst_steady_ms": 13.06,
+        "open_ms": 10.4,
+        "total_s": 0.44,
+        "throughput_fps": 273.5
+      }
+    },
+    {
+      "name": "2K_ProRes422HQ",
+      "file": "tests/test_videos/2K_prores422HQ.mov",
+      "probe": {
+        "codec": "prores",
+        "profile": "HQ",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "frames": 647,
+        "duration_s": 25.88,
+        "size_mb": 495.1,
+        "bitrate_mbps": 160.5
+      },
+      "ffmpeg": {
+        "n": 120,
+        "p50_ms": 2.06,
+        "p95_ms": 3.18,
+        "worst_steady_ms": 4.83,
+        "open_ms": 16.3,
+        "total_s": 0.27,
+        "throughput_fps": 450.5
+      },
+      "vt": {
+        "n": 120,
+        "p50_ms": 4.13,
+        "p95_ms": 5.05,
+        "worst_steady_ms": 11.54,
+        "open_ms": 20.1,
+        "total_s": 0.54,
+        "throughput_fps": 224.1
+      }
+    },
+    {
+      "name": "2K_DNxHR_HQX",
+      "file": "tests/test_videos/2K_DNxHR HQX 12-bit.mov",
+      "probe": {
+        "codec": "dnxhd",
+        "profile": "DNXHR HQX",
+        "pix_fmt": "yuv422p12le",
+        "bit_depth": 12,
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "frames": 743,
+        "duration_s": 29.72,
+        "size_mb": 658.3,
+        "bitrate_mbps": 185.8
+      },
+      "ffmpeg": {
+        "n": 120,
+        "p50_ms": 1.33,
+        "p95_ms": 2.75,
+        "worst_steady_ms": 3.62,
+        "open_ms": 13.7,
+        "total_s": 0.18,
+        "throughput_fps": 676.9
+      },
+      "vt": {
+        "ok": false,
+        "error": "open() returned False (codec unsupported)",
+        "open_ms": 15.0
+      }
+    },
+    {
+      "name": "4K_H264",
+      "file": "tests/test_videos/4K_H264.mov",
+      "probe": {
+        "codec": "h264",
+        "profile": "High",
+        "pix_fmt": "yuv420p",
+        "bit_depth": 8,
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "frames": 743,
+        "duration_s": 29.72,
+        "size_mb": 51.3,
+        "bitrate_mbps": 14.5
+      },
+      "ffmpeg": {
+        "n": 120,
+        "p50_ms": 1.44,
+        "p95_ms": 9.25,
+        "worst_steady_ms": 87.96,
+        "open_ms": 20.6,
+        "total_s": 0.38,
+        "throughput_fps": 312.7
+      },
+      "vt": {
+        "n": 120,
+        "p50_ms": 5.6,
+        "p95_ms": 7.24,
+        "worst_steady_ms": 13.94,
+        "open_ms": 32.9,
+        "total_s": 0.71,
+        "throughput_fps": 169.3
+      }
+    },
+    {
+      "name": "4K_H265",
+      "file": "tests/test_videos/4K_H265.mov",
+      "probe": {
+        "codec": "hevc",
+        "profile": "Main 10",
+        "pix_fmt": "yuv420p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "frames": 743,
+        "duration_s": 29.72,
+        "size_mb": 36.7,
+        "bitrate_mbps": 10.4
+      },
+      "ffmpeg": {
+        "n": 120,
+        "p50_ms": 5.06,
+        "p95_ms": 25.35,
+        "worst_steady_ms": 200.25,
+        "open_ms": 1.0,
+        "total_s": 1.0,
+        "throughput_fps": 119.4
+      },
+      "vt": {
+        "n": 120,
+        "p50_ms": 7.0,
+        "p95_ms": 22.92,
+        "worst_steady_ms": 26.2,
+        "open_ms": 11.4,
+        "total_s": 0.92,
+        "throughput_fps": 130.2
+      }
+    },
+    {
+      "name": "4K_ProRes422HQ",
+      "file": "tests/test_videos/4K_prores422HQ.mov",
+      "probe": {
+        "codec": "prores",
+        "profile": "HQ",
+        "pix_fmt": "yuv422p10le",
+        "bit_depth": 10,
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "frames": 743,
+        "duration_s": 29.72,
+        "size_mb": 2544.4,
+        "bitrate_mbps": 718.2
+      },
+      "ffmpeg": {
+        "n": 120,
+        "p50_ms": 10.12,
+        "p95_ms": 12.94,
+        "worst_steady_ms": 14.52,
+        "open_ms": 64.9,
+        "total_s": 1.22,
+        "throughput_fps": 98.0
+      },
+      "vt": {
+        "n": 120,
+        "p50_ms": 14.61,
+        "p95_ms": 16.88,
+        "worst_steady_ms": 37.02,
+        "open_ms": 65.5,
+        "total_s": 1.94,
+        "throughput_fps": 61.8
+      }
+    },
+    {
+      "name": "4K_ProRes4444",
+      "file": "tests/test_videos/4K_prores4444.mov",
+      "probe": {
+        "codec": "prores",
+        "profile": "4444",
+        "pix_fmt": "yuv444p12le",
+        "bit_depth": 12,
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "frames": 261,
+        "duration_s": 10.44,
+        "size_mb": 1367.8,
+        "bitrate_mbps": 1099.0
+      },
+      "ffmpeg": {
+        "n": 120,
+        "p50_ms": 16.99,
+        "p95_ms": 21.45,
+        "worst_steady_ms": 102.62,
+        "open_ms": 138.3,
+        "total_s": 2.19,
+        "throughput_fps": 54.7
+      },
+      "vt": {
+        "n": 120,
+        "p50_ms": 24.2,
+        "p95_ms": 28.22,
+        "worst_steady_ms": 63.64,
+        "open_ms": 139.9,
+        "total_s": 3.15,
+        "throughput_fps": 38.1
+      }
+    },
+    {
+      "name": "4K_DNxHR_HQX",
+      "file": "tests/test_videos/4K_DNxHR HQX 12-bit.mov",
+      "probe": {
+        "codec": "dnxhd",
+        "profile": "DNXHR HQX",
+        "pix_fmt": "yuv422p12le",
+        "bit_depth": 12,
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "frames": 743,
+        "duration_s": 29.72,
+        "size_mb": 2588.4,
+        "bitrate_mbps": 730.6
+      },
+      "ffmpeg": {
+        "n": 120,
+        "p50_ms": 5.77,
+        "p95_ms": 9.04,
+        "worst_steady_ms": 20.67,
+        "open_ms": 54.9,
+        "total_s": 0.75,
+        "throughput_fps": 159.1
+      },
+      "vt": {
+        "ok": false,
+        "error": "open() returned False (codec unsupported)",
+        "open_ms": 64.0
+      }
+    }
+  ]
+}

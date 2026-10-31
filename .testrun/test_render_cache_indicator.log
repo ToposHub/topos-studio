@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 10 items
+
+tests/edit/test_render_cache_indicator.py ..........                     [100%]
+
+============================= 10 passed in 10.68s ==============================

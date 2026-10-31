@@ -1,0 +1,25 @@
+# 忽略大数据目录
+.claude/
+.cache/
+.trash/
+.assetdeck/
+
+# 软件配置文件
+config.json
+
+# 忽略 Mac 系统缓存文件
+.DS_Store
+Thumbs.db
+
+# 忽略 Python 缓存和环境
+__pycache__/
+*.pyc
+venv/
+.env
+
+# 忽略 Docker 可能产生的临时文件
+.pytest_cache/
+
+# 忽略日志文件
+*.log
+.port_config.json

@@ -1,0 +1,17 @@
+[in#0/rawvideo @ 0x7fc2bf813b00] Estimating duration from bitrate, this may be inaccurate
+Input #0, rawvideo, from '/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_vs_ref/20260902_065819_4k/source_yuv422p10le.raw':
+  Duration: 00:00:00.96, start: 0.000000, bitrate: 6635520 kb/s
+  Stream #0:0: Video: rawvideo (Y3[10][10] / 0xA0A3359), yuv422p10le, 3840x2160, 6635520 kb/s, 25 tbr, 25 tbn
+Stream mapping:
+  Stream #0:0 -> #0:0 (rawvideo (native) -> dnxhd (native))
+Press [q] to stop, [?] for help
+Output #0, mov, to '/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_vs_ref/20260902_065819_4k/ref_dnxhr_hqx_raw_r0.mov':
+  Metadata:
+    encoder         : Lavf62.12.100
+  Stream #0:0: Video: dnxhd (DNXHR HQX) (AVdh / 0x68645641), yuv422p10le(tv, progressive), 3840x2160, q=2-31, 200 kb/s, 25 fps, 12800 tbn
+    Metadata:
+      encoder         : Lavc62.28.100 dnxhd
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:02.53    
+frame=   20 fps=6.6 q=1.0 size=   67328KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:03.03    
+[out#0/mov @ 0x7fc2bfa04580] video:85344KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.000993%
+frame=   24 fps=7.7 q=1.0 Lsize=   85345KiB time=00:00:00.96 bitrate=728276.0kbits/s speed=0.308x elapsed=0:00:03.11    

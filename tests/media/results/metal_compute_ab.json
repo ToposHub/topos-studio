@@ -1,0 +1,62 @@
+{
+  "date": "2026-09-11T12:37:37",
+  "gl_version": "4.1 ATI-6.1.13",
+  "metal_device": "AMD Radeon RX 6800",
+  "blur": [
+    {
+      "case": "blur_r32",
+      "size": "1920x1080",
+      "metal_p95_ms": 87.261,
+      "metal_median_ms": 73.455,
+      "fragment_p95_ms": 0.554,
+      "fragment_median_ms": 0.27
+    },
+    {
+      "case": "blur_r64",
+      "size": "1920x1080",
+      "metal_p95_ms": 101.744,
+      "metal_median_ms": 89.867,
+      "fragment_p95_ms": 0.6,
+      "fragment_median_ms": 0.492
+    },
+    {
+      "case": "blur_r32",
+      "size": "3840x2160",
+      "metal_p95_ms": 425.314,
+      "metal_median_ms": 368.861,
+      "fragment_p95_ms": 0.742,
+      "fragment_median_ms": 0.595
+    },
+    {
+      "case": "blur_r64",
+      "size": "3840x2160",
+      "metal_p95_ms": 438.376,
+      "metal_median_ms": 404.175,
+      "fragment_p95_ms": 0.944,
+      "fragment_median_ms": 0.837
+    }
+  ],
+  "normalize_percentile": [
+    {
+      "case": "normalize_percentile",
+      "size": "1920x1080",
+      "metal_p95_ms": 12.396,
+      "metal_median_ms": 10.409,
+      "old_path": "silent no-op（返回 (0,1)，§0.4）"
+    },
+    {
+      "case": "normalize_percentile",
+      "size": "3840x2160",
+      "metal_p95_ms": 28.863,
+      "metal_median_ms": 26.568,
+      "old_path": "silent no-op（返回 (0,1)，§0.4）"
+    }
+  ],
+  "k5_gate": {
+    "blur_entry_unlocked": true,
+    "erode_dilate_entry_unlocked": true,
+    "normalize_chain_unlocked": true,
+    "triggered": false
+  },
+  "notes": "Metal 路径含 CPU staging 全链路（GL 读回 + 上传 + kernel + 写回）；fragment 基线为最小可分离高斯近似（非 evaluator 完整管线），用于同机同 context 的成本结构对比。"
+}

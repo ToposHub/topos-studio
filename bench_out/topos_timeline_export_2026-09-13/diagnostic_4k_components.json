@@ -1,0 +1,97 @@
+{
+  "protocol": "same-decoded-frames-component-timing",
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_prores422HQ.mov",
+  "source_codec": "ProRes 422 HQ",
+  "resolution": [
+    3840,
+    2160
+  ],
+  "pixel_format": "yuv422p10le",
+  "frames": 120,
+  "fps": 25.0,
+  "slice_threads": 16,
+  "slice_rows": 16,
+  "decoder_threads": 0,
+  "decode_sequential": {
+    "count": 120,
+    "total_s": 4.010275,
+    "mean_ms": 33.419,
+    "median_ms": 31.246,
+    "p95_ms": 42.691,
+    "equivalent_fps": 29.923
+  },
+  "encode_loop_s": 2.792968,
+  "encode_loop_fps": 42.965,
+  "close_finalize_s": 0.001876,
+  "stage_timings": {
+    "prepare_planar": {
+      "count": 120,
+      "total_s": 0.010773,
+      "mean_ms": 0.09,
+      "median_ms": 0.07,
+      "p95_ms": 0.113,
+      "equivalent_fps": 11139.291
+    },
+    "product_encode_packet": {
+      "count": 120,
+      "total_s": 2.47585,
+      "mean_ms": 20.632,
+      "median_ms": 18.684,
+      "p95_ms": 24.039,
+      "equivalent_fps": 48.468
+    },
+    "mux_add_packet": {
+      "count": 120,
+      "total_s": 0.299469,
+      "mean_ms": 2.496,
+      "median_ms": 2.038,
+      "p95_ms": 4.458,
+      "equivalent_fps": 400.709
+    },
+    "encode_frame": {
+      "count": 120,
+      "total_s": 2.792529,
+      "mean_ms": 23.271,
+      "median_ms": 21.237,
+      "p95_ms": 26.487,
+      "equivalent_fps": 42.972
+    },
+    "mux_write_callback": {
+      "count": 123,
+      "total_s": 0.295542,
+      "mean_ms": 2.403,
+      "median_ms": 1.978,
+      "p95_ms": 4.423,
+      "equivalent_fps": 416.185
+    },
+    "mux_seek_write_callback": {
+      "count": 1,
+      "total_s": 6.2e-05,
+      "mean_ms": 0.062,
+      "median_ms": 0.062,
+      "p95_ms": 0.062,
+      "equivalent_fps": 16066.322
+    }
+  },
+  "derived_stage_totals": {
+    "prepare_plus_native_encode_plus_mux_s": 2.786092,
+    "encode_frame_internal_overhead_ms_per_frame": 0.054,
+    "mux_callback_time_ms_per_frame": 2.463,
+    "mux_add_packet_noncallback_time_ms_per_frame": 0.032,
+    "harness_loop_overhead_ms_per_frame": 0.004
+  },
+  "mux_callback_bytes": {
+    "write": 318860428,
+    "seek_write": 8
+  },
+  "output_path": "/Users/testuser/Documents/vscode/topos_1/bench_out/topos_timeline_export_2026-09-13/diagnostic_4k_components.mov",
+  "output_size_bytes": 318860428,
+  "output_sample_count": 120,
+  "output_bitrate_mbps_at_25fps": 531.434,
+  "comparison_reference": {
+    "standalone_native_4k_hq_fps": 53.212,
+    "previous_full_timeline_stable_fps": 33.745,
+    "previous_timeline_encode_frame_mean_ms": 29.917,
+    "scope_note": "Decode is completed before encoding to isolate the encoder; the separate decode measurement is not added to encode_loop_fps. Native-only baseline excludes mux and Python frame preparation."
+  }
+}

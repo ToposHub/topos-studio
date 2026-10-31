@@ -1,0 +1,10 @@
+U-14 replace input undo edges= [] expected a->o
+U-15 delete second multi edge model= [('g1', 's')] visual= [('g2', 's')]
+U-15 drag multi input model= [('g2', 's')] visual= []
+U-16 paste undo desc= Undo: Paste nodes nodes= 4
+U-16 after undo paste remaining old nodes= 2 next undo= Undo: Connect result → image
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 234 ms. Replace uses of missing font family "Sans Serif" with one that exists to avoid this cost.

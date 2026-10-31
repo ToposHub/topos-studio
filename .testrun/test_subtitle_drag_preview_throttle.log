@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_subtitle_drag_preview_throttle.py .......                [100%]
+
+============================== 7 passed in 6.84s ===============================

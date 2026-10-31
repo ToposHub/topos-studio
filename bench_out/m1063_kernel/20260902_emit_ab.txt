@@ -1,0 +1,18 @@
+== M10-6.3C 熵发射融合 A/B（对照=2eb2b720，2026-09-02，低负载窗口）==
+-- 4K before --
+  fps 15.59  wall/帧 64.1 ms
+  qp: min 55 中位 55 max 58
+-- 4K after --
+  fps 16.10  wall/帧 62.1 ms
+  qp: min 55 中位 55 max 58
+-- 2K before --
+  fps 46.03  wall/帧 21.7 ms
+  qp: min 51 中位 51 max 52
+-- 2K after --
+  fps 46.61  wall/帧 21.5 ms
+  qp: min 51 中位 51 max 52
+
+补充（qp20 重码流内核口径，profile_kernel_driver 4K t8）：
+before 17.51 fps → after 21.18 fps（+21%）
+结论：hq sized 档 token 稀疏收益小（+1~3%），画质档/crf（qp≤30）token
+密集路径收益显著；put64/code_word 基础设施为后续 VLC/alpha 融合复用。

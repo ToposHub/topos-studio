@@ -1,0 +1,136 @@
+{
+  "ok": true,
+  "result": {
+    "ordinary_transform_animation_buttons": [],
+    "keyframe_added": [
+      {
+        "effect_id": "65ca18e4-d11f-4f68-9615-c1301c869555",
+        "effect_type": "blur",
+        "params": {
+          "blur_type": "box",
+          "radius_x": 5.0,
+          "radius_y": 5.0,
+          "radius": 8.0,
+          "angle": 0.0,
+          "motion_source": "angle",
+          "shutter": 1.0,
+          "edge_preserve": 0.5,
+          "aperture_blades": "circle",
+          "anamorphic": 0.0,
+          "highlight_gain": 0.0,
+          "edge_policy": "clamp",
+          "quality": "normal",
+          "channel_r": true,
+          "channel_g": true,
+          "channel_b": true,
+          "channel_a": false,
+          "mix": 1.0,
+          "process_alpha": true
+        },
+        "animated_params": {
+          "radius": {
+            "base_value": 8.0,
+            "keyframes": {
+              "param_name": "",
+              "keyframes": [
+                {
+                  "frame": 10,
+                  "value": 8.0,
+                  "interpolation": "linear",
+                  "bezier_in": [
+                    0.2,
+                    0.0
+                  ],
+                  "bezier_out": [
+                    0.8,
+                    1.0
+                  ]
+                }
+              ],
+              "min_val": 0.0,
+              "max_val": 100.0
+            },
+            "min_value": 0.0,
+            "max_value": 100.0
+          }
+        },
+        "is_enabled": true,
+        "order": 0
+      }
+    ],
+    "locked_button_enabled": true,
+    "locked_effect_animation": {
+      "revision_before": 20,
+      "revision_after": 21,
+      "effects": [
+        {
+          "effect_id": "65ca18e4-d11f-4f68-9615-c1301c869555",
+          "effect_type": "blur",
+          "params": {
+            "blur_type": "box",
+            "radius_x": 5.0,
+            "radius_y": 5.0,
+            "radius": 8.0,
+            "angle": 0.0,
+            "motion_source": "angle",
+            "shutter": 1.0,
+            "edge_preserve": 0.5,
+            "aperture_blades": "circle",
+            "anamorphic": 0.0,
+            "highlight_gain": 0.0,
+            "edge_policy": "clamp",
+            "quality": "normal",
+            "channel_r": true,
+            "channel_g": true,
+            "channel_b": true,
+            "channel_a": false,
+            "mix": 1.0,
+            "process_alpha": true
+          },
+          "animated_params": {
+            "radius": {
+              "base_value": 8.0,
+              "keyframes": {
+                "param_name": "",
+                "keyframes": [
+                  {
+                    "frame": 10,
+                    "value": 8.0,
+                    "interpolation": "linear",
+                    "bezier_in": [
+                      0.2,
+                      0.0
+                    ],
+                    "bezier_out": [
+                      0.8,
+                      1.0
+                    ]
+                  },
+                  {
+                    "frame": 20,
+                    "value": 8.0,
+                    "interpolation": "linear",
+                    "bezier_in": [
+                      0.2,
+                      0.0
+                    ],
+                    "bezier_out": [
+                      0.8,
+                      1.0
+                    ]
+                  }
+                ],
+                "min_val": 0.0,
+                "max_val": 100.0
+              },
+              "min_value": 0.0,
+              "max_value": 100.0
+            }
+          },
+          "is_enabled": true,
+          "order": 0
+        }
+      ]
+    }
+  }
+}

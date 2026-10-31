@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+collected 11 items
+
+tests/edit/test_media_pool_analysis_ui.py ......[mov,mp4,m4a,3gp,3g2,mj2 @ 0x7f82dc1a6b00] moov atom not found
+.[mov,mp4,m4a,3gp,3g2,mj2 @ 0x7f835b7d1f80] moov atom not found
+...[mov,mp4,m4a,3gp,3g2,mj2 @ 0x7f82dc294740] moov atom not found
+OpenCV: Couldn't read video stream from file "/private/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/pytest-of-heng/pytest-57/test_analysis_completed_trigge0/b.mp4"
+[mov,mp4,m4a,3gp,3g2,mj2 @ 0x7f82dc1c4f00] moov atom not found
+.                    [100%]
+
+============================= 11 passed in 20.23s ==============================

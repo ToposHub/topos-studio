@@ -1,0 +1,15 @@
+{
+  "actual_switch_same_timeline": {
+    "before": 7,
+    "after": 0
+  },
+  "helper_switch": 0,
+  "helper_create_timeline": 0,
+  "helper_ref_add": 7,
+  "actual_create_and_switch": {
+    "before": 7,
+    "after": 0,
+    "active": "90acd0ea-7016-49bb-8784-0ebc2822f19d",
+    "sequence_count": 2
+  }
+}

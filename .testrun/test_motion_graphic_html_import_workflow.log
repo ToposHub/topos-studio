@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 1 item
+
+tests/edit/test_motion_graphic_html_import_workflow.py .                 [100%]
+
+============================== 1 passed in 11.50s ==============================

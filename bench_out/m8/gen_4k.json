@@ -1,0 +1,168 @@
+{
+  "res": "4k",
+  "source": "tests/test_videos/4K_prores422HQ.mov",
+  "frames": 120,
+  "threads": 8,
+  "warmup_discarded": 12,
+  "prores": {
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/m8/4k_proreshq.mov",
+    "encode": {
+      "n": 108,
+      "avg_ms": 240.935,
+      "p50_ms": 238.799,
+      "p95_ms": 261.302,
+      "p99_ms": 271.382,
+      "max_ms": 284.957
+    },
+    "avg_frame_bytes(measured)": 3228189.5,
+    "file_bytes": 387452983,
+    "bitrate_mbps(file,120f)": 645.75
+  },
+  "dnxhr": {
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/m8/4k_dnxhrhqx.mov",
+    "encode": {
+      "n": 108,
+      "avg_ms": 30.769,
+      "p50_ms": 29.907,
+      "p95_ms": 35.115,
+      "p99_ms": 47.031,
+      "max_ms": 52.104
+    },
+    "avg_frame_bytes(measured)": 3641344.0,
+    "file_bytes": 436962531,
+    "bitrate_mbps(file,120f)": 728.27
+  },
+  "topos": {
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/m8/4k_topos_qp57.mov",
+    "qp": 57,
+    "encode": {
+      "n": 108,
+      "avg_ms": 82.77,
+      "p50_ms": 82.501,
+      "p95_ms": 92.509,
+      "p99_ms": 96.091,
+      "max_ms": 97.1
+    },
+    "file_bytes": 367697252,
+    "bitrate_mbps(file,120f)": 612.83,
+    "bitrate_dev_vs_prores_pct": -5.1
+  },
+  "topos_calibration": [
+    {
+      "qp": 20,
+      "avg_bytes": 23648490.7
+    },
+    {
+      "qp": 24,
+      "avg_bytes": 21550332.7
+    },
+    {
+      "qp": 28,
+      "avg_bytes": 19708246.1
+    },
+    {
+      "qp": 32,
+      "avg_bytes": 17675877.6
+    },
+    {
+      "qp": 36,
+      "avg_bytes": 15449261.2
+    },
+    {
+      "qp": 40,
+      "avg_bytes": 12942770.4
+    },
+    {
+      "qp": 44,
+      "avg_bytes": 10499612.6
+    },
+    {
+      "qp": 48,
+      "avg_bytes": 7756985.8
+    },
+    {
+      "qp": 52,
+      "avg_bytes": 5364242.7
+    },
+    {
+      "qp": 56,
+      "avg_bytes": 3438269.4
+    },
+    {
+      "qp": 60,
+      "avg_bytes": 2191463.7
+    },
+    {
+      "qp": 56,
+      "avg_bytes": 3438269.4
+    },
+    {
+      "qp": 60,
+      "avg_bytes": 2191463.7
+    },
+    {
+      "qp": 53,
+      "avg_bytes": 4802893.5
+    },
+    {
+      "qp": 54,
+      "avg_bytes": 4272561.7
+    },
+    {
+      "qp": 55,
+      "avg_bytes": 3832220.3
+    },
+    {
+      "qp": 57,
+      "avg_bytes": 3078371.2
+    },
+    {
+      "qp": 58,
+      "avg_bytes": 2749800.3
+    },
+    {
+      "qp": 59,
+      "avg_bytes": 2459143.7
+    }
+  ],
+  "topos_sized": {
+    "target_frame_bytes": 3228189,
+    "encode": {
+      "n": 108,
+      "avg_ms": 188.152,
+      "p50_ms": 187.946,
+      "p95_ms": 205.063,
+      "p99_ms": 212.114,
+      "max_ms": 240.661
+    },
+    "avg_frame_bytes": 2565125.3,
+    "rate_error_pct": -20.54,
+    "qp_histogram": {
+      "58": 57,
+      "59": 45,
+      "60": 6
+    }
+  },
+  "thread_parity": {
+    "threads_1": {
+      "packet_bytes": 21673891,
+      "encode_match": true,
+      "decode_match": true
+    },
+    "threads_2": {
+      "packet_bytes": 21673891,
+      "encode_match": true,
+      "decode_match": true
+    },
+    "threads_4": {
+      "packet_bytes": 21673891,
+      "encode_match": true,
+      "decode_match": true
+    },
+    "threads_8": {
+      "packet_bytes": 21673891,
+      "encode_match": true,
+      "decode_match": true
+    }
+  }
+}

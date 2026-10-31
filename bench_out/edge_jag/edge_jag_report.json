@@ -1,0 +1,278 @@
+{
+ "generated_at": "2026-09-21T02:40:06.510045+00:00",
+ "note": "边缘锯齿取证：ref=母版 reformat（bicubic）；grid_residual_ratio>1.2 表示误差集中在 8×8 块界；stair_axis_ratio>0.6 表示残差轴向化（阶梯）；sharpness_retention<1 表示边缘锐度损失。",
+ "pairs": [
+  {
+   "size": "2K",
+   "tier": "proxy",
+   "frames": [
+    100,
+    300
+   ],
+   "prores": "2K_prores422Proxy.mov",
+   "topos": "2K_topos_proxy.mov",
+   "per_frame": {
+    "100": {
+     "edge_pct": 6.0,
+     "prores": {
+      "psnr_all": 49.59,
+      "psnr_edge": 44.21,
+      "mae_edge": 4.52,
+      "sharpness_retention": 1.288,
+      "grid_residual_ratio": 1.256,
+      "stair_axis_ratio": 0.352
+     },
+     "topos": {
+      "psnr_all": 48.19,
+      "psnr_edge": 43.06,
+      "mae_edge": 5.32,
+      "sharpness_retention": 1.318,
+      "grid_residual_ratio": 1.357,
+      "stair_axis_ratio": 0.363
+     }
+    },
+    "300": {
+     "edge_pct": 9.2,
+     "prores": {
+      "psnr_all": 34.89,
+      "psnr_edge": 32.23,
+      "mae_edge": 19.48,
+      "sharpness_retention": 1.566,
+      "grid_residual_ratio": 1.41,
+      "stair_axis_ratio": 0.351
+     },
+     "topos": {
+      "psnr_all": 34.97,
+      "psnr_edge": 31.9,
+      "mae_edge": 20.48,
+      "sharpness_retention": 1.3,
+      "grid_residual_ratio": 1.33,
+      "stair_axis_ratio": 0.357
+     }
+    }
+   },
+   "mean": {
+    "prores": {
+     "psnr_all": 42.24,
+     "psnr_edge": 38.22,
+     "mae_edge": 12.0,
+     "sharpness_retention": 1.427,
+     "grid_residual_ratio": 1.333,
+     "stair_axis_ratio": 0.351
+    },
+    "topos": {
+     "psnr_all": 41.58,
+     "psnr_edge": 37.48,
+     "mae_edge": 12.9,
+     "sharpness_retention": 1.309,
+     "grid_residual_ratio": 1.344,
+     "stair_axis_ratio": 0.36
+    }
+   }
+  },
+  {
+   "size": "2K",
+   "tier": "lt",
+   "frames": [
+    100,
+    300
+   ],
+   "prores": "2K_prores422LT.mov",
+   "topos": "2K_topos_lt.mov",
+   "per_frame": {
+    "100": {
+     "edge_pct": 6.0,
+     "prores": {
+      "psnr_all": 51.28,
+      "psnr_edge": 45.99,
+      "mae_edge": 3.58,
+      "sharpness_retention": 1.755,
+      "grid_residual_ratio": 1.089,
+      "stair_axis_ratio": 0.359
+     },
+     "topos": {
+      "psnr_all": 49.71,
+      "psnr_edge": 45.36,
+      "mae_edge": 4.09,
+      "sharpness_retention": 1.649,
+      "grid_residual_ratio": 1.3,
+      "stair_axis_ratio": 0.369
+     }
+    },
+    "300": {
+     "edge_pct": 9.2,
+     "prores": {
+      "psnr_all": 40.11,
+      "psnr_edge": 36.61,
+      "mae_edge": 11.8,
+      "sharpness_retention": 1.531,
+      "grid_residual_ratio": 1.23,
+      "stair_axis_ratio": 0.328
+     },
+     "topos": {
+      "psnr_all": 39.99,
+      "psnr_edge": 37.1,
+      "mae_edge": 11.15,
+      "sharpness_retention": 1.353,
+      "grid_residual_ratio": 1.341,
+      "stair_axis_ratio": 0.349
+     }
+    }
+   },
+   "mean": {
+    "prores": {
+     "psnr_all": 45.695,
+     "psnr_edge": 41.3,
+     "mae_edge": 7.69,
+     "sharpness_retention": 1.643,
+     "grid_residual_ratio": 1.159,
+     "stair_axis_ratio": 0.344
+    },
+    "topos": {
+     "psnr_all": 44.85,
+     "psnr_edge": 41.23,
+     "mae_edge": 7.62,
+     "sharpness_retention": 1.501,
+     "grid_residual_ratio": 1.321,
+     "stair_axis_ratio": 0.359
+    }
+   }
+  },
+  {
+   "size": "2K",
+   "tier": "standard",
+   "frames": [
+    100,
+    300
+   ],
+   "prores": "2K_prores422.mov",
+   "topos": "2K_topos_standard.mov",
+   "per_frame": {
+    "100": {
+     "edge_pct": 6.0,
+     "prores": {
+      "psnr_all": 52.07,
+      "psnr_edge": 46.63,
+      "mae_edge": 3.25,
+      "sharpness_retention": 1.776,
+      "grid_residual_ratio": 1.053,
+      "stair_axis_ratio": 0.355
+     },
+     "topos": {
+      "psnr_all": 50.32,
+      "psnr_edge": 46.02,
+      "mae_edge": 3.74,
+      "sharpness_retention": 1.636,
+      "grid_residual_ratio": 1.241,
+      "stair_axis_ratio": 0.365
+     }
+    },
+    "300": {
+     "edge_pct": 9.2,
+     "prores": {
+      "psnr_all": 42.63,
+      "psnr_edge": 38.09,
+      "mae_edge": 10.05,
+      "sharpness_retention": 1.538,
+      "grid_residual_ratio": 1.098,
+      "stair_axis_ratio": 0.3
+     },
+     "topos": {
+      "psnr_all": 42.47,
+      "psnr_edge": 38.95,
+      "mae_edge": 9.02,
+      "sharpness_retention": 1.422,
+      "grid_residual_ratio": 1.223,
+      "stair_axis_ratio": 0.315
+     }
+    }
+   },
+   "mean": {
+    "prores": {
+     "psnr_all": 47.35,
+     "psnr_edge": 42.36,
+     "mae_edge": 6.65,
+     "sharpness_retention": 1.657,
+     "grid_residual_ratio": 1.075,
+     "stair_axis_ratio": 0.328
+    },
+    "topos": {
+     "psnr_all": 46.395,
+     "psnr_edge": 42.485,
+     "mae_edge": 6.38,
+     "sharpness_retention": 1.529,
+     "grid_residual_ratio": 1.232,
+     "stair_axis_ratio": 0.34
+    }
+   }
+  },
+  {
+   "size": "2K",
+   "tier": "hq",
+   "frames": [
+    100,
+    300
+   ],
+   "prores": "2K_prores422HQ.mov",
+   "topos": "2K_topos_hq.mov",
+   "per_frame": {
+    "100": {
+     "edge_pct": 6.0,
+     "prores": {
+      "psnr_all": 54.16,
+      "psnr_edge": 47.51,
+      "mae_edge": 2.77,
+      "sharpness_retention": 1.738,
+      "grid_residual_ratio": 1.04,
+      "stair_axis_ratio": 0.348
+     },
+     "topos": {
+      "psnr_all": 53.27,
+      "psnr_edge": 47.77,
+      "mae_edge": 2.8,
+      "sharpness_retention": 1.6,
+      "grid_residual_ratio": 1.175,
+      "stair_axis_ratio": 0.352
+     }
+    },
+    "300": {
+     "edge_pct": 9.2,
+     "prores": {
+      "psnr_all": 44.36,
+      "psnr_edge": 38.79,
+      "mae_edge": 9.41,
+      "sharpness_retention": 1.53,
+      "grid_residual_ratio": 1.031,
+      "stair_axis_ratio": 0.28
+     },
+     "topos": {
+      "psnr_all": 44.27,
+      "psnr_edge": 39.67,
+      "mae_edge": 8.33,
+      "sharpness_retention": 1.443,
+      "grid_residual_ratio": 1.133,
+      "stair_axis_ratio": 0.285
+     }
+    }
+   },
+   "mean": {
+    "prores": {
+     "psnr_all": 49.26,
+     "psnr_edge": 43.15,
+     "mae_edge": 6.09,
+     "sharpness_retention": 1.634,
+     "grid_residual_ratio": 1.035,
+     "stair_axis_ratio": 0.314
+    },
+    "topos": {
+     "psnr_all": 48.77,
+     "psnr_edge": 43.72,
+     "mae_edge": 5.565,
+     "sharpness_retention": 1.522,
+     "grid_residual_ratio": 1.154,
+     "stair_axis_ratio": 0.319
+    }
+   }
+  }
+ ]
+}

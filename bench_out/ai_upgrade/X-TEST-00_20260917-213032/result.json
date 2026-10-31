@@ -1,0 +1,23 @@
+{
+  "task_id": "X-TEST-00",
+  "status": "PASS",
+  "git_revision": "47e30e37aa58560331fb8bf29496eb070b427d5a",
+  "generated_at": "2026-09-17T21:31:08+0800",
+  "manifest_path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/ai_test_asset_manifest.json",
+  "manifest_digest": "bb9b991d1b1c0def2b966f3bfe75e6dfe3de4f89d4d4c35d2cab20e0204c2ef9",
+  "asset_count": 44,
+  "status_counts": {
+    "PASS": 43,
+    "NOT_MEDIA": 1
+  },
+  "blocking_definitions": {
+    "FAILED": "所有可用后端都未能给出元数据（含 NO_VIDEO_STREAM/打开失败）",
+    "CONFLICT": "多个可用后端对同一字段给出不一致值（PROBE_METADATA_CONFLICT）",
+    "UNPROBED": "没有任何后端产出可用元数据（如缺 dylib/缺 PyAV）"
+  },
+  "artifacts": {
+    "manifest_copy": "/Users/testuser/Documents/vscode/topos_1/bench_out/ai_upgrade/X-TEST-00_20260917-213032/asset_manifest.json",
+    "environment": "/Users/testuser/Documents/vscode/topos_1/bench_out/ai_upgrade/X-TEST-00_20260917-213032/environment.json",
+    "command_log": "/Users/testuser/Documents/vscode/topos_1/bench_out/ai_upgrade/X-TEST-00_20260917-213032/command.log"
+  }
+}

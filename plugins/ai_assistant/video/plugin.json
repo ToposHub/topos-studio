@@ -1,0 +1,15 @@
+{
+  "api_version": "1",
+  "kind": "assistant_mode",
+  "id": "video",
+  "version": "1.0.0",
+  "label": "视频生成",
+  "description": "调用已配置的视频生成模型，结果先进入生成素材箱。",
+  "handler": "builtin:media_generation",
+  "media_modality": "video",
+  "capabilities": ["video_generation"],
+  "ui": {
+    "order": 30,
+    "label": "视频生成"
+  }
+}

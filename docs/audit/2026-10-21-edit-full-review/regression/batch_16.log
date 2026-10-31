@@ -1,0 +1,38 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 607 items
+
+tests/edit/test_fix_wd13g67_aud.py .............................         [  4%]
+tests/edit/test_fix_wd13g69_aud.py ..................................... [ 10%]
+........................................................................ [ 22%]
+.........................                                                [ 26%]
+tests/edit/test_fix_wd14g68_aud.py ..................................... [ 32%]
+....                                                                     [ 33%]
+tests/edit/test_fix_wd8g45_aud.py ...........ss........                  [ 37%]
+tests/edit/test_fix_wd8g46_aud.py ...............................        [ 42%]
+tests/edit/test_fix_wd8g47_aud.py ..............................         [ 47%]
+tests/edit/test_fix_wd9g48_aud.py ..........................             [ 51%]
+tests/edit/test_fix_wd9g49_aud.py ...................................... [ 57%]
+.................                                                        [ 60%]
+tests/edit/test_fix_wd9g50_aud.py ...................................... [ 66%]
+............                                                             [ 68%]
+tests/edit/test_fix_wd9g55_aud.py ...................................... [ 74%]
+.................                                                        [ 77%]
+tests/edit/test_fix_wd9g56_aud.py ....................................   [ 83%]
+tests/edit/test_frame_blend.py .........                                 [ 85%]
+tests/edit/test_freeze_frame.py .........                                [ 86%]
+tests/edit/test_generator_clip_gc_wiring.py ........                     [ 87%]
+tests/edit/test_generator_clip_transaction.py .........                  [ 89%]
+tests/edit/test_generator_clips.py ..................                    [ 92%]
+tests/edit/test_generator_transaction_boundary.py ...................... [ 96%]
+.....                                                                    [ 96%]
+tests/edit/test_global_undo_routing.py ......                            [ 97%]
+tests/edit/test_gpu_adjustment_scope_composite.py .......                [ 99%]
+tests/edit/test_gpu_blur_channel_mask_contract.py ......                 [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_16.xml -
+======================= 605 passed, 2 skipped in 13.04s ========================

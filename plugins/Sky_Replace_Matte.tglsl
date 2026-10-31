@@ -1,0 +1,71 @@
+// --- Topos Plugin Metadata ---
+// @name Sky Replace Matte
+// @i18n_name Sky_Replace_Matte
+// @author Topos Team
+// @version 1.0
+// @description Sky replacement aid: hue+luminance keyed sky matte with vertical horizon bias, replacing keyed region with a two-stop gradient sky
+// @input_space scene-linear
+// @output_space scene-linear
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @occlusion background_independent
+// @param color sky_color_low "Sky Color (Horizon)" 0.35 0.55 0.85
+// @param color sky_color_high "Sky Color (Zenith)" 0.10 0.25 0.60
+// @param slider key_luma "Sky Luminance Key" 0.55 0.0 1.0
+// @param slider key_width "Key Softness" 0.18 0.01 0.5
+// @param slider horizon_falloff "Horizon Falloff" 0.6 0.0 1.0
+// @param slider blend "Blend" 1.0 0.0 1.0
+// -----------------------------
+
+// Sky Replace Matte —— 天空替换辅助。
+//
+// 原理：三路判据合成天空 matte：
+//   1) 亮度键：scene-linear 亮度高于 key_luma（软边由 key_width 控制）；
+//   2) 色相键：只认"冷天空色"（蓝/青通道占优且暖色不占优），把亮白云、
+//      白墙与亮天空一起收入，但把亮暖色（灯、皮肤高光）排除；
+//   3) 垂直偏置：uv.y 越靠画面顶部越可能是天空，horizon_falloff 控制
+//      该偏置强度（0 = 不用位置先验，纯键控）。
+// 命中区域被替换为 zenith→horizon 两段渐变的新天空色，未命中区域保留
+// 原像素；matte 与原像素按 blend 混合，供先粗调后精修的工作流。
+//
+// 契约：vec3 process(vec3 color, vec2 uv)。color 为 scene-linear，可为负 /
+// 远大于 1.0；替换色与混合均在 scene-linear 域进行，不 clamp 基色。
+// 参数 ABI：头部声明参数以裸名引用（编译期改写为带插件索引的命名空间
+// uniform），不引用任何未声明 uniform；本文件不依赖注入 uniform。
+
+vec3 process(vec3 color, vec2 uv) {
+    if (blend < 0.001) return color;
+
+    // ====== 亮度键（软阶跃）======
+    // clamp 只作用于"键控权重"，不触碰基色。scene-linear 亮度先用
+    // sqrt 近似回到感知域再比较，避免 HDR 高光把键值整体推死。
+    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    float luma_p = sqrt(max(luma, 0.0));
+    float k = smoothstep(key_luma - key_width, key_luma + key_width, luma_p);
+
+    // ====== 色相键：冷色占优且暖色不占优 ======
+    float mx = max(color.r, max(color.g, color.b));
+    float mn = min(color.r, min(color.g, color.b));
+    float chroma = mx - mn;
+    // 蓝青优势度：b 高于 r（覆盖蓝天与青天）；chroma 很小时（近灰白云）
+    // 也放行——白云属于天空的一部分。
+    float cool_bias = color.b - color.r;
+    float cool_key = smoothstep(-0.02, 0.06, cool_bias);
+    float neutral_pass = 1.0 - smoothstep(0.005, 0.05, chroma);
+    float hue_key = max(cool_key, neutral_pass * 0.85);
+
+    // ====== 垂直偏置（地平线先验）======
+    // uv.y=1 为画面顶部：顶部全权重，向下按 horizon_falloff 收窄。
+    float vert = mix(1.0, smoothstep(0.0, 1.0, uv.y), horizon_falloff);
+
+    // ====== 合成 matte（亮度 × 色相 × 位置）======
+    float matte = clamp(k * hue_key * vert, 0.0, 1.0) * blend;
+
+    // ====== 新天空：zenith→horizon 两段渐变 ======
+    // 用户给的两组色视为 scene-linear 直出；顶部用 high、地平线用 low。
+    vec3 new_sky = mix(sky_color_low, sky_color_high, smoothstep(0.0, 1.0, uv.y));
+
+    // ====== 混合（HDR 安全：未命中区原样透传，可含 >1.0 高光）======
+    return mix(color, new_sky, matte);
+}

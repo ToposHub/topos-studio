@@ -1,0 +1,364 @@
+{
+  "status": "invalid_reference_encoder_format",
+  "created_at": "2026-09-27T15:06:20.796327+00:00",
+  "source_origin": "lossless-original",
+  "source": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_synthetic/source_444p12le.yuv",
+  "source_sha256": "ad8bf7226bbbbd5de52e85f9ac719afad1950f6939d37e6ef4cf150e06a70844",
+  "format": "yuv444p12le",
+  "tier": "4444xq",
+  "width": 320,
+  "height": 192,
+  "fps": 25,
+  "frames": 8,
+  "native_library": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/release/topos_codec.0.1.0.dylib",
+  "native_library_sha256": "d052edae7ea12f50e189b7621268129ed95fa157af69534c533df6f1b689149c",
+  "topos": {
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_synthetic/4444xq/topos_4444xq.mov",
+    "sha256": "9ab7b2f9441fd4b7a5b2adbbf2c315ad6ec3b8048906ae435df9e0f371256cf6",
+    "video_bytes": 378487,
+    "encode_wall_s": 0.022076540997659322,
+    "slice_threads": 4
+  },
+  "prores": {
+    "path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_synthetic/4444xq/prores_4444xq.mov",
+    "sha256": "e3aa3869e4e11ad6cf739ee619d2ef5e29484394df493aa4b09561dfee80d076",
+    "video_bytes": 280585,
+    "encode_wall_s": 0.10862675899988972,
+    "encoder": "ffmpeg/prores_ks",
+    "command": [
+      "/usr/local/bin/ffmpeg",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "rawvideo",
+      "-pixel_format",
+      "yuv444p12le",
+      "-video_size",
+      "320x192",
+      "-framerate",
+      "25",
+      "-i",
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_synthetic/source_444p12le.yuv",
+      "-frames:v",
+      "8",
+      "-c:v",
+      "prores_ks",
+      "-profile:v",
+      "5",
+      "-pix_fmt",
+      "yuv444p12le",
+      "-color_primaries",
+      "bt709",
+      "-color_trc",
+      "bt709",
+      "-colorspace",
+      "bt709",
+      "-color_range",
+      "tv",
+      "-y",
+      "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_synthetic/4444xq/prores_4444xq.mov"
+    ]
+  },
+  "topos_over_prores_video_bytes": 1.3489210043302386,
+  "per_frame": [
+    {
+      "frame": 0,
+      "topos": {
+        "y": {
+          "psnr_db": 79.51770514554259,
+          "mae_codes": 0.181494140625,
+          "max_abs_codes": 3
+        },
+        "u": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        },
+        "v": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 45.200045676600936,
+          "mae_codes": 17.94931640625,
+          "max_abs_codes": 109
+        },
+        "u": {
+          "psnr_db": 48.04994196821616,
+          "mae_codes": 9.979524739583333,
+          "max_abs_codes": 118
+        },
+        "v": {
+          "psnr_db": 53.61710670095472,
+          "mae_codes": 6.287174479166667,
+          "max_abs_codes": 86
+        }
+      }
+    },
+    {
+      "frame": 1,
+      "topos": {
+        "y": {
+          "psnr_db": 79.51996906122497,
+          "mae_codes": 0.181298828125,
+          "max_abs_codes": 3
+        },
+        "u": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        },
+        "v": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 45.93493755427126,
+          "mae_codes": 16.4326171875,
+          "max_abs_codes": 102
+        },
+        "u": {
+          "psnr_db": 48.97781253752726,
+          "mae_codes": 9.040738932291667,
+          "max_abs_codes": 105
+        },
+        "v": {
+          "psnr_db": 54.1884083510769,
+          "mae_codes": 6.0111328125,
+          "max_abs_codes": 83
+        }
+      }
+    },
+    {
+      "frame": 2,
+      "topos": {
+        "y": {
+          "psnr_db": 79.53319880892606,
+          "mae_codes": 0.18056640625,
+          "max_abs_codes": 3
+        },
+        "u": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        },
+        "v": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 46.666895273183954,
+          "mae_codes": 15.098095703125,
+          "max_abs_codes": 94
+        },
+        "u": {
+          "psnr_db": 49.93970999649914,
+          "mae_codes": 8.20595703125,
+          "max_abs_codes": 98
+        },
+        "v": {
+          "psnr_db": 54.735210754588635,
+          "mae_codes": 5.746647135416667,
+          "max_abs_codes": 78
+        }
+      }
+    },
+    {
+      "frame": 3,
+      "topos": {
+        "y": {
+          "psnr_db": 79.55635313847046,
+          "mae_codes": 0.17957356770833333,
+          "max_abs_codes": 3
+        },
+        "u": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        },
+        "v": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 47.37587236283217,
+          "mae_codes": 13.944026692708333,
+          "max_abs_codes": 89
+        },
+        "u": {
+          "psnr_db": 50.949765728570966,
+          "mae_codes": 7.510823567708333,
+          "max_abs_codes": 89
+        },
+        "v": {
+          "psnr_db": 55.237821294512976,
+          "mae_codes": 5.495768229166667,
+          "max_abs_codes": 73
+        }
+      }
+    },
+    {
+      "frame": 4,
+      "topos": {
+        "y": {
+          "psnr_db": 79.56130366578519,
+          "mae_codes": 0.17945963541666668,
+          "max_abs_codes": 3
+        },
+        "u": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        },
+        "v": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 48.01852180085207,
+          "mae_codes": 13.024593098958333,
+          "max_abs_codes": 83
+        },
+        "u": {
+          "psnr_db": 51.98414313177548,
+          "mae_codes": 6.941048177083333,
+          "max_abs_codes": 78
+        },
+        "v": {
+          "psnr_db": 55.71934612661735,
+          "mae_codes": 5.234912109375,
+          "max_abs_codes": 67
+        }
+      }
+    },
+    {
+      "frame": 5,
+      "topos": {
+        "y": {
+          "psnr_db": 79.5419146384591,
+          "mae_codes": 0.18028971354166667,
+          "max_abs_codes": 3
+        },
+        "u": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        },
+        "v": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 48.549866323689585,
+          "mae_codes": 12.353662109375,
+          "max_abs_codes": 76
+        },
+        "u": {
+          "psnr_db": 53.014561559286655,
+          "mae_codes": 6.4966796875,
+          "max_abs_codes": 68
+        },
+        "v": {
+          "psnr_db": 56.03847776926807,
+          "mae_codes": 5.040934244791667,
+          "max_abs_codes": 63
+        }
+      }
+    },
+    {
+      "frame": 6,
+      "topos": {
+        "y": {
+          "psnr_db": 79.52828019685286,
+          "mae_codes": 0.18097330729166666,
+          "max_abs_codes": 3
+        },
+        "u": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        },
+        "v": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 48.914922152710396,
+          "mae_codes": 11.947298177083333,
+          "max_abs_codes": 66
+        },
+        "u": {
+          "psnr_db": 53.95641465273747,
+          "mae_codes": 6.167789713541667,
+          "max_abs_codes": 60
+        },
+        "v": {
+          "psnr_db": 56.263261296944066,
+          "mae_codes": 4.853889973958333,
+          "max_abs_codes": 57
+        }
+      }
+    },
+    {
+      "frame": 7,
+      "topos": {
+        "y": {
+          "psnr_db": 79.51959165998042,
+          "mae_codes": 0.18138020833333332,
+          "max_abs_codes": 3
+        },
+        "u": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        },
+        "v": {
+          "psnr_db": Infinity,
+          "mae_codes": 0.0,
+          "max_abs_codes": 0
+        }
+      },
+      "prores": {
+        "y": {
+          "psnr_db": 49.06677157498852,
+          "mae_codes": 11.787939453125,
+          "max_abs_codes": 63
+        },
+        "u": {
+          "psnr_db": 54.711092990424596,
+          "mae_codes": 5.97265625,
+          "max_abs_codes": 49
+        },
+        "v": {
+          "psnr_db": 56.337118948789936,
+          "mae_codes": 4.71748046875,
+          "max_abs_codes": 58
+        }
+      }
+    }
+  ],
+  "invalid_reason": "FFmpeg prores_ks on this host supports only yuv422p10le/yuv444p10le/yuva444p10le input; yuv444p12le was silently converted to 10-bit before encoding. All ProRes quality scores and pairwise comparisons in this report are invalid.",
+  "rate_matched_2pct": false
+}

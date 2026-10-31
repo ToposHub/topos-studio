@@ -1,0 +1,57 @@
+// --- Topos Plugin Metadata ---
+// @name Grad Filter Exposure
+// @i18n_name Grad_Filter_Exposure
+// @author Topos Team
+// @version 1.0
+// @description Rotatable graduated ND exposure filter: smoothstep feathered linear ramp of exposure stops along a user angle
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider exposure "Exposure Stops" 1.0 -3.0 3.0
+// @param slider grad_angle "Angle (Degrees)" 0.0 -180.0 180.0
+// @param separator
+// @param slider grad_center "Gradient Center" 0.5 0.0 1.0
+// @param slider feather "Feather" 0.5 0.01 1.0
+// -----------------------------
+//
+// Grad Filter Exposure —— 旋转载渐变曝光（ND grad）。
+//
+// 原理：把画面沿用户角度投影成一条轴坐标，在轴上以 smoothstep 软边
+// 过渡带构造 t ∈ [0,1] 的渐变权重，曝光增益 = 2^(stops * t) 乘性施加。
+// 模拟摄影机前的渐变灰/渐变滤镜：一端压暗或提亮，过渡带位置/宽度可调。
+//
+// 设计要点：
+// - 乘性曝光增益在 scene-linear 域物理正确（HDR 安全：超白/负值按同一
+//   增益缩放，色相比例不变，不 clamp 内容色）；
+// - 每像素 2 次三角函数（uniform 角度的 cos/sin）+ 1 次 pow(2.0, x)，
+//   属预算内的低频开销（对照 Day_Night_Converter 的同级别预算）；零采样、
+//   零循环；
+// - feather 下限 0.01 保证 smoothstep 边缘严格递增（无除零/NaN 风险）；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零档位为纯直通
+    if (abs(exposure) < 0.001) return color;
+
+    // 渐变方向向量（uniform 角度）
+    float ang = radians(grad_angle);
+    vec2 dir = vec2(cos(ang), sin(ang));
+
+    // 轴坐标：投影到方向后平移回 ~[0,1] 量纲
+    float a = dot(uv - vec2(0.5), dir) + 0.5;
+
+    // 过渡半宽（feather 下限守护，保证 edge0 < edge1）
+    float w = max(0.5 * feather, 0.01);
+    float t = smoothstep(grad_center - w, grad_center + w, a);
+
+    // 乘性曝光增益：stops 在渐变末端全额生效
+    return color * pow(2.0, exposure * t);
+}

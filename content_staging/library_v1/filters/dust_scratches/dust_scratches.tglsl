@@ -1,0 +1,122 @@
+// --- Topos Plugin Metadata ---
+// @name Dust Scratches
+// @i18n_name LIB1_Dust_Scratches
+// @author Topos Library v1
+// @version 0.1.0
+// @description Procedural film dust and vertical scratches, static mode: seeded cell-lattice decides dust presence (probability tracks density), each dust speck is a small elliptical dark SDF spot inside its cell; column-hash selects thin vertical scratches with length-driven extent; multiplicative attenuation tracks opacity (no RGB clamp, HDR scales through)
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider density "Density" 0.35 0.0 1.0
+// @param slider scratch_length "Scratch Length" 0.6 0.0 1.0
+// @param slider opacity "Opacity" 0.6 0.0 1.0
+// @param slider seed "Seed" 7.0 0.0 100.0
+// @param slider size "Size" 3.0 1.0 8.0
+// -----------------------------
+//
+// Dust Scratches —— 程序灰尘/划痕（L 计划 F09，LIB1，静态程序版）。
+//
+// 差量（L00 台账 F09 行）：全库无灰尘/划痕类（无重复）。程序静态版先行；
+// 外接纹理版依赖资源子门+M20 闭包，**不在本批**（README 声明）。
+//
+// 算法（与 references/dust_scratches_ref.py 逐式同构）：
+// - 格子：cell = max(size,1) 输出像素；gp = uv·texSize/cell；
+//   格 id (ix,iy)、格内局部 f ∈ [0,1)²；uint32 murmur3 风格散列
+//   （同 F07/F08 常量族）h32((ix,iy), s)，s = uint(int(seed))；
+// - 尘点：h0 = h32(格, s) < density → 该格含尘点（概率∝density）；
+//   斑心 c = (0.3+0.4·hu, 0.3+0.4·hv)（hu/hv/hd 独立散列相位：
+//   (3,11)/(7,5)/(13,2) 偏移），椭圆 SDF
+//   e = ((f.x-c.x)/0.20)² + ((f.y-c.y)/0.26)²；
+//   软边 t = clamp((1.2-e)/0.5,0,1)，spot = t²(3-2t)；
+//   深度 0.4+0.4·hd；斑完全落于格内（c∈[0.3,0.7]、半径≤0.26 →
+//   e≥1.2 于格界），无跨格连续性需求 → 零邻域采样；
+// - 划痕：列格散列 hx = h32((ix,917), s) < density·0.05 → 该列含划痕
+//   （密度门与尘点共享——density=0 全恒等）；竖向范围
+//   y ∈ [y0, y0+span]，span=clamp(scratch_length,0,1)、
+//   y0 = hl·(1-span)（h32((ix,511),s)）；线位 xs = 0.25+0.5·hxs、
+//   半宽 w = 0.10+0.08·hw（格内比例，h32((ix,733)/(ix,353),s)）；
+//   横向轮廓 p = 1-q²(3-2q)，q = clamp(|f.x-xs|/w, 0, 1)；
+//   端部 0.03 归一羽化；
+// - 加暗（乘性，HDR 安全不 clamp 基色）：
+//   atten = opacity·(0.4+0.4·hd)·spot + opacity·0.35·p·edge（mask 域
+//   合计钳 0.9）；out = color·(1 - atten)。黑位保持黑、HDR 等比衰减。
+//
+// density<0.001 首行早退（oracle 同阈值镜像）；零纹理采样零循环；
+// 参数 ABI 裸名引用；textureSize 取尺寸（白名单）。
+
+float ds_hash(uvec2 p, uint s) {
+    uint h = (p.x * 0x9E3779B1u) ^ (p.y * 0x85EBCA77u) ^ (s * 0xC2B2AE3Du);
+    h ^= h >> 15u;
+    h *= 0x2545F491u;
+    h ^= h >> 13u;
+    h *= 0x9E3779B1u;
+    h ^= h >> 16u;
+    return float(h) * (1.0 / 4294967296.0);
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零密度纯直通（密度门同时管尘点与划痕）
+    if (density < 0.001) return color;
+
+    vec2 ts = vec2(textureSize(u_input_tex, 0));
+    float cell = max(size, 1.0);
+    vec2 gp = uv * ts / vec2(cell);
+    vec2 ci = floor(gp);
+    vec2 f = fract(gp);
+    uint s = uint(int(seed));
+    uvec2 cell_id = uvec2(ci);
+
+    float atten = 0.0;
+
+    // ===== 尘点（格内小椭圆暗斑，程序 SDF）=====
+    float h0 = ds_hash(cell_id, s);
+    if (h0 < density) {
+        float hu = ds_hash(cell_id + uvec2(3u, 11u), s);
+        float hv = ds_hash(cell_id + uvec2(7u, 5u), s);
+        float hd = ds_hash(cell_id + uvec2(13u, 2u), s);
+        vec2 c = vec2(0.3 + 0.4 * hu, 0.3 + 0.4 * hv);
+        float exd = (f.x - c.x) / 0.20;
+        float eyd = (f.y - c.y) / 0.26;
+        float e = exd * exd + eyd * eyd;
+        float t = clamp((1.2 - e) / 0.5, 0.0, 1.0);
+        float spot = t * t * (3.0 - 2.0 * t);
+        atten += opacity * (0.4 + 0.4 * hd) * spot;
+    }
+
+    // ===== 划痕（格列散裂选中列的竖向细线）=====
+    uint col = uint(ci.x);
+    float hx = ds_hash(uvec2(col, 917u), s);
+    if (hx < density * 0.05 && scratch_length > 0.0) {
+        float hl = ds_hash(uvec2(col, 511u), s);
+        float hxs = ds_hash(uvec2(col, 733u), s);
+        float hw = ds_hash(uvec2(col, 353u), s);
+        float span = clamp(scratch_length, 0.0, 1.0);
+        float y0 = hl * (1.0 - span);
+        float yn = uv.y;
+        if (yn >= y0 && yn <= y0 + span) {
+            float xs = 0.25 + 0.5 * hxs;
+            float w = 0.10 + 0.08 * hw;
+            float dxl = abs(f.x - xs);
+            float q = clamp(dxl / w, 0.0, 1.0);
+            float prof = 1.0 - q * q * (3.0 - 2.0 * q);
+            // 端部 0.03 归一羽化（两端 smoothstep 展开，min 合成）
+            float ta = clamp((yn - y0) / 0.03, 0.0, 1.0);
+            float ea = ta * ta * (3.0 - 2.0 * ta);
+            float tb = clamp((y0 + span - yn) / 0.03, 0.0, 1.0);
+            float eb = tb * tb * (3.0 - 2.0 * tb);
+            float edge = min(ea, eb);
+            atten += opacity * 0.35 * prof * edge;
+        }
+    }
+
+    // 乘性加暗（mask 域合计钳 0.9；基色不 clamp）
+    atten = min(atten, 0.9);
+    return color * (1.0 - atten);
+}

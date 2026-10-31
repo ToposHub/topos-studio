@@ -1,0 +1,108 @@
+
+CASE: explicit left trim fade40 to duration20
+
+CASE: reverse right factory and explicit undo
+helper start/duration: 110 90 actual: 110 90
+before/after head: [199, 198, 197] [199, 198, 197] equal: True
+direct explicit apply source: 110 undo source: 100 expected undo: 100
+
+CASE: trim undo fade and transition payload
+fade before/after/undo: 40 20 40
+trans duration before/after/undo: 40 20 40 full undo equal: True
+
+CASE: speed undo fade payload
+duration/fade before/after/undo: [(100, 40), (20, 20), (100, 40)]
+full undo equal: True
+
+CASE: split marker exactly seam
+marker owner/range: 13ce8085-a872-4d76-988b-f69b13c37de2 [('c', 0, 50), ('13ce8085-a872-4d76-988b-f69b13c37de2', 50, 100)]
+validation: []
+
+CASE: split marker command JSON roundtrip undo
+owner before/after/deserialized undo: c 27fef1eb-fc43-4698-9b9c-22ca8ac83caa c
+validation: [] full undo equal: True
+
+CASE: roll and group-move delete valid seam transition
+roll transition before/after/undo: 1 1 1 full undo equal: True
+group clips: [('a', 200, 300), ('b', 300, 400)] transitions: 1
+
+CASE: locked-track command matrix
+MoveClipCommand rejected: ValueError Move clip rejected: track 'v' is locked
+TrimClipCommand rejected: ValueError Trim clip rejected: track 'v' is locked
+DeleteClipCommand rejected: ValueError Delete clip rejected: track 'v' is locked
+InsertClipCommand rejected: ValueError Insert clip rejected: track 'v' is locked
+OverwriteClipCommand rejected: ValueError Overwrite clip rejected: track 'v' is locked
+RippleTrimCommand rejected: ValueError Ripple trim clip rejected: track 'v' is locked
+
+CASE: mixedFPS insert target/sync tracks delta mismatch
+inserted duration/ripple_offset: 24 24
+video/audio follower starts: 124 124 expected: 124 124
+
+CASE: insert interior reverse slice playback changed
+before/after first seam/tail: [199, 198, 197] [199, 198, 197] [161, 160, 159, 158, 157] [161, 160, 159, 158, 157] [102, 101, 100] [102, 101, 100] equal: True
+
+CASE: insert target followers marker/keys do not follow
+clip start/marker/firstkey before: 100 110 100 after: 120 130 [(120, 0), (219, 1)]
+local opacity before/after: 0.0 0.0 validation: []
+
+CASE: ripple target followers marker/keys do not follow
+follower start/marker/keys after: 80 90 [(80, 0), (179, 1)]
+local frame10 opacity before/after: 0.10101010101010101 0.10101010101010101
+
+CASE: split preservation matrix (fps,reverse,speed,duration,cut,mismatchcount,examples)
+(None, False, 'constant.5', 240, 121, 60, [(120, 160, 159), (122, 161, 160), (124, 162, 161), (126, 163, 162)])
+(None, False, 'constant1.25', 96, 49, 11, [(52, 165, 164), (56, 170, 169), (60, 175, 174), (64, 180, 179)])
+(None, False, 'step', 80, 41, 0, [])
+(None, False, 'smooth', 96, 49, 51, [(43, 143, 144), (44, 144, 145), (45, 145, 147), (46, 146, 148)])
+(None, True, 'constant.5', 240, 121, 60, [(120, 159, 160), (122, 158, 159), (124, 157, 158), (126, 156, 157)])
+(None, True, 'constant1.25', 96, 49, 11, [(52, 154, 155), (56, 149, 150), (60, 144, 145), (64, 139, 140)])
+(None, True, 'step', 80, 41, 0, [])
+(None, True, 'smooth', 96, 49, 51, [(43, 176, 175), (44, 175, 174), (45, 174, 172), (46, 173, 171)])
+((30, 24), False, 'constant.5', 192, 97, 35, [(98, 161, 162), (101, 163, 164), (103, 164, 165), (106, 166, 167)])
+((30, 24), False, 'constant1.25', 77, 39, 2, [(47, 173, 174), (63, 198, 199)])
+((30, 24), False, 'step', 64, 33, 16, [(34, 144, 145), (35, 148, 147), (38, 156, 155), (39, 158, 157)])
+((30, 24), False, 'smooth', 77, 39, 40, [(35, 144, 145), (36, 145, 147), (37, 146, 148), (40, 150, 152)])
+((30, 24), True, 'constant.5', 192, 97, 35, [(98, 158, 157), (100, 157, 156), (103, 155, 154), (106, 153, 152)])
+((30, 24), True, 'constant1.25', 77, 39, 3, [(40, 157, 156), (56, 132, 131), (72, 107, 106)])
+((30, 24), True, 'step', 64, 33, 19, [(35, 171, 172), (36, 169, 170), (38, 163, 165), (39, 161, 162)])
+((30, 24), True, 'smooth', 77, 39, 40, [(35, 175, 174), (36, 174, 172), (37, 173, 171), (40, 169, 168)])
+((24, 30), False, 'constant.5', 300, 151, 61, [(149, 160, 159), (150, 160, 159), (152, 161, 160), (154, 162, 161)])
+((24, 30), False, 'constant1.25', 120, 61, 0, [])
+((24, 30), False, 'step', 100, 51, 20, [(53, 144, 145), (54, 146, 147), (58, 152, 153), (59, 154, 155)])
+((24, 30), False, 'smooth', 120, 61, 64, [(54, 143, 144), (55, 144, 145), (56, 145, 147), (57, 146, 148)])
+((24, 30), True, 'constant.5', 300, 151, 61, [(149, 159, 160), (150, 159, 160), (152, 158, 159), (154, 157, 158)])
+((24, 30), True, 'constant1.25', 120, 61, 0, [])
+((24, 30), True, 'step', 100, 51, 20, [(53, 175, 174), (54, 173, 172), (58, 167, 166), (59, 165, 164)])
+((24, 30), True, 'smooth', 120, 61, 64, [(54, 176, 175), (55, 175, 174), (56, 174, 172), (57, 173, 171)])
+
+CASE: variable speed mixedFPS mapper and smooth duration integration
+duration: 72 mapped last5: [208, 210, 212, 216, 218] expected unrounded source offset at frame71: 117.5 mapped: 118
+smooth helper at24/24 vs authoritative SpeedParams duration: 102 102
+
+CASE: reverse roll retains wrong content
+before/after retained A head: [199, 198, 197, 196, 195] [199, 198, 197, 196, 195] B at110: 189 189
+
+CASE: batch cumulative sync shifts locked track (new regression)
+locked audio start before/after: 100 100
+
+CASE: new snapshots missing from command serialized payload
+DeleteClipCommand before/after/loadedundo trans: 1 0 1 full undo equal: True
+RippleDeleteCommand before/after/loadedundo trans: 1 0 1 full undo equal: True
+BatchDeleteCommand before/after/loadedundo trans: 1 0 1 full undo equal: True
+MoveClipCommand loadedundo trans: 1
+SlideClipCommand full serialized undo equal: True before/undo ranges: [(0, 90), (100, 90), (200, 100)] [(0, 90), (100, 90), (200, 100)]
+
+CASE: variable-speed left trim does not rebase points
+source start/duration/speedpoints: 120 80 (SpeedPoint(source_offset=50, speed=2, easing='linear'),)
+before/after retained timeline[50,60,70]: [150, 170, 190] [150, 160, 170]
+
+CASE: mixedFPS source-to-timeline inverse ignores FPS
+source160 inverse timeline: 48 expected: 48 mapped back: 160
+
+CASE: batch cumulative sync creates overlap behind fixed clip
+ValueError: Clips overlap: fixed and follower
+
+CASE: no-op command clears redo and pushes history
+redo before no-op: True history: 1
+same timeline: True redo after: True history: 1
+\nDONE

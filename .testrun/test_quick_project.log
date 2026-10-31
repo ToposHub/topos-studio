@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 12 items
+
+tests/edit/test_quick_project.py .......sssss                            [100%]
+
+======================== 7 passed, 5 skipped in 10.51s =========================

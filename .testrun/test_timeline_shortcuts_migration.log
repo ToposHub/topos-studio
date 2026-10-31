@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_timeline_shortcuts_migration.py .......                  [100%]
+
+============================== 7 passed in 7.94s ===============================

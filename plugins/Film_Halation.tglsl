@@ -1,0 +1,12 @@
+// --- Topos Plugin Metadata ---
+// @name Film Halation
+// @i18n_name Film_Halation
+// @author Topos Team
+// @param slider blur_radius "Blur Radius" 2.5 0.0 5.0
+// @param checkbox enable_tint "Enable Red Tint" 1
+// -----------------------------
+
+vec3 process(vec3 color, vec2 uv) {
+    // Phase 1 placeholder
+    return color; 
+}

@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+collected 54 items
+
+tests/video_denoise/test_frame_window.py ..........                      [ 18%]
+tests/video_denoise/test_temporal_denoise_state.py ..........            [ 37%]
+tests/video_denoise/test_video_denoise_gpu.py ............               [ 59%]
+tests/video_denoise/test_video_denoise_integration.py 2026-10-28 06:46:59.358 Python[42396:3566035] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+.....              [ 68%]
+tests/video_denoise/test_video_denoise_params.py ............            [ 90%]
+tests/video_denoise/test_window_provider.py .....                        [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/video_denoise.xml -
+============================== 54 passed in 4.25s ==============================

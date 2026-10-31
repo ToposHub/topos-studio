@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 25 items
+
+tests/edit/test_native_gpu_bridge_eligibility.py ....................... [ 92%]
+.s                                                                       [100%]
+
+======================== 24 passed, 1 skipped in 28.34s ========================

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://topos.color/codec/reduced-decode-benchmark-schema-v1.json",
+  "title": "Topos reduced decode benchmark report",
+  "type": "object",
+  "required": [
+    "schema_version", "benchmark", "generated_at_utc", "environment",
+    "source", "request", "threads", "cache_policy", "modes"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "benchmark": {"const": "topos_reduced_decode"},
+    "generated_at_utc": {"type": "string"},
+    "environment": {"$ref": "#/$defs/environment"},
+    "source": {"$ref": "#/$defs/source"},
+    "request": {"$ref": "#/$defs/request"},
+    "threads": {"$ref": "#/$defs/threads"},
+    "cache_policy": {"type": "object", "required": ["cold", "hot"], "additionalProperties": true},
+    "modes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/mode"}},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "environment": {
+      "type": "object",
+      "required": ["os", "python", "machine", "logical_cpu_count", "build_type", "git_commit"],
+      "properties": {
+        "logical_cpu_count": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "object",
+      "required": ["path", "width", "height", "plane_count", "pixel_format", "bit_depth", "packet_sha256", "packet_bytes"],
+      "properties": {
+        "path": {"type": "string"},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "plane_count": {"type": "integer", "minimum": 3, "maximum": 4},
+        "pixel_format": {"type": "integer", "minimum": 0, "maximum": 2},
+        "bit_depth": {"type": "integer", "enum": [10, 12]},
+        "packet_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "packet_bytes": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "request": {
+      "type": "object",
+      "required": ["scale_divisor", "scale", "target_width", "target_height"],
+      "properties": {
+        "scale_divisor": {"type": "integer", "enum": [2, 3, 4, 8]},
+        "scale": {"type": "integer", "enum": [1, 2, 3, 4]},
+        "target_width": {"type": "integer", "minimum": 1},
+        "target_height": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "threads": {
+      "type": "object",
+      "required": ["requested", "effective"],
+      "properties": {
+        "requested": {"type": "integer", "minimum": 0},
+        "effective": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "percentiles": {
+      "type": "object",
+      "required": ["p50", "p95", "p99", "max", "mean"],
+      "properties": {
+        "p50": {"type": "number", "minimum": 0},
+        "p95": {"type": "number", "minimum": 0},
+        "p99": {"type": "number", "minimum": 0},
+        "max": {"type": "number", "minimum": 0},
+        "mean": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "telemetry": {
+      "type": "object",
+      "required": [
+        "packet_bytes_read", "segments_parsed", "segments_skipped",
+        "entropy_symbols", "coefficients_skipped", "idct_samples",
+        "upload_bytes", "frames", "wall_ns", "p50_ns", "p95_ns", "p99_ns"
+      ],
+      "additionalProperties": true
+    },
+    "run": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["ok", "unsupported"]},
+        "cache_state": {"enum": ["cold", "hot"]},
+        "iterations": {"type": "integer", "minimum": 0},
+        "latency_ms": {"$ref": "#/$defs/percentiles"},
+        "output_bytes": {"type": "integer", "minimum": 0},
+        "telemetry": {"$ref": "#/$defs/telemetry"}
+      },
+      "additionalProperties": true
+    },
+    "mode": {
+      "type": "object",
+      "required": ["name", "cold", "hot"],
+      "properties": {
+        "name": {"enum": ["full", "post_scale", "legacy_reduced", "v7_band", "v7_base"]},
+        "cold": {"$ref": "#/$defs/run"},
+        "hot": {"$ref": "#/$defs/run"}
+      },
+      "additionalProperties": true
+    }
+  }
+}

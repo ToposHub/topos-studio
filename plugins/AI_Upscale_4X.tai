@@ -1,0 +1,14 @@
+// --- Topos AI Plugin Metadata ---
+// @name AI Upscale 4X
+// @i18n_name AI_Upscale_4X
+// @author Topos Team
+// @version 1.0
+// @category upscale
+// @ai_model models/upscale/4x_ultrasharp.onnx
+// @ai_tile_size 512
+// @ai_overlap 32
+// @ai_scale 4
+// @ai_input_format RGB
+// @ai_output_format RGB
+// @param slider blend "Blend" 1.0 0.0 1.0
+// -----------------------------

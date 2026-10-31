@@ -1,0 +1,44 @@
+{
+  "locked_menu_Disable Clip": {
+    "selection": [
+      {
+        "text": "Disable Clip",
+        "enabled": false
+      }
+    ],
+    "enabled": true,
+    "duration": 100,
+    "speed": 1.0,
+    "undo": false
+  },
+  "locked_menu_200%": {
+    "selection": [
+      {
+        "text": "200%",
+        "enabled": true
+      }
+    ],
+    "enabled": true,
+    "duration": 100,
+    "speed": 1.0,
+    "undo": false
+  },
+  "disabled_menu_label": [
+    "Disable Clip"
+  ],
+  "cleared_blade": {
+    "registered_binding": "",
+    "matches_with_default": false,
+    "tool": "SELECT"
+  },
+  "properties_multiselect": {
+    "requested": [
+      "c",
+      "d"
+    ],
+    "stored": [
+      "c",
+      "d"
+    ]
+  }
+}

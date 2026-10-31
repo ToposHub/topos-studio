@@ -1,0 +1,71 @@
+{
+  "video": "4K_DNxHR HQX 12-bit.mov",
+  "results": [
+    {
+      "label": "fast_drag",
+      "cadence_ms": 10.0,
+      "inputs": 268,
+      "duration_s": 4.16,
+      "updates_per_sec": 24.3,
+      "emissions": 101,
+      "e2e_latency_ms": {
+        "p50": 381.9,
+        "p90": 1422.2,
+        "max": 1446.2
+      },
+      "decode_ms": {
+        "p50": 5.3,
+        "p90": 9.6,
+        "max": 88.5
+      },
+      "gpu_round_ms": {
+        "p50": 5.4,
+        "p90": 9.7
+      },
+      "cycle_gaps": {
+        "worker_wake_ms": 0.1,
+        "decode_ms": 9.0,
+        "submit_ms": 0.0,
+        "release_hop_ms": 3.5
+      },
+      "decode_types": {
+        "planar": 165
+      },
+      "defer_busy_ratio": 0.68,
+      "drop_events": 440
+    },
+    {
+      "label": "slow_drag",
+      "cadence_ms": 60.0,
+      "inputs": 800,
+      "duration_s": 49.7,
+      "updates_per_sec": 18.4,
+      "emissions": 913,
+      "e2e_latency_ms": {
+        "p50": 21.0,
+        "p90": 60.7,
+        "max": 85.2
+      },
+      "decode_ms": {
+        "p50": 5.1,
+        "p90": 6.3,
+        "max": 19.5
+      },
+      "gpu_round_ms": {
+        "p50": 5.3,
+        "p90": 6.5
+      },
+      "cycle_gaps": {
+        "worker_wake_ms": 0.0,
+        "decode_ms": 4.9,
+        "submit_ms": 0.0,
+        "release_hop_ms": 3.7
+      },
+      "decode_types": {
+        "planar": 1665
+      },
+      "defer_busy_ratio": 0.09,
+      "drop_events": 756
+    }
+  ]
+}

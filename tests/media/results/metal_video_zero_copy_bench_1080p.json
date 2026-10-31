@@ -1,0 +1,32 @@
+{
+  "mode": "synthetic",
+  "pixel_format": "nv12",
+  "size": "1920x1080",
+  "import": {
+    "p50": 0.0792,
+    "p95": 0.1842,
+    "mean": 0.0962,
+    "n": 120
+  },
+  "convert_encode": {
+    "p50": 0.2078,
+    "p95": 0.4258,
+    "mean": 0.3282,
+    "n": 120
+  },
+  "gpu_wait": {
+    "p50": 0.5934,
+    "p95": 0.8828,
+    "mean": 0.6335,
+    "n": 120
+  },
+  "total": {
+    "p50": 0.9157,
+    "p95": 1.4363,
+    "mean": 1.0579,
+    "n": 120
+  },
+  "timestamp": "2026-09-11T19:40:33",
+  "device": "AMD Radeon RX 6800",
+  "platform_note": "Intel + AMD 6900XT 降级路径（A′ 主目标机待复测）"
+}

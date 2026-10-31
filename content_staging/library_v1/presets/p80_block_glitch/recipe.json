@@ -1,0 +1,30 @@
+{
+  "recipe_id": "P80",
+  "name": "碎块故障",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "碎块故障：glitch 全参数中值起步，merge 混回原片（mix<1 可减烈度）",
+  "component": "C09 glitch（暂存节点 lib1_glitch，复用 Glitch_Blocks 算法族）＋生产 merge",
+  "dependencies": {
+    "component_id": "C09",
+    "component_slug": "glitch",
+    "component_kind": "node",
+    "node_type": "lib1_glitch",
+    "aux_node_types": [
+      "merge"
+    ]
+  },
+  "params": {
+    "band_height": 24.0,
+    "shift_amount": 0.35,
+    "rgb_split": 0.3,
+    "corruption": 0.35,
+    "seed": 0.0
+  },
+  "notes": "C09 glitch 暂存组件＋生产 merge 组成碎块故障宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；动态 frame 模式仅在正式 frame 子门后开启，seed 为固定值（spec §3 时域冻结口径）。"
+}

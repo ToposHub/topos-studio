@@ -1,0 +1,32 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 242 items
+
+tests/edit/test_source_viewer_gl_contract.py ......                      [  2%]
+tests/edit/test_source_viewer_playback_backpressure.py .......           [  5%]
+tests/edit/test_source_viewer_playback_chain.py ........................ [ 15%]
+.......                                                                  [ 18%]
+tests/edit/test_source_viewer_scrub_preview.py ...                       [ 19%]
+tests/edit/test_source_viewer_transform_contract.py ...................  [ 27%]
+tests/edit/test_stem_export.py ...........................               [ 38%]
+tests/edit/test_stem_export_dialog.py ...........                        [ 42%]
+tests/edit/test_strip_eq.py ..........................                   [ 53%]
+tests/edit/test_subtitle_command_commit_contract.py ...........          [ 58%]
+tests/edit/test_subtitle_delivery.py ...........                         [ 62%]
+tests/edit/test_subtitle_drag_preview_throttle.py .......                [ 65%]
+tests/edit/test_subtitle_drag_restore_contract.py ...                    [ 66%]
+tests/edit/test_subtitle_edit_policy.py ..........                       [ 71%]
+tests/edit/test_subtitle_font_preflight.py .........                     [ 74%]
+tests/edit/test_subtitle_handle_controller.py ......                     [ 77%]
+tests/edit/test_subtitle_incremental_timeline.py ............            [ 82%]
+tests/edit/test_subtitle_layout_persistence.py .....                     [ 84%]
+tests/edit/test_subtitle_live_clamp.py .....                             [ 86%]
+tests/edit/test_subtitle_model_invariants.py ......................      [ 95%]
+tests/edit/test_subtitle_panel_debounce.py ...........                   [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_26.xml -
+============================= 242 passed in 13.28s =============================

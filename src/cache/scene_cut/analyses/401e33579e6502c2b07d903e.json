@@ -1,0 +1,47 @@
+{
+  "analysis_id": "analysis-1",
+  "asset_id": "asset-1",
+  "source_path": "/tmp/fake.mp4",
+  "clip_id": null,
+  "settings": {
+    "sensitivity": 0.55,
+    "min_scene_frames": 8,
+    "sample_width": 256,
+    "max_sample_height": 144,
+    "use_proxy": true,
+    "detect_transitions": true,
+    "suppress_flash": true,
+    "suppress_fast_motion": true,
+    "suppress_black_fades": true,
+    "adaptive_threshold": true,
+    "start_source_frame": 0,
+    "end_source_frame": null,
+    "rolling_window_size": 30,
+    "black_score_threshold": 0.7,
+    "motion_score_threshold": 0.5,
+    "flash_score_threshold": 0.3,
+    "transition_frame_threshold": 12
+  },
+  "media_fingerprint": "",
+  "source_time_index": null,
+  "candidates": [
+    {
+      "source_frame": 24,
+      "pts": null,
+      "seconds": 1.0,
+      "timeline_frame": null,
+      "score": 0.9,
+      "confidence": 0.9,
+      "kind": "unknown",
+      "decision": "pending",
+      "metrics": null,
+      "reasons": [],
+      "before_thumb_cache_key": null,
+      "after_thumb_cache_key": null
+    }
+  ],
+  "created_at": 0.0,
+  "detector_version": "1.0.0",
+  "diagnostics": null,
+  "proxy_fingerprint": null
+}

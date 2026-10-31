@@ -1,0 +1,15 @@
+U-06 decorations models/visuals= 1 0 1 0
+U-07 bypass after undo= True has_undo= False
+U-08 settings after undo= 640 30.0 150 has_undo= False
+U-09 stale canvas lock= True
+U-10 upstream from d= ['c'] downstream from a= ['b']
+U-11 removed composition fields= ['clip_id', 'comp_asset_id', 'comp_clip_id', 'composite_id', 'created_at', 'custom_extension', 'groups', 'height', 'modified_at', 'name', 'source_asset_id', 'source_asset_path', 'source_clip_id', 'source_kind', 'timeline_id', 'viewport_state', 'width']
+U-12 saved viewer_state= {'zoom_level': 1.5}
+U-13 group view after load= ['g'] new node visible= False
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 236 ms. Replace uses of missing font family "Sans Serif" with one that exists to avoid this cost.
+Callback not set: get_ui_state
+Callback not set: get_current_timeline_sequences

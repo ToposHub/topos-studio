@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_adjustment_clip_cpu_export_application.py ...            [100%]
+
+============================== 3 passed in 5.72s ===============================

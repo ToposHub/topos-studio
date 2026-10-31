@@ -1,0 +1,32 @@
+{
+  "component": "X05 luma_reveal",
+  "method": "手算：4x4 灰度图（列梯度 [0, 0.25, 0.5, 0.75]，行复制）→ luma_eff = clamp01(luma + (0.5 − threshold))，invert 时 1−luma_eff → thr_eff = −span + p·(1+2·span) → mask = clamp((thr_eff + span/2 − luma_eff)/span)。独立枚举推演（纯 Python/math，不复用核代码），容差 1e-6。",
+  "params_default": {"source": "A", "threshold": 0.5, "span": 0.2, "invert": false},
+  "fixtures": {
+    "image_a_gray_cols": [0.0, 0.25, 0.5, 0.75],
+    "image_b_gray_cols": [0.75, 0.5, 0.25, 0.0]
+  },
+  "vectors": [
+    {"fixture": "4x4-A-cols", "params": {"span": 0.2}, "progress": 0.5,
+     "expected_grid_rows": [[1, 1, 0.5, 0], [1, 1, 0.5, 0], [1, 1, 0.5, 0], [1, 1, 0.5, 0]],
+     "note": "A 暗部先揭示 p=0.5：thr_eff=0.5，col2 (v=0.5) 恰在前沿中心 → (0.5+0.1−0.5)/0.2=0.5 精确"},
+    {"fixture": "4x4-A-cols", "params": {"span": 0.2}, "progress": 0.25,
+     "expected_grid_rows": [[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]],
+     "note": "p=0.25：thr_eff=0.15，仅 v=0 揭示；v=0.25 → (0.25−0.25)/0.2=0（前沿下缘恰为 0）"},
+    {"fixture": "4x4-A-cols", "params": {"span": 0.2, "invert": true}, "progress": 0.5,
+     "expected_grid_rows": [[0, 0, 0.5, 1], [0, 0, 0.5, 1], [0, 0, 0.5, 1], [0, 0, 0.5, 1]],
+     "note": "invert：反相对象是亮度排序（先亮后暗）而非 mask——端点 p=0/1 仍全 0/全 1（README 冲突记录）"},
+    {"fixture": "4x4-A-cols", "params": {"span": 0.2, "threshold": 0.75}, "progress": 0.5,
+     "expected_grid_rows": [[1, 1, 1, 0.5], [1, 1, 1, 0.5], [1, 1, 1, 0.5], [1, 1, 1, 0.5]],
+     "note": "threshold=0.75：亮度偏置 −0.25，luma_eff=[0,0,0.25,0.5]，v=0.75 像素落前沿中心"},
+    {"fixture": "4x4-B-cols", "params": {"span": 0.2, "source": "B"}, "progress": 0.5,
+     "expected_grid_rows": [[0, 0.5, 1, 1], [0, 0.5, 1, 1], [0, 0.5, 1, 1], [0, 0.5, 1, 1]],
+     "note": "source=B：按 B 图（镜像梯度）排序 → 揭示序镜像"},
+    {"fixture": "4x4-no-image", "params": {}, "progress": 0.37, "expected_all": 0.37,
+     "note": "图像缺省回退：线性 dissolve mask=p（README 声明）"},
+    {"fixture": "4x4-const-0.3", "params": {"span": 0.2}, "progress": 0.0, "expected_all": 0.0,
+     "note": "端点精确：常量亮度输入 p=0 全 0（端点确定）"},
+    {"fixture": "4x4-const-0.3", "params": {"span": 0.2}, "progress": 1.0, "expected_all": 1.0,
+     "note": "端点精确：常量亮度输入 p=1 全 1（端点确定）"}
+  ]
+}

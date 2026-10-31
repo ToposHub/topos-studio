@@ -1,0 +1,2 @@
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/deliver -q   # 149 passed
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/test_audio_waveform_lifecycle.py -q   # 2 passed

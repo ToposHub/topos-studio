@@ -1,0 +1,36 @@
+{
+  "source_frame_path": "bench_out/topos_raw_real_cfa_probe/proresraw_frame0.rggb16le",
+  "source_frame_bytes": 70778880,
+  "crop_xywh": [
+    3072,
+    1136,
+    2048,
+    2048
+  ],
+  "cfa_pattern": "RGGB",
+  "phase_order": [
+    "R",
+    "Gr",
+    "Gb",
+    "B"
+  ],
+  "phase_min": [
+    252,
+    269,
+    252,
+    240
+  ],
+  "phase_max": [
+    24480,
+    39168,
+    38784,
+    11088
+  ],
+  "phase_mean": [
+    1317.4169425964355,
+    1748.8898229599,
+    1748.3587856292725,
+    613.4710693359375
+  ],
+  "crop_sha256": "03961f031d9181f797af95de4e655d0ce62d6550e076ccacfcf303d7a770719f"
+}

@@ -1,0 +1,70 @@
+// --- Topos Plugin Metadata ---
+// @name Lens Breathing
+// @i18n_name LIB1_Lens_Breathing
+// @author Topos Library v1
+// @version 0.1.0
+// @description Static lens breathing zoom: uniform scale about an adjustable pivot, scale_eff = 1 + amount*(scale-1), bilinear resample with Freeze (edge clamp) or Black out-of-frame border; animatable via existing host keyframes on the parameters, no focal-length estimation claimed
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param slider amount "Amount" 1.0 0.0 1.0
+// @param slider pivot_x "Pivot X" 0.5 0.0 1.0
+// @param slider pivot_y "Pivot Y" 0.5 0.0 1.0
+// @param slider scale "Scale" 1.1 0.8 1.2
+// @param select border_mode "Border" 0 "Freeze" "Black"
+// -----------------------------
+//
+// Lens Breathing —— 呼吸式缩放（L 计划 F11，LIB1，静态版）。
+//
+// 差量（L00 台账 F11 行，对 plugins/Lens_Distortion.tglsl）：Lens_Distortion
+// 是静态 r² 多项式重映射+auto-zoom（桶/枕形畸变）；本项是**可动画的
+// 呼吸缩放**——统一缩放（无畸变项）+ 可移动 pivot + amount 插值，动画走
+// 宿主既有 keyframe 通道（参数可关键帧）。**不声称自动估计真实镜头焦距**
+// （README 声明）。
+//
+// 算法（与 references/lens_breathing_ref.py 逐式同构）：
+// - scale_eff = 1 + amount·(scale - 1)（amount∈[0,1] 在 1 与 scale 间插值）；
+// - 以 pivot 为中心的统一缩放采样：suv = pivot + (uv - pivot)/scale_eff
+//   （归一坐标统一缩放——画幅内等比，内容几何保持，无需宽高比校正）；
+// - 旋转 0（本项不含旋转，与 F08 分工）；
+// - 双线性重采样（Delta 惯例 out = color + (sample - base)）：
+//   Freeze：suv 钳半纹素 [0.5/ts, 1-0.5/ts]（clamp-to-edge 等价）；
+//   Black：suv 出 [0,1]² → vec3(0.0)。
+//
+// 恒等：amount=0 或 scale=1（**精确零值判定**——几何参数不用阈值早退，
+// 与 oracle 逐式同构）。参数 ABI 裸名引用；u_input_tex 白名单。
+
+vec3 process(vec3 color, vec2 uv) {
+    // 精确恒等判定：零呼吸量或缩放为 1（几何参数不用阈值早退）
+    if (amount == 0.0 || scale == 1.0) return color;
+
+    float s = 1.0 + amount * (scale - 1.0);
+    vec2 pv = vec2(pivot_x, pivot_y);
+    vec2 suv = pv + (uv - pv) / vec2(s);
+
+    // 半纹素安全边界（clamp-to-edge 等价）
+    vec2 ts = vec2(textureSize(u_input_tex, 0));
+    ts = max(ts, vec2(1.0));
+    vec2 mn = vec2(0.5) / ts;
+    vec2 mx = vec2(1.0) - mn;
+
+    vec3 base = texture(u_input_tex, uv).rgb;
+    vec3 sampled;
+    if (border_mode == 1) {
+        if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) {
+            sampled = vec3(0.0);
+        } else {
+            sampled = texture(u_input_tex, clamp(suv, mn, mx)).rgb;
+        }
+    } else {
+        sampled = texture(u_input_tex, clamp(suv, mn, mx)).rgb;
+    }
+    return color + (sampled - base);
+}

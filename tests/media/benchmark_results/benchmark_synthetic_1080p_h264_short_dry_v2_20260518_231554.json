@@ -1,0 +1,64 @@
+{
+  "fixture_id": "synthetic_1080p_h264_short",
+  "timestamp": "2026-05-18T23:15:49.166186",
+  "mode": "dry",
+  "pipeline_version": "v2",
+  "video_properties": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 29.75,
+    "duration_s": 5.006
+  },
+  "ui_tick": {
+    "samples": 91,
+    "avg_ms": 53.73320306566861,
+    "p50_ms": 52.81819502124563,
+    "p95_ms": 68.46308195963502,
+    "max_ms": 74.17634595185518
+  },
+  "render_submit": {
+    "samples": 0,
+    "avg_ms": 53.723270362012784,
+    "p50_ms": 0.0,
+    "p95_ms": 68.450087972451
+  },
+  "render_queue": {
+    "samples": 0,
+    "avg": 0.0,
+    "p95": 0,
+    "max": 0
+  },
+  "playback": {
+    "total_frames": 91,
+    "dropped_frames": 0,
+    "dropped_frames_stable_percent": 0.0,
+    "displayed_fps": 18.11787391331264,
+    "target_fps": 29.75
+  },
+  "seek": {
+    "samples": 5,
+    "median_ms": 62.19709402648732,
+    "p95_ms": 67.70526402397081
+  },
+  "gpu_texture": {
+    "count": 0,
+    "pool_size": 0,
+    "samples": 0,
+    "growth_detected": false
+  },
+  "memory": {
+    "current_mb": 0.0,
+    "peak_mb": 0.0,
+    "samples": 0,
+    "growth_detected": false
+  },
+  "first_frame": {
+    "ms": 0.0
+  },
+  "test_info": {
+    "duration_s": 5.022664382995572,
+    "test_type": "standard",
+    "success": true
+  },
+  "errors": []
+}

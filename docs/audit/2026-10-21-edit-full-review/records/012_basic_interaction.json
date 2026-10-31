@@ -1,0 +1,1007 @@
+{
+  "ok": true,
+  "result": {
+    "insert": {
+      "revision": 9,
+      "duration": 400,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "d28aad86-d1f7-4bb4-9092-3502b95c81af"
+            },
+            {
+              "id": "196221cc-6789-42a0-abdb-92ce37a2f31d",
+              "start": 50,
+              "end": 150,
+              "source": 50,
+              "duration": 100,
+              "linked": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7"
+            },
+            {
+              "id": "ed7250bf-06a8-471b-a51d-7630b4625ddd",
+              "start": 150,
+              "end": 175,
+              "source": 50,
+              "duration": 25,
+              "linked": "0e2f6ac3-bb29-43b5-9f77-e1b1fb76b9ad"
+            },
+            {
+              "id": "345cf24f-141e-48e1-8857-d0387ea2b6fc",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "044db0f0-7487-4cc6-834c-597f39fc04cd"
+            },
+            {
+              "id": "960880ff-06f6-4555-be89-d95f962a81b9",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "7c3041d4-0f79-416e-9a26-b4e9e181ce96"
+            },
+            {
+              "id": "20f32e42-2939-489d-97ae-7b8549ea753c",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "5e8798f1-6b8b-4831-a71f-008f537d56c1"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d28aad86-d1f7-4bb4-9092-3502b95c81af",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "b2edbd3a-9ad3-4525-9202-69a15afe875c"
+            },
+            {
+              "id": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7",
+              "start": 50,
+              "end": 150,
+              "source": 50,
+              "duration": 100,
+              "linked": "196221cc-6789-42a0-abdb-92ce37a2f31d"
+            },
+            {
+              "id": "0e2f6ac3-bb29-43b5-9f77-e1b1fb76b9ad",
+              "start": 150,
+              "end": 175,
+              "source": 50,
+              "duration": 25,
+              "linked": "ed7250bf-06a8-471b-a51d-7630b4625ddd"
+            },
+            {
+              "id": "044db0f0-7487-4cc6-834c-597f39fc04cd",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "345cf24f-141e-48e1-8857-d0387ea2b6fc"
+            },
+            {
+              "id": "7c3041d4-0f79-416e-9a26-b4e9e181ce96",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "960880ff-06f6-4555-be89-d95f962a81b9"
+            },
+            {
+              "id": "5e8798f1-6b8b-4831-a71f-008f537d56c1",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "20f32e42-2939-489d-97ae-7b8549ea753c"
+            }
+          ]
+        }
+      ]
+    },
+    "undo_insert": {
+      "revision": 10,
+      "duration": 300,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "d28aad86-d1f7-4bb4-9092-3502b95c81af"
+            },
+            {
+              "id": "ed7250bf-06a8-471b-a51d-7630b4625ddd",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "0e2f6ac3-bb29-43b5-9f77-e1b1fb76b9ad"
+            },
+            {
+              "id": "345cf24f-141e-48e1-8857-d0387ea2b6fc",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "044db0f0-7487-4cc6-834c-597f39fc04cd"
+            },
+            {
+              "id": "960880ff-06f6-4555-be89-d95f962a81b9",
+              "start": 175,
+              "end": 200,
+              "source": 125,
+              "duration": 25,
+              "linked": "7c3041d4-0f79-416e-9a26-b4e9e181ce96"
+            },
+            {
+              "id": "20f32e42-2939-489d-97ae-7b8549ea753c",
+              "start": 200,
+              "end": 300,
+              "source": 50,
+              "duration": 100,
+              "linked": "5e8798f1-6b8b-4831-a71f-008f537d56c1"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d28aad86-d1f7-4bb4-9092-3502b95c81af",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "b2edbd3a-9ad3-4525-9202-69a15afe875c"
+            },
+            {
+              "id": "0e2f6ac3-bb29-43b5-9f77-e1b1fb76b9ad",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "ed7250bf-06a8-471b-a51d-7630b4625ddd"
+            },
+            {
+              "id": "044db0f0-7487-4cc6-834c-597f39fc04cd",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "345cf24f-141e-48e1-8857-d0387ea2b6fc"
+            },
+            {
+              "id": "7c3041d4-0f79-416e-9a26-b4e9e181ce96",
+              "start": 175,
+              "end": 200,
+              "source": 125,
+              "duration": 25,
+              "linked": "960880ff-06f6-4555-be89-d95f962a81b9"
+            },
+            {
+              "id": "5e8798f1-6b8b-4831-a71f-008f537d56c1",
+              "start": 200,
+              "end": 300,
+              "source": 50,
+              "duration": 100,
+              "linked": "20f32e42-2939-489d-97ae-7b8549ea753c"
+            }
+          ]
+        }
+      ]
+    },
+    "redo_insert": {
+      "revision": 11,
+      "duration": 400,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "d28aad86-d1f7-4bb4-9092-3502b95c81af"
+            },
+            {
+              "id": "196221cc-6789-42a0-abdb-92ce37a2f31d",
+              "start": 50,
+              "end": 150,
+              "source": 50,
+              "duration": 100,
+              "linked": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7"
+            },
+            {
+              "id": "ed7250bf-06a8-471b-a51d-7630b4625ddd",
+              "start": 150,
+              "end": 175,
+              "source": 50,
+              "duration": 25,
+              "linked": "0e2f6ac3-bb29-43b5-9f77-e1b1fb76b9ad"
+            },
+            {
+              "id": "345cf24f-141e-48e1-8857-d0387ea2b6fc",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "044db0f0-7487-4cc6-834c-597f39fc04cd"
+            },
+            {
+              "id": "960880ff-06f6-4555-be89-d95f962a81b9",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "7c3041d4-0f79-416e-9a26-b4e9e181ce96"
+            },
+            {
+              "id": "20f32e42-2939-489d-97ae-7b8549ea753c",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "5e8798f1-6b8b-4831-a71f-008f537d56c1"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d28aad86-d1f7-4bb4-9092-3502b95c81af",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "b2edbd3a-9ad3-4525-9202-69a15afe875c"
+            },
+            {
+              "id": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7",
+              "start": 50,
+              "end": 150,
+              "source": 50,
+              "duration": 100,
+              "linked": "196221cc-6789-42a0-abdb-92ce37a2f31d"
+            },
+            {
+              "id": "0e2f6ac3-bb29-43b5-9f77-e1b1fb76b9ad",
+              "start": 150,
+              "end": 175,
+              "source": 50,
+              "duration": 25,
+              "linked": "ed7250bf-06a8-471b-a51d-7630b4625ddd"
+            },
+            {
+              "id": "044db0f0-7487-4cc6-834c-597f39fc04cd",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "345cf24f-141e-48e1-8857-d0387ea2b6fc"
+            },
+            {
+              "id": "7c3041d4-0f79-416e-9a26-b4e9e181ce96",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "960880ff-06f6-4555-be89-d95f962a81b9"
+            },
+            {
+              "id": "5e8798f1-6b8b-4831-a71f-008f537d56c1",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "20f32e42-2939-489d-97ae-7b8549ea753c"
+            }
+          ]
+        }
+      ]
+    },
+    "overwrite": {
+      "revision": 12,
+      "duration": 400,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "d28aad86-d1f7-4bb4-9092-3502b95c81af"
+            },
+            {
+              "id": "196221cc-6789-42a0-abdb-92ce37a2f31d",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7"
+            },
+            {
+              "id": "79deaa41-20d5-4855-bbe1-0861b00ac7f9",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "3bda7d53-c7b2-44e4-9a79-881022598fba"
+            },
+            {
+              "id": "345cf24f-141e-48e1-8857-d0387ea2b6fc",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "044db0f0-7487-4cc6-834c-597f39fc04cd"
+            },
+            {
+              "id": "960880ff-06f6-4555-be89-d95f962a81b9",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "7c3041d4-0f79-416e-9a26-b4e9e181ce96"
+            },
+            {
+              "id": "20f32e42-2939-489d-97ae-7b8549ea753c",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "5e8798f1-6b8b-4831-a71f-008f537d56c1"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d28aad86-d1f7-4bb4-9092-3502b95c81af",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "b2edbd3a-9ad3-4525-9202-69a15afe875c"
+            },
+            {
+              "id": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "196221cc-6789-42a0-abdb-92ce37a2f31d"
+            },
+            {
+              "id": "3bda7d53-c7b2-44e4-9a79-881022598fba",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "79deaa41-20d5-4855-bbe1-0861b00ac7f9"
+            },
+            {
+              "id": "044db0f0-7487-4cc6-834c-597f39fc04cd",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "345cf24f-141e-48e1-8857-d0387ea2b6fc"
+            },
+            {
+              "id": "7c3041d4-0f79-416e-9a26-b4e9e181ce96",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "960880ff-06f6-4555-be89-d95f962a81b9"
+            },
+            {
+              "id": "5e8798f1-6b8b-4831-a71f-008f537d56c1",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "20f32e42-2939-489d-97ae-7b8549ea753c"
+            }
+          ]
+        }
+      ]
+    },
+    "append_second": {
+      "revision": 13,
+      "duration": 500,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "d28aad86-d1f7-4bb4-9092-3502b95c81af"
+            },
+            {
+              "id": "196221cc-6789-42a0-abdb-92ce37a2f31d",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7"
+            },
+            {
+              "id": "79deaa41-20d5-4855-bbe1-0861b00ac7f9",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "3bda7d53-c7b2-44e4-9a79-881022598fba"
+            },
+            {
+              "id": "345cf24f-141e-48e1-8857-d0387ea2b6fc",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "044db0f0-7487-4cc6-834c-597f39fc04cd"
+            },
+            {
+              "id": "960880ff-06f6-4555-be89-d95f962a81b9",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "7c3041d4-0f79-416e-9a26-b4e9e181ce96"
+            },
+            {
+              "id": "20f32e42-2939-489d-97ae-7b8549ea753c",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "5e8798f1-6b8b-4831-a71f-008f537d56c1"
+            },
+            {
+              "id": "781860af-9842-40ef-bdbd-4efce5cdccea",
+              "start": 400,
+              "end": 500,
+              "source": 50,
+              "duration": 100,
+              "linked": "9885fcea-5f77-480e-8de0-82d3abf0d40b"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d28aad86-d1f7-4bb4-9092-3502b95c81af",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "b2edbd3a-9ad3-4525-9202-69a15afe875c"
+            },
+            {
+              "id": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "196221cc-6789-42a0-abdb-92ce37a2f31d"
+            },
+            {
+              "id": "3bda7d53-c7b2-44e4-9a79-881022598fba",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "79deaa41-20d5-4855-bbe1-0861b00ac7f9"
+            },
+            {
+              "id": "044db0f0-7487-4cc6-834c-597f39fc04cd",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "345cf24f-141e-48e1-8857-d0387ea2b6fc"
+            },
+            {
+              "id": "7c3041d4-0f79-416e-9a26-b4e9e181ce96",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "960880ff-06f6-4555-be89-d95f962a81b9"
+            },
+            {
+              "id": "5e8798f1-6b8b-4831-a71f-008f537d56c1",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "20f32e42-2939-489d-97ae-7b8549ea753c"
+            },
+            {
+              "id": "9885fcea-5f77-480e-8de0-82d3abf0d40b",
+              "start": 400,
+              "end": 500,
+              "source": 50,
+              "duration": 100,
+              "linked": "781860af-9842-40ef-bdbd-4efce5cdccea"
+            }
+          ]
+        }
+      ]
+    },
+    "clear_source_buttons": [
+      false,
+      false,
+      false
+    ],
+    "split": {
+      "revision": 13,
+      "duration": 500,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "d28aad86-d1f7-4bb4-9092-3502b95c81af"
+            },
+            {
+              "id": "196221cc-6789-42a0-abdb-92ce37a2f31d",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7"
+            },
+            {
+              "id": "79deaa41-20d5-4855-bbe1-0861b00ac7f9",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "3bda7d53-c7b2-44e4-9a79-881022598fba"
+            },
+            {
+              "id": "345cf24f-141e-48e1-8857-d0387ea2b6fc",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "044db0f0-7487-4cc6-834c-597f39fc04cd"
+            },
+            {
+              "id": "960880ff-06f6-4555-be89-d95f962a81b9",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "7c3041d4-0f79-416e-9a26-b4e9e181ce96"
+            },
+            {
+              "id": "20f32e42-2939-489d-97ae-7b8549ea753c",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "5e8798f1-6b8b-4831-a71f-008f537d56c1"
+            },
+            {
+              "id": "781860af-9842-40ef-bdbd-4efce5cdccea",
+              "start": 400,
+              "end": 500,
+              "source": 50,
+              "duration": 100,
+              "linked": "9885fcea-5f77-480e-8de0-82d3abf0d40b"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d28aad86-d1f7-4bb4-9092-3502b95c81af",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "b2edbd3a-9ad3-4525-9202-69a15afe875c"
+            },
+            {
+              "id": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "196221cc-6789-42a0-abdb-92ce37a2f31d"
+            },
+            {
+              "id": "3bda7d53-c7b2-44e4-9a79-881022598fba",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "79deaa41-20d5-4855-bbe1-0861b00ac7f9"
+            },
+            {
+              "id": "044db0f0-7487-4cc6-834c-597f39fc04cd",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "345cf24f-141e-48e1-8857-d0387ea2b6fc"
+            },
+            {
+              "id": "7c3041d4-0f79-416e-9a26-b4e9e181ce96",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "960880ff-06f6-4555-be89-d95f962a81b9"
+            },
+            {
+              "id": "5e8798f1-6b8b-4831-a71f-008f537d56c1",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "20f32e42-2939-489d-97ae-7b8549ea753c"
+            },
+            {
+              "id": "9885fcea-5f77-480e-8de0-82d3abf0d40b",
+              "start": 400,
+              "end": 500,
+              "source": 50,
+              "duration": 100,
+              "linked": "781860af-9842-40ef-bdbd-4efce5cdccea"
+            }
+          ]
+        }
+      ]
+    },
+    "undo_split": {
+      "revision": 14,
+      "duration": 400,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "d28aad86-d1f7-4bb4-9092-3502b95c81af"
+            },
+            {
+              "id": "196221cc-6789-42a0-abdb-92ce37a2f31d",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7"
+            },
+            {
+              "id": "79deaa41-20d5-4855-bbe1-0861b00ac7f9",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "3bda7d53-c7b2-44e4-9a79-881022598fba"
+            },
+            {
+              "id": "345cf24f-141e-48e1-8857-d0387ea2b6fc",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "044db0f0-7487-4cc6-834c-597f39fc04cd"
+            },
+            {
+              "id": "960880ff-06f6-4555-be89-d95f962a81b9",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "7c3041d4-0f79-416e-9a26-b4e9e181ce96"
+            },
+            {
+              "id": "20f32e42-2939-489d-97ae-7b8549ea753c",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "5e8798f1-6b8b-4831-a71f-008f537d56c1"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d28aad86-d1f7-4bb4-9092-3502b95c81af",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "b2edbd3a-9ad3-4525-9202-69a15afe875c"
+            },
+            {
+              "id": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "196221cc-6789-42a0-abdb-92ce37a2f31d"
+            },
+            {
+              "id": "3bda7d53-c7b2-44e4-9a79-881022598fba",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "79deaa41-20d5-4855-bbe1-0861b00ac7f9"
+            },
+            {
+              "id": "044db0f0-7487-4cc6-834c-597f39fc04cd",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "345cf24f-141e-48e1-8857-d0387ea2b6fc"
+            },
+            {
+              "id": "7c3041d4-0f79-416e-9a26-b4e9e181ce96",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "960880ff-06f6-4555-be89-d95f962a81b9"
+            },
+            {
+              "id": "5e8798f1-6b8b-4831-a71f-008f537d56c1",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "20f32e42-2939-489d-97ae-7b8549ea753c"
+            }
+          ]
+        }
+      ]
+    },
+    "redo_split": {
+      "revision": 15,
+      "duration": 500,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "d28aad86-d1f7-4bb4-9092-3502b95c81af"
+            },
+            {
+              "id": "196221cc-6789-42a0-abdb-92ce37a2f31d",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7"
+            },
+            {
+              "id": "79deaa41-20d5-4855-bbe1-0861b00ac7f9",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "3bda7d53-c7b2-44e4-9a79-881022598fba"
+            },
+            {
+              "id": "345cf24f-141e-48e1-8857-d0387ea2b6fc",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "044db0f0-7487-4cc6-834c-597f39fc04cd"
+            },
+            {
+              "id": "960880ff-06f6-4555-be89-d95f962a81b9",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "7c3041d4-0f79-416e-9a26-b4e9e181ce96"
+            },
+            {
+              "id": "20f32e42-2939-489d-97ae-7b8549ea753c",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "5e8798f1-6b8b-4831-a71f-008f537d56c1"
+            },
+            {
+              "id": "781860af-9842-40ef-bdbd-4efce5cdccea",
+              "start": 400,
+              "end": 500,
+              "source": 50,
+              "duration": 100,
+              "linked": "9885fcea-5f77-480e-8de0-82d3abf0d40b"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d28aad86-d1f7-4bb4-9092-3502b95c81af",
+              "start": 0,
+              "end": 50,
+              "source": 50,
+              "duration": 50,
+              "linked": "b2edbd3a-9ad3-4525-9202-69a15afe875c"
+            },
+            {
+              "id": "dc69cb32-c53b-4ef4-acc9-bdc6d7def2b7",
+              "start": 50,
+              "end": 75,
+              "source": 50,
+              "duration": 25,
+              "linked": "196221cc-6789-42a0-abdb-92ce37a2f31d"
+            },
+            {
+              "id": "3bda7d53-c7b2-44e4-9a79-881022598fba",
+              "start": 75,
+              "end": 175,
+              "source": 50,
+              "duration": 100,
+              "linked": "79deaa41-20d5-4855-bbe1-0861b00ac7f9"
+            },
+            {
+              "id": "044db0f0-7487-4cc6-834c-597f39fc04cd",
+              "start": 175,
+              "end": 275,
+              "source": 50,
+              "duration": 100,
+              "linked": "345cf24f-141e-48e1-8857-d0387ea2b6fc"
+            },
+            {
+              "id": "7c3041d4-0f79-416e-9a26-b4e9e181ce96",
+              "start": 275,
+              "end": 300,
+              "source": 125,
+              "duration": 25,
+              "linked": "960880ff-06f6-4555-be89-d95f962a81b9"
+            },
+            {
+              "id": "5e8798f1-6b8b-4831-a71f-008f537d56c1",
+              "start": 300,
+              "end": 400,
+              "source": 50,
+              "duration": 100,
+              "linked": "20f32e42-2939-489d-97ae-7b8549ea753c"
+            },
+            {
+              "id": "9885fcea-5f77-480e-8de0-82d3abf0d40b",
+              "start": 400,
+              "end": 500,
+              "source": 50,
+              "duration": 100,
+              "linked": "781860af-9842-40ef-bdbd-4efce5cdccea"
+            }
+          ]
+        }
+      ]
+    },
+    "playback": {
+      "frame": 59,
+      "render_emissions": 118,
+      "non_none": 118,
+      "events": [
+        [
+          725.558580449,
+          "1",
+          true
+        ],
+        [
+          725.558583071,
+          "1",
+          true
+        ],
+        [
+          725.59024365,
+          "2",
+          true
+        ],
+        [
+          727.82331409,
+          "58",
+          true
+        ],
+        [
+          727.859567793,
+          "59",
+          true
+        ],
+        [
+          727.859569728,
+          "59",
+          true
+        ]
+      ]
+    }
+  }
+}

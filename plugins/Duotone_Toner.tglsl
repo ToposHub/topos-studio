@@ -1,0 +1,64 @@
+// --- Topos Plugin Metadata ---
+// @name Duotone Toner
+// @i18n_name Duotone_Toner
+// @author Topos Team
+// @version 1.0
+// @description Duotone/tritone luminance ramp: linear shadow-to-highlight color map with detail keep-back and selectable luma source
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support all
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost low
+// @param color shadow_color "Shadow Color" 0.04 0.07 0.14
+// @param color highlight_color "Highlight Color" 0.93 0.86 0.72
+// @param separator
+// @param slider tone_amount "Amount" 0.6 0.0 1.0
+// @param slider tone_detail "Detail Keep" 0.3 0.0 1.0
+// @param select luma_mode "Luma Source" 0 "Rec.709 Luma" "Average RGB"
+// -----------------------------
+//
+// Duotone Toner —— 双色调映射。
+//
+// 原理：经典印刷双色调（duotone）的数字版——把像素亮度 l 作为位置
+// 参数，在"阴影色 → 高光色"渐变上取色，再把亮度差（原始像素 - l）
+// 作为细节层按比例回加，保住纹理与层次。luma_mode 提供 709 亮度与
+// 平均值两种亮度定义（平均值对手持高饱和素材产生更宽的中间调）。
+//
+// 设计要点：
+// - 渐变 ramped = mix(shadow, highlight, l) 对 l 严格线性 → HDR 域
+//   自然线性外推（l > 1 超出高光色、l < 0 深入阴影色以下），无极点、
+//   无折返，绝不 clamp 内容色（Cross_Process 的"风格曲线不 clamp"
+//   范式的线性特例）；
+// - 纯逐像素数学：零采样、零循环、零三角/超越函数；
+// - 细节回加项 (color - l) 可为负/超界，按 tone_detail 线性缩放，
+//   同样 HDR 安全；
+// - 参数 ABI：@param 以裸名引用（编译期改写为命名空间 uniform），
+//   禁止引用未声明的 u_* 标识符（P0-COL-01）。
+
+const vec3 DUO_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度纯直通
+    if (tone_amount < 0.001) return color;
+
+    // 亮度定义分派（select 早退 if 链惯例，fallback = 平均值）
+    float l;
+    if (luma_mode == 0) {
+        l = dot(color, DUO_LUMA_W);
+    } else {
+        l = (color.r + color.g + color.b) / 3.0;
+    }
+
+    // 线性双色渐变：l 超界时单调外推，HDR 安全
+    vec3 ramped = mix(shadow_color, highlight_color, l);
+
+    // 细节回加：亮度差保留纹理，哑光印刷感 = 低回加
+    vec3 toned = ramped + (color - l) * tone_detail;
+
+    return mix(color, toned, tone_amount);
+}

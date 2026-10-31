@@ -1,0 +1,46 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Vignette_Shapes": {
+        "name": "多形状暗角",
+        "desc": {
+          "short": "椭圆/圆角矩形/真圆三种形状的电影感暗角：smoothstep 羽化、乘性强度混合（HDR 安全），并可开启均值保持的亮度补偿防止整体画面变暗。",
+          "params": {
+            "shape": "遮罩形状。椭圆：随画面比例的内切椭圆（默认）；矩形：与画面边框吻合的圆角矩形；圆形：宽高比纠正后的几何真圆（横幅下相对更收紧）。",
+            "feather": "羽化宽度。映射为暗角过渡带半宽；过渡 50% 点恒落在所选形状的名义边界上，任何羽化下形状读数不漂移。",
+            "strength": "暗角强度。乘性变暗（角点最深、中心为 0），对 HDR 高光与负值等比缩放，不裁切、不偏色。",
+            "luma_comp": "亮度补偿。0 为经典暗角；1 时按遮码帧平均施加反向增益，使整帧平均亮度基本保持不变（防整体变暗）。"
+          }
+        },
+        "params": {
+          "shape": "形状",
+          "feather": "羽化",
+          "strength": "强度",
+          "luma_comp": "亮度补偿"
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Vignette_Shapes": {
+        "name": "Vignette Shapes",
+        "desc": {
+          "short": "Cinematic vignette in three shapes (ellipse / rounded rectangle / true circle) with smoothstep feather, HDR-safe multiplicative strength and optional mean-preserving luma compensation.",
+          "params": {
+            "shape": "Mask shape. Ellipse: frame-proportioned inscribed oval (default). Rectangle: rounded box matching the frame edges. Circle: aspect-corrected geometric circle (relatively tighter on wide frames).",
+            "feather": "Feather width, mapped to the transition half-width; the 50 percent point always sits on the selected shape's nominal boundary, so the shape reads true at any feather.",
+            "strength": "Vignette strength. Multiplicative darkening (deepest at corners, zero at center) that scales HDR highlights and negative values proportionally, with no clamping or hue shift.",
+            "luma_comp": "Luma compensation. 0 keeps the classic look; 1 applies a corrective gain based on the mask's frame average so overall brightness is largely preserved."
+          }
+        },
+        "params": {
+          "shape": "Shape",
+          "feather": "Feather",
+          "strength": "Strength",
+          "luma_comp": "Luma Compensation"
+        }
+      }
+    }
+  }
+}

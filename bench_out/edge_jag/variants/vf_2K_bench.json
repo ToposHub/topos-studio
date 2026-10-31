@@ -1,0 +1,24 @@
+{
+ "generated_at": "2026-09-21T06:01:49.755586+00:00",
+ "variant": "vf",
+ "results": [
+  {
+   "variant": "vf",
+   "size": "2K",
+   "tier": "standard",
+   "frames": 487,
+   "video_bytes": 265678111,
+   "video_mbps": 109.11,
+   "enc_s": 21.76,
+   "enc_fps": 22.4,
+   "dec_s": 1.87,
+   "dec_fps": 260.8,
+   "y_psnr": 46.052,
+   "u_psnr": 50.872,
+   "v_psnr": 50.287,
+   "y_psnr_edge": 43.919,
+   "sharp": 0.905,
+   "grid": 1.058
+  }
+ ]
+}

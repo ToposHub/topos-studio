@@ -1,0 +1,36 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 422 items
+
+tests/edit/test_scene_cut_project_serialization.py ........              [  1%]
+tests/edit/test_scene_cut_result_model.py .............................. [  9%]
+..........................                                               [ 15%]
+tests/edit/test_scene_cut_session_memory.py ...                          [ 15%]
+tests/edit/test_scene_cut_subclip_timeline_insert.py .........           [ 18%]
+tests/edit/test_scene_cut_subclips.py .................................. [ 26%]
+.....                                                                    [ 27%]
+tests/edit/test_scene_cut_timeline_mapping.py .......................... [ 33%]
+............................                                             [ 40%]
+tests/edit/test_scene_cut_timeline_overlay_entry.py ................     [ 43%]
+tests/edit/test_scene_cut_vfr_mapping.py ............................... [ 51%]
+.......                                                                  [ 52%]
+tests/edit/test_scene_cut_worker.py .................................... [ 61%]
+..................................                                       [ 69%]
+tests/edit/test_scheduler_real_hotpath.py ........                       [ 71%]
+tests/edit/test_scrub_display_stride.py ...............                  [ 74%]
+tests/edit/test_selection_diagnostics.py .......                         [ 76%]
+tests/edit/test_shortcut_preset.py .............                         [ 79%]
+tests/edit/test_shortcut_scope_gates.py ..                               [ 80%]
+tests/edit/test_sidechain_ducker.py ..............                       [ 83%]
+tests/edit/test_smart_bins.py ....................                       [ 88%]
+tests/edit/test_smooth_speed_ramp.py .........                           [ 90%]
+tests/edit/test_solo_audible_closure.py ...............                  [ 93%]
+tests/edit/test_source_resolver.py ..............                        [ 97%]
+tests/edit/test_source_time_domain_mapping.py ............               [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_25.xml -
+============================= 422 passed in 10.78s =============================

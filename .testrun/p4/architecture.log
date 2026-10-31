@@ -1,0 +1,285 @@
+============================= test session starts ==============================
+collected 412 items
+
+tests/architecture/test_acceptance_markers.py .....                      [  1%]
+tests/architecture/test_boundary_guardrails.py ...........FF............ [  7%]
+.................                                                        [ 11%]
+tests/architecture/test_ci_matrix.py ...............                     [ 15%]
+tests/architecture/test_config_manager.py ......                         [ 16%]
+tests/architecture/test_feature_flags_registry.py ...................... [ 21%]
+............................................                             [ 32%]
+tests/architecture/test_file_explorer_integration.py .....2026-10-28 06:10:37.083 Python[41572:3365562] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+.              [ 33%]
+tests/architecture/test_i18n_lifecycle.py ..............                 [ 37%]
+tests/architecture/test_layout_integration.py ...................        [ 41%]
+tests/architecture/test_layout_store.py ................................ [ 49%]
+.................                                                        [ 53%]
+tests/architecture/test_menu_contributions.py ..............FF....F..... [ 60%]
+...........                                                              [ 62%]
+tests/architecture/test_module_isolation.py .....x.....                  [ 65%]
+tests/architecture/test_module_preferences.py .......................... [ 71%]
+.................                                                        [ 75%]
+tests/architecture/test_page_context.py ..................               [ 80%]
+tests/architecture/test_product_physical_missing.py .................... [ 85%]
+.                                                                        [ 85%]
+tests/architecture/test_product_presets.py ............................. [ 92%]
+.............                                                            [ 95%]
+tests/architecture/test_src_directory_boundaries.py ..................   [100%]
+
+=================================== FAILURES ===================================
+_ TestAppLayerForbiddenImports.test_app_layer_has_no_forbidden_feature_imports _
+tests/architecture/test_boundary_guardrails.py:218: in test_app_layer_has_no_forbidden_feature_imports
+    _assert_boundary_clean_or_known_baseline(ROOT / "src" / "app", "app")
+tests/architecture/test_boundary_guardrails.py:208: in _assert_boundary_clean_or_known_baseline
+    pytest.fail(
+E   Failed: app boundary drift: 161 offenders (8a1736ca10567843c1feb30b9495f2018224fe2b8bce57bc096195e4f673737d)
+E   src/app/main_window.py:75 'from src.features.edit.core.project import EditProject'
+E   src/app/main_window.py:76 'from src.features.edit.core.timeline_preview_renderer import TimelinePreviewRenderer'
+E   src/app/main_window.py:853 'from src.features.edit.core.audio_capabilities import ('
+E   src/app/controllers/ai_editing_mixin.py:618 'from src.features.edit.core.captions.translation import ('
+E   src/app/controllers/edit_controller.py:48 'from src.features.edit.core.playback_debug import playback_trace'
+E   src/app/controllers/edit_controller.py:53 'from src.features.edit.core.timeline_ops import TimelineOperationError'
+E   src/app/controllers/edit_controller.py:91 'from src.features.edit.core.render_cache import RenderCacheManifest'
+E   src/app/controllers/edit_controller.py:370 'from src.features.edit.core.recording_manager import ('
+E   src/app/controllers/edit_controller.py:828 'from src.features.edit.ui.new_timeline_dialog import NewTimelineDialog'
+E   src/app/controllers/edit_controller.py:894 'from src.features.edit.core.timeline_settings_command import TimelineSettingsCommand'
+E   src/app/controllers/edit_controller.py:1026 'from src.features.edit.ui.new_timeline_dialog import NewTimelineDialog'
+E   src/app/controllers/edit_controller.py:1210 'from src.features.edit.ui.speech_to_text_dialog import SpeechToTextSettingsDialog'
+E   src/app/controllers/edit_controller.py:1358 'from src.features.edit.core.commands import ('
+E   src/app/controllers/edit_controller.py:1514 'from src.features.edit.ui.tts_settings_dialog import TtsSettingsDialog'
+E   src/app/controllers/edit_controller.py:1553 'from src.features.edit.core.project import _probe_audio_info'
+E   src/app/controllers/edit_controller.py:1580 'from src.features.edit.core.commands import AddClipCommand, AddTrackCommand'
+E   src/app/controllers/edit_controller.py:1581 'from src.features.edit.core.timeline_v2 import ClipInstance'
+E   src/app/controllers/edit_controller.py:1617 'from src.features.edit.core.commands import ('
+E   src/app/controllers/edit_controller.py:2388 'from src.features.edit.core.commands import SetClipBlendModeCommand'
+E   src/app/controllers/edit_controller.py:2556 'from src.features.edit.core.commands import ('
+E   src/app/controllers/edit_controller.py:2799 'from src.features.edit.core.automation_recorder import AutomationRecorder'
+E   src/app/controllers/edit_controller.py:2864 'from src.features.edit.core.commands import SetTrackVolumeCommand'
+E   src/app/controllers/edit_controller.py:2892 'from src.features.edit.core.commands import SetTrackPanCommand'
+E   src/app/controllers/edit_controller.py:2917 'from src.features.edit.core.commands import SetTrackMuteCommand'
+E   src/app/controllers/edit_controller.py:2945 'from src.features.edit.core.commands import SetTrackSoloCommand'
+E   src/app/controllers/edit_controller.py:2963 'from src.features.edit.core.commands import SetTrackSoloCommand, MacroCommand'
+E   src/app/controllers/edit_controller.py:2991 'from src.features.edit.core.commands import SetTrackMuteCommand, MacroCommand'
+E   src/app/controllers/edit_controller.py:3018 'from src.features.edit.core.commands import MacroCommand'
+E   src/app/controllers/edit_controller.py:3052 'from src.features.edit.core.commands import SetMasterVolumeCommand'
+E   src/app/controllers/edit_controller.py:3077 'from src.features.edit.core.commands import SetMasterMuteCommand'
+E   src/app/controllers/edit_controller.py:3111 'from src.features.edit.core.recording_manager import ('
+E   src/app/controllers/edit_controller.py:3251 'from src.features.edit.core.project import _probe_audio_info'
+E   src/app/controllers/edit_controller.py:3252 'from src.features.edit.core.take_sheet import take_metadata_for_asset'
+E   src/app/controllers/edit_controller.py:3265 'from src.features.edit.core.commands import ('
+E   src/app/controllers/edit_controller.py:3423 'from src.features.edit.core.take_sheet import ('
+E   src/app/controllers/edit_controller.py:3479 'from src.features.edit.core.commands import MarkBestTakeCommand'
+E   src/app/controllers/edit_controller.py:3496 'from src.features.edit.core.commands import UpdateClipSourceCommand'
+E   src/app/controllers/edit_controller.py:3572 'from src.features.edit.core.take_sheet import ('
+E   src/app/controllers/edit_controller.py:3587 'from src.features.edit.core.commands import RenameTrackCommand'
+E   src/app/controllers/edit_controller.py:3600 'from src.features.edit.core.commands import SetTrackColorCommand'
+E   src/app/controllers/edit_controller.py:3660 'from src.features.edit.core.commands import AddAutomationKeyframeCommand'
+E   src/app/controllers/edit_controller.py:3675 'from src.features.edit.core.commands import RemoveAutomationKeyframeCommand'
+E   src/app/controllers/edit_controller.py:3693 'from src.features.edit.core.commands import ('
+E   src/app/controllers/edit_controller.py:3709 'from src.features.edit.core.commands import ClearAutomationCommand'
+E   src/app/controllers/edit_controller.py:3767 'from src.features.edit.core.commands import SetTrackStripEQCommand'
+E   src/app/controllers/edit_controller.py:3915 'from src.features.edit.core.audio_playback import validate_routing_graph'
+E   src/app/controllers/edit_controller.py:3992 'from src.features.edit.core.audio_playback import validate_routing_graph'
+E   src/app/controllers/edit_controller.py:4021 'from src.features.edit.core.commands import ('
+E   src/app/controllers/edit_controller.py:4097 'from src.features.edit.core.commands import SetTrackEffectChainCommand'
+E   src/app/controllers/edit_controller.py:4128 'from src.features.edit.core.commands import assert_track_editable'
+E   src/app/controllers/edit_controller.py:4240 'from src.features.edit.core.commands import assert_track_editable'
+E   src/app/controllers/edit_controller.py:4538 'from src.features.edit.core.transition_catalog import TRANSITION_TYPE_OPTIONS'
+E   src/app/controllers/edit_controller.py:4539 'from src.features.edit.core.audio_transition_catalog import ('
+E   src/app/controllers/edit_controller.py:4677 'from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES'
+E   src/app/controllers/edit_controller.py:4773 'from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES'
+E   src/app/controllers/edit_controller.py:5206 'from src.features.edit.ui.clip_audio_effect_dialog_adapter import ('
+E   src/app/controllers/edit_controller.py:5940 'from src.features.edit.ui.comp_clip_settings_dialog import ('
+E   src/app/controllers/edit_controller.py:6019 'from src.features.edit.ui.comp_clip_settings_dialog import ('
+E   src/app/controllers/edit_controller.py:6097 'from src.features.edit.core.comp_clip_data import CompClipData'
+E   src/app/controllers/edit_controller.py:6098 'from src.features.edit.core.composite_graph_data import ('
+E   src/app/controllers/edit_controller.py:6227 'from src.features.edit.core.render_cache_evaluator import ('
+E   src/app/controllers/edit_controller.py:6607 'from src.features.edit.core.timeline_project_transaction import TimelineProjectTransactionCommand'
+E   src/app/controllers/edit_controller.py:7345 'from src.features.edit.core.multicam import plan_multicam_insert'
+E   src/app/controllers/edit_controller.py:7346 'from src.features.edit.core.timeline_project_transaction import TimelineProjectTransactionCommand'
+E   src/app/controllers/edit_controller.py:7399 'from src.features.edit.core.multicam import multicam_group_from_asset'
+E   src/app/controllers/edit_controller.py:7427 'from src.features.edit.core.commands import SwitchMulticamAngleCommand'
+E   src/app/controllers/edit_controller.py:7428 'from src.features.edit.core.multicam import multicam_group_from_asset'
+E   src/app/controllers/edit_controller.py:7509 'from src.features.edit.core.commands import MacroCommand'
+E   src/app/controllers/edit_controller.py:7531 'from src.features.edit.core.multicam import multicam_group_from_asset'
+E   src/app/controllers/edit_controller.py:7544 'from src.features.edit.core.multicam import multicam_group_from_asset'
+E   src/app/controllers/edit_controller.py:7576 'from src.features.edit.core.multicam import ('
+E   src/app/controllers/edit_controller.py:7582 'from src.features.edit.core.media_replacement import source_fps_from_metadata'
+E   src/app/controllers/edit_controller.py:7639 'from src.features.edit.core.multicam import multicam_group_from_asset'
+E   src/app/controllers/edit_controller.py:7649 'from src.features.edit.core.multicam_sync import ('
+E   src/app/controllers/edit_controller.py:7671 'from src.features.edit.ui.multicam_sync_result_dialog import ('
+E   src/app/controllers/edit_controller.py:7748 'from src.features.edit.core.audio_sync import ('
+E   src/app/controllers/edit_controller.py:7769 'from src.features.edit.core.multicam_sync import ('
+E   src/app/controllers/edit_controller.py:7813 'from src.features.edit.core.audio_sync import AudioSyncBinding'
+E   src/app/controllers/edit_controller.py:7814 'from src.features.edit.core.commands import UpdateAudioSyncBindingCommand'
+E   src/app/controllers/edit_controller.py:7856 'from src.features.edit.core.commands import ('
+E   src/app/controllers/edit_controller.py:7860 'from src.features.edit.core.interpretation import fps_as_fraction'
+E   src/app/controllers/edit_controller.py:7908 'from src.features.edit.core.multicam import multicam_group_from_asset'
+E   src/app/controllers/edit_controller.py:7918 'from src.features.edit.core.multicam_sync import ('
+E   src/app/controllers/edit_controller.py:7943 'from src.features.edit.core.multicam import MulticamSyncIdentity'
+E   src/app/controllers/edit_controller.py:8017 'from src.features.edit.core.multicam import ('
+E   src/app/controllers/edit_controller.py:8025 'from src.features.edit.ui.multicam_sync_result_dialog import ('
+E   src/app/controllers/edit_controller.py:8077 'from src.features.edit.core.multicam import ('
+E   src/app/controllers/edit_controller.py:8081 'from src.features.edit.core.multicam_sync import filter_writable_offsets'
+E   src/app/controllers/edit_controller.py:8191 'from src.features.edit.core.nested_sequence import ('
+E   src/app/controllers/edit_controller.py:8230 'from src.features.edit.core.project import TimelineSequenceRef'
+E   src/app/controllers/edit_controller.py:8248 'from src.features.edit.core.timeline_project_transaction import TimelineProjectTransactionCommand'
+E   src/app/controllers/edit_controller.py:8551 'from src.features.edit.core.color_versions import ('
+E   src/app/controllers/edit_controller.py:8757 'from src.features.edit.core.commands import ProjectMacroCommand'
+E   src/app/controllers/edit_controller.py:8870 'from src.features.edit.core.commands import UpdateColorStackCommand'
+E   src/app/controllers/edit_controller.py:9084 'from src.features.edit.core.render_cache import build_render_cache_fingerprint'
+E   src/app/controllers/edit_controller.py:9637 'from src.features.edit.core.snapshot_backup_scheduler import ('
+E   src/app/controllers/edit_controller.py:9746 'from src.features.edit.core.render_cache_status import ('
+E   src/app/controllers/edit_controller.py:10148 'from src.features.edit.core.commands import AddClipCommand'
+E   src/app/controllers/edit_controller.py:10149 'from src.features.edit.core.project import create_placeholder_asset'
+E   src/app/controllers/edit_controller.py:10150 'from src.features.edit.core.timeline_v2 import ClipInstance'
+E   src/app/controllers/edit_controller.py:10151 'from src.features.edit.ui.placeholder_dialog import PlaceholderDialog'
+E   src/app/controllers/edit_controller.py:10213 'from src.features.edit.core.captions.model import CaptionStyle'
+E   src/app/controllers/edit_controller.py:10216 'from src.features.edit.core.captions.style_preset import BUILTIN_PRESETS'
+E   src/app/controllers/edit_controller.py:10217 'from src.features.edit.core.title_templates import ('
+E   src/app/controllers/edit_controller.py:10234 'from src.features.edit.core.commands import ('
+E   src/app/controllers/edit_controller.py:10318 'from src.features.edit.core.commands import ('
+E   src/app/controllers/edit_controller.py:10392 'from src.features.edit.core.captions.edit_policy import ('
+E   src/app/controllers/edit_controller.py:10554 'from src.features.edit.core.captions.commands import ('
+E   src/app/controllers/edit_controller.py:10574 'from src.features.edit.core.captions.commands import ('
+E   src/app/controllers/edit_controller.py:10627 'from src.features.edit.core.captions.commands import ('
+E   src/app/controllers/edit_controller.py:10853 'from src.features.edit.core.captions.model import STYLE_FIELDS'
+E   src/app/controllers/edit_controller.py:10858 'from src.features.edit.core.captions.model import CaptionStyle'
+E   src/app/controllers/edit_controller.py:10882 'from src.features.edit.core.captions.commands import UpdateSubtitleTrackStyleCommand'
+E   src/app/controllers/edit_controller.py:10883 'from src.features.edit.core.captions.model import CaptionStyle, EMPTY_STYLE'
+E   src/app/controllers/edit_controller.py:10910 'from src.features.edit.core.captions.model import ('
+E   src/app/controllers/edit_controller.py:10979 'from src.features.edit.ui.caption_workspace import ('
+E   src/app/controllers/edit_controller.py:11042 'from src.features.edit.core.captions.model import ('
+E   src/app/controllers/edit_controller.py:11119 'from src.features.edit.core.captions.model import CaptionStyle, EMPTY_STYLE'
+E   src/app/controllers/edit_controller.py:11147 'from src.features.edit.core.captions.model import CaptionTrackMetadata'
+E   src/app/controllers/edit_controller.py:11297 'from src.features.edit.core.captions.commands import UpdateSubtitleTrackStyleCommand'
+E   src/app/controllers/edit_controller.py:11298 'from src.features.edit.core.captions.model import CaptionStyle, EMPTY_STYLE'
+E   src/app/controllers/deliver_controller.py:904 'from src.features.edit.core.timeline_export import ('
+E   src/app/controllers/deliver_controller.py:1410 'from src.features.edit.core.timeline_v2 import ('
+E   src/app/controllers/deliver_controller.py:2022 'from src.features.composite.core.node_engine import NodeGraph'
+E   src/app/controllers/file_controller.py:23 'from src.features.edit.core.playback_debug import playback_trace'
+E   src/app/controllers/file_controller.py:761 'from src.features.edit.core.project import EditProject'
+E   src/app/controllers/file_controller.py:4309 'from src.features.edit.core.project_migration import ('
+E   src/app/controllers/file_controller.py:7438 'from src.features.edit.ui.interchange_dialog import InterchangeReportDialog'
+E   src/app/controllers/file_controller.py:7498 'from src.features.edit.ui.interchange_dialog import InterchangeReportDialog'
+E   src/app/controllers/file_controller.py:7557 'from src.features.edit.ui.interchange_dialog import InterchangeReportDialog'
+E   src/app/controllers/file_controller.py:7636 'from src.features.edit.core.captions.delivery import ('
+E   src/app/controllers/file_controller.py:7640 'from src.features.edit.ui.subtitle_delivery_dialog import ('
+E   src/app/controllers/file_controller.py:7752 'from src.features.edit.ui.stem_export_dialog import StemExportDialog'
+E   src/app/controllers/file_controller.py:7772 'from src.features.edit.ui.interchange_dialog import InterchangeReportDialog'
+E   src/app/controllers/ai_edit_host_bridge_impl.py:147 'from src.features.edit.core.captions.model import ('
+E   src/app/controllers/ai_edit_host_bridge_impl.py:152 'from src.features.edit.core.subtitle_renderer import measure_subtitle_render_bbox'
+E   src/app/controllers/menu_toolbar_controller.py:1235 'from src.features.edit.core.edit_project_io import EditProjectIO'
+E   src/app/controllers/menu_toolbar_controller.py:2037 'from src.features.edit.core.edit_gpu_decode_manager import ('
+E   src/app/controllers/menu_toolbar_controller.py:2221 'from src.features.composite.core.undo_stack import UndoAction'
+E   src/app/controllers/menu_toolbar_controller.py:2245 'from src.features.composite.core.tracker_corrections import ('
+E   src/app/controllers/ai_workflow_composite_render.py:356 'from src.features.composite.render.composite_render_output import ('
+E   src/app/controllers/ai_workflow_composite_render.py:412 'from src.features.composite.render.composite_frame_renderer import ('
+E   src/app/controllers/ai_workflow_composite_render.py:449 'from src.features.composite.render.composite_render_output import ('
+E   src/app/controllers/dock_layout_controller.py:168 'from src.features.edit.core.multicam_adaptive import ('
+E   src/app/controllers/dock_layout_controller.py:701 'from src.features.edit.ui.ai_edit_assistant_panel import ('
+E   src/app/controllers/dock_layout_controller.py:2533 'from src.features.edit.core.workspace_presets import ('
+E   src/app/controllers/dock_layout_controller.py:2611 'from src.features.edit.core.workspace_presets import ('
+E   src/app/controllers/dock_layout_controller.py:2632 'from src.features.edit.core.workspace_presets import ('
+E   src/app/controllers/dock_layout_controller.py:2720 'from src.features.edit.core.workspace_presets import ('
+E   src/app/controllers/composite_controller.py:965 'from src.features.composite.render.composite_render_output import ('
+E   src/app/controllers/composite_controller.py:1037 'from src.features.composite.core.graph_preflight import ('
+E   src/app/controllers/composite_controller.py:1230 'from src.features.composite.render.composite_render_worker import ('
+E   src/app/controllers/ai_edit_controller.py:1425 'from src.features.edit.core.captions.quality import inspect_subtitle_track'
+E   src/app/controllers/ai_edit_controller.py:2370 'from src.features.edit.ui.ai_assistant_composer import RunDrawerItem'
+E   src/app/controllers/ai_edit_controller.py:2452 'from src.features.edit.ui.ai_assistant_composer import RunDrawerState'
+E   src/app/controllers/ai_edit_controller.py:3200 'from src.features.edit.ui.ai_assistant_composer import RunDrawerItem'
+E   src/app/controllers/ai_edit_controller.py:3515 'from src.features.edit.ui.ai_assistant_composer import RunDrawerState'
+E   src/app/controllers/ai_edit_controller.py:5142 'from src.features.edit.ui.ai_assistant_composer import ComposerFooterState'
+E   src/app/controllers/ai_edit_controller.py:6065 'from src.features.edit.ui.ai_assistant_composer import ('
+E   src/app/controllers/ai_edit_controller.py:6190 'from src.features.edit.ui.ai_assistant_composer import ComposerFooterState'
+E   src/app/controllers/ai_edit_controller.py:6325 'from src.features.edit.core.captions.translation import ('
+_ TestAppLayerForbiddenImports.test_shared_layer_has_no_forbidden_feature_imports _
+tests/architecture/test_boundary_guardrails.py:221: in test_shared_layer_has_no_forbidden_feature_imports
+    _assert_boundary_clean_or_known_baseline(ROOT / "src" / "shared", "shared")
+tests/architecture/test_boundary_guardrails.py:208: in _assert_boundary_clean_or_known_baseline
+    pytest.fail(
+E   Failed: shared boundary drift: 57 offenders (b51033f277ebd28a44adc6517316949c4c7cd983fbf100bf731cfde05d52bee7)
+E   src/shared/ui/upgrade_panel_actions.py:61 'from src.features.edit.ui.m07_version_tools_panel import ('
+E   src/shared/ui/upgrade_panel_actions.py:71 'from src.features.edit.ui.filler_removal_panel import ('
+E   src/shared/ui/upgrade_panel_actions.py:83 'from src.features.edit.ui.snapshot_compare_panel import ('
+E   src/shared/ui/upgrade_panel_actions.py:95 'from src.features.edit.ui.proxy_cleanup_panel import ('
+E   src/shared/ui/upgrade_panel_actions.py:113 'from src.features.deliver.ui.m21_multi_version_qc_panel import ('
+E   src/shared/contracts/effect_catalog.py:56 'from src.features.edit.core.effect_registry import get_effect_registry'
+E   src/shared/contracts/effect_catalog.py:57 'from src.features.edit.core.transition_catalog import ('
+E   src/shared/project/handoff.py:95 'from src.features.edit.core.edit_project_io import ('
+E   src/shared/project/handoff.py:165 'from src.features.edit.core.serialization import EditProjectSerializer'
+E   src/shared/export/video_encoder.py:2348 'from src.features.edit.core.channel_layout import ChannelLayout'
+E   src/shared/export/quick_export_dialog.py:44 'from src.features.deliver.core.video_export_formats import ('
+E   src/shared/export/video_export_worker.py:90 'from src.features.edit.core.timeline_export import ('
+E   src/shared/ui/audio_mixer/compressor_dialog.py:30 'from src.features.edit.core.timeline_v2 import CompressorParams'
+E   src/shared/ui/audio_mixer/delay_dialog.py:29 'from src.features.edit.core.timeline_v2 import DelayParams'
+E   src/shared/ui/audio_mixer/routing_matrix_dialog.py:198 'from src.features.edit.core.audio_playback import validate_routing_graph'
+E   src/shared/ui/audio_mixer/dynamics_dialog.py:30 'from src.features.edit.core.timeline_v2 import ('
+E   src/shared/ui/audio_mixer/dynamics_dialog.py:416 'from src.features.edit.core.timeline_v2 import TrackEffectInstance'
+E   src/shared/ui/audio_mixer/noise_gate_dialog.py:27 'from src.features.edit.core.timeline_v2 import NoiseGateParams'
+E   src/shared/ui/audio_mixer/strip_eq_dialog.py:33 'from src.features.edit.core.timeline_v2 import StripEQParams'
+E   src/shared/ui/audio_mixer/strip_eq_dialog.py:34 'from src.features.edit.core.audio_dsp import ('
+E   src/shared/ui/audio_mixer/strip_eq_dialog.py:351 'from src.features.edit.core.audio_capabilities import ('
+E   src/shared/ui/audio_mixer/preset_dialog.py:26 'from src.features.edit.core.mixer_preset import ('
+E   src/shared/ui/audio_mixer/imager_dialog.py:26 'from src.features.edit.core.timeline_v2 import ImagerParams'
+E   src/shared/ui/audio_mixer/audio_mixer_panel.py:483 'from src.features.edit.core.audio_capabilities import ('
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:56 'from src.features.edit.core.timeline_v2 import ('
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:707 'from src.features.edit.core.timeline_v2 import ('
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:736 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:825 'from src.features.edit.core.timeline_v2 import StripEQParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:914 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1050 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1072 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1118 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1146 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1205 'from src.features.edit.core.timeline_v2 import LimiterParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1243 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1264 'from src.features.edit.core.timeline_v2 import CompressorParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1300 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1321 'from src.features.edit.core.timeline_v2 import ReverbParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1355 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1376 'from src.features.edit.core.timeline_v2 import DelayParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1410 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1431 'from src.features.edit.core.timeline_v2 import SaturationParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1465 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1486 'from src.features.edit.core.timeline_v2 import ImagerParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1520 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1541 'from src.features.edit.core.timeline_v2 import NoiseGateParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1575 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1600 'from src.features.edit.core.timeline_v2 import StripEQParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1632 'from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams'
+E   src/shared/ui/audio_mixer/track_mixer_widget.py:1864 'from src.features.edit.core.audio_capabilities import ('
+E   src/shared/ui/audio_mixer/reverb_dialog.py:28 'from src.features.edit.core.timeline_v2 import ReverbParams'
+E   src/shared/ui/audio_mixer/limiter_dialog.py:23 'from src.features.edit.core.timeline_v2 import LimiterParams'
+E   src/shared/ui/audio_mixer/routing_dialog.py:160 'from src.features.edit.core.timeline_v2 import Send'
+E   src/shared/ui/audio_mixer/routing_dialog.py:369 'from src.features.edit.core.timeline_v2 import Send'
+E   src/shared/ui/audio_mixer/routing_dialog.py:425 'from src.features.edit.core.audio_playback import validate_routing_graph'
+E   src/shared/ui/audio_mixer/saturation_dialog.py:25 'from src.features.edit.core.timeline_v2 import SaturationParams'
+E   src/shared/media/macos_vt/vt_compression.py:910 'from src.features.edit.core.channel_layout import ChannelLayout'
+_ TestModuleMenuActionRegistration.test_composite_actions_not_returned_when_disabled _
+tests/architecture/test_menu_contributions.py:315: in test_composite_actions_not_returned_when_disabled
+    assert not any(aid.startswith("composite.") for aid in action_ids)
+E   assert not True
+E    +  where True = any(<generator object TestModuleMenuActionRegistration.test_composite_actions_not_returned_when_disabled.<locals>.<genexpr> at 0x3125f0450>)
+_ TestModuleMenuActionRegistration.test_deliver_actions_not_returned_when_disabled _
+tests/architecture/test_menu_contributions.py:328: in test_deliver_actions_not_returned_when_disabled
+    assert not any(aid.startswith("deliver.") for aid in action_ids)
+E   assert not True
+E    +  where True = any(<generator object TestModuleMenuActionRegistration.test_deliver_actions_not_returned_when_disabled.<locals>.<genexpr> at 0x3126df6b0>)
+__ TestModuleMenuActionRegistration.test_action_id_format_follows_convention ___
+tests/architecture/test_menu_contributions.py:384: in test_action_id_format_follows_convention
+    assert parts[0] == action.feature_id, (
+E   AssertionError: action_id prefix mismatch: color.shot_match.open vs feature_id=edit
+E   assert 'color' == 'edit'
+E     
+E     - edit
+E     + color
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/architecture.xml -
+=========================== short test summary info ============================
+FAILED tests/architecture/test_boundary_guardrails.py::TestAppLayerForbiddenImports::test_app_layer_has_no_forbidden_feature_imports
+FAILED tests/architecture/test_boundary_guardrails.py::TestAppLayerForbiddenImports::test_shared_layer_has_no_forbidden_feature_imports
+FAILED tests/architecture/test_menu_contributions.py::TestModuleMenuActionRegistration::test_composite_actions_not_returned_when_disabled
+FAILED tests/architecture/test_menu_contributions.py::TestModuleMenuActionRegistration::test_deliver_actions_not_returned_when_disabled
+FAILED tests/architecture/test_menu_contributions.py::TestModuleMenuActionRegistration::test_action_id_format_follows_convention
+=================== 5 failed, 406 passed, 1 xfailed in 4.35s ===================

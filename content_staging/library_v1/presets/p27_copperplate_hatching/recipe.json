@@ -1,0 +1,32 @@
+{
+  "recipe_id": "P27",
+  "name": "铜版排线",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合插画化/铜版画感；line_spacing 4–8 细排线，layers 2 层交叉",
+  "component": "F14 hatching（暂存组件 content_staging/library_v1/filters/hatching）",
+  "dependencies": {
+    "component_id": "F14",
+    "component_slug": "hatching",
+    "component_kind": "filter"
+  },
+  "params": {
+    "line_spacing": 6.0,
+    "angle": 45.0,
+    "layers": "2",
+    "ink_color": [
+      0.07,
+      0.06,
+      0.05
+    ],
+    "paper": 0.92,
+    "amount": 0.9
+  },
+  "notes": "依赖暂存组件（L11 未接缝）：亮度驱动交叉排线，与生产 Edge_Ink_Outline 的差量在灰阶排线模型。"
+}

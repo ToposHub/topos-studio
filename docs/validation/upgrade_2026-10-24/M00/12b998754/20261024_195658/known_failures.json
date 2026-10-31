@@ -1,0 +1,83 @@
+{
+  "task": "M00",
+  "title": "现有失败/缺口登记（宿主、依赖、责任归属）",
+  "head": "12b998754",
+  "date": "2026-10-24",
+  "note": "本登记不把任何失败改 skip；复验条件按各责任包推进。全量失败 ID 集合以既有 manifest 引用为准，不在本机重新推导。",
+  "registers": [
+    {
+      "id": "S01-S12",
+      "kind": "shared_correctness_gaps",
+      "evidence": "docs/validation/upgrade_2026-10-24/issue_inventory.json",
+      "host": "macOS-15.3.1-x86_64（审查复现，9 组逻辑探针 + 4 组 v2 探针）",
+      "dependency": "无硬件依赖；S04/S12 真实媒体/窗口验收待各包补",
+      "owner": "M02-M12（Mac 修复），Windows 按 W 计划复验",
+      "blocking": "P1 正确性项，M18 发布门禁前必须关闭或明确降级声明"
+    },
+    {
+      "id": "M-I01",
+      "kind": "dependency_conflict",
+      "detail": "pip check 3 处冲突：pyannote-core 6.0.1 需 numpy>=2（本机 1.26.4）；lightning 2.4.0 需 packaging<25（本机 26.3）；qwen-tts 0.1.1 需 transformers==4.57.3（本机 4.57.6）",
+      "evidence": "docs/validation/upgrade_2026-10-24/pip_check.log（exit 1）",
+      "host": "macOS 主 venv（.venv）",
+      "dependency": "AI worker 可选栈",
+      "owner": "M01",
+      "blocking": "不阻塞核心 UI/视频链；M01 交付隔离环境后复测"
+    },
+    {
+      "id": "M-I02",
+      "kind": "perf_retest_pending",
+      "detail": "旧 4K 窗口解码等待/预取锁争用（历史 38.2ms 记录，非当前 HEAD 结论）",
+      "evidence": "docs/perf_baseline_freeze_mac_2026-10.md:135",
+      "host": "macOS（历史）",
+      "owner": "M16",
+      "blocking": "复测优先级，不冒充当前实测"
+    },
+    {
+      "id": "M-I03",
+      "kind": "perf_retest_pending",
+      "detail": "监看第一刀后历史 48.2ms 超 25fps 的 40ms 预算（历史记录）",
+      "evidence": "docs/perf_baseline_freeze_mac_2026-10.md:135",
+      "host": "macOS（历史）",
+      "owner": "M17",
+      "blocking": "复测优先级，不冒充当前实测"
+    },
+    {
+      "id": "BASELINE-media-tests",
+      "kind": "pre_existing_test_failures",
+      "detail": "tests/media 3535 用例 190F/945E（失败/错误 ID 集合 1135 项，与 C0.1-G2 基线逐 ID 一致，零新回归）",
+      "evidence": "docs/b22_decode_matrix_machineB_2026-10.md（Phase5，提交 e3d9313ac 记录）",
+      "host": "机器 B（Windows）",
+      "dependency": "GPU/硬件相关用例在无硬件宿主 skip",
+      "owner": "历史基线；Mac 全量复跑归 M16.3/M18 记录，不在 M00 重推导",
+      "blocking": "非本轮 focused 门禁范围"
+    },
+    {
+      "id": "BASELINE-edit-tests",
+      "kind": "pre_existing_test_failures",
+      "detail": "tests/edit 11201 用例 69F（C0.1-G4 基线 76 的子集，flaky 回正 7 项，零新回归）",
+      "evidence": "Phase5 回归记录（提交 e3d9313ac）",
+      "host": "机器 B（Windows）",
+      "owner": "历史基线；Mac 全量复跑归 M16.3/M18 记录",
+      "blocking": "非本轮 focused 门禁范围"
+    },
+    {
+      "id": "BASELINE-composite-tests",
+      "kind": "pre_existing_test_failures",
+      "detail": "tests/composite 回归 197 绿 + 4 失败（已验证 pre-existing）",
+      "evidence": "提交 0b57c322d 记录",
+      "host": "机器 B（Windows）",
+      "owner": "历史基线；M08 触及 composite 时逐项核对",
+      "blocking": "非本轮 focused 门禁范围"
+    },
+    {
+      "id": "F-OPEN-ITEMS",
+      "kind": "plan_open_items",
+      "detail": "F 计划 8 项开：F5.2（设备）、F6.3（aaf2+接收端）、F10.1–F10.6（显式立项）",
+      "evidence": "docs/validation/upgrade_2026-10-24/M00/12b998754/20261024_195658/f_plan_gap_table.json",
+      "host": "n/a",
+      "owner": "M17（F5.2 软件子项）/M24+M18（F6.3）/条件表（F10.x）",
+      "blocking": "条件不满足时维持延期，不得改成通过"
+    }
+  ]
+}

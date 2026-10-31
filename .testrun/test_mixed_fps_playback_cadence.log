@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 13 items
+
+tests/edit/test_mixed_fps_playback_cadence.py .............              [100%]
+
+============================== 13 passed in 6.71s ==============================

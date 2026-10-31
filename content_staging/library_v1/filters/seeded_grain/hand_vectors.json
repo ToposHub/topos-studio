@@ -1,0 +1,101 @@
+{
+  "component": "F07 seeded_grain",
+  "method": "手算：uint32 murmur3 风格格点散列（常量按 README 规格：0x9E3779B1/0x85EBCA77/0xC2B2AE3D/0x2545F491）+ 4-tap smoothstep value noise + 亮度加权 + 加性彩噪，独立脚本 /tmp 一次性推导，与 oracle/GLSL 无代码复用；容差 1e-6。夹具：8×4 全 0.18 常色图（W=8, H=4，RGB 同值）；颗粒为位置依赖，向量按 (x, y) 定位。",
+  "params": {
+    "strength": 0.35,
+    "grain_size": 1.5,
+    "seed": 7,
+    "chroma": 0.25,
+    "shadow_bias": 0.25,
+    "highlight_bias": 0.15
+  },
+  "vectors": [
+    {
+      "pos": [3, 1],
+      "expected": [
+        0.1879178,
+        0.1808993,
+        0.1769899
+      ],
+      "note": "默认参数：gp=(2.3333,1.0) 格(2,1) fade=(0.2593,0)；n0=0.0280483 n1=0.8756502 n2=-0.4877324；weight=0.76336 amp=0.042"
+    },
+    {
+      "pos": [0, 0],
+      "expected": [
+        0.1791491,
+        0.1743064,
+        0.1765738
+      ],
+      "note": "角像素 gp=(0.3333,0.3333)（格点 (0,0)/(1,0)/(0,1)/(1,1) 双向插值；n0=-0.1775873）"
+    },
+    {
+      "pos": [3, 1],
+      "hdr_input": true,
+      "expected": [
+        4.5015559,
+        4.5001767,
+        4.4994085
+      ],
+      "note": "HDR 基色 4.5：luma 权重饱和在高光端 weight=0.15（clamp 仅权重域），加性增量不 clamp"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "params": {
+        "chroma": 0.0
+      },
+      "pos": [3, 1],
+      "expected": [
+        0.1808993,
+        0.1808993,
+        0.1808993
+      ],
+      "note": "chroma=0 → 纯单色颗粒：三通道同偏移 +0.0008993（R/B 相位项归零）"
+    },
+    {
+      "params": {
+        "grain_size": 1.0
+      },
+      "pos": [3, 1],
+      "expected": [
+        0.1949535,
+        0.1906371,
+        0.1876749
+      ],
+      "note": "grain_size=1：gp=(3.5,1.5) fade=(0.5,0.5)，n0=0.3317756"
+    },
+    {
+      "params": {
+        "seed": 8
+      },
+      "pos": [3, 1],
+      "expected": [
+        0.1641936,
+        0.1631429,
+        0.1623271
+      ],
+      "note": "seed 改变输出（seed 进入格点散列第三乘子通道）——静态可复现：同 seed 恒同图"
+    },
+    {
+      "params": {
+        "shadow_bias": 1.0,
+        "highlight_bias": 0.0
+      },
+      "pos": [3, 1],
+      "expected": [
+        0.1930982,
+        0.1814876,
+        0.1750206
+      ],
+      "note": "权重调制：weight 0.76336→1.26280（中间调 0.18 上阴影偏置项放大颗粒）"
+    },
+    {
+      "params": {
+        "strength": 0.0
+      },
+      "pos": [3, 1],
+      "expected": null,
+      "note": "strength=0 精确恒等（含 HDR，早退直通）"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+$ TOPOS_CODEC_LIB=.../topos_codec.0.1.0.dylib QT_QPA_PLATFORM=offscreen pytest tests/media/test_topos_probe_unification.py -q
+18 passed
+$ pytest tests/media/test_topos_source.py tests/media/test_media_source_factory.py -q
+37 passed
+$ pytest tests/media/test_topos_source_export_passthrough.py -q
+5 passed (真实 2K_topos.mov → h264/ProRes/DNxHR/topos_proxy 直通导出)
+$ pytest tests/media/test_codec_probe_fix.py tests/edit/test_quick_project.py tests/edit/test_color_vs_edit_decode.py tests/edit/ai_editing/test_runtime_capability_snapshot.py -q
+31 passed, 12 skipped
+$ pytest tests/edit/test_edit_gpu_decode_manager.py tests/edit/test_edit_gpu_pipeline.py tests/color/test_color_monitor_status_bar.py tests/media/test_high_bit_depth_integration.py tests/media/test_resource_leak.py tests/media/test_topos_raw_sequence.py -q
+120 passed, 4 skipped

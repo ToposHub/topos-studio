@@ -1,0 +1,73 @@
+{
+  "kind": "cp_export_speed_real_media",
+  "rows": [
+    {
+      "case": "A baseline png",
+      "ok": true,
+      "frames_written": 5,
+      "wall_s": 1.307,
+      "fps": 3.83,
+      "ms_per_frame": 261.4,
+      "error": null
+    },
+    {
+      "case": "B heavy_chain(6fx) png",
+      "ok": true,
+      "frames_written": 5,
+      "wall_s": 1.275,
+      "fps": 3.92,
+      "ms_per_frame": 255.0,
+      "error": null
+    },
+    {
+      "case": "C baseline exr",
+      "ok": true,
+      "frames_written": 5,
+      "wall_s": 1.161,
+      "fps": 4.31,
+      "ms_per_frame": 232.1,
+      "error": null
+    },
+    {
+      "case": "C heavy_chain(6fx) exr",
+      "ok": true,
+      "frames_written": 5,
+      "wall_s": 1.306,
+      "fps": 3.83,
+      "ms_per_frame": 261.3,
+      "error": null
+    },
+    {
+      "case": "D heavy_chain video h264 crf23",
+      "ok": true,
+      "frames_written": 10,
+      "wall_s": 2.347,
+      "fps": 4.26,
+      "ms_per_frame": 234.7,
+      "error": null
+    },
+    {
+      "case": "E writer: multipart(1 part, PIZ)",
+      "ok": true,
+      "frames_written": 1,
+      "wall_s": 0.213,
+      "ms_per_frame": 212.7
+    },
+    {
+      "case": "E writer: multipart(beauty+3 AOV, PIZ)",
+      "ok": true,
+      "frames_written": 1,
+      "wall_s": 0.345,
+      "ms_per_frame": 345.2
+    },
+    {
+      "case": "E writer: cv2 single-part EXR(pxr24)",
+      "ok": true,
+      "frames_written": 1,
+      "wall_s": 1.482,
+      "ms_per_frame": 1481.7
+    }
+  ],
+  "frames": 5,
+  "resolution": "1920x1080"
+}

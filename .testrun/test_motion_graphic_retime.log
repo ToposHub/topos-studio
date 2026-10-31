@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_motion_graphic_retime.py ...                             [100%]
+
+============================== 3 passed in 11.15s ==============================

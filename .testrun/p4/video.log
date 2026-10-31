@@ -1,0 +1,101 @@
+============================= test session starts ==============================
+collected 1020 items
+
+tests/video/test_4k_proxy.py ...                                         [  0%]
+tests/video/test_async_cancel.py ...................                     [  2%]
+tests/video/test_cfa_gpu_debayer.py .........                            [  3%]
+tests/video/test_dynamic_preview_quality.py ........                     [  3%]
+tests/video/test_ef05_aud.py ........................................... [  8%]
+.2026-10-28 06:46:26.305 Python[42319:3559044] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+............                                                            [  9%]
+tests/video/test_external_yuv_renderer.py ......                         [  9%]
+tests/video/test_ffmpeg_encoder.py ..................................... [ 13%]
+......FF.........................................ss.s..                  [ 18%]
+tests/video/test_frame_trace_schema.py ...............................   [ 21%]
+tests/video/test_gif_encoder.py ...                                      [ 22%]
+tests/video/test_gpu_resource_pool.py .................................. [ 25%]
+....                                                                     [ 25%]
+tests/video/test_gpu_resource_pool_v2.py ..........................      [ 28%]
+tests/video/test_m21_publish_group.py ....                               [ 28%]
+tests/video/test_m21_publish_transaction.py ....                         [ 29%]
+tests/video/test_pbo_upload_api.py ..................................... [ 32%]
+.........                                                                [ 33%]
+tests/video/test_regression_image_video.py ............................. [ 36%]
+s.....................s................ss.....                           [ 41%]
+tests/video/test_resource_cleanup_on_exception.py ..........             [ 42%]
+tests/video/test_scrub_fast_seek.py ........                             [ 42%]
+tests/video/test_timeline_planar_yuv_color_metadata.py ......            [ 43%]
+tests/video/test_topos_planar_semantics.py .........                     [ 44%]
+tests/video/test_video_async_renderer.py .  ✓ 帧渲染完成，纹理 ID: 2
+...                            [ 44%]
+tests/video/test_video_optimization.py ..                                [ 45%]
+tests/video/test_video_pipeline_decision.py ............................ [ 47%]
+..........                                                               [ 48%]
+tests/video/test_video_pipeline_fallback_types.py ...................... [ 50%]
+...........                                                              [ 51%]
+tests/video/test_video_playback_coverage.py ............................ [ 54%]
+........................................................................ [ 61%]
+........................................................................ [ 68%]
+.................................................                        [ 73%]
+tests/video/test_video_playback_flags.py ............................... [ 76%]
+....                                                                     [ 77%]
+tests/video/test_video_texture_pool.py ................................. [ 80%]
+.                                                                        [ 80%]
+tests/video/test_video_upload_command.py ............................... [ 83%]
+......................................................................   [ 90%]
+tests/video/test_yuv_chroma_sampling_pixels.py ....                      [ 90%]
+tests/video/test_yuv_gpu_upload.py ..................................... [ 94%]
+........                                                                 [ 95%]
+tests/video/test_yuv_temp_texture_release.py ..........                  [ 96%]
+tests/video/test_yuv_upload_api.py ..................................... [ 99%]
+...                                                                      [100%]
+
+=================================== FAILURES ===================================
+__________________ TestColorMetadata.test_set_hdr10_metadata ___________________
+tests/video/test_ffmpeg_encoder.py:945: in test_set_hdr10_metadata
+    encoder.open()
+src/shared/export/video_encoder.py:1023: in open
+    raise RuntimeError(reason)
+E   RuntimeError: FFmpegVideoEncoder: HEVC 10-bit 软件编码（libx265）在当前 PyAV/ffmpeg 构建下有确定性崩溃（flush 段错误，上游缺陷）——已拒绝导出以免整个进程崩溃丢失工作。请改用 HEVC 8-bit、H.264，或硬件 VideoToolbox 路径；升级 PyAV/ffmpeg 后可移除此限制。
+------------------------------ Captured log call -------------------------------
+ERROR    src.shared.export.video_encoder:video_encoder.py:1011 FFmpegVideoEncoder: HEVC 10-bit 软件编码（libx265）在当前 PyAV/ffmpeg 构建下有确定性崩溃（flush 段错误，上游缺陷）——已拒绝导出以免整个进程崩溃丢失工作。请改用 HEVC 8-bit、H.264，或硬件 VideoToolbox 路径；升级 PyAV/ffmpeg 后可移除此限制。
+___________________ TestColorMetadata.test_set_hlg_metadata ____________________
+tests/video/test_ffmpeg_encoder.py:973: in test_set_hlg_metadata
+    encoder.open()
+src/shared/export/video_encoder.py:1023: in open
+    raise RuntimeError(reason)
+E   RuntimeError: FFmpegVideoEncoder: HEVC 10-bit 软件编码（libx265）在当前 PyAV/ffmpeg 构建下有确定性崩溃（flush 段错误，上游缺陷）——已拒绝导出以免整个进程崩溃丢失工作。请改用 HEVC 8-bit、H.264，或硬件 VideoToolbox 路径；升级 PyAV/ffmpeg 后可移除此限制。
+------------------------------ Captured log call -------------------------------
+ERROR    src.shared.export.video_encoder:video_encoder.py:1011 FFmpegVideoEncoder: HEVC 10-bit 软件编码（libx265）在当前 PyAV/ffmpeg 构建下有确定性崩溃（flush 段错误，上游缺陷）——已拒绝导出以免整个进程崩溃丢失工作。请改用 HEVC 8-bit、H.264，或硬件 VideoToolbox 路径；升级 PyAV/ffmpeg 后可移除此限制。
+=============================== warnings summary ===============================
+tests/video/test_video_async_renderer.py::test_video_renderer_creation
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/_pytest/python.py:170: PytestReturnNotNoneWarning: Test functions should return None, but tests/video/test_video_async_renderer.py::test_video_renderer_creation returned <class 'bool'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/video/test_video_async_renderer.py::test_frame_upload_and_render
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/_pytest/python.py:170: PytestReturnNotNoneWarning: Test functions should return None, but tests/video/test_video_async_renderer.py::test_frame_upload_and_render returned <class 'bool'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/video/test_video_async_renderer.py::test_resource_cleanup
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/_pytest/python.py:170: PytestReturnNotNoneWarning: Test functions should return None, but tests/video/test_video_async_renderer.py::test_resource_cleanup returned <class 'bool'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/video/test_video_async_renderer.py::test_command_queue
+  /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.venv/lib/python3.12/site-packages/_pytest/python.py:170: PytestReturnNotNoneWarning: Test functions should return None, but tests/video/test_video_async_renderer.py::test_command_queue returned <class 'bool'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/video.xml -
+=========================== short test summary info ============================
+FAILED tests/video/test_ffmpeg_encoder.py::TestColorMetadata::test_set_hdr10_metadata
+FAILED tests/video/test_ffmpeg_encoder.py::TestColorMetadata::test_set_hlg_metadata
+============ 2 failed, 1011 passed, 7 skipped, 4 warnings in 30.94s ============
+VideoTexturePool: 1 texture slot(s) outlived explicit release_all() on the render thread — dropping references without GL release (GC thread has no current context); GPU memory is reclaimed when the owning GL context is destroyed

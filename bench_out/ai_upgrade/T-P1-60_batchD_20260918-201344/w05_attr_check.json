@@ -1,0 +1,187 @@
+{
+  "meta": {
+    "generated": "2026-09-18 19:44:21",
+    "gl": {
+      "version": "4.1 ATI-6.1.13",
+      "renderer": "AMD Radeon RX 6800 OpenGL Engine"
+    },
+    "gl_require": 0,
+    "preview_frames": 2,
+    "export_frames": 1
+  },
+  "cases": [
+    {
+      "name": "blur@hd",
+      "cold_ms": 692.6,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 100.6067,
+        "std": 52.3328,
+        "attribution": {
+          "eval_ms": 342.294,
+          "readback_ms": 55.949,
+          "total_ms": 596.573,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 5,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 6.4,
+      "preview_p90_ms": 7.3,
+      "attribution_preview": {
+        "eval_ms": 0.414,
+        "readback_ms": 3.948,
+        "total_ms": 4.799,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 46.1,
+      "attribution_export": {
+        "eval_ms": 0.759,
+        "readback_ms": 43.571,
+        "total_ms": 45.053,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 5,
+        "readback_format": "linear_f32"
+      },
+      "res": "hd",
+      "node_type": "blur",
+      "exec_class": "gpu",
+      "total_wall_s": 2.25
+    },
+    {
+      "name": "chroma_keyer@hd",
+      "cold_ms": 504.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 63.75,
+        "std": 110.4182,
+        "attribution": {
+          "eval_ms": 153.667,
+          "readback_ms": 30.504,
+          "total_ms": 410.933,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 3,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 9.4,
+      "preview_p90_ms": 10.3,
+      "attribution_preview": {
+        "eval_ms": 0.294,
+        "readback_ms": 9.175,
+        "total_ms": 9.774,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 3,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 41.4,
+      "attribution_export": {
+        "eval_ms": 0.598,
+        "readback_ms": 39.494,
+        "total_ms": 40.674,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 3,
+        "readback_format": "linear_f32"
+      },
+      "res": "hd",
+      "node_type": "chroma_keyer",
+      "exec_class": "gpu",
+      "total_wall_s": 1.72
+    }
+  ],
+  "video": [],
+  "baseline": {
+    "hd": {
+      "name": "baseline_hd",
+      "cold_ms": 982.3,
+      "output": {
+        "ok": true,
+        "shape": [
+          1080,
+          1920,
+          3
+        ],
+        "dtype": "uint8",
+        "mean": 99.4899,
+        "std": 54.2958,
+        "attribution": {
+          "eval_ms": 440.022,
+          "readback_ms": 38.731,
+          "total_ms": 772.182,
+          "cpu_upload_bytes": null,
+          "cpu_download_bytes": 6220800,
+          "cache_hit": null,
+          "strategy": "full_frame",
+          "backend": "opengl",
+          "node_count": 4,
+          "readback_format": "srgb_u8"
+        }
+      },
+      "preview_ms": 8.1,
+      "preview_p90_ms": 11.2,
+      "attribution_preview": {
+        "eval_ms": 0.37,
+        "readback_ms": 3.655,
+        "total_ms": 4.424,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 6220800,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 4,
+        "readback_format": "srgb_u8"
+      },
+      "export_ms": 49.1,
+      "attribution_export": {
+        "eval_ms": 0.659,
+        "readback_ms": 46.918,
+        "total_ms": 48.185,
+        "cpu_upload_bytes": null,
+        "cpu_download_bytes": 24883200,
+        "cache_hit": null,
+        "strategy": "full_frame",
+        "backend": "opengl",
+        "node_count": 4,
+        "readback_format": "linear_f32"
+      }
+    }
+  }
+}

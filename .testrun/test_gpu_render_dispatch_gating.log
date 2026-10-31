@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_gpu_render_dispatch_gating.py .......                    [100%]
+
+============================== 7 passed in 10.16s ==============================

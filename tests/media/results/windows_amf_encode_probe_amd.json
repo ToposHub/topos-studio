@@ -1,0 +1,79 @@
+{
+  "date": "2026-09-15T14:57:36",
+  "plan_item": "W6-02（AMD 半边）：AMF 硬编导出实测",
+  "machine": {
+    "gpu": "AMD Radeon RX 6800; AMD Radeon RX 6800; Microsoft Basic Render Driver",
+    "pyav": "18.1.0"
+  },
+  "protocol": "可用性裁决 = 真实 open + 编码 + 码流可回解；PSNR 为 30 帧 1280x720 渐变序列 luma 值，目标码率 8 Mbps（x264/x265 为 ABR）",
+  "rows": [
+    {
+      "encoder": "h264_amf",
+      "hwaccel": "amf",
+      "codec": "h264",
+      "pix_fmt": "nv12",
+      "bit_depth": 8,
+      "registered": true,
+      "verdict": "encoded",
+      "encode_ms": 199.7,
+      "packets": 0,
+      "decoded_frames": 30,
+      "out_bitrate_mbps": 0.4,
+      "luma_psnr_db": 57.35,
+      "baseline_encoder": "libx264",
+      "baseline_psnr_db": 92.12,
+      "detail": ""
+    },
+    {
+      "encoder": "hevc_amf",
+      "hwaccel": "amf",
+      "codec": "hevc",
+      "pix_fmt": "nv12",
+      "bit_depth": 8,
+      "registered": true,
+      "verdict": "encoded",
+      "encode_ms": 207.4,
+      "packets": 0,
+      "decoded_frames": 30,
+      "out_bitrate_mbps": 0.4,
+      "luma_psnr_db": 66.84,
+      "baseline_encoder": "libx265",
+      "baseline_psnr_db": 93.74,
+      "detail": ""
+    },
+    {
+      "encoder": "hevc_amf",
+      "hwaccel": "amf",
+      "codec": "hevc",
+      "pix_fmt": "p010le",
+      "bit_depth": 10,
+      "registered": true,
+      "verdict": "encoded",
+      "encode_ms": 195.2,
+      "packets": 0,
+      "decoded_frames": 30,
+      "out_bitrate_mbps": 0.05,
+      "luma_psnr_db": 43.59,
+      "baseline_encoder": "libx265",
+      "baseline_psnr_db": 114.32,
+      "detail": ""
+    },
+    {
+      "encoder": "av1_amf",
+      "hwaccel": "amf",
+      "codec": "av1",
+      "pix_fmt": "nv12",
+      "bit_depth": 8,
+      "registered": true,
+      "verdict": "open_or_encode_failed",
+      "encode_ms": 0.0,
+      "packets": 0,
+      "decoded_frames": 0,
+      "out_bitrate_mbps": 0.0,
+      "luma_psnr_db": 0.0,
+      "baseline_encoder": "libsvtav1",
+      "baseline_psnr_db": 0.0,
+      "detail": "EncoderNotFoundError: [Errno 1129203192] Encoder not found: 'avcodec_open2(\"av1_amf\", {})'"
+    }
+  ]
+}

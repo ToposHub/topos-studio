@@ -1,0 +1,79 @@
+{
+ "kind": "export_effects_matrix_bench",
+ "schema_version": 1,
+ "side": "t3_h264_hevc8_opacity_fade",
+ "git_rev": "c6fb567d",
+ "frames": 240,
+ "warmup": 30,
+ "runs": [
+  {
+   "warmup": "failed: ValueError: fade_in_duration (36) exceeds clip duration (30)",
+   "frames_requested": 240,
+   "wall_s": 3.1616,
+   "status": "ok",
+   "fps": 75.91,
+   "frame_ms_p50": 4.072,
+   "frame_ms_p95": 33.643,
+   "hw_fallback_reason": "",
+   "trail_fallback_reason": "cpu_encoder_surface_path",
+   "output_probe": {
+    "codec": "hevc",
+    "profile": "Main",
+    "pix_fmt": "yuv420p",
+    "frames": 240,
+    "width": 1920,
+    "height": 1080
+   },
+   "runs": [
+    {
+     "frames_requested": 240,
+     "wall_s": 4.3535,
+     "status": "ok",
+     "fps": 55.128,
+     "frame_ms_p50": 4.211,
+     "frame_ms_p95": 34.2,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "frames_requested": 240,
+     "wall_s": 3.1616,
+     "status": "ok",
+     "fps": 75.91,
+     "frame_ms_p50": 4.072,
+     "frame_ms_p95": 33.643,
+     "hw_fallback_reason": "",
+     "trail_fallback_reason": "cpu_encoder_surface_path",
+     "output_probe": {
+      "codec": "hevc",
+      "profile": "Main",
+      "pix_fmt": "yuv420p",
+      "frames": 240,
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ],
+   "median_fps": 75.91,
+   "config": {
+    "source": "h264",
+    "codec": "hevc8",
+    "scenario": "opacity_fade",
+    "group": "adaptive"
+   },
+   "env": {
+    "TOPOS_EXPORT_GPU_RENDER": "",
+    "TOPOS_DISABLE_WIN_HW_DECODE": "",
+    "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+   }
+  }
+ ]
+}

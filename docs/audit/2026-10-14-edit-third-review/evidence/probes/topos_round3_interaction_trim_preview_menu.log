@@ -1,0 +1,107 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 399 ms. Replace uses of missing font family "SF Mono" with one that exists to avoid this cost. 
+{
+  "left_snapFalse": {
+    "preview": {
+      "start": 110,
+      "duration": 90,
+      "source_start": 120,
+      "source_duration": 180
+    },
+    "expected_preview_source": [
+      120,
+      180
+    ],
+    "commit": {
+      "start": 110,
+      "duration": 90,
+      "source_start": 120,
+      "source_duration": 180
+    }
+  },
+  "left_snapTrue": {
+    "preview": {
+      "start": 110,
+      "duration": 90,
+      "source_start": 120,
+      "source_duration": 180
+    },
+    "expected_preview_source": [
+      120,
+      180
+    ],
+    "commit": {
+      "start": 110,
+      "duration": 90,
+      "source_start": 120,
+      "source_duration": 180
+    }
+  },
+  "right_snapFalse": {
+    "preview": {
+      "start": 100,
+      "duration": 90,
+      "source_start": 100,
+      "source_duration": 180
+    },
+    "expected_preview_source": [
+      100,
+      180
+    ],
+    "commit": {
+      "start": 100,
+      "duration": 90,
+      "source_start": 100,
+      "source_duration": 180
+    }
+  },
+  "right_snapTrue": {
+    "preview": {
+      "start": 100,
+      "duration": 90,
+      "source_start": 100,
+      "source_duration": 180
+    },
+    "expected_preview_source": [
+      100,
+      180
+    ],
+    "commit": {
+      "start": 100,
+      "duration": 90,
+      "source_start": 100,
+      "source_duration": 180
+    }
+  },
+  "disabled_menu": {
+    "before_enabled": false,
+    "menu": [
+      {
+        "text": "Enable Clip",
+        "enabled": true,
+        "item_state": false
+      }
+    ],
+    "after_enabled": true,
+    "undo": true
+  },
+  "locked_menu": {
+    "before_enabled": true,
+    "menu": [
+      {
+        "text": "Disable Clip",
+        "enabled": false,
+        "item_state": true
+      }
+    ],
+    "after_enabled": true,
+    "undo": false
+  },
+  "locked_keyboard_disable": {
+    "enabled": true,
+    "undo": false
+  }
+}

@@ -1,0 +1,167 @@
+{
+  "action": {
+    "export_srt": "导出字幕 (SRT)...",
+    "queue_start": "开始视频队列",
+    "queue_stop": "停止视频队列"
+  },
+  "panel": {
+    "deliver_video_batch": "视频批量导出"
+  },
+  "deliver": {
+    "export_stems": "导出 Stem 分轨…",
+    "export_stems_tooltip": "将各音频轨 / Bus / D-M-E 分组导出为独立 WAV 分轨",
+    "export_chapters": "导出章节标记…",
+    "export_chapters_tooltip": "把时间线上的章节标记导出为 YouTube 章节文本或 FFMetadata",
+    "video": {
+      "settings_title": "视频交付",
+      "source_range": "来源与范围",
+      "video_settings": "视频",
+      "audio_delivery": "音频与交付",
+      "no_project": "（无项目）",
+      "output_dir_placeholder": "输出目录",
+      "select_output_dir": "选择输出目录",
+      "add_to_queue": "加入视频队列",
+      "add_and_start": "加入并开始",
+      "alpha": "Alpha 通道",
+      "profile_default": "（默认）",
+      "preflight_ok": "可以加入队列",
+      "project": "项目",
+      "timeline": "时间线",
+      "range": "范围",
+      "frames": "帧数",
+      "duration": "时长",
+      "container": "容器",
+      "codec": "编码",
+      "profile": "Profile",
+      "profile_tooltip": "编码器配置档。Auto 会使用该编码器默认的兼容性配置。",
+      "aspect_lock": "锁定宽高比",
+      "resolution": "分辨率",
+      "size": "尺寸",
+      "frame_rate": "帧率",
+      "custom_fps": "自定义帧率",
+      "quality_mode": "质量模式",
+      "quality": "质量",
+      "quality_crf": "质量（CRF）",
+      "quality_crf_hint": "CRF 没有单位；数值越低，画质越高。",
+      "crf_18": "CRF 18 · 高质量",
+      "crf_20": "CRF 20 · 蓝光质量",
+      "crf_23": "CRF 23 · 常用默认",
+      "crf_28": "CRF 28 · 更小文件",
+      "crf_30": "CRF 30 · 预览",
+      "quality_bitrate_hint": "目标平均视频码率，单位 kbps；实际码率会随画面复杂度浮动。",
+      "quality_cbr_hint": "固定视频码率，单位 kbps；会约束最小和最大码率。",
+      "quality_auto_hint": "由编码器自动选择质量。",
+      "estimated_size": "预计大小",
+      "estimated_size_hint": "按输出时长 × 视频码率 ÷ 8 估算；未计入音频和容器开销。",
+      "filename_placeholder": "时间线名称",
+      "quality_auto": "自动",
+      "quality_vbr": "VBR（可变码率）",
+      "quality_cbr": "CBR（固定码率）",
+      "quality_bitrate": "码率",
+      "color_space": "色彩空间",
+      "bit_depth": "位深",
+      "audio_codec": "音频编码",
+      "sample_rate": "采样率",
+      "audio_bitrate": "音频码率",
+      "subtitles": "字幕",
+      "output_dir": "输出目录",
+      "filename": "文件名",
+      "if_exists": "冲突策略",
+      "allow_placeholders": "允许占位片段导出",
+      "allow_placeholders_hint": "含占位片段的时间线默认禁止交付。勾选后仍可导出，占位片段将以彩条形式渲染进成片。"
+    },
+    "preset": {
+      "web_h264": {
+        "title": "Web H.264",
+        "subtitle": "MP4 · H.264 · 1080p"
+      },
+      "mobile_h264": {
+        "title": "移动端",
+        "subtitle": "MP4 · H.264 · 1080×1920"
+      },
+      "master_prores422": {
+        "title": "母版",
+        "subtitle": "MOV · ProRes 422 · UHD"
+      },
+      "master_prores4444": {
+        "title": "母版（含 Alpha）",
+        "subtitle": "MOV · ProRes 4444 · 4:4:4"
+      },
+      "hevc_uhd": {
+        "title": "HEVC 4K",
+        "subtitle": "MP4 · HEVC · 3840×2160"
+      },
+      "dnxhr_sq": {
+        "title": "DNxHR SQ",
+        "subtitle": "MOV · DNxHR SQ · 1080p"
+      },
+      "custom": {
+        "title": "自定义",
+        "subtitle": "当前设置"
+      }
+    },
+    "queue": {
+      "title": "视频渲染队列",
+      "start": "开始队列",
+      "pause": "暂停",
+      "resume": "继续",
+      "cancel_current": "取消当前",
+      "clear_completed": "清除已完成",
+      "more": "更多",
+      "float": "浮动面板",
+      "return_to_deliver": "回到 Deliver 下方",
+      "empty_title": "尚未添加视频导出任务",
+      "empty_hint": "在上方选择时间线和视频预设，然后点击“加入视频队列”。",
+      "tasks": "个任务",
+      "running": "渲染中",
+      "pending": "等待中",
+      "done": "已完成",
+      "failed": "失败",
+      "status_pending": "等待中",
+      "status_running": "视频渲染中",
+      "status_done": "已完成",
+      "status_failed": "视频任务失败",
+      "status_cancelled": "已取消",
+      "status_paused": "队列暂停",
+      "status_needs_relink": "需重新链接",
+      "no_audio": "无音频",
+      "action_cancel": "取消",
+      "action_open": "打开",
+      "action_retry": "重试",
+      "action_remove": "移除",
+      "action_edit": "编辑设置",
+      "action_relink": "重新链接时间线",
+      "col_status": "状态",
+      "col_source": "来源",
+      "col_preset": "预设",
+      "col_output": "输出文件",
+      "col_video": "视频",
+      "col_audio": "音频",
+      "col_progress": "进度",
+      "col_state": "状态",
+      "col_actions": "操作"
+    },
+    "subtitle": {
+      "off": "关闭",
+      "burn": "烧录",
+      "sidecar": "独立文件"
+    },
+    "conflict": {
+      "ask": "询问",
+      "overwrite": "覆盖",
+      "auto_number": "自动编号",
+      "skip": "跳过"
+    },
+    "timeline_unnamed": "未命名",
+    "frames_suffix": " 帧",
+    "px_suffix": " px",
+    "fps_suffix": " fps",
+    "kbps_suffix": " kbps",
+    "w_label": "W",
+    "h_label": "H",
+    "colors_suffix": " 色",
+    "gif_colors_label": "GIF 颜色数",
+    "qc_title": "多版本交付 QC",
+    "close": "关闭"
+  }
+}

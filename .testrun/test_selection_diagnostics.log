@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_selection_diagnostics.py .......                         [100%]
+
+============================== 7 passed in 13.74s ==============================

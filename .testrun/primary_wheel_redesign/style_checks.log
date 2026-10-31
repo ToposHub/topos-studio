@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 22 items
+
+tests/color/test_primary_wheel_ui.py ..........                          [ 45%]
+tests/color/test_primary_highlights_integration.py ....                  [ 63%]
+tests/shared/control_surfaces/test_tangent_settings.py ........          [100%]
+
+============================== 22 passed in 4.28s ==============================

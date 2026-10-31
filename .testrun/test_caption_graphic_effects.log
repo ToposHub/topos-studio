@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 8 items
+
+tests/edit/test_caption_graphic_effects.py ........                      [100%]
+
+============================== 8 passed in 24.22s ==============================

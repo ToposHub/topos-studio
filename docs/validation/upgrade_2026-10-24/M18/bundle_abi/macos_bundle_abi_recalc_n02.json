@@ -1,0 +1,42 @@
+{
+ "recalculated_at": "2026-10-25",
+ "basis": "N02 strict re-audit after F07 minos offset fix + N02 load-command bounds checks; old manifest preserved unchanged",
+ "effective_min_os": "15.0",
+ "strict_verdict_vs_effective_floor": {
+  "strict_pass": true,
+  "reasons": []
+ },
+ "strict_verdict_vs_illustrative_12_0": {
+  "strict_pass": false,
+  "reason_count": 955,
+  "note": "Qt6 frameworks require 13.0-15.0; any distribution declaration below the effective floor fails"
+ },
+ "summary": {
+  "macho_count": 1523,
+  "architectures": [
+   "x86_64"
+  ],
+  "consistent": true,
+  "malformed": [],
+  "skipped_non_macho": 13877,
+  "universal_binaries": [],
+  "bundle_exists": true,
+  "scan_truncated": false
+ },
+ "min_os_recalculated": [
+  "10.12",
+  "10.13",
+  "10.13.6",
+  "10.14",
+  "10.15",
+  "10.16",
+  "10.8",
+  "10.9",
+  "11.0",
+  "12.0",
+  "13.0",
+  "13.4",
+  "14.0",
+  "15.0"
+ ]
+}

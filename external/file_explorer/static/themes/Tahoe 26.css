@@ -1,0 +1,377 @@
+/* macOS Tahoe 26 Concept Theme */
+/* 设计理念：深邃、通透、未来感 */
+
+:root {
+    /* --- 核心变量覆盖 --- */
+    
+    /* 背景：使用深色渐变模拟太浩湖深夜的湖水 */
+    --bg-body: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    
+    /* 卡片：半透明玻璃 */
+    --bg-card: rgba(255, 255, 255, 0.03);
+    
+    /* 边框：极其微弱的亮光，模拟玻璃边缘 */
+    --border-color: rgba(255, 255, 255, 0.08);
+    
+    /* 文字：Mac 风格的高对比度 */
+    --text-main: #f5f5f7;
+    --text-muted: #86868b;
+    
+    /* 强调色：macOS 系统蓝 */
+    --primary: #0A84FF; 
+}
+
+/* ================= 全局设定 ================= */
+
+body {
+    background: var(--bg-body) !important;
+    /* 强制使用 macOS 系统字体 */
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif !important;
+    /* 字体平滑 */
+    -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条：Mac 风格细条 */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+}
+
+/* ================= 顶部菜单栏 (Finder 风格) ================= */
+
+.app-menubar {
+    /* 顶部通透磨砂 */
+    background: rgba(20, 20, 30, 0.7) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    height: 38px !important; /* 稍微加高一点，更有呼吸感 */
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+.app-menubar .menu-item {
+    font-weight: 500;
+    font-size: 13px;
+    border-radius: 6px;
+    margin: 0 2px;
+}
+.app-menubar .menu-item:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* 下拉菜单：悬浮玻璃 */
+.app-menubar .dropdown-menu {
+    background: rgba(30, 30, 40, 0.85) !important;
+    backdrop-filter: blur(25px) !important;
+    -webkit-backdrop-filter: blur(25px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4) !important;
+    padding: 6px;
+    margin-top: 6px;
+}
+.app-menubar .dropdown-item {
+    border-radius: 6px;
+    margin-bottom: 2px;
+}
+.app-menubar .dropdown-item:hover {
+    background: var(--primary) !important;
+    color: #fff !important;
+}
+
+/* ================= 侧边栏 (Sidebar) ================= */
+
+.sidebar-panel {
+    /* 侧边栏深色磨砂 */
+    background: rgba(20, 25, 35, 0.5) !important;
+    backdrop-filter: blur(30px) !important;
+    -webkit-backdrop-filter: blur(30px) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+/* 侧边栏头部 */
+.file-toolbar h6 {
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+}
+
+/* 树节点 Hover */
+.tree-header {
+    border-radius: 6px;
+    margin: 2px 8px;
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+    padding-right: 10px !important;
+    /* 移除左侧 padding !important，允许内联样式控制层级缩进 */
+}
+.tree-header:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+}
+.tree-header.active {
+    background: rgba(10, 132, 255, 0.15) !important;
+    color: #4facfe !important; /* 更亮的蓝色 */
+    font-weight: 500;
+}
+
+/* ================= 主区域 & 文件卡片 ================= */
+
+.main-panel {
+    background: transparent !important; /* 让 body 的渐变透出来 */
+}
+
+/* 工具栏玻璃化 */
+.file-toolbar {
+    background: rgba(20, 20, 30, 0.3) !important;
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+/* 路径框：Mac 胶囊风格 */
+.breadcrumb-path {
+    background: rgba(0, 0, 0, 0.2) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 8px !important;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
+    color: #ddd !important;
+}
+.breadcrumb-path:focus {
+    background: rgba(0, 0, 0, 0.4) !important;
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25);
+}
+
+/* 搜索框美化 */
+.search-input {
+    background: rgba(0, 0, 0, 0.2) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    border-radius: 8px !important;
+}
+
+/* 文件卡片 */
+.file-card {
+    background: rgba(255, 255, 255, 0.02) !important; /* 极淡的填充 */
+    border: 1px solid transparent !important; /* 默认无边框 */
+    border-radius: 12px !important; /* 更大的圆角 */
+    box-shadow: none;
+    transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.file-card:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.file-card.selected {
+    background: rgba(10, 132, 255, 0.15) !important;
+    border: 1px solid rgba(10, 132, 255, 0.5) !important;
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.15);
+}
+
+/* 卡片图片 */
+.file-thumb {
+    border-radius: 8px !important;
+    /* [优化版] 使用稍微柔和的白色，避免刺眼 */
+    background-color: #f5f5f7; 
+}
+
+/* 卡片底部信息 */
+.layout-grid .file-info, 
+.layout-adaptive .file-info {
+    background: rgba(0, 0, 0, 0.2) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+/* ================= 右键菜单 (Context Menu) ================= */
+
+.context-menu {
+    background: rgba(35, 35, 45, 0.75) !important;
+    backdrop-filter: blur(40px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4) !important;
+    padding: 6px;
+    min-width: 180px;
+}
+
+.context-menu .menu-item {
+    border-radius: 6px;
+    margin-bottom: 1px;
+    transition: background 0.1s;
+    font-size: 13.5px;
+}
+
+.context-menu .menu-item:hover {
+    background: var(--primary) !important;
+    color: #fff !important;
+}
+.context-menu .menu-divider {
+    background: rgba(255, 255, 255, 0.1) !important;
+    margin: 4px 8px;
+}
+
+/* ================= 列表模式优化 ================= */
+
+.layout-list .file-card {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
+    border-radius: 6px !important;
+    height: 44px !important; /* 列表稍微高一点，方便点击 */
+    margin-bottom: 2px !important;
+}
+.layout-list .file-card:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+}
+.layout-list .file-card.selected {
+    background: rgba(10, 132, 255, 0.2) !important;
+}
+
+/* ================= Toast 通知 ================= */
+
+.toastify {
+    background: rgba(30, 30, 40, 0.8) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
+    border-radius: 12px !important;
+    font-weight: 500;
+}
+
+/* ================= 属性面板 (Properties Panel) ================= */
+
+.properties-panel {
+    background: rgba(20, 25, 35, 0.6) !important;
+    backdrop-filter: blur(35px) !important;
+    -webkit-backdrop-filter: blur(35px) !important;
+    border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.panel-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.prop-group label {
+    color: rgba(255, 255, 255, 0.4) !important;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+}
+
+.prop-table td {
+    color: rgba(255, 255, 255, 0.7);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
+    padding: 8px 4px;
+}
+.prop-table td:first-child {
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 12px;
+}
+
+/* 评分星星美化 */
+.rating-stars i {
+    color: rgba(255, 255, 255, 0.1);
+    transition: all 0.2s;
+    margin: 0 2px;
+}
+.rating-stars i.active {
+    color: #FFD60A !important; /* Apple 风格的黄色 */
+    text-shadow: 0 0 10px rgba(255, 214, 10, 0.3);
+}
+.rating-stars i:hover {
+    transform: scale(1.2);
+}
+
+/* 输入框统一玻璃化 */
+.form-control, .form-select {
+    background: rgba(0, 0, 0, 0.2) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: #fff !important;
+    border-radius: 8px !important;
+}
+.form-control:focus, .form-select:focus {
+    background: rgba(0, 0, 0, 0.4) !important;
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2);
+}
+
+/* ================= 批量操作标签页 (Batch Tabs) ================= */
+
+.batch-tabs {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 4px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.batch-tab-item {
+    border-radius: 7px !important;
+    color: rgba(255, 255, 255, 0.5) !important;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+.batch-tab-item:hover {
+    color: #fff !important;
+    background: rgba(255, 255, 255, 0.05);
+}
+.batch-tab-item.active {
+    background: rgba(255, 255, 255, 0.12) !important;
+    color: #fff !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+/* 按钮美化 */
+.btn-primary {
+    background: var(--primary) !important;
+    border: none !important;
+    box-shadow: 0 4px 12px rgba(10, 132, 255, 0.3);
+    font-weight: 500;
+}
+.btn-primary:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
+/* 预览条目 */
+.preview-item {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin-bottom: 4px;
+}
+.preview-arrow { color: var(--primary); }
+.preview-new { color: #32D74B; } /* Apple 风格的绿色 */
+
+/* ================= 模态框 (Modals) ================= */
+
+.modal-content {
+    background: rgba(30, 35, 45, 0.8) !important;
+    backdrop-filter: blur(40px) !important;
+    -webkit-backdrop-filter: blur(40px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 18px !important;
+}
+.modal-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+.modal-footer {
+    border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+}

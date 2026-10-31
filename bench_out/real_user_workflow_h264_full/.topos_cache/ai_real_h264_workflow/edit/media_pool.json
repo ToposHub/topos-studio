@@ -1,0 +1,29 @@
+{
+  "h264_asset": {
+    "asset_id": "h264_asset",
+    "path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_h264.mp4",
+    "media_type": "video",
+    "display_name": "2K H264 Real Material",
+    "metadata": {
+      "fps": 25.0,
+      "total_frames": 1572
+    },
+    "thumbnail_key": null,
+    "proxy_path": null,
+    "proxy_status": "none",
+    "is_offline": false,
+    "color_metadata": null,
+    "created_at": 0.0,
+    "reel": "",
+    "scene": "",
+    "shot": "",
+    "take": "",
+    "keywords": [],
+    "rating": 0,
+    "flag": "none",
+    "color_label": "none",
+    "comment": "",
+    "path_relative": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_h264.mp4",
+    "path_original": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_h264.mp4"
+  }
+}

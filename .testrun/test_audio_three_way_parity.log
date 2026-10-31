@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_audio_three_way_parity.py ....                           [100%]
+
+============================== 4 passed in 22.62s ==============================

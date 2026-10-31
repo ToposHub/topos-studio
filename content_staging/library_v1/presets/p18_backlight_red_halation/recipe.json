@@ -1,0 +1,25 @@
+{
+  "recipe_id": "P18",
+  "name": "逆光红晕",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合逆光/点光源；strength 0.4–0.7，threshold 0.5 起步避免大面积泛红",
+  "component": "Halation_Extended（生产插件 plugins/Halation_Extended.tglsl）",
+  "dependencies": {
+    "plugin_id": "Halation_Extended",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "strength": 0.6,
+    "radius": 0.55,
+    "hue_shift": 0.05,
+    "threshold": 0.5
+  },
+  "notes": "生产 Halation_Extended 红晕路线；参数已对真实插件 schema 校验。多尺度版本见 F06 multiscale_halation（暂存，L11 接缝后可升级配方）。"
+}

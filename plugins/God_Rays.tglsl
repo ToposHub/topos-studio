@@ -1,0 +1,69 @@
+// --- Topos Plugin Metadata ---
+// @name God Rays
+// @i18n_name God_Rays
+// @author Topos Team
+// @version 1.0
+// @description Volumetric light shafts: radial accumulation of brightness keyed along the direction to a movable light center, with decay and color tint
+// @input_space scene-linear
+// @output_space scene-linear
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @occlusion background_independent
+// @param slider light_x "Light Center X" 0.5 0.0 1.0
+// @param slider light_y "Light Center Y" 0.8 0.0 1.0
+// @param slider density "Ray Density" 0.55 0.0 1.0
+// @param slider decay "Ray Decay" 0.85 0.5 0.98
+// @param slider weight "Ray Weight" 0.4 0.0 1.0
+// @param slider threshold "Brightness Key" 0.6 0.0 2.0
+// @param color ray_color "Ray Tint" 1.0 0.95 0.85
+// @param slider exposure "Exposure" 0.35 0.0 1.0
+// -----------------------------
+
+// God Rays —— 体积光/氛围光效。
+//
+// 原理：经典径向光轴散射（radial light-shaft）单 pass 近似：沿当前像素
+// 到光源中心 (light_x, light_y) 的连线做 24 步定长采样，每步：
+//   1) 采样 scene-linear 亮度并做亮度键（threshold 以上才算"亮源"）；
+//   2) 键控亮度乘衰减因子（decay^i，步数越远贡献越小）累加；
+//   3) 累加量经 ray_color 染色后加性叠加到基色（screen 空间的加性
+//      散射近似，HDR 安全，不 clamp 基色）。
+// density 控制采样步距（视觉上的光轴"密度"），weight 控制每步贡献。
+//
+// 契约：vec3 process(vec3 color, vec2 uv)。仅使用注入 uniform u_input_tex；
+// 采样在 scene-linear 域进行；for 循环边界为常量 24（红线：循环边界
+// 必须常量）；分母（步距）设下限守护。
+
+const int RAY_STEPS = 24;
+
+vec3 process(vec3 color, vec2 uv) {
+    if (exposure < 0.001 && weight < 0.001) return color;
+
+    vec2 center = vec2(light_x, light_y);
+    vec2 delta = uv - center;
+    // 步距 = 距离 / 步数，density 越大步距越小（采样越密、光轴越"实"）
+    float step_len = length(delta) / (float(RAY_STEPS) * max(density, 0.05) + 1.0);
+    vec2 step_uv = normalize(delta + vec2(1e-6, 1e-6)) * max(step_len, 1.0 / 512.0);
+
+    float illum = 0.0;
+    vec2 sample_uv = uv;
+    float atten = 1.0;
+    for (int i = 0; i < RAY_STEPS; i++) {
+        sample_uv -= step_uv;
+        // clamp 采样坐标到 [0,1]：越界采样在部分 GL 实现返回未定义值
+        vec2 suv = clamp(sample_uv, vec2(0.0), vec2(1.0));
+        vec3 s = texture(u_input_tex, suv).rgb;
+        float luma = dot(s, vec3(0.2126, 0.7152, 0.0722));
+        // 亮度键：只有亮于 threshold 的区域贡献光轴（把暗部排除在
+        // 散射之外，光轴只从光源/亮窗/亮天发出）
+        float keyed = max(luma - threshold, 0.0) / max(threshold, 0.05);
+        illum += keyed * atten;
+        atten *= decay;
+    }
+    illum /= float(RAY_STEPS);
+
+    // 染色 + 双强度合成：weight 为散射累加强度，exposure 为整体曝光加成
+    vec3 rays = ray_color * illum * weight * 4.0 * (0.5 + exposure);
+    // 加性叠加（HDR 安全：不 clamp 输出，soft-clip 阶段自行处理超界）
+    return color + rays;
+}

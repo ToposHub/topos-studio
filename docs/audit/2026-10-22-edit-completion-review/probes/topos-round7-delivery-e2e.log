@@ -1,0 +1,6 @@
+Failed to add audio stream: 'StandardImageSequenceEncoder' object has no attribute 'add_audio_stream'
+Manifest output hash failed: [Errno 21] Is a directory: '/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-round7-delivery-e2e-1xm2yxm0/png_sequence'
+Failed to add audio stream: 'StandardImageSequenceEncoder' object has no attribute 'add_audio_stream'
+Manifest output hash failed: [Errno 21] Is a directory: '/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-round7-delivery-e2e-1xm2yxm0/tiff_sequence'
+Manifest output hash failed: [Errno 21] Is a directory: '/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-round7-delivery-e2e-1xm2yxm0/png_sequence'
+Manifest output hash failed: [Errno 21] Is a directory: '/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-round7-delivery-e2e-1xm2yxm0/tiff_sequence'

@@ -1,0 +1,378 @@
+{
+ "manifest": {
+  "schema": "bench_manifest.v1",
+  "topos_version": "0.1.0",
+  "dylib_commit_embedded": "d9552407",
+  "git_head": "d9552407",
+  "git_dirty": false,
+  "dylib_path": "/Users/testuser/Documents/vscode/topos/native/topos_codec/build/release/topos_codec.dylib",
+  "dylib_sha256": "ce8ba9ab5ff966d9656ab19efbb77d014168184a569547bfba3a4e292ce9e1e5",
+  "abi_version": 2,
+  "slice_threads": 16,
+  "simd_avx2": true,
+  "simd_neon": false,
+  "cpu": "Genuine Intel(R) 0000",
+  "os": "darwin",
+  "python": "3.12.14"
+ },
+ "cases": {
+  "2k": {
+   "res": "2k",
+   "rows": [
+    {
+     "domain": "422",
+     "codec": "prores",
+     "tier": "proxy",
+     "file": "prores_proxy_2K.mov",
+     "mbps": 12.69,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 54.065,
+     "ssim_y": 0.9972
+    },
+    {
+     "domain": "422",
+     "codec": "prores",
+     "tier": "LT",
+     "file": "prores_lt_2K.mov",
+     "mbps": 40.92,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 58.753,
+     "ssim_y": 0.99879
+    },
+    {
+     "domain": "422",
+     "codec": "prores",
+     "tier": "422",
+     "file": "prores_standard_2K.mov",
+     "mbps": 60.62,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 61.257,
+     "ssim_y": 0.9993
+    },
+    {
+     "domain": "422",
+     "codec": "prores",
+     "tier": "HQ",
+     "file": "prores_hq_2K.mov",
+     "mbps": 106.47,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 65.888,
+     "ssim_y": 0.99976
+    },
+    {
+     "domain": "422",
+     "codec": "topos",
+     "tier": "proxy",
+     "file": "topos_proxy_2K.mov",
+     "mbps": 48.14,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 57.862,
+     "ssim_y": 0.99853
+    },
+    {
+     "domain": "422",
+     "codec": "topos",
+     "tier": "LT",
+     "file": "topos_lt_2K.mov",
+     "mbps": 85.42,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 60.72,
+     "ssim_y": 0.9992
+    },
+    {
+     "domain": "422",
+     "codec": "topos",
+     "tier": "422",
+     "file": "topos_standard_2K.mov",
+     "mbps": 129.22,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 62.874,
+     "ssim_y": 0.99951
+    },
+    {
+     "domain": "422",
+     "codec": "topos",
+     "tier": "HQ",
+     "file": "topos_hq_2K.mov",
+     "mbps": 191.25,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 65.46,
+     "ssim_y": 0.99972
+    },
+    {
+     "domain": "444",
+     "codec": "prores",
+     "tier": "4444",
+     "file": "prores_4444_2K.mov",
+     "mbps": 290.44,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 56.775,
+     "ssim_y": 0.9988
+    },
+    {
+     "domain": "444",
+     "codec": "prores",
+     "tier": "4444XQ",
+     "file": "prores_4444xq_2K.mov",
+     "mbps": 428.8,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 60.268,
+     "ssim_y": 0.99947
+    },
+    {
+     "domain": "444",
+     "codec": "topos",
+     "tier": "4444",
+     "file": "topos_pro444_2K.mov",
+     "mbps": 305.15,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 50.736,
+     "ssim_y": 0.99467
+    },
+    {
+     "domain": "444",
+     "codec": "topos",
+     "tier": "4444XQ",
+     "file": "topos_extreme_2K.mov",
+     "mbps": 584.61,
+     "bit_depth": 12,
+     "frames_total": 96,
+     "frames_measured": 96,
+     "psnr_y": 57.667,
+     "ssim_y": 0.99902
+    }
+   ],
+   "prores_interp_deltas": [
+    {
+     "tier": "proxy",
+     "mbps": 48.14,
+     "psnr_y": 57.862,
+     "prores_interp": 59.671,
+     "delta_db": -1.809
+    },
+    {
+     "tier": "LT",
+     "mbps": 85.42,
+     "psnr_y": 60.72,
+     "prores_interp": 63.762,
+     "delta_db": -3.042
+    },
+    {
+     "tier": "422",
+     "mbps": 129.22,
+     "psnr_y": 62.874,
+     "prores_interp": null,
+     "delta_db": null
+    },
+    {
+     "tier": "HQ",
+     "mbps": 191.25,
+     "psnr_y": 65.46,
+     "prores_interp": null,
+     "delta_db": null
+    }
+   ]
+  },
+  "4k": {
+   "res": "4k",
+   "rows": [
+    {
+     "domain": "422",
+     "codec": "prores",
+     "tier": "proxy",
+     "file": "prores_proxy_4K.mov",
+     "mbps": 78.4,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 53.964,
+     "ssim_y": 0.99527
+    },
+    {
+     "domain": "422",
+     "codec": "prores",
+     "tier": "LT",
+     "file": "prores_lt_4K.mov",
+     "mbps": 286.82,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 58.734,
+     "ssim_y": 0.99824
+    },
+    {
+     "domain": "422",
+     "codec": "prores",
+     "tier": "422",
+     "file": "prores_standard_4K.mov",
+     "mbps": 413.64,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 60.914,
+     "ssim_y": 0.99894
+    },
+    {
+     "domain": "422",
+     "codec": "prores",
+     "tier": "HQ",
+     "file": "prores_hq_4K.mov",
+     "mbps": 648.29,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 65.334,
+     "ssim_y": 0.99966
+    },
+    {
+     "domain": "422",
+     "codec": "topos",
+     "tier": "proxy",
+     "file": "topos_proxy_4K.mov",
+     "mbps": 311.3,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 57.087,
+     "ssim_y": 0.99756
+    },
+    {
+     "domain": "422",
+     "codec": "topos",
+     "tier": "LT",
+     "file": "topos_lt_4K.mov",
+     "mbps": 353.87,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 57.393,
+     "ssim_y": 0.99766
+    },
+    {
+     "domain": "422",
+     "codec": "topos",
+     "tier": "422",
+     "file": "topos_standard_4K.mov",
+     "mbps": 524.16,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 59.133,
+     "ssim_y": 0.99838
+    },
+    {
+     "domain": "422",
+     "codec": "topos",
+     "tier": "HQ",
+     "file": "topos_hq_4K.mov",
+     "mbps": 770.95,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 61.03,
+     "ssim_y": 0.99897
+    },
+    {
+     "domain": "444",
+     "codec": "prores",
+     "tier": "4444",
+     "file": "prores_4444_4K.mov",
+     "mbps": 1149.88,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 61.591,
+     "ssim_y": 0.99953
+    },
+    {
+     "domain": "444",
+     "codec": "prores",
+     "tier": "4444XQ",
+     "file": "prores_4444xq_4K.mov",
+     "mbps": 1410.43,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 65.69,
+     "ssim_y": 0.9998
+    },
+    {
+     "domain": "444",
+     "codec": "topos",
+     "tier": "4444",
+     "file": "topos_pro444_4K.mov",
+     "mbps": 1171.53,
+     "bit_depth": 10,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 55.841,
+     "ssim_y": 0.99793
+    },
+    {
+     "domain": "444",
+     "codec": "topos",
+     "tier": "4444XQ",
+     "file": "topos_extreme_4K.mov",
+     "mbps": 1842.8,
+     "bit_depth": 12,
+     "frames_total": 96,
+     "frames_measured": 48,
+     "psnr_y": 59.807,
+     "ssim_y": 0.99923
+    }
+   ],
+   "prores_interp_deltas": [
+    {
+     "tier": "proxy",
+     "mbps": 311.3,
+     "psnr_y": 57.087,
+     "prores_interp": 59.155,
+     "delta_db": -2.068
+    },
+    {
+     "tier": "LT",
+     "mbps": 353.87,
+     "psnr_y": 57.393,
+     "prores_interp": 59.887,
+     "delta_db": -2.494
+    },
+    {
+     "tier": "422",
+     "mbps": 524.16,
+     "psnr_y": 59.133,
+     "prores_interp": 62.996,
+     "delta_db": -3.863
+    },
+    {
+     "tier": "HQ",
+     "mbps": 770.95,
+     "psnr_y": 61.03,
+     "prores_interp": null,
+     "delta_db": null
+    }
+   ]
+  }
+ }
+}

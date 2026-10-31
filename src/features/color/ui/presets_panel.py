@@ -1,0 +1,896 @@
+import os
+import json
+import logging
+import shutil
+import zipfile
+from typing import Optional, OrderedDict
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+                             QStyledItemDelegate, QStyle, QListWidget, QListWidgetItem,
+                             QToolButton, QSlider, QLabel, QLineEdit,
+                             QMenu, QInputDialog, QMessageBox,
+                             QDockWidget)
+from PyQt6.QtCore import (QStandardPaths, pyqtSignal, Qt, QSize, QRect)
+from PyQt6.QtGui import (QPainter, QColor, QBrush, QPen, QPixmap, QLinearGradient)
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+from src.shared.assets.icon_manager import get_icon
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_presets_root() -> str:
+    """返回稳定的用户预设根目录（AUD-25514）。
+
+    之前绑定 os.getcwd()：从 Finder/快捷方式/cron 以不同工作目录启动时
+    面板读写的是另一份空的 ``<cwd>/Presets``，已有静帧"丢失"、新抓取写进
+    临时位置；只读 CWD 下 makedirs 还会在构造函数直接抛 PermissionError。
+    现统一使用应用数据目录（与 motion_graphic_template_store 同口径），
+    Qt 不可用或返回空时回退 ``~/.topos-color``。
+    """
+    base = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppDataLocation)
+    if not base:
+        base = os.path.join(os.path.expanduser("~"), ".topos-color")
+    return os.path.join(base, "Presets")
+
+
+def _is_safe_preset_name(name: str) -> bool:
+    """校验用户输入的预设/文件夹名（AUD-25515）。
+
+    拒绝路径分隔符、``.``/``..``、纯点名与控制字符，防止
+    ``create_folder("../x")`` 之类的路径注入把文件写出预设区。
+    """
+    if not name or not name.strip():
+        return False
+    name = name.strip()
+    if name in {".", ".."}:
+        return False
+    if "/" in name or "\\" in name or os.sep in name:
+        return False
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in name):
+        return False
+    return True
+
+
+class PresetsPanel(QWidget):
+    """Gallery panel（原 Presets，P1-COLOR-04 升级为 DaVinci Gallery）。
+
+    Captures still frames from the viewport, saves them as .topos project
+    files (with thumb / full-res reference / meta sidecars), and supports
+    applying grades to other images or videos — full or by category
+    (Paste Attributes) — plus loading a still as reference wipe.
+    面板显示名为 Gallery；代码名 PresetsPanel 与 objectName "dockPresets"
+    保留以兼容既有引用与已保存布局。
+    """
+
+    grade_applied = pyqtSignal(str)   # Emits .topos file path
+    capture_requested = pyqtSignal()  # Emits when user clicks Capture Still
+    # P1-COLOR-04（Gallery 并入 Presets）
+    apply_categories_requested = pyqtSignal(str)  # 分类应用调色（.topos 路径）
+    reference_requested = pyqtSignal(str)         # 加载为参考帧 wipe
+    # P1-COLOR-21: Color Match（把当前调色结果匹配到此静帧）
+    match_requested = pyqtSignal(str)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.presets_root = _resolve_presets_root()
+        self._ensure_dirs()
+        self._migrate_legacy_cwd_presets()
+        self._current_folder = os.path.join(self.presets_root, "User")
+        self._preset_meta_cache = {}  # path -> dict (project.json data cache)
+        self._search_query = ""       # 当前搜索词（扫描后重放过滤）
+        self._init_ui()
+        self.scan_presets()
+
+    def _ensure_dirs(self) -> None:
+        """Ensure Presets directory structure exists.
+
+        AUD-25514：创建失败（如只读卷/权限）记录警告而不是从构造函数
+        抛 PermissionError 导致启动崩溃；后续扫描/保存各自的 OSError
+        已有独立处理路径。
+        """
+        for sub in ["User", "System"]:
+            try:
+                os.makedirs(os.path.join(self.presets_root, sub), exist_ok=True)
+            except OSError as exc:
+                logger.warning(
+                    "Presets: cannot create %s (%s); panel will stay empty "
+                    "until the location becomes writable",
+                    os.path.join(self.presets_root, sub), exc)
+
+    def _migrate_legacy_cwd_presets(self) -> None:
+        """把旧版 ``<cwd>/Presets`` 的用户数据复制进稳定根目录（AUD-25514）。
+
+        仅在新位置对应子目录为空时搬迁，避免覆盖既有数据；采用**复制**
+        而非移动——旧目录可能是仓库内真实用户数据（测试/开发环境从仓库
+        根启动），迁移绝不删除来源。任何 OSError 只记录警告，迁移是
+        尽力而为的、幂等的（已存在的目标跳过）。
+        """
+        legacy_root = os.path.join(os.getcwd(), "Presets")
+        if os.path.abspath(legacy_root) == os.path.abspath(self.presets_root):
+            return
+        if not os.path.isdir(legacy_root):
+            return
+        for sub in ("User", "System"):
+            legacy_sub = os.path.join(legacy_root, sub)
+            new_sub = os.path.join(self.presets_root, sub)
+            if not os.path.isdir(legacy_sub):
+                continue
+            try:
+                entries = os.listdir(legacy_sub)
+                if not entries or any(os.listdir(new_sub)):
+                    continue
+                copied = 0
+                for entry in entries:
+                    source = os.path.join(legacy_sub, entry)
+                    destination = os.path.join(new_sub, entry)
+                    if os.path.exists(destination):
+                        continue
+                    if os.path.isdir(source):
+                        shutil.copytree(source, destination)
+                    else:
+                        shutil.copy2(source, destination)
+                    copied += 1
+                if copied:
+                    logger.info(
+                        "Presets: copied %d entries from legacy %s to %s",
+                        copied, legacy_sub, new_sub)
+            except OSError as exc:
+                logger.warning(
+                    "Presets: legacy migration %s -> %s failed: %s",
+                    legacy_sub, new_sub, exc)
+
+    def _init_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.setStyleSheet("""
+            QWidget { background: #27272b; color: #cccccc; font-size: 11px; }
+            QFrame#Header { background: #2f2f33; border-bottom: 1px solid #222; }
+            QFrame#Footer { background: #2f2f33; border-top: 1px solid #222; }
+            QToolButton {
+                background: transparent; border: none; border-radius: 4px; padding: 4px; color: #888;
+            }
+            QToolButton:hover { background: #444; color: #eee; }
+            /* QComboBox uses global DARK_THEME style */
+        """)
+
+        # --- Header ---
+        header = QFrame()
+        header.setObjectName("Header")
+        header.setFixedHeight(38)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(10, 0, 10, 0)
+        header_layout.setSpacing(8)
+
+        up_btn = QToolButton()
+        up_btn.setIcon(get_icon('fa5s.arrow-up', color='#aaaaaa'))
+        up_btn.setIconSize(QSize(14, 14))
+        up_btn.setToolTip(I18N.tr("presets.go_up", "Go Up"))
+        up_btn.clicked.connect(self._go_up)
+        header_layout.addWidget(up_btn)
+
+        self.folder_combo = ChevronComboBox()
+        self.folder_combo.currentTextChanged.connect(self._on_folder_changed)
+        header_layout.addWidget(self.folder_combo, 1)
+
+        layout.addWidget(header)
+
+        # --- Toolbar ---
+        toolbar = QFrame()
+        toolbar.setObjectName("Header")
+        toolbar.setFixedHeight(32)
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(10, 0, 10, 0)
+        toolbar_layout.setSpacing(4)
+
+        new_folder_btn = QToolButton()
+        new_folder_btn.setIcon(get_icon('fa5s.folder-plus', color='#aaaaaa'))
+        new_folder_btn.setIconSize(QSize(14, 14))
+        new_folder_btn.setToolTip(I18N.tr("presets.new_folder", "New Folder"))
+        new_folder_btn.clicked.connect(self.create_folder)
+        toolbar_layout.addWidget(new_folder_btn)
+
+        capture_btn = QToolButton()
+        capture_btn.setIcon(get_icon('fa5s.camera', color='#aaaaaa'))
+        capture_btn.setIconSize(QSize(14, 14))
+        capture_btn.setToolTip(I18N.tr("presets.capture_still", "Capture Still"))
+        capture_btn.clicked.connect(lambda: self.capture_requested.emit())
+        toolbar_layout.addWidget(capture_btn)
+
+        self.delete_btn = QToolButton()
+        self.delete_btn.setIcon(get_icon('fa5s.trash', color='#aaaaaa'))
+        self.delete_btn.setIconSize(QSize(14, 14))
+        self.delete_btn.setToolTip(I18N.tr("presets.delete", "Delete"))
+        self.delete_btn.clicked.connect(self._delete_selected)
+        toolbar_layout.addWidget(self.delete_btn)
+
+        # P1-COLOR-04: 搜索（预设名 / 来源片段 / source tag）
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText(
+            I18N.tr("presets.search", "搜索预设 / 来源片段…"))
+        self.search_edit.setFixedWidth(130)
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self._on_search_changed)
+        toolbar_layout.addWidget(self.search_edit)
+
+        toolbar_layout.addStretch()
+
+        zoom_lbl = QLabel(I18N.tr("presets.columns", "Columns"))
+        zoom_lbl.setStyleSheet("color: #888; font-size: 10px; font-weight: bold;")
+        toolbar_layout.addWidget(zoom_lbl)
+
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self.zoom_slider.setFixedWidth(80)
+        toolbar_layout.addWidget(self.zoom_slider)
+
+        layout.addWidget(toolbar)
+
+        # --- Preset Grid ---
+        self.list_widget = QListWidget()
+        self.list_widget.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list_widget.setMovement(QListWidget.Movement.Static)
+        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
+        self.list_widget.setStyleSheet("QListWidget { background: #27272b; border: none; padding: 10px; }")
+        layout.addWidget(self.list_widget)
+
+        self.delegate = PresetDelegate(self)
+        self.list_widget.setItemDelegate(self.delegate)
+
+        # Column-count zoom: cards are square (the delegate paints the name
+        # inside the card), width follows the live viewport so rows tile
+        # flush with the right edge.
+        from src.shared.ui.column_grid import ColumnGridController
+        self._column_grid = ColumnGridController(
+            self.list_widget, slider=self.zoom_slider,
+            settings_key="presets_columns", columns_default=4,
+            gap=6, aspect=1.0, extra_height=0)
+
+        self._populate_folder_combo()
+
+        # Panel context menu (Float / Dock)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_panel_context_menu)
+
+    # --- Panel Float / Dock ---
+
+    def _find_dock_widget(self):
+        """Walk up the widget hierarchy to find the parent QDockWidget."""
+        parent = self.parent()
+        while parent is not None:
+            if isinstance(parent, QDockWidget):
+                return parent
+            parent = parent.parent()
+        return None
+
+    def _toggle_float(self) -> None:
+        """Float the panel as an independent window."""
+        dock = self._find_dock_widget()
+        if dock and not dock.isFloating():
+            dock.setFloating(True)
+
+    def _dock_panel(self) -> None:
+        """Dock the panel back to the main window."""
+        dock = self._find_dock_widget()
+        if dock and dock.isFloating():
+            dock.setFloating(False)
+
+    def _show_panel_context_menu(self, pos) -> None:
+        """Show right-click context menu for the panel header/toolbar area."""
+        menu = QMenu(self)
+
+        dock = self._find_dock_widget()
+        is_floating = dock.isFloating() if dock else False
+
+        float_action = menu.addAction(I18N.tr("panel.float", "Float") if not is_floating else I18N.tr("panel.floating", "Floating"))
+        float_action.setEnabled(not is_floating)
+        float_action.triggered.connect(self._toggle_float)
+
+        dock_action = menu.addAction(I18N.tr("panel.dock", "Dock") if is_floating else I18N.tr("panel.docked", "Docked"))
+        dock_action.setEnabled(is_floating)
+        dock_action.triggered.connect(self._dock_panel)
+
+        menu.addSeparator()
+
+        refresh_act = menu.addAction(I18N.tr("presets.refresh", "Refresh"))
+        refresh_act.triggered.connect(self.scan_presets)
+
+        menu.exec(self.mapToGlobal(pos))
+
+    # --- Folder Navigation ---
+
+    def _populate_folder_combo(self) -> None:
+        """Populate the folder combo with User and System preset folders."""
+        self.folder_combo.blockSignals(True)
+        self.folder_combo.clear()
+
+        # User section
+        user_root = os.path.join(self.presets_root, "User")
+        self.folder_combo.addItem("User", user_root)
+        for name in sorted(self._list_subdirs(user_root)):
+            self.folder_combo.addItem(f"  User/{name}", os.path.join(user_root, name))
+
+        # System section
+        system_root = os.path.join(self.presets_root, "System")
+        self.folder_combo.addItem("System", system_root)
+        for name in sorted(self._list_subdirs(system_root)):
+            self.folder_combo.addItem(f"  System/{name}", os.path.join(system_root, name))
+
+        # Restore current selection
+        for i in range(self.folder_combo.count()):
+            if self.folder_combo.itemData(i) == self._current_folder:
+                self.folder_combo.setCurrentIndex(i)
+                break
+
+        self.folder_combo.blockSignals(False)
+
+    def _on_folder_changed(self, text) -> None:
+        idx = self.folder_combo.currentIndex()
+        if idx >= 0:
+            path = self.folder_combo.itemData(idx)
+            if path and os.path.isdir(path):
+                self._current_folder = path
+                self.scan_presets()
+
+    def _go_up(self) -> None:
+        """Navigate to parent folder."""
+        parent = os.path.dirname(self._current_folder)
+        if parent and os.path.isdir(parent) and parent.startswith(self.presets_root):
+            self._current_folder = parent
+            self._populate_folder_combo()
+            self.scan_presets()
+
+    def _list_subdirs(self, path):
+        """List subdirectory names in a given path."""
+        if not os.path.isdir(path):
+            return []
+        return [d for d in os.listdir(path)
+                if os.path.isdir(os.path.join(path, d)) and not d.startswith('.')]
+
+    # --- Preset Meta Cache ---
+
+    def _get_preset_meta(self, topos_path: str) -> dict:
+        """Read and cache project.json from a .topos file."""
+        if topos_path in self._preset_meta_cache:
+            return self._preset_meta_cache[topos_path]
+        data = {}
+        try:
+            with zipfile.ZipFile(topos_path, 'r') as zf:
+                if "project.json" in zf.namelist():
+                    with zf.open("project.json") as f:
+                        data = json.load(f)
+        except Exception:
+            logger.debug("Presets: failed to read project.json from %s",
+                         topos_path)
+        self._preset_meta_cache[topos_path] = data
+        return data
+
+    # --- Preset Scanning ---
+
+    def get_current_folder(self) -> str:
+        """Return the currently active folder path."""
+        return self._current_folder
+
+    def scan_presets(self) -> None:
+        """Scan current folder for .topos preset files and populate the grid."""
+        from src.features.color.core.preset_meta import (
+            load_preset_meta, matches_query,
+        )
+        self.list_widget.clear()
+        self._preset_meta_cache.clear()
+        # AUD-25513：缩略图 QPixmap 缓存随目录重扫失效（重命名/删除/新增
+        # 都可能改变磁盘内容）。
+        self.delegate.clear_thumbnail_cache()
+        folder = self._current_folder
+        if not os.path.isdir(folder):
+            return
+
+        for name in sorted(os.listdir(folder)):
+            if name.startswith('.'):
+                continue
+            topos_path = os.path.join(folder, name)
+            if not os.path.isfile(topos_path) or not name.endswith('.topos'):
+                continue
+
+            preset_name = os.path.splitext(name)[0]
+
+            item = QListWidgetItem(preset_name)
+            item.setData(Qt.ItemDataRole.UserRole, topos_path)
+
+            # P1-COLOR-04: Gallery 元数据 sidecar → tooltip + 搜索过滤
+            meta = load_preset_meta(topos_path)
+            item.setData(Qt.ItemDataRole.UserRole + 1, meta)
+            if meta is not None:
+                summary = meta.describe()
+                if summary:
+                    item.setToolTip(f"{preset_name} | {summary}")
+
+            # AUD-25517: 不再在扫描路径为每个缩略图 eagerly 解码一次
+            # QPixmap（仅用于 setIcon，而 PresetDelegate.paint 走自己的
+            # _thumbnail_pixmap LRU 缓存按需解码，item 图标从未被绘制）——
+            # 大库扫描的每条 JPEG 解码成本直接砍半。
+            self.list_widget.addItem(item)
+            # setHidden 必须在 addItem 之后（插入前设置会被视图重置）
+            item.setHidden(
+                not matches_query(preset_name, meta, self._search_query))
+        # Fresh items carry no sizeHint — pin them to the current column
+        # cell so the grid stays flush after a rescan.
+        self._column_grid.pin_items()
+
+    def _on_search_changed(self, text: str) -> None:
+        """搜索词变化：对现有条目重放过滤（不重扫磁盘）。"""
+        from src.features.color.core.preset_meta import matches_query
+        self._search_query = text
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            meta = item.data(Qt.ItemDataRole.UserRole + 1)
+            item.setHidden(
+                not matches_query(item.text(), meta, self._search_query))
+
+    # --- Actions ---
+
+    def create_folder(self) -> None:
+        """Create a new subfolder in the current preset folder.
+
+        AUD-25515：用户输入的名称先做安全校验（拒绝路径分隔符/../
+        控制字符），makedirs 的 OSError 以弹窗报告而不是从槽内抛出。
+        """
+        name, ok = QInputDialog.getText(
+            self,
+            I18N.tr("presets.new_folder_title", "New Folder"),
+            I18N.tr("presets.folder_name", "Folder Name:")
+        )
+        if ok and name:
+            name = name.strip()
+            if not name:
+                return
+            if not _is_safe_preset_name(name):
+                QMessageBox.warning(
+                    self,
+                    I18N.tr("presets.invalid_name_title", "Invalid Name"),
+                    I18N.tr("presets.invalid_name",
+                            "Name must not contain path separators, "
+                            "'..', or control characters."))
+                return
+            folder_path = os.path.join(self._current_folder, name)
+            if os.path.exists(folder_path):
+                QMessageBox.warning(self, I18N.tr("presets.exists", "Already Exists"),
+                                    I18N.tr("presets.folder_exists", "A folder with this name already exists."))
+                return
+            try:
+                os.makedirs(folder_path, exist_ok=True)
+            except OSError as exc:
+                logger.warning("Presets: create folder %s failed: %s",
+                               folder_path, exc)
+                QMessageBox.critical(
+                    self,
+                    I18N.tr("presets.create_failed_title", "Create Failed"),
+                    I18N.tr("presets.create_folder_failed",
+                            f"Could not create folder: {exc}"))
+                return
+            self._populate_folder_combo()
+            self._current_folder = folder_path
+            self._populate_folder_combo()
+            self.scan_presets()
+
+    # --- Sidecar file management (P1-COLOR-04: thumb / still / meta) ---
+
+    _SIDECAR_SUFFIXES = (".thumb.jpg", ".still.jpg", ".meta.json", ".still.exr")
+
+    @classmethod
+    def _sibling_paths(cls, topos_path: str):
+        base = os.path.splitext(topos_path)[0]
+        return [f"{base}{s}" for s in cls._SIDECAR_SUFFIXES]
+
+    def _delete_preset_files(self, topos_path: str) -> None:
+        """删除 .topos 及其全部 sidecar。"""
+        for path in [topos_path, *self._sibling_paths(topos_path)]:
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
+    def _delete_selected(self) -> None:
+        """Delete the selected preset(s)."""
+        items = self.list_widget.selectedItems()
+        if not items:
+            return
+        names = ", ".join(item.text() for item in items)
+        reply = QMessageBox.question(
+            self,
+            I18N.tr("presets.delete_title", "Delete Preset"),
+            I18N.tr("presets.delete_confirm", f"Delete preset(s): {names}?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            for item in items:
+                topos_path = item.data(Qt.ItemDataRole.UserRole)
+                if topos_path and os.path.isfile(topos_path):
+                    self._delete_preset_files(topos_path)
+            self.scan_presets()
+
+    def _rename_preset(self, item) -> None:
+        """Rename a preset.
+
+        AUD-25515：新名称先做安全校验；改名按事务推进——任一 sidecar
+        改名失败时回滚已完成的改名（含 .topos 本体），OSError 以弹窗
+        报告而不是从槽内抛出，避免留下 .topos 与 sidecar 不同名的
+        残局。
+        """
+        old_name = item.text()
+        new_name, ok = QInputDialog.getText(
+            self,
+            I18N.tr("presets.rename_title", "Rename Preset"),
+            I18N.tr("presets.new_name", "New Name:"),
+            text=old_name
+        )
+        if not (ok and new_name and new_name != old_name):
+            return
+        new_name = new_name.strip()
+        if not new_name:
+            return
+        if not _is_safe_preset_name(new_name):
+            QMessageBox.warning(
+                self,
+                I18N.tr("presets.invalid_name_title", "Invalid Name"),
+                I18N.tr("presets.invalid_name",
+                        "Name must not contain path separators, "
+                        "'..', or control characters."))
+            return
+
+        topos_path = item.data(Qt.ItemDataRole.UserRole)
+        if not topos_path:
+            return
+        folder = os.path.dirname(topos_path)
+        new_topos = os.path.join(folder, f"{new_name}.topos")
+
+        if os.path.exists(new_topos):
+            QMessageBox.warning(self, "Error", I18N.tr("presets.name_exists", "A preset with this name already exists."))
+            return
+
+        try:
+            os.rename(topos_path, new_topos)
+        except OSError as exc:
+            logger.warning("Presets: rename %s failed: %s", topos_path, exc)
+            QMessageBox.critical(
+                self,
+                I18N.tr("presets.rename_failed_title", "Rename Failed"),
+                I18N.tr("presets.rename_failed", f"Could not rename preset: {exc}"))
+            return
+
+        # sidecar（缩略图/参考帧/元数据）跟随改名；失败则整体回滚
+        renamed_sidecars: list[tuple[str, str]] = []  # (new, old)
+        try:
+            for suffix in self._SIDECAR_SUFFIXES:
+                old_side = os.path.join(folder, f"{old_name}{suffix}")
+                new_side = os.path.join(folder, f"{new_name}{suffix}")
+                if os.path.exists(old_side):
+                    os.rename(old_side, new_side)
+                    renamed_sidecars.append((new_side, old_side))
+        except OSError as exc:
+            logger.warning(
+                "Presets: sidecar rename during '%s' -> '%s' failed: %s; "
+                "rolling back", old_name, new_name, exc)
+            rollback_ok = True
+            for new_side, old_side in reversed(renamed_sidecars):
+                try:
+                    os.rename(new_side, old_side)
+                except OSError:
+                    rollback_ok = False
+            try:
+                os.rename(new_topos, topos_path)
+            except OSError:
+                rollback_ok = False
+            if not rollback_ok:
+                logger.error(
+                    "Presets: rollback incomplete for '%s' -> '%s'; "
+                    "manual cleanup may be required", old_name, new_name)
+            QMessageBox.critical(
+                self,
+                I18N.tr("presets.rename_failed_title", "Rename Failed"),
+                I18N.tr("presets.rename_failed", f"Could not rename preset: {exc}"))
+            return
+        self.scan_presets()
+
+    # --- Context Menu ---
+
+    def _show_context_menu(self, pos) -> None:
+        """Show right-click context menu."""
+        item = self.list_widget.itemAt(pos)
+        menu = QMenu(self)
+
+        if item:
+            topos_path = item.data(Qt.ItemDataRole.UserRole)
+
+            apply_act = menu.addAction(I18N.tr("presets.apply_grade", "Apply Grade"))
+            apply_act.triggered.connect(lambda: self.grade_applied.emit(topos_path))
+
+            # P1-COLOR-04: 分类应用（Paste Attributes）与参考帧对比
+            apply_cats_act = menu.addAction(
+                I18N.tr("presets.apply_categories", "Apply Grade (Categories)…"))
+            apply_cats_act.triggered.connect(
+                lambda: self.apply_categories_requested.emit(topos_path))
+
+            reference_act = menu.addAction(
+                I18N.tr("presets.load_reference", "Load as Reference Wipe"))
+            reference_act.triggered.connect(
+                lambda: self.reference_requested.emit(topos_path))
+
+            # P1-COLOR-21: Color Match（增量建议 + 可撤销应用）
+            match_act = menu.addAction(
+                I18N.tr("presets.match_to_still", "Color Match to This Still"))
+            match_act.triggered.connect(
+                lambda: self.match_requested.emit(topos_path))
+
+            menu.addSeparator()
+
+            rename_act = menu.addAction(I18N.tr("presets.rename", "Rename"))
+            rename_act.triggered.connect(lambda: self._rename_preset(item))
+
+            export_act = menu.addAction(I18N.tr("presets.export_thumb", "Export Thumbnail"))
+            export_act.triggered.connect(lambda: self._export_thumbnail(topos_path))
+
+            menu.addSeparator()
+
+            delete_act = menu.addAction(I18N.tr("presets.delete", "Delete"))
+            delete_act.triggered.connect(lambda: self._delete_item(item))
+        else:
+            # Blank area menu
+            new_folder_act = menu.addAction(I18N.tr("presets.new_folder", "New Folder"))
+            new_folder_act.triggered.connect(self.create_folder)
+
+            capture_act = menu.addAction(I18N.tr("presets.capture_still", "Capture Still"))
+            capture_act.triggered.connect(lambda: self.capture_requested.emit())
+
+            menu.addSeparator()
+
+            refresh_act = menu.addAction(I18N.tr("presets.refresh", "Refresh"))
+            refresh_act.triggered.connect(self.scan_presets)
+
+        menu.exec(self.list_widget.mapToGlobal(pos))
+
+    def _delete_item(self, item) -> None:
+        """Delete a single preset item."""
+        name = item.text()
+        reply = QMessageBox.question(
+            self,
+            I18N.tr("presets.delete_title", "Delete Preset"),
+            I18N.tr("presets.delete_confirm", f"Delete preset: {name}?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            topos_path = item.data(Qt.ItemDataRole.UserRole)
+            if topos_path and os.path.isfile(topos_path):
+                self._delete_preset_files(topos_path)
+            self.scan_presets()
+
+    def _export_thumbnail(self, topos_path) -> None:
+        """Export the thumbnail image to a user-selected location."""
+        from PyQt6.QtWidgets import QFileDialog
+        preset_name = os.path.splitext(os.path.basename(topos_path))[0]
+        thumb_path = os.path.join(os.path.dirname(topos_path), f"{preset_name}.thumb.jpg")
+        if not os.path.exists(thumb_path):
+            return
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            I18N.tr("presets.export_thumb", "Export Thumbnail"),
+            f"{preset_name}.jpg",
+            "JPEG (*.jpg *.jpeg)"
+        )
+        if save_path:
+            # AUD-25517: copy2 遇目标只读/磁盘满/权限不足会抛 OSError——
+            # 槽内不再裸奔，弹窗告知用户并留日志。
+            try:
+                shutil.copy2(thumb_path, save_path)
+            except OSError as exc:
+                logger.warning(
+                    "PresetsPanel: 导出缩略图失败 %s -> %s: %s",
+                    thumb_path, save_path, exc, exc_info=True)
+                QMessageBox.warning(
+                    self,
+                    I18N.tr("presets.export_thumb_failed_title",
+                            "Export Failed"),
+                    I18N.tr(
+                        "presets.export_thumb_failed",
+                        f"Could not export thumbnail: {exc}"),
+                )
+
+
+class PresetDelegate(QStyledItemDelegate):
+    """Custom delegate for painting preset thumbnails in the grid."""
+
+    # AUD-25513：paint 每次重绘都从磁盘解码 JPEG 会让滚动/悬停/resize
+    # 持续做重复 I/O；按 topos_path 做有上限的 LRU 缓存（含"无缩略图"
+    # 的负结果，避免反复 exists 探测）。
+    _THUMB_CACHE_LIMIT = 256
+    _THUMB_CACHE_MISS = object()
+
+    def __init__(self, panel, parent=None) -> None:
+        super().__init__(parent)
+        self.panel = panel
+        self._thumb_cache: OrderedDict[str, Optional[QPixmap]] = OrderedDict()
+
+    def clear_thumbnail_cache(self) -> None:
+        """Drop cached thumbnails (called when the folder is rescanned)."""
+        self._thumb_cache.clear()
+
+    def _thumbnail_pixmap(self, topos_path: str) -> Optional[QPixmap]:
+        """Return the preset's thumbnail pixmap, or None if unavailable.
+
+        Results (including misses) are memoized per topos_path; disk is hit
+        at most once per entry between rescans.
+        """
+        cached = self._thumb_cache.get(topos_path, self._THUMB_CACHE_MISS)
+        if cached is not self._THUMB_CACHE_MISS:
+            self._thumb_cache.move_to_end(topos_path)
+            return cached
+        pixmap: Optional[QPixmap] = None
+        preset_name = os.path.splitext(os.path.basename(topos_path))[0]
+        thumb_path = os.path.join(os.path.dirname(topos_path),
+                                  f"{preset_name}.thumb.jpg")
+        if os.path.exists(thumb_path):
+            loaded = QPixmap(thumb_path)
+            if not loaded.isNull():
+                pixmap = loaded
+        self._thumb_cache[topos_path] = pixmap
+        while len(self._thumb_cache) > self._THUMB_CACHE_LIMIT:
+            self._thumb_cache.popitem(last=False)
+        return pixmap
+
+    def paint(self, painter, option, index) -> None:
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Background rect with margins
+        margin = 4
+        bg_rect = option.rect.adjusted(margin, margin, -margin, -margin)
+
+        # Selection / hover background
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.setBrush(QBrush(QColor(255, 136, 0, 80)))
+        elif option.state & QStyle.StateFlag.State_MouseOver:
+            painter.setBrush(QBrush(QColor(255, 255, 255, 15)))
+        else:
+            painter.setBrush(QBrush(QColor(35, 35, 39)))
+        painter.setPen(QPen(QColor(60, 60, 60), 1))
+        painter.drawRoundedRect(bg_rect, 8, 8)
+
+        # Thumbnail area
+        thumb_margin = 4
+        thumb_rect = QRect(
+            bg_rect.left() + thumb_margin,
+            bg_rect.top() + thumb_margin,
+            bg_rect.width() - 2 * thumb_margin,
+            bg_rect.height() - 24
+        )
+
+        # Draw thumbnail
+        topos_path = index.data(Qt.ItemDataRole.UserRole)
+        if topos_path:
+            pixmap = self._thumbnail_pixmap(topos_path)
+            if pixmap is not None:
+                pw, ph = pixmap.width(), pixmap.height()
+                tw, th = thumb_rect.width(), thumb_rect.height()
+                aspect_p = pw / ph if ph > 0 else 1
+                aspect_t = tw / th if th > 0 else 1
+                if aspect_p > aspect_t:
+                    src_h = ph
+                    src_w = int(ph * aspect_t)
+                    src_x = (pw - src_w) // 2
+                    src_y = 0
+                else:
+                    src_w = pw
+                    src_h = int(pw / aspect_t) if aspect_t > 0 else ph
+                    src_x = 0
+                    src_y = (ph - src_h) // 2
+                painter.drawPixmap(thumb_rect, pixmap, QRect(src_x, src_y, src_w, src_h))
+            else:
+                self._draw_placeholder(painter, thumb_rect)
+
+            # Check for grading effects from .topos project data
+            meta = self.panel._get_preset_meta(topos_path)
+            layers = meta.get("layers", [])
+            if layers:
+                has_grading = False
+                has_plugins = False
+                for layer_data in layers:
+                    gp = layer_data.get("grading_params", {})
+                    has_effect = any(
+                        gp.get(k) != 0 and gp.get(k) != [0, 0, 0] and gp.get(k) != (0, 0, 0)
+                        for k in ["exposure", "contrast", "saturation", "temp", "tint",
+                                   "shadow", "highlights", "vibrance", "hue_shift"]
+                    )
+                    if has_effect or layer_data.get("curves_data") or layer_data.get("warper_params"):
+                        has_grading = True
+                    if layer_data.get("plugins"):
+                        has_plugins = True
+
+                # Draw indicator dots above filename (horizontal: orange, purple, cyan)
+                dot_y = bg_rect.bottom() - 26
+                dot_x = bg_rect.left() + 8
+                dot_size = 6
+                dot_gap = 10
+                painter.setPen(Qt.PenStyle.NoPen)
+                if has_grading:
+                    painter.setBrush(QBrush(QColor(255, 136, 0)))
+                    painter.drawEllipse(QRect(dot_x, dot_y, dot_size, dot_size))
+                    dot_x += dot_gap
+                if len(layers) > 1:
+                    painter.setBrush(QBrush(QColor(180, 120, 255)))
+                    painter.drawEllipse(QRect(dot_x, dot_y, dot_size, dot_size))
+                    dot_x += dot_gap
+                if has_plugins:
+                    painter.setBrush(QBrush(QColor(0, 180, 255)))
+                    painter.drawEllipse(QRect(dot_x, dot_y, dot_size, dot_size))
+
+        # Bottom gradient overlay
+        overlay_height = 22
+        overlay_rect = QRect(
+            bg_rect.left() + thumb_margin,
+            bg_rect.bottom() - overlay_height,
+            bg_rect.width() - 2 * thumb_margin,
+            overlay_height
+        )
+        gradient = QLinearGradient(
+            float(overlay_rect.left()), float(overlay_rect.top()),
+            float(overlay_rect.left()), float(overlay_rect.bottom())
+        )
+        gradient.setColorAt(0, QColor(0, 0, 0, 0))
+        gradient.setColorAt(0.4, QColor(0, 0, 0, 80))
+        gradient.setColorAt(1, QColor(0, 0, 0, 160))
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRect(overlay_rect)
+
+        # Preset name
+        name = index.data(Qt.ItemDataRole.DisplayRole)
+        name_rect = QRect(
+            bg_rect.left() + 8,
+            bg_rect.bottom() - 18,
+            bg_rect.width() - 16,
+            14
+        )
+        painter.setPen(QColor(255, 255, 255, 210))
+        font = painter.font()
+        font.setPointSize(8)
+        font.setBold(False)
+        painter.setFont(font)
+        elided = painter.fontMetrics().elidedText(name, Qt.TextElideMode.ElideMiddle, name_rect.width())
+        painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
+
+        painter.restore()
+
+    def _draw_placeholder(self, painter, rect) -> None:
+        """Draw a placeholder for missing thumbnails."""
+        painter.setBrush(QBrush(QColor(30, 30, 30)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(rect, 6, 6)
+        painter.setPen(QColor(80, 80, 80))
+        font = painter.font()
+        font.setPointSize(16)
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "📷")
+
+    def sizeHint(self, option, index):
+        # Follow the view's gridSize (the column-grid controller keeps it
+        # in sync with the viewport width); the fixed 128x128 predates the
+        # column-count zoom and left cards stranded in oversized cells.
+        view = option.widget
+        grid = view.gridSize() if view is not None else QSize()
+        if grid.isValid() and grid.width() > 0:
+            return grid
+        return QSize(128, 128)
+
+    def editorEvent(self, event, model, option, index):
+        """Handle middle-click to apply grade."""
+        if event.type() == event.Type.MouseButtonRelease:
+            if event.button() == Qt.MouseButton.MiddleButton:
+                topos_path = index.data(Qt.ItemDataRole.UserRole)
+                if topos_path and os.path.isfile(topos_path):
+                    self.panel.grade_applied.emit(topos_path)
+                    return True
+        return super().editorEvent(event, model, option, index)

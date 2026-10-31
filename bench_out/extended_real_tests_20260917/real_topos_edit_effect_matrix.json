@@ -1,0 +1,408 @@
+{
+  "kind": "real_topos_edit_effect_matrix",
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+  "native_codec": "/Users/testuser/Documents/vscode/topos_1/native/topos_codec/build/release/topos_codec.0.1.0.dylib",
+  "rows": [
+    {
+      "effect_type": "transform",
+      "category": "transform",
+      "params": {
+        "position_x": 0.0,
+        "position_y": 0.0,
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "rotation": 0.0,
+        "anchor_x": 0.5,
+        "anchor_y": 0.5
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "not_attachable_by_design",
+      "reason": "clip-native or legacy ghost effect"
+    },
+    {
+      "effect_type": "crop",
+      "category": "transform",
+      "params": {
+        "left": 0.0,
+        "right": 0.0,
+        "top": 0.0,
+        "bottom": 0.0,
+        "feather": 0.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "not_attachable_by_design",
+      "reason": "clip-native or legacy ghost effect"
+    },
+    {
+      "effect_type": "opacity",
+      "category": "transform",
+      "params": {
+        "opacity": 100.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "not_attachable_by_design",
+      "reason": "clip-native or legacy ghost effect"
+    },
+    {
+      "effect_type": "vignette",
+      "category": "stylize",
+      "params": {
+        "intensity": 1.25,
+        "radius": 8.0,
+        "softness": 0.3,
+        "roundness": 0.5
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "not_attachable_by_design",
+      "reason": "clip-native or legacy ghost effect"
+    },
+    {
+      "effect_type": "strip_eq",
+      "category": "audio",
+      "params": {
+        "gain": 0.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "audio"
+    },
+    {
+      "effect_type": "limiter",
+      "category": "audio",
+      "params": {
+        "threshold_db": -3.0,
+        "release_ms": 100.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "audio"
+    },
+    {
+      "effect_type": "compressor",
+      "category": "audio",
+      "params": {
+        "threshold_db": -24.0,
+        "ratio": 4.0,
+        "makeup_gain": 0.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "audio"
+    },
+    {
+      "effect_type": "reverb",
+      "category": "audio",
+      "params": {
+        "mix": 0.7,
+        "decay": 2.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "audio"
+    },
+    {
+      "effect_type": "delay",
+      "category": "audio",
+      "params": {
+        "time_ms": 300.0,
+        "feedback": 40.0,
+        "mix": 0.7
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "audio"
+    },
+    {
+      "effect_type": "saturation",
+      "category": "audio",
+      "params": {
+        "drive": 0.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "audio"
+    },
+    {
+      "effect_type": "imager",
+      "category": "audio",
+      "params": {
+        "width": 100.0,
+        "pan": 0.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "audio"
+    },
+    {
+      "effect_type": "noise_gate",
+      "category": "audio",
+      "params": {
+        "threshold_db": -40.0,
+        "release_ms": 100.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "audio"
+    },
+    {
+      "effect_type": "adjustment_clip",
+      "category": "generator",
+      "params": {},
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "generator"
+    },
+    {
+      "effect_type": "solid_color",
+      "category": "generator",
+      "params": {
+        "color": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "separate_domain",
+      "reason": "generator"
+    },
+    {
+      "effect_type": "blur",
+      "category": "filter",
+      "params": {
+        "blur_type": "gaussian",
+        "radius_x": 8.0,
+        "radius_y": 8.0,
+        "radius": 8.0,
+        "angle": 0.0,
+        "motion_source": "angle",
+        "shutter": 1.0,
+        "edge_preserve": 0.5,
+        "aperture_blades": "circle",
+        "anamorphic": 0.0,
+        "highlight_gain": 0.0,
+        "edge_policy": "clamp",
+        "quality": "normal",
+        "channel_r": true,
+        "channel_g": true,
+        "channel_b": true,
+        "channel_a": false,
+        "mix": 0.7,
+        "process_alpha": true
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "passed",
+      "success": true,
+      "error_code": "",
+      "cause": "",
+      "elapsed_s": 4.668,
+      "output_bytes": 589427,
+      "hw_fallback_reason": "",
+      "trail_fallback_reason": "cpu_encoder_surface_path"
+    },
+    {
+      "effect_type": "sharpen",
+      "category": "filter",
+      "params": {
+        "amount": 1.2,
+        "radius": 8.0,
+        "threshold": 0.25,
+        "channels": "all"
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "passed",
+      "success": true,
+      "error_code": "",
+      "cause": "",
+      "elapsed_s": 5.454,
+      "output_bytes": 824435,
+      "hw_fallback_reason": "",
+      "trail_fallback_reason": "cpu_encoder_surface_path"
+    },
+    {
+      "effect_type": "denoise",
+      "status": "timeout",
+      "timeout_s": 120
+    },
+    {
+      "effect_type": "edge_detect",
+      "category": "filter",
+      "params": {
+        "method": "sobel",
+        "threshold": 0.25,
+        "threshold_high": 0.75,
+        "direction": "both",
+        "output_mode": "edges",
+        "invert": false,
+        "output_strength": 1.0,
+        "kernel_size": 3,
+        "preblur": 0.0,
+        "channel": "luminance"
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "passed",
+      "success": true,
+      "error_code": "",
+      "cause": "",
+      "elapsed_s": 5.243,
+      "output_bytes": 234851,
+      "hw_fallback_reason": "",
+      "trail_fallback_reason": "cpu_encoder_surface_path"
+    },
+    {
+      "effect_type": "erode_dilate",
+      "category": "filter",
+      "params": {
+        "operation": "erode",
+        "size": 3,
+        "iterations": 2,
+        "edge_mode": "extend",
+        "channels": "alpha"
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "passed",
+      "success": true,
+      "error_code": "",
+      "cause": "",
+      "elapsed_s": 3.861,
+      "output_bytes": 765891,
+      "hw_fallback_reason": "",
+      "trail_fallback_reason": "cpu_encoder_surface_path"
+    },
+    {
+      "effect_type": "defocus",
+      "category": "filter",
+      "params": {
+        "mode": "separable",
+        "focal_x": 0.5,
+        "focal_y": 0.5,
+        "focal_size": 0.3,
+        "max_radius": 12.0,
+        "edge_policy": "clamp",
+        "process_alpha": true
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "passed",
+      "success": true,
+      "error_code": "",
+      "cause": "",
+      "elapsed_s": 15.579,
+      "output_bytes": 612123,
+      "hw_fallback_reason": "",
+      "trail_fallback_reason": "cpu_encoder_surface_path"
+    },
+    {
+      "effect_type": "glow",
+      "category": "stylize",
+      "params": {
+        "threshold": 0.25,
+        "radius": 8.0,
+        "intensity": 1.25,
+        "tint_r": 1.0,
+        "tint_g": 0.85,
+        "tint_b": 0.7,
+        "mix": 0.7,
+        "quality": "normal"
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "status": "passed",
+      "success": true,
+      "error_code": "",
+      "cause": "",
+      "elapsed_s": 5.248,
+      "output_bytes": 729731,
+      "hw_fallback_reason": "",
+      "trail_fallback_reason": "cpu_encoder_surface_path"
+    },
+    {
+      "effect_type": "plugin:bilateral_skin_smooth",
+      "category": "plugin",
+      "params": {
+        "strength": 0.65,
+        "radius": 8.0,
+        "threshold": 0.25,
+        "recover": 0.4
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "plugin_identity": "active_catalog_identity",
+      "status": "exception",
+      "exception_type": "ValueError",
+      "exception": "Video effect preflight failed: 效果「plugin:bilateral_skin_smooth」无导出后端；继续导出会静默丢失该效果。请移除/禁用该效果，或安装支持它的导出后端。",
+      "elapsed_s": 1.59
+    },
+    {
+      "effect_type": "plugin:Color_Space_Transform",
+      "category": "plugin",
+      "params": {
+        "input_space": "sRGB",
+        "input_gamma": "Linear",
+        "output_space": "sRGB",
+        "output_gamma": "sRGB",
+        "enable_adaptation": false,
+        "tone_mapping": "None",
+        "exposure": 0.0,
+        "contrast": 1.0,
+        "saturation": 1.0
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "plugin_identity": "active_catalog_identity",
+      "status": "exception",
+      "exception_type": "ValueError",
+      "exception": "Video effect preflight failed: 效果「plugin:Color_Space_Transform」无导出后端；继续导出会静默丢失该效果。请移除/禁用该效果，或安装支持它的导出后端。",
+      "elapsed_s": 1.72
+    },
+    {
+      "effect_type": "plugin:HighPass_Retouch",
+      "category": "plugin",
+      "params": {
+        "smooth_radius": 5.0,
+        "detail_preserve": 0.75,
+        "mix_amount": 0.65
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "plugin_identity": "active_catalog_identity",
+      "status": "exception",
+      "exception_type": "ValueError",
+      "exception": "Video effect preflight failed: 效果「plugin:HighPass_Retouch」无导出后端；继续导出会静默丢失该效果。请移除/禁用该效果，或安装支持它的导出后端。",
+      "elapsed_s": 1.557
+    },
+    {
+      "effect_type": "plugin:Film_Halation",
+      "category": "plugin",
+      "params": {
+        "blur_radius": 4.0,
+        "enable_tint": true
+      },
+      "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+      "source_codec": "TOPOS 422Proxy / yuv422p10le / 10-bit",
+      "plugin_identity": "active_catalog_identity",
+      "status": "exception",
+      "exception_type": "ValueError",
+      "exception": "Video effect preflight failed: 效果「plugin:Film_Halation」无导出后端；继续导出会静默丢失该效果。请移除/禁用该效果，或安装支持它的导出后端。",
+      "elapsed_s": 1.568
+    }
+  ]
+}

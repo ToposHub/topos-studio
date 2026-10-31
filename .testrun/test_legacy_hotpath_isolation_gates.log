@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 16 items
+
+tests/edit/test_legacy_hotpath_isolation_gates.py ................       [100%]
+
+============================= 16 passed in 28.94s ==============================

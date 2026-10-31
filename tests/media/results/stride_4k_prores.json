@@ -1,0 +1,71 @@
+{
+  "video": "4K_prores422HQ.mov",
+  "results": [
+    {
+      "label": "fast_drag",
+      "cadence_ms": 10.0,
+      "inputs": 268,
+      "duration_s": 4.12,
+      "updates_per_sec": 29.6,
+      "emissions": 122,
+      "e2e_latency_ms": {
+        "p50": 46.6,
+        "p90": 1085.2,
+        "max": 1429.3
+      },
+      "decode_ms": {
+        "p50": 15.7,
+        "p90": 17.4,
+        "max": 22.7
+      },
+      "gpu_round_ms": {
+        "p50": 15.9,
+        "p90": 17.5
+      },
+      "cycle_gaps": {
+        "worker_wake_ms": 4.9,
+        "decode_ms": 16.3,
+        "submit_ms": 0.0,
+        "release_hop_ms": 0.8
+      },
+      "decode_types": {
+        "vt_pixel_buffer": 169
+      },
+      "defer_busy_ratio": 0.84,
+      "drop_events": 393
+    },
+    {
+      "label": "slow_drag",
+      "cadence_ms": 60.0,
+      "inputs": 800,
+      "duration_s": 50.77,
+      "updates_per_sec": 16.6,
+      "emissions": 845,
+      "e2e_latency_ms": {
+        "p50": 65.6,
+        "p90": 74.7,
+        "max": 242.6
+      },
+      "decode_ms": {
+        "p50": 18.0,
+        "p90": 63.5,
+        "max": 394.0
+      },
+      "gpu_round_ms": {
+        "p50": 18.0,
+        "p90": 71.6
+      },
+      "cycle_gaps": {
+        "worker_wake_ms": 0.1,
+        "decode_ms": -234.7,
+        "submit_ms": 249.5,
+        "release_hop_ms": 1.1
+      },
+      "decode_types": {
+        "vt_pixel_buffer": 1987
+      },
+      "defer_busy_ratio": 0.96,
+      "drop_events": 1420
+    }
+  ]
+}

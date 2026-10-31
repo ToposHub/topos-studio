@@ -1,0 +1,15 @@
+{
+  "measured_at": "2026-09-18 (pre-fix, code at T-P1-20 commit 020b63fd)",
+  "protocol": "48 frames + 8 warmup, 2K_topos_proxy source, topos_proxy output, anchor children",
+  "note": "child JSONs cleaned when re-running in place; numbers transcribed from the pre-fix matrix run stdout",
+  "timeline": {
+    "identity": {"cpu_render": 85.12, "forced_gpu": 87.12},
+    "grade": {"cpu_render": 1.40, "forced_gpu": 1.38},
+    "blur": {"cpu_render": 4.55, "forced_gpu": 4.67},
+    "sharpen": {"cpu_render": 3.23, "forced_gpu": 3.25},
+    "glow": {"cpu_render": 3.35, "forced_gpu": 3.53},
+    "two_layer": {"cpu_render": 2.64, "forced_gpu": 2.44},
+    "transition": {"cpu_render": 3.64, "forced_gpu": 3.72}
+  },
+  "anchors": {"decode_only": 376.35, "encode_only": 155.24, "decode_encode": 102.22}
+}

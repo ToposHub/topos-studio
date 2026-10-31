@@ -1,0 +1,146 @@
+{
+  "status": "ok",
+  "frames": 48,
+  "wall_s": 0.5320262040004309,
+  "fps": 90.22112001077512,
+  "decode_ms_p50": 2.736431501034531,
+  "decode_ms_p95": 3.4006160021817777,
+  "encode_ms_p50": 7.673278500078595,
+  "encode_ms_p95": 10.760962999484036,
+  "decode_stage": {
+    "scan_ns": 98000,
+    "crc_ns": 6089000,
+    "entropy_ns": 163631352,
+    "dequant_idct_ns": 965891648,
+    "output_ns": 0,
+    "alloc_ns": 0,
+    "blocks": 3110400,
+    "nonzero_ac": 2789785,
+    "dc_only_blocks": 0,
+    "slices": 1296,
+    "packet_bytes_read": 3655338,
+    "segments_parsed": 1296,
+    "segments_skipped": 0,
+    "entropy_symbols": 11800370,
+    "coefficients_skipped": 0,
+    "idct_samples": 199065600,
+    "upload_bytes": 398131200,
+    "frames": 48,
+    "wall_ns": 119997000,
+    "p50_ns": 2398000,
+    "p95_ns": 3022000,
+    "p99_ns": 3164000
+  },
+  "encode_stage": {
+    "pad_ns": 37000,
+    "fill_ns": 700999000,
+    "entropy_ns": 1026774000,
+    "crc_ns": 44420000,
+    "copy_ns": 4205000,
+    "asm_ns": 5868000,
+    "slices": 1296,
+    "blocks": 3110400,
+    "dct_ns": 0,
+    "probe_fill_ns": 0,
+    "probe_wall_ns": 0,
+    "final_wall_ns": 0,
+    "check_wall_ns": 50267000
+  },
+  "diagnostics": {
+    "decode_path": "context",
+    "decode_path_reason": "ok",
+    "native_target_decode": false,
+    "bitstream_major": 7,
+    "stream_compatibility": "unsupported_major",
+    "legacy_reduced_fallback": false,
+    "v7b_base_range_decode": false,
+    "v7b_base_range_samples": 0,
+    "decode_request_mode": null,
+    "decode_request_scale": null,
+    "read_ahead_depth": 0,
+    "read_ahead_stats": {
+      "batch_decodes": 0,
+      "prefetched_frames": 0,
+      "cache_hits": 0,
+      "cache_discarded": 0,
+      "batch_fallbacks": 0
+    },
+    "decode_workers_requested": 0,
+    "decode_workers_assigned": 16,
+    "decode_worker_budget": {
+      "capacity": 16,
+      "active": 1,
+      "assigned_total": 16,
+      "oversubscribed": false,
+      "leases": [
+        {
+          "key": "media:12161558352",
+          "role": "export",
+          "requested": 0,
+          "assigned": 16
+        }
+      ]
+    },
+    "metal_surface_frames": 0,
+    "metal_surface_failures": 0,
+    "metal_surface_active": false,
+    "plane_pool_entries": 5,
+    "frame_bytes_estimate": 8294400
+  },
+  "output_bytes": 57875558,
+  "kind": "decode_encode",
+  "source": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos_proxy.mov",
+  "meta": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "fps_rational": [
+      25,
+      1
+    ],
+    "total_frames": 96,
+    "pixel_format": "yuv422p10le",
+    "bit_depth": 10,
+    "diagnostics": {
+      "decode_path": "context",
+      "decode_path_reason": "ok",
+      "native_target_decode": false,
+      "bitstream_major": 7,
+      "stream_compatibility": "unsupported_major",
+      "legacy_reduced_fallback": false,
+      "v7b_base_range_decode": false,
+      "v7b_base_range_samples": 0,
+      "decode_request_mode": null,
+      "decode_request_scale": null,
+      "read_ahead_depth": 0,
+      "read_ahead_stats": {
+        "batch_decodes": 0,
+        "prefetched_frames": 0,
+        "cache_hits": 0,
+        "cache_discarded": 0,
+        "batch_fallbacks": 0
+      },
+      "decode_workers_requested": 0,
+      "decode_workers_assigned": 16,
+      "decode_worker_budget": {
+        "capacity": 16,
+        "active": 1,
+        "assigned_total": 16,
+        "oversubscribed": false,
+        "leases": [
+          {
+            "key": "media:12161558352",
+            "role": "export",
+            "requested": 0,
+            "assigned": 16
+          }
+        ]
+      },
+      "metal_surface_frames": 0,
+      "metal_surface_failures": 0,
+      "metal_surface_active": false,
+      "plane_pool_entries": 5,
+      "frame_bytes_estimate": 8294400
+    }
+  }
+}

@@ -1,0 +1,48 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/testuser/Documents/vscode/topos_1
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 3037 items
+
+tests/media/test_audio_metadata.py ..................................... [  1%]
+..                                                                       [  1%]
+tests/media/test_bench_timeline_export_windows.py ...................... [  2%]
+...........                                                              [  2%]
+tests/media/test_capability_manifest.py ......................           [  3%]
+tests/media/test_codec_probe_fix.py sssssss                              [  3%]
+tests/media/test_color_convert.py ...................................... [  4%]
+.......................                                                  [  5%]
+tests/media/test_color_decode_chroma_resize.py ..                        [  5%]
+tests/media/test_color_frame_provider_adapter.py ....................... [  6%]
+..                                                                       [  6%]
+tests/media/test_color_metadata_mapping.py ............................. [  7%]
+........................................................................ [  9%]
+........................................................................ [ 11%]
+..                                                                       [ 11%]
+tests/media/test_cv_metal_bridge.py .................................... [ 13%]
+                                                                         [ 13%]
+tests/media/test_decode_policy.py ...................................... [ 14%]
+............................                                             [ 15%]
+tests/media/test_decode_surface_protocol.py ....                         [ 15%]
+tests/media/test_decode_worker.py ...............................        [ 16%]
+tests/media/test_disk_proxy.py ...................................       [ 17%]
+tests/media/test_disk_proxy_integration.py ............................. [ 18%]
+.....                                                                    [ 18%]
+tests/media/test_ffmpeg_decode.py ...................................... [ 20%]
+..........                                                               [ 20%]
+tests/media/test_ffmpeg_seek.py ..........sssssss......                  [ 21%]
+tests/media/test_ffmpeg_source_seek_math.py ..                           [ 21%]
+tests/media/test_frame_path.py ......................................... [ 22%]
+..............                                                           [ 22%]
+tests/media/test_frame_provider_vt_zero_copy.py .......F...............  [ 23%]
+tests/media/test_gop_index.py ....................                       [ 24%]
+tests/media/test_gpu_frame.py .....................................      [ 25%]
+tests/media/test_hevc10_source_export_passthrough.py ...                 [ 25%]
+tests/media/test_high_bit_depth.py ..........ss.sss..s..s                [ 26%]
+tests/media/test_high_bit_depth_integration.py ......................... [ 27%]
+.........s.s.ss.......                                                   [ 27%]
+tests/media/test_hot_path_guards.py .........                            [ 28%]
+tests/media/test_hwaccel_vendor_routing.py ...........s                  [ 28%]
+tests/media/test_macos_vt_compression.py ..

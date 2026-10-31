@@ -1,0 +1,50 @@
+{
+  "ok": true,
+  "result": {
+    "range": {
+      "in": 50,
+      "out": 149,
+      "enabled": [
+        true,
+        true,
+        true
+      ]
+    },
+    "timeline": {
+      "revision": 1,
+      "duration": 100,
+      "tracks": [
+        {
+          "name": "V1",
+          "type": "video",
+          "locked": false,
+          "clips": [
+            {
+              "id": "b2edbd3a-9ad3-4525-9202-69a15afe875c",
+              "start": 0,
+              "end": 100,
+              "source": 50,
+              "duration": 100,
+              "linked": "d28aad86-d1f7-4bb4-9092-3502b95c81af"
+            }
+          ]
+        },
+        {
+          "name": "A1",
+          "type": "audio",
+          "locked": false,
+          "clips": [
+            {
+              "id": "d28aad86-d1f7-4bb4-9092-3502b95c81af",
+              "start": 0,
+              "end": 100,
+              "source": 50,
+              "duration": 100,
+              "linked": "b2edbd3a-9ad3-4525-9202-69a15afe875c"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

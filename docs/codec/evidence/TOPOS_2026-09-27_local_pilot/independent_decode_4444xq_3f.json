@@ -1,0 +1,71 @@
+{
+  "status": "independent_decoder_agreement_only",
+  "created_at": "2026-09-27T15:56:24.536614+00:00",
+  "file": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_paired_q01_real_source/4444xq-vt-12bit-match/prores_4444xq.mov",
+  "file_sha256": "371c152e449e66b0d7479ac33e8b78003ddcaab191dbd6e732befa8c77e32b76",
+  "frames": 3,
+  "apple_output": "p416le high 12 bits",
+  "ffmpeg_output": "yuva444p12le first three planes",
+  "results": [
+    {
+      "frame": 0,
+      "planes": {
+        "y": {
+          "mae_codes": 0.3161950231481481,
+          "max_abs_codes": 3,
+          "bit_exact": false
+        },
+        "u": {
+          "mae_codes": 0.17942226080246915,
+          "max_abs_codes": 2,
+          "bit_exact": false
+        },
+        "v": {
+          "mae_codes": 0.1915596064814815,
+          "max_abs_codes": 2,
+          "bit_exact": false
+        }
+      }
+    },
+    {
+      "frame": 1,
+      "planes": {
+        "y": {
+          "mae_codes": 0.3153071952160494,
+          "max_abs_codes": 3,
+          "bit_exact": false
+        },
+        "u": {
+          "mae_codes": 0.18119068287037038,
+          "max_abs_codes": 2,
+          "bit_exact": false
+        },
+        "v": {
+          "mae_codes": 0.19473765432098766,
+          "max_abs_codes": 2,
+          "bit_exact": false
+        }
+      }
+    },
+    {
+      "frame": 2,
+      "planes": {
+        "y": {
+          "mae_codes": 0.3147907021604938,
+          "max_abs_codes": 3,
+          "bit_exact": false
+        },
+        "u": {
+          "mae_codes": 0.18047260802469137,
+          "max_abs_codes": 2,
+          "bit_exact": false
+        },
+        "v": {
+          "mae_codes": 0.19317129629629629,
+          "max_abs_codes": 2,
+          "bit_exact": false
+        }
+      }
+    }
+  ]
+}

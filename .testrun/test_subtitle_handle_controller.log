@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_subtitle_handle_controller.py ......                     [100%]
+
+============================== 6 passed in 8.49s ===============================

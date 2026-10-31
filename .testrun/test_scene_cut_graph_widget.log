@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/edit/test_scene_cut_graph_widget.py ...                            [100%]
+
+============================== 3 passed in 11.72s ==============================

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_media_pool_bin_tree_root_top.py .......                  [100%]
+
+============================== 7 passed in 19.65s ==============================

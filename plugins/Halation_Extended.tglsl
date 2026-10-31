@@ -1,0 +1,129 @@
+// --- Topos Plugin Metadata ---
+// @name Halation Extended
+// @i18n_name Halation_Extended
+// @author Topos Team
+// @version 1.0
+// @description Highlight diffusion glow with hue-adjustable tint (halation variant, alternating-direction ring kernel)
+// @input_space scene-linear
+// @output_space scene-linear
+// @precision float16
+// @determinism deterministic
+// @export_support video
+// @threading gpu
+// @param slider strength "Strength" 0.5 0.0 1.0
+// @param slider radius "Radius" 0.5 0.0 1.0
+// @param separator
+// @param slider hue_shift "Hue Shift" 0.0 -0.5 0.5
+// @param slider threshold "Highlight Threshold" 0.55 0.0 1.0
+// -----------------------------
+
+// ====== SECTION 1: ADR KERNEL CONSTANTS ======
+// ADR = Alternating-Direction Ring kernel, designed for this plugin as an
+// independent alternative to the built-in fast_blur / plain box blur.
+// 3 nested rings of 4 taps; ring directions alternate
+// axis-aligned -> diagonal -> axis-aligned:
+//   - alternation decorrelates the sampling lattice (no plus-shaped or
+//     axis-aligned ghosting a separable/box pass would leave behind),
+//   - front-loaded ring weights with geometrically growing radii give a
+//     tight core plus a long diffusion tail - the visual signature of
+//     halation spread.
+// Total cost: 13 texture fetches per pixel (12 ring taps + center).
+
+const int ADR_TAPS = 12;        // 3 rings x 4 taps, compile-time loop bound
+const int ADR_RINGS = 3;
+const float ADR_CENTER_W = 1.0; // hot core keeps the glow attached to its source
+
+// Unit sample direction per tap (axis / diagonal alternating rings).
+const vec2 ADR_DIRS[12] = vec2[12](
+    vec2( 1.0,  0.0), vec2( 0.0,  1.0), vec2(-1.0,  0.0), vec2( 0.0, -1.0),
+    vec2( 0.7071,  0.7071), vec2(-0.7071,  0.7071),
+    vec2(-0.7071, -0.7071), vec2( 0.7071, -0.7071),
+    vec2( 1.0,  0.0), vec2( 0.0,  1.0), vec2(-1.0,  0.0), vec2( 0.0, -1.0)
+);
+
+// Ring radius as a fraction of the user radius: tight core, long tail.
+const float ADR_RING_R[3] = float[3](0.35, 0.6, 1.0);
+
+// Ring tap weights: front-loaded decay - neither uniform (box) nor
+// gaussian; a slightly heavier tail than a gaussian of matched core.
+const float ADR_RING_W[3] = float[3](1.0, 0.65, 0.45);
+
+// Highlight soft-knee width, scene-linear luminance units.
+const float KNEE_WIDTH = 0.35;
+
+// Tint anchor: classic film halation sits on red (HSV hue 0.0);
+// hue_shift rotates the glow hue from this anchor.
+const float HALATION_BASE_HUE = 0.0;
+
+// Saturation floor so the glow reads as colored halation, not white bloom.
+const float HALATION_MIN_SAT = 0.55;
+
+// Peak additive gain reached at strength = 1.0.
+const float HALATION_MAX_GAIN = 1.5;
+
+// ====== SECTION 2: HSV CONVERSIONS ======
+// rgb2hsv / hsv2rgb 由宿主 composition shader 提供（与 Day_Night_Converter
+// 等插件同源）；此处不得重复定义，否则 GLSL "redefines an existing
+// function" 编译失败、整层被静默跳过（P0-COL-01）。
+
+// ====== SECTION 3: HIGHLIGHT EXTRACTION ======
+
+// Soft highlight mask in scene-linear luminance. knee_start (0..1) sets
+// where the ramp begins; anything above knee_start + KNEE_WIDTH -
+// including HDR values above 1.0 - glows at full strength. No hard
+// cutoff, no range clamping.
+float highlightMask(vec3 c, float knee_start) {
+    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return smoothstep(knee_start, knee_start + KNEE_WIDTH, luma);
+}
+
+// ====== SECTION 4: MAIN ======
+
+vec3 process(vec3 color, vec2 uv) {
+    if (strength < 0.001) return color;
+
+    vec2 current_size = vec2(textureSize(u_input_tex, 0));
+    vec2 tex_offset = 1.0 / current_size;
+    vec3 original_color = texture(u_input_tex, uv).rgb;
+
+    // Radius: 0..1 -> 0.4% - 3.0% of image width (4K: 15 - 115 px).
+    float radius_ratio = 0.004 + radius * 0.026;
+    float radius_pix = max(2.0, current_size.x * radius_ratio);
+
+    // ====== ADR RING ACCUMULATION ======
+    // Each tap is masked against the highlight knee BEFORE accumulating:
+    // the glow must carry energy out of bright regions into dark ones
+    // (masking after the blur would fade the glow at region borders).
+    float knee = threshold;
+    vec3 spill = original_color * highlightMask(original_color, knee) * ADR_CENTER_W;
+    float sum_w = ADR_CENTER_W;
+
+    for (int i = 0; i < ADR_TAPS; i++) {
+        int ring = i / (ADR_TAPS / ADR_RINGS);
+        float w = ADR_RING_W[ring];
+        vec2 offs = ADR_DIRS[i] * (radius_pix * ADR_RING_R[ring]) * tex_offset;
+        vec3 s = texture(u_input_tex, uv + offs).rgb;
+        spill += s * (highlightMask(s, knee) * w);
+        sum_w += w;
+    }
+    vec3 spill_avg = spill / max(sum_w, 0.001);
+
+    // ====== HSV TINT PATH ======
+    // Re-hue the averaged spill: anchor on the classic halation red and
+    // rotate by the user offset (fract wraps the wheel; negative offsets
+    // are well defined in GLSL). Saturation is floored so the tint stays
+    // chromatic; the HDR energy (v) passes through untouched.
+    vec3 tint_hsv = rgb2hsv(spill_avg);
+    tint_hsv.x = fract(HALATION_BASE_HUE + hue_shift);
+    tint_hsv.y = max(tint_hsv.y, HALATION_MIN_SAT);
+    vec3 tinted = hsv2rgb(tint_hsv);
+
+    // ====== ADDITIVE LIGHT (delta output) ======
+    // Strength curve 1 - (1-s)^1.5 keeps the slider feel linear
+    // (codebase idiom, cf. bilateral_skin_smooth).
+    float glow_gain = (1.0 - pow(1.0 - strength, 1.5)) * HALATION_MAX_GAIN;
+    vec3 result = original_color + tinted * glow_gain;
+    // Delta form: the effect is pure additive light computed from
+    // u_input_tex and applied on top of the upstream-graded color.
+    return color + (result - original_color);
+}

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/edit/test_caption_split_merge_style.py .......                     [100%]
+
+============================== 7 passed in 6.85s ===============================

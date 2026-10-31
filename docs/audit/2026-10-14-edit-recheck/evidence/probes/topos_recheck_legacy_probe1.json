@@ -1,0 +1,29 @@
+{
+  "ripple_click_left": [],
+  "ripple_click_right": [],
+  "before_escape": {
+    "model": 100,
+    "preview": 130,
+    "interaction": "DRAGGING_CLIP",
+    "drag": true
+  },
+  "after_escape": {
+    "model": 100,
+    "preview": 100,
+    "interaction": "IDLE",
+    "drag": false
+  },
+  "after_release": {
+    "model": 100,
+    "preview": 100,
+    "undo": false
+  },
+  "horizontal_wheel": {
+    "before": 80,
+    "after": 40
+  },
+  "ctrl_horizontal_wheel": {
+    "before": 3,
+    "after": 3.2401792166769185
+  }
+}

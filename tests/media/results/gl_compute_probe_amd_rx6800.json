@@ -1,0 +1,36 @@
+{
+  "date": "2026-09-12T06:49:39",
+  "purpose": "W4-01 GL compute probe (Qt offscreen 4.5 Core)",
+  "gl_context": {
+    "requested": "4.5 Core",
+    "got": "4.5",
+    "surface": "QOffscreenSurface"
+  },
+  "gl_strings": {
+    "GL_VERSION": "4.5.0 Core Profile Context 26.8.1.260806",
+    "GL_RENDERER": "AMD Radeon RX 6800"
+  },
+  "steps": [
+    {
+      "step": "qt_context_current",
+      "ok": true,
+      "detail": "requested=4.5 Core got=4.5 profile=Core"
+    },
+    {
+      "step": "gl_strings",
+      "ok": true,
+      "detail": "AMD Radeon RX 6800 | 4.5.0 Core Profile Context 26.8.1.260806"
+    },
+    {
+      "step": "compute_fn_ptrs",
+      "ok": true,
+      "detail": "all present"
+    },
+    {
+      "step": "compute_shader_compile",
+      "ok": false,
+      "detail": "(empty log)"
+    }
+  ],
+  "verdict": "compute_unavailable_shader_compile_failed"
+}

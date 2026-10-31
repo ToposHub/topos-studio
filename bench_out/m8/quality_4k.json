@@ -1,0 +1,104 @@
+{
+  "res": "4k",
+  "frames_psnr": 120,
+  "frames_ssim": 60,
+  "topos": {
+    "psnr_y_db": 60.392,
+    "psnr_u_db": 67.559,
+    "psnr_v_db": 67.199,
+    "max_abs_err_yuv": [
+      13,
+      8,
+      9
+    ],
+    "ssim_frames": 60,
+    "ssim_y": 0.99903,
+    "ssim_u": 0.9998,
+    "ssim_v": 0.99979
+  },
+  "prores": {
+    "psnr_y_db": 65.575,
+    "psnr_u_db": 69.208,
+    "psnr_v_db": 69.0,
+    "max_abs_err_yuv": [
+      16,
+      17,
+      16
+    ],
+    "ssim_frames": 60,
+    "ssim_y": 0.99972,
+    "ssim_u": 0.99986,
+    "ssim_v": 0.99985
+  },
+  "dnxhr": {
+    "psnr_y_db": 64.07,
+    "psnr_u_db": 68.052,
+    "psnr_v_db": 67.877,
+    "max_abs_err_yuv": [
+      7,
+      7,
+      8
+    ],
+    "ssim_frames": 60,
+    "ssim_y": 0.99963,
+    "ssim_u": 0.99984,
+    "ssim_v": 0.99984
+  },
+  "multigen_topos": [
+    {
+      "gen": 1,
+      "psnr_y_db": 60.02,
+      "psnr_u_db": 67.22,
+      "psnr_v_db": 66.915
+    },
+    {
+      "gen": 3,
+      "psnr_y_db": 59.814,
+      "psnr_u_db": 66.617,
+      "psnr_v_db": 66.311
+    },
+    {
+      "gen": 5,
+      "psnr_y_db": 59.715,
+      "psnr_u_db": 66.388,
+      "psnr_v_db": 66.067
+    },
+    {
+      "gen": 10,
+      "psnr_y_db": 59.646,
+      "psnr_u_db": 66.246,
+      "psnr_v_db": 65.897
+    }
+  ],
+  "multigen_prores": [
+    {
+      "gen": 1,
+      "psnr_y_db": 65.134,
+      "psnr_u_db": 68.51,
+      "psnr_v_db": 68.353
+    },
+    {
+      "gen": 3,
+      "psnr_y_db": 61.325,
+      "psnr_u_db": 65.705,
+      "psnr_v_db": 65.436
+    },
+    {
+      "gen": 5,
+      "psnr_y_db": 59.496,
+      "psnr_u_db": 64.341,
+      "psnr_v_db": 63.998
+    },
+    {
+      "gen": 10,
+      "psnr_y_db": 57.148,
+      "psnr_u_db": 62.469,
+      "psnr_v_db": 61.986
+    }
+  ],
+  "bitrate_mbps": {
+    "topos": 612.83,
+    "prores": 645.75,
+    "dnxhr": 728.27
+  }
+}

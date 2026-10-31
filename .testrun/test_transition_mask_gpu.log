@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_transition_mask_gpu.py ......                            [100%]
+
+============================== 6 passed in 3.62s ===============================

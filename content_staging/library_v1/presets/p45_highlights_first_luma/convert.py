@@ -1,0 +1,34 @@
+"""P45 亮部先入配方（L18 批次：源配方 → 转场载荷转换）。
+
+依赖：X05 luma_reveal——生产 base lib1_luma_reveal（transition_catalog 已注册，
+生产核 transition_packs/library_v1/cores.py；暂存组件 content_staging/library_v1/transitions/luma_reveal/）。
+载荷一类：
+- to_transition_instance：TransitionInstance(transition_type, params) 直填形态
+  （生产 catalog 类型 + 生产核参数域，测试逐项校验并真实构造实例）。
+
+白名单纪律：base lib1_luma_reveal 不在 custom_transitions._BASE_TYPES（当前仅
+lib1_clock_wipe / lib1_true_push），不产出用户转场 JSON，也不提供该转换——
+未接入 = 不可声明（防悬空引用，L05 口径）。
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_DIR = Path(__file__).resolve().parent
+if str(_DIR.parents[3]) not in sys.path:
+    sys.path.insert(0, str(_DIR.parents[3]))
+
+from content_staging.library_v1.presets._shared_convert import (
+    load_recipe,
+    transition_instance,
+)
+
+TRANSITION_TYPE = "lib1_luma_reveal"
+COMPONENT_ID = "X05"
+RECIPE = load_recipe(_DIR / "recipe.json")
+
+def to_transition_instance() -> dict:
+    """Edit 转场实例载荷（TransitionInstance 直填形态）。"""
+    return transition_instance(RECIPE)

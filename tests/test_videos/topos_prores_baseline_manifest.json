@@ -1,0 +1,1109 @@
+{
+  "generated_at": "2026-09-26T20:08:33.846370+00:00",
+  "generator": "tools/generate_topos_baseline_corpus.py",
+  "plan": "docs/topos_prores_quality_optimization_plan_2026-09-21.md",
+  "phase": "P0",
+  "master": {
+    "path": "tests/test_videos/4K_prores4444.mov",
+    "frames": 487,
+    "fps": [
+      25,
+      1
+    ],
+    "resolution": [
+      3840,
+      2160
+    ],
+    "color": {
+      "primaries": 1,
+      "transfer": 1,
+      "matrix": 1,
+      "range": "limited"
+    },
+    "bytes": 2587996910,
+    "sha256_partial": "96dee3166282d212628baaef6cf55b938f2f5f78ceb360725dc38d64f878e057",
+    "audio_payload_sha256": "0a49cf7654603d7231595e084c33387713089badfed227b2f6457d21adbff87e"
+  },
+  "audio_rate": 48000,
+  "audio_samples": 935040,
+  "entries": [
+    {
+      "path": "tests/test_videos/2K_prores422Proxy.mov",
+      "kind": "prores",
+      "tier": "proxy",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv422p10le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 101282290,
+      "video_bytes": 95662497,
+      "video_mbps": 39.286446406570846,
+      "sha256_partial": "24e85ce00fff7fe8f46e1701a9160ed53969899012686d267c62240dfe8014f7"
+    },
+    {
+      "path": "tests/test_videos/2K_prores422LT.mov",
+      "kind": "prores",
+      "tier": "lt",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv422p10le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 201262666,
+      "video_bytes": 195646976,
+      "video_mbps": 80.3478340862423,
+      "sha256_partial": "79ba4ca4cc5c431f72e219984624c47c8a3e76872be37407b7334f9633d89956"
+    },
+    {
+      "path": "tests/test_videos/2K_prores422.mov",
+      "kind": "prores",
+      "tier": "standard",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv422p10le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 297668134,
+      "video_bytes": 292052176,
+      "video_mbps": 119.93929199178645,
+      "sha256_partial": "cb076dca399f7d774e87bd24bf4b2585e3103652145519b99f85babbb858f28b"
+    },
+    {
+      "path": "tests/test_videos/2K_prores422HQ.mov",
+      "kind": "prores",
+      "tier": "hq",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv422p10le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 448008914,
+      "video_bytes": 442392656,
+      "video_mbps": 181.68076221765915,
+      "sha256_partial": "6f9d05dd31349a0b312f911496d9af29113bfd227474308fd8e702c55a91ea31"
+    },
+    {
+      "path": "tests/test_videos/2K_prores4444.mov",
+      "kind": "prores",
+      "tier": "4444",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv444p12le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 671066878,
+      "video_bytes": 665450608,
+      "video_mbps": 273.2856706365503,
+      "sha256_partial": "2855c401ba0d4629990eb4868cde849574b597565d4c3cd71e273cea372d87a3"
+    },
+    {
+      "path": "tests/test_videos/2K_prores4444XQ.mov",
+      "kind": "prores",
+      "tier": "4444xq",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv444p12le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 986283406,
+      "video_bytes": 980667136,
+      "video_mbps": 402.7380435318275,
+      "sha256_partial": "7aca69c048b8c944751cda9782fed4a2f7a3cea2c4c33607ef07d9e9243dfa9c"
+    },
+    {
+      "path": "tests/test_videos/4K_prores422Proxy.mov",
+      "kind": "prores",
+      "tier": "proxy",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv422p10le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 355333634,
+      "video_bytes": 349717328,
+      "video_mbps": 143.62107926078028,
+      "sha256_partial": "1b4791ffcf1e05a7ee2eba009bd6249a277ef397c9dd835bd68cd74ab3975c74"
+    },
+    {
+      "path": "tests/test_videos/4K_prores422LT.mov",
+      "kind": "prores",
+      "tier": "lt",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv422p10le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 739049598,
+      "video_bytes": 733433328,
+      "video_mbps": 301.2046521560575,
+      "sha256_partial": "dfbdc71588b5dc55201d419bd76cf92eaa5cf16c14b0e201c22e03534e4cf30b"
+    },
+    {
+      "path": "tests/test_videos/4K_prores422.mov",
+      "kind": "prores",
+      "tier": "standard",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv422p10le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 1230752877,
+      "video_bytes": 1225133084,
+      "video_mbps": 503.1347367556468,
+      "sha256_partial": "f8dc2396915fd22d2dbdcda7527a750cd52a1d6a479056f4103dfb52afd67bfc"
+    },
+    {
+      "path": "tests/test_videos/4K_prores422HQ.mov",
+      "kind": "prores",
+      "tier": "hq",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv422p10le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 1789044428,
+      "video_bytes": 1783424635,
+      "video_mbps": 732.4125811088295,
+      "sha256_partial": "424d992f97fd122e0f886594d4f66fb19910b07b57177bb5a08253f7757e5df6"
+    },
+    {
+      "path": "tests/test_videos/4K_prores4444.mov",
+      "kind": "prores",
+      "tier": "4444",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv444p12le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 2587996910,
+      "video_bytes": 2582380640,
+      "video_mbps": 1060.525930184805,
+      "sha256_partial": "96dee3166282d212628baaef6cf55b938f2f5f78ceb360725dc38d64f878e057"
+    },
+    {
+      "path": "tests/test_videos/4K_prores4444XQ.mov",
+      "kind": "prores",
+      "tier": "4444xq",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": 25.0,
+      "pix_fmt": "yuv444p12le",
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24
+      },
+      "bytes": 3934180734,
+      "video_bytes": 3928564464,
+      "video_mbps": 1613.37349650924,
+      "sha256_partial": "1c52d83f15d5f4fbd8ae783141d5eb42bdb209a8f59daa68bfbbe033fc4b9f6c"
+    },
+    {
+      "path": "tests/test_videos/2K_topos_422_Proxy.mov",
+      "kind": "topos",
+      "tier": "proxy",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 3,
+      "pixel_format": 0,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 86719957,
+      "video_bytes": 81095301,
+      "video_mbps": 33.304025051334705,
+      "sha256_partial": "3c12e2c45aa9eabb374b798fb7c6b86c50453eedd04f1dccb719703493bd30ec",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/2K_topos_422_LT.mov",
+      "kind": "topos",
+      "tier": "lt",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 3,
+      "pixel_format": 0,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 175716768,
+      "video_bytes": 170092115,
+      "video_mbps": 69.85302464065708,
+      "sha256_partial": "ba62a53eef50a5e22e5ae8e7aa5f5a29bbca839f67cc3ea969d543ae5b2dbf2a",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/2K_topos_422.mov",
+      "kind": "topos",
+      "tier": "standard",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 3,
+      "pixel_format": 0,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 270869774,
+      "video_bytes": 265245124,
+      "video_mbps": 108.93023572895277,
+      "sha256_partial": "ac1ab4137449d05122e819754558be4bbb5809d3db4042882d8fcd796a1ca6a1",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/2K_topos_422_HQ.mov",
+      "kind": "topos",
+      "tier": "hq",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 3,
+      "pixel_format": 0,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 401863229,
+      "video_bytes": 396238576,
+      "video_mbps": 162.72631457905544,
+      "sha256_partial": "80c533e2b9b6e0039b4c2cd45d99b1bb100e1ae96dfe708f18c42b0648fd3b77",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/2K_topos_4444.mov",
+      "kind": "topos",
+      "tier": "4444",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 5,
+      "pixel_format": 1,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 541599658,
+      "video_bytes": 535975007,
+      "video_mbps": 220.11293921971253,
+      "sha256_partial": "47c74f78c9655efd13e2a89dadfea34ff9bc5734898a88f750a1d4db17cbf50c",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/2K_topos_4444_XQ.mov",
+      "kind": "topos",
+      "tier": "4444xq",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 6,
+      "pixel_format": 1,
+      "bit_depth": 12,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 795408478,
+      "video_bytes": 789783824,
+      "video_mbps": 324.3465396303901,
+      "sha256_partial": "06b71d5563a0757b5af80f11501b4e1577f1e7fe63d4dde86c23dfe40b4f1adc",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/4K_topos_422_Proxy.mov",
+      "kind": "topos",
+      "tier": "proxy",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 3,
+      "pixel_format": 0,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 330336001,
+      "video_bytes": 324711345,
+      "video_mbps": 133.351681724846,
+      "sha256_partial": "949b7fd8ccaeac89293dba522be13659aab9e9ed3a0c3509a04e438fb4be2d23",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/4K_topos_422_LT.mov",
+      "kind": "topos",
+      "tier": "lt",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 3,
+      "pixel_format": 0,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 686397319,
+      "video_bytes": 680772666,
+      "video_mbps": 279.57809691991787,
+      "sha256_partial": "ad1af50f802b29c2ccdacacab421ed97514c882353c6b628ea2202ceb36d2fd0",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/4K_topos_422.mov",
+      "kind": "topos",
+      "tier": "standard",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 3,
+      "pixel_format": 0,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 1067075479,
+      "video_bytes": 1061450829,
+      "video_mbps": 435.9140981519507,
+      "sha256_partial": "531c64b0c3ad97a397d29739686cb4f9d72cdd8f7b0c14003f3707572ec83150",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/4K_topos_422_HQ.mov",
+      "kind": "topos",
+      "tier": "hq",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 3,
+      "pixel_format": 0,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 1583117149,
+      "video_bytes": 1577492496,
+      "video_mbps": 647.8408607802875,
+      "sha256_partial": "bc239f59d09cc56a35f19b2d1ff99f51230b4e0cd4c16e7dd7e193aacf14a11a",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/4K_topos_4444.mov",
+      "kind": "topos",
+      "tier": "4444",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 5,
+      "pixel_format": 1,
+      "bit_depth": 10,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 2149386257,
+      "video_bytes": 2143761606,
+      "video_mbps": 880.3949100616016,
+      "sha256_partial": "026cf5330a46f8375ad40ed4131ccfedd39d28be0cb1016be39abf873c9f9b5e",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    },
+    {
+      "path": "tests/test_videos/4K_topos_4444_XQ.mov",
+      "kind": "topos",
+      "tier": "4444xq",
+      "resolution": [
+        3840,
+        2160
+      ],
+      "frames": 487,
+      "fps": [
+        25,
+        1
+      ],
+      "profile": 6,
+      "pixel_format": 1,
+      "bit_depth": 12,
+      "color": {
+        "primaries": 1,
+        "transfer": 1,
+        "matrix": 1,
+        "range": "limited"
+      },
+      "audio": {
+        "codec": "pcm_s24le",
+        "rate": 48000,
+        "channels": 2,
+        "bits": 24,
+        "samples": 935040,
+        "byte_exact": true,
+        "neg_full_scale_clipped_lsb": 0
+      },
+      "bytes": 3172538428,
+      "video_bytes": 3166913774,
+      "video_mbps": 1300.580605338809,
+      "sha256_partial": "4d2891aec07b9efb777b1cd282606b796e308ccd451a05026576a8e3631a1cce",
+      "checks": {
+        "dimensions": true,
+        "sample_count": true,
+        "profile": true,
+        "pixel_format": true,
+        "bit_depth": true,
+        "bitstream_major": true,
+        "color": true,
+        "decode_first_last": true,
+        "audio_format": true,
+        "audio_bytes_equal": true
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "size": "2K",
+      "tier": "proxy",
+      "prores": "tests/test_videos/2K_prores422Proxy.mov",
+      "topos": "tests/test_videos/2K_topos_proxy.mov",
+      "prores_bytes": 101282290,
+      "topos_bytes": 86719957,
+      "topos_over_prores": 0.8562,
+      "prores_video_mbps": 39.29,
+      "topos_video_mbps": 33.3,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "2K",
+      "tier": "lt",
+      "prores": "tests/test_videos/2K_prores422LT.mov",
+      "topos": "tests/test_videos/2K_topos_lt.mov",
+      "prores_bytes": 201262666,
+      "topos_bytes": 175716768,
+      "topos_over_prores": 0.8731,
+      "prores_video_mbps": 80.35,
+      "topos_video_mbps": 69.85,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "2K",
+      "tier": "standard",
+      "prores": "tests/test_videos/2K_prores422.mov",
+      "topos": "tests/test_videos/2K_topos_standard.mov",
+      "prores_bytes": 297668134,
+      "topos_bytes": 270869774,
+      "topos_over_prores": 0.91,
+      "prores_video_mbps": 119.94,
+      "topos_video_mbps": 108.93,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "2K",
+      "tier": "hq",
+      "prores": "tests/test_videos/2K_prores422HQ.mov",
+      "topos": "tests/test_videos/2K_topos_hq.mov",
+      "prores_bytes": 448008914,
+      "topos_bytes": 401863229,
+      "topos_over_prores": 0.897,
+      "prores_video_mbps": 181.68,
+      "topos_video_mbps": 162.73,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "2K",
+      "tier": "4444",
+      "prores": "tests/test_videos/2K_prores4444.mov",
+      "topos": "tests/test_videos/2K_topos_4444.mov",
+      "prores_bytes": 671066878,
+      "topos_bytes": 541599658,
+      "topos_over_prores": 0.8071,
+      "prores_video_mbps": 273.29,
+      "topos_video_mbps": 220.11,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "2K",
+      "tier": "4444xq",
+      "prores": "tests/test_videos/2K_prores4444XQ.mov",
+      "topos": "tests/test_videos/2K_topos_4444xq.mov",
+      "prores_bytes": 986283406,
+      "topos_bytes": 795408478,
+      "topos_over_prores": 0.8065,
+      "prores_video_mbps": 402.74,
+      "topos_video_mbps": 324.35,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "4K",
+      "tier": "proxy",
+      "prores": "tests/test_videos/4K_prores422Proxy.mov",
+      "topos": "tests/test_videos/4K_topos_proxy.mov",
+      "prores_bytes": 355333634,
+      "topos_bytes": 330336001,
+      "topos_over_prores": 0.9297,
+      "prores_video_mbps": 143.62,
+      "topos_video_mbps": 133.35,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "4K",
+      "tier": "lt",
+      "prores": "tests/test_videos/4K_prores422LT.mov",
+      "topos": "tests/test_videos/4K_topos_lt.mov",
+      "prores_bytes": 739049598,
+      "topos_bytes": 686397319,
+      "topos_over_prores": 0.9288,
+      "prores_video_mbps": 301.2,
+      "topos_video_mbps": 279.58,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "4K",
+      "tier": "standard",
+      "prores": "tests/test_videos/4K_prores422.mov",
+      "topos": "tests/test_videos/4K_topos_standard.mov",
+      "prores_bytes": 1230752877,
+      "topos_bytes": 1067075479,
+      "topos_over_prores": 0.867,
+      "prores_video_mbps": 503.13,
+      "topos_video_mbps": 435.91,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "4K",
+      "tier": "hq",
+      "prores": "tests/test_videos/4K_prores422HQ.mov",
+      "topos": "tests/test_videos/4K_topos_hq.mov",
+      "prores_bytes": 1789044428,
+      "topos_bytes": 1583117149,
+      "topos_over_prores": 0.8849,
+      "prores_video_mbps": 732.41,
+      "topos_video_mbps": 647.84,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "4K",
+      "tier": "4444",
+      "prores": "tests/test_videos/4K_prores4444.mov",
+      "topos": "tests/test_videos/4K_topos_4444.mov",
+      "prores_bytes": 2587996910,
+      "topos_bytes": 2149386257,
+      "topos_over_prores": 0.8305,
+      "prores_video_mbps": 1060.53,
+      "topos_video_mbps": 880.39,
+      "consistent": true,
+      "within_cap_98": true
+    },
+    {
+      "size": "4K",
+      "tier": "4444xq",
+      "prores": "tests/test_videos/4K_prores4444XQ.mov",
+      "topos": "tests/test_videos/4K_topos_4444xq.mov",
+      "prores_bytes": 3934180734,
+      "topos_bytes": 3172538428,
+      "topos_over_prores": 0.8064,
+      "prores_video_mbps": 1613.37,
+      "topos_video_mbps": 1300.58,
+      "consistent": true,
+      "within_cap_98": true
+    }
+  ],
+  "topos_naming": {
+    "proxy": "422_Proxy",
+    "lt": "422_LT",
+    "standard": "422",
+    "hq": "422_HQ",
+    "4444": "4444",
+    "4444xq": "4444_XQ"
+  }
+}

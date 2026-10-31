@@ -1,0 +1,829 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+INFO: [ThumbEngine] FFmpeg found and loaded: /usr/local/bin/ffmpeg
+WARNING: [ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+INFO: Product mode preset 'studio' keeps config value for AI capability 'ai_assistant' (explicit config entry wins over the preset default)
+INFO: Registered feature module: color
+INFO: Registered feature module: edit
+INFO: Registered page: edit (剪辑)
+INFO: Registered feature module: composite
+INFO: Registered page: composite (合成)
+INFO: Scanning plugin directory: /Users/testuser/.topos/plugins/node_plugins
+INFO: Scanning plugin directory: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins
+ERROR: Failed to load plugin from /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins/vintage_plugin.py: No module named 'src.composite'
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/composite/core/node_plugin.py", line 293, in _load_plugin_file
+    spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins/vintage_plugin.py", line 20, in <module>
+    from src.composite.node_plugin import NodePlugin, PluginInfo
+ModuleNotFoundError: No module named 'src.composite'
+ERROR: Failed to load plugin from /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins/posterize_plugin.py: No module named 'src.composite'
+Traceback (most recent call last):
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/features/composite/core/node_plugin.py", line 293, in _load_plugin_file
+    spec.loader.exec_module(module)
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/plugins/node_plugins/posterize_plugin.py", line 21, in <module>
+    from src.composite.node_plugin import NodePlugin, PluginInfo
+ModuleNotFoundError: No module named 'src.composite'
+INFO: Plugin discovery complete: 0 plugins loaded
+INFO: Registered 0 node types from plugins
+INFO: Plugin discovery complete: 0 plugins loaded, 0 node types registered
+2026-10-15 23:54:12.923 Python[8325:70486] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 206 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost.
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.2 LGPL version 2.1 or later
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+2026-10-15 23:54:15.946 Python[8325:70486] +[IMKClient subclass]: chose IMKClient_Modern
+2026-10-15 23:54:15.946 Python[8325:70486] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+AUDIT {"name": "startup", "page": "Edit", "platform": "cocoa", "qt": "6.10.0", "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/01-empty.png"}
+AUDIT {"name": "initial_layout", "window": [1440, 1000], "timeline_dock": 102, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/01-normal-empty.png"}
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+AUDIT {"name": "real_media_import", "drop": true, "asset_count": 3, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/02-media.png"}
+AUDIT {"name": "source_first_frame", "loaded": "fba7c83c-207e-4a5d-adb0-4f2bd7926e28", "viewer_type": "SourceViewer", "paint_failed": false, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/03-source-first-frame.png"}
+AUDIT {"name": "source_valid_range", "range": [0, 100], "buttons": [true, true, true]}
+AUDIT {"name": "source_clear_range", "range": [null, null], "buttons": [false, false, false]}
+AUDIT {"name": "source_single_frame_range", "range": [100, 100], "buttons": [true, true, true]}
+AUDIT {"name": "linked_drop", "accepted": true, "state": {"revision": 1, "fps": "25/1", "playhead": 0, "tracks": [{"id": "84de8103-7da3-4d2f-abff-943a873b195b", "type": "video", "locked": false, "clips": [{"id": "4d286dae-534b-4d72-9b21-51d686b85836", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "8000136e-45d4-4f85-904a-f4b4e5886452"}]}, {"id": "a135114a-a093-453d-b922-1b49f86002e4", "type": "audio", "locked": false, "clips": [{"id": "8000136e-45d4-4f85-904a-f4b4e5886452", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "4d286dae-534b-4d72-9b21-51d686b85836"}]}]}, "project_revision": 1, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/04-linked.png"}
+AUDIT {"name": "source_visible", "visible": true, "paint_failed": false, "texture": "3", "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/05-source-visible.png"}
+AUDIT {"name": "source_playback", "before": 100, "after": 124, "paint_failed": false}
+AUDIT {"name": "runtime", "runtime": "6.10.2", "compiled": "6.10.0"}
+AUDIT {"name": "source_append_existing", "state": {"revision": 2, "fps": "25/1", "playhead": 0, "tracks": [{"id": "84de8103-7da3-4d2f-abff-943a873b195b", "type": "video", "locked": false, "clips": [{"id": "4d286dae-534b-4d72-9b21-51d686b85836", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "8000136e-45d4-4f85-904a-f4b4e5886452"}, {"id": "5be69e1f-0fba-4487-8d0c-fe2db2d85829", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0"}]}, {"id": "a135114a-a093-453d-b922-1b49f86002e4", "type": "audio", "locked": false, "clips": [{"id": "8000136e-45d4-4f85-904a-f4b4e5886452", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "4d286dae-534b-4d72-9b21-51d686b85836"}, {"id": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "5be69e1f-0fba-4487-8d0c-fe2db2d85829"}]}]}}
+AUDIT {"name": "source_append_next", "state": {"revision": 3, "fps": "25/1", "playhead": 0, "tracks": [{"id": "84de8103-7da3-4d2f-abff-943a873b195b", "type": "video", "locked": false, "clips": [{"id": "4d286dae-534b-4d72-9b21-51d686b85836", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "8000136e-45d4-4f85-904a-f4b4e5886452"}, {"id": "5be69e1f-0fba-4487-8d0c-fe2db2d85829", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0"}, {"id": "781509d7-242e-4981-b1ba-d071778a155b", "start": 1622, "end": 1672, "in": 50, "source_duration": 50, "speed": 1.0, "link": "3c9a1454-6203-4fa7-b2b1-81e794b49f52"}]}, {"id": "a135114a-a093-453d-b922-1b49f86002e4", "type": "audio", "locked": false, "clips": [{"id": "8000136e-45d4-4f85-904a-f4b4e5886452", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "4d286dae-534b-4d72-9b21-51d686b85836"}, {"id": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "5be69e1f-0fba-4487-8d0c-fe2db2d85829"}, {"id": "3c9a1454-6203-4fa7-b2b1-81e794b49f52", "start": 1622, "end": 1672, "in": 50, "source_duration": 50, "speed": 1.0, "link": "781509d7-242e-4981-b1ba-d071778a155b"}]}]}, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/17-source-appended-av.png"}
+AUDIT {"name": "source_overwrite_occupied", "before": {"revision": 3, "fps": "25/1", "playhead": 19, "tracks": [{"id": "84de8103-7da3-4d2f-abff-943a873b195b", "type": "video", "locked": false, "clips": [{"id": "4d286dae-534b-4d72-9b21-51d686b85836", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "8000136e-45d4-4f85-904a-f4b4e5886452"}, {"id": "5be69e1f-0fba-4487-8d0c-fe2db2d85829", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0"}, {"id": "781509d7-242e-4981-b1ba-d071778a155b", "start": 1622, "end": 1672, "in": 50, "source_duration": 50, "speed": 1.0, "link": "3c9a1454-6203-4fa7-b2b1-81e794b49f52"}]}, {"id": "a135114a-a093-453d-b922-1b49f86002e4", "type": "audio", "locked": false, "clips": [{"id": "8000136e-45d4-4f85-904a-f4b4e5886452", "start": 0, "end": 1572, "in": 0, "source_duration": 1572, "speed": 1.0, "link": "4d286dae-534b-4d72-9b21-51d686b85836"}, {"id": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "5be69e1f-0fba-4487-8d0c-fe2db2d85829"}, {"id": "3c9a1454-6203-4fa7-b2b1-81e794b49f52", "start": 1622, "end": 1672, "in": 50, "source_duration": 50, "speed": 1.0, "link": "781509d7-242e-4981-b1ba-d071778a155b"}]}]}, "after": {"revision": 4, "fps": "25/1", "playhead": 19, "tracks": [{"id": "84de8103-7da3-4d2f-abff-943a873b195b", "type": "video", "locked": false, "clips": [{"id": "4d286dae-534b-4d72-9b21-51d686b85836", "start": 0, "end": 19, "in": 0, "source_duration": 19, "speed": 1.0, "link": "8000136e-45d4-4f85-904a-f4b4e5886452"}, {"id": "6b1def38-b25b-45fe-9d43-b16f05ee6cf4", "start": 19, "end": 29, "in": 100, "source_duration": 10, "speed": 1.0, "link": "c8df4420-2b23-4929-a8bd-a19f3769c8e4"}, {"id": "7316ad45-ccbb-4ba2-a318-68c4f1cc14da", "start": 29, "end": 1572, "in": 29, "source_duration": 1543, "speed": 1.0, "link": "3a4cb5b3-66e7-48d6-879c-954bf1977873"}, {"id": "5be69e1f-0fba-4487-8d0c-fe2db2d85829", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0"}, {"id": "781509d7-242e-4981-b1ba-d071778a155b", "start": 1622, "end": 1672, "in": 50, "source_duration": 50, "speed": 1.0, "link": "3c9a1454-6203-4fa7-b2b1-81e794b49f52"}]}, {"id": "a135114a-a093-453d-b922-1b49f86002e4", "type": "audio", "locked": false, "clips": [{"id": "8000136e-45d4-4f85-904a-f4b4e5886452", "start": 0, "end": 19, "in": 0, "source_duration": 19, "speed": 1.0, "link": "4d286dae-534b-4d72-9b21-51d686b85836"}, {"id": "c8df4420-2b23-4929-a8bd-a19f3769c8e4", "start": 19, "end": 29, "in": 100, "source_duration": 10, "speed": 1.0, "link": "6b1def38-b25b-45fe-9d43-b16f05ee6cf4"}, {"id": "3a4cb5b3-66e7-48d6-879c-954bf1977873", "start": 29, "end": 1572, "in": 29, "source_duration": 1543, "speed": 1.0, "link": "7316ad45-ccbb-4ba2-a318-68c4f1cc14da"}, {"id": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "5be69e1f-0fba-4487-8d0c-fe2db2d85829"}, {"id": "3c9a1454-6203-4fa7-b2b1-81e794b49f52", "start": 1622, "end": 1672, "in": 50, "source_duration": 50, "speed": 1.0, "link": "781509d7-242e-4981-b1ba-d071778a155b"}]}]}, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/18-overwrite-success.png"}
+AUDIT {"name": "source_insert_internal", "before": {"revision": 4, "fps": "25/1", "playhead": 19, "tracks": [{"id": "84de8103-7da3-4d2f-abff-943a873b195b", "type": "video", "locked": false, "clips": [{"id": "4d286dae-534b-4d72-9b21-51d686b85836", "start": 0, "end": 19, "in": 0, "source_duration": 19, "speed": 1.0, "link": "8000136e-45d4-4f85-904a-f4b4e5886452"}, {"id": "6b1def38-b25b-45fe-9d43-b16f05ee6cf4", "start": 19, "end": 29, "in": 100, "source_duration": 10, "speed": 1.0, "link": "c8df4420-2b23-4929-a8bd-a19f3769c8e4"}, {"id": "7316ad45-ccbb-4ba2-a318-68c4f1cc14da", "start": 29, "end": 1572, "in": 29, "source_duration": 1543, "speed": 1.0, "link": "3a4cb5b3-66e7-48d6-879c-954bf1977873"}, {"id": "5be69e1f-0fba-4487-8d0c-fe2db2d85829", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0"}, {"id": "781509d7-242e-4981-b1ba-d071778a155b", "start": 1622, "end": 1672, "in": 50, "source_duration": 50, "speed": 1.0, "link": "3c9a1454-6203-4fa7-b2b1-81e794b49f52"}]}, {"id": "a135114a-a093-453d-b922-1b49f86002e4", "type": "audio", "locked": false, "clips": [{"id": "8000136e-45d4-4f85-904a-f4b4e5886452", "start": 0, "end": 19, "in": 0, "source_duration": 19, "speed": 1.0, "link": "4d286dae-534b-4d72-9b21-51d686b85836"}, {"id": "c8df4420-2b23-4929-a8bd-a19f3769c8e4", "start": 19, "end": 29, "in": 100, "source_duration": 10, "speed": 1.0, "link": "6b1def38-b25b-45fe-9d43-b16f05ee6cf4"}, {"id": "3a4cb5b3-66e7-48d6-879c-954bf1977873", "start": 29, "end": 1572, "in": 29, "source_duration": 1543, "speed": 1.0, "link": "7316ad45-ccbb-4ba2-a318-68c4f1cc14da"}, {"id": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0", "start": 1572, "end": 1622, "in": 0, "source_duration": 50, "speed": 1.0, "link": "5be69e1f-0fba-4487-8d0c-fe2db2d85829"}, {"id": "3c9a1454-6203-4fa7-b2b1-81e794b49f52", "start": 1622, "end": 1672, "in": 50, "source_duration": 50, "speed": 1.0, "link": "781509d7-242e-4981-b1ba-d071778a155b"}]}]}, "after": {"revision": 5, "fps": "25/1", "playhead": 19, "tracks": [{"id": "84de8103-7da3-4d2f-abff-943a873b195b", "type": "video", "locked": false, "clips": [{"id": "4d286dae-534b-4d72-9b21-51d686b85836", "start": 0, "end": 19, "in": 0, "source_duration": 19, "speed": 1.0, "link": "8000136e-45d4-4f85-904a-f4b4e5886452"}, {"id": "fa56ab4d-9981-4ea4-a28e-13fe44094d6b", "start": 19, "end": 29, "in": 100, "source_duration": 10, "speed": 1.0, "link": "077462b2-9eec-49ef-859f-18d427b3cb05"}, {"id": "6b1def38-b25b-45fe-9d43-b16f05ee6cf4", "start": 29, "end": 39, "in": 100, "source_duration": 10, "speed": 1.0, "link": "c8df4420-2b23-4929-a8bd-a19f3769c8e4"}, {"id": "7316ad45-ccbb-4ba2-a318-68c4f1cc14da", "start": 39, "end": 1582, "in": 29, "source_duration": 1543, "speed": 1.0, "link": "3a4cb5b3-66e7-48d6-879c-954bf1977873"}, {"id": "5be69e1f-0fba-4487-8d0c-fe2db2d85829", "start": 1582, "end": 1632, "in": 0, "source_duration": 50, "speed": 1.0, "link": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0"}, {"id": "781509d7-242e-4981-b1ba-d071778a155b", "start": 1632, "end": 1682, "in": 50, "source_duration": 50, "speed": 1.0, "link": "3c9a1454-6203-4fa7-b2b1-81e794b49f52"}]}, {"id": "a135114a-a093-453d-b922-1b49f86002e4", "type": "audio", "locked": false, "clips": [{"id": "8000136e-45d4-4f85-904a-f4b4e5886452", "start": 0, "end": 19, "in": 0, "source_duration": 19, "speed": 1.0, "link": "4d286dae-534b-4d72-9b21-51d686b85836"}, {"id": "077462b2-9eec-49ef-859f-18d427b3cb05", "start": 19, "end": 29, "in": 100, "source_duration": 10, "speed": 1.0, "link": "fa56ab4d-9981-4ea4-a28e-13fe44094d6b"}, {"id": "c8df4420-2b23-4929-a8bd-a19f3769c8e4", "start": 29, "end": 39, "in": 100, "source_duration": 10, "speed": 1.0, "link": "6b1def38-b25b-45fe-9d43-b16f05ee6cf4"}, {"id": "3a4cb5b3-66e7-48d6-879c-954bf1977873", "start": 39, "end": 1582, "in": 29, "source_duration": 1543, "speed": 1.0, "link": "7316ad45-ccbb-4ba2-a318-68c4f1cc14da"}, {"id": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0", "start": 1582, "end": 1632, "in": 0, "source_duration": 50, "speed": 1.0, "link": "5be69e1f-0fba-4487-8d0c-fe2db2d85829"}, {"id": "3c9a1454-6203-4fa7-b2b1-81e794b49f52", "start": 1632, "end": 1682, "in": 50, "source_duration": 50, "speed": 1.0, "link": "781509d7-242e-4981-b1ba-d071778a155b"}]}]}, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/19-insert-av.png"}
+AUDIT {"name": "source_final", "state": {"revision": 5, "fps": "25/1", "playhead": 19, "tracks": [{"id": "84de8103-7da3-4d2f-abff-943a873b195b", "type": "video", "locked": false, "clips": [{"id": "4d286dae-534b-4d72-9b21-51d686b85836", "start": 0, "end": 19, "in": 0, "source_duration": 19, "speed": 1.0, "link": "8000136e-45d4-4f85-904a-f4b4e5886452"}, {"id": "fa56ab4d-9981-4ea4-a28e-13fe44094d6b", "start": 19, "end": 29, "in": 100, "source_duration": 10, "speed": 1.0, "link": "077462b2-9eec-49ef-859f-18d427b3cb05"}, {"id": "6b1def38-b25b-45fe-9d43-b16f05ee6cf4", "start": 29, "end": 39, "in": 100, "source_duration": 10, "speed": 1.0, "link": "c8df4420-2b23-4929-a8bd-a19f3769c8e4"}, {"id": "7316ad45-ccbb-4ba2-a318-68c4f1cc14da", "start": 39, "end": 1582, "in": 29, "source_duration": 1543, "speed": 1.0, "link": "3a4cb5b3-66e7-48d6-879c-954bf1977873"}, {"id": "5be69e1f-0fba-4487-8d0c-fe2db2d85829", "start": 1582, "end": 1632, "in": 0, "source_duration": 50, "speed": 1.0, "link": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0"}, {"id": "781509d7-242e-4981-b1ba-d071778a155b", "start": 1632, "end": 1682, "in": 50, "source_duration": 50, "speed": 1.0, "link": "3c9a1454-6203-4fa7-b2b1-81e794b49f52"}]}, {"id": "a135114a-a093-453d-b922-1b49f86002e4", "type": "audio", "locked": false, "clips": [{"id": "8000136e-45d4-4f85-904a-f4b4e5886452", "start": 0, "end": 19, "in": 0, "source_duration": 19, "speed": 1.0, "link": "4d286dae-534b-4d72-9b21-51d686b85836"}, {"id": "077462b2-9eec-49ef-859f-18d427b3cb05", "start": 19, "end": 29, "in": 100, "source_duration": 10, "speed": 1.0, "link": "fa56ab4d-9981-4ea4-a28e-13fe44094d6b"}, {"id": "c8df4420-2b23-4929-a8bd-a19f3769c8e4", "start": 29, "end": 39, "in": 100, "source_duration": 10, "speed": 1.0, "link": "6b1def38-b25b-45fe-9d43-b16f05ee6cf4"}, {"id": "3a4cb5b3-66e7-48d6-879c-954bf1977873", "start": 39, "end": 1582, "in": 29, "source_duration": 1543, "speed": 1.0, "link": "7316ad45-ccbb-4ba2-a318-68c4f1cc14da"}, {"id": "029e4cb0-65eb-4cc8-ad70-6d6fe919f0b0", "start": 1582, "end": 1632, "in": 0, "source_duration": 50, "speed": 1.0, "link": "5be69e1f-0fba-4487-8d0c-fe2db2d85829"}, {"id": "3c9a1454-6203-4fa7-b2b1-81e794b49f52", "start": 1632, "end": 1682, "in": 50, "source_duration": 50, "speed": 1.0, "link": "781509d7-242e-4981-b1ba-d071778a155b"}]}]}, "project_revision": 5}
+AUDIT {"name": "source_av_relations_validated", "clip_count": 12, "issues": [], "all_reciprocal": true}
+AUDIT {"name": "source_validation", "issues": []}
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+Traceback (most recent call last):
+  File "/tmp/topos-edit-fourth-review-final-20261015/command-02.py", line 9, in setup_roll_fixture
+NameError: name 'create_' is not defined
+
+AUDIT {"name": "harness_fixture_repaired", "cause": "command02 timer string replacement affected create_timer.stop; no production fault"}
+AUDIT {"name": "roll_normal_press", "state": "InteractionState.ROLLING", "preview": true, "focus": null, "monitor_visible": true, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/23-roll-press.png"}
+AUDIT {"name": "roll_normal_move", "state": "InteractionState.ROLLING", "preview": true}
+AUDIT {"name": "roll_normal_release", "before": {"revision": 2, "fps": "25/1", "playhead": 19, "tracks": [{"id": "543f7449-ae88-4d96-a0d8-1bdc4ab8da65", "type": "video", "locked": false, "clips": [{"id": "4ae7a3bc-713e-4913-85a6-c2fc3cb8939f", "start": 0, "end": 50, "in": 0, "source_duration": 50, "speed": 1.0, "link": "fb63f661-f3a2-49c7-9a68-ecc1628dc643"}, {"id": "a20abeb4-5c52-426b-acfc-1e5ffe8dcd97", "start": 50, "end": 100, "in": 50, "source_duration": 50, "speed": 1.0, "link": "591bc85b-3bea-4f78-8bcb-23d0ac6f947a"}]}, {"id": "72fb24e4-93a8-4278-aa0b-4069db0a3557", "type": "audio", "locked": false, "clips": [{"id": "fb63f661-f3a2-49c7-9a68-ecc1628dc643", "start": 0, "end": 50, "in": 0, "source_duration": 50, "speed": 1.0, "link": "4ae7a3bc-713e-4913-85a6-c2fc3cb8939f"}, {"id": "591bc85b-3bea-4f78-8bcb-23d0ac6f947a", "start": 50, "end": 100, "in": 50, "source_duration": 50, "speed": 1.0, "link": "a20abeb4-5c52-426b-acfc-1e5ffe8dcd97"}]}]}, "after": {"revision": 3, "fps": "25/1", "playhead": 19, "tracks": [{"id": "543f7449-ae88-4d96-a0d8-1bdc4ab8da65", "type": "video", "locked": false, "clips": [{"id": "4ae7a3bc-713e-4913-85a6-c2fc3cb8939f", "start": 0, "end": 51, "in": 0, "source_duration": 51, "speed": 1.0, "link": "fb63f661-f3a2-49c7-9a68-ecc1628dc643"}, {"id": "a20abeb4-5c52-426b-acfc-1e5ffe8dcd97", "start": 51, "end": 100, "in": 51, "source_duration": 49, "speed": 1.0, "link": "591bc85b-3bea-4f78-8bcb-23d0ac6f947a"}]}, {"id": "72fb24e4-93a8-4278-aa0b-4069db0a3557", "type": "audio", "locked": false, "clips": [{"id": "fb63f661-f3a2-49c7-9a68-ecc1628dc643", "start": 0, "end": 50, "in": 0, "source_duration": 50, "speed": 1.0, "link": "4ae7a3bc-713e-4913-85a6-c2fc3cb8939f"}, {"id": "591bc85b-3bea-4f78-8bcb-23d0ac6f947a", "start": 50, "end": 100, "in": 50, "source_duration": 50, "speed": 1.0, "link": "a20abeb4-5c52-426b-acfc-1e5ffe8dcd97"}]}]}, "screenshot": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-15-edit-fixes/gui-session2/24-roll-normal-release.png"}
+AUDIT {"name": "roll_av_boundary_alignment", "video": [[0, 51], [51, 100]], "audio": [[0, 50], [50, 100]], "aligned": false}
+[ERROR] src.app.controllers.file_controller: GPU 渲染线程未在 2000ms 内退出，已推迟销毁（进程退出时回收）；请排查长命令或 GL 清理挂起
+AUDIT {"name": "normal_audit_close", "window_visible": false}

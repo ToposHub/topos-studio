@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+collected 19 items
+
+tests/composite/test_m05_composite_chain_gpu.py ........                 [ 42%]
+tests/composite/test_m08_bake_dialog.py ..                               [ 52%]
+tests/composite/test_m23_availability.py .....                           [ 78%]
+tests/composite/test_m23_tracker_panel.py ....                           [100%]
+
+============================== 19 passed in 2.79s ==============================
+

@@ -1,0 +1,75 @@
+{
+  "component": "X11 cube_faces",
+  "method": "手算独立脚本（纯 Python 标量逐像素）：共棱 x=p；A 面 [p,p+cosθ] m=(x-p)/cosθ、B 面 [p-sinθ,p] m=(x-p+sinθ)/sinθ；persp 重参数化（A 外边 m=1 / B 外边 m=0 加速，同 X10 门内公式及镜像）；shadow=1-shadow·(1-面视宽)。容差 1e-6。",
+  "params_default": {
+    "axis": "Horizontal",
+    "perspective": 0.5,
+    "shadow": 0.5
+  },
+  "vectors": [
+    {
+      "desc": "Horizontal persp=0 shadow=0 p=0.5（8x4 ramp）",
+      "params": {
+        "axis": "Horizontal",
+        "perspective": 0.0,
+        "shadow": 0.0
+      },
+      "progress": 0.5,
+      "fixture": "8x4 A=i/7 B=10+i",
+      "expected_row0": [
+        12.550253,
+        13.964466,
+        15.37868,
+        16.792893,
+        0.029587,
+        0.231617,
+        0.433648,
+        0.635678
+      ],
+      "note": "cosθ=sinθ=0.707107：i=3 u=0.4375<p → B 面 m=0.9116→src px=6.793→16.792893；i=7 u=0.9375≥p → A 面 m=0.6187→src px=4.4497→0.635678"
+    },
+    {
+      "desc": "Horizontal persp=1 shadow=0.5 p=0.5",
+      "params": {
+        "axis": "Horizontal",
+        "perspective": 1.0,
+        "shadow": 0.5
+      },
+      "progress": 0.5,
+      "fixture": "同上",
+      "expected_row0": [
+        11.517744,
+        12.761462,
+        13.791792,
+        14.510408,
+        0.0,
+        0.102659,
+        0.249849,
+        0.427523
+      ],
+      "note": "shade_A=1-0.5·(1-0.7071)=0.853553、shade_B 同值"
+    },
+    {
+      "desc": "端点 p=0",
+      "progress": 0.0,
+      "expected": "A 比特级拷贝（m=x 全幅）",
+      "note": ""
+    },
+    {
+      "desc": "端点 p=1",
+      "progress": 1.0,
+      "expected": "B 比特级拷贝（m=x 全幅）",
+      "note": ""
+    }
+  ],
+  "conflicts": [
+    {
+      "desc": "任务原文区间『A 面 x∈[p-1,p]』按 A/B 指派在 p=0 时 A 离屏、违反端点；该区间实为 B 面的世界张成",
+      "resolution": "实现为 A 面 [p,p+cosθ]（世界张成 [p,p+1] 的透视压扁）、B 面 [p-sinθ,p]（世界张成 [p-1,p]）；p±面视宽 ⊇ [0,1] 全覆盖（README 证明）"
+    },
+    {
+      "desc": "初算把 8 宽像素中心写成 W=4 口径（0.375/0.875），期望值偏移",
+      "resolution": "按 W=8 中心 0.4375/0.9375 重算；核与独立重算一致"
+    }
+  ]
+}

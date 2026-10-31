@@ -1,0 +1,111 @@
+// --- Topos Plugin Metadata ---
+// @name Starburst
+// @i18n_name LIB1_Starburst
+// @author Topos Library v1
+// @version 0.1.0
+// @description Multi-blade highlight starburst: N lines through center at angle + k*180/N, 7 taps each direction with distance-squared falloff and linear-overshoot highlight gating (Anamorphic_Streak conventions)
+// @input_space scene-linear
+// @output_space scene-linear
+// @alpha premultiplied
+// @precision float16
+// @determinism deterministic
+// @export_support opengl
+// @threading gpu
+// @graphics_backends opengl
+// @compute_backends glsl_fragment
+// @preview_cost high
+// @param select blades "Blades" 1 "2" "4" "6"
+// @param slider angle "Angle" 0.0 -90.0 90.0
+// @param slider ray_length "Ray Length" 0.5 0.0 1.0
+// @param slider threshold "Highlight Threshold" 0.55 0.0 1.0
+// @param slider intensity "Intensity" 0.4 0.0 1.0
+// -----------------------------
+//
+// Starburst —— 多叶星芒（L 计划 F10，LIB1）。
+//
+// 差量（L00 台账 F10 行）：Anamorphic_Streak 仅水平 ±X 单方向 14/22/30 tap。
+// 本项差量 = 多叶/多方向：N 条过中心的角度线（角度 = angle + k*180/N，
+// N 为有界常量档 2/4/6），每条双向各 7 tap 常量展开，距离平方衰减，
+// 高光门控与归一化沿用 Anamorphic_Streak 惯例。
+//
+// 设计要点：
+// - 叶数为 select 三档（2/4/6），经早退 if 链调度到编译期常量基方向集
+//   （0/30/45/60/90/120/135/150 度的 const 单位向量），运行期只做一次
+//   radians(angle) 旋转；每条线一个 7-tap 常量上限循环——无宏参数循环
+//   上限（红线：循环上限必须字面常量）；
+// - 门控/衰减（Anamorphic_Streak 逐字惯例）：e = max(luma - threshold, 0)
+//   线性超出量加权采样；w = (1-t)^2 距离平方衰减；分母 Σw 下限守护；
+//   归一化按全部 2N 方向总权重——极亮输入能量有限（≤ max 采样值×超出量）；
+// - 采样 UV 钳到半纹素边界（clamp-to-edge 保险）；
+// - 角度定义在方形像素域（像素序偏移），非方像素比的 aspect 校正未声明
+//   前按方形处理（README 已知限制）；
+// - intensity=0 或 ray_length=0 首行早退精确恒等；纯静态确定性；
+// - 参数 ABI 裸名引用；注意 length 是 GLSL 内建/AUD-0832 黑名单保留字，
+//   行程参数命名 ray_length（F16/F19 的 mix→amount 同类改名先例）。
+
+const vec3 STB_LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+
+// 单条角度线：双向各 7 tap，e = max(luma-thr, 0) 线性超出门控，
+// w = (1-t)^2 距离平方衰减（Anamorphic_Streak STREAK_ACCUMULATE 同式）。
+void stb_line(vec2 uv, vec2 dir, float span_px, vec2 texel,
+              vec2 min_uv, vec2 max_uv, inout vec3 acc, inout float wsum) {
+    for (int i = 0; i < 7; i++) {
+        float t = (float(i) + 0.5) / 7.0;
+        float w = 1.0 - t;
+        w = w * w;
+        vec2 off = dir * (span_px * t) * texel;
+        vec3 sp = texture(u_input_tex, clamp(uv + off, min_uv, max_uv)).rgb;
+        vec3 sn = texture(u_input_tex, clamp(uv - off, min_uv, max_uv)).rgb;
+        float ep = max(dot(sp, STB_LUMA_W) - threshold, 0.0);
+        float en = max(dot(sn, STB_LUMA_W) - threshold, 0.0);
+        acc += (sp * ep + sn * en) * w;
+        wsum += 2.0 * w;
+    }
+}
+
+vec3 process(vec3 color, vec2 uv) {
+    // 首行早退出：零强度/零行程纯直通（含 HDR）
+    if (intensity < 0.001 || ray_length < 0.001) return color;
+
+    vec2 ts = vec2(textureSize(u_input_tex, 0));
+    vec2 safe = max(ts, vec2(1.0));
+    vec2 half_texel = 0.5 / safe;
+    vec2 min_uv = half_texel;
+    vec2 max_uv = vec2(1.0) - half_texel;
+    vec2 texel = 1.0 / safe;
+
+    // 行程：单侧最长画幅宽度 25%（Anamorphic_Streak streak_reach 同口径）
+    float span_px = ray_length * 0.25 * safe.x;
+
+    // 运行期旋转（angle 度 → 弧度）；基方向为编译期常量
+    float phi = radians(angle);
+    float ca = cos(phi);
+    float sa = sin(phi);
+    mat2 rot = mat2(ca, sa, -sa, ca);
+
+    vec3 acc = vec3(0.0);
+    float wsum = 0.0;
+    if (blades == 0) {
+        // 2 叶：angle, angle+90
+        stb_line(uv, rot * vec2(1.0, 0.0), span_px, texel, min_uv, max_uv, acc, wsum);
+        stb_line(uv, rot * vec2(0.0, 1.0), span_px, texel, min_uv, max_uv, acc, wsum);
+    } else if (blades == 1) {
+        // 4 叶：angle + k*45（0/45/90/135）
+        stb_line(uv, rot * vec2(1.0, 0.0), span_px, texel, min_uv, max_uv, acc, wsum);
+        stb_line(uv, rot * vec2(0.70710678, 0.70710678), span_px, texel, min_uv, max_uv, acc, wsum);
+        stb_line(uv, rot * vec2(0.0, 1.0), span_px, texel, min_uv, max_uv, acc, wsum);
+        stb_line(uv, rot * vec2(-0.70710678, 0.70710678), span_px, texel, min_uv, max_uv, acc, wsum);
+    } else {
+        // 6 叶：angle + k*30（0/30/60/90/120/150）
+        stb_line(uv, rot * vec2(1.0, 0.0), span_px, texel, min_uv, max_uv, acc, wsum);
+        stb_line(uv, rot * vec2(0.86602540, 0.50000000), span_px, texel, min_uv, max_uv, acc, wsum);
+        stb_line(uv, rot * vec2(0.50000000, 0.86602540), span_px, texel, min_uv, max_uv, acc, wsum);
+        stb_line(uv, rot * vec2(0.0, 1.0), span_px, texel, min_uv, max_uv, acc, wsum);
+        stb_line(uv, rot * vec2(-0.50000000, 0.86602540), span_px, texel, min_uv, max_uv, acc, wsum);
+        stb_line(uv, rot * vec2(-0.86602540, 0.50000000), span_px, texel, min_uv, max_uv, acc, wsum);
+    }
+
+    // 全方向权重归一：星芒能量有界（≤ max 采样值 × max 超出量）
+    vec3 star = acc / max(wsum, 0.001);
+    return color + star * intensity;
+}

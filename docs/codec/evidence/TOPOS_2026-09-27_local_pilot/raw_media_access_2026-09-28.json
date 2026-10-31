@@ -1,0 +1,139 @@
+{
+  "status": "local_decode_access_verified_not_same_source_quality_comparison",
+  "same_source_comparison_eligible": false,
+  "different_camera_scenes": true,
+  "files": [
+    {
+      "filename": "H034C0035_240410_P05R39.MOV",
+      "bytes": 11639173602,
+      "sha256": "fac40e1afd6b3a20e64841377ce113d241395675fe5002e1b57631970ff46eb9",
+      "format": "ProRes RAW HQ",
+      "metadata": {
+        "coded_resolution": "8192x4320",
+        "fps": 24,
+        "frames": 655,
+        "first_frame_pixel_format": "bayer_rggb16le",
+        "bayer_pattern": "RGGB"
+      },
+      "verified_decoder": "FFmpeg 9.0.2 native prores_raw decoder",
+      "verified_output_domain": "decoded 16-bit Bayer CFA; not original sensor truth"
+    },
+    {
+      "filename": "A002_01012049_C013.braw",
+      "bytes": 740721856,
+      "sha256": "65dda2afe450c43ba7c27ca86cef73c686922327ffbaac49efa74ca6ea03c81e",
+      "format": "Blackmagic RAW",
+      "metadata": {
+        "coded_resolution_ffprobe": "4128x2176",
+        "active_resolution_resolve": "4096x2160",
+        "fps": 24,
+        "frames": 196
+      },
+      "verified_decoder": "DaVinci Resolve 20.2.1.6 / installed BlackmagicRawAPI",
+      "verified_output_domain": "Resolve-developed RGB still; native CFA not extracted",
+      "first_frame_still": {
+        "rgb_resolution": "1920x1080",
+        "sha256": "466cbed240de87e6b1a3156a7e48e66a658c2d1bba1805343e4befb9138d3e21",
+        "retained_in_repository": false
+      }
+    },
+    {
+      "filename": "A010_A037_0715UN_001.R3D",
+      "bytes": 1468354560,
+      "sha256": "de4af62d178f16a47e538398d6789c5d215a54432f77eac2dfb5470af901b5b4",
+      "format": "RED RAW",
+      "metadata": {
+        "resolution": "5120x2700",
+        "fps": 24,
+        "frames": 487
+      },
+      "verified_decoder": "DaVinci Resolve 20.2.1.6 / bundled REDR3D.dylib",
+      "verified_output_domain": "Resolve-developed RGB still; native CFA not extracted",
+      "first_frame_still": {
+        "rgb_resolution": "1920x1080",
+        "sha256": "b01473dc4356fe02326f293d8237a0759fcec981c4f2d99d5eb3515517d072da",
+        "retained_in_repository": false
+      }
+    }
+  ],
+  "prores_raw_cfa_probe": {
+    "source_movie_sha256": "fac40e1afd6b3a20e64841377ce113d241395675fe5002e1b57631970ff46eb9",
+    "decoded_frame_index": 0,
+    "extraction": "ffmpeg -map 0:v:0 -frames:v 1 -pix_fmt bayer_rggb16le -f rawvideo",
+    "crop_xywh": [
+      3072,
+      1136,
+      2048,
+      2048
+    ],
+    "phase_order": [
+      "R",
+      "Gr",
+      "Gb",
+      "B"
+    ],
+    "source_raw16_sha256": "03961f031d9181f797af95de4e655d0ce62d6550e076ccacfcf303d7a770719f",
+    "phase_min": [
+      252,
+      269,
+      252,
+      240
+    ],
+    "phase_max": [
+      24480,
+      39168,
+      38784,
+      11088
+    ],
+    "phase_mean": [
+      1317.4169425964355,
+      1748.8898229599,
+      1748.3587856292725,
+      613.4710693359375
+    ],
+    "tier_report": "native_domains_proresraw_decoded_raw16_crop.json",
+    "results": [
+      {
+        "tier": "raw16-2",
+        "source_over_encoded": 2.536207574209231,
+        "min_phase_psnr_db": 96.91407417495185,
+        "max_phase_abs_error_codes": 5
+      },
+      {
+        "tier": "raw16-4",
+        "source_over_encoded": 17.855966351137628,
+        "min_phase_psnr_db": 67.01741604443858,
+        "max_phase_abs_error_codes": 188
+      },
+      {
+        "tier": "raw16-6",
+        "source_over_encoded": 41.370064605217735,
+        "min_phase_psnr_db": 63.80741359257029,
+        "max_phase_abs_error_codes": 348
+      },
+      {
+        "tier": "raw16-8",
+        "source_over_encoded": 58.93690807408032,
+        "min_phase_psnr_db": 62.77302998501785,
+        "max_phase_abs_error_codes": 537
+      },
+      {
+        "tier": "raw16-12",
+        "source_over_encoded": 79.14677133260369,
+        "min_phase_psnr_db": 61.82193161036729,
+        "max_phase_abs_error_codes": 726
+      },
+      {
+        "tier": "raw16-16",
+        "source_over_encoded": 102.36501195880314,
+        "min_phase_psnr_db": 60.84838050172038,
+        "max_phase_abs_error_codes": 889
+      }
+    ]
+  },
+  "product_import_check": {
+    "ProRes RAW": "MediaSourceFactory.create/open/probe/read_frame(0) succeeded; probe pixel_format=unknown, preview rgb24",
+    "BRAW": "TOPOS FFmpeg/PyAV lacks BRAW decoder; current code fails with actionable MediaOpenError and releases opened container (before fix: VideoStream.width AttributeError)",
+    "R3D": "TOPOS FFmpeg/PyAV lacks R3D demux/decoder; current code fails with actionable MediaOpenError and releases opened container (before fix: invalid data)"
+  }
+}

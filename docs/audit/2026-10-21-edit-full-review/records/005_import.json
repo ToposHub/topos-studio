@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "result": {
+    "drag_accepted": true,
+    "drop_accepted": true,
+    "assets_so_far": 0,
+    "children": [
+      [
+        "QListView",
+        ""
+      ],
+      [
+        "QListView",
+        ""
+      ],
+      [
+        "AssetTreeWidget",
+        ""
+      ],
+      [
+        "QHeaderView",
+        ""
+      ],
+      [
+        "AssetListView",
+        ""
+      ],
+      [
+        "BinTreeWidget",
+        ""
+      ],
+      [
+        "QHeaderView",
+        ""
+      ]
+    ]
+  }
+}

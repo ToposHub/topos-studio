@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 23 items
+
+tests/edit/test_delivery_qc.py .......................                   [100%]
+
+============================= 23 passed in 40.98s ==============================
+Export manifest write failed: Object of type MagicMock is not JSON serializable

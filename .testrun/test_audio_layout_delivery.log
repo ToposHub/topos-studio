@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 11 items
+
+tests/edit/test_audio_layout_delivery.py ...........                     [100%]
+
+============================= 11 passed in 23.90s ==============================

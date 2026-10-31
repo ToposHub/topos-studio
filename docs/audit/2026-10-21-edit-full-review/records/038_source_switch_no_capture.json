@@ -1,0 +1,69 @@
+{
+  "ok": true,
+  "result": {
+    "switches": 18,
+    "screenshot_during_switches": false,
+    "warnings": [
+      {
+        "file": "4K_H264.mov",
+        "logger": "src.features.edit.core.edit_gpu_preview_renderer",
+        "message": "EditGpuPreviewRenderer: task error frame=0: GLError(\n\terr = 1282,\n\tdescription = b'invalid operation',\n\tbaseOperation = glUseProgram,\n\tcArguments = (24,)\n)"
+      },
+      {
+        "file": "4K_H264.mov",
+        "logger": "src.shared.gpu.present_frame",
+        "message": "TextureLease 0: force release from WRITING (frame=0)"
+      },
+      {
+        "file": "4K_H264.mov",
+        "logger": "src.shared.media.gpu_frame",
+        "message": "GpuDecodedFrame.__del__: frame=0 leaked (not released before GC). Call safe_release_gpu_frame() from the render thread."
+      },
+      {
+        "file": "4K_H264.mov",
+        "logger": "src.app.controllers.file_controller",
+        "message": "Source GPU render error frame=0: GLError(\n\terr = 1282,\n\tdescription = b'invalid operation',\n\tbaseOperation = glUseProgram,\n\tcArguments = (24,)\n)"
+      },
+      {
+        "file": "2K_Prores4444_Alpha.mov",
+        "logger": "src.features.edit.core.edit_gpu_preview_renderer",
+        "message": "EditGpuPreviewRenderer: task error frame=0: GLError(\n\terr = 1282,\n\tdescription = b'invalid operation',\n\tbaseOperation = glUseProgram,\n\tcArguments = (24,)\n)"
+      },
+      {
+        "file": "2K_Prores4444_Alpha.mov",
+        "logger": "src.shared.gpu.present_frame",
+        "message": "TextureLease 0: force release from WRITING (frame=0)"
+      },
+      {
+        "file": "2K_Prores4444_Alpha.mov",
+        "logger": "src.shared.media.gpu_frame",
+        "message": "GpuDecodedFrame.__del__: frame=0 leaked (not released before GC). Call safe_release_gpu_frame() from the render thread."
+      },
+      {
+        "file": "2K_Prores4444_Alpha.mov",
+        "logger": "src.app.controllers.file_controller",
+        "message": "Source GPU render error frame=0: GLError(\n\terr = 1282,\n\tdescription = b'invalid operation',\n\tbaseOperation = glUseProgram,\n\tcArguments = (24,)\n)"
+      },
+      {
+        "file": "2K_Prores4444_Alpha.mov",
+        "logger": "src.features.edit.core.edit_gpu_preview_renderer",
+        "message": "EditGpuPreviewRenderer: task error frame=0: GLError(\n\terr = 1282,\n\tdescription = b'invalid operation',\n\tbaseOperation = glUseProgram,\n\tcArguments = (24,)\n)"
+      },
+      {
+        "file": "2K_Prores4444_Alpha.mov",
+        "logger": "src.shared.gpu.present_frame",
+        "message": "TextureLease 0: force release from WRITING (frame=0)"
+      },
+      {
+        "file": "2K_Prores4444_Alpha.mov",
+        "logger": "src.shared.media.gpu_frame",
+        "message": "GpuDecodedFrame.__del__: frame=0 leaked (not released before GC). Call safe_release_gpu_frame() from the render thread."
+      },
+      {
+        "file": "2K_Prores4444_Alpha.mov",
+        "logger": "src.app.controllers.file_controller",
+        "message": "Source GPU render error frame=0: GLError(\n\terr = 1282,\n\tdescription = b'invalid operation',\n\tbaseOperation = glUseProgram,\n\tcArguments = (24,)\n)"
+      }
+    ]
+  }
+}

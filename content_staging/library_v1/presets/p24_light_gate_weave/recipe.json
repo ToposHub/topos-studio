@@ -1,0 +1,27 @@
+{
+  "recipe_id": "P24",
+  "name": "轻门片抖动",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合胶片放映感；amplitude_h 0.002–0.006 轻微横移，rotation 0.05 起",
+  "component": "F08 gate_weave（暂存组件 content_staging/library_v1/filters/gate_weave）",
+  "dependencies": {
+    "component_id": "F08",
+    "component_slug": "gate_weave",
+    "component_kind": "filter"
+  },
+  "params": {
+    "amplitude_h": 0.004,
+    "amplitude_v": 0.002,
+    "rotation": 0.05,
+    "seed": 7.0,
+    "border_mode": "Freeze"
+  },
+  "notes": "依赖暂存组件（L12 未接缝）：确定性门片位移（不读系统时钟，seed 固定；border_mode=Freeze 冻结边缘）。"
+}

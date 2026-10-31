@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 1 item
+
+tests/edit/test_timeline_playhead_style.py .                             [100%]
+
+============================== 1 passed in 5.17s ===============================

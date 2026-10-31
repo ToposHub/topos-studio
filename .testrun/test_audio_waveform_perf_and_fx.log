@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+collected 20 items
+
+tests/edit/test_audio_waveform_perf_and_fx.py .............sF.....       [100%]
+
+=================================== FAILURES ===================================
+_______ TestClipEffectWaveformWorker.test_missing_file_fails_gracefully ________
+tests/edit/test_audio_waveform_perf_and_fx.py:265: in test_missing_file_fails_gracefully
+    assert "err" in results
+E   AssertionError: assert 'err' in {}
+=========================== short test summary info ============================
+FAILED tests/edit/test_audio_waveform_perf_and_fx.py::TestClipEffectWaveformWorker::test_missing_file_fails_gracefully
+=================== 1 failed, 18 passed, 1 skipped in 21.26s ===================

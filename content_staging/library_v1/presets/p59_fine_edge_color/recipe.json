@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P59",
+  "name": "细边缘保色",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "细发丝边缘保色：Scale 法温和限幅；strength 0.5–0.8 防过抑",
+  "component": "C03 despill（暂存节点 lib1_despill，Scale 法）＋生产 keyer",
+  "dependencies": {
+    "component_id": "C03",
+    "component_slug": "despill",
+    "component_kind": "node",
+    "node_type": "lib1_despill",
+    "aux_node_types": [
+      "keyer"
+    ]
+  },
+  "params": {
+    "method": "Scale",
+    "limit": 0.85,
+    "strength": 0.7
+  },
+  "notes": "C03 despill Scale 法细边缘保色宏模板（暂存，宿主图导入未接线，未接 L05 白名单）；不承诺自动发丝分割——质量取决于上游键控（计划 §7.3 口径）。"
+}

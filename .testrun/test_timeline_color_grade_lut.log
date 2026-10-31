@@ -1,0 +1,27 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/edit/test_timeline_color_grade_lut.py F...                         [100%]
+
+=================================== FAILURES ===================================
+_____ test_cached_lut_matches_float_grade_exactly_for_real_project_wheels ______
+tests/edit/test_timeline_color_grade_lut.py:90: in test_cached_lut_matches_float_grade_exactly_for_real_project_wheels
+    np.testing.assert_array_equal(actual, expected)
+/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/contextlib.py:81: in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+E   AssertionError: 
+E   Arrays are not equal
+E   
+E   Mismatched elements: 5427 / 25344 (21.4%)
+E   Max absolute difference: 4
+E   Max relative difference: 0.14285714
+E    x: array([[[ 37, 255,   0],
+E           [ 38, 254,   0],
+E           [ 39, 253,   0],...
+E    y: array([[[ 38, 255,   0],
+E           [ 39, 254,   0],
+E           [ 40, 253,   0],...
+=========================== short test summary info ============================
+FAILED tests/edit/test_timeline_color_grade_lut.py::test_cached_lut_matches_float_grade_exactly_for_real_project_wheels
+========================= 1 failed, 3 passed in 14.26s =========================

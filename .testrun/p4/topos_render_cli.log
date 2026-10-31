@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 7 items
+
+tests/test_topos_render_cli.py ......s                                   [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/topos_render_cli.xml -
+========================= 6 passed, 1 skipped in 3.70s =========================

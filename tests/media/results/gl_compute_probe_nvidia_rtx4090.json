@@ -1,0 +1,65 @@
+{
+  "date": "2026-09-12T11:48:06",
+  "purpose": "W4-01 GL compute probe (Qt offscreen 4.5 Core)",
+  "gl_context": {
+    "requested": "4.5 Core",
+    "got": "4.5",
+    "surface": "QOffscreenSurface"
+  },
+  "gl_strings": {
+    "GL_VERSION": "4.5.0 NVIDIA 610.88",
+    "GL_RENDERER": "NVIDIA GeForce RTX 4090/PCIe/SSE2"
+  },
+  "create_shader": {
+    "shader_handle": 0,
+    "gl_error_before": "0x0000",
+    "gl_error_after": "0x0500"
+  },
+  "native_wgl_cross_check": [
+    {
+      "ctx": "legacy",
+      "version": "4.6.0 NVIDIA 610.88"
+    },
+    {
+      "ctx": "4.6 Core",
+      "version": "4.6.0 NVIDIA 610.88",
+      "compute_handle": 0,
+      "gl_error": "0x0500 (GL_INVALID_ENUM)"
+    },
+    {
+      "ctx": "4.5 Core",
+      "version": "4.5.0 NVIDIA 610.88",
+      "compute_handle": 0,
+      "gl_error": "0x0500 (GL_INVALID_ENUM)"
+    },
+    {
+      "ctx": "4.3 Core",
+      "version": "4.3.0 NVIDIA 610.88",
+      "compute_handle": 0,
+      "gl_error": "0x0500 (GL_INVALID_ENUM)"
+    }
+  ],
+  "steps": [
+    {
+      "step": "qt_context_current",
+      "ok": true,
+      "detail": "requested=4.5 Core got=4.5 profile=Core"
+    },
+    {
+      "step": "gl_strings",
+      "ok": true,
+      "detail": "NVIDIA GeForce RTX 4090/PCIe/SSE2 | 4.5.0 NVIDIA 610.88"
+    },
+    {
+      "step": "compute_fn_ptrs",
+      "ok": true,
+      "detail": "all present"
+    },
+    {
+      "step": "create_shader_handle",
+      "ok": false,
+      "detail": "handle=0 err_after=GL_INVALID_ENUM"
+    }
+  ],
+  "verdict": "compute_unavailable_native_wgl_confirmed"
+}

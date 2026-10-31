@@ -1,0 +1,17 @@
+{
+  "inphase": [
+    true,
+    "Integrated：-14.2 LUFS（目标 -23）\nTrue Peak：-10.5 dBTP（上限 -3）\n建议增益：-8.8 dB",
+    -8.848921557439871
+  ],
+  "antiphase": [
+    true,
+    "Integrated：-14.2 LUFS（目标 -23）\nTrue Peak：-10.5 dBTP（上限 -3）\n建议增益：-8.8 dB",
+    -8.848921557439871
+  ],
+  "silence": [
+    true,
+    "Integrated：-70.0 LUFS（低于测量门限，疑似静音或反相抵消）\n已拒绝正增益建议：请先检查素材实际内容",
+    null
+  ]
+}

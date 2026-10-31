@@ -1,0 +1,489 @@
+{
+  "schema_version": 1,
+  "kind": "windows_timeline_export_bench",
+  "meta": {
+    "date": "2026-09-15",
+    "gpu_tag": "amd_rx6800_config_isolated_smoke",
+    "os": "win32 nt",
+    "python": "3.12.14",
+    "git_rev": "63a02d05",
+    "bitrate_bps": 20000000,
+    "json_name": "windows_timeline_export_amd_rx6800_config_isolated_smoke_2026-09-15.json"
+  },
+  "protocol": {
+    "frames": 30,
+    "warmup_frames": 2,
+    "runs": 1,
+    "bitrate_mode": "vbr",
+    "report": "median of runs; frame times from progress callback deltas",
+    "case_matrix": [
+      "T0",
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T6",
+      "T7",
+      "T8",
+      "T9",
+      "T10"
+    ],
+    "groups": [
+      "cpu_pipeline",
+      "hw_download",
+      "ffmpeg_gpu_ref",
+      "d3d11_gpu_surface"
+    ],
+    "input_manifest": "sha256 + PyAV video probe for every selected material",
+    "output_validation": "PyAV decoded frame count + codec/pixel format/size + SHA-256",
+    "gpu_evidence": "D3D11 requires adapter LUID, native decode/render/yuv/encode timestamps and ExportGpuTrail cpu_upload_bytes=0/cpu_download_bytes=0"
+  },
+  "inputs": {
+    "2K_H265.mov": {
+      "path": "tests\\test_videos\\2K_H265.mov",
+      "exists": true,
+      "sha256": "0aee87a9fc159d2e28bfec8286269feef72499007b9bb8422b96fb89a568970b",
+      "probe": {
+        "codec": "hevc",
+        "pix_fmt": "yuv420p10le",
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "total_frames": 487
+      },
+      "status": "ok"
+    },
+    "2K_h264.mp4": {
+      "path": "tests\\test_videos\\2K_h264.mp4",
+      "exists": true,
+      "sha256": "3d420027cb4b6afcff11e5cc7b3510ddbb019de732ee403d21f6f40b3f1af04f",
+      "probe": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "width": 1920,
+        "height": 1080,
+        "fps": 25.0,
+        "total_frames": 1572
+      },
+      "status": "ok"
+    },
+    "4K_H264.mov": {
+      "path": "tests\\test_videos\\4K_H264.mov",
+      "exists": true,
+      "sha256": "044b677f60b6bfb5561bfabb974ebb2ab62c128da9a409d52ff0c1dc67973717",
+      "probe": {
+        "codec": "h264",
+        "pix_fmt": "yuv420p",
+        "width": 3840,
+        "height": 2160,
+        "fps": 25.0,
+        "total_frames": 743
+      },
+      "status": "ok"
+    }
+  },
+  "cases": {
+    "T0": {
+      "title": "单段 H.264 直通",
+      "purpose": "解码 -> 编码的最低开销与 surface 连通性（计划 §4.1 T0）。",
+      "coverage": "",
+      "status": "ok",
+      "groups": {
+        "cpu_pipeline": {
+          "status": "ok",
+          "group": "cpu_pipeline",
+          "runs": [
+            {
+              "frames_requested": 30,
+              "setup_s": 0.0664,
+              "wall_s": 0.8553,
+              "status": "ok",
+              "frames": 30,
+              "fps": 35.077,
+              "frame_ms_p50": 3.715,
+              "frame_ms_p95": 5.877,
+              "hw_fallback_reason": "",
+              "output_mb": 3.127,
+              "output_sha256": "aa31ede85b870294150c7eceaad5e2d3332fbdf54a8c6621f46049f28dcd2dd3",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 30,
+                "decoded_frames": 30
+              },
+              "run_index": 1
+            }
+          ],
+          "warmup": "done frames=2",
+          "median_fps": 35.077,
+          "hw_fallback_reasons": [],
+          "env": {
+            "TOPOS_DISABLE_WIN_HW_DECODE": "1",
+            "TOPOS_DISABLE_WIN_HW_ENCODE": "1"
+          },
+          "elapsed_s": 3.63
+        },
+        "hw_download": {
+          "status": "ok",
+          "group": "hw_download",
+          "runs": [
+            {
+              "frames_requested": 30,
+              "setup_s": 0.0562,
+              "wall_s": 0.6993,
+              "status": "ok",
+              "frames": 30,
+              "fps": 42.898,
+              "frame_ms_p50": 5.978,
+              "frame_ms_p95": 14.228,
+              "hw_fallback_reason": "",
+              "output_mb": 3.167,
+              "output_sha256": "2526e30e1251dcfacf382cfec4338fa9a33351c2b87df14b9dea3e661b144988",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 30,
+                "decoded_frames": 30
+              },
+              "run_index": 1
+            }
+          ],
+          "warmup": "done frames=2",
+          "median_fps": 42.898,
+          "hw_fallback_reasons": [],
+          "env": {
+            "TOPOS_DISABLE_WIN_HW_DECODE": "",
+            "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+          },
+          "elapsed_s": 4.08
+        },
+        "ffmpeg_gpu_ref": {
+          "status": "ok",
+          "group": "ffmpeg_gpu_ref",
+          "vendor": "amd",
+          "ref_mode": "gpu_surface",
+          "ref_mode_fallback": false,
+          "ref_mode_fallback_reason": "",
+          "runs": [
+            {
+              "run_index": 1,
+              "status": "ok",
+              "frames": 30,
+              "wall_s": 0.445,
+              "fps": 67.418,
+              "output_mb": 3.168,
+              "output_sha256": "9844e1080efb8ad4ce68332d6e18d4965d6dad8902735123154204f1022a3777",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1920,
+                "height": 1080,
+                "stream_frames": 30,
+                "decoded_frames": 30
+              }
+            }
+          ],
+          "warmup": "n/a",
+          "median_fps": 67.418,
+          "elapsed_s": 1.83
+        },
+        "d3d11_gpu_surface": {
+          "status": "declared_not_run",
+          "group": "d3d11_gpu_surface",
+          "blocking": "not_yet_implemented:native_bridge:No module named 'topos_hwdecode_windows'",
+          "capability": {
+            "ready": false,
+            "reason": "not_yet_implemented:native_bridge:No module named 'topos_hwdecode_windows'",
+            "adapter_luid": "000111A0-00000000",
+            "feature_level": "0xc100",
+            "bridge_version": "",
+            "decode_surface": false,
+            "renderer": false,
+            "encode_surface": false,
+            "zero_copy_probe": false,
+            "evidence": {
+              "device": true,
+              "native_bridge": false
+            }
+          },
+          "elapsed_s": 0.58
+        }
+      },
+      "ref_mode": "gpu_surface",
+      "vendor": "amd",
+      "group_summaries": {
+        "cpu_pipeline": {
+          "status": "ok",
+          "runs_recorded": 1,
+          "runs_ok": 1,
+          "median_fps": 35.077,
+          "median_frame_ms_p50": 3.715,
+          "max_frame_ms_p95": 5.877,
+          "median_output_mb": 3.127,
+          "output_sha256_stable": true,
+          "output_sha256": "aa31ede85b870294150c7eceaad5e2d3332fbdf54a8c6621f46049f28dcd2dd3",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1920,
+            "height": 1080,
+            "stream_frames": 30,
+            "decoded_frames": 30
+          }
+        },
+        "hw_download": {
+          "status": "ok",
+          "runs_recorded": 1,
+          "runs_ok": 1,
+          "median_fps": 42.898,
+          "median_frame_ms_p50": 5.978,
+          "max_frame_ms_p95": 14.228,
+          "median_output_mb": 3.167,
+          "output_sha256_stable": true,
+          "output_sha256": "2526e30e1251dcfacf382cfec4338fa9a33351c2b87df14b9dea3e661b144988",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1920,
+            "height": 1080,
+            "stream_frames": 30,
+            "decoded_frames": 30
+          }
+        },
+        "ffmpeg_gpu_ref": {
+          "status": "ok",
+          "runs_recorded": 1,
+          "runs_ok": 1,
+          "median_fps": 67.418,
+          "median_output_mb": 3.168,
+          "output_sha256_stable": true,
+          "output_sha256": "9844e1080efb8ad4ce68332d6e18d4965d6dad8902735123154204f1022a3777",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1920,
+            "height": 1080,
+            "stream_frames": 30,
+            "decoded_frames": 30
+          }
+        },
+        "d3d11_gpu_surface": {
+          "status": "declared_not_run",
+          "runs_recorded": 0,
+          "runs_ok": 0,
+          "error": "not_yet_implemented:native_bridge:No module named 'topos_hwdecode_windows'"
+        }
+      },
+      "baseline_ratios": {
+        "cpu_pipeline_vs_ffmpeg": 0.52,
+        "hw_download_vs_ffmpeg": 0.636
+      }
+    },
+    "T1": {
+      "title": "resize + 色彩转换",
+      "purpose": "验证最常见的渲染链：解码 -> 缩放 -> 色彩转换 -> 编码。",
+      "coverage": "已接线：resize + yuv420p 色彩转换；未接线：主级调色（效果实例程序化构建属后续批次，届时在 coverage 里显式升级，不冒充完整 T1）。",
+      "status": "ok",
+      "groups": {
+        "cpu_pipeline": {
+          "status": "ok",
+          "group": "cpu_pipeline",
+          "runs": [
+            {
+              "frames_requested": 30,
+              "setup_s": 0.0646,
+              "wall_s": 1.4275,
+              "status": "ok",
+              "frames": 30,
+              "fps": 21.016,
+              "frame_ms_p50": 25.254,
+              "frame_ms_p95": 28.368,
+              "hw_fallback_reason": "",
+              "output_mb": 3.485,
+              "output_sha256": "b2cf2f2987f68d8a593bec6c3a2797377e4026e786b5f3121661eb65720a120d",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1280,
+                "height": 720,
+                "stream_frames": 30,
+                "decoded_frames": 30
+              },
+              "run_index": 1
+            }
+          ],
+          "warmup": "done frames=2",
+          "median_fps": 21.016,
+          "hw_fallback_reasons": [],
+          "env": {
+            "TOPOS_DISABLE_WIN_HW_DECODE": "1",
+            "TOPOS_DISABLE_WIN_HW_ENCODE": "1"
+          },
+          "elapsed_s": 4.64
+        },
+        "hw_download": {
+          "status": "ok",
+          "group": "hw_download",
+          "runs": [
+            {
+              "frames_requested": 30,
+              "setup_s": 0.0572,
+              "wall_s": 1.716,
+              "status": "ok",
+              "frames": 30,
+              "fps": 17.482,
+              "frame_ms_p50": 34.09,
+              "frame_ms_p95": 44.776,
+              "hw_fallback_reason": "",
+              "output_mb": 3.012,
+              "output_sha256": "8a7443badb1c4885fc8425c4a081c21e3d2e0c1188e885fecbdd3cdf9ec28076",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1280,
+                "height": 720,
+                "stream_frames": 30,
+                "decoded_frames": 30
+              },
+              "run_index": 1
+            }
+          ],
+          "warmup": "done frames=2",
+          "median_fps": 17.482,
+          "hw_fallback_reasons": [],
+          "env": {
+            "TOPOS_DISABLE_WIN_HW_DECODE": "",
+            "TOPOS_DISABLE_WIN_HW_ENCODE": ""
+          },
+          "elapsed_s": 6.1
+        },
+        "ffmpeg_gpu_ref": {
+          "status": "ok",
+          "group": "ffmpeg_gpu_ref",
+          "vendor": "amd",
+          "ref_mode": "hwaccel_download",
+          "ref_mode_fallback": true,
+          "ref_mode_fallback_reason": "[AVHWFramesContext @ 00000268473cdf00] Could not create the texture (80070057)\n[Parsed_scale_d3d11_0 @ 00000268450462c0] Failed to configure output pad on Parsed_scale_d3d11_0\n[vf#0:0 @ 00000268450037c0] Error reinitializing filters!\n[vf#0:0 @ 00000268450037c0] Task finished with error code: -1313558101 (Unknown error occurred)\n[vf#0:0 @ 00000268450037c0] Terminating thread with return code -1313558101 (Unknown error occurred)\n[vost#0:0/h264_amf @ 00000268470c0700] [enc:h264_amf @ 0000026846c921c0] Could not open encoder before EOF\n[vost#0:0/h264_amf @ 00000268470c0700] Task finished with error code: -22 (Invalid argument)\n[vost#0:0/h264_amf @ 00000268470c0700] Terminating thread with return code -22 (Invalid argument)\n[out#0/mp4 @ 0000026844f8eb00] Nothing was written into output file, because at least one of its streams received no packets.",
+          "runs": [
+            {
+              "run_index": 1,
+              "status": "ok",
+              "frames": 30,
+              "wall_s": 0.407,
+              "fps": 73.718,
+              "output_mb": 2.928,
+              "output_sha256": "1e3e5212d2e59d113d884346db0250551357481f9f36272a7ca57d0adc5a1531",
+              "probe": {
+                "codec": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 1280,
+                "height": 720,
+                "stream_frames": 30,
+                "decoded_frames": 30
+              }
+            }
+          ],
+          "warmup": "done (run 0)",
+          "median_fps": 73.718,
+          "elapsed_s": 1.1
+        },
+        "d3d11_gpu_surface": {
+          "status": "declared_not_run",
+          "group": "d3d11_gpu_surface",
+          "blocking": "not_yet_implemented:native_bridge:No module named 'topos_hwdecode_windows'",
+          "capability": {
+            "ready": false,
+            "reason": "not_yet_implemented:native_bridge:No module named 'topos_hwdecode_windows'",
+            "adapter_luid": "000111A0-00000000",
+            "feature_level": "0xc100",
+            "bridge_version": "",
+            "decode_surface": false,
+            "renderer": false,
+            "encode_surface": false,
+            "zero_copy_probe": false,
+            "evidence": {
+              "device": true,
+              "native_bridge": false
+            }
+          },
+          "elapsed_s": 0.58
+        }
+      },
+      "ref_mode": "hwaccel_download",
+      "vendor": "amd",
+      "group_summaries": {
+        "cpu_pipeline": {
+          "status": "ok",
+          "runs_recorded": 1,
+          "runs_ok": 1,
+          "median_fps": 21.016,
+          "median_frame_ms_p50": 25.254,
+          "max_frame_ms_p95": 28.368,
+          "median_output_mb": 3.485,
+          "output_sha256_stable": true,
+          "output_sha256": "b2cf2f2987f68d8a593bec6c3a2797377e4026e786b5f3121661eb65720a120d",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1280,
+            "height": 720,
+            "stream_frames": 30,
+            "decoded_frames": 30
+          }
+        },
+        "hw_download": {
+          "status": "ok",
+          "runs_recorded": 1,
+          "runs_ok": 1,
+          "median_fps": 17.482,
+          "median_frame_ms_p50": 34.09,
+          "max_frame_ms_p95": 44.776,
+          "median_output_mb": 3.012,
+          "output_sha256_stable": true,
+          "output_sha256": "8a7443badb1c4885fc8425c4a081c21e3d2e0c1188e885fecbdd3cdf9ec28076",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1280,
+            "height": 720,
+            "stream_frames": 30,
+            "decoded_frames": 30
+          }
+        },
+        "ffmpeg_gpu_ref": {
+          "status": "ok",
+          "runs_recorded": 1,
+          "runs_ok": 1,
+          "median_fps": 73.718,
+          "median_output_mb": 2.928,
+          "output_sha256_stable": true,
+          "output_sha256": "1e3e5212d2e59d113d884346db0250551357481f9f36272a7ca57d0adc5a1531",
+          "probe": {
+            "codec": "h264",
+            "pix_fmt": "yuv420p",
+            "width": 1280,
+            "height": 720,
+            "stream_frames": 30,
+            "decoded_frames": 30
+          },
+          "ref_mode_fallback_reason": "[AVHWFramesContext @ 00000268473cdf00] Could not create the texture (80070057)\n[Parsed_scale_d3d11_0 @ 00000268450462c0] Failed to configure output pad on Parsed_scale_d3d11_0\n[vf#0:0 @ 00000268450037c0] Error reinitializing filters!\n[vf#0:0 @ 00000268450037c0] Task finished with error code: -1313558101 (Unknown error occurred)\n[vf#0:0 @ 00000268450037c0] Terminating thread with return code -1313558101 (Unknown error occurred)\n[vost#0:0/h264_amf @ 00000268470c0700] [enc:h264_amf @ 0000026846c921c0] Could not open encoder before EOF\n[vost#0:0/h264_amf @ 00000268470c0700] Task finished with error code: -22 (Invalid argument)\n[vost#0:0/h264_amf @ 00000268470c0700] Terminating thread with return code -22 (Invalid argument)\n[out#0/mp4 @ 0000026844f8eb00] Nothing was written into output file, because at least one of its streams received no packets."
+        },
+        "d3d11_gpu_surface": {
+          "status": "declared_not_run",
+          "runs_recorded": 0,
+          "runs_ok": 0,
+          "error": "not_yet_implemented:native_bridge:No module named 'topos_hwdecode_windows'"
+        }
+      },
+      "baseline_ratios": {
+        "cpu_pipeline_vs_ffmpeg": 0.285,
+        "hw_download_vs_ffmpeg": 0.237
+      }
+    }
+  }
+}

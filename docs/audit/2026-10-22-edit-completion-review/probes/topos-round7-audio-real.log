@@ -1,0 +1,232 @@
+Failed to decode audio for clip c: operands could not be broadcast together with shapes (2,1764) (2,1748) (2,1764) 
+{
+  "speed1_sr44100_in50": {
+    "shape": [
+      2,
+      88200
+    ],
+    "peak": 0.0,
+    "nonzero_samples": 0,
+    "tail_std": 0.0
+  },
+  "speed2_sr48000_in100": {
+    "shape": [
+      2,
+      96000
+    ],
+    "peak": 0.027178682386875153,
+    "nonzero_samples": 192000,
+    "tail_std": 3.725290298461914e-09
+  },
+  "speed1_sr48000_in100": {
+    "shape": [
+      2,
+      192000
+    ],
+    "peak": 0.36135220527648926,
+    "nonzero_samples": 384000,
+    "tail_std": 0.023076878860592842
+  },
+  "decoder_blocks": [
+    {
+      "frame": 50,
+      "length": 1748
+    },
+    {
+      "frame": 51,
+      "length": 1764
+    },
+    {
+      "frame": 52,
+      "length": 1764
+    },
+    {
+      "frame": 53,
+      "length": 1764
+    },
+    {
+      "frame": 54,
+      "length": 1764
+    },
+    {
+      "frame": 55,
+      "length": 1764
+    },
+    {
+      "frame": 56,
+      "length": 1764
+    },
+    {
+      "frame": 57,
+      "length": 1764
+    },
+    {
+      "frame": 58,
+      "length": 1764
+    },
+    {
+      "frame": 59,
+      "length": 1764
+    },
+    {
+      "frame": 60,
+      "length": 1764
+    },
+    {
+      "frame": 61,
+      "length": 1764
+    },
+    {
+      "frame": 62,
+      "length": 1764
+    },
+    {
+      "frame": 63,
+      "length": 1764
+    },
+    {
+      "frame": 64,
+      "length": 1764
+    },
+    {
+      "frame": 65,
+      "length": 1764
+    },
+    {
+      "frame": 66,
+      "length": 1764
+    },
+    {
+      "frame": 67,
+      "length": 1764
+    },
+    {
+      "frame": 68,
+      "length": 1764
+    },
+    {
+      "frame": 69,
+      "length": 1764
+    },
+    {
+      "frame": 70,
+      "length": 1764
+    },
+    {
+      "frame": 71,
+      "length": 1764
+    },
+    {
+      "frame": 72,
+      "length": 1764
+    },
+    {
+      "frame": 73,
+      "length": 1764
+    },
+    {
+      "frame": 74,
+      "length": 1764
+    },
+    {
+      "frame": 75,
+      "length": 1764
+    },
+    {
+      "frame": 76,
+      "length": 1764
+    },
+    {
+      "frame": 77,
+      "length": 1764
+    },
+    {
+      "frame": 78,
+      "length": 1764
+    },
+    {
+      "frame": 79,
+      "length": 1764
+    },
+    {
+      "frame": 80,
+      "length": 1764
+    },
+    {
+      "frame": 81,
+      "length": 1764
+    },
+    {
+      "frame": 82,
+      "length": 1764
+    },
+    {
+      "frame": 83,
+      "length": 1764
+    },
+    {
+      "frame": 84,
+      "length": 1764
+    },
+    {
+      "frame": 85,
+      "length": 1764
+    },
+    {
+      "frame": 86,
+      "length": 1764
+    },
+    {
+      "frame": 87,
+      "length": 1764
+    },
+    {
+      "frame": 88,
+      "length": 1764
+    },
+    {
+      "frame": 89,
+      "length": 1764
+    },
+    {
+      "frame": 90,
+      "length": 1764
+    },
+    {
+      "frame": 91,
+      "length": 1764
+    },
+    {
+      "frame": 92,
+      "length": 1764
+    },
+    {
+      "frame": 93,
+      "length": 1764
+    },
+    {
+      "frame": 94,
+      "length": 1764
+    },
+    {
+      "frame": 95,
+      "length": 1764
+    },
+    {
+      "frame": 96,
+      "length": 1764
+    },
+    {
+      "frame": 97,
+      "length": 1764
+    },
+    {
+      "frame": 98,
+      "length": 1764
+    },
+    {
+      "frame": 99,
+      "length": 1764
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="2000" viewBox="0 0 1600 2000">
+  <title>TOPOS 优势 03：性能与可靠性</title>
+  <defs>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#03111d" stop-opacity=".36"/><stop offset=".52" stop-color="#04101d" stop-opacity=".91"/><stop offset="1" stop-color="#020811" stop-opacity=".98"/></linearGradient>
+    <linearGradient id="cyan" x1="0" x2="1"><stop stop-color="#40d9ff"/><stop offset="1" stop-color="#7ef0d1"/></linearGradient>
+    <linearGradient id="amber" x1="0" x2="1"><stop stop-color="#ffb44a"/><stop offset="1" stop-color="#ff6d8a"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#000" flood-opacity=".46"/></filter>
+    <style>
+      .cn{font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif}.white{fill:#f2f7fb}.muted{fill:#a9bdcb}.cyan{fill:#7fe6ff}.amber{fill:#ffc56a}.card{fill:#071725;fill-opacity:.91;stroke:#2b5870;stroke-width:2}.body{font-size:29px}.small{font-size:24px}
+    </style>
+  </defs>
+  <image x="0" y="0" width="1600" height="2000" preserveAspectRatio="xMidYMid slice" xlink:href="assets/topos_codec_poster_bg.png"/>
+  <rect width="1600" height="2000" fill="url(#shade)"/>
+  <g class="cn">
+    <text x="82" y="118" class="cyan" font-size="24" font-weight="800" letter-spacing="5">TOPOS CODEC / ADVANTAGE 03</text>
+    <text x="82" y="220" class="white" font-size="70" font-weight="800">性能与可靠性：快是路径，稳是门槛</text>
+    <text x="86" y="280" class="muted" font-size="29">把并行、随机访问、错误处理和测量门禁放进同一套工程约束。</text>
+    <rect x="82" y="325" width="440" height="7" rx="3" fill="url(#cyan)"/>
+  </g>
+
+  <g filter="url(#shadow)" class="cn">
+    <rect x="70" y="420" width="700" height="350" rx="26" class="card"/>
+    <rect x="70" y="420" width="11" height="350" rx="5" fill="url(#cyan)"/>
+    <text x="112" y="482" class="cyan" font-size="24" font-weight="800" letter-spacing="4">FAST PATH</text>
+    <text x="112" y="540" class="white" font-size="43" font-weight="800">帧级访问与编辑友好</text>
+    <text x="112" y="595" class="white body">MOV sample 可独立 probe / decode / seek</text>
+    <text x="112" y="643" class="white body">.toos 单帧文件可直接读写</text>
+    <text x="112" y="700" class="muted small">代理、缓存、拖拽、单帧提取都能复用同一接口。</text>
+
+    <rect x="830" y="420" width="700" height="350" rx="26" class="card"/>
+    <rect x="830" y="420" width="11" height="350" rx="5" fill="url(#amber)"/>
+    <text x="872" y="482" class="amber" font-size="24" font-weight="800" letter-spacing="4">BOUNDED PARALLELISM</text>
+    <text x="872" y="540" class="white" font-size="43" font-weight="800">有界并行，不把线程数乘爆</text>
+    <text x="872" y="595" class="white body">常驻 worker pool · 默认上限 16</text>
+    <text x="872" y="643" class="white body">动态领取任务 · 尾部负载更均衡</text>
+    <text x="872" y="700" class="muted small">初始化、OOM 或超限时明确退化到串行路径。</text>
+
+    <rect x="70" y="820" width="700" height="350" rx="26" class="card"/>
+    <rect x="70" y="820" width="11" height="350" rx="5" fill="url(#amber)"/>
+    <text x="112" y="882" class="amber" font-size="24" font-weight="800" letter-spacing="4">DETERMINISTIC</text>
+    <text x="112" y="940" class="white" font-size="43" font-weight="800">可复验的输出</text>
+    <text x="112" y="995" class="white body">1 线程 / 多线程 parity 门禁</text>
+    <text x="112" y="1043" class="white body">错误详情按线程隔离</text>
+    <text x="112" y="1100" class="muted small">性能优化不会悄悄改变 bitstream 或错误语义。</text>
+
+    <rect x="830" y="820" width="700" height="350" rx="26" class="card"/>
+    <rect x="830" y="820" width="11" height="350" rx="5" fill="url(#cyan)"/>
+    <text x="872" y="882" class="cyan" font-size="24" font-weight="800" letter-spacing="4">FAIL CLOSED</text>
+    <text x="872" y="940" class="white" font-size="43" font-weight="800">坏文件不静默通过</text>
+    <text x="872" y="995" class="white body">CRC · truncated · malformed · limit</text>
+    <text x="872" y="1043" class="white body">co64 / 大文件边界有明确返回码</text>
+    <text x="872" y="1100" class="muted small">调用方能得到可诊断、可恢复或可拒绝的结果。</text>
+  </g>
+
+  <g class="cn">
+    <text x="82" y="1285" class="white" font-size="31" font-weight="800" letter-spacing="3">测量优先，而不是只报一个最快数字</text>
+    <line x1="82" y1="1320" x2="1518" y2="1320" stroke="#2d657f" stroke-width="2"/>
+    <g transform="translate(82 1400)"><rect width="220" height="130" rx="18" fill="#0b2c3c" stroke="#3eb9d4"/><text x="110" y="55" text-anchor="middle" class="cyan" font-size="36" font-weight="800">p50</text><text x="110" y="94" text-anchor="middle" class="muted small">典型延迟</text></g>
+    <g transform="translate(340 1400)"><rect width="220" height="130" rx="18" fill="#1e1c1a" stroke="#a06e3c"/><text x="110" y="55" text-anchor="middle" class="amber" font-size="36" font-weight="800">p95</text><text x="110" y="94" text-anchor="middle" class="muted small">尾部延迟</text></g>
+    <g transform="translate(598 1400)"><rect width="220" height="130" rx="18" fill="#201b2d" stroke="#725a9b"/><text x="110" y="55" text-anchor="middle" fill="#d6b8ff" font-size="36" font-weight="800">p99</text><text x="110" y="94" text-anchor="middle" class="muted small">极端尾部</text></g>
+    <text x="900" y="1445" class="white body" font-weight="700">每轮原始数据、库 SHA、提交号与</text>
+    <text x="900" y="1492" class="white body" font-weight="700">质量报告一起留档，结果才可复查。</text>
+    <text x="900" y="1550" class="muted small">性能数字会随平台和素材变化；门禁负责防止回退。</text>
+
+    <rect x="82" y="1640" width="1436" height="155" rx="22" fill="#071725" fill-opacity=".84" stroke="#2b5870"/>
+    <text x="120" y="1702" class="amber" font-size="28" font-weight="800">工程结论</text>
+    <text x="120" y="1750" class="white body" font-weight="700">把“快、稳、可诊断、可复验”作为一个整体交付，才适合进入真实创作流水线。</text>
+    <text x="82" y="1935" class="muted" font-size="20">TOPOS Codec V1 Preview · 性能结果以固定机与完整轮次报告为准 · 03 / 05</text>
+  </g>
+</svg>

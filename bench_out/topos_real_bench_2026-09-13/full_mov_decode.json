@@ -1,0 +1,122 @@
+{
+  "benchmark": "topos_mov_real_file_decode",
+  "os": "macOS-15.3.1-x86_64-i386-64bit",
+  "results": [
+    {
+      "label": "2K",
+      "path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_topos.mov",
+      "width": 1920,
+      "height": 1080,
+      "fps": 25.0,
+      "frames_decoded": 2912,
+      "duration_s": 116.48,
+      "file_size_bytes": 2914694719,
+      "file_average_mbps": 200.1850768543956,
+      "source_open_seconds": 0.002667603999725543,
+      "sequential_decode_seconds": 21.638486148000084,
+      "sequential_decode_fps": 134.57503358057878,
+      "decoder_workers_assigned": 16,
+      "decode_path": "context",
+      "bit_depth": 10,
+      "pixel_format": "yuv422p10le",
+      "codec_name": "topos",
+      "codec_profile": "Topos 422",
+      "diagnostics": {
+        "decode_path": "context",
+        "decode_path_reason": "ok",
+        "native_target_decode": false,
+        "bitstream_major": 1,
+        "stream_compatibility": "legacy_v1_v6",
+        "legacy_reduced_fallback": false,
+        "v7b_base_range_decode": false,
+        "v7b_base_range_samples": 0,
+        "decode_request_mode": null,
+        "decode_request_scale": null,
+        "read_ahead_depth": 0,
+        "read_ahead_stats": {
+          "batch_decodes": 0,
+          "prefetched_frames": 0,
+          "cache_hits": 0,
+          "cache_discarded": 0,
+          "batch_fallbacks": 0
+        },
+        "decode_workers_requested": 0,
+        "decode_workers_assigned": 16,
+        "decode_worker_budget": {
+          "capacity": 16,
+          "active": 1,
+          "assigned_total": 16,
+          "oversubscribed": false,
+          "leases": [
+            {
+              "key": "media:12127538736",
+              "role": "playback",
+              "requested": 0,
+              "assigned": 16
+            }
+          ]
+        },
+        "plane_pool_entries": 5,
+        "frame_bytes_estimate": 8294400
+      }
+    },
+    {
+      "label": "4K",
+      "path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/4K_topos.mov",
+      "width": 3840,
+      "height": 2160,
+      "fps": 25.0,
+      "frames_decoded": 300,
+      "duration_s": 12.0,
+      "file_size_bytes": 958959463,
+      "file_average_mbps": 639.3063086666666,
+      "source_open_seconds": 0.0005752889992436394,
+      "sequential_decode_seconds": 4.01933349400133,
+      "sequential_decode_fps": 74.63924067205078,
+      "decoder_workers_assigned": 16,
+      "decode_path": "context",
+      "bit_depth": 10,
+      "pixel_format": "yuv422p10le",
+      "codec_name": "topos",
+      "codec_profile": "Topos 422",
+      "diagnostics": {
+        "decode_path": "context",
+        "decode_path_reason": "ok",
+        "native_target_decode": false,
+        "bitstream_major": 1,
+        "stream_compatibility": "legacy_v1_v6",
+        "legacy_reduced_fallback": false,
+        "v7b_base_range_decode": false,
+        "v7b_base_range_samples": 0,
+        "decode_request_mode": null,
+        "decode_request_scale": null,
+        "read_ahead_depth": 0,
+        "read_ahead_stats": {
+          "batch_decodes": 0,
+          "prefetched_frames": 0,
+          "cache_hits": 0,
+          "cache_discarded": 0,
+          "batch_fallbacks": 0
+        },
+        "decode_workers_requested": 0,
+        "decode_workers_assigned": 16,
+        "decode_worker_budget": {
+          "capacity": 16,
+          "active": 1,
+          "assigned_total": 16,
+          "oversubscribed": false,
+          "leases": [
+            {
+              "key": "media:12368526752",
+              "role": "playback",
+              "requested": 0,
+              "assigned": 16
+            }
+          ]
+        },
+        "plane_pool_entries": 5,
+        "frame_bytes_estimate": 33177600
+      }
+    }
+  ]
+}

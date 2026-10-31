@@ -1,0 +1,79 @@
+# ProRes/DNxHR 解码基线静机同窗重测（候选①，2026-09-02 晚，i9-9900K 8C16T）
+
+## 任务
+记分牌锚点「2K ProRes 同窗 448.2」（M10-6.4 证据 ~07:00 脏机窗口）与
+「静机 Topos 2K 内核 ~486fps」（t16 复验，重启后 Topos-only 交错）系
+跨窗混比——公平比值未知，假设静机反超。本测试把两侧放进同一窗口
+成对交错重钉。
+
+## 方法（tools/bench_prores_quiet_paired.py，本次入库）
+- 每对按臂序跑独立子进程（各自线程池/缓存态），臂序随对奇偶轮转
+  （序平衡），逐对计算对 prores_slice 锚点的比值，中位数消慢漂移。
+- 子进程 1 遍预热 + 5 遍计时；2K 36 帧/遍 / 4K 24 帧/遍（历史口径）；
+  两侧均 t8（Topos set_slice_threads(8)；PyAV thread_count=8×SLICE/FRAME）。
+- 口径对齐 tools/bench_decode_same_threads.py（448.2 锚点原始口径）；
+  topos_kernel 臂与 tools/bench_t8_t16_paired.py 同源（预取包 +
+  decode_views_batch，bs 2K=8/4K=4，平面保活）。
+- 码率档：ProRes HQ 源 2K 107 Mbps / 4K ~430 Mbps；Topos hq rate
+  193.6/767.4，standard rate 127.6/535.3。
+- 环境注记：非重启后首小时静机——会话 UI（ZCode 渲染 ~60%+1 核）+
+  网盘后台常驻，load 3.5~7（含基准子进程自负载）。成对比值不受
+  慢漂移影响，两侧同窗同待遇。
+
+## 结果（5 次运行，原始 JSON 同目录 *_quiet*）
+
+### 2K（对 prores_slice 锚比值，逐对中位）
+| 运行 | topos_kernel(hq) | topos_kernel_std | topos_product | 锚 fps |
+|---|---|---|---|---|
+| 全 5 臂 12 对 (213622) | 442.6 = 0.935 | — | 366.6 = 0.771 | 470.6 |
+| 紧凑 2 臂 16 对 (215622) | 454.6 = 0.942 | — | — | 482.2 |
+| 紧凑 3 臂 12 对 (215812) | 452.6 = 0.938 | 480.2 = **0.998** | — | 480.3 |
+
+辅助臂（全 5 臂运行）：prores_frame 476.6（1.012）；dnxhr_slice
+565.4（1.217）。
+
+### 4K
+| 运行 | topos_kernel(hq) | topos_kernel_std | topos_product | 锚 fps |
+|---|---|---|---|---|
+| 全 5 臂 12 对 (215538) | 105.0 = **1.130** | — | 90.0 = 0.967 | 93.1 |
+| 紧凑 3 臂 12 对 (215951) | 106.2 = **1.147** | 111.8 = **1.208** | — | 92.3 |
+
+辅助臂（全 5 臂运行）：prores_frame 89.9（0.967）；dnxhr_slice
+149.7（1.619）。
+
+### 锚点静机位移（脏→静）
+- 2K ProRes slice：448.2 → 470.6~482.2（+5~8%）
+- 4K ProRes slice：76.1 → 92.3~93.1（+21~22%）
+- Topos 内核：2K 429.4 → 442.6~454.6（+3~6%）；4K 103.4 → 105.0~106.2（≈不动）
+
+## 判定
+1. **「2K 静机反超」不成立**：hq 档公平比值 **~0.94**（三个独立运行
+   0.935/0.942/0.938 互证）。原记分牌 96% 系「Topos 静机 486 ×
+   ProRes 脏机 448」跨窗混比，微高估 ~2 个百分点。修正入库。
+2. **2K 同码率档精确打平**：Topos standard（127.6 Mbps）480.2 vs
+   ProRes HQ（107 Mbps）480.3，比值 0.998——等比特预算下解码吞吐
+   已与 ProRes 持平（Topos hq 解 1.8 倍比特仍达 0.94）。
+3. **4K 反超稳固但幅度修正**：hq +13~15%（原脏机口径 1.36 系高估，
+   ProRes 4K 对负载远比 Topos 敏感）；std 档 +21%。
+4. **负载敏感性不对称（方法论教训）**：2K Topos 批解偶发深坑
+   （受扰对 0.75~0.83，遍内 424→296 递降），ProRes 2K 几乎不动；
+   4K 反之（ProRes 脏机 −22%）。跨窗绝对 fps 对比不可靠，成对同窗
+   比值是唯一公平口径——本次三运行比值一致而绝对值漂移 ±5% 即证明。
+5. 产品逐帧口径（packet_into + tc_frame_decode）2K 0.771 / 4K 0.967。
+   产品读前批量 + 聚读 arena 更高口径未静机重测（脏机 2K 368.4 /
+   4K 93.5 已有；非本次锚点任务）。
+6. t16 复验记录的「~486」为 Topos-only 交错口径（无 PyAV 臂间插），
+   与 PyAV 交错窗口下 442.6~454.6 的差 (~6%) 属窗口组成效应，
+   不改变比值结论（锚同窗同样受影响）。
+
+## 复现
+    .venv/bin/python tools/bench_prores_quiet_paired.py --res 2k --pairs 12
+    .venv/bin/python tools/bench_prores_quiet_paired.py --res 4k --pairs 12
+    # 紧凑复核 / 同码率档：
+    ... --res 2k --pairs 16 --arms topos_kernel prores_slice
+    ... --res 2k --pairs 12 --arms topos_kernel topos_kernel_std prores_slice
+    ... --res 4k --pairs 12 --arms topos_kernel topos_kernel_std prores_slice
+
+原始数据：bench_out/topos_vs_ref/20260902_{213622,215538,215622,
+215812,215951}_quiet*/result.json（含逐对 fps 运列、逐对比值、
+load 采样）

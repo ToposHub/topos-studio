@@ -1,0 +1,25 @@
+{
+  "format": "topos_project_archive",
+  "schema_version": 3,
+  "created_by": "Topos Color",
+  "project_id": "ee8a85fa-1627-4786-aafa-e43d7acd6fb7",
+  "project_mode": "edit_project",
+  "features": [
+    "media_pool",
+    "edit",
+    "color"
+  ],
+  "primary_asset_id": null,
+  "active_timeline_id": "h264_timeline",
+  "created_at": 1789637892.026298,
+  "modified_at": 1789637892.026311,
+  "last_saved_by": "topos-studio",
+  "required_features": [],
+  "optional_features": [],
+  "present_modules": [
+    "color",
+    "composite",
+    "edit"
+  ],
+  "edit_content_schema_version": 3
+}

@@ -1,0 +1,9 @@
+============================= test session starts ==============================
+collected 33 items
+
+tests/scripting/test_fix_api_engine_aud.py ...2026-10-28 06:27:38.714 Python[41871:3550564] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+..........                 [ 39%]
+tests/scripting/test_script_api_versioning.py ....................       [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/scripting.xml -
+============================== 33 passed in 1.78s ==============================

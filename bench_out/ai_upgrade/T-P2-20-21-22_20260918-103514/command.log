@@ -1,0 +1,1 @@
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/ai_editing/test_taep_contracts.py -q   # 40 passed

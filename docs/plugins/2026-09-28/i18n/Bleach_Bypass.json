@@ -1,0 +1,42 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Bleach_Bypass": {
+        "name": "漂白旁路",
+        "params": {
+          "strength": "强度",
+          "contrast": "对比度",
+          "saturation": "饱和保留"
+        },
+        "desc": {
+          "short": "漂白旁路风格：高对比、低饱和的银盐胶片质感。",
+          "params": {
+            "strength": "整体效果混合量，0 时完全直通。",
+            "contrast": "以 18% 灰为锚点的 S 曲线强度，控制阴影下压与高光扩张。",
+            "saturation": "色彩保留比例，1.0 保留原始色度，0.0 完全银灰。"
+          }
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Bleach_Bypass": {
+        "name": "Bleach Bypass",
+        "params": {
+          "strength": "Strength",
+          "contrast": "Contrast",
+          "saturation": "Saturation Retention"
+        },
+        "desc": {
+          "short": "Bleach bypass look: high-contrast, low-saturation silver film response.",
+          "params": {
+            "strength": "Overall effect mix, 0 is a full bypass.",
+            "contrast": "S-curve strength anchored at 18% grey; crushes shadows, expands highlights.",
+            "saturation": "Chroma retention ratio, 1.0 keeps original chroma, 0.0 is fully silver."
+          }
+        }
+      }
+    }
+  }
+}

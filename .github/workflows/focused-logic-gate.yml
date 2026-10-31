@@ -1,0 +1,58 @@
+name: focused-logic-gate
+
+# M00（docs/upgrade_plan_M_mac_2026-10-24.md §M00）：关键正确性/保存/导出
+# focused suites 的真实阻断门禁。分域子进程运行（scripts/m00_focused_gate.py），
+# 避免全量单进程累积 Qt/C 解码器挂起；任何域非零失败/超时 → 门禁失败，
+# 不允许"与旧基线失败集合相等"放行。历史上这 12 个文件在本机/CI 均应 142 全绿，
+# 因此任何失败都是新回归，必须修复而不是登记跳过。
+
+on:
+  push:
+    branches: [main, develop, dev, fix-ui]
+    paths:
+      - "src/features/edit/core/**"
+      - "src/features/edit/ai_editing/**"
+      - "src/features/deliver/**"
+      - "src/features/color/**"
+      - "src/shared/export/**"
+      - "src/shared/media/ffmpeg_source.py"
+      - "src/app/controllers/edit_controller.py"
+      - "tests/edit/**"
+      - "tests/deliver/**"
+      - "tests/color/**"
+      - "tests/shared/**"
+      - "scripts/m00_focused_gate.py"
+      - ".github/workflows/focused-logic-gate.yml"
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-gate:
+    name: focused logic gate (py3.12)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Run M00 focused gate (per-domain subprocesses)
+        run: python scripts/m00_focused_gate.py --report m00_gate_report.json --timeout 1200
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m00-gate-report-${{ matrix.os }}
+          path: m00_gate_report.json

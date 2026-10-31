@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 1 item
+
+tests/edit/test_new_timeline_dialog_settings.py .                        [100%]
+
+============================== 1 passed in 20.36s ==============================

@@ -1,0 +1,29 @@
+{
+  "recipe_id": "P70",
+  "name": "单色剪影光",
+  "kind": "composite_macro",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "composite"
+  ],
+  "strength_hint": "单色辉光剪影：主体压暗成剪影，等 tint 辉光，叠底",
+  "component": "生产 glow/grade/merge（node_engine 注册表内置节点）",
+  "dependencies": {
+    "node_type": "glow",
+    "aux_node_types": [
+      "grade",
+      "merge"
+    ]
+  },
+  "params": {
+    "threshold": 0.3,
+    "radius": 24.0,
+    "intensity": 1.8,
+    "tint_r": 1.0,
+    "tint_g": 1.0,
+    "tint_b": 1.0
+  },
+  "notes": "生产内置节点宏模板（glow/grade/merge）；暂存级图模板，宿主图导入未接线，未接 L05 白名单。"
+}

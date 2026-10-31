@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 2 items
+
+tests/edit/test_timeline_transport_shortcuts.py ..                       [100%]
+
+============================== 2 passed in 9.48s ===============================

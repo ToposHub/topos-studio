@@ -1,0 +1,93 @@
+{
+  "component": "F06 multiscale_halation",
+  "method": "独立脚本（纯 math 模块、dict 场表示，与 oracle/GLSL 无代码复用）+ 均匀场/远距退化位手算；容差 1e-6（float32 舍入内）。多尺度=E 场先提取（点态 smoothstep 软膝）后双尺度 12-tap 黄金角环采样；降级单尺度=逐 tap 门控。",
+  "params_default": {
+    "strength": 0.5,
+    "radius": 0.5,
+    "red_scatter": 0.5,
+    "threshold": 0.55
+  },
+  "vectors": [
+    {
+      "fixture": "uniform12_8x8",
+      "pos": [0, 0],
+      "params": {},
+      "expected": [21.0, 18.0, 16.5],
+      "note": "均匀 HDR 高光（手算，零采样依赖）：m=1 → E=12 → halo=12 → scatter=(12*1.5, 12, 12*0.75)=(18,12,9)；out=12+0.5*scatter"
+    },
+    {
+      "fixture": "uniform03_8x8",
+      "pos": [3, 3],
+      "params": {},
+      "expected": [0.3, 0.3, 0.3],
+      "note": "阈下均匀场（手算）：luma 0.3 < threshold 0.55 → m=0 → halo=0 → 精确恒等（strength=1 语义同）"
+    },
+    {
+      "fixture": "uniform20_8x8",
+      "pos": [3, 3],
+      "params": {},
+      "expected": [3.5, 3.0, 2.75],
+      "note": "均匀 2.0（手算）：halo=2 → out=2+(3,2,1.5)*0.5"
+    },
+    {
+      "fixture": "uniform0725_8x8",
+      "pos": [3, 3],
+      "params": {},
+      "expected": [0.996875, 0.90625, 0.8609375],
+      "note": "软膝中点（手算）：luma 0.725 → t=(0.725-0.55)/0.35=0.5 → m=0.5 → E=0.3625 → out=0.725+(0.3625*1.5,0.3625,0.3625*0.75)*0.5"
+    },
+    {
+      "fixture": "point33",
+      "pos": [16, 19],
+      "params": {},
+      "expected": [0.03771826, 0.03181217, 0.02885913],
+      "note": "点光源（33x33 底 0.02、(16,16)=2.0）距源 3px：小尺度最大 tap 距 1.958px 不可达，仅大尺度（2R=4px）tap 部分命中——多尺度差量证据；delta 比 R:G:B=1.5:1:0.75"
+    },
+    {
+      "fixture": "point33",
+      "pos": [16, 16],
+      "params": {},
+      "expected": [2.06246785, 2.04164524, 2.03123393],
+      "note": "点源自身：24 tap（双尺度）部分落在源像素双线性足迹内"
+    },
+    {
+      "fixture": "cornerblock16",
+      "pos": [12, 12],
+      "params": {},
+      "expected": [0.02, 0.02, 0.02],
+      "note": "角块（(0..3,0..3)=2.0 其余 0.02）远角：距块 >8px 超出大尺度可达（3.91px+1px 足迹）→ 精确基色（clamp-edge 无环绕钉住）"
+    },
+    {
+      "fixture": "cornerblock16",
+      "pos": [5, 5],
+      "params": {},
+      "expected": [0.0543137, 0.0428758, 0.03715685],
+      "note": "角块近旁：双尺度部分能量（脚本枚举 24 tap）"
+    }
+  ],
+  "variant_vectors": [
+    {
+      "desc": "red_scatter=0 无重着色（能量对称）",
+      "fixture": "uniform20_8x8",
+      "pos": [3, 3],
+      "params": {"red_scatter": 0.0},
+      "expected": [3.0, 3.0, 3.0],
+      "note": "手算：w=0 → scatter=halo=2 → out=3 三通道相等"
+    },
+    {
+      "desc": "单尺度降级模式在仅大尺度可达位无扩散",
+      "fixture": "point33",
+      "pos": [16, 19],
+      "params": {},
+      "entry": "degraded_single_scale",
+      "expected": [0.02, 0.02, 0.02],
+      "note": "降级 .tglsl（小尺度 R 逐 tap 门控）在距源 3px 处 tap 全落暗区 → 精确基色；同位置多尺度 oracle=0.03771826（见主向量 5）——单 pass 降级限制钉住"
+    },
+    {
+      "desc": "strength=0 恒等",
+      "params": {"strength": 0.0},
+      "expected": null,
+      "note": "任意输入（含 HDR/负值）精确恒等"
+    }
+  ]
+}

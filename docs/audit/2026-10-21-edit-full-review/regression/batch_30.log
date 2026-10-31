@@ -1,0 +1,31 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+PyQt6 6.10.2 -- Qt runtime 6.10.2 -- Qt compiled 6.10.0
+rootdir: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.14.2, typeguard-4.6.0, qt-4.5.0, hydra-core-1.3.2
+collected 252 items
+
+tests/edit/test_timeline_tool_acceptance.py ..................           [  7%]
+tests/edit/test_timeline_track_management.py ................            [ 13%]
+tests/edit/test_timeline_transport_shortcuts.py ..                       [ 14%]
+tests/edit/test_timeline_ux_stopgaps.py ..s....                          [ 17%]
+tests/edit/test_timeline_view_layout.py ................................ [ 29%]
+......................................                                   [ 44%]
+tests/edit/test_timeline_visibility_render.py ...........                [ 49%]
+tests/edit/test_title_templates.py .............                         [ 54%]
+tests/edit/test_topos_package_log_roundtrip.py ....                      [ 55%]
+tests/edit/test_track_header_controls.py ...                             [ 57%]
+tests/edit/test_track_lock_guard_and_source_range.py ........            [ 60%]
+tests/edit/test_track_sync_lock.py ...........                           [ 64%]
+tests/edit/test_transition_and_slide_transactions.py .........           [ 68%]
+tests/edit/test_transition_context_menu.py .....                         [ 70%]
+tests/edit/test_transition_double_click.py .................             [ 76%]
+tests/edit/test_transition_effects.py .....                              [ 78%]
+tests/edit/test_transition_mask_gpu.py ......                            [ 81%]
+tests/edit/test_transition_preview_mode.py ....                          [ 82%]
+tests/edit/test_trim_professional.py ..............................      [ 94%]
+tests/edit/test_workspace_presets.py .............                       [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-21-edit-full-review/regression/batch_30.xml -
+======================== 251 passed, 1 skipped in 9.85s ========================

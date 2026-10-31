@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 5 items
+
+tests/edit/test_timeline_single_layer_fast_path.py .....                 [100%]
+
+============================== 5 passed in 6.15s ===============================

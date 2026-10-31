@@ -1,0 +1,110 @@
+{
+  "fixtures": [
+    {
+      "name": "gray_ramp_linear",
+      "shape": [
+        32,
+        64,
+        3
+      ],
+      "dtype": "float32",
+      "sha256": "c29dfabaeae2cd3ac39290341e96be6bde955207bf7caa4db0d596c8bf867798",
+      "purpose": "亮度映射类（F16/F17/F04…）",
+      "license": "CC0（程序生成，无第三方素材）"
+    },
+    {
+      "name": "hdr_probes",
+      "shape": [
+        9,
+        3
+      ],
+      "dtype": "float32",
+      "sha256": "1f67237381b408feee63ddc650c4c5f3277a1b85666a2bb7cb26e36568260c0e",
+      "purpose": "HDR 数值覆盖（§9.1 共同验收门）",
+      "license": "CC0（程序生成，无第三方素材）"
+    },
+    {
+      "name": "color_patches",
+      "shape": [
+        64,
+        64,
+        3
+      ],
+      "dtype": "float32",
+      "sha256": "f85491028836bd8283e49edf72669dc36345414a19ec123e42289b657f3692d0",
+      "purpose": "肤色保护/分区/饱和类（F03/F04…）",
+      "license": "CC0（程序生成，无第三方素材）"
+    },
+    {
+      "name": "hdr_point_light",
+      "shape": [
+        48,
+        96,
+        3
+      ],
+      "dtype": "float32",
+      "sha256": "ab77bc8dd3d35f1adfba5711255ff748cfbac4bc5ddb95498d77f02c73465716",
+      "purpose": "halation/starburst/glow 类（F06/F10/C20）",
+      "license": "CC0（程序生成，无第三方素材）"
+    },
+    {
+      "name": "alpha_fringe_hair",
+      "shape": [
+        64,
+        64,
+        4
+      ],
+      "dtype": "float32",
+      "sha256": "493cf05d3d560d4447fb7dd2181d3db00ee19fe8e9b6cb95f2aac26142055c09",
+      "purpose": "alpha/边缘类（C17/C03、straight/premult 验收）",
+      "license": "CC0（程序生成，无第三方素材）"
+    },
+    {
+      "name": "uv_grid",
+      "shape": [
+        64,
+        64,
+        3
+      ],
+      "dtype": "float32",
+      "sha256": "cc19c20560e31b41624a0c56f84d47bf41dc9fa68acb372be65485e6acd52b45",
+      "purpose": "UV 重采样类（X09/X12–X17、C12/C13）",
+      "license": "CC0（程序生成，无第三方素材）"
+    },
+    {
+      "name": "short_seq_8",
+      "shape": [
+        8,
+        32,
+        16,
+        3
+      ],
+      "dtype": "float32",
+      "sha256": "83032c72c294064949d72c8c9f29f7ac053be9fde89d609c11fd563a19c405bc",
+      "purpose": "确定性短序列（转场 A/B 双源对）",
+      "license": "CC0（程序生成，无第三方素材）"
+    },
+    {
+      "name": "paper_tex_64",
+      "shape": [
+        64,
+        64
+      ],
+      "dtype": "float32",
+      "sha256": "059831f6a009c522601b570391e0ca22a192392b79037bc6927451d1044403d4",
+      "purpose": "纸纹/排线底纹（F14/F15，程序生成 CC0）",
+      "license": "CC0（程序生成，无第三方素材）"
+    },
+    {
+      "name": "rank_field_64",
+      "shape": [
+        64,
+        64
+      ],
+      "dtype": "float32",
+      "sha256": "f119f4d1a535c8fb443fca9c75e9f88fc1596eb7b5c4dd4ad8610c9716c9ff06",
+      "purpose": "rank-field 揭示顺序（X06/X18）",
+      "license": "CC0（程序生成，无第三方素材）"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 10 items
+
+tests/test_topos_benchmark_protocol.py ..........                        [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/topos_benchmark_protocol.xml -
+============================== 10 passed in 0.81s ==============================

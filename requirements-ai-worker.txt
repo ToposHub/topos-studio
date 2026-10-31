@@ -1,0 +1,49 @@
+# ==============================================================================
+# Topos Color - 可选 AI Worker 依赖 · 组合A「ASR 主链」（M01）
+# 计划：docs/upgrade_plan_M_mac_2026-10-24.md §M01
+# ==============================================================================
+# 覆盖：ASR（Qwen3-ASR）/词级对齐（Qwen3-ForcedAligner）/Vault real embed
+# （sentence-transformers）。
+# 该栈与核心 UI/视频栈分环境安装（scripts/m01_build_envs.sh ai），不进
+# requirements.txt——核心环境缺本栈时 AI 能力走准确诊断降级。
+#
+# 版本解（2026-10-24，Darwin x86_64 / Python 3.12.13，pip check 冲突逐项关闭）：
+#   1. pyannote-core 6.0.1 需 numpy>=2.0：pyannote 已被 R4-c 方案彻底替换
+#      （model_pack_manager.py:223），src 零直接导入 → 从支持组合移除；
+#      且本机 torch 上限 2.2.2（x86_64 macOS 无更新轮子）与 numpy>=2 运行
+#      时不兼容，pyannote 6.x 在本宿主不可支持，不装而非强装。
+#   2. lightning 2.4.0 需 packaging<25：本组合不装 lightning（见下条），
+#      packaging<25 仍统一钉住以防传递引入。
+#   3. transformers 钉版冲突（上游生态互斥，登记在案）：qwen-tts 全系
+#      （0.0.2–0.1.1）钉 transformers==4.57.3，qwen-asr 全系（0.0.1–0.0.6）
+#      钉 transformers==4.57.6——任何版本组合都无法共存。本组合A按 ASR
+#      主链钉 4.57.6，不含 qwen-tts；TTS 走组合B
+#      （requirements-ai-worker-tts.txt，transformers==4.57.3）。
+#   4. nemo-toolkit（Sortformer 分离）本宿主不可用：nemo 2.6.1 的
+#      SortformerEncLabelModel 导入链需要 torch>=2.4 的
+#      torch.distributed.tensor.parallel.SequenceParallel，而 x86_64 macOS
+#      torch 轮子止于 2.2.2（主 venv 同组合同样失败——该链在此宿主从未
+#      可导入）；旧 nemo 版本又钉旧 transformers 与 qwen-asr 冲突。
+#      → 不纳入支持组合；缺失时 transcript_provider 依
+#      find_spec(nemo)==None 走"diarization disabled"准确诊断
+#      （transcript_provider.py:713-714）。
+#
+# torch 上限说明：Darwin x86_64 的 PyTorch 轮子止于 2.2.2（2.3+ 仅 arm64）；
+# numpy 必须保持 1.26.x（torch 2.2.2 按 numpy 1.x ABI 编译）。
+# numba/llvmlite：resolver 默认选最新（0.68/0.51+），后者无 x86_64 macOS
+# 轮子且源码构建失败——钉主 venv 已验证的轮子版本。
+# ==============================================================================
+
+torch==2.2.2
+torchvision==0.17.2
+torchaudio==2.2.2
+numpy==1.26.4
+packaging<25
+transformers==4.57.6
+qwen-asr==0.0.6
+qwen-omni-utils==0.0.9
+numba==0.60.0
+llvmlite==0.43.0
+# Vault real embed provider（apps/topos_vault/providers/real_*_embed.py，
+# 缺失时 provider 走准确诊断降级，不影响核心应用）
+sentence-transformers>=5.0

@@ -1,0 +1,25 @@
+{
+  "recipe_id": "P21",
+  "name": "细颗粒纪实",
+  "kind": "filter_look",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit",
+    "color"
+  ],
+  "strength_hint": "适合纪实/手持素材；grain_size 1.0–1.5 细颗粒，强度压在 0.3 以下",
+  "component": "Film_Grain（生产插件 plugins/Film_Grain.tglsl）",
+  "dependencies": {
+    "plugin_id": "Film_Grain",
+    "min_plugin_version": "1.0"
+  },
+  "params": {
+    "strength": 0.25,
+    "grain_size": 1.2,
+    "shadow_bias": 0.2,
+    "highlight_bias": 0.15
+  },
+  "notes": "生产 Film_Grain 细颗粒档；可复现 seed 版本见 F07 seeded_grain（暂存，L12 接缝）。"
+}

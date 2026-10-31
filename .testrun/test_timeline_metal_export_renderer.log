@@ -1,0 +1,16 @@
+============================= test session starts ==============================
+collected 108 items
+
+tests/edit/test_timeline_metal_export_renderer.py ..............F....... [ 20%]
+........................................................................ [ 87%]
+..............                                                           [100%]
+
+=================================== FAILURES ===================================
+_____ test_real_metal_stack_reuses_scratch_between_separable_effect_layers _____
+tests/edit/test_timeline_metal_export_renderer.py:649: in test_real_metal_stack_reuses_scratch_between_separable_effect_layers
+    assert "stack_effect_horizontal" in renderer._buffers
+E   AssertionError: assert 'stack_effect_horizontal' in {'stack_accumulator_0': <GFXAAMD_MtlBuffer: 0x7fc926fb19e0>\n    label = <none> \n    length = 49152 \n    cpuCacheMode =...sourceStorageModePrivate MTLResourceHazardTrackingModeTracked  \n    purgeableState = MTLPurgeableStateNonVolatile, ...}
+E    +  where {'stack_accumulator_0': <GFXAAMD_MtlBuffer: 0x7fc926fb19e0>\n    label = <none> \n    length = 49152 \n    cpuCacheMode =...sourceStorageModePrivate MTLResourceHazardTrackingModeTracked  \n    purgeableState = MTLPurgeableStateNonVolatile, ...} = <src.features.edit.core.timeline_metal_export_renderer.TimelineMetalExportRenderer object at 0x309c1f320>._buffers
+=========================== short test summary info ============================
+FAILED tests/edit/test_timeline_metal_export_renderer.py::test_real_metal_stack_reuses_scratch_between_separable_effect_layers
+======================== 1 failed, 107 passed in 42.63s ========================

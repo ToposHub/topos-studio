@@ -1,0 +1,128 @@
+{
+  "manifest": {
+    "schema": "bench_manifest.v1",
+    "topos_version": "0.1.0",
+    "dylib_commit_embedded": "b0907366",
+    "git_head": "b0907366",
+    "git_dirty": true,
+    "dylib_path": "/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/native/topos_codec/build/intra-release/topos_codec.0.1.0.dylib",
+    "dylib_sha256": "63f18e179ee83142bbe8a769c63097be5599339e403b9ee26550ea486d895ea5",
+    "abi_version": 2,
+    "slice_threads": 16,
+    "simd_avx2": true,
+    "simd_neon": false,
+    "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "os": "darwin",
+    "python": "3.12.13",
+    "threads_effective": 4
+  },
+  "cases": [
+    {
+      "res": "4k",
+      "w": 3840,
+      "h": 2160,
+      "frames": 4,
+      "tier": "hq",
+      "encode": [
+        {
+          "scope": "core",
+          "ref": "prores_hq",
+          "topos_s_median": 0.3684527599980356,
+          "topos_ci95": null,
+          "ref_s_median": 0.9697772150029778,
+          "ref_ci95": null,
+          "ratio_median": 0.3799354679589005,
+          "ratio_ci95": null,
+          "interpretation": "indistinguishable"
+        },
+        {
+          "scope": "core",
+          "ref": "dnxhr_hqx",
+          "topos_s_median": 0.3684527599980356,
+          "topos_ci95": null,
+          "ref_s_median": 2.584880278001947,
+          "ref_ci95": null,
+          "ratio_median": 0.14254151851196806,
+          "ratio_ci95": null,
+          "interpretation": "indistinguishable"
+        },
+        {
+          "scope": "e2e",
+          "ref": "prores_hq",
+          "topos_s_median": 0.19061283200062462,
+          "topos_ci95": null,
+          "ref_s_median": 0.967185393001273,
+          "ref_ci95": null,
+          "ratio_median": 0.1970799325340656,
+          "ratio_ci95": null,
+          "topos_file_bytes": 10858804,
+          "ref_file_bytes": 13339716,
+          "topos_probe": {
+            "width": 3840,
+            "height": 2160,
+            "nb_frames": "4",
+            "side_data_list": [
+              {}
+            ]
+          },
+          "ref_probe": {
+            "codec_name": "prores",
+            "profile": "HQ",
+            "width": 3840,
+            "height": 2160,
+            "pix_fmt": "yuv422p10le",
+            "nb_frames": "4"
+          },
+          "interpretation": "indistinguishable"
+        },
+        {
+          "scope": "e2e",
+          "ref": "dnxhr_hqx",
+          "topos_s_median": 0.19061283200062462,
+          "topos_ci95": null,
+          "ref_s_median": 2.6480792869988363,
+          "ref_ci95": null,
+          "ratio_median": 0.07198154259824033,
+          "ratio_ci95": null,
+          "topos_file_bytes": 10858804,
+          "ref_file_bytes": 14566164,
+          "topos_probe": {
+            "width": 3840,
+            "height": 2160,
+            "nb_frames": "4",
+            "side_data_list": [
+              {}
+            ]
+          },
+          "ref_probe": {
+            "codec_name": "dnxhd",
+            "profile": "DNXHR HQX",
+            "width": 3840,
+            "height": 2160,
+            "pix_fmt": "yuv422p10le",
+            "nb_frames": "4"
+          },
+          "interpretation": "indistinguishable"
+        }
+      ],
+      "decode": [
+        {
+          "ref": "prores_hq",
+          "topos_s_median": 0.09779129200251191,
+          "ref_s_median": 0.2735245540025062,
+          "ratio_median": 0.3575229008567029,
+          "ratio_ci95": null,
+          "interpretation": "indistinguishable"
+        },
+        {
+          "ref": "dnxhr_hqx",
+          "topos_s_median": 0.09779129200251191,
+          "ref_s_median": 0.29238176599756116,
+          "ratio_median": 0.334464400229827,
+          "ratio_ci95": null,
+          "interpretation": "indistinguishable"
+        }
+      ]
+    }
+  ]
+}

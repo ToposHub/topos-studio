@@ -1,0 +1,34 @@
+{
+ "old": {
+  "lib": "/tmp/topos_prefix_lib/topos_codec.dylib",
+  "dec_fps_median": 224.3,
+  "dec_fps_all": [
+   224.3,
+   220.3,
+   232.9
+  ],
+  "block_h": 1.5528,
+  "block_v": 1.8606,
+  "y_psnr": 45.1775,
+  "y_psnr_edge": 40.3828,
+  "sharp": 1.5627,
+  "grid": 1.1952,
+  "stair": 0.3112
+ },
+ "new": {
+  "lib": "native/topos_codec/build/release/topos_codec.dylib",
+  "dec_fps_median": 218.6,
+  "dec_fps_all": [
+   218.6,
+   218.7,
+   212.9
+  ],
+  "block_h": 0.5354,
+  "block_v": 0.7346,
+  "y_psnr": 45.1819,
+  "y_psnr_edge": 40.3832,
+  "sharp": 1.5626,
+  "grid": 1.1948,
+  "stair": 0.311
+ }
+}

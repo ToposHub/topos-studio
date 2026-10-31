@@ -1,0 +1,26 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Skin_Even_Matte": {
+        "name": "哑光肤色平滑",
+        "params": {
+          "radius": "半径",
+          "skin_threshold": "肤色检测阈值",
+          "texture_keep": "纹理保留"
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Skin_Even_Matte": {
+        "name": "Skin Even Matte",
+        "params": {
+          "radius": "Radius",
+          "skin_threshold": "Skin Threshold",
+          "texture_keep": "Texture Keep"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "zh_CN": {
+    "plugins": {
+      "Soft_Glow_Bloom": {
+        "name": "柔光泛光",
+        "params": {
+          "threshold": "阈值",
+          "radius": "泛光半径",
+          "intensity": "混合强度"
+        }
+      }
+    }
+  },
+  "en_US": {
+    "plugins": {
+      "Soft_Glow_Bloom": {
+        "name": "Soft Glow Bloom",
+        "params": {
+          "threshold": "Threshold",
+          "radius": "Glow Radius",
+          "intensity": "Blend Intensity"
+        }
+      }
+    }
+  }
+}

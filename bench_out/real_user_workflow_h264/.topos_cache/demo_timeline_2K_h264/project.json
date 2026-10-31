@@ -1,0 +1,66 @@
+{
+  "project_id": "6c3d7c85-fc87-444e-9147-cc1e7e490c9b",
+  "name": "real-export-demo",
+  "project_mode": "edit_project",
+  "assets": {
+    "demo_asset": {
+      "asset_id": "demo_asset",
+      "path": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_h264.mp4",
+      "media_type": "video",
+      "display_name": "2K_h264",
+      "is_offline": false,
+      "path_relative": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_h264.mp4",
+      "path_original": "/Users/testuser/Documents/vscode/topos_1/tests/test_videos/2K_h264.mp4"
+    }
+  },
+  "bins": {
+    "b6f33bff-0e2a-4dcd-b2b2-1ef51f81f081": {
+      "bin_id": "b6f33bff-0e2a-4dcd-b2b2-1ef51f81f081",
+      "name": "Root",
+      "parent_id": null,
+      "asset_count": 0
+    }
+  },
+  "timelines": {
+    "demo": {
+      "timeline_id": "demo",
+      "name": "Demo Timeline",
+      "fps": 25.0,
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "color_stacks": {},
+  "compositions": {},
+  "deliver_presets": {},
+  "ui_state": {},
+  "settings": {
+    "root_bin_id": "b6f33bff-0e2a-4dcd-b2b2-1ef51f81f081",
+    "active_comp_clip_id": null,
+    "color_management": {
+      "color.preview.timeline_primaries": "bt709",
+      "color.preview.timeline_transfer": "bt709",
+      "color.preview.image_primaries": "bt709",
+      "color.preview.image_transfer": "iec61966_2_1",
+      "color.output.timeline_primaries": "bt709",
+      "color.output.timeline_transfer": "bt709",
+      "color.output.timeline_range": "limited",
+      "color.output.image_primaries": "bt709",
+      "color.output.image_transfer": "iec61966_2_1",
+      "color.preview.hdr_tonemap": 1,
+      "color.preview.hdr_target_peak": 100,
+      "color.output.hdr_metadata": true,
+      "color.smart_default": true
+    },
+    "render_cache_settings": null,
+    "proxy_policy": null,
+    "render_cache_manifests": {}
+  },
+  "primary_asset_id": null,
+  "primary_color_stack_id": null,
+  "active_timeline_id": "demo",
+  "active_composition_id": null,
+  "created_at": 1789637642.3984761,
+  "modified_at": 1789637642.450155,
+  "revision": 0
+}

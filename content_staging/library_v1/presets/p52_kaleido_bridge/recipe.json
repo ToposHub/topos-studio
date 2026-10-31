@@ -1,0 +1,28 @@
+{
+  "recipe_id": "P52",
+  "name": "万花筒桥接",
+  "kind": "transition",
+  "status": "component_ready",
+  "version": "1.0.0",
+  "working_space": "scene-linear",
+  "applies_pages": [
+    "edit"
+  ],
+  "strength_hint": "扇区镜像桥接；sectors 6–10，strength 0.7–1.0",
+  "component": "X17 kaleido_bridge（生产 lib1_kaleido_bridge，transition_catalog 已注册；暂存组件 content_staging/library_v1/transitions/kaleido_bridge）",
+  "dependencies": {
+    "component_id": "X17",
+    "component_slug": "kaleido_bridge",
+    "component_kind": "transition",
+    "transition_type": "lib1_kaleido_bridge",
+    "user_json_base": false
+  },
+  "params": {
+    "sectors": 8,
+    "rotation": 15.0,
+    "center_x": 0.5,
+    "center_y": 0.5,
+    "strength": 0.8
+  },
+  "notes": "X17 生产 base lib1_kaleido_bridge（transition_catalog 已注册，resample_cores 复合核）；base 不在 custom_transitions._BASE_TYPES 白名单（未接入），不产出用户转场 JSON。"
+}

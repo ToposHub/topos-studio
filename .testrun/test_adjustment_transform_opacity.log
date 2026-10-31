@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 2 items
+
+tests/edit/test_adjustment_transform_opacity.py ..                       [100%]
+
+============================== 2 passed in 5.13s ===============================

@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+collected 18 items
+
+tests/file_explorer/test_decode_benchmark.py ....                        [ 22%]
+tests/file_explorer/test_meta_consistency.py ......                      [ 55%]
+tests/file_explorer/test_thumb_enqueue.py ..                             [ 66%]
+tests/file_explorer/test_topos_image_preview.py ....ss                   [100%]
+
+- generated xml file: /Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/.testrun/p4/file_explorer.xml -
+======================== 16 passed, 2 skipped in 0.56s =========================

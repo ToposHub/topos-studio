@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+collected 27 items
+
+tests/edit/test_program_viewer_transform_contract.py ................... [ 70%]
+........                                                                 [100%]
+
+============================== 27 passed in 7.44s ==============================

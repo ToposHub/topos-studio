@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 5 items
+
+tests/edit/test_effect_keyframe_coordinate_contract.py .....             [100%]
+
+============================== 5 passed in 7.79s ===============================

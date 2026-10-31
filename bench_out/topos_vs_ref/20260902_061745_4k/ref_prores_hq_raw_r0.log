@@ -1,0 +1,21 @@
+[in#0/rawvideo @ 0x7fab1fc04c00] Estimating duration from bitrate, this may be inaccurate
+Input #0, rawvideo, from '/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_vs_ref/20260902_061745_4k/source_yuv422p10le.raw':
+  Duration: 00:00:01.44, start: 0.000000, bitrate: 6635520 kb/s
+  Stream #0:0: Video: rawvideo (Y3[10][10] / 0xA0A3359), yuv422p10le, 3840x2160, 6635520 kb/s, 25 tbr, 25 tbn
+Stream mapping:
+  Stream #0:0 -> #0:0 (rawvideo (native) -> prores (prores_ks))
+Press [q] to stop, [?] for help
+Output #0, mov, to '/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/bench_out/topos_vs_ref/20260902_061745_4k/ref_prores_hq_raw_r0.mov':
+  Metadata:
+    encoder         : Lavf62.12.100
+  Stream #0:0: Video: prores (HQ) (apch / 0x68637061), yuv422p10le(tv, progressive), 3840x2160, q=2-31, 200 kb/s, 25 fps, 12800 tbn
+    Metadata:
+      encoder         : Lavc62.28.100 prores_ks
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.50    
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:01.00    
+frame=    8 fps=5.3 q=-0.0 size=   22528KiB time=00:00:00.32 bitrate=576717.7kbits/s speed=0.212x elapsed=0:00:01.51    
+frame=   16 fps=7.9 q=-0.0 size=   47104KiB time=00:00:00.64 bitrate=602931.7kbits/s speed=0.317x elapsed=0:00:02.01    
+frame=   16 fps=6.3 q=-0.0 size=   47104KiB time=00:00:00.64 bitrate=602931.7kbits/s speed=0.254x elapsed=0:00:02.52    
+frame=   32 fps= 11 q=-0.0 size=   99328KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:03.02    
+[out#0/mov @ 0x7fab1fa13140] video:115282KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.000856%
+frame=   36 fps= 11 q=-0.0 Lsize=  115283KiB time=00:00:01.44 bitrate=655833.6kbits/s speed=0.423x elapsed=0:00:03.40    

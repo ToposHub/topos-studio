@@ -1,0 +1,199 @@
+{
+  "directory": "/var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/topos-round7-delivery-data-iif_bpgi",
+  "config_fields": {
+    "bit_depth": false,
+    "naming_config": false
+  },
+  "production_config": {
+    "pix_fmt": "rgb24",
+    "has_alpha": true,
+    "start_index": 0,
+    "digits": 6,
+    "supports_audio": "ABSENT"
+  },
+  "png_sequence-uint8": {
+    "format": "rgba",
+    "roundtrip_equal": true,
+    "sample": [
+      30,
+      250,
+      100,
+      200
+    ]
+  },
+  "png_sequence-uint16": {
+    "format": "rgba64be",
+    "roundtrip_equal": false,
+    "sample": [
+      7680,
+      64000,
+      25600,
+      51200
+    ]
+  },
+  "tiff_sequence-uint8": {
+    "format": "rgba",
+    "roundtrip_equal": true,
+    "sample": [
+      30,
+      250,
+      100,
+      200
+    ]
+  },
+  "tiff_sequence-uint16": {
+    "format": "rgba64le",
+    "roundtrip_equal": true,
+    "sample": [
+      30,
+      250,
+      100,
+      200
+    ]
+  },
+  "collision": {
+    "existing_frame_overwritten": true,
+    "existing_frame_deleted_on_abort": true
+  },
+  "capability-gif": {
+    "codec": "gif",
+    "pixel_format": "",
+    "container": "mov",
+    "alpha_capable": false,
+    "audio_capable": false,
+    "subtitle_burn_capable": true,
+    "hdr": false,
+    "audio_limit": "\u9010\u5e27\u4ea7\u7269\u65e0\u97f3\u9891\u8f68\uff08\u56fe\u7247\u5e8f\u5217/GIF \u4e0d\u542b\u97f3\u9891\uff09",
+    "effects": {
+      "blur": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "defocus": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "denoise": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "edge_detect": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "erode_dilate": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "glow": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "sharpen": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      }
+    }
+  },
+  "capability-png_sequence": {
+    "codec": "png_sequence",
+    "pixel_format": "",
+    "container": "mov",
+    "alpha_capable": false,
+    "audio_capable": false,
+    "subtitle_burn_capable": true,
+    "hdr": false,
+    "audio_limit": "\u9010\u5e27\u4ea7\u7269\u65e0\u97f3\u9891\u8f68\uff08\u56fe\u7247\u5e8f\u5217/GIF \u4e0d\u542b\u97f3\u9891\uff09",
+    "effects": {
+      "blur": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "defocus": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "denoise": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "edge_detect": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "erode_dilate": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "glow": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "sharpen": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      }
+    }
+  },
+  "capability-tiff_sequence": {
+    "codec": "tiff_sequence",
+    "pixel_format": "",
+    "container": "mov",
+    "alpha_capable": false,
+    "audio_capable": false,
+    "subtitle_burn_capable": true,
+    "hdr": false,
+    "audio_limit": "\u9010\u5e27\u4ea7\u7269\u65e0\u97f3\u9891\u8f68\uff08\u56fe\u7247\u5e8f\u5217/GIF \u4e0d\u542b\u97f3\u9891\uff09",
+    "effects": {
+      "blur": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "defocus": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "denoise": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "edge_detect": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "erode_dilate": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "glow": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      },
+      "sharpen": {
+        "exportable": true,
+        "preview_only": false,
+        "restriction": null
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 417 ms. Replace uses of missing font family "SF Mono" with one that exists to avoid this cost. 
+{
+  "shift_box_selection": {
+    "selected_ids": [
+      "c"
+    ],
+    "is_multi": false
+  },
+  "subtitle_fit_selection": {
+    "before": 3,
+    "after": 8.15
+  },
+  "subtitle_next_boundary": {
+    "from": 50,
+    "to": 100,
+    "subtitle_start": 100
+  },
+  "subtitle_delete_track": {
+    "confirmation_calls": [
+      "Track 'S1' contains 1 subtitle cues.\nAre you sure you want to delete this track?"
+    ],
+    "remaining_tracks": 1,
+    "undo": false
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "date": "2026-09-15T14:57:11",
+  "plan_item": "W1-03 multi-GPU decode/render 适配器匹配实测",
+  "machine": {
+    "os": "win32",
+    "primary_vendor": "amd",
+    "adapters": [
+      {
+        "description": "AMD Radeon RX 6800",
+        "vendor_id": "0x1002",
+        "device_id": "0x73BF",
+        "dedicated_video_memory_mb": 16338,
+        "vendor_name": "amd",
+        "adapter_luid": "000111A0-00000000"
+      },
+      {
+        "description": "AMD Radeon RX 6800",
+        "vendor_id": "0x1002",
+        "device_id": "0x73BF",
+        "dedicated_video_memory_mb": 16338,
+        "vendor_name": "amd",
+        "adapter_luid": "023C407C-00000000"
+      },
+      {
+        "description": "Microsoft Basic Render Driver",
+        "vendor_id": "0x1414",
+        "device_id": "0x008C",
+        "dedicated_video_memory_mb": 0,
+        "vendor_name": "unknown",
+        "adapter_luid": "00013C96-00000000"
+      }
+    ],
+    "duplicate_description_entries": [
+      {
+        "description": "AMD Radeon RX 6800",
+        "luid_a": "000111A0-00000000",
+        "luid_b": "023C407C-00000000"
+      }
+    ]
+  },
+  "decode_side": {
+    "description": "AMD Radeon RX 6800",
+    "adapter_luid": "000111A0-00000000"
+  },
+  "rule_verification": {
+    "same_luid": {
+      "match": true,
+      "reason": ""
+    },
+    "diff_luid": {
+      "match": false,
+      "reason": "adapter_mismatch:00010000-00000000|000111A0-00000000"
+    }
+  },
+  "render_side": {
+    "probe_ok": true,
+    "decode_adapter": {
+      "description": "AMD Radeon RX 6800",
+      "vendor_id": "0x1002",
+      "device_id": "0x73BF",
+      "dedicated_video_memory_mb": 16338,
+      "vendor_name": "amd",
+      "adapter_luid": "000111A0-00000000"
+    },
+    "decode_adapter_luid": "000111A0-00000000",
+    "render_adapter_luid": "",
+    "match": false,
+    "reason": "render_adapter_unprobed"
+  },
+  "all_ok": true
+}

@@ -1,0 +1,6 @@
+============================= test session starts ==============================
+collected 6 items
+
+tests/edit/test_source_viewer_gl_contract.py ......                      [100%]
+
+============================== 6 passed in 15.44s ==============================

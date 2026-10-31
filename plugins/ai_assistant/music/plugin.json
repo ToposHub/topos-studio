@@ -1,0 +1,15 @@
+{
+  "api_version": "1",
+  "kind": "assistant_mode",
+  "id": "music",
+  "version": "1.0.0",
+  "label": "音乐生成",
+  "description": "调用已配置的音乐生成模型，结果先进入生成素材箱。",
+  "handler": "builtin:media_generation",
+  "media_modality": "music",
+  "capabilities": ["music_generation"],
+  "ui": {
+    "order": 40,
+    "label": "音乐生成"
+  }
+}
