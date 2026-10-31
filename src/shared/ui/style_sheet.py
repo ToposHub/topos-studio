@@ -141,6 +141,17 @@ DRAG_VALUE_ACTIVE_STYLE = f"""
     }}
 """
 
+# --- 参数标签 / 数值格（禁用态，达芬奇式整列变灰） ---
+PARAM_LABEL_DISABLED_STYLE = "color: #555555; font-size: 11px;"
+
+DRAG_VALUE_DISABLED_STYLE = f"""
+    QLabel {{
+        color: {C.TEXT_DIM}; font-size: 11px; font-weight: bold;
+        background: #1c1c1e; border: 1px solid #1a1a1c;
+        border-radius: 3px; padding: 0px 3px;
+    }}
+"""
+
 # --- 曲线工具栏按钮容器 ---
 CURVE_BTN_CONTAINER_STYLE = f"""
     QWidget {{
@@ -1253,6 +1264,25 @@ QSlider::handle:horizontal:hover {
 
 QSlider::handle:horizontal:pressed {
     background: #cc6600;         /* 按下时更深的橙色 */
+}
+
+/* 滑杆禁用态：DenoisePanel 达芬奇式"整列变灰"联动专用（限定作用域，
+   不影响其他面板既有观感；几何与常规态一致，仅颜色转暗，避免布局跳动） */
+DenoisePanel QSlider::groove:horizontal:disabled {
+    border: 1px solid #262628;
+    height: 4px;
+    background: #202023;
+    margin: 2px 0;
+    border-radius: 2px;
+}
+
+DenoisePanel QSlider::handle:horizontal:disabled {
+    background: #4a4a4e;
+    border: 1px solid #1e1e1e;
+    width: 10px;
+    height: 10px;
+    margin: -4px 0;
+    border-radius: 5px;
 }
 
 /* --- 垂直滑动条 --- */

@@ -28,6 +28,7 @@ from src.shared.ui.style_sheet import (
     DRAG_VALUE_LABEL_STYLE,
     DRAG_VALUE_NORMAL_STYLE,
     DRAG_VALUE_ACTIVE_STYLE,
+    DRAG_VALUE_DISABLED_STYLE,
 )
 
 # 进入拖拽前需要移动的最小像素数；小于此值视为点击，不改变数值，
@@ -176,6 +177,19 @@ class DragValue(QWidget):
     def _update_display(self):
         self._value_label.setText(
             "—" if self._mixed_value else self._format_value(self._value))
+
+    def changeEvent(self, event: QEvent) -> None:
+        """启用状态切换时同步数值格样式（达芬奇式整列变灰）。
+
+        禁用态用暗淡配色（DRAG_VALUE_DISABLED_STYLE）；编辑/拖拽的
+        ACTIVE 态优先级更高，仅在非编辑态下切换 NORMAL/DISABLED。
+        """
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.EnabledChange and not self._editing:
+            if self.isEnabled():
+                self._value_label.setStyleSheet(DRAG_VALUE_NORMAL_STYLE)
+            else:
+                self._value_label.setStyleSheet(DRAG_VALUE_DISABLED_STYLE)
 
     def setMixedValue(self, mixed: bool) -> None:
         """Display a multi-selection value without emitting an edit."""
