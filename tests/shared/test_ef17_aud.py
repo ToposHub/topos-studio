@@ -573,22 +573,36 @@ class TestAud25316DeblurSetParams:
 
 
 class TestAud25403DenoiseSetParamsGuard:
-    """AUD-25403: set_params 防递归锁挂在面板自身，挡不住子控件信号。"""
+    """AUD-25403: 恢复窗口的程序化回填不得触发参数发射（防递归/风暴）。
 
-    def test_restore_suppresses_mode_combo_signal(self, qapp) -> None:
+    2026-11 重设计后降噪面板仅剩视频降噪，恢复入口为
+    ``set_video_params_dict``；防递归锁即恢复期的 ``_video_updating``
+    （旧 ``set_params``/``mode_combo`` 随经典/AI UI 移除）。
+    """
+
+    def test_restore_suppresses_video_param_emission(self, qapp) -> None:
         from src.features.color.ui.denoise_panel import DenoisePanel
+        from src.shared.video.denoise.params import (
+            TemporalDenoiseParams,
+            VideoDenoiseParams,
+        )
 
         panel = DenoisePanel()
         try:
-            panel.mode_combo.setCurrentIndex(2)  # 先离开默认档，使恢复是真实变更
-            hits: list = []
-            panel.mode_combo.currentIndexChanged.connect(
-                lambda i: hits.append(i))
-            panel.set_params({"mode": "Basic"})
-            assert panel.mode_combo.currentIndex() == 0
-            # 回退（仅 self.blockSignals，子控件信号照常）时 hits == [0] → 失败
-            assert hits == [], "恢复期间 mode_combo 信号未被抑制"
-            assert panel._restoring_params is False  # 状态锁必须复位
+            emitted: list = []
+            panel.video_denoise_changed.connect(lambda d: emitted.append(d))
+            panel.set_video_params_dict(VideoDenoiseParams(
+                temporal=TemporalDenoiseParams(enabled=True, frames=3,
+                                               luma=60.0),
+            ).to_dict())
+            # 回退（恢复期不设 _video_updating）时 Frames/Luma 回填会触发
+            # _emit_video_params → emitted 非空 → 失败
+            assert emitted == [], "恢复期间视频参数被发射"
+            assert panel._video_updating is False  # 状态锁必须复位
+            # 恢复值真实落位 + 灰联动刷新（Frames=3 → 时域行可用）
+            assert panel.temporal_frames['combo'].currentIndex() == 3
+            assert panel.temporal_luma.value() == pytest.approx(60.0)
+            assert panel.temporal_luma.isEnabled()
         finally:
             panel._video_param_timer.stop()
             panel.deleteLater()

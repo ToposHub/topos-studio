@@ -43,6 +43,10 @@ class ChevronComboBox(QComboBox):
                 max-height: 18px;
             }
             QComboBox:hover { background-color: #2e2e34; }
+            QComboBox:disabled {
+                color: #666666; background-color: #1d1d1f;
+                border-color: #1a1a1c;
+            }
             QComboBox::drop-down { border: none; width: 0px; }
             QComboBox::down-arrow { image: none; border: none; }
         """)
@@ -52,8 +56,11 @@ class ChevronComboBox(QComboBox):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         pen = painter.pen()
-        # Arrow color: orange when open, white on hover, light gray default
-        if self._popup_open:
+        # Arrow color: orange when open, white on hover, light gray default;
+        # disabled combos keep a dim chevron (达芬奇式整列变灰)
+        if not self.isEnabled():
+            pen.setColor(QColor("#55555a"))
+        elif self._popup_open:
             pen.setColor(QColor("#ff8800"))
         elif self.underMouse():
             pen.setColor(QColor("#ffffff"))

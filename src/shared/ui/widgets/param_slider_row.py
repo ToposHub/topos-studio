@@ -19,7 +19,10 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from src.shared.ui.widgets.drag_value import DragValue
 from src.shared.ui.widgets.topos_controls import ToposClickableSlider
-from src.shared.ui.style_sheet import PARAM_LABEL_STYLE
+from src.shared.ui.style_sheet import (
+    PARAM_LABEL_STYLE,
+    PARAM_LABEL_DISABLED_STYLE,
+)
 
 # 面板宽度低于此值时自动隐藏滑动条
 # 固定开销：label(65) + drag(64) + spacing(8) + margins(~6) ≈ 143px
@@ -151,6 +154,9 @@ class ParamSliderRow(QWidget):
     def setEnabled(self, enabled: bool):
         self._slider.setEnabled(enabled)
         self._drag.setEnabled(enabled)
+        # 标签同步变暗/恢复（达芬奇式整列变灰；QSS 固定色不会自动置灰）
+        self._label.setStyleSheet(
+            PARAM_LABEL_STYLE if enabled else PARAM_LABEL_DISABLED_STYLE)
         super().setEnabled(enabled)
 
     def setDecimals(self, d: int):

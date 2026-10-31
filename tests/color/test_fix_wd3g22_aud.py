@@ -8,7 +8,7 @@
 - AUD-25300: 降噪档位 provider 失败不再无痕吞错（首次告警去重）
 - AUD-25303: _rgb_to_hsv 等比归一化，饱和度不再被 clamp 折叠
 - AUD-25311: Esc 取消不再提交裁切（恢复快照、不 emit crop_requested）
-- AUD-25400: reset_defaults 使用 ConfigManager 推导的亮度默认值
+- AUD-25400: reset_defaults 恢复视频降噪默认参数（2026-11 达芬奇式重设计后）
 - AUD-25401: 视频降噪参数 16ms 节流 + 交互结束 flush
 - AUD-25411: show 后延迟渲染：不可见即放弃 + 有限次重试
 - AUD-25423: 子控件右键菜单以 sender 为原点映射全局坐标
@@ -334,16 +334,74 @@ def test_apply_commits_current_params(qapp):
 # AUD-25400 / AUD-25401: DenoisePanel
 # ---------------------------------------------------------------------------
 
-def test_reset_defaults_uses_config_luma_default(qapp):
+def test_reset_defaults_restores_video_defaults(qapp):
+    """AUD-25400（重设计版）: reset_defaults 恢复达芬奇式默认并下发默认参数。
+
+    2026-11 重设计后面板仅剩视频降噪（时域/空域两栏），默认值唯一来源
+    为 VideoDenoiseParams 数据类字段默认（Frames=0 关闭、空域开关关闭）。
+    """
+    from src.shared.video.denoise.params import VideoDenoiseParams
+
     panel = DenoisePanel()
     try:
-        panel._luma_default = 0.08  # 模拟 default_denoise_strength=80
-        panel.luma_control.setValue(0.3)
+        emitted = []
+        panel.video_denoise_changed.connect(lambda d: emitted.append(d))
+        # 偏离默认：时域开启 + 值调整；空域开启 + 值调整
+        panel.temporal_frames['combo'].setCurrentIndex(2)
+        panel.temporal_luma.setValue(60.0)
+        panel.spatial_toggle.setChecked(True)
+        panel.spatial_luma.setValue(70.0)
         panel.reset_defaults()
-        assert panel.luma_control.value() == pytest.approx(0.08)
+        panel._flush_pending_video_params()
+        # 控件全部回到数据类默认（时域 Frames=0 关闭、空域开关关闭）
+        assert panel.temporal_frames['combo'].currentIndex() == 0
+        assert panel.temporal_luma.value() == pytest.approx(0.0)
+        assert panel.temporal_threshold.value() == pytest.approx(0.5)
+        assert panel.temporal_blend.value() == pytest.approx(0.8)
+        assert panel.spatial_toggle.isChecked() is False
+        assert panel.spatial_luma.value() == pytest.approx(0.0)
+        # 下发的最后一包就是数据类默认参数
+        assert emitted, "reset_defaults 必须下发一次默认参数"
+        assert emitted[-1] == VideoDenoiseParams().to_dict()
     finally:
         panel._video_param_timer.stop()
-        panel._resize_debounce_timer.stop() if hasattr(panel, "_resize_debounce_timer") else None
+        panel.deleteLater()
+
+
+def test_luma_chroma_link_pair_follows_and_unlinks(qapp):
+    """达芬奇式亮度/色度链接：默认绑定同步，解绑后独立，无信号风暴。
+
+    链接路径经 ParamSliderRow 用户交互信号（spin.setValue 会发射
+    DragValue.valueChanged → row.valueChanged），程序化回填侧为静默
+    setValue，天然无递归。
+    """
+    panel = DenoisePanel()
+    try:
+        emitted = []
+        panel.video_denoise_changed.connect(lambda d: emitted.append(d))
+        # 时域链接（默认绑定）：改亮度 → 色度同步为同一值
+        panel.temporal_luma.spin.setValue(30.0)
+        assert panel.temporal_chroma.value() == pytest.approx(30.0)
+        # 空域链接（默认绑定）：改色度 → 亮度同步
+        panel.spatial_chroma.spin.setValue(25.0)
+        assert panel.spatial_luma.value() == pytest.approx(25.0)
+        # 解绑：一侧变化不再带动另一侧
+        panel.temporal_link_btn.setChecked(False)
+        panel.temporal_luma.spin.setValue(70.0)
+        assert panel.temporal_luma.value() == pytest.approx(70.0)
+        assert panel.temporal_chroma.value() == pytest.approx(30.0)
+        # 重新绑定：只耦合后续调整，不强制对齐现有值（达芬奇行为）
+        panel.temporal_link_btn.setChecked(True)
+        panel.temporal_luma.spin.setValue(40.0)
+        assert panel.temporal_chroma.value() == pytest.approx(40.0)
+        # 下发参数与 UI 一致（链接同步值进入渲染参数，无风暴）
+        panel._flush_pending_video_params()
+        assert emitted, "链接变化必须下发一次参数"
+        last = emitted[-1]
+        assert last["temporal"]["luma"] == pytest.approx(40.0)
+        assert last["temporal"]["chroma"] == pytest.approx(40.0)
+    finally:
+        panel._video_param_timer.stop()
         panel.deleteLater()
 
 
