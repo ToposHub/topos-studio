@@ -171,7 +171,9 @@ class LayerOpsMixin:
 
         self.mixer_panel.set_params(layer.mixer_params)
         self.effects_panel.set_params_dict(layer.effects_params)
-        self.soft_clip_panel.set_params(layer.soft_clip_params)
+        # 旧 SoftClipPanel 已删（任务 9）：旧 8 参数 soft_clip_params 保留
+        # 在图层上供渲染/工程兼容，无面板回显（新 UI 为 curves_panel 侧栏，
+        # 已在上方 set_layer_state 回填）
         self.qualifier_panel.set_params(layer.qualifier_params)
         self.lut_panel.set_selected_lut(layer.active_lut_path)
         self.lut_panel.set_intensity(layer.lut_intensity)

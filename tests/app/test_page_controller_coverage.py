@@ -2993,7 +2993,6 @@ def test_collect_color_panels_gathers_truthy_panels() -> None:
     host.curves_widget = curves
     host.hsl_curves_panel = None  # falsy entries skipped
     host.mixer_panel = None
-    host.soft_clip_panel = None
     host.lut_panel = None
     host.denoise_panel = None
 

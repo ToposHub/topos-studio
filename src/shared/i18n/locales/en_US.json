@@ -381,7 +381,6 @@
     "masks": "Masks",
     "qualifier": "Qualifier",
     "lut": "3D LUT",
-    "soft_clip": "Soft Clip",
     "camera_raw": "Camera Raw",
     "analysis": "Analysis",
     "export": "Export",
@@ -609,21 +608,6 @@
     "reset_amount": "Reset channel amount",
     "reset_parameter": "Reset parameter",
     "reset_section": "Reset section"
-  },
-  "soft_clip": {
-    "title": "Soft Clip",
-    "high_shoulder": "High / Shoulder",
-    "low_toe": "Low / Toe",
-    "global_tone": "Global / Tone",
-    "high_threshold": "High Threshold",
-    "white_point": "White Point",
-    "shoulder": "Shoulder",
-    "low_threshold": "Low Threshold",
-    "black_point": "Black Point",
-    "toe": "Toe",
-    "exposure": "Exposure",
-    "contrast": "Contrast",
-    "reset_tooltip": "Reset All Parameters"
   },
   "analysis": {
     "title": "RGB Waveform",

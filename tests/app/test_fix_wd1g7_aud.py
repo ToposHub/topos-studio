@@ -543,7 +543,6 @@ def _make_load_video_host(*, load_ok: bool) -> Any:
         save_router=MagicMock(),
         grading_panel=MagicMock(),
         hsl_curves_panel=MagicMock(),
-        soft_clip_panel=MagicMock(),
         effects_panel=MagicMock(),
         denoise_panel=MagicMock(),
         _composite_available=False,

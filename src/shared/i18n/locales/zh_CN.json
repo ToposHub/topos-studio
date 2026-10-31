@@ -381,7 +381,6 @@
     "masks": "遮罩",
     "qualifier": "限定器",
     "lut": "3D LUT",
-    "soft_clip": "软裁切",
     "camera_raw": "Camera Raw",
     "analysis": "示波器",
     "export": "导出",
@@ -651,21 +650,6 @@
     "reset_amount": "重置通道强度",
     "reset_parameter": "重置此参数",
     "reset_section": "重置此区域"
-  },
-  "soft_clip": {
-    "title": "软裁切",
-    "high_shoulder": "高光/肩部",
-    "low_toe": "暗部/趾部",
-    "global_tone": "全局/色调",
-    "high_threshold": "高光阈值",
-    "white_point": "白点",
-    "shoulder": "肩部强度",
-    "low_threshold": "暗部阈值",
-    "black_point": "黑点",
-    "toe": "趾部强度",
-    "exposure": "曝光",
-    "contrast": "对比度",
-    "reset_tooltip": "重置全部参数"
   },
   "analysis": {
     "title": "RGB 波形",

@@ -62,40 +62,18 @@ def _make_mock_mixer_panel() -> MagicMock:
     return panel
 
 
-def _make_mock_soft_clip_panel() -> MagicMock:
-    panel = MagicMock()
-    panel.enable_check = MagicMock()
-    panel.enable_check.isChecked.return_value = True
-    panel.exposure_control = {"spin": MagicMock()}
-    panel.exposure_control["spin"].value.return_value = 0.5
-    panel.contrast_control = {"spin": MagicMock()}
-    panel.contrast_control["spin"].value.return_value = 0.0
-    panel.high_control = {"spin": MagicMock()}
-    panel.high_control["spin"].value.return_value = 1.2
-    panel.white_point_control = {"spin": MagicMock()}
-    panel.white_point_control["spin"].value.return_value = 1.1
-    panel.shoulder_strength_control = {"spin": MagicMock()}
-    panel.shoulder_strength_control["spin"].value.return_value = 1.0
-    panel.low_control = {"spin": MagicMock()}
-    panel.low_control["spin"].value.return_value = 0.0
-    panel.black_point_control = {"spin": MagicMock()}
-    panel.black_point_control["spin"].value.return_value = -0.1
-    panel.toe_strength_control = {"spin": MagicMock()}
-    panel.toe_strength_control["spin"].value.return_value = 1.0
-    return panel
-
-
 def _make_mock_lut_panel() -> MagicMock:
     return MagicMock()
 
 
 def _make_all_panels() -> dict:
+    # 旧 SoftClipPanel 已删（任务 9）：面板集合不再包含 soft_clip_panel；
+    # legacy 8 参数无面板读写（图层路径始终权威）
     return {
         "grading_panel": _make_mock_grading_panel(),
         "curves_panel": _make_mock_curves_panel(),
         "hsl_panel": _make_mock_hsl_panel(),
         "mixer_panel": _make_mock_mixer_panel(),
-        "soft_clip_panel": _make_mock_soft_clip_panel(),
         "lut_panel": _make_mock_lut_panel(),
     }
 
@@ -270,17 +248,6 @@ class TestApplyStackToPanels:
 
         panels["mixer_panel"].set_params.assert_called_once_with(stack.mixer_params)
 
-    def test_updates_soft_clip_panel(self) -> None:
-        hydrator = ColorStackHydrator()
-        stack = _make_sample_stack()
-        panels = _make_all_panels()
-
-        hydrator.apply_stack_to_panels(stack, panels)
-
-        panels["soft_clip_panel"].set_params.assert_called_once_with(
-            stack.soft_clip_params, emit=False
-        )
-
     def test_updates_lut_panel(self) -> None:
         hydrator = ColorStackHydrator()
         stack = _make_sample_stack()
@@ -342,8 +309,8 @@ class TestCollectStack:
         assert "M" in result.curves_data
         assert "lum_vs_sat" in result.hsl_curve_data
         assert result.mixer_params["green"] == [10, -5, 3]
-        assert result.soft_clip_params["enabled"] is True
-        assert result.soft_clip_params["exposure"] == 0.5
+        # 旧面板删除后：无引擎图层快照时 legacy 8 参数无面板可读，保持空
+        assert result.soft_clip_params == {}
         assert result.lut_path == "/saved/lut.cube"
         assert result.lut_intensity == 0.7
 

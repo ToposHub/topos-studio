@@ -3153,10 +3153,9 @@ class PageManagementMixin:
 
         通过 ColorStackHydrator 将调色栈数据统一同步到:
         - GradingPanel (色轮 + 滑块)
-        - CurvesWidget (RGB 曲线)
+        - CurvesWidget (RGB 曲线) + CurvesPanel 侧栏 (四参数柔化裁切/强度)
         - HSLCurvesPanel (HSL 曲线)
         - MixerPanel (颜色混合器)
-        - SoftClipPanel (柔化裁切)
         - LutPanel (3D LUT)
         - engine.layers (渲染引擎)
 
@@ -3230,8 +3229,6 @@ class PageManagementMixin:
             panels["hsl_panel"] = self.hsl_curves_panel
         if hasattr(self, 'mixer_panel') and self.mixer_panel:
             panels["mixer_panel"] = self.mixer_panel
-        if hasattr(self, 'soft_clip_panel') and self.soft_clip_panel:
-            panels["soft_clip_panel"] = self.soft_clip_panel
         if hasattr(self, 'lut_panel') and self.lut_panel:
             panels["lut_panel"] = self.lut_panel
         if hasattr(self, 'denoise_panel') and self.denoise_panel:

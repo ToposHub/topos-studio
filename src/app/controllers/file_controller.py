@@ -5172,8 +5172,12 @@ class FileOpsMixin:
             self.grading_panel.reset_all()
             if hasattr(self.hsl_curves_panel, 'reset_all_curves'):
                 self.hsl_curves_panel.reset_all_curves()
-            if hasattr(self.soft_clip_panel, 'reset_all'):
-                self.soft_clip_panel.reset_all()
+            # 曲线工具（画布控制点 + 侧栏四参数/强度）整体回默认
+            if hasattr(self, 'curves_widget'):
+                self.curves_widget.reset(emit_changed=False)
+            if hasattr(self, 'curves_panel'):
+                self.curves_panel.set_layer_state(
+                    {"curves_soft_clip": {}, "curves_edit": {}})
             if hasattr(self.effects_panel, 'reset_all'):
                 self.effects_panel.reset_all()
             if hasattr(self.denoise_panel, 'reset_all'):

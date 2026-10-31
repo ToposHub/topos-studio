@@ -1245,7 +1245,6 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         from src.features.color.ui.film_grain_panel import FilmGrainPanel
         from src.features.color.ui.mask_panel import MaskPanel
         from src.features.color.ui.qualifier_panel import QualifierPanel
-        from src.features.color.ui.soft_clip_panel import SoftClipPanel
         from src.features.color.ui.raw_panel import RawPanel
         from src.features.color.ui.crop_panel import CropPanel
         from src.shared.ui.widgets.curves_widget import CurvesWidget
@@ -1334,11 +1333,9 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         self._active_tracker_task = None
         self._active_tracker_directions = ()
         self.qualifier_panel = QualifierPanel()
-        # Legacy project/hydrator state only. No dock or visible panel remains;
-        # the new four-control UI in curves_panel is intentionally not wired.
-        # Remove this bridge with the schema migration in the UI follow-up plan.
-        self.soft_clip_panel = SoftClipPanel(parent=self)
-        self.soft_clip_panel.hide()
+        # 旧 SoftClipPanel 已删除（2026-11-01 UI 整合计划任务 9）：柔化裁切
+        # 四参数 UI 在 curves_panel 侧栏，旧 8 参数仅保留渲染/工程兼容路径
+        # （layer.soft_clip_params 经脚本 API / 旧工程数据继续生效）。
         self.raw_panel = RawPanel()
         self.crop_panel = CropPanel()
         self.export_panel = ExportPanel()
@@ -1746,11 +1743,6 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
                 self.mask_panel.btn_sam.setChecked(False)
                 if hasattr(self.crop_panel, 'set_crop_active'): self.crop_panel.set_crop_active(False)
         self.qualifier_panel.picker_toggled.connect(on_picker_toggled)
-
-        self.soft_clip_panel.params_changed.connect(self.engine.set_soft_clip_params)
-        self.soft_clip_panel.params_changed.connect(self._invalidate_video_render_params_if_playing)
-        self.soft_clip_panel.interaction_started.connect(self.on_interaction_started)
-        self.soft_clip_panel.interaction_ended.connect(self.on_interaction_ended)
 
         # 曲线面板侧栏（四参数柔化裁切 + Edit 强度）：正式参数信号。
         # 画布控制点仍走 curves_widget.changed -> on_curves_changed，
