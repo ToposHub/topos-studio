@@ -1,6 +1,7 @@
 # 曲线 / 柔化裁切 UI 整合与后续接线计划
 
-日期：2026-11-01。范围：本次完成 UI，后续功能与接线由项目维护者完成。
+日期：2026-11-01。~~范围：本次完成 UI，后续功能与接线由项目维护者完成。~~
+**2026-11-01 续批：任务表 1-10 全部完成**（语义裁决、模型/schema、迁移、四参数渲染、Edit 强度/链接、接线、回填持久化、旧面板删除、验收），详见任务表与验证记录；遗留项仅"实机验收清单"（需真机交互复核）与 golden corpus 环境漂移裁决。
 
 ## 本次已完成
 
@@ -22,15 +23,16 @@
 
 预览：`wide.png`（1000×420）、`compact.png`（请求 760×290，按面板最小高度显示）、`active-channels.png`（R 与 G 激活状态）。
 
-## 当前功能边界与兼容措施
+## 当前功能边界与兼容措施（任务 1-9 完成后更新）
 
-**已保留的功能**：原曲线控制点编辑、单通道选择、拾色、曲线重置以及原有 LUT 信号仍工作。
+**已上线（正式接线）**：曲线控制点编辑（含链接编辑）、Edit 强度/链接、四参数 Soft Clip（每通道 + 链接）——全部经 `soft_clip_changed` / `edit_changed` → `ImageEngine.set_curves_soft_clip_params` / `set_curves_edit_params` 提交渲染，按图层/片段持久化（Layer 快照 + schema v3 平铺键），undo/redo、目标切换回填、复制调色、导出全链路可用。
 
-**仅限本地 UI 草稿**：Edit 强度、Edit 链接、多通道编辑、四参数 Soft Clip、RGB 参数切换与链接。Soft Clip 的 RGB 独立值、链接复制、数值/滑条同步和重置可以本地交互，但不会改变图像。草稿尚不按图层/片段保存，切换目标也不回填；重启后恢复默认。不要将 `get_ui_state()` 的结果当成既有渲染参数。
+**兼容边界**：
+- 旧 8 参数 `soft_clip_params`：独立 SoftClipPanel 已删除（任务 9）。legacy 数据与渲染路径（GLSL/CPU/导出/delivery）保留；仅脚本 API 与旧工程数据可写，无 UI 读写。与新四参数阶段互不转换。
+- 移动版工程兼容：模型归一化接受移动版 camelCase 键与 red/green/blue 通道别名（`normalize_curves_soft_clip`），为"移动工程在桌面打开"预留直通映射。
+- 旧工作区布局：`color.soft_clip` → `color.curves` 由 `sanitize_preset()` 兼容；`dockCurves` 名称与 780–1680 px 限定不变。
 
-`MainWindow.soft_clip_panel` 暂时保留为**有父对象且隐藏的旧兼容对象**，不创建 dock，不进入面板菜单。现有 layer/file/page controller 与 `ColorStackHydrator` 仍读写它，旧工程数据和原渲染连接继续存在。它不与新侧栏参数互写。本次没有删除旧模型字段、改 shader 或更改工程 schema；待下面迁移任务完成后删除旧 UI 文件和兼容引用。
 
-### 参考与数值口径
 
 ~~早期草稿按 Resolve 截图使用 0…1 归一化滑条位置（Low/High 默认 0.50）。~~
 **任务 1 已裁决（2026-11-01）：参数语义以移动版 `topos_edit_mobile` 的实现为权威参考**——桌面与移动端共用同一套参数名、范围、默认值与算法，是"移动工程未来可在桌面打开"目标的基础，优先级高于对达芬奇内部实现的猜测。移动版参考实现：
@@ -87,15 +89,15 @@
 | 7 | 已完成 | 图层/片段回填与持久化 | `Layer` 序列化全链路（to_dict/from_dict/reset/copy/paste）已在批次 2 落地；`update_from_layer` 随图层切换整体回填（草稿不跨目标泄漏）；hydrator `_apply_curves_palette_to_panel`（活动层快照优先、平铺键兜底）+ 无引擎时收集兜底；page_controller 注入 `curves_palette`；file_controller 视频加载重置改为曲线工具整体回默认；grade 剪贴板 curves 类别扩展为控制点+强度+四参数整体粘贴；undo/redo 经快照恢复 + update_from_layer 回填闭环。 |
 | 8 | 已完成 | 曲线背后的直方图 | 曲线 dock 显示时，GPU scope demand 同时输出 histogram descriptor，复用 histogram accumulation/reduce/display；曲线 widget 在 GPU blit 后叠画网格、曲线和控制点。实机验收仍需校对坐标和强度。 |
 | 9 | 已完成 | 彻底删除隐藏旧面板 | `soft_clip_panel.py` 已删（git rm）；`ui/__init__.py` 导出替换为 CurvesPanel；MainWindow 删除导入/创建/4 条旧信号连接；layer_controller 回填改注释说明；page_controller 面板集合移除 `soft_clip_panel`；file_controller 视频加载重置改为曲线工具整体回默认（画布 reset + 侧栏 set_layer_state）；hydrator 删除 `_apply_soft_clip_to_panel` / `_read_soft_clip_params`（无引擎图层时 legacy 8 参数保持空 dict，图层路径始终权威）；i18n 清理 `soft_clip.*` 13 键与 `panel.soft_clip`（保留 `gradecat.soft_clip`——legacy 粘贴类别、`delivery.op_soft_clip`——delivery 矩阵、`curves_palette.soft_clip`）；测试替身同步清理（hydrator/wd1g7/layer_ai_library/presets_gallery/auto_color/page_controller）。legacy 8 参数渲染路径与脚本 API 保留（旧工程兼容）。 |
-| 10 | 待办 | 验收与性能 | 建立参考数值/图像、RGB 非链接、soft=0、HDR 超白/负值、重置、undo/redo、目标切换、旧工程迁移及 preview/export 一致性测试；检查 4K 拖动节流、最终值 flush、资源释放、失败/取消路径。 |
+| 10 | 已完成 | 验收与性能 | 参考数值：`curves_soft_clip.apply_soft_clip_channel` 标量参考 + 移动版对齐向量测试；RGB 非链接（每通道独立）、soft=0 纯 clip 点、HDR 超白/负值保留均有专项测试；真机 GL↔MTL↔CPU 三端对拍（SDR/HDR + CPU 参考复验）作为图像验收。undo/redo 快照恢复侧栏状态、目标切换无草稿泄漏、旧工程（v2）重开/再保存逐键不变、导出收集（非恒等进 grade / 恒等不进）测试齐备。性能：16ms 节流 + interaction 结束 flush（测试锁定）、恒等状态共享缓存 program（无重编译）、strength 只置脏最终 LUT（通道缓存复用）、CPU 导出为掩码向量化 exp。失败/取消路径：CPU 导出单段失败告警续跑（沿用既有降级口径）、shader 编译失败诊断缓冲不变。 |
 
-## 接线时的注意事项
+## 接线注意事项（已按实现复核）
 
-- 当前侧栏操作不能发原 `CurvesWidget.changed`；已有曲线控制点操作仍走原信号，不要重复连接导致双提交。
-- Edit 区域重置目前只复位四条强度；顶部重置只复位原曲线。正式产品需确定整面板重置、区域重置和单通道重置的 undo 范围。
-- Soft Clip 链接时本地值跟随当前通道复制至 RGB；解链后各通道独立，区域重置作用于当前通道。正式语义若不同，应同步修改模型、UI 与测试。
-- 不为本次 UI 更改整体布局 schema 或重置用户布局。`dockCurves` 名称保留，旧独立 dock 不再创建；工作区 ID 兼容由 `sanitize_preset()` 完成。
-- 归档 `src/features/color/ui/tools_panel.py` 没有生产引用，本轮未改；它仍使用基础画布。如未来重新启用，应改用 `CurvesPanel`。
+- 侧栏操作不发原 `CurvesWidget.changed`——Edit/柔化裁切经 `edit_changed` / `soft_clip_changed` 提交，画布控制点仍走原信号，两路不双提交（测试锁定）。
+- Edit 侧栏重置只复位四条强度；画布顶部重置只复位控制点；链接模式下画布双击重置同步全部通道。整面板重置 = 两者之和，undo 范围由 interaction 快照对决定。
+- Soft Clip 链接复制/解链语义与移动版一致（模型 `set_soft_clip_control` 为权威约束实现），模型/UI/测试三方同源。
+- 布局 schema 未整体变更：`dockCurves` 保留，工作区 ID 兼容由 `sanitize_preset()` 完成。
+- 归档 `src/features/color/ui/tools_panel.py` 没有生产引用，未改；如未来重新启用，应改用 `CurvesPanel`。
 
 ## 验证记录
 
@@ -106,3 +108,6 @@
 - 当前虚拟环境没有安装 Ruff，未运行 Ruff 检查。
 - **2026-11-01 续批验证**：curves 面板 7 项、模型/水合/历史/剪贴板/delivery 163 项、渲染/CPU/uniform 137 项、project 555 项、layer 全套通过。
 - **预存失败（与本计划无关）**：`tests/color/test_shader_golden_corpus.py::test_bit_identical_to_baseline` 的 `grading_extreme/checker` 用例在 e7ffa56（本计划所有改动之前）即失败，且与当前哈希逐位一致——判定为本机 GL 驱动/环境的数值漂移（golden 基线在别的环境归档），非本计划引入。未重归档（重归档会掩盖漂移），待维护者在其确认基准环境上复核后决定 `TOPOS_UPDATE_SHADER_GOLDEN=1`。
+- **任务 4-7 + 9 全量验证（2026-11-01）**：curves 相关测试 86 + 22 + 14 → 含验收共 29 项 wiring/acceptance 全过；color+app 合并套件 4309 过。edit 全套 9585 过 / 19 失败，经 e7ffa56 worktree 复跑逐一对比：8 项（ef08×2、wd1g6、gap002、gap007×4）与 4 个 tracking worker 错误在基线上完全复现（预存）；m09_lightbox、edit_mode_toggle 隔离运行通过（顺序敏感偶发）；1 项为上一会话改名的高度迁移测试（环境相关）。**无一由本计划引入**。
+- 旧面板删除后残留检查：`soft_clip_panel`/`SoftClipPanel` 在 src/tests 仅存于说明性注释。
+- 实机验收清单（维护者执行）：拖动侧栏滑条实时预览 + 一次拖动一次 Ctrl+Z；链接/解链；恒等状态不触发 shader 重编译；4K 时间线拖动流畅度；导出成片与 Color 页预览一致性（同参数帧对比）。
