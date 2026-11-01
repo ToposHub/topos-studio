@@ -115,12 +115,14 @@ class TestTimelineClipCardLazyThumbnail(unittest.TestCase):
 
         card.deleteLater()
 
-    def test_graded_card_uses_gradient_bottom_label(self) -> None:
+    def test_graded_card_uses_rainbow_number_badge(self) -> None:
         """A graded clip is visually distinguishable in the strip."""
         graded_card = TimelineClipCard(_make_entry(0, color_graded=True))
         plain_card = TimelineClipCard(_make_entry(1, color_graded=False))
 
-        self.assertIn("qlineargradient", graded_card._bottom_label.styleSheet())
+        self.assertTrue(graded_card._header.index_label.property("graded"))
+        self.assertFalse(plain_card._header.index_label.property("graded"))
+        self.assertNotIn("qlineargradient", graded_card._bottom_label.styleSheet())
         self.assertNotIn("qlineargradient", plain_card._bottom_label.styleSheet())
 
         graded_card.deleteLater()
@@ -276,8 +278,8 @@ class TestTimelineClipStripLazyThumbnails(unittest.TestCase):
         strip.deleteLater()
 
     @patch("src.features.color.ui.timeline_clip_strip.ThumbnailProvider")
-    def test_cards_follow_panel_height(self, mock_provider_cls: MagicMock) -> None:
-        """Clip cards should grow when the Timeline Clips panel grows."""
+    def test_cards_keep_reference_density(self, mock_provider_cls: MagicMock) -> None:
+        """Dock resizing must not turn the compact strip into large image cards."""
         mock_provider_cls.instance.return_value = MagicMock()
 
         strip = TimelineClipStrip()
@@ -294,11 +296,16 @@ class TestTimelineClipStripLazyThumbnails(unittest.TestCase):
         expanded_height = strip._cards[0].height()
         expanded_width = strip._cards[0].width()
 
-        self.assertGreater(expanded_height, compact_height)
-        self.assertGreater(expanded_width, compact_width)
+        self.assertEqual(expanded_height, compact_height)
+        self.assertEqual(expanded_width, compact_width)
+        strip.resize(900, 480)
+        _app.processEvents()
+        self.assertEqual(strip._cards[0].height(), expanded_height)
+        self.assertEqual(strip._cards[0].width(), expanded_width)
+        self.assertLessEqual(expanded_width, 148)
         self.assertEqual(
             strip._scroll_area.horizontalScrollBarPolicy(),
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOn,
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
         )
         horizontal_bar = strip._scroll_area.horizontalScrollBar()
         self.assertGreaterEqual(horizontal_bar.minimumHeight(), 9)

@@ -84,6 +84,17 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+#: 建栈时需完整携带的 ColorStackData v2/v3 内容字段清单（审查 S1：
+#: 手抄清单曾漂移——本地副本与片段版本空域初始化共用此常量，
+#: 覆盖曲线侧栏 v3 键 curves_soft_clip/curves_edit 与 video_denoise）。
+V2_SNAPSHOT_CONTENT_FIELDS = (
+    "grading_params", "curves_data", "hsl_curve_data",
+    "mixer_params", "soft_clip_params", "lut_path",
+    "lut_intensity", "layers", "active_layer_index",
+    "trackings", "raw_params", "video_denoise",
+    "curves_soft_clip", "curves_edit",
+)
+
 
 def _render_cache_manifest_from_value(value: Any) -> Any | None:
     """Normalize a project cache entry without coupling callers to storage."""
@@ -2171,10 +2182,13 @@ class EditControllerMixin:
         # through the preview-sync capture scheduled below.
         self._schedule_idle_color_timeline_clip_strip_refresh()
         strip = getattr(self, "color_timeline_clip_strip", None)
-        target_clip_id = getattr(strip, "_active_clip_id", None)
+        # A strip click selects the incoming clip before the outgoing stack is
+        # flushed. The loaded playback context still identifies that stack's
+        # owner; never capture its frame into the newly selected card.
+        context = getattr(self, "_color_timeline_clip_playback_context", None) or {}
+        target_clip_id = getattr(context.get("clip"), "clip_id", None)
         if not target_clip_id:
-            context = getattr(self, "_color_timeline_clip_playback_context", None) or {}
-            target_clip_id = getattr(context.get("clip"), "clip_id", None)
+            target_clip_id = getattr(strip, "_active_clip_id", None)
         self._schedule_color_timeline_clip_preview_sync(target_clip_id)
 
         # Phase 7: Color → Composite revision sync.
@@ -2199,6 +2213,20 @@ class EditControllerMixin:
         if strip is None or canvas is None or frame_ready is None:
             return
 
+        project = getattr(self, "_current_edit_project", None)
+        has_grade = getattr(strip, "stack_has_grade", None)
+        capture_needed = True
+        if project is not None and callable(has_grade):
+            clip = self._find_timeline_clip(clip_id)
+            if clip is not None:
+                stack_id = getattr(clip, "color_stack_id", None)
+                stack = project.color_stacks.get(stack_id)
+                if not has_grade(stack, clip_id, bool(getattr(clip, "color_shared", False))):
+                    # Neutral clips use their source thumbnail. Capturing a
+                    # switch-time viewport here could cache the departing shot.
+                    strip.invalidate_graded_preview_stacks({stack_id} if stack_id else set())
+                    capture_needed = False
+
         previous = getattr(self, "_timeline_clip_preview_subscription", None)
         if previous is not None:
             try:
@@ -2209,11 +2237,18 @@ class EditControllerMixin:
 
         token = int(getattr(self, "_timeline_clip_preview_token", 0) or 0) + 1
         self._timeline_clip_preview_token = token
+        if not capture_needed:
+            return
+        captured = False
 
         def _capture() -> None:
-            if token != getattr(self, "_timeline_clip_preview_token", None):
+            nonlocal captured
+            if captured or token != getattr(self, "_timeline_clip_preview_token", None):
                 return
-            self._timeline_clip_preview_token = None
+            renderer = getattr(engine, "renderer", None)
+            if bool(getattr(renderer, "video_texture_pending", False)):
+                return
+            captured = True
             try:
                 frame_ready.disconnect(_on_frame_ready)
             except (TypeError, RuntimeError):
@@ -2223,6 +2258,10 @@ class EditControllerMixin:
             if getattr(self, "current_page", None) != "Color":
                 return
             if getattr(strip, "_active_clip_id", None) != clip_id:
+                return
+            context = getattr(self, "_color_timeline_clip_playback_context", None) or {}
+            loaded_clip = context.get("clip")
+            if loaded_clip is not None and getattr(loaded_clip, "clip_id", None) != clip_id:
                 return
             viewport = getattr(canvas, "gl_viewport", None)
             if viewport is None:
@@ -2258,9 +2297,8 @@ class EditControllerMixin:
         except (TypeError, RuntimeError):
             return
 
-        # Fallback for a render that completed before the queued signal was
-        # connected; still only performs one low-frequency capture.
-        QTimer.singleShot(220, _capture)
+        # Capture only a completed frame. A time-based fallback could grab the
+        # departing shot while the new clip's decode/render is still queued.
 
     def _schedule_idle_color_timeline_clip_strip_refresh(self) -> None:
         """Rebuild the Color clip strip at idle instead of on every commit.
@@ -8597,15 +8635,11 @@ class EditControllerMixin:
             # P1-COLOR-16：本地副本必须携带完整 v2 快照（layers/
             # active_layer_index/trackings/raw_params 及平铺键），此前只
             # 复制平铺键，蒙版/限定器可视化/插件/跟踪/RAW 在本地化时
-            # 静默丢失。
+            # 静默丢失。审查 S1：清单抽到 V2_SNAPSHOT_CONTENT_FIELDS
+            # 共享（补曲线侧栏 v3 键），防止两处再漂移。
             stamp_fields.update({
                 field_name: getattr(source, field_name)
-                for field_name in (
-                    "grading_params", "curves_data", "hsl_curve_data",
-                    "mixer_params", "soft_clip_params", "lut_path",
-                    "lut_intensity", "layers", "active_layer_index",
-                    "trackings", "raw_params",
-                )
+                for field_name in V2_SNAPSHOT_CONTENT_FIELDS
             })
         command = _CreateStampedColorStackCommand.create(
             asset_id=None,
@@ -8819,6 +8853,14 @@ class EditControllerMixin:
         # 若 Color 页活动 clip 在本时间线中：统一同步引擎并重渲染一次
         strip = getattr(self, "color_timeline_clip_strip", None)
         active_clip_id = getattr(strip, "_active_clip_id", None)
+        invalidate_previews = getattr(strip, "invalidate_graded_preview_stacks", None)
+        if callable(invalidate_previews):
+            changed_stack_ids = {
+                clip.color_stack_id for clip_id in clip_ids
+                if (clip := self._find_timeline_clip(clip_id)) is not None
+                and clip.color_stack_id
+            }
+            invalidate_previews(changed_stack_ids)
         if active_clip_id and getattr(self, "engine", None):
             active_clip = self._find_timeline_clip(active_clip_id)
             active_stack_id = (
@@ -8830,11 +8872,19 @@ class EditControllerMixin:
             if new_stack is not None:
                 self._color_stack_hydration_in_progress = True
                 try:
-                    ColorStackHydrator().apply_stack_to_engine(
-                        new_stack, self.engine)
+                    hydrator = ColorStackHydrator()
+                    hydrator.apply_stack_to_engine(new_stack, self.engine)
+                    collect_panels = getattr(self, "_collect_color_panels", None)
+                    panels = collect_panels() if callable(collect_panels) else {
+                        "grading_panel": getattr(self, "grading_panel", None),
+                    }
+                    hydrator.apply_stack_to_panels(new_stack, panels)
+                    self._pending_grading_color_stack = None
                 finally:
                     self._color_stack_hydration_in_progress = False
                 self.engine.render_pipeline(render_reason='grading')
+
+                self._schedule_color_timeline_clip_preview_sync(active_clip_id)
 
         self._schedule_idle_color_timeline_clip_strip_refresh()
         try:
@@ -8949,16 +8999,32 @@ class EditControllerMixin:
         # 4. 若目标是 Color 页当前活动 clip：同步引擎并重渲染
         strip = getattr(self, "color_timeline_clip_strip", None)
         active_clip_id = getattr(strip, "_active_clip_id", None)
-        if active_clip_id == clip_id and getattr(self, "engine", None):
+        invalidate_previews = getattr(strip, "invalidate_graded_preview_stacks", None)
+        if callable(invalidate_previews):
+            invalidate_previews({stack_id})
+        active_clip = self._find_timeline_clip(active_clip_id) if active_clip_id else None
+        active_uses_stack = (
+            active_clip_id == clip_id
+            or (active_clip is not None and active_clip.color_stack_id == stack_id)
+        )
+        if active_uses_stack and getattr(self, "engine", None):
             new_stack = new_project.color_stacks.get(stack_id)
             if new_stack is not None:
                 self._color_stack_hydration_in_progress = True
                 try:
-                    ColorStackHydrator().apply_stack_to_engine(
-                        new_stack, self.engine)
+                    hydrator = ColorStackHydrator()
+                    hydrator.apply_stack_to_engine(new_stack, self.engine)
+                    collect_panels = getattr(self, "_collect_color_panels", None)
+                    panels = collect_panels() if callable(collect_panels) else {
+                        "grading_panel": getattr(self, "grading_panel", None),
+                    }
+                    hydrator.apply_stack_to_panels(new_stack, panels)
+                    self._pending_grading_color_stack = None
                 finally:
                     self._color_stack_hydration_in_progress = False
                 self.engine.render_pipeline(render_reason='grading')
+
+                self._schedule_color_timeline_clip_preview_sync(active_clip_id)
 
         self._schedule_idle_color_timeline_clip_strip_refresh()
         try:
