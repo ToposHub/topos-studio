@@ -1636,20 +1636,11 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
 */
 
 QMainWindow::separator {
-    /* Keep a wider transparent hit area so adjacent dock groups can be resized. */
+    /* Keep the wide resize hit area transparent; MainWindow paints one center line. */
     background-color: transparent;
     border: none;
     width: 8px;
     height: 8px;
-}
-
-QMainWindow::separator:hover {
-    /* Reveal the resize handle on hover without adding a thick idle divider. */
-    background-color: rgba(255, 122, 0, 72);
-}
-
-QMainWindow::separator:pressed {
-    background-color: rgba(255, 122, 0, 128);
 }
 
 /* === Dock 标签栏 === */
