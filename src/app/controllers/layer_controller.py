@@ -1259,8 +1259,7 @@ class LayerOpsMixin:
         # texture. There is deliberately no CPU snapshot/readback here:
         # realtime Color-page scopes must remain GPU-only.
         need_scope = self._is_scope_panel_visible() or self._is_curves_panel_visible()
-        video_controller = getattr(self, 'video_controller', None)
-        is_playing = bool(getattr(video_controller, 'is_playing', False))
+        is_playing = self._scope_playback_is_active()
         if need_scope:
             self._submit_gpu_scope_demand(is_playing=is_playing)
         self.on_render_finished(None, False)
@@ -1281,6 +1280,10 @@ class LayerOpsMixin:
         analysis size (768x432) so the final scope is crisp.
         """
         try:
+            is_playing = is_playing or self._scope_playback_is_active()
+            curves_frozen = is_playing or self._scope_scrub_is_active()
+            if curves_frozen and not self._is_scope_panel_visible():
+                return  # Curves freeze their histogram during play and scrub.
             engine = self.engine
             if engine is None or engine.renderer is None:
                 return
@@ -1338,17 +1341,29 @@ class LayerOpsMixin:
             # per submit, so a frame produced from this demand still matches
             # the panel's current revision when it arrives.
             revision = panel.gpu_demand_revision
+            curves_overlay = self._is_curves_panel_visible() and not curves_frozen
+            curves_mode = self._current_curve_mode()
+            curves_size, curves_line_width = (1024, 512), 1.0
+            if curves_overlay:
+                # A peak-normalized histogram must not alternate between
+                # 320/512/768 sampling grids for the same paused image. Each
+                # grid changes bin counts and causes visible vertical breathing.
+                analysis = HIGH_QUALITY_ANALYSIS_SIZE
+                curves_size, curves_line_width = self._active_curve_canvas().histogram_display_metrics()
             demand = ScopeDemand(
                 revision=revision,
                 source_revision=engine.scope_source_revision,
-                mode=state['mode'],
+                mode=state['mode'] if self._is_scope_panel_visible() else 'histogram',
                 display_size=state['display_size'],
                 analysis_size=analysis,
                 vectorscope_zoom=state['vectorscope_zoom'],
                 is_playing=is_playing,
                 mask_layer_id=mask_layer_id,
                 mask_enabled=mask_enabled,
-                histogram_overlay=self._is_curves_panel_visible(),
+                histogram_overlay=curves_overlay,
+                curves_display_size=curves_size,
+                curves_line_width=curves_line_width,
+                curves_mode=curves_mode,
                 scope_transfer=state.get('scope_transfer', 'srgb'),
                 scope_primaries=state.get('scope_primaries', 'bt709'),
                 falsecolor_mode=state.get('falsecolor_mode', 'sdr'),
@@ -1366,9 +1381,55 @@ class LayerOpsMixin:
         """Submit a GPU refresh after a mode/zoom/size-only change."""
         if not (self._is_scope_panel_visible() or self._is_curves_panel_visible()):
             return
-        video_controller = getattr(self, 'video_controller', None)
-        is_playing = bool(getattr(video_controller, 'is_playing', False))
+        is_playing = self._scope_playback_is_active()
         self._submit_gpu_scope_demand(is_playing=is_playing, force=True)
+
+    def _current_curve_mode(self) -> str:
+        mode = getattr(getattr(self, 'curves_panel', None), 'curve_mode', 'Custom')
+        return mode if isinstance(mode, str) else 'Custom'
+
+    def _active_curve_canvas(self) -> Any:
+        if self._current_curve_mode() != 'Custom':
+            return self.hsl_curves_panel.hsl_curves_widget
+        return self.curves_widget
+
+    def _scope_playback_is_active(self) -> bool:
+        """Check both the source player and Color's timeline transport."""
+        video = getattr(self, 'video_controller', None)
+        if bool(getattr(video, 'is_playing', False)):
+            return True
+        get_timeline = getattr(self, '_color_timeline_playback_controller', None)
+        timeline = get_timeline() if callable(get_timeline) else None
+        return bool(getattr(timeline, 'is_playing', False))
+
+    def _scope_scrub_is_active(self) -> bool:
+        """Include the viewport bar and shared timeline's drag preview state."""
+        return bool(
+            getattr(self, '_curves_scope_scrubbing', False)
+            or getattr(self, '_viewport_scrub_active', False)
+            or getattr(getattr(self, 'edit_page', None), '_scrub_active', False)
+        )
+
+    def _on_scope_scrub_state_changed(self, active: bool) -> None:
+        """Retain the underlay throughout a drag, including pause callbacks."""
+        self._curves_scope_scrubbing = active
+        if active:
+            self.engine.discard_pending_gpu_scope()
+            self._latest_gpu_scope_demand = None
+        else:
+            # The bar emits its exact seek immediately after scrub_finished.
+            # Let that request enter the render queue before refreshing scopes.
+            QTimer.singleShot(150, self._on_scope_demand_changed)
+
+    def _on_scope_play_state_changed(
+        self, is_playing: bool, speed: float = 0.0, direction: int = 1,
+    ) -> None:
+        """Freeze the curve underlay on play and refresh it after pause."""
+        if is_playing:
+            self.engine.discard_pending_gpu_scope()
+            self._latest_gpu_scope_demand = None
+        elif self._is_scope_panel_visible() or self._is_curves_panel_visible():
+            self._submit_gpu_scope_demand(is_playing=False, force=True)
 
     def _on_scope_visibility_changed(self, visible: bool) -> None:
         """Start/stop the low-priority GPU scope lane with the dock."""
@@ -1396,11 +1457,14 @@ class LayerOpsMixin:
             panel = getattr(self, 'scope_panel', None)
             if panel is not None:
                 panel.update_gpu_scope(frame)
-            curves_widget = getattr(self, 'curves_widget', None)
-            if curves_widget is not None:
+            curves_widget = self._active_curve_canvas() if getattr(self, 'curves_widget', None) is not None else None
+            if (curves_widget is not None and not self._scope_playback_is_active()
+                    and not self._scope_scrub_is_active()
+                    and getattr(frame, 'curves_mode', 'Custom') == self._current_curve_mode()
+                    and frame.curves_histogram_texture_id is not None):
                 curves_widget.set_scope_frame(
-                    frame.histogram_texture_id,
-                    *frame.histogram_size,
+                    frame.curves_histogram_texture_id,
+                    *frame.curves_histogram_size,
                 )
         except Exception as exc:
             logger.debug("GPU scope present failed: %s", exc)
@@ -1426,7 +1490,9 @@ class LayerOpsMixin:
     def _is_curves_panel_visible(self) -> bool:
         """Return whether the integrated curve histogram is exposed."""
         dock = getattr(self, 'dock_curves', None)
-        panel = getattr(self, 'curves_widget', None)
+        panel = getattr(self, 'curves_panel', None)
+        if panel is None:
+            panel = getattr(self, 'curves_widget', None)
         return bool(
             dock is not None
             and panel is not None

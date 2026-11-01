@@ -6,7 +6,7 @@ Tests for the non-blocking Color scrub-release settle seek.
 seek + 就绪轮询上屏精确帧。
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -30,6 +30,22 @@ def _make_controller(page: str = "Color"):
 
 
 class TestScrubSettleNonBlocking:
+    def test_scope_freeze_precedes_timeline_pause_and_unfreezes_on_release(self):
+        fc = _make_controller("Color")
+        timeline = MagicMock()
+        timeline.is_playing = True
+        fc._color_timeline_playback_controller = lambda: timeline
+        fc._on_scope_scrub_state_changed = MagicMock()
+        fc.on_video_seek = MagicMock()
+        calls = MagicMock()
+        calls.attach_mock(fc._on_scope_scrub_state_changed, 'scope')
+        calls.attach_mock(timeline.pause, 'pause')
+        fc.on_video_scrub_started(5)
+        assert calls.mock_calls[0].args == (True,)
+        assert calls.mock_calls[1] == call.pause()
+        fc.on_video_scrub_finished(10)
+        fc._on_scope_scrub_state_changed.assert_called_with(False)
+
     def test_settle_seek_is_non_blocking_with_color_precision(self):
         fc = _make_controller("Color")
         fc.on_video_scrub_started(50)

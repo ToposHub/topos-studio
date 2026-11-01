@@ -3,7 +3,7 @@ import logging
 import numpy as np
 from typing import Dict, Optional, Any
 from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QButtonGroup, QWidget
-from PyQt6.QtCore import Qt, QPointF, pyqtSignal, QRectF, QTimer
+from PyQt6.QtCore import Qt, QEvent, QPointF, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath
 from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
 
@@ -25,17 +25,41 @@ from src.shared.ui.style_sheet import (
 
 logger = logging.getLogger(__name__)
 
-class CurvesWidget(GpuScopeWidget):
+class _CurveOverlay(QWidget):
+    """Raster UI chrome stays visible even without a GPU scope frame."""
+
+    def __init__(self, canvas: "CurvesWidget") -> None:
+        super().__init__(canvas)
+        self.canvas = canvas
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setStyleSheet("background: transparent;")
+
+    def paintEvent(self, event) -> None:
+        self.canvas._paint_curve_overlay(self)
+
+
+class CurvesWidget(QWidget):
     # Emits the LUT array (256, 1, 3) BGR and the control points data
     changed = pyqtSignal(np.ndarray, dict)
     interaction_started = pyqtSignal()
     interaction_ended = pyqtSignal()
+    histogram_geometry_changed = pyqtSignal()
     # Color Picker signals
     picker_toggled = pyqtSignal(bool)  # True = activate picker, False = deactivate
     color_received = pyqtSignal(float, float, float)  # r, g, b (0-255)
 
     def __init__(self, parent=None) -> None:
-        super().__init__(parent, preserve_aspect=False, show_value_axis=False)
+        super().__init__(parent)
+        self.setStyleSheet("background-color: #232326;")
+        self._scope = GpuScopeWidget(self, preserve_aspect=False, show_value_axis=False)
+        self._scope.hide()
+        self._has_histogram = False
+        self._overlay = _CurveOverlay(self)
+        self._scope_resize_timer = QTimer(self)
+        self._scope_resize_timer.setSingleShot(True)
+        self._scope_resize_timer.setInterval(150)
+        self._scope_resize_timer.timeout.connect(self.histogram_geometry_changed)
         self.setMinimumSize(300, 220)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         
@@ -50,7 +74,7 @@ class CurvesWidget(GpuScopeWidget):
         }
         
         self.selected_point_idx = -1
-        self.margin = 15
+        self.margin = 7
         # 曲线面板侧栏状态（语义见 layer.compose_curves_lut）：
         # - edit_amounts：YRGB 强度 0-100，100 = 曲线全额生效；
         # - edit_linked：链接编辑（拖动/加点/删点同步到全部通道）。
@@ -130,8 +154,25 @@ class CurvesWidget(GpuScopeWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._scope.setGeometry(self.get_draw_rect().toAlignedRect())
+        self._overlay.setGeometry(self.rect())
+        self._overlay.raise_()
         # Position buttons at top-left, floating over the canvas
         self.btn_container.move(self.margin + 5, self.margin + 5)
+        self.btn_container.raise_()
+        self._scope_resize_timer.start()
+
+    def histogram_display_metrics(self) -> tuple[tuple[int, int], float]:
+        """Request a one-to-one device-pixel texture and one logical pixel stroke."""
+        rect = self.get_draw_rect().toAlignedRect()
+        dpr = self.devicePixelRatioF()
+        return (max(1, round(rect.width() * dpr)), max(1, round(rect.height() * dpr))), dpr
+
+    def event(self, event: QEvent) -> bool:
+        if (event.type() == QEvent.Type.DevicePixelRatioChange
+                and hasattr(self, '_scope_resize_timer')):
+            self._scope_resize_timer.start()
+        return super().event(event)
 
     def set_active_channel(self, ch):
         self.active_channel = ch
@@ -153,22 +194,23 @@ class CurvesWidget(GpuScopeWidget):
         my = (wy - rect.top()) / rect.height() * 255
         return mx, my
 
-    def paintEvent(self, event):
-        # QOpenGLWidget performs its own framebuffer pass via paintGL.
-        super().paintEvent(event)
+    def set_scope_frame(self, tex_id: Optional[int], width: int, height: int) -> None:
+        """Present histogram inside the same bounds used by curve coordinates."""
+        self._scope.set_scope_frame(tex_id, width, height)
+        self._has_histogram = tex_id is not None
+        self._scope.setVisible(tex_id is not None)
+        self._overlay.raise_()
+        self.btn_container.raise_()
+        self.update()
 
-    def paintGL(self) -> None:
-        """Blit the shared GPU histogram, then paint the curve overlay."""
-        super().paintGL()
-        if self._frame_tex_id is None or not self._gl_ready:
-            self._paint_curve_overlay()
+    def clear(self) -> None:
+        self._scope.clear()
+        self._has_histogram = False
+        self._scope.hide()
+        self.update()
 
-    def _paint_scope_chrome(self) -> None:
-        super()._paint_scope_chrome()
-        self._paint_curve_overlay()
-
-    def _paint_curve_overlay(self) -> None:
-        painter = QPainter(self)
+    def _paint_curve_overlay(self, target: QWidget) -> None:
+        painter = QPainter(target)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         rect = self.get_draw_rect()
@@ -200,14 +242,15 @@ class CurvesWidget(GpuScopeWidget):
             self._draw_curve(painter, ch, inactive_colors[ch], rect, thickness=1.0)
 
         # Draw Active Curve with thicker line
-        self._draw_curve(painter, self.active_channel, active_colors[self.active_channel], rect, thickness=1.8)
+        self._draw_curve(painter, self.active_channel, active_colors[self.active_channel], rect, thickness=1.2)
 
         # Draw Control Points for Active Channel
         self._draw_control_points(painter, active_colors[self.active_channel], rect)
+        painter.end()
 
     def _draw_background(self, painter: QPainter, rect: QRectF):
         """Draw the curve surface with a fine black outer frame."""
-        if self._frame_tex_id is None:
+        if not self._has_histogram:
             painter.setBrush(QColor(35, 35, 38))
         else:
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -216,12 +259,12 @@ class CurvesWidget(GpuScopeWidget):
 
     def _draw_grid(self, painter: QPainter, rect: QRectF):
         """Draw fine continuous grid lines with a subtly stronger major grid."""
-        x_divisions = max(4, round(rect.width() / 50.0))
-        y_divisions = max(4, round(rect.height() / 38.0))
-        major_every = 3
+        x_divisions = max(4, round(rect.width() / 27.0))
+        y_divisions = max(4, round(rect.height() / 14.0))
+        major_every = 5
 
-        minor_pen = QPen(QColor(49, 49, 53), 0.55)
-        major_pen = QPen(QColor(62, 62, 66), 0.75)
+        minor_pen = QPen(QColor(75, 75, 80, 52), 0.55)
+        major_pen = QPen(QColor(92, 92, 97, 65), 0.75)
         for divisions, vertical in ((x_divisions, True), (y_divisions, False)):
             for i in range(1, divisions):
                 x = rect.left() + rect.width() * i / divisions

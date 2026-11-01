@@ -305,8 +305,11 @@ class DockLayoutMixin:
 
 
         self.dock_curves = create_custom_dock(I18N.tr("panel.curves", "Curves"), self.curves_panel, "dockCurves")
-        self.dock_curves.setMinimumWidth(780)
-        self.dock_curves.setMaximumWidth(1680)
+        self.dock_curves.setMinimumWidth(420)
+        self.dock_curves.setMaximumWidth(1800)
+        self.dock_curves.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_curves)
         self.dock_curves.visibilityChanged.connect(self._on_scope_visibility_changed)
 

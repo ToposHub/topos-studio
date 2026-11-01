@@ -222,7 +222,11 @@ class TrackerPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("TrackerPanel")
         self.setMinimumWidth(320)
-        self.setMaximumWidth(900)
+        # Tracker shares a tab stack with Curves in the Color workspace.
+        # QMainWindow applies the tightest member width to the whole stack,
+        # so a 900px cap here silently capped Curves too, regardless of the
+        # Curves dock's own 1800px maximum.
+        self.setMaximumWidth(1800)
         self.setStyleSheet(PANEL_STYLE)
 
         self._state = PanelState.EMPTY

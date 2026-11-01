@@ -8,18 +8,15 @@ from src.shared.panels.registry import PanelRegistry
 
 
 def test_color_mapping_panel_uses_existing_child_panels(qapp):
-    hsl_curves = QWidget()
     warper = QWidget()
     mixer = QWidget()
 
-    panel = ColorMappingPanel(hsl_curves, warper, mixer)
+    panel = ColorMappingPanel(warper, mixer)
 
-    assert panel.tabs.count() == 3
-    assert panel.tabs.widget(0) is hsl_curves
-    assert panel.tabs.widget(1) is warper
-    assert panel.tabs.widget(2) is mixer
-    assert [panel.tabs.tabText(i) for i in range(3)] == [
-        "HSL Curves",
+    assert panel.tabs.count() == 2
+    assert panel.tabs.widget(0) is warper
+    assert panel.tabs.widget(1) is mixer
+    assert [panel.tabs.tabText(i) for i in range(2)] == [
         "Warper",
         "Mixer",
     ]

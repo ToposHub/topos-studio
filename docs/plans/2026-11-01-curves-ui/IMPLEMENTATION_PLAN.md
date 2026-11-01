@@ -5,18 +5,44 @@
 
 ## 本次已完成
 
+2026-11-01 HSL 曲线合并：合并前实际查看 Resolve 的 Hue vs Hue、Hue vs Sat、Lum vs Sat、Sat vs Lum 页面。Curves 顶部改为 Custom → Hue vs Hue → Hue vs Sat → Hue vs Lum → Lum vs Sat → Sat vs Sat → Sat vs Lum 七个图标；Custom 保留 Edit / Soft Clip 侧栏，六个 HSL 模式使用全宽画布和底部取色、预设色点、输入/输出数值框。移除 Color Mapping 的 HSL 页，只保留 Warper / Mixer；旧 `color.hsl_curves` 工作区入口转至 `color.curves`。
+
+复用原 `self.hsl_curves_panel` 与其 widget，LUT 六行顺序仍为 LumSat/HueHue/HueSat/HueLum/SatSat/SatLum，插值与调色算法、工程数据格式未改。导航不发曲线 changed，不产生撤销提交；底部数字与色点沿原 interaction/flush 提交链。切页关闭隐藏拾色器，并清理双方 GPU descriptor，避免共享纹理背景串页。
+
+HSL 背景分布：在既有 GPU histogram alpha 通道按当前模式统计 HSV Hue（按饱和度加权）、HSV Saturation 或既有 HSL 取色器使用的 BT.601 Luma；RGB 统计保持独立示波器兼容。Hue 背景为暗色相环渐变，直方图压在中线下方；Lum/Sat 为黑白渐变。网格/中线为连续细线，轮廓使用既有等宽像素方法。仍在播放/拖拽期间冻结，仅暂停后刷新；这些外观与统计口径为项目实现，不宣称 Resolve 内部算法逐项一致。
+
+验证：243 项合并/水合/工作区/已有 HSL 回归通过，另新增 HSL descriptor 定向检查通过；15 项真实 GPU 检查（含六个 HSL 模式轴位置、无彩像素不制造假红峰）通过，2 项原生 Qt 检查通过，完整 MainWindow `--test-startup` 成功。预览 `merged-HueHue.png` / `merged-LumSat.png` 为空态 UI；`merged-*-histogram.png` 为真实 GPU 输出和同一 UI 覆盖层的静态合成预览。
+
+2026-11-01 轮廓线等宽修正（用户澄清“连续”指线条粗细）：原 shader 用纵向距离加 fwidth 计算轮廓，再将固定 1024×512 纹理拉到画布尺寸，容易造成不同斜率的线段粗细不均。现在用 `abs(delta) / length(vec2(dFdx(delta), dFdy(delta)))` 计算垂直于轮廓的屏幕像素距离；需求携带实际 drawRect 物理像素尺寸与 DPR，专用纹理直接按该尺寸绘制，线宽为 1 个逻辑像素。尺寸变化 150 ms 合并更新，跨 DPR 显示器也刷新尺寸；同尺寸复用纹理和 FBO。另将暂停态曲线统计固定为 768×432，避免分析档位切换改变峰高。
+
+本批最终验证：115 项 scope/UI/scrub 回归、8 项真实 GPU 检查、2 项 Cocoa 原生 Qt 检查通过。GPU 检查覆盖平缓/陡峭段在三种尺寸及 DPR 1/2 下的垂直线宽、相同静帧重复绘制的像素一致性、纹理/FBO 同尺寸复用等。
+
+2026-11-01 拖拽预览与闪黑修正：播放条 scrub 开始时先冻结曲线背景，再暂停/seek（覆盖 Color 时间线早退分支）；提交与接收两侧均检查拖拽状态，松手后延迟 150 ms 请求刷新，播放开始仍保留原冻结策略。`GpuScopeWidget` 使用 PartialUpdate，在渲染线程占用 mutex、UI tryLock 跳过 blit 时保留上一张 FBO；显式 clear 单独填充空背景，避免旧素材残留。移除曲线父控件 paintEvent 内对透明子覆盖层的重复 update，避免父子重绘循环。面板基础最小 900 px、dock 920 px、画布基础最小 560 px；工具区变高时按约 1.6:1 的画布宽高需求提高最小宽度（侧栏预留 340 px），继续保持左右排布。
+
+本批验证：113 项 scope/UI/scrub 回归通过；Cocoa 原生 Qt 2 项通过，分别检查忙渲染器连续跳过 5 次绘制仍保留原像素、clear 确实移除旧帧，以及空闲曲线不再持续重绘。实机操作对照及局限见 `INTERACTION_CHECK.md`。
+
+2026-11-01 空项目显示修正：曲线画布改用 QWidget，GPU 直方图由内嵌 presenter 显示，独立透明覆盖层持续绘制网格、曲线和控制点。无素材、未收到 scope 帧及清空 scope 时均显示完整网格；GPU 纹理显示范围与曲线坐标范围对齐。外留白由 15 px 缩为 7 px，背景统一为炭灰，外框保留细黑线。画布和参数区之间改用可拖动的水平分隔条，参数区宽度 230–320 px；面板最小 640 px、dock 660–2400 px，始终左右排布，取消窄宽度上下堆叠。空态预览：`empty-grid.png`。
+
+本批验证：空态网格像素、resize、清空 scope、左右布局与分隔条调整，以及既有曲线强度/链接编辑，共 22 项通过。全局深色主题的空态截图已检查；本批未在真实素材上复核 GPU 直方图显示。
+
+2026-11-01 直方图外观与刷新优化：对照已打开的 Resolve 曲线面板，曲线背景改用独立的 1024×512 YRGB 显示纹理：RGB 复用原有统计、Y 使用 Rec.709 亮度独立统计；GPU 1×1 峰值归约，每通道恢复线性计数并单独归一化，保留 2% 顶部余量。五点核抑制 8-bit 素材在 512 bins 上形成的隔列梳齿，RGB 低透明填充、Y 灰色填充、抗锯齿细轮廓，背景不烘焙重复网格。外观与缩放方式来自视觉对照，未宣称 Resolve 内部亮度公式或算法逐项相同。修复浮点散列在高质量采样大面积纯色下的计数损失，改用整数散列。
+
+播放时曲线背景冻结，暂停、静帧调色、拖动定位后再刷新；仅曲线可见且正在播放时不提交 GPU scope demand。独立示波器仍按自身设置刷新；独立 histogram 未请求曲线时也不额外统计 Y。源播放器与 Color 时间线均接入播放状态信号，开始播放取消待执行需求，播放时忽略迟到的曲线描述符，暂停时强制请求当前帧。所有分析与显示 pass 保留在既有渲染线程，生产路径无 GPU 回读。
+
+本批验证：110 项 scope/controller/UI 回归通过；另 5 项真实 GPU 测试通过（shader 编译、全零 mask、正 mask 权重、331776 样本纯色尖峰与 Y 位置、线性峰高比例、真实素材输出）。GPU 图片来自本地 `2K_h264.mp4` 第一帧；预览 `histogram-gpu.png` 是测试读回的 GPU 显示纹理，`histogram-preview.png` 为它与现有 UI 覆盖层的静态合成预览。两张预览仅用于外观对照，不代表完整应用内跨 context 播放验收。
+
 - [x] 新增 `src/features/color/ui/curves_panel.py`，左侧保留原曲线画布，右侧为 Edit 与 Soft Clip。
 - [x] 曲线原拾色、重置按钮移至顶部，保持原控件实例、信号及曲线数据接口。
 - [x] Edit 提供 Y / R / G / B、链接按钮、四条强度滑条/数值框、逐行与区域重置。Y 在现有曲线内部仍对应 M。
 - [x] YRGB 按钮采用实色通道块，四条强度滑杆的滑块圆点使用对应白/红/绿/蓝通道色。
 - [x] 默认链接状态下 YRGB / RGB 通道都显示实色填充；点击单个通道会解除链接，并只高亮当前通道，其余通道显示灰色描边。连接图标无背景边框。
 - [x] 曲线网格由点线改为随画布像素大小自适应的连续细线，主网格轻微加深，外边框为黑色细线。
-- [x] 曲线工具显示时通过示波器 GPU demand 共用实时 RGB 直方图 pass；直方图在曲线后方绘制，不从 GPU 回读像素。
+- [x] 曲线工具在暂停时通过 GPU demand 共用 RGB 统计并补充独立 Y 统计，输出专用 YRGB 纹理；播放时冻结，生产路径不从 GPU 回读像素。
 - [x] Soft Clip 提供 RGB、链接与区域重置，参数**仅保留 Low、Low Soft、High、High Soft**。
 - [x] 新面板不再展示曝光、对比度、白点、黑点、肩部强度、趾部强度、独立预览图、启用开关。
 - [x] 使用全局 `ParamSliderRow`（`DragValue` + `ToposClickableSlider`）、通道按钮样式和图标。
-- [x] 整个曲线工具在 dock 限定宽度内始终保持画布与参数左右排布；窄于 760 px 的容器兜底切换为上下堆叠（resizeEvent 自适应）；侧栏支持滚动。
-- [x] 曲线 dock 限定 780–1680 px，避免工具区过窄或在超宽窗口下无限扩张。
+- [x] 整个曲线工具始终保持画布与参数左右排布；可拖动中间分隔条调整两侧宽度，侧栏支持滚动。
+- [x] 曲线 dock 基础限定 920–2400 px，面板基础最小 900 px；随工具高度提高最小宽度以保持宽画布。
 - [x] 移除独立 `dockSoftClip`、面板菜单注册、默认布局项、默认 tabify 项。
 - [x] 内置 HDR 工作区改用曲线面板；旧用户工作区的 `color.soft_clip` 自动解析为 `color.curves`。
 - [x] 中文、英文文案；预览图保存于本目录。
@@ -30,7 +56,7 @@
 **兼容边界**：
 - 旧 8 参数 `soft_clip_params`：独立 SoftClipPanel 已删除（任务 9）。legacy 数据与渲染路径（GLSL/CPU/导出/delivery）保留；仅脚本 API 与旧工程数据可写，无 UI 读写。与新四参数阶段互不转换。
 - 移动版工程兼容：模型归一化接受移动版 camelCase 键与 red/green/blue 通道别名（`normalize_curves_soft_clip`），为"移动工程在桌面打开"预留直通映射。
-- 旧工作区布局：`color.soft_clip` → `color.curves` 由 `sanitize_preset()` 兼容；`dockCurves` 名称与 780–1680 px 限定不变。
+- 旧工作区布局：`color.soft_clip` → `color.curves` 由 `sanitize_preset()` 兼容；`dockCurves` 名称不变，面板与 dock 的宽度限定为 420–1800 px。最小宽度由 220 px 画布、170 px 参数区及分隔条/边距组成；Tracker 与曲线共用标签组时，其最大宽度也保持 1800 px，避免收紧整组上限。
 
 
 

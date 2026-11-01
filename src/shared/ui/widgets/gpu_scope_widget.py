@@ -129,6 +129,10 @@ class GpuScopeWidget(QOpenGLWidget):
         show_vectorscope_targets: bool = False,
     ) -> None:
         super().__init__(parent)
+        # tryLock may intentionally skip a blit during a seek/render. Qt's
+        # default NoPartialUpdate invalidates the FBO before paintGL, making
+        # that early return flash black. Keep the last presented pixels.
+        self.setUpdateBehavior(QOpenGLWidget.UpdateBehavior.PartialUpdate)
         # Request a double-buffered core-profile surface matching the app.
         fmt = QSurfaceFormat(_DEFAULT_FMT)
         fmt.setSwapBehavior(QSurfaceFormat.SwapBehavior.DoubleBuffer)
@@ -244,7 +248,14 @@ class GpuScopeWidget(QOpenGLWidget):
         self._gl_ready = False
 
     def paintGL(self) -> None:  # pragma: no cover - GL required
-        if not self._gl_ready or self._frame_tex_id is None:
+        if not self._gl_ready:
+            return
+        if self._frame_tex_id is None:
+            # PartialUpdate retains pixels deliberately on a busy-renderer
+            # skip, but an explicit clear must drop the previous source.
+            painter = QPainter(self)
+            painter.fillRect(self.rect(), QColor(5, 5, 5))
+            painter.end()
             return
         # tryLock: never block the GUI. If the renderer holds the mutex,
         # keep showing the previous frame.

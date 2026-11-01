@@ -1,6 +1,6 @@
 """Combined Color Mapping panel.
 
-The panel groups the three color-remapping tools behind a single tab bar while
+The panel groups Warper and Mixer behind a single tab bar while
 keeping each tool's existing widget hierarchy and behavior unchanged.
 """
 
@@ -12,7 +12,7 @@ from src.shared.i18n.i18n import I18N
 
 
 class ColorMappingPanel(QWidget):
-    """Container for HSL Curves, Warper, and Mixer panels.
+    """Container for Warper and Mixer panels.
 
     The child panels are supplied by the main window so existing controller
     references and signal connections continue to use the original panel
@@ -21,14 +21,12 @@ class ColorMappingPanel(QWidget):
 
     def __init__(
         self,
-        hsl_curves_panel: QWidget,
         warper_panel: QWidget,
         mixer_panel: QWidget,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
 
-        self.hsl_curves_panel = hsl_curves_panel
         self.warper_panel = warper_panel
         self.mixer_panel = mixer_panel
 
@@ -46,10 +44,6 @@ class ColorMappingPanel(QWidget):
                 color: #cc6600;
             }
             """
-        )
-        self.tabs.addTab(
-            self.hsl_curves_panel,
-            I18N.tr("panel.hsl_curves", "HSL Curves"),
         )
         self.tabs.addTab(
             self.warper_panel,

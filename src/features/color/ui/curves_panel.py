@@ -12,8 +12,8 @@ from collections.abc import Callable
 
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QBoxLayout, QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
+    QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from src.features.color.core.curves_soft_clip import (
@@ -27,6 +27,11 @@ from src.shared.ui.style_sheet import (
 )
 from src.shared.ui.widgets.curves_widget import CurvesWidget
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
+from src.shared.ui.widgets.curve_mode_button import CurveModeButton
+from src.shared.ui.widgets.hsl_curves_widget import CURVE_MODES
+from src.features.color.ui.hsl_curves_panel import HSLCurvesPanel
+
+CURVE_PALETTE_ORDER = ('Custom', 'HueHue', 'HueSat', 'HueLum', 'LumSat', 'SatSat', 'SatLum')
 
 
 class CurvesPanel(QWidget):
@@ -41,18 +46,22 @@ class CurvesPanel(QWidget):
     edit_changed = pyqtSignal(dict)
     interaction_started = pyqtSignal()
     interaction_ended = pyqtSignal()
+    curve_mode_changed = pyqtSignal(str)
 
-    def __init__(self, curves_widget: CurvesWidget, parent: QWidget | None = None) -> None:
+    def __init__(self, curves_widget: CurvesWidget, parent: QWidget | None = None,
+                 *, hsl_panel: HSLCurvesPanel | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("curves_panel")
         # 接线守卫先于任何控件连接初始化：构造期的 toggle/setValue 噪声
         # 不得触发节流发射（_wiring_ready 在 __init__ 尾部才放行）。
         self._syncing = False
         self._wiring_ready = False
-        # Production docks clamp this tool to 780-1680 px, where the canvas
-        # and controls stay side by side; narrower embeds fall back to the
-        # stacked layout in resizeEvent.
+        # Keep the dock resizable on compact screens while preserving enough
+        # room for a useful graph and the channel controls side by side.
+        self.setMinimumWidth(420)
         self.curves_widget = curves_widget
+        self.hsl_panel = hsl_panel if hsl_panel is not None else HSLCurvesPanel()
+        self.curve_mode = 'Custom'
         self.edit_rows: dict[str, ParamSliderRow] = {}
         self.soft_clip_rows: dict[str, ParamSliderRow] = {}
         self.edit_buttons: dict[str, QPushButton] = {}
@@ -62,32 +71,60 @@ class CurvesPanel(QWidget):
         layout.setContentsMargins(6, 4, 6, 6)
         layout.setSpacing(4)
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel(I18N.tr("curves_palette.custom", "Custom")))
-        toolbar.addStretch()
-        # Reparent the original buttons, retaining their existing slots/state.
+        self.mode_title = QLabel(I18N.tr("curves_palette.custom", "Custom"))
+        toolbar.addWidget(self.mode_title)
+        # Keep the picker beside its active curve mode so it is easy to find.
         self.picker_btn = curves_widget.picker_btn
         toolbar.addWidget(self.picker_btn)
+        toolbar.addStretch()
+        self.mode_buttons: dict[str, CurveModeButton] = {}
+        self.mode_group = QButtonGroup(self)
+        for mode in CURVE_PALETTE_ORDER:
+            title = self._mode_title(mode)
+            button = CurveModeButton(mode, title, self)
+            self.mode_buttons[mode] = button
+            self.mode_group.addButton(button)
+            button.clicked.connect(lambda _checked=False, m=mode: self.set_curve_mode(m))
+            toolbar.addWidget(button)
+        self.mode_buttons['Custom'].setChecked(True)
+        # Reparent the original buttons, retaining their existing slots/state.
         self.reset_curves_btn = curves_widget.btn_container.layout().itemAt(
             curves_widget.btn_container.layout().count() - 1
         ).widget()
         toolbar.addWidget(self.reset_curves_btn)
+        self.reset_hsl_btn = self.hsl_panel.hsl_curves_widget.reset_btn
+        toolbar.addWidget(self.reset_hsl_btn)
+        self.reset_hsl_btn.hide()
         curves_widget.btn_container.hide()
         layout.addLayout(toolbar)
 
-        self.body = QBoxLayout(QBoxLayout.Direction.LeftToRight)
-        self.body.setSpacing(8)
-        layout.addLayout(self.body, 1)
-        curves_widget.setMinimumSize(180, 180)
-        self.body.addWidget(curves_widget, 1)
+        self.body = QSplitter(Qt.Orientation.Horizontal, self)
+        self.body.setChildrenCollapsible(False)
+        self.body.setHandleWidth(8)
+        self.body.setStyleSheet("""
+            QSplitter::handle { background: transparent; }
+            QSplitter::handle:hover { background: rgba(255, 122, 0, 72); }
+            QSplitter::handle:pressed { background: rgba(255, 122, 0, 128); }
+        """)
+        self.pages = QStackedWidget(self)
+        self.custom_page = QWidget(self.pages)
+        custom_layout = QVBoxLayout(self.custom_page)
+        custom_layout.setContentsMargins(0, 0, 0, 0)
+        custom_layout.addWidget(self.body)
+        self.pages.addWidget(self.custom_page)
+        self.hsl_panel.set_integrated(True)
+        self.pages.addWidget(self.hsl_panel)
+        layout.addWidget(self.pages, 1)
+        curves_widget.setMinimumSize(220, 180)
+        self.body.addWidget(curves_widget)
 
         self.sidebar_scroll = QScrollArea(self)
         self.sidebar_scroll.setWidgetResizable(True)
         self.sidebar_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.sidebar_scroll.setStyleSheet(SCROLL_AREA_TRANSPARENT_STYLE)
-        self.sidebar_scroll.setMinimumWidth(250)
+        self.sidebar_scroll.setMinimumWidth(170)
         self.sidebar_scroll.setMaximumWidth(320)
-        self.body.setDirection(QBoxLayout.Direction.LeftToRight)
         self.sidebar_scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.sidebar = QWidget()
         self.sidebar.setObjectName("curves_sidebar")
@@ -203,16 +240,41 @@ class CurvesPanel(QWidget):
 
         self.sidebar_scroll.setWidget(self.sidebar)
         self.body.addWidget(self.sidebar_scroll)
+        self.body.setStretchFactor(0, 1)
+        self.body.setStretchFactor(1, 0)
+        self.body.setSizes([700, 250])
+        self.hsl_panel.hsl_curves_widget.mode_changed.connect(self.set_curve_mode)
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
-        """Stack the canvas above the controls when the tool drops below
-        the side-by-side width (dock layout clamps keep production wide)."""
-        super().resizeEvent(event)
-        narrow = self.width() < 760
-        direction = (QBoxLayout.Direction.TopToBottom if narrow
-                     else QBoxLayout.Direction.LeftToRight)
-        if self.body.direction() != direction:
-            self.body.setDirection(direction)
+    @staticmethod
+    def _mode_title(mode: str) -> str:
+        if mode == 'Custom':
+            return I18N.tr('curves_palette.custom', 'Custom')
+        return I18N.tr(f"hsl_curves.{CURVE_MODES[mode]['name']}",
+                       CURVE_MODES[mode]['name'].replace('_', ' ').title())
+
+    def set_curve_mode(self, mode: str) -> None:
+        """Navigate editors without changing a curve, LUT, or undo history."""
+        if mode not in CURVE_PALETTE_ORDER or mode == self.curve_mode:
+            return
+        self.curves_widget.deactivate_picker()
+        self.hsl_panel.deactivate_picker()
+        self.curves_widget.clear()
+        self.hsl_panel.hsl_curves_widget.clear_scope()
+        self.curve_mode = mode
+        custom = mode == 'Custom'
+        self.mode_buttons[mode].setChecked(True)
+        self.mode_title.setText(self._mode_title(mode))
+        self.pages.setCurrentIndex(0 if custom else 1)
+        self.picker_btn.setVisible(custom)
+        self.reset_curves_btn.setVisible(custom)
+        self.reset_hsl_btn.setVisible(not custom)
+        if not custom:
+            self.hsl_panel.hsl_curves_widget.current_mode = mode
+            # Resolve-style one-shot picking: entering an HSL curve makes the
+            # next viewer click add a point; the existing pick handler turns
+            # this back off after sampling.
+            self.hsl_panel.hsl_curves_widget.picker_btn.setChecked(True)
+        self.curve_mode_changed.emit(mode)
 
     @staticmethod
     def _channel_color(channel: str) -> str:
