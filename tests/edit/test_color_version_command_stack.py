@@ -504,3 +504,110 @@ class TestMacroWithActivation:
         # 内容相同，校验 active 指针与栈表完整即可）
         assert versions_state(p, "s1")["active"] == "A"
         assert "A" in versions_state(p, "s1")["versions"]
+
+
+class TestSnapshotRestorationCompleteness:
+    @pytest.mark.parametrize("operation", ["activate", "delete_all"])
+    def test_empty_snapshot_clears_optional_content_and_undo_redo_restores(self, operation):
+        from src.features.edit.core.color_version_domains import live_matches_active_version
+
+        stack = ProjectCommandStack()
+        p = _project()
+        p = stack.execute(InitializeDefaultVersionCommand.create(p, "s1"), p)
+        # Every field below is omitted when empty by ColorStackData.to_dict().
+        # Loading the original snapshot must clear the later version's values.
+        edited = replace(
+            p.color_stacks["s1"],
+            layers=({"name": "Later", "grading_params": {"exposure": 9.0}},),
+            active_layer_index=2,
+            raw_params={"iso": 1600},
+            video_denoise={"enabled": True},
+            curves_soft_clip={"enabled": True, "high": 0.3},
+            curves_edit={"strength": 0.2},
+        )
+        p = p.with_color_stacks({"s1": edited})
+        p = stack.execute(SaveColorVersionCommand.create(p, "s1", "Later"), p)
+        command = (ActivateColorVersionCommand.create("s1", DEFAULT_VERSION_NAME)
+                   if operation == "activate" else DeleteAllVersionsCommand.create(p, "s1"))
+        loaded = stack.execute(command, p)
+        restored = loaded.color_stacks["s1"]
+        assert restored.layers == ()
+        assert restored.active_layer_index == 0
+        assert restored.raw_params == {}
+        assert restored.video_denoise is None
+        assert restored.curves_soft_clip == {}
+        assert restored.curves_edit == {}
+        assert live_matches_active_version(loaded, "s1")
+        assert not ({"plugin_diagnostics", "plugin_check_unverified", "saved_at", "plugin_versions"}
+                    & restored._extra_fields.keys())
+        undone = stack.undo(loaded)
+        assert undone.color_stacks["s1"].to_dict() == edited.to_dict()
+        redone = stack.redo(undone)
+        assert redone.color_stacks["s1"].to_dict() == restored.to_dict()
+
+    def test_version_unknown_content_replaces_live_unknown_content_but_keeps_identity(self):
+        stack = ProjectCommandStack()
+        original = ColorStackData.from_dict({
+            "stack_id": "s1", "asset_id": "a", "scope": "clip_local",
+            "timeline_id": "tl", "clip_id": "clip", "created_at": 15.0,
+            "future_color_content": {"strength": 0.1},
+        })
+        p = EditProject(project_id="p", name="P", color_stacks={"s1": original})
+        p = stack.execute(SaveColorVersionCommand.create(p, "s1", "A"), p)
+        changed = ColorStackData.from_dict({
+            **original.to_dict(), "future_color_content": {"strength": 0.9},
+            "later_color_content": {"enabled": True},
+        })
+        p = p.with_color_stacks({"s1": changed})
+        p = stack.execute(ActivateColorVersionCommand.create("s1", "A"), p)
+        loaded = p.color_stacks["s1"].to_dict()
+        assert loaded["future_color_content"] == {"strength": 0.1}
+        assert "later_color_content" not in loaded
+        for name in ("stack_id", "asset_id", "scope", "timeline_id", "clip_id", "created_at"):
+            assert loaded[name] == original.to_dict()[name]
+
+
+class TestUnknownVersionTableFields:
+    def test_all_version_table_commands_preserve_future_fields(self):
+        from src.features.edit.core.color_versions import SetStackLockCommand
+
+        stack = ProjectCommandStack()
+        p = _project()
+        opaque = {"future_version_table_schema": {"metadata": [1, {"keep": "opaque"}]}}
+        p = p.with_color_stack_versions({"s1": opaque})
+        p = stack.execute(InitializeDefaultVersionCommand.create(p, "s1"), p)
+        p = stack.execute(SaveColorVersionCommand.create(p, "s1", "A"), p)
+        p = stack.execute(RenameColorVersionCommand.create(p, "s1", "A", "B"), p)
+        p = stack.execute(DuplicateColorVersionCommand.create(p, "s1", "B", "C"), p)
+        p = stack.execute(SetStackLockCommand.create(p, "s1", True), p)
+        p = stack.execute(DeleteColorVersionCommand.create(p, "s1", "C"), p)
+        p = stack.execute(ActivateColorVersionCommand.create("s1", "B"), p)
+        p = stack.execute(DeleteAllVersionsCommand.create(p, "s1"), p)
+        for _ in range(8):
+            assert p.color_stack_versions["s1"]["future_version_table_schema"] == opaque["future_version_table_schema"]
+            p = stack.undo(p)
+        assert p.color_stack_versions["s1"]["future_version_table_schema"] == opaque["future_version_table_schema"]
+        for _ in range(8):
+            p = stack.redo(p)
+            assert p.color_stack_versions["s1"]["future_version_table_schema"] == opaque["future_version_table_schema"]
+
+
+@pytest.mark.parametrize("operation", ["save", "initialize", "lock"])
+@pytest.mark.parametrize("original_table", [{}, {"s1": {}}, {"s1": {"future": {"keep": [1]}}}])
+def test_first_version_entry_undo_restores_exact_original_shape(operation, original_table):
+    from src.features.edit.core.color_versions import SetStackLockCommand
+
+    p = _project().with_color_stack_versions(original_table)
+    stack = ProjectCommandStack()
+    if operation == "save":
+        command = SaveColorVersionCommand.create(p, "s1", "A")
+    elif operation == "initialize":
+        command = InitializeDefaultVersionCommand.create(p, "s1")
+    else:
+        command = SetStackLockCommand.create(p, "s1", True)
+    changed = stack.execute(command, p)
+    assert "s1" in changed.color_stack_versions
+    undone = stack.undo(changed)
+    assert undone.color_stack_versions == original_table
+    redone = stack.redo(undone)
+    assert redone.color_stack_versions == changed.color_stack_versions

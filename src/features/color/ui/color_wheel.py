@@ -495,10 +495,14 @@ class ColorWheel(QWidget):
 
     def _on_value_interaction_ended(self) -> None:
         """Flush value-box changes before ending the wheel gesture."""
+        self.flush_pending_changes()
+        self.interaction_ended.emit()
+
+    def flush_pending_changes(self) -> None:
+        """Publish the last wheel value before a host snapshots the grade."""
         if self._update_timer.isActive():
             self._update_timer.stop()
             self._emit_changed_signal()
-        self.interaction_ended.emit()
 
     def _update_rgb_values(self) -> None:
         """从当前 hue/sat/brightness 计算 RGB 并更新 3 个 DragValue（防递归）。"""
@@ -969,10 +973,18 @@ class GradingPanel(QWidget):
 
     def _on_slider_interaction_ended(self) -> None:
         """Flush the last throttled slider value before ending its gesture."""
+        self.flush_pending_changes()
+        self.interaction_ended.emit()
+
+    def flush_pending_changes(self) -> None:
+        """Bring engine listeners up to date before saving full layer payloads."""
+        if self._syncing_ui:
+            return
+        for wheel in (self.lift_wheel, self.gamma_wheel, self.gain_wheel):
+            wheel.flush_pending_changes()
         if self._grading_update_timer.isActive():
             self._grading_update_timer.stop()
             self._emit_grading_changed()
-        self.interaction_ended.emit()
 
     def _emit_grading_changed(self) -> None:
         """节流定时器回调：发射真正的 grading_changed 信号。"""
@@ -1216,5 +1228,6 @@ class GradingPanel(QWidget):
         用于手动触发保存，例如在切换 clip 或页面时。
         """
         if self._save_callback and self._current_stack_id:
+            self.flush_pending_changes()
             params = self.get_current_params()
             self._save_callback(params)

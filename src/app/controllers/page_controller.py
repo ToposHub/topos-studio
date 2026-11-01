@@ -3180,6 +3180,44 @@ class PageManagementMixin:
 
         logger.debug(f"Loaded color stack {stack_id} to all panels via hydrator")
 
+    def _sync_active_color_version_stack(self, stack_id: str) -> None:
+        """Rebind the current Color session after a version load or history edit."""
+        from dataclasses import replace
+
+        project = getattr(self, "_current_edit_project", None)
+        manager = getattr(self, "_color_session_manager", None)
+        session = manager.get_current_session() if manager is not None else None
+        if (project is None or session is None
+                or session.project_id != project.project_id
+                or stack_id not in project.color_stacks):
+            return
+        sequences = getattr(self, "_current_timeline_sequences", None) or {}
+        sequence = sequences.get(session.timeline_id)
+        clip = sequence.get_clip_by_id(session.clip_id) if sequence is not None else None
+        if clip is None or clip.color_stack_id != stack_id:
+            return
+
+        # Keep save routing and context consistent before any hydrate signal
+        # can fire. Never flush the old controls into the newly loaded stack.
+        manager.set_current_session(replace(session, color_stack_id=stack_id))
+        contexts = getattr(self, "_page_context_manager", None)
+        context = contexts.get_current_context() if contexts is not None else None
+        if (context is not None and context.timeline_id == session.timeline_id
+                and context.clip_id == session.clip_id):
+            contexts.set_current_context(replace(context, color_stack_id=stack_id))
+        playback = getattr(self, "_color_timeline_clip_playback_context", None)
+        if (playback is not None and playback.get("timeline_id") == session.timeline_id
+                and getattr(playback.get("clip"), "clip_id", None) == session.clip_id):
+            self._color_timeline_clip_playback_context = {**playback, "clip": clip}
+
+        previous = getattr(self, "_color_stack_hydration_in_progress", False)
+        self._color_stack_hydration_in_progress = True
+        try:
+            self._setup_grading_save_callback(stack_id)
+            self._load_color_stack_to_grading_panel(stack_id)
+        finally:
+            self._color_stack_hydration_in_progress = previous
+
     def _refresh_video_preview_after_color_stack_hydration(self) -> None:
         """Rebuild the playback frame after applying a saved ColorStack.
 

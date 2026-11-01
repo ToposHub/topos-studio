@@ -39,6 +39,12 @@ _IDENTITY_FIELDS = (
     "clip_id", "created_at",
 )
 
+# These describe a named snapshot, never live ColorStack content.
+_VERSION_METADATA_FIELDS = frozenset({
+    "plugin_versions", "saved_at", "plugin_check_unverified",
+    "plugin_diagnostics",
+})
+
 #: 版本名长度上限（与片段版本 UI 的 128 字符策略统一；后端强制执行，
 #: 不依赖前端校验）
 _MAX_VERSION_NAME_LEN = 128
@@ -74,12 +80,14 @@ def versions_state(project: Any, stack_id: str) -> dict:
     宿主不得开放 DELETE_ALL（先迁移，见 promote_default_version）。"""
     table = (getattr(project, "color_stack_versions", None) or {}).get(
         stack_id) or {}
-    return {
+    state = copy.deepcopy(table)
+    state.update({
         "active": table.get("active"),
         "locked": bool(table.get("locked", False)),
-        "versions": dict(table.get("versions", {}) or {}),
+        "versions": dict(state.get("versions", {}) or {}),
         "default_version": table.get("default_version"),
-    }
+    })
+    return state
 
 
 def is_stack_locked(project: Any, stack_id: str) -> bool:
@@ -162,16 +170,12 @@ def _missing_or_unverified(payload: dict) -> Tuple[Tuple[str, ...], bool]:
 def version_plugin_diagnostics(payload: dict) -> Dict[str, Any]:
     """DIAG-01 · 统一插件诊断字段：``{"missing": [...], "unverified": bool}``。
 
-    消费方（片段版本宿主、M07 旧面板）统一读此字段/函数，不再各自猜
-    ``missing_plugins_hint`` 之类的无来源键。旧载荷无该字段时现算；
-    注册表不可用时 ``unverified=True``（明确"未核对"，不当"无缺失"）。
+    消费方（片段版本宿主、M07 旧面板）统一调用本函数，不再各自猜
+    ``missing_plugins_hint`` 之类的无来源键。保存时的 plugin_diagnostics
+    是历史快照；插件可能已安装/卸载，因此每次读取均核对当前注册表，
+    不修改保存载荷。注册表不可用时 ``unverified=True``（明确"未核对"，
+    不把历史结果冒充为当前可渲染性）。
     """
-    stored = payload.get("plugin_diagnostics") if isinstance(payload, dict) else None
-    if isinstance(stored, dict) and "missing" in stored:
-        return {
-            "missing": list(stored.get("missing") or []),
-            "unverified": bool(stored.get("unverified", False)),
-        }
     missing, unverified = _missing_or_unverified(payload or {})
     return {"missing": list(missing), "unverified": bool(unverified)}
 
@@ -224,13 +228,29 @@ def _plugin_manifest(stack: Any) -> Dict[str, Any]:
 
 def _with_state(project: Any, stack_id: str, state: dict) -> Any:
     table = dict(getattr(project, "color_stack_versions", None) or {})
-    table[stack_id] = {
+    table[stack_id] = copy.deepcopy(state)
+    table[stack_id].update({
         "active": state.get("active"),
         "locked": bool(state.get("locked", False)),
-        "versions": dict(state.get("versions", {}) or {}),
+        "versions": dict(table[stack_id].get("versions", {}) or {}),
         "default_version": state.get("default_version"),
-    }
+    })
     return project.with_color_stack_versions(table)
+
+
+def _restore_version_entry(project: Any, stack_id: str,
+                           entry: dict | None) -> Any:
+    """Undo restores the original table shape, including an absent entry."""
+    table = dict(getattr(project, "color_stack_versions", None) or {})
+    if entry is None:
+        table.pop(stack_id, None)
+    else:
+        table[stack_id] = copy.deepcopy(entry)
+    return project.with_color_stack_versions(table)
+
+
+def _raw_version_entry(project: Any, stack_id: str) -> dict | None:
+    return copy.deepcopy((getattr(project, "color_stack_versions", None) or {}).get(stack_id))
 
 
 # ── 命令（project 域受限事务；undo 对称） ────────────────────────────
@@ -247,6 +267,7 @@ class SaveColorVersionCommand:
     before: dict
     after: dict
     missing_plugins: Tuple[str, ...] = ()
+    _before_entry: dict | None = None
 
     def apply(self, project: Any) -> Any:
         current = versions_state(project, self.stack_id)
@@ -259,7 +280,7 @@ class SaveColorVersionCommand:
         current = versions_state(project, self.stack_id)
         if current != self.after:
             raise ValueError("版本表已被其他操作修改，无法撤销。")
-        return _with_state(project, self.stack_id, self.before)
+        return _restore_version_entry(project, self.stack_id, self._before_entry)
 
     @staticmethod
     def create(project: Any, stack_id: str, version_name: str,
@@ -289,7 +310,8 @@ class SaveColorVersionCommand:
         after["active"] = version_name
         return SaveColorVersionCommand(
             str(uuid.uuid4()), f"Save Color Version「{version_name}」",
-            stack_id, version_name, before, after, missing)
+            stack_id, version_name, before, after, missing,
+            _raw_version_entry(project, stack_id))
 
 
 @dataclass(frozen=True)
@@ -418,7 +440,8 @@ class RenameColorVersionCommand:
         versions = {}
         for key, payload in before["versions"].items():
             versions[new_name if key == old_name else key] = payload
-        after = {
+        after = copy.deepcopy(before)
+        after.update({
             "active": (new_name if before["active"] == old_name
                        else before["active"]),
             "locked": before["locked"],
@@ -426,7 +449,7 @@ class RenameColorVersionCommand:
             "default_version": (
                 new_name if before["default_version"] == old_name
                 else before["default_version"]),
-        }
+        })
         return RenameColorVersionCommand(
             str(uuid.uuid4()),
             f"Rename Color Version「{old_name}」→「{new_name}」",
@@ -592,6 +615,7 @@ class InitializeDefaultVersionCommand:
     stack_id: str
     before: dict
     after: dict
+    _before_entry: dict | None = None
 
     def apply(self, project: Any) -> Any:
         if versions_state(project, self.stack_id) != self.before:
@@ -601,7 +625,7 @@ class InitializeDefaultVersionCommand:
     def undo(self, project: Any) -> Any:
         if versions_state(project, self.stack_id) != self.after:
             raise ValueError("版本表已被其他操作修改，无法撤销。")
-        return _with_state(project, self.stack_id, self.before)
+        return _restore_version_entry(project, self.stack_id, self._before_entry)
 
     @staticmethod
     def create(project: Any, stack_id: str,
@@ -622,16 +646,17 @@ class InitializeDefaultVersionCommand:
             "missing": list(missing), "unverified": bool(unverified)}
         if unverified:
             payload["plugin_check_unverified"] = True
-        after = {
+        after = copy.deepcopy(before)
+        after.update({
             "active": default_name,
             "locked": before["locked"],
             "versions": {default_name: payload},
             "default_version": default_name,
-        }
+        })
         return InitializeDefaultVersionCommand(
             str(uuid.uuid4()),
             f"Initialize Default Color Version「{default_name}」",
-            stack_id, before, after)
+            stack_id, before, after, _raw_version_entry(project, stack_id))
 
 
 @dataclass(frozen=True)
@@ -702,12 +727,13 @@ class DeleteAllVersionsCommand:
         if len(before["versions"]) <= 1:
             raise ValueError("没有可删除的其他版本。")
         payload = before["versions"][default_name]
-        after = {
+        after = copy.deepcopy(before)
+        after.update({
             "active": default_name,
             "locked": before["locked"],
             "versions": {default_name: payload},
             "default_version": default_name,
-        }
+        })
         return DeleteAllVersionsCommand(
             str(uuid.uuid4()),
             f"Delete All Other Color Versions（keep「{default_name}」）",
@@ -805,6 +831,7 @@ class SetStackLockCommand:
     stack_id: str
     before: dict
     after: dict
+    _before_entry: dict | None = None
 
     def apply(self, project: Any) -> Any:
         if versions_state(project, self.stack_id) != self.before:
@@ -814,7 +841,7 @@ class SetStackLockCommand:
     def undo(self, project: Any) -> Any:
         if versions_state(project, self.stack_id) != self.after:
             raise ValueError("版本表已被其他操作修改，无法撤销。")
-        return _with_state(project, self.stack_id, self.before)
+        return _restore_version_entry(project, self.stack_id, self._before_entry)
 
     @staticmethod
     def create(project: Any, stack_id: str,
@@ -828,7 +855,7 @@ class SetStackLockCommand:
         return SetStackLockCommand(
             str(uuid.uuid4()),
             f"{'Lock' if locked else 'Unlock'} Color Stack {stack_id[:8]}",
-            stack_id, before, after)
+            stack_id, before, after, _raw_version_entry(project, stack_id))
 
 
 def lock_shared_stacks(project: Any) -> Tuple[Any, Tuple[str, ...]]:
@@ -900,11 +927,16 @@ def version_restorable(project: Any, stack_id: str, version_name: str) -> bool:
 def _stack_from_payload(current: Any, content: dict) -> Any:
     """用版本载荷重建栈（身份字段沿用当前栈；内容字段取版本）。"""
     from src.shared.project.color_stack import ColorStackData
-    merged = dict(content)
+    # Optional empty fields are omitted by to_dict(). Building on the current
+    # stack would retain the other version's layers, RAW/denoise and curves.
+    # Restore snapshot content in full; from_dict supplies schema defaults.
+    payload = copy.deepcopy({
+        key: value for key, value in content.items()
+        if key not in _VERSION_METADATA_FIELDS
+    })
+    current_payload = current.to_dict()
     for field in _IDENTITY_FIELDS:
-        merged.pop(field, None)
-    payload = current.to_dict()
-    payload.update(merged)
+        payload[field] = copy.deepcopy(current_payload.get(field))
     return ColorStackData.from_dict(payload)
 
 

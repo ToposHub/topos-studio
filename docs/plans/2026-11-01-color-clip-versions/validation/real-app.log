@@ -1,0 +1,33 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[ThumbEngine] FFmpeg NOT found! Video thumbnails will fail.
+qt.qpa.fonts: Populating font family aliases took 535 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost. 
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+2026-11-01 18:45:43.292 Python[33639:734772] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-01 18:45:43.294 Python[33639:734772] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+[STRIPDIAG] auto-dismiss dialog: ProjectManagerDialog
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+[STRIPDIAG] timeline ready: A=0+24 B=48+24 same_path=True
+[STRIPDIAG] color page ready loaded=True cards=2
+[STRIPDIAG] PASS real version create local
+[STRIPDIAG] PASS real version create local
+[STRIPDIAG] PASS real version load local
+[STRIPDIAG] PASS real version load local
+[STRIPDIAG] PASS real last-gesture snapshot and different grade restoration
+[STRIPDIAG] PASS real version duplicate local
+[STRIPDIAG] PASS real version rename local
+[STRIPDIAG] PASS real version copy_to_scope local
+[STRIPDIAG] PASS real version load remote
+[STRIPDIAG] PASS real global undo/redo reference + save callback + session
+[STRIPDIAG] PASS real version create remote
+[STRIPDIAG] PASS real edit after cross-scope load saves the new stack
+[STRIPDIAG] RESULT: ALL REAL APP VERSION CHECKS PASSED
