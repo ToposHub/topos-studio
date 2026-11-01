@@ -283,14 +283,13 @@ class ProjectCommandStack:
         # N20/RF04：项目级事务命令返回结构化 ProjectTransactionResult
         # （含 sequence_map），栈只消费 project 并把 sequence_map 暴露
         # 给调用方落缓存；普通命令仍直接返回 EditProject。
-        stack_command = command
+        # BE-01：经 consume_project_result 统一归一——二元组（EditCommand
+        # 兼容）不再被误当工程 replace，栈持有含 apply 期快照的
+        # updated_command，undo 拿得到激活前内容。
+        new_project, stack_command = consume_project_result(command, result)
         if isinstance(result, ProjectTransactionResult):
-            new_project = result.project
-            if result.updated_command is not None:
-                stack_command = result.updated_command
             self.last_sequence_updates = dict(result.sequence_map)
         else:
-            new_project = result
             self.last_sequence_updates = {}
         # R25/F-R06：发布 revision 单调推进——此前 execute/undo/redo 都
         # 返回原 revision（审计实测 Replace 后序列 [7,7,7,7,7]），旧 AI
@@ -328,11 +327,12 @@ class ProjectCommandStack:
         except Exception:
             self._undo_stack.append(command)
             raise
+        # BE-01：undo 分支同经 consume_project_result 归一（undo 也可能
+        # 返回 ProjectTransactionResult/二元组）。
+        new_project, _ = consume_project_result(command, result)
         if isinstance(result, ProjectTransactionResult):
-            new_project = result.project
             self.last_sequence_updates = dict(result.sequence_map)
         else:
-            new_project = result
             self.last_sequence_updates = {}
         new_project = replace(new_project, revision=int(project.revision) + 1)
         self._redo_stack.append(command)
@@ -363,14 +363,16 @@ class ProjectCommandStack:
         except Exception:
             self._redo_stack.append(command)
             raise
+        # BE-01：redo 分支同经 consume_project_result 归一——redo 重新
+        # apply 返回的 updated_command（含新捕获快照）覆盖入栈。
+        new_project, effective_command = consume_project_result(
+            command, result)
         if isinstance(result, ProjectTransactionResult):
-            new_project = result.project
             self.last_sequence_updates = dict(result.sequence_map)
         else:
-            new_project = result
             self.last_sequence_updates = {}
         new_project = replace(new_project, revision=int(project.revision) + 1)
-        self._undo_stack.append(command)
+        self._undo_stack.append(effective_command)
 
         logger.debug(
             f"ProjectCommandStack: redone {command.label}, "
@@ -440,9 +442,14 @@ class ProjectMacroCommand:
         """
         Apply all sub-commands in order.
 
-        Sub-commands persist their own snapshots internally via
-        ``object.__setattr__``, so this method simply threads the project
-        through them in order.
+        Sub-commands may return ``ProjectTransactionResult`` or
+        ``(new_project, updated_command)`` tuples; the macro threads the
+        project and **persists the updated sub-commands on itself** via
+        ``object.__setattr__`` (frozen-dataclass self-update, 与
+        scene_cut_controller 等既有先例一致)。BE-01/BE-04：子命令在
+        apply 期捕获快照（如 ActivateColorVersion 的 before/after 栈），
+        丢弃 updated_command 会让宏 undo 拿不到激活前内容——旧实现直接
+        透传裸返回值，遇结构化结果把 Result 对象喂给下一个子命令。
 
         Args:
             project: Current project
@@ -451,8 +458,36 @@ class ProjectMacroCommand:
             New project after all sub-commands applied
         """
         current_project = project
-        for cmd in self.sub_commands:
-            current_project = cmd.apply(current_project)
+        updated_sub_commands: list[Any] = []
+        try:
+            for cmd in self.sub_commands:
+                result = cmd.apply(current_project)
+                current_project, effective = consume_project_result(
+                    cmd, result)
+                updated_sub_commands.append(effective)
+        except Exception:
+            # 宏是单步用户操作：后续子命令失败时先逆序回滚已应用子命令
+            # 再上抛（与时间线 MacroCommand 同型），不留半提交。回滚途中
+            # 单个子命令 undo 再抛不中断其余回滚（审查 S7）——收集后
+            # 优先上抛原始异常。
+            rollback_errors: list[BaseException] = []
+            for applied_cmd in reversed(updated_sub_commands):
+                try:
+                    undo_result = applied_cmd.undo(current_project)
+                    current_project, _ = consume_project_result(
+                        applied_cmd, undo_result)
+                except Exception as rollback_exc:  # noqa: BLE001
+                    rollback_errors.append(rollback_exc)
+                    logger.exception(
+                        "ProjectMacroCommand rollback step failed for %s",
+                        getattr(applied_cmd, "label", applied_cmd))
+            if rollback_errors:
+                logger.error(
+                    "ProjectMacroCommand %s rollback incomplete: %d step(s) "
+                    "failed", self.label, len(rollback_errors))
+            raise
+        object.__setattr__(
+            self, "sub_commands", tuple(updated_sub_commands))
 
         logger.debug(
             f"ProjectMacroCommand applied: {self.label} "
@@ -472,7 +507,8 @@ class ProjectMacroCommand:
         """
         current_project = project
         for cmd in reversed(self.sub_commands):
-            current_project = cmd.undo(current_project)
+            result = cmd.undo(current_project)
+            current_project, _ = consume_project_result(cmd, result)
 
         logger.debug(
             f"ProjectMacroCommand undone: {self.label} "
@@ -977,6 +1013,7 @@ from .asset_commands import (
 from ._support import (
     ProjectTransactionResult,
     assert_track_editable as assert_track_editable,
+    consume_project_result as consume_project_result,
     _clips_from_dicts as _clips_from_dicts,
     _transitions_from_dicts as _transitions_from_dicts,
 )

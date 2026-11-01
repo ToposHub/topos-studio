@@ -69,3 +69,22 @@ class ProjectTransactionResult:
     project: Any
     sequence_map: dict = field(default_factory=dict)
     updated_command: Any = None
+
+
+def consume_project_result(command: Any, result: Any) -> tuple[Any, Any]:
+    """BE-01 · 归一命令 apply/undo 返回值 → (new_project, effective_command)。
+
+    支持三种返回形态：``ProjectTransactionResult``（项目栈正典协议）、
+    ``(new_project, updated_command)`` 二元组（EditCommand 兼容）、裸新
+    工程。命令在 apply 期捕获快照时（如 ActivateColorVersion 的
+    before/after 栈），入栈/留用的必须是 updated_command——丢掉它，
+    undo 就拿不到激活前内容。此前 ProjectCommandStack 只识别
+    ProjectTransactionResult，二元组被当作工程交给 dataclasses.replace
+    直接 TypeError（2026-11-01 实测阻塞）。
+    """
+    if isinstance(result, ProjectTransactionResult):
+        updated = result.updated_command
+        return result.project, command if updated is None else updated
+    if isinstance(result, tuple):
+        return result[0], command if result[1] is None else result[1]
+    return result, command

@@ -384,6 +384,12 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dock_color_timeline_clips)
         # Connect clip_activated to open_timeline_clip_in_color
         self.color_timeline_clip_strip.clip_activated.connect(self.open_timeline_clip_in_color)
+        # 2026-11-01 片段版本菜单：WIRE-01/02 宿主接线（读取/写入经
+        # clip_version_host 单一出口，权威工程 + 真实命令栈 + 回填）。
+        from src.app.controllers.clip_version_host import ClipVersionRequestHost
+        self._clip_version_request_host = ClipVersionRequestHost(self)
+        self._clip_version_request_host.connect_strip(
+            self.color_timeline_clip_strip)
         # P1-COLOR-16: 分类调色复制/粘贴（edit_controller mixin 方法）
         self.color_timeline_clip_strip.grade_copy_requested.connect(
             self._on_grade_copy_requested)
