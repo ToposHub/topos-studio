@@ -1,0 +1,8 @@
+2026-11-02
+Final combined regression: 687 passed in 49.39s.
+Scope: shared tracking + masks + Window/Tracker UI + history/evaluator/controller/service + real async integration + cancellation/stale-generation guards.
+Ruff: All checks passed, 36 changed/new Python files.
+Python compileall: passed.
+git diff --check: passed.
+Real asynchronous integration: six tests (four shapes + repeated one-frame + Stop preserving partial results).
+Synthetic media: 640x360, 48 frames, 24 fps. Endpoint error <0.03px on a 47px translation; not a real-media or Resolve algorithm equivalence claim.

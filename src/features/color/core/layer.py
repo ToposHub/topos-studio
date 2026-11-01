@@ -28,6 +28,8 @@ try:
 except ModuleNotFoundError:
     HAS_SCIPY = False
 
+from src.features.color.core.window_softness import normalize_edge_softness
+
 from src.features.color.core.curves_soft_clip import (
     curves_soft_clip_is_identity,
     default_curves_edit,
@@ -79,6 +81,9 @@ class MaskShape:
         self.locked = False  # P1-COLOR-09: 锁定后画布禁止拖动/改形
         self.operation = self.OP_ADD
         self.feather = 0 if shape_type == self.CURVE else 50  # 0-100 scale
+        self.edge_softness: Optional[List[float]] = None  # rect left/right/top/bottom, image-width %
+        self.shape_schema_version = 2
+        self._shape_extra_fields: Dict[str, Any] = {}
         self.opacity = 1.0 # 0.0-1.0
         self.blur = 0.0    # 0-100 scale
         self.clean_black = 0.0 # 0-20 scale
@@ -132,6 +137,7 @@ class MaskShape:
             self.type, self.feather, self.opacity,
             self.blur, self.clean_black, self.clean_white,
             self.invert, self.rotation, self.softness,
+            tuple(self.edge_softness) if self.edge_softness is not None else None,
             tuple(self.center), tuple(self.size),
         )
         if self.type == MaskShape.GRADIENT:
@@ -163,10 +169,13 @@ class MaskShape:
         base = (
             target_w, target_h, img_w,
             self.type, self.feather,
+            tuple(self.edge_softness) if self.edge_softness is not None else None,
             self.blur, self.clean_black, self.clean_white,
             center_for_cache, tuple(self.size),
         )
-        if self.type == MaskShape.CURVE and self.points:
+        if self.type == MaskShape.GRADIENT:
+            base += (tuple(tuple(point) for point in self.grad_points),)
+        elif self.type == MaskShape.CURVE and self.points:
             base += (tuple(
                 (tuple(p.get('pos', (0, 0))), tuple(p.get('c1', (0, 0))), tuple(p.get('c2', (0, 0))),
                  p.get('fi'), p.get('fo'))
@@ -201,6 +210,9 @@ class MaskShape:
             Dictionary containing the shape's data.
         """
         data = {
+            **copy.deepcopy(self._shape_extra_fields),
+            "shape_schema_version": self.shape_schema_version,
+            "edge_softness": list(self.edge_softness) if self.edge_softness is not None else None,
             "id": self.id,
             "type": self.type,
             "name": self.name,
@@ -270,6 +282,19 @@ class MaskShape:
             raise ValueError(
                 f"MaskShape 数据缺少有效 type 字段: {data.get('type')!r}")
         shape = cls(shape_type)
+        version = data.get("shape_schema_version", 1)
+        if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+            raise ValueError("MaskShape shape_schema_version must be a positive integer")
+        shape.shape_schema_version = max(2, version)
+        shape.edge_softness = normalize_edge_softness(data.get("edge_softness"))
+        known_fields = {
+            "shape_schema_version", "edge_softness", "id", "type", "name", "visible", "invert", "locked",
+            "operation", "feather", "opacity", "blur", "clean_black", "clean_white", "center", "size",
+            "rotation", "points", "grad_points", "softness", "brush_strokes", "brush_size",
+            "brush_feather", "brush_opacity", "brush_flow", "bitmap_data", "bitmap_file", "bitmap_path",
+        }
+        shape._shape_extra_fields = {key: copy.deepcopy(value) for key, value in data.items()
+                                     if key not in known_fields}
         shape.id = data.get("id", str(uuid.uuid4()))
         shape.name = data.get("name")
         shape.visible = data.get("visible", True)

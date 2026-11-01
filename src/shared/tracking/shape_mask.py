@@ -7,6 +7,7 @@
 仅依赖 numpy / PIL，无 Qt 依赖，可在跟踪工作线程直接调用。
 """
 
+import math
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -14,6 +15,7 @@ from PIL import Image, ImageDraw
 
 # 每个 cubic bezier 段的采样数（pos 之间的折线展开粒度）
 _CURVE_SEGMENTS = 16
+_ELLIPSE_SEGMENTS = 64
 # 掩码有效像素低于该值（约 16 px）视为形状过小/出画，退化 None
 _MIN_MASK_PIXELS = 16
 
@@ -68,11 +70,17 @@ def _draw_ellipse(draw: ImageDraw.ImageDraw, geometry: Dict,
     size = geometry.get("size") or [0.0, 0.0]
     cx = float(center[0]) * width
     cy = float(center[1]) * height
-    rx = float(size[0]) * width / 2.0
-    ry = float(size[1]) * height / 2.0
+    # Circle size stores normalized radii, matching Canvas/ImageEngine.
+    rx = float(size[0]) * width
+    ry = float(size[1]) * height
     if rx <= 1.0 or ry <= 1.0:
         return False
-    draw.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=255)
+    polygon = [
+        (cx + rx * math.cos(2.0 * math.pi * i / _ELLIPSE_SEGMENTS),
+         cy + ry * math.sin(2.0 * math.pi * i / _ELLIPSE_SEGMENTS))
+        for i in range(_ELLIPSE_SEGMENTS)
+    ]
+    draw.polygon(_rotate_polygon(polygon, geometry, width, height), fill=255)
     return True
 
 
@@ -87,7 +95,6 @@ def _rect_corners(geometry: Dict, width: int, height: int
     hh = float(size[1]) * height / 2.0
     if hw <= 1.0 or hh <= 1.0:
         return None
-    import math
     rot = float(geometry.get("rotation", 0.0))
     cos_r, sin_r = math.cos(math.radians(rot)), math.sin(math.radians(rot))
     corners = []
@@ -117,7 +124,26 @@ def _curve_polygon(geometry: Dict, width: int, height: int
         for t in range(_CURVE_SEGMENTS):
             u = t / _CURVE_SEGMENTS
             poly.append(_cubic_point(p0, c2_px, c1_px, p1, u))
-    return poly if len(poly) >= 3 else None
+    return _rotate_polygon(poly, geometry, width, height) if len(poly) >= 3 else None
+
+
+def _rotate_polygon(
+    polygon: List[Tuple[float, float]], geometry: Dict, width: int, height: int,
+) -> List[Tuple[float, float]]:
+    """Rotate pixel points clockwise about the window's own pivot.
+
+    Rotating after normalized coordinates become pixels preserves the same
+    angles on non-square images as QGraphicsItem and ImageEngine.
+    """
+    rotation = math.radians(float(geometry.get("rotation", 0.0)))
+    if abs(rotation) < 1e-12:
+        return polygon
+    center = geometry.get("center") or [0.5, 0.5]
+    cx, cy = float(center[0]) * width, float(center[1]) * height
+    cosine, sine = math.cos(rotation), math.sin(rotation)
+    return [(cx + (x - cx) * cosine - (y - cy) * sine,
+             cy + (x - cx) * sine + (y - cy) * cosine)
+            for x, y in polygon]
 
 
 def _cubic_point(p0: Tuple[float, float], c2: Tuple[float, float],

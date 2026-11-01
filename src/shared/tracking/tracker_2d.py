@@ -106,6 +106,12 @@ class TrackerConfig:
     # 实测分布（遮挡素材）：清晰可见 ≈0.99+，遮挡/出画/错误位姿 ≈0，
     # 模糊且边缘裁切的可见帧 0.14-0.56。
     appearance_min_similarity: float = 0.45
+    adaptive_appearance: bool = False
+    # Adapt only from verified, sharp frames. Local continuity is stricter
+    # than the first-frame gate, so an occluder cannot become the template.
+    appearance_update_min_similarity: float = 0.80
+    appearance_update_min_inlier_ratio: float = 0.60
+    appearance_update_min_fb_ratio: float = 0.80
 
     # ---- 失败策略与重捕获（阶段 7） ----
     failure_policy: FailurePolicy = FailurePolicy.RECAPTURE
@@ -297,6 +303,7 @@ class Tracker2D:
             # 参考模板（外观门控与模板重捕获共用）：
             # (模板图, 模板局部→分析坐标的单应性, 分析坐标矩形)
             ref_template = self._ref_template(ref_sample.gray, pattern_ana)
+            appearance_template = ref_template
 
             criteria = (
                 cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
@@ -348,17 +355,25 @@ class Tracker2D:
                     ),
                     ref_gray=ref_sample.gray,
                     ref_template=ref_template,
+                    appearance_template=appearance_template,
                     criteria=criteria,
                     win_size=win_size,
                 )
 
                 if step.transform.status == TrackStatus.FAILED:
                     gap_since_valid += 1
+                    # After a lost gap, reacquisition must establish the
+                    # original target, not trust an adapted pre-gap patch.
+                    appearance_template = ref_template
                 else:
                     gap_since_valid = 0
                     last_valid_ana = step.transform.matrix_np
                     last_valid_conf = step.transform.confidence
                     last_valid_frame = frame
+                    if self._can_update_appearance(step, sharpness, request.mode):
+                        appearance_template = self._aligned_appearance_template(
+                            cur_gray, step.transform.matrix_np, ref_template,
+                        )
 
                 if (
                     step.transform.status == TrackStatus.FAILED
@@ -416,7 +431,7 @@ class Tracker2D:
                         # 本帧重新检测并重建了锚点（锚帧 = 当前帧）
                         anchor_pts = step.anchor_pts.astype(np.float32)
                         anchor_H = step.anchor_H
-                    else:
+                    elif step.transform.status != TrackStatus.FAILED:
                         # 每帧重锚到当前帧：新锚点 = 本帧有效点（cur_subset），
                         # 「新锚→参考」复用本帧估计，避免求逆放大误差。
                         anchor_pts = step.cur_pts.astype(np.float32)
@@ -473,6 +488,7 @@ class Tracker2D:
         ref_template: Optional[Tuple[np.ndarray, np.ndarray, tuple]],
         criteria: tuple,
         win_size: Tuple[int, int],
+        appearance_template: Optional[Tuple[np.ndarray, np.ndarray, tuple]] = None,
     ) -> "_FrameStep":
         """单帧：LK 光流 + forward-backward 检查 + 几何求解 + 五因子置信度。"""
         cfg = self.config
@@ -578,6 +594,13 @@ class Tracker2D:
         appearance = self._appearance_similarity(
             cur_gray, H_ref_cur, ref_template
         )
+        local_appearance = (
+            self._appearance_similarity(cur_gray, H_ref_cur, appearance_template)
+            if appearance_template is not None and appearance_template is not ref_template
+            else appearance
+        )
+        if local_appearance >= cfg.appearance_update_min_similarity:
+            appearance = max(appearance, local_appearance)
         if appearance < cfg.appearance_min_similarity:
             return self._fail_step(
                 request=request, frame=frame, sharpness=sharpness,
@@ -708,6 +731,7 @@ class Tracker2D:
                     anchor_H=H_ref_cur,
                     condition_number=condition_number,
                     appearance_similarity=appearance,
+                    local_appearance_similarity=local_appearance,
                 )
 
         return _FrameStep(
@@ -729,7 +753,40 @@ class Tracker2D:
             anchor_H=None,
             condition_number=condition_number,
             appearance_similarity=appearance,
+            local_appearance_similarity=local_appearance,
         )
+
+    def _can_update_appearance(
+        self, step: "_FrameStep", sharpness: float, mode: TrackingMode,
+    ) -> bool:
+        """Accept a rolling template only after all motion checks succeeded."""
+        cfg = self.config
+        return bool(
+            cfg.adaptive_appearance
+            and step.transform.status == TrackStatus.VALID
+            and step.local_appearance_similarity >= cfg.appearance_update_min_similarity
+            and step.fb_pass_ratio >= cfg.appearance_update_min_fb_ratio
+            and step.inlier_ratio >= cfg.appearance_update_min_inlier_ratio
+            and step.inlier_count >= mode.recommended_points
+            and sharpness >= cfg.blur_laplacian_min
+        )
+
+    @staticmethod
+    def _aligned_appearance_template(
+        gray: np.ndarray,
+        transform: np.ndarray,
+        reference: Optional[Tuple[np.ndarray, np.ndarray, tuple]],
+    ) -> Optional[Tuple[np.ndarray, np.ndarray, tuple]]:
+        """Sample an accepted frame in the unchanged reference template grid."""
+        if reference is None:
+            return None
+        template, origin, rect = reference
+        height, width = template.shape[:2]
+        patch = cv2.warpPerspective(
+            gray, np.linalg.inv(transform @ origin), (width, height),
+            flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
+        )
+        return patch, origin, rect
 
     def _fail_step(
         self,
@@ -1169,3 +1226,4 @@ class _FrameStep:
     anchor_H: Optional[np.ndarray]         # 非 None 表示本帧重建了锚点（新锚→参考帧的估计）
     condition_number: float = 0.0          # 单应性模式条件数（阶段 8 诊断）
     appearance_similarity: float = 0.0     # 与参考模板的 NCC 相似度（外观门控）
+    local_appearance_similarity: float = 0.0

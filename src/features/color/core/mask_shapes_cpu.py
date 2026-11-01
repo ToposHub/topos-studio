@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 
 from src.features.color.core.layer import MaskGroup, MaskShape
+from src.features.color.core.window_softness import rasterize_rect_edge_softness
 
 
 @dataclass
@@ -59,7 +60,8 @@ def _apply_postprocess(arr: np.ndarray, shape: MaskShape,
                        target_w: int) -> np.ndarray:
     """后处理链（与 engine._render_single_shape 尾段同式同序）。"""
     out = arr
-    if shape.feather > 0 and shape.type != MaskShape.BITMAP:
+    independent_edges = shape.type == MaskShape.RECT and shape.edge_softness is not None
+    if not independent_edges and shape.feather > 0 and shape.type != MaskShape.BITMAP:
         radius = int((shape.feather / 100.0) * 4.0 * (target_w / 5.0))
         if radius > 0:
             out = _feather_blur(out, radius)
@@ -100,6 +102,11 @@ def rasterize_shape_cpu(shape: MaskShape, w: int, h: int
     if shape.type == MaskShape.BRUSH:
         return None, "brush 笔刷由 GPU 管线渲染（笔画栅格化专属）"
 
+    if shape.type == MaskShape.RECT and shape.edge_softness is not None:
+        arr = rasterize_rect_edge_softness(w, h, shape.center, shape.size,
+                                           shape.rotation, shape.edge_softness)
+        return _apply_postprocess(arr, shape, w), None
+
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     xn = xx / max(1, w - 1)
     yn = yy / max(1, h - 1)
@@ -108,8 +115,8 @@ def rasterize_shape_cpu(shape: MaskShape, w: int, h: int
 
     if shape.type == MaskShape.CIRCLE:
         # 椭圆：归一化半径内 1（feather 由后处理模糊链负责边缘过渡）
-        rx = max(1e-6, sw / 2.0)
-        ry = max(1e-6, sh / 2.0)
+        rx = max(1e-6, sw)
+        ry = max(1e-6, sh)
         d = ((xn - cx) / rx) ** 2 + ((yn - cy) / ry) ** 2
         arr = (d <= 1.0).astype(np.float32)
     elif shape.type == MaskShape.RECT:
@@ -131,17 +138,18 @@ def rasterize_shape_cpu(shape: MaskShape, w: int, h: int
         return None, f"未知形状类型：{shape.type}"
 
     if abs(float(shape.rotation)) > 0.01:
-        arr = _rotate_mask(arr, float(shape.rotation), w, h)
+        arr = _rotate_mask(arr, float(shape.rotation), w, h, tuple(shape.center))
     return _apply_postprocess(arr, shape, w), None
 
 
 def _rotate_mask(arr: np.ndarray, rotation_deg: float,
-                 w: int, h: int) -> np.ndarray:
-    """绕画布中心旋转（同 engine 的 warpAffine 常规路径）。"""
+                 w: int, h: int,
+                 center: Tuple[float, float] = (0.5, 0.5)) -> np.ndarray:
+    """绕窗口中心旋转（同 engine 的点几何与最终放置后形状）。"""
     pad = max(w, h) * 3 // 4 + 4
     padded = np.zeros((h + 2 * pad, w + 2 * pad), dtype=np.float32)
     padded[pad:pad + h, pad:pad + w] = arr
-    ccx, ccy = 0.5 * w + pad, 0.5 * h + pad
+    ccx, ccy = center[0] * w + pad, center[1] * h + pad
     matrix = cv2.getRotationMatrix2D((ccx, ccy), -rotation_deg, 1.0)
     rotated = cv2.warpAffine(
         padded, matrix, (w + 2 * pad, h + 2 * pad),

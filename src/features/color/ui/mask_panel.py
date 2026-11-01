@@ -186,13 +186,27 @@ class MaskPanel(QWidget):
         self._explicit_selection_request: Optional[str] = None
 
         # Performance: Throttle parameter updates to 60 FPS during drag
-        self._param_timer = QTimer()
+        self._param_timer = QTimer(self)
         self._param_timer.setSingleShot(True)
         self._param_timer.timeout.connect(self._emit_pending_params)
         self._pending_params: Dict[str, Any] = {}
         self._pending_shape_id: Optional[str] = None
 
         self.init_ui()
+        from src.features.color.ui.power_window_panel import PowerWindowPanel
+        self.video_panel = PowerWindowPanel(self)
+        self.layout().addWidget(self.video_panel)
+        self.video_panel.hide()
+        self.video_panel.shape_added.connect(self.shape_added.emit)
+        self.video_panel.shape_removed.connect(self.shape_removed.emit)
+        self.video_panel.shape_selected.connect(self._on_video_shape_selected)
+        self.video_panel.shape_updated.connect(self.shape_updated.emit)
+        self.video_panel.interaction_started.connect(self.interaction_started.emit)
+        self.video_panel.interaction_ended.connect(self.interaction_ended.emit)
+        self.video_panel.reset_requested.connect(self.reset_all)
+        self.video_panel.duplicate_requested.connect(self.duplicate_shape_requested.emit)
+        self.video_panel.copy_to_layer_requested.connect(self.copy_shapes_to_layer_requested.emit)
+        self.video_panel.tracker_requested.connect(self.send_to_tracker_requested.emit)
 
     def get_style_sheet(self) -> str:
         return """
@@ -273,10 +287,14 @@ class MaskPanel(QWidget):
     def init_ui(self) -> None:
         self.setStyleSheet(self.get_style_sheet())
 
-        main_layout = QVBoxLayout()
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+        self.image_panel = QWidget(self)
+        root_layout.addWidget(self.image_panel)
+        main_layout = QVBoxLayout(self.image_panel)
         main_layout.setContentsMargins(4, 4, 4, 4)
         main_layout.setSpacing(4)
-        self.setLayout(main_layout)
 
         # Header with title and reset button
         header_layout = QHBoxLayout()
@@ -567,6 +585,8 @@ class MaskPanel(QWidget):
         却会作用于整段视频的所有帧，因此仅在图片模式提供。
         几何形状与"发送到跟踪器"在视频模式保留。
         """
+        self.image_panel.setVisible(visible)
+        self.video_panel.setVisible(not visible)
         self.btn_birefnet.setVisible(visible)
         self.btn_sam.setVisible(visible)
         self.btn_brush.setVisible(visible)
@@ -575,6 +595,15 @@ class MaskPanel(QWidget):
             # setChecked(False) 对未选中按钮无副作用；brush 取消时会级联复位 eraser
             self.btn_sam.setChecked(False)
             self.btn_brush.setChecked(False)
+
+    def _on_video_shape_selected(self, shape_id: str) -> None:
+        """Keep the retained image tree aligned without re-emitting its selection."""
+        self.select_shape(shape_id)
+        self.shape_selected.emit(shape_id)
+
+    def set_frame_aspect(self, aspect: float) -> None:
+        """Set source width/height used by the video window transform controls."""
+        self.video_panel.set_frame_aspect(aspect)
 
     def create_param(self, label_text: str, min_v: float, max_v: float, def_v: float,
                      decimals: int = 0, suffix: str = "", compact: bool = False) -> DragValue:
@@ -589,7 +618,7 @@ class MaskPanel(QWidget):
         # main_window.on_interaction_started 能压入 undo 快照
         # （engine.history.push_state），拖拽修改可撤销。
         drag.interaction_started.connect(self.interaction_started.emit)
-        drag.interaction_ended.connect(self.interaction_ended.emit)
+        drag.interaction_ended.connect(self._finish_param_interaction)
         return drag
 
     def on_item_clicked(self, item: Optional[QTreeWidgetItem] = None) -> None:
@@ -599,10 +628,13 @@ class MaskPanel(QWidget):
             return
         shape_id = item.data(0, Qt.ItemDataRole.UserRole)
         if shape_id:
+            self.video_panel.select_shape(shape_id)
             self.shape_selected.emit(shape_id)
 
     def _schedule_param_update(self, shape_id: str, params: dict) -> None:
         """Schedule a throttled parameter update (max 60 FPS during drag)."""
+        if self._pending_shape_id is not None and self._pending_shape_id != shape_id:
+            self._emit_pending_params()
         self._pending_shape_id = shape_id
         self._pending_params.update(params)
         if not self._param_timer.isActive():
@@ -610,9 +642,17 @@ class MaskPanel(QWidget):
 
     def _emit_pending_params(self) -> None:
         """Emit the pending parameter update (called by timer timeout)."""
-        if self._pending_shape_id and self._pending_params:
-            self.shape_updated.emit(self._pending_shape_id, self._pending_params)
-            self._pending_params = {}
+        self._param_timer.stop()
+        shape_id, params = self._pending_shape_id, self._pending_params
+        self._pending_shape_id = None
+        self._pending_params = {}
+        if shape_id and params:
+            self.shape_updated.emit(shape_id, params)
+
+    def _finish_param_interaction(self) -> None:
+        """Commit the final drag value before the controller closes its undo entry."""
+        self._emit_pending_params()
+        self.interaction_ended.emit()
 
     def _show_tree_context_menu(self, pos) -> None:
         """P1-COLOR-09: 窗口列表右键菜单（原地复制 / 复制到其他图层）。"""
@@ -654,6 +694,7 @@ class MaskPanel(QWidget):
 
     def set_transform_params(self, center, size, rotation) -> None:
         """更新 Transform 数值（不触发信号）。"""
+        self.video_panel.set_transform_params(center, size, rotation)
         drags = [self.pos_x_drag, self.pos_y_drag, self.size_w_drag, self.size_h_drag, self.rotation_drag]
         for d in drags:
             d.blockSignals(True)
@@ -672,6 +713,7 @@ class MaskPanel(QWidget):
     def update_shapes_list(self, shapes: List) -> None:
         """更新遮罩列表（延迟执行以避免信号冲突）。"""
         self._pending_shapes = list(shapes)
+        self.video_panel.set_shapes(self._pending_shapes)
         QTimer.singleShot(0, self._do_update_shapes_list)
 
     def _do_update_shapes_list(self) -> None:
@@ -842,6 +884,7 @@ class MaskPanel(QWidget):
 
         注意：Clean Black/White 参数传入的是实际效果值 (0-10)，会映射为 UI 值 (0-100)。
         """
+        self.video_panel.set_params(feather, opacity)
         controls = [
             self.feather_drag,
             self.opacity_drag,
@@ -867,6 +910,7 @@ class MaskPanel(QWidget):
         # AUD-25501：记录显式选中请求；若延迟树重建尚未执行，请求将在
         # 重建后得到满足
         self._explicit_selection_request = shape_id
+        self.video_panel.select_shape(shape_id)
         self.tree_widget.blockSignals(True)
 
         def find_and_select(parent: Optional[QTreeWidgetItem] = None) -> bool:
@@ -1007,6 +1051,7 @@ class MaskPanel(QWidget):
         self.tree_widget.blockSignals(True)
         self.tree_widget.clear()
         self.tree_widget.blockSignals(False)
+        self.video_panel.set_shapes([])
 
         # 4. 只发射一个全局清除信号，由 main_window 统一处理
         self.all_masks_cleared.emit()

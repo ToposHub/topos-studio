@@ -1332,6 +1332,7 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         except Exception:
             _mask_image_tools_visible = True
         self.mask_panel.set_image_only_tools_visible(_mask_image_tools_visible)
+        self.canvas.set_video_window_mode(not _mask_image_tools_visible)
         self.tracker_panel = TrackerPanel()
         self.tracking_service = TrackingService(parent=self)
         # Tracker 当前绑定的形状 id（None = 未绑定，面板空态）
@@ -1699,6 +1700,13 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         self.canvas.mask_shape_selected.connect(self._on_tracker_shape_selected)
         self.tracker_panel.params_changed.connect(
             self._on_tracker_params_changed)
+        self.tracker_panel.clear_tracking_requested.connect(self._clear_tracker_tracking)
+        self.tracker_panel.insert_point_requested.connect(self._on_tracker_insert_point_requested)
+        self.tracker_panel.set_point_requested.connect(self._on_tracker_set_point_requested)
+        self.tracker_panel.delete_point_requested.connect(self._on_tracker_delete_point_requested)
+        self.canvas.tracker_feature_selected.connect(self.tracker_panel.set_selected_feature)
+        self.canvas.tracker_feature_inserted.connect(self._on_tracker_feature_inserted)
+        self.canvas.tracker_overlay.insert_mode_changed.connect(self.tracker_panel.set_insert_mode_active)
         # 工具栏目标下拉切换：按形状 id 重绑跟踪目标
         self.tracker_panel.toolbar.target_changed.connect(
             self._on_tracker_target_changed)
@@ -1726,9 +1734,12 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         self.tracker_panel.nav_requested.connect(self._on_tracker_nav_requested)
         self.tracker_panel.graph.frame_clicked.connect(
             self._on_tracker_graph_frame_clicked)
+        self.tracker_panel.graph.scrub_started.connect(self._on_tracker_graph_scrub_started)
+        self.tracker_panel.graph.scrub_finished.connect(self._on_tracker_graph_scrub_finished)
         self.tracking_service.task_started.connect(self._on_tracker_task_started)
         self.tracking_service.task_progress.connect(self._on_tracker_task_progress)
         self.tracking_service.task_finished.connect(self._on_tracker_task_finished)
+        self.tracking_service.task_partial_result.connect(self._on_tracker_task_finished)
         self.tracking_service.task_failed.connect(self._on_tracker_task_failed)
         self.tracking_service.task_cancelled.connect(self._on_tracker_task_cancelled)
         # 画布跟踪区域框交互：拖动释放后写回窗口几何/搜索倍率（此前为死端信号）

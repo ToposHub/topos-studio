@@ -8,7 +8,6 @@ from src.features.color.tracking.types import (
     FailureReason,
     TrackStatus,
     TrackTransform,
-    TrackingMode,
 )
 
 from tests.color import tracker_qt_support as tq
@@ -106,6 +105,21 @@ class TestServiceCancelInvalidate:
         workers[0].finished_with_result.emit(gen, tq.make_result(gen))
         assert events["stale"] == [("clip1:shape1", gen)]
         assert events["finished"] == []
+
+    def test_user_stop_preserves_partial_data_but_invalidated_stop_discards_it(self, qapp):
+        service, workers, events = tq.make_service()
+        partials = []
+        service.task_partial_result.connect(lambda key, gen, result: partials.append(result))
+        gen = tq.start_default(service, directions=(TrackDirection.FORWARD,))
+        service.cancel("clip1", "shape1")
+        workers[0].finished_with_result.emit(gen, tq.make_result(gen, cancelled=True))
+        assert len(partials) == 1
+        assert set(partials[0].transforms) == {63, 64, 65}
+        assert not events["finished"]
+        gen = tq.start_default(service, directions=(TrackDirection.FORWARD,))
+        service.invalidate("clip1")
+        workers[-1].finished_with_result.emit(gen, tq.make_result(gen, cancelled=True))
+        assert len(partials) == 1
 
     def test_invalidate_only_targets_given_clip(self, qapp):
         service, workers, _ = tq.make_service()

@@ -24,7 +24,7 @@ _W, _H = 64, 48
 def _circle(cx=0.5, cy=0.5, r=0.4, **kw):
     s = MaskShape(MaskShape.CIRCLE)
     s.center = [cx, cy]
-    s.size = [r * 2, r * 2]
+    s.size = [r, r]  # Circle geometry stores radii, matching Canvas/ImageEngine.
     s.feather = 0
     for k, v in kw.items():
         setattr(s, k, v)
@@ -79,16 +79,15 @@ class TestCombine:
 
     def test_subtract_and_intersect(self):
         a = _circle(cx=0.5, r=0.4)
-        b = _circle(cx=0.5, r=0.2)
         sub = MaskShape(MaskShape.CIRCLE)
-        sub.center, sub.size = [0.5, 0.5], [0.4, 0.4]
+        sub.center, sub.size = [0.5, 0.5], [0.2, 0.2]
         sub.feather = 0
         sub.operation = MaskShape.OP_SUBTRACT
         mask, _ = combine_masks_cpu([a, sub], _W, _H)
         assert mask[24, 32] == 0.0          # 中心被减去
         assert mask[24, 8] == 1.0           # 环形残留
         inter = MaskShape(MaskShape.CIRCLE)
-        inter.center, inter.size = [0.5, 0.5], [0.4, 0.4]
+        inter.center, inter.size = [0.5, 0.5], [0.2, 0.2]
         inter.feather = 0
         inter.operation = MaskShape.OP_INTERSECT
         mask2, _ = combine_masks_cpu([a, inter], _W, _H)
@@ -123,3 +122,14 @@ class TestCombine:
         grown, _ = combine_masks_cpu(
             [_circle(r=0.2, clean_white=2.0)], _W, _H)
         assert float(np.mean(grown)) > float(np.mean(base))
+
+
+def test_circle_size_is_radius_like_preview_engine():
+    """A radius .15 occupies 30% of the image width, not 15%."""
+    shape = _circle(r=.15)
+    arr, reason = rasterize_shape_cpu(shape, 200, 100)
+    assert reason is None
+    row = arr[50]
+    assert np.count_nonzero(row > .5) == pytest.approx(60, abs=2)
+    assert row[75] == 1
+    assert row[65] == 0

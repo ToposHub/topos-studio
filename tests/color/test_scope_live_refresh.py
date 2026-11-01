@@ -31,6 +31,7 @@ class _ScopeRefreshHost(LayerOpsMixin):
         self.engine = MagicMock()
         self.engine.renderer = MagicMock()
         self.engine.renderer.gpu_scope_enabled = True
+        self.engine.is_interacting = False
         self.engine.scope_source_revision = 10
         self.engine.scope_snapshots_enabled = False
         self.engine.get_active_layer.return_value = None
@@ -246,7 +247,7 @@ def test_curve_histogram_sampling_does_not_breathe_between_quality_tiers() -> No
     from src.features.color.core.scope_types import HIGH_QUALITY_ANALYSIS_SIZE
     host = _ScopeRefreshHost()
     _show_curves(host)
-    for interacting, last_activity in ((True, 1.0), (False, 1.0), (False, 0.0)):
+    for interacting, last_activity in ((False, 1.0), (False, 0.0)):
         host.engine.is_interacting = interacting
         host._gpu_scope_last_activity = last_activity
         with patch('src.app.controllers.layer_controller.time.monotonic', return_value=1.1):
@@ -321,4 +322,70 @@ def test_hsl_palette_demand_and_descriptor_target_the_active_hsl_canvas() -> Non
     host.on_gpu_scope_ready(ScopeGpuFrame(3, 10, curves_histogram_texture_id=76,
                                          curves_histogram_size=(1200, 400), curves_mode='HueSat'))
     hsl.set_scope_frame.assert_called_once_with(76, 1200, 400)
+    host.curves_widget.set_scope_frame.assert_not_called()
+
+
+def test_curves_only_adjustment_never_requests_work_even_when_forced() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.scope_panel.isVisible.return_value = False
+    host.engine.is_interacting = True
+    for _ in range(10):
+        host._submit_gpu_scope_demand(is_playing=False, force=True)
+    host.engine.request_gpu_scope.assert_not_called()
+
+
+def test_adjustment_retains_standalone_scope_without_curve_histogram() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.engine.is_interacting = True
+    host.on_frame_ready(42)
+    assert host.engine.request_gpu_scope.call_args.args[0].histogram_overlay is False
+
+
+def test_inactive_curve_dock_tab_does_not_request_background_histogram() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.scope_panel.isVisible.return_value = False
+    # Qt isVisible() can remain true on a tabified, unselected dock.
+    host._on_curves_scope_visibility_changed(False)
+    host.on_frame_ready(42)
+    host.engine.request_gpu_scope.assert_not_called()
+    host._on_curves_scope_visibility_changed(True)
+    assert host.engine.request_gpu_scope.call_args.args[0].histogram_overlay is True
+
+
+def test_curves_only_final_image_gets_one_histogram(qapp) -> None:
+    from src.features.color.core.scope_types import ScopeGpuFrame
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.scope_panel.isVisible.return_value = False
+    host.engine.is_interacting = True
+    host.on_frame_ready(42)
+    host.engine.request_gpu_scope.assert_not_called()
+    host.engine.is_interacting = False
+    for _ in range(4):
+        host._submit_gpu_scope_demand(is_playing=False, force=True)
+    host.engine.request_gpu_scope.assert_called_once()
+    host.on_gpu_scope_ready(ScopeGpuFrame(3, 10, curves_histogram_texture_id=76,
+                                         curves_histogram_size=(1024, 512)))
+    host.scope_panel.update_gpu_scope.assert_not_called()
+    for _ in range(4):
+        host._submit_gpu_scope_demand(is_playing=False, force=True)
+    host.engine.request_gpu_scope.assert_called_once()
+    host.engine.scope_source_revision = 11
+    host._submit_gpu_scope_demand(is_playing=False, force=True)
+    assert host.engine.request_gpu_scope.call_count == 2
+
+
+def test_interaction_cancels_pending_and_rejects_late_curve_frame() -> None:
+    from src.features.color.core.scope_types import ScopeGpuFrame
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.on_frame_ready(42)
+    host._freeze_curves_scope_for_interaction()
+    host.engine.discard_pending_gpu_scope.assert_called_once()
+    host.engine.is_interacting = True
+    host.on_gpu_scope_ready(ScopeGpuFrame(3, 10, curves_histogram_texture_id=76,
+                                         curves_histogram_size=(1024, 512)))
     host.curves_widget.set_scope_frame.assert_not_called()

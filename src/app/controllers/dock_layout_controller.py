@@ -311,7 +311,7 @@ class DockLayoutMixin:
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_curves)
-        self.dock_curves.visibilityChanged.connect(self._on_scope_visibility_changed)
+        self.dock_curves.visibilityChanged.connect(self._on_curves_scope_visibility_changed)
 
         self.dock_color_mapping = create_custom_dock(
             I18N.tr("panel.color_mapping", "Color Mapping"),
@@ -351,7 +351,7 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_analysis)
         # Hidden scopes must not consume GPU analysis time. Showing the dock
         # also triggers an immediate demand for the current front texture.
-        self.dock_analysis.visibilityChanged.connect(self._on_scope_visibility_changed)
+        self.dock_analysis.visibilityChanged.connect(self._on_analysis_scope_visibility_changed)
 
         # The image batch-export panel. Renamed for clarity so a future
         # video batch-export panel can coexist without confusing users.

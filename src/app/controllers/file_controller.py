@@ -1377,11 +1377,9 @@ class FileOpsMixin:
              self.engine.on_raw_params_changed(self.engine.current_raw_params)
 
         try:
-            # Scope output is GPU-only. The normal frame_ready path submits
-            # after the new front texture is published; this explicit refresh
-            # also covers an idle pass without a new frame notification.
-            if self._is_scope_panel_visible() or self._is_curves_panel_visible():
-                self._submit_gpu_scope_demand(is_playing=False, force=True)
+            # frame_ready requests the single curve underlay only after the
+            # final render is published. Requesting here would analyse the
+            # previous preview, then repeat the work for the final image.
             self.on_render_finished(None, False)
         except Exception:
             logger.debug("Render finished callback failed")
@@ -5190,6 +5188,7 @@ class FileOpsMixin:
             self.video_controller.frame_changed.connect(self._on_color_video_source_frame_changed)
             # 跟踪结果随帧应用：帧切换时重建受跟踪绑定影响的蒙版纹理
             self.video_controller.frame_changed.connect(self._on_color_tracking_frame_changed)
+            self.video_controller.play_state_changed.connect(self._on_color_tracking_play_state_changed)
             self.video_controller.frame_ready.connect(self.on_video_frame_ready)  # 更新 Canvas
             self.video_controller.play_state_changed.connect(self.canvas.video_control_bar.on_play_state_changed)
             self.video_controller.play_state_changed.connect(self._on_video_play_state_changed)  # P0-5: debounce cleanup
@@ -5853,6 +5852,9 @@ class FileOpsMixin:
         context = self._active_color_timeline_clip_playback_context()
         if not context:
             return
+        sync_tracker = getattr(self, '_sync_tracker_clip_range', None)
+        if callable(sync_tracker):
+            sync_tracker()
         bar = getattr(getattr(self, "canvas", None), "video_control_bar", None)
         if bar is None:
             return
@@ -5883,6 +5885,9 @@ class FileOpsMixin:
                 pass
 
     def _on_color_video_total_frames_changed(self, total_frames: int) -> None:
+        sync_tracker = getattr(self, '_sync_tracker_clip_range', None)
+        if callable(sync_tracker):
+            sync_tracker()
         clip_total = self._color_timeline_clip_total_frames()
         if clip_total is not None:
             self.canvas.video_control_bar.set_total_frames(clip_total)

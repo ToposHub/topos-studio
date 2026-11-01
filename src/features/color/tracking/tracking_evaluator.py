@@ -69,6 +69,9 @@ def capture_base_geometry(shape) -> dict:
             }
             for p in points
         ]
+    elif shape_type == "gradient":
+        base["grad_points"] = [list(point) for point in get(
+            "grad_points", [[0.4, 0.5], [0.6, 0.5]])]
     return base
 
 
@@ -153,13 +156,27 @@ def _transform_curve_geometry(base: dict, h: np.ndarray) -> dict:
     return result
 
 
+def _window_rotation(base: dict, frame_size: FrameSize) -> np.ndarray:
+    """Rotation metadata uses the window's center in pixel coordinates."""
+    width, height = frame_size
+    cx, cy = base["center"][0] * width, base["center"][1] * height
+    angle = math.radians(float(base.get("rotation", 0.0)))
+    ct, st = math.cos(angle), math.sin(angle)
+    return np.array([[ct, -st, cx * (1.0 - ct) + cy * st],
+                     [st, ct, cy * (1.0 - ct) - cx * st],
+                     [0.0, 0.0, 1.0]])
+
+
 def apply_transform_to_geometry(base: dict, matrix_np: np.ndarray,
                                 frame_size: FrameSize) -> dict:
     """把跟踪变换施加到基准几何，返回新的几何字典（不修改入参）。
 
     参考帧（单位矩阵）直接返回基准几何副本，不做双重变换。
-    不支持几何点变换的类型（brush/bitmap/gradient）原样返回副本。
+    不支持几何点变换的类型（brush/bitmap）原样返回副本。
     """
+    # Editor metadata may contain many frame overrides. Keep it out of the
+    # per-frame geometry copies and out of recursive transforms.
+    base = {key: value for key, value in base.items() if not key.startswith("_")}
     width, height = frame_size
     if width <= 0 or height <= 0:
         raise ValueError("帧尺寸必须为正")
@@ -171,8 +188,22 @@ def apply_transform_to_geometry(base: dict, matrix_np: np.ndarray,
         # rect/circle 在像素空间拟合（各向同性，旋转角不受宽高比影响）
         return _transform_rect_geometry(base, m, width, height)
     if shape_type == "curve":
-        h = _normalized_homography(m, width, height)
-        return _transform_curve_geometry(base, h)
+        h = _normalized_homography(m @ _window_rotation(base, frame_size), width, height)
+        result = _transform_curve_geometry(base, h)
+        result["center"] = list(_apply_norm_point(
+            _normalized_homography(m, width, height), *base["center"]))
+        result["rotation"] = 0.0
+        return result
+    if shape_type == "gradient" and "grad_points" in base:
+        result = _copy_geometry(base)
+        # Bake rotation once so the renderer and overlay use identical points.
+        h = _normalized_homography(m @ _window_rotation(base, frame_size), width, height)
+        result["grad_points"] = [list(_apply_norm_point(h, *point))
+                                 for point in base.get("grad_points", [])]
+        result["center"] = list(_apply_norm_point(
+            _normalized_homography(m, width, height), *base["center"]))
+        result["rotation"] = 0.0
+        return result
     return _copy_geometry(base)
 
 
@@ -212,12 +243,7 @@ class TrackingEvaluator:
             return None
         if binding.base_geometry is None or not binding.contains_frame(source_frame):
             return None
-        transform = binding.transform_at(source_frame)
-        if transform is None or transform.status == TrackStatus.FAILED:
-            # 失败帧回退基准几何：不产生假有效结果
-            return _copy_geometry(binding.base_geometry)
-        return apply_transform_to_geometry(
-            binding.base_geometry, transform.matrix_np, frame_size)
+        return _evaluate_binding_frame(binding, source_frame, frame_size)
 
     def evaluate_geometry_at_timeline(
             self, clip_id: str, shape_id: str, timeline_frame: int,
@@ -281,10 +307,20 @@ def bake_binding_keyframes(
 def _evaluate_binding_frame(binding: TrackingBinding, source_frame: int,
                             frame_size: FrameSize) -> Optional[dict]:
     """单 binding 求值（供烘焙使用，不走 store）。"""
-    transform = binding.transform_at(source_frame)
-    if binding.base_geometry is None or transform is None:
+    base = binding.base_geometry
+    if base is None or not binding.contains_frame(source_frame):
         return None
-    if transform.status == TrackStatus.FAILED:
-        return copy.deepcopy(binding.base_geometry)
+    overrides = base.get("_frame_geometry", {})
+    override = overrides.get(str(source_frame)) if isinstance(overrides, dict) else None
+    manual = binding.manual_corrections.get(source_frame)
+    if isinstance(override, dict) and manual is not None and manual.status != TrackStatus.FAILED:
+        return _copy_geometry(override)
+    transform = binding.transform_at(source_frame)
+    if transform is None or transform.status == TrackStatus.FAILED:
+        return _copy_geometry({key: value for key, value in base.items()
+                               if not key.startswith("_")})
+    from .window_edit import filter_motion_matrix
+    matrix = filter_motion_matrix(transform.matrix_np, base, frame_size,
+                                  base.get("_motion_channels", {}))
     return apply_transform_to_geometry(
-        binding.base_geometry, transform.matrix_np, frame_size)
+        base, matrix, frame_size)

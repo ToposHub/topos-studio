@@ -1749,6 +1749,7 @@ class MenuToolbarMixin:
 
     def on_interaction_started(self) -> None:
         self.idle_render_timer.stop()
+        self._freeze_curves_scope_for_interaction()
         itype = "general"
         if self.sender() == self.canvas: itype = self.canvas.current_interaction_type
         # set_interaction_mode already submits the first preview render.  A
@@ -1765,6 +1766,10 @@ class MenuToolbarMixin:
             )
 
     def on_interaction_ended(self) -> None:
+        # Mask controls throttle UI and model delivery independently. Commit
+        # their final value before autosave and before the next undo gesture.
+        if getattr(self, "pending_mask_updates", None):
+            self.process_mask_update()
         self.idle_render_timer.start(); self._trigger_autosave()
 
         # Optimization: Do NOT trigger full quality decode here synchronously.

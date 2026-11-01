@@ -37,6 +37,7 @@
 
 import cv2
 import numpy as np
+from weakref import WeakKeyDictionary
 import copy
 import moderngl
 import time  # noqa: F401 — 回归守卫 patch 锚点（tests/color/test_quality_control 断言种子不使用 wall-clock）
@@ -363,8 +364,11 @@ class ImageEngine(QObject):
         from src.features.color.tracking.tracking_store import TrackingStore
         from src.features.color.tracking.tracking_evaluator import TrackingEvaluator
         self.tracking_store = TrackingStore()
+        self._tracking_shape_views: WeakKeyDictionary[MaskShape, MaskShape] = WeakKeyDictionary()
         # 渲染链通过求值器读取「基准几何 + 跟踪变换」，不直接访问 store。
         self.tracking_evaluator = TrackingEvaluator(self.tracking_store)
+        self.history.extra_state_provider = self._capture_tracking_history_state
+        self.history.extra_state_restorer = self._restore_tracking_history_state
         # 由 UI 层注入：返回 (clip_id, source_frame)。未设置时渲染使用原始几何。
         self.tracking_context_provider = None
         self.current_lod = 0
@@ -2423,11 +2427,30 @@ class ImageEngine(QObject):
         if shape._render_cache is not None and shape._render_cache_key == full_key:
             return shape._render_cache.copy()
 
+        has_edge_softness = shape.type == MaskShape.RECT and shape.edge_softness is not None
         has_rotation = shape.type not in (MaskShape.BITMAP, MaskShape.BRUSH) and abs(shape.rotation) > 0.01
         is_translatable = shape.type in ('circle', 'rect')
 
-        if has_rotation:
+        if has_edge_softness:
+            from src.features.color.core.window_softness import rasterize_rect_edge_softness
+            shape_arr = rasterize_rect_edge_softness(
+                target_w, target_h, shape.center, shape.size, shape.rotation, shape.edge_softness)
+        elif has_rotation:
             rot_pad = max(target_w, target_h) * 3 // 4 + 4
+            if is_translatable:
+                # Canonical circles/rectangles usually fit inside the source
+                # canvas. Rotation needs the full source shape, not a blanket
+                # 3/4-frame border (over five million pixels at 1024x576).
+                half_w = shape.size[0] * target_w
+                half_h = shape.size[1] * target_h
+                if shape.type == 'rect':
+                    half_w *= 0.5
+                    half_h *= 0.5
+                required = int(np.ceil(max(
+                    0.0, half_w - target_w * 0.5 + 2.0,
+                    half_h - target_h * 0.5 + 2.0,
+                )))
+                rot_pad = min(rot_pad, required)
 
             # Shape cache excludes rotation AND position (for circle/rect)
             padded_key = ('padded', rot_pad) + shape._get_shape_cache_key(target_w, target_h, img_w)
@@ -2438,17 +2461,19 @@ class ImageEngine(QObject):
                 shape._shape_cache = shape_arr.copy()
                 shape._shape_cache_key = padded_key
 
-            # Rotate around canonical center
-            pw = target_w + 2 * rot_pad
-            ph = target_h + 2 * rot_pad
-            ccx = 0.5 * target_w + rot_pad
-            ccy = 0.5 * target_h + rot_pad
+            # Cached circle/rect textures use canonical center; point-based
+            # windows use their own pivot, matching QGraphicsItem rotation.
+            ccx = (0.5 if is_translatable else shape.center[0]) * target_w + rot_pad
+            ccy = (0.5 if is_translatable else shape.center[1]) * target_h + rot_pad
             M = cv2.getRotationMatrix2D((ccx, ccy), -shape.rotation, 1.0)
-            rotated = cv2.warpAffine(shape_arr, M, (pw, ph),
+            # Produce exactly the old central crop directly. Keep source
+            # padding for off-canvas geometry, but never allocate/warp output
+            # pixels that are immediately discarded.
+            M[:, 2] -= rot_pad
+            shape_arr = cv2.warpAffine(shape_arr, M, (target_w, target_h),
                                        flags=cv2.INTER_LINEAR,
                                        borderMode=cv2.BORDER_CONSTANT,
                                        borderValue=0.0)
-            shape_arr = rotated[rot_pad:rot_pad + target_h, rot_pad:rot_pad + target_w]
 
             # For circle/rect: translate from canonical center to actual position
             if is_translatable:
@@ -2491,7 +2516,7 @@ class ImageEngine(QObject):
         # Apply feather (ONLY for vector masks - NOT for BITMAP/AI masks)
         if shape.type == MaskShape.CURVE and shape.has_per_point_feather:
             shape_arr = self._render_curve_feather_sdf(shape, shape_arr, target_w, target_h)
-        elif shape.feather > 0 and shape.type != MaskShape.BITMAP:
+        elif not has_edge_softness and shape.feather > 0 and shape.type != MaskShape.BITMAP:
             blur_radius = int((shape.feather / 100.0) * 4.0 * (target_w / 5.0))
             if blur_radius > 0:
                 if blur_radius % 2 == 0: blur_radius += 1
@@ -2746,8 +2771,13 @@ class ImageEngine(QObject):
             painter.end()
 
             ptr = shape_img.bits()
-            ptr.setsize(canvas_w * canvas_h)
-            shape_arr = np.frombuffer(ptr, np.uint8).reshape((canvas_h, canvas_w)).astype(np.float32) / 255.0
+            # Grayscale QImage scanlines are padded to 32 bits. Rotation pads
+            # frequently make the width non-divisible by four; treating that
+            # padding as pixels shears the mask and can crop it away entirely.
+            ptr.setsize(shape_img.sizeInBytes())
+            shape_arr = (np.frombuffer(ptr, np.uint8)
+                         .reshape((canvas_h, shape_img.bytesPerLine()))[:, :canvas_w]
+                         .astype(np.float32) / 255.0)
 
         # Gradient type
         if shape.type == "gradient" and hasattr(shape, 'grad_points'):
@@ -2806,22 +2836,28 @@ class ImageEngine(QObject):
         """返回应用了当前帧跟踪变换的形状视图（不修改原始形状）。
 
         浅拷贝代理：几何属性被替换，其余参数（羽化/透明度等）共享；
-        渲染缓存字段清空，避免污染原始形状的缓存。
+        独立缓存按原始形状弱引用保存，避免每帧重建相同纹理，且不污染
+        原始形状的缓存。完整参数键仍负责几何/羽化/分辨率变更失效。
         """
         geometry = self.get_tracked_geometry(shape)
         if geometry is None:
             return shape
         import copy as _copy
+        views = self._tracking_shape_views
+        previous = views.get(shape)
         proxy = _copy.copy(shape)
         proxy.center = list(geometry.get("center", shape.center))
         proxy.size = list(geometry.get("size", shape.size))
         proxy.rotation = float(geometry.get("rotation", shape.rotation) or 0.0)
         if "points" in geometry:
             proxy.points = geometry["points"]
-        proxy._render_cache = None
-        proxy._render_cache_key = None
-        proxy._shape_cache = None
-        proxy._shape_cache_key = None
+        if "grad_points" in geometry:
+            proxy.grad_points = geometry["grad_points"]
+        proxy._render_cache = previous._render_cache if previous is not None else None
+        proxy._render_cache_key = previous._render_cache_key if previous is not None else None
+        proxy._shape_cache = previous._shape_cache if previous is not None else None
+        proxy._shape_cache_key = previous._shape_cache_key if previous is not None else None
+        views[shape] = proxy
         return proxy
 
     def _layer_contains_shape(self, layer, shape_id: str) -> bool:
@@ -2836,10 +2872,11 @@ class ImageEngine(QObject):
 
         return _walk(layer.mask_shapes)
 
-    def refresh_tracking_masks(self, source_frame=None) -> bool:
+    def refresh_tracking_masks(self, source_frame=None, *, preview: bool = False) -> bool:
         """视频帧切换后重建受跟踪绑定影响的蒙版纹理。
 
         返回 True 表示至少一层纹理被更新（调用方负责触发视口重绘）。
+        preview 复用交互蒙版档位；暂停后必须再次以默认精度刷新。
         """
         if self.tracking_store.is_empty() or self.img_full_original is None:
             return False
@@ -2861,7 +2898,7 @@ class ImageEngine(QObject):
                     changed = True
                     break
         if changed:
-            self._update_mask_textures()
+            self._update_mask_textures(preview=preview)
         return changed
 
     def _render_mask_items_recursive(
@@ -2951,17 +2988,17 @@ class ImageEngine(QObject):
                     return True
         return False
 
-    def _update_mask_textures(self) -> None:
+    def _update_mask_textures(self, *, preview: bool = False) -> None:
         """重栅格化所有 mask_dirty 层的蒙版并上传为单通道纹理。
 
-        分辨率策略：交互中 512 基准宽（保实时性），静止 1024。CPU 侧
+        分辨率策略：交互/播放预览 512 基准宽，静止 1024。CPU 侧
         递归合成形状 / MaskGroup / 跟踪视图 / AI matte 后，以
         UPDATE_AUX_TEX('mask') 提交 uint8 蒙版；无可见形状且无 AI
         matte 的层上传全零蒙版。蒙版宽高按源图纵横比换算。
         """
         if not self.renderer or self.img_full_original is None: return
         h, w = self.img_full_original.shape[:2]
-        if self.is_interacting:
+        if self.is_interacting or preview:
             base_size = 512
         else:
             base_size = 1024
@@ -4543,7 +4580,20 @@ class ImageEngine(QObject):
         self._restore_state(state)
         return True
 
-    def _restore_state(self, state: dict):
+    def _capture_tracking_history_state(self) -> dict:
+        """Include window tracking edits in every grading undo snapshot."""
+        return {"trackings": self.tracking_store.to_dict()}
+
+    def _restore_tracking_history_state(self, state: dict) -> None:
+        """Replace the store and evaluator together to avoid stale references."""
+        if "trackings" not in state:
+            return
+        from src.features.color.tracking.tracking_store import TrackingStore
+        from src.features.color.tracking.tracking_evaluator import TrackingEvaluator
+        self.tracking_store = TrackingStore.from_dict(state["trackings"])
+        self.tracking_evaluator = TrackingEvaluator(self.tracking_store)
+
+    def _restore_state(self, state: dict) -> None:
         """从状态字典恢复图像和图层状态。"""
         from src.features.color.core.history import HistoryManager
 
@@ -4596,6 +4646,9 @@ class ImageEngine(QObject):
         layers_data = state.get('layers', [])
         if layers_data:
             self.layers = HistoryManager.deserialize_layers(layers_data)
+        history = getattr(self, "history", None)
+        if history is not None:
+            history.restore_extra_state(state)
 
         # AUD-0600：图像内容/尺寸已恢复，全部层的蒙版必须重栅格化——
         # _update_mask_textures 按 mask_dirty 跳过未置脏的层，不重置则

@@ -105,7 +105,52 @@ class MaskHandle(QGraphicsEllipseItem):
             # 'node', 'center', 'ctrl', 'grad_start', 'grad_end' 等
             self.setCursor(Qt.CursorShape.PointingHandCursor)
 
+        self.set_video_window_style(getattr(parent, '_video_window_mode', False) is True)
+
+    def set_video_window_style(self, enabled: bool) -> None:
+        """Keep video controls small while providing a separate mouse target."""
+        self.prepareGeometryChange()
+        self._video_window_style = bool(enabled)
+        if enabled:
+            diameter = 7.0 if self.handle_type == 'center' else 6.0
+            self.setRect(-diameter / 2.0, -diameter / 2.0, diameter, diameter)
+        else:
+            diameter = 9.0 if self.handle_type in ('node', 'grad_start', 'grad_end', 'rotate') else 8.0
+            if self.handle_type in ('ctrl', 'feather_curve'):
+                diameter = 7.0
+            elif self.handle_type == 'center':
+                diameter = 11.0
+            self.setRect(-diameter / 2.0, -diameter / 2.0, diameter, diameter)
+        if self.handle_type in ('resize_tl', 'resize_br'):
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif self.handle_type in ('resize_tr', 'resize_bl'):
+            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        self.update()
+
+    def boundingRect(self) -> QRectF:
+        if getattr(self, '_video_window_style', False):
+            return QRectF(-8.0, -8.0, 16.0, 16.0)
+        return super().boundingRect()
+
+    def shape(self) -> QPainterPath:
+        if getattr(self, '_video_window_style', False):
+            path = QPainterPath()
+            path.addEllipse(self.boundingRect())
+            return path
+        return super().shape()
+
     def paint(self, painter, option, widget) -> None:
+        if self._video_window_style:
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen = QPen(QColor(255, 136, 0), 1.0)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            hollow = self.handle_type in ('center', 'rotate') or self.handle_type.startswith('feather')
+            painter.setBrush(Qt.BrushStyle.NoBrush if hollow else QBrush(QColor(255, 242, 220)))
+            painter.drawEllipse(self.rect())
+            painter.restore()
+            return
         # Override to ensure crisp rendering
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         # For center handle, add a subtle crosshair or dot to make it look like DaVinci
@@ -175,6 +220,8 @@ class MaskHandle(QGraphicsEllipseItem):
                 value = QPointF(0, value.y())
             # Force feather handles to exact outline positions
             if self.handle_type in ('feather_r', 'feather_l', 'feather_t', 'feather_b'):
+                if getattr(parent, '_video_window_mode', False):
+                    return parent._video_feather_position(self.handle_type)
                 try:
                     if parent.shape_type == "circle":
                         fx = parent.feather / 100.0 * parent.size[0]
@@ -196,6 +243,8 @@ class MaskHandle(QGraphicsEllipseItem):
                         value = QPointF(0, edge_y + fy)
                 except (RuntimeError, AttributeError):
                     pass
+            if self.handle_type in ('resize_tl', 'resize_tr', 'resize_bl', 'resize_br'):
+                return parent._video_corner_position(self.handle_type)
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:
@@ -205,6 +254,9 @@ class MaskHandle(QGraphicsEllipseItem):
             return
         # Mark drag start for performance optimization
         self._is_dragging = True
+        parent = self.parentItem()
+        if parent is not None and self.handle_type in ('resize_tl', 'resize_tr', 'resize_bl', 'resize_br'):
+            parent._corner_resize_start_size = tuple(parent.size)
         
         # Notify canvas about interaction and set type
         if self.parentItem() and hasattr(self.parentItem(), 'canvas'):
@@ -218,6 +270,8 @@ class MaskHandle(QGraphicsEllipseItem):
         if is_ctrl and self.handle_type == 'node' and hasattr(self.parentItem(), 'on_node_deleted'):
             self._is_dragging = False  # Reset state for deletion
             self.parentItem().on_node_deleted(self.index)
+            if hasattr(self.parentItem(), 'canvas'):
+                QTimer.singleShot(0, self.parentItem().canvas.interaction_ended.emit)
             event.accept()
             return
             
@@ -233,6 +287,7 @@ class MaskHandle(QGraphicsEllipseItem):
         # This ensures the last position is always synchronized to the engine
         if self.parentItem():
             parent = self.parentItem()
+            parent._corner_resize_start_size = None
             # Stop any pending throttled sync
             if hasattr(parent, '_sync_timer'):
                 parent._sync_timer.stop()
@@ -977,6 +1032,10 @@ class MaskShapeItem(QGraphicsItem):
         self.rotation = 0.0
         self.feather = 50.0
 
+        self._video_window_mode = False
+        self.edge_softness: Optional[List[float]] = None
+        self._corner_resize_start_size: Optional[Tuple[float, float]] = None
+
         self.selected_node_idx = -1
         self._locked = False  # P1-COLOR-09: 窗口锁定（画布禁止编辑）
         
@@ -1015,6 +1074,77 @@ class MaskShapeItem(QGraphicsItem):
             self.handles['grad_end'] = MaskHandle('grad_end', self)
         
         self._is_updating_handles = False
+        self.set_video_window_mode(getattr(canvas, '_video_window_mode', False) is True)
+
+    def set_video_window_mode(self, enabled: bool) -> None:
+        """Apply the video palette's transform cage without changing image tools."""
+        self.prepareGeometryChange()
+        self._video_window_mode = bool(enabled)
+        if enabled and self.shape_type in ('circle', 'rect'):
+            for corner in ('tl', 'tr', 'bl', 'br'):
+                key = 'resize_' + corner
+                if key not in self.handles:
+                    self.handles[key] = MaskHandle(key, self)
+        if enabled and self.shape_type == 'gradient' and 'center' not in self.handles:
+            self.handles['center'] = MaskHandle('center', self)
+        for key, handle in self.handles.items():
+            handle.set_video_window_style(enabled)
+            handle.setEnabled(not self._locked)
+            if key in ('resize_tl', 'resize_tr', 'resize_bl', 'resize_br'):
+                handle.setVisible(enabled)
+            if self.shape_type == 'gradient' and key == 'center':
+                handle.setVisible(enabled)
+        self._update_handle_positions()
+        self.update()
+
+    def _video_half_size(self) -> Tuple[float, float]:
+        factor = 1.0 if self.shape_type == 'circle' else 0.5
+        return self.size[0] * factor, self.size[1] * factor
+
+    def _video_corner_position(self, key: str) -> QPointF:
+        half_w, half_h = self._video_half_size()
+        return QPointF(-half_w if key.endswith(('tl', 'bl')) else half_w,
+                       -half_h if key.endswith(('tl', 'tr')) else half_h)
+
+    def _video_feather_offsets(self) -> Tuple[float, float, float, float]:
+        width = self.canvas.logical_size.width() if getattr(self.canvas, 'logical_size', None) else 1000
+        if self.shape_type == 'rect' and self.edge_softness is not None:
+            return tuple(float(value) * width / 200.0 for value in self.edge_softness)
+        # Half the existing feather kernel spans each side of the hard edge.
+        offset = self.feather * width * 0.4 / 100.0
+        return offset, offset, offset, offset
+
+    def _video_feather_position(self, key: str) -> QPointF:
+        half_w, half_h = self._video_half_size()
+        left, right, top, bottom = self._video_feather_offsets()
+        return {
+            'feather_l': QPointF(-half_w - left, 0.0),
+            'feather_r': QPointF(half_w + right, 0.0),
+            'feather_t': QPointF(0.0, -half_h - top),
+            'feather_b': QPointF(0.0, half_h + bottom),
+        }[key]
+
+    def _paint_video_transform_cage(self, painter: QPainter, color: QColor) -> None:
+        half_w, half_h = self._video_half_size()
+        pen = QPen(color, 1.0)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(QRectF(-half_w, -half_h, half_w * 2.0, half_h * 2.0))
+        left, right, top, bottom = self._video_feather_offsets()
+        if max(left, right, top, bottom) <= 0.0:
+            return
+        if self.shape_type == 'circle':
+            self._draw_shape_outline(painter, self.size, (left, top), False)
+            self._draw_shape_outline(painter, self.size, (-left, -top), False)
+        else:
+            painter.drawRect(QRectF(-half_w - left, -half_h - top,
+                                    half_w * 2.0 + left + right, half_h * 2.0 + top + bottom))
+            inner_left, inner_right = min(left, half_w), min(right, half_w)
+            inner_top, inner_bottom = min(top, half_h), min(bottom, half_h)
+            painter.drawRect(QRectF(-half_w + inner_left, -half_h + inner_top,
+                                    half_w * 2.0 - inner_left - inner_right,
+                                    half_h * 2.0 - inner_top - inner_bottom))
 
     def set_locked(self, locked: bool) -> None:
         """P1-COLOR-09: 锁定窗口——画布禁止拖动/改形（面板参数仍可查看）。"""
@@ -1078,6 +1208,11 @@ class MaskShapeItem(QGraphicsItem):
         self._update_handle_positions()
 
     def boundingRect(self):
+        if self._video_window_mode and self.shape_type in ('circle', 'rect'):
+            half_w, half_h = self._video_half_size()
+            left, right, top, bottom = self._video_feather_offsets()
+            return QRectF(-half_w - left, -half_h - top,
+                          half_w * 2.0 + left + right, half_h * 2.0 + top + bottom).adjusted(-2, -2, 2, 2)
         if self.shape_type == "curve":
             if not self.bezier_points: return QRectF()
             path = self._get_path()
@@ -1204,7 +1339,9 @@ class MaskShapeItem(QGraphicsItem):
         # DaVinci 级别视觉：所有轮廓线使用 Cosmetic Pen，无论缩放级别保持恒定物理像素宽度
         
         # 1. Draw Feather Outlines (Inner + Outer, Dashed)
-        if self.shape_type in ["circle", "rect"] and self.feather > 0:
+        if self._video_window_mode and self.shape_type in ('circle', 'rect'):
+            self._paint_video_transform_cage(painter, base_color)
+        elif self.shape_type in ["circle", "rect"] and self.feather > 0:
             # feather=100 → offset=shape radius, separate for X/Y to match ellipse
             if self.shape_type == "circle":
                 fx = self.feather / 100.0 * self.size[0]
@@ -1255,7 +1392,7 @@ class MaskShapeItem(QGraphicsItem):
                 painter.drawPath(self._get_offset_curve_path(-feather_px))
 
         # 3. Draw Main Outline (Solid for DaVinci feel)
-        main_pen = QPen(base_color, 2.0)
+        main_pen = QPen(base_color, 1.0 if self._video_window_mode else 2.0)
         main_pen.setCosmetic(True)
         painter.setPen(main_pen)
         # No fill inside the mask as requested (fully transparent)
@@ -1264,14 +1401,15 @@ class MaskShapeItem(QGraphicsItem):
         
         # 4. Draw rotation handle connector (from shape top edge to rotate handle)
         if self.shape_type in ["circle", "rect", "curve"] and 'rotate' in self.handles:
-            conn_pen = QPen(base_color, 1.0, Qt.PenStyle.DotLine)
+            conn_pen = QPen(base_color, 1.0,
+                           Qt.PenStyle.SolidLine if self._video_window_mode else Qt.PenStyle.DotLine)
             conn_pen.setCosmetic(True)
             painter.setPen(conn_pen)
             r_pos = self.handles['rotate'].pos()
             painter.drawLine(QPointF(0, 0), r_pos)
             
         # 5. Draw center crosshair if active
-        if is_active and self.shape_type in ["circle", "rect", "curve"]:
+        if is_active and not self._video_window_mode and self.shape_type in ["circle", "rect", "curve"]:
             cross_pen = QPen(base_color, 1.0)
             cross_pen.setCosmetic(True)
             painter.setPen(cross_pen)
@@ -1302,18 +1440,20 @@ class MaskShapeItem(QGraphicsItem):
                     fi_key = f'fi_{i}'
                     fo_key = f'fo_{i}'
                     if fi_key in self.handles and self.handles[fi_key].isVisible():
-                        feather_pen = QPen(QColor(0, 255, 255, 180), 1.0, Qt.PenStyle.DashLine)
+                        feather_pen = QPen(base_color if self._video_window_mode else QColor(0, 255, 255, 180),
+                                           1.0, Qt.PenStyle.SolidLine if self._video_window_mode else Qt.PenStyle.DashLine)
                         feather_pen.setCosmetic(True)
                         painter.setPen(feather_pen)
                         painter.drawLine(p['pos'], self.handles[fi_key].pos())
                     if fo_key in self.handles and self.handles[fo_key].isVisible():
                         if fi_key not in self.handles or not self.handles[fi_key].isVisible():
-                            feather_pen = QPen(QColor(0, 255, 255, 180), 1.0, Qt.PenStyle.DashLine)
+                            feather_pen = QPen(base_color if self._video_window_mode else QColor(0, 255, 255, 180),
+                                               1.0, Qt.PenStyle.SolidLine if self._video_window_mode else Qt.PenStyle.DashLine)
                             feather_pen.setCosmetic(True)
                             painter.setPen(feather_pen)
                         painter.drawLine(p['pos'], self.handles[fo_key].pos())
         elif self.shape_type == "gradient":
-            grad_pen = QPen(base_color, 2.0)
+            grad_pen = QPen(base_color, 1.0 if self._video_window_mode else 2.0)
             grad_pen.setCosmetic(True)
             painter.setPen(grad_pen)
             p1 = self.handles['grad_start'].pos()
@@ -1324,7 +1464,8 @@ class MaskShapeItem(QGraphicsItem):
             line = QLineF(p1, p2)
             normal = line.normalVector().unitVector()
             # Normal vector is rotated 90 degrees, we use it to draw the boundary
-            bound_pen = QPen(base_color, 1.0, Qt.PenStyle.DashLine)
+            bound_pen = QPen(base_color, 1.0,
+                            Qt.PenStyle.SolidLine if self._video_window_mode else Qt.PenStyle.DashLine)
             bound_pen.setCosmetic(True)
             for pt in [p1, p2]:
                 n_vec = QPointF(normal.dx() * 500, normal.dy() * 500)
@@ -1665,7 +1806,8 @@ class MaskShapeItem(QGraphicsItem):
             path = self._get_path()
             painter.drawPath(path)
 
-    def update_from_data(self, center, size, rotation, feather, points=None, brush_strokes=None, grad_points=None) -> None:
+    def update_from_data(self, center, size, rotation, feather, points=None, brush_strokes=None, grad_points=None,
+                         edge_softness: Optional[List[float]] = None) -> None:
         # 关键修复：如果当前有手柄正在被拖拽，绝对不能用后端的旧数据覆盖当前UI状态
         # 否则会导致鼠标拖拽事件丢失和控制点坐标强制回弹
         is_dragging = False
@@ -1676,7 +1818,9 @@ class MaskShapeItem(QGraphicsItem):
         if is_dragging:
             return
 
+        self.prepareGeometryChange()
         self._is_updating_handles = True
+        self.edge_softness = list(edge_softness) if edge_softness is not None else None
         self.setPos(center)
         self.size = size
         self.rotation = rotation
@@ -1700,6 +1844,7 @@ class MaskShapeItem(QGraphicsItem):
             self.bezier_points = []
             for p in points:
                 self.bezier_points.append({
+                    **p,
                     'pos': QPointF(p['pos'][0] * w - center.x(), p['pos'][1] * h - center.y()),
                     'c1': QPointF(p['c1'][0] * w - center.x(), p['c1'][1] * h - center.y()),
                     'c2': QPointF(p['c2'][0] * w - center.x(), p['c2'][1] * h - center.y()),
@@ -1748,7 +1893,8 @@ class MaskShapeItem(QGraphicsItem):
                 if 'resize_h_neg' in self.handles:
                     self.handles['resize_h_neg'].setPos(0, self.size[1]/2 if self.shape_type == "rect" else self.size[1])
                 if 'rotate' in self.handles:
-                    self.handles['rotate'].setPos(0, -100)
+                    half_w, half_h = self._video_half_size()
+                    self.handles['rotate'].setPos(0, -half_h * 0.5 if self._video_window_mode else -100)
                 if 'feather_r' in self.handles:
                     if self.shape_type == "circle":
                         fx = self.feather / 100.0 * self.size[0]
@@ -1764,6 +1910,11 @@ class MaskShapeItem(QGraphicsItem):
                         self.handles['feather_l'].setPos(-(self.size[0]/2 + fx), 0)
                         self.handles['feather_t'].setPos(0, -(self.size[1]/2 + fy))
                         self.handles['feather_b'].setPos(0, self.size[1]/2 + fy)
+                if self._video_window_mode:
+                    for key in ('resize_tl', 'resize_tr', 'resize_bl', 'resize_br'):
+                        self.handles[key].setPos(self._video_corner_position(key))
+                    for key in ('feather_l', 'feather_r', 'feather_t', 'feather_b'):
+                        self.handles[key].setPos(self._video_feather_position(key))
             elif self.shape_type == "curve":
                 if 'center' in self.handles:
                     self.handles['center'].setPos(0, 0)
@@ -1771,7 +1922,7 @@ class MaskShapeItem(QGraphicsItem):
                     path = self._get_path()
                     br = path.boundingRect()
                     top = br.top() if not br.isEmpty() else -100
-                    self.handles['rotate'].setPos(0, min(top - 40, -60))
+                    self.handles['rotate'].setPos(0, top * 0.5 if self._video_window_mode else min(top - 40, -60))
                 
                 # 只有处于曲线绘制模式且当前形状为活跃状态时，才显示 node 和 ctrl handles
                 is_this_active = (self.shape_id == getattr(self.canvas, 'active_shape_id', None))
@@ -1884,6 +2035,18 @@ class MaskShapeItem(QGraphicsItem):
                     elif self.handles['grad_start'].pos() == QPointF(0, 0) and self.handles['grad_end'].pos() == QPointF(0, 0):
                         self.handles['grad_start'].setPos(-100, 0)
                         self.handles['grad_end'].setPos(100, 0)
+                    if self._video_window_mode:
+                        self.handles['center'].setPos((self.handles['grad_start'].pos()
+                                                       + self.handles['grad_end'].pos()) / 2.0)
+            if self._video_window_mode:
+                active = self.shape_id == getattr(self.canvas, 'active_shape_id', None) or self.isSelected()
+                if getattr(self.canvas, 'brush_mode_active', False) or getattr(self.canvas, 'sam_mode_active', False):
+                    active = False
+                for handle in self.handles.values():
+                    if self.shape_type != 'curve' or handle.handle_type in ('center', 'rotate'):
+                        handle.setVisible(active)
+                    elif not active:
+                        handle.setVisible(False)
         finally:
             self._is_updating_handles = False
 
@@ -1963,7 +2126,19 @@ class MaskShapeItem(QGraphicsItem):
                 self._sync_back()  # Immediate sync for non-drag interactions
             return
 
-        if handle.handle_type in ('resize_w', 'resize_w_neg'):
+        if handle.handle_type.startswith('resize_') or handle.handle_type.startswith('feather'):
+            self.prepareGeometryChange()
+        if handle.handle_type in ('resize_tl', 'resize_tr', 'resize_bl', 'resize_br'):
+            original = self._corner_resize_start_size or tuple(self.size)
+            factor = 1.0 if self.shape_type == 'circle' else 0.5
+            x_sign = -1.0 if handle.handle_type.endswith(('tl', 'bl')) else 1.0
+            y_sign = -1.0 if handle.handle_type.endswith(('tl', 'tr')) else 1.0
+            corner = QPointF(original[0] * factor * x_sign, original[1] * factor * y_sign)
+            denominator = max(1.0, corner.x() ** 2 + corner.y() ** 2)
+            scale = (pos.x() * corner.x() + pos.y() * corner.y()) / denominator
+            scale = max(10.0 / max(1.0, min(original)), scale)
+            self.size = [original[0] * scale, original[1] * scale]
+        elif handle.handle_type in ('resize_w', 'resize_w_neg'):
             if self.shape_type == "circle":
                 self.size[0] = max(10, abs(pos.x()))
             else:
@@ -1979,7 +2154,17 @@ class MaskShapeItem(QGraphicsItem):
             self.rotation = angle
             self.setRotation(angle)
         elif handle.handle_type in ('feather_r', 'feather_l', 'feather_t', 'feather_b'):
-            if handle.handle_type in ('feather_r', 'feather_l'):
+            if self._video_window_mode:
+                half_w, half_h = self._video_half_size()
+                horizontal = handle.handle_type in ('feather_l', 'feather_r')
+                edge, distance = (half_w, abs(pos.x())) if horizontal else (half_h, abs(pos.y()))
+                width = self.canvas.logical_size.width() if getattr(self.canvas, 'logical_size', None) else 1000
+                if self.shape_type == 'rect' and self.edge_softness is not None:
+                    index = ('feather_l', 'feather_r', 'feather_t', 'feather_b').index(handle.handle_type)
+                    self.edge_softness[index] = max(0.0, min(100.0, (distance - edge) * 200.0 / width))
+                else:
+                    self.feather = max(0.0, min(100.0, (distance - edge) * 100.0 / (width * 0.4)))
+            elif handle.handle_type in ('feather_r', 'feather_l'):
                 if self.shape_type == "circle":
                     edge = self.size[0]
                 else:
@@ -2063,7 +2248,16 @@ class MaskShapeItem(QGraphicsItem):
             return
         elif handle.handle_type in ['grad_start', 'grad_end']:
             # Handled by _sync_back which pulls current handle positions
-            pass
+            if self._video_window_mode and 'center' in self.handles:
+                other = self.handles['grad_end' if handle.handle_type == 'grad_start' else 'grad_start'].pos()
+                self._is_updating_handles = True
+                try:
+                    self.handles['center'].setPos((other + pos) / 2.0)
+                finally:
+                    self._is_updating_handles = False
+
+        if self._video_window_mode and self.shape_type in ('circle', 'rect'):
+            self._update_handle_positions()
         
         # For resize, rotate, feather handles: use throttled sync during drag
         if skip_sync:
@@ -2197,11 +2391,14 @@ class MaskShapeItem(QGraphicsItem):
             # 如果是笔刷类型，强制将传递给后端的全局羽化设为 0
             "feather": 0.0 if self.shape_type == "brush" else self.feather
         }
+        if self._video_window_mode and self.shape_type == 'rect' and self.edge_softness is not None:
+            data['edge_softness'] = list(self.edge_softness)
         
         if self.shape_type == "curve":
             norm_points = []
             for p in self.bezier_points:
                 norm_points.append({
+                    **p,
                     'pos': [(self.pos().x() + p['pos'].x()) / w, (self.pos().y() + p['pos'].y()) / h],
                     'c1': [(self.pos().x() + p['c1'].x()) / w, (self.pos().y() + p['c1'].y()) / h],
                     'c2': [(self.pos().x() + p['c2'].x()) / w, (self.pos().y() + p['c2'].y()) / h],
@@ -3709,6 +3906,8 @@ class Canvas(QGraphicsView):
     # 透视模式四角手动修正（归一化四角，顺序 TL/TR/BR/BL）
     tracker_homography_corners_committed = pyqtSignal(list)
     tracker_failed_marker_clicked = pyqtSignal(int)  # frame
+    tracker_feature_selected = pyqtSignal(int)
+    tracker_feature_inserted = pyqtSignal(float, float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -3732,6 +3931,7 @@ class Canvas(QGraphicsView):
         # Tracker 等其他面板时必须保持可见（否则无法选形/调跟踪位置）。
         # 用户仍可通过视口菜单的 mask 开关显式关闭。
         self._show_mask_overlays = True
+        self._video_window_mode = False
         
         # Grid and safe area visibility states
 
@@ -3764,6 +3964,7 @@ class Canvas(QGraphicsView):
         
         # Pen tool state
         self.is_drawing = False
+        self._mask_creation_mode = "curve"
         self.is_picking = False
         self.inspector_mode_active = False
         self.hsl_picker_mode = False  # HSL Curves color picker mode
@@ -3849,6 +4050,8 @@ class Canvas(QGraphicsView):
             self.tracker_homography_corners_committed.emit)
         self.tracker_overlay.failed_marker_clicked.connect(
             self.tracker_failed_marker_clicked.emit)
+        self.tracker_overlay.feature_selected.connect(self.tracker_feature_selected.emit)
+        self.tracker_overlay.feature_inserted.connect(self.tracker_feature_inserted.emit)
         
         self._brush_stroke_points = []  # Current stroke points
         self._brush_params = {"size": 50, "feather": 50, "opacity": 1.0, "flow": 1.0}
@@ -4630,6 +4833,12 @@ class Canvas(QGraphicsView):
             event.accept()
             return
 
+        # Point editing is explicit and takes priority over cycling MaskShapeItem
+        # selection. Ordinary clicks retain the existing mask interaction path.
+        if self.tracker_overlay.wants_point_interaction(self.mapToScene(event.pos()), event.button()):
+            super().mousePressEvent(event)
+            return
+
         # Handle Brush drawing start
         if self.brush_mode_active and event.button() == Qt.MouseButton.LeftButton:
             scene_pos = self.mapToScene(event.pos())
@@ -4997,7 +5206,7 @@ class Canvas(QGraphicsView):
                         'pos': local_pos,
                         'c1': local_pos,
                         'c2': local_pos,
-                        'type': 'smooth'
+                        'type': 'corner' if self._mask_creation_mode == 'polygon' else 'smooth'
                     }
                     active_item.bezier_points.insert(insert_idx, new_pt)
                     active_item.selected_node_idx = insert_idx
@@ -5018,12 +5227,13 @@ class Canvas(QGraphicsView):
                 return
 
         # 3. Add new point (Default to Smooth with generous handles as requested)
-        handle_offset = QPointF(40, 0) # Longer handles for easier adjustment
+        polygon = self._mask_creation_mode == 'polygon'
+        handle_offset = QPointF() if polygon else QPointF(40, 0)
         new_pt = {
             'pos': pos - active_item.pos(),
             'c1': pos - active_item.pos() - handle_offset,
             'c2': pos - active_item.pos() + handle_offset,
-            'type': 'smooth'
+            'type': 'corner' if polygon else 'smooth'
         }
         active_item.bezier_points.append(new_pt)
         active_item.selected_node_idx = len(active_item.bezier_points) - 1
@@ -5031,7 +5241,7 @@ class Canvas(QGraphicsView):
         # Requirement: Keep center handle at shape center
         active_item.recenter()
         
-        self.pen_dragging = True
+        self.pen_dragging = not polygon
         self.pen_start_pos = pos
         
         active_item._update_handle_positions()
@@ -5519,13 +5729,23 @@ class Canvas(QGraphicsView):
                     effective_shape.rotation = float(geometry.get("rotation", shape.rotation) or 0.0)
                     if "points" in geometry:
                         effective_shape.points = geometry["points"]
+                    if "grad_points" in geometry:
+                        effective_shape.grad_points = geometry["grad_points"]
 
             center = QPointF(effective_shape.center[0] * w, effective_shape.center[1] * h)
             size = [effective_shape.size[0] * w, effective_shape.size[1] * h]
             item.update_from_data(center, size, effective_shape.rotation, shape.feather,
                                   points=getattr(effective_shape, 'points', None),
                                   brush_strokes=getattr(shape, 'brush_strokes', None),
-                                  grad_points=getattr(shape, 'grad_points', None))
+                                  grad_points=getattr(effective_shape, 'grad_points', None),
+                                  edge_softness=getattr(shape, 'edge_softness', None))
+
+    def set_video_window_mode(self, enabled: bool) -> None:
+        """Select video window handles without altering image mask tools."""
+        self._video_window_mode = bool(enabled)
+        for item in self.mask_items.values():
+            item.set_video_window_mode(self._video_window_mode)
+        self.viewport().update()
 
     def wheelEvent(self, event) -> None:
         speed = 100
@@ -5659,7 +5879,16 @@ class Canvas(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
 
-    def set_drawing_mode(self, enabled) -> None:
+    def set_mask_creation_mode(self, mode: str) -> None:
+        """Choose curved pen or corner-only polygon creation for curve masks."""
+        if mode not in ("curve", "polygon"):
+            raise ValueError(f"Unsupported mask creation mode: {mode}")
+        self._mask_creation_mode = mode
+        self.pen_dragging = False
+        self.pen_start_pos = None
+        self.set_drawing_mode(True)
+
+    def set_drawing_mode(self, enabled: bool) -> None:
         """Toggle between Pen drawing and standard Hand pan modes."""
         self.is_drawing = enabled
         if enabled:

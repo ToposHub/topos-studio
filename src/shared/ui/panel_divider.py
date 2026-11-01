@@ -16,6 +16,38 @@ __all__ = ["PanelDockWidget", "paint_shared_dock_dividers"]
 _FALLBACK_SEPARATOR_EXTENT = 8
 
 
+def _dock_rectangles(
+    main_window: QMainWindow,
+    *,
+    exclude: QDockWidget | None = None,
+) -> list[QRect]:
+    """Snapshot layout neighbors without traversing dock content widgets.
+
+    addDockWidget reparents participating docks directly to QMainWindow.
+    Recursive discovery visits the full editor/inspector trees on every
+    repaint, even though their descendants cannot be layout neighbors.
+    """
+    rectangles: list[QRect] = []
+    for dock in main_window.findChildren(
+        QDockWidget, options=Qt.FindChildOption.FindDirectChildrenOnly,
+    ):
+        if (
+            dock is not exclude
+            and dock.isVisible()
+            and not dock.isFloating()
+            and main_window.dockWidgetArea(dock)
+            != Qt.DockWidgetArea.NoDockWidgetArea
+        ):
+            origin = dock.mapTo(main_window, QPoint(0, 0))
+            rectangles.append(QRect(origin, dock.size()))
+
+    center = main_window.centralWidget()
+    if center is not None and center.isVisible():
+        origin = center.mapTo(main_window, QPoint(0, 0))
+        rectangles.append(QRect(origin, center.size()))
+    return rectangles
+
+
 class _PanelDividerOverlay(QWidget):
     """Paint the dock outline above its content without stealing input."""
 
@@ -46,36 +78,14 @@ class _PanelDividerOverlay(QWidget):
             result.append((cursor, end))
         return result
 
+    @staticmethod
     def _shared_edge_ranges(
-        self,
-        dock: QDockWidget,
         dock_rect: QRect,
         side: str,
         separator_extent: int,
+        neighbors: list[QRect],
     ) -> list[tuple[int, int]]:
-        """Find the part of an edge facing an adjacent dock or center widget."""
-        main_window = dock.window()
-        if dock.isFloating() or not isinstance(main_window, QMainWindow):
-            return []
-
-        neighbors: list[QRect] = []
-        for candidate in main_window.findChildren(QDockWidget):
-            if (
-                candidate is dock
-                or candidate.isFloating()
-                or not candidate.isVisible()
-                or main_window.dockWidgetArea(candidate)
-                == Qt.DockWidgetArea.NoDockWidgetArea
-            ):
-                continue
-            origin = candidate.mapTo(main_window, QPoint(0, 0))
-            neighbors.append(QRect(origin, candidate.size()))
-
-        center = main_window.centralWidget()
-        if center is not None and center.isVisible():
-            origin = center.mapTo(main_window, QPoint(0, 0))
-            neighbors.append(QRect(origin, center.size()))
-
+        """Find shared portions using the single snapshot for this paint."""
         max_gap = max(1, separator_extent) + 1
         shared: list[tuple[int, int]] = []
         for other in neighbors:
@@ -126,6 +136,11 @@ class _PanelDividerOverlay(QWidget):
             main_window, QMainWindow
         ) else QPoint(0, 0)
         dock_rect = QRect(origin, dock.size())
+        neighbors = (
+            _dock_rectangles(main_window, exclude=dock)
+            if isinstance(main_window, QMainWindow) and not dock.isFloating()
+            else []
+        )
         width = self.width()
         height = self.height()
         edges = (
@@ -136,7 +151,7 @@ class _PanelDividerOverlay(QWidget):
         )
         for side, fixed, start, end, axis_origin in edges:
             shared = self._shared_edge_ranges(
-                dock, dock_rect, side, separator_extent
+                dock_rect, side, separator_extent, neighbors
             )
             local_shared = [
                 (shared_start - axis_origin, shared_end - axis_origin)
@@ -160,21 +175,7 @@ def paint_shared_dock_dividers(
     This is called from the main window's paint event so it does not add an
     unmanaged child to QMainWindow's layout or intercept splitter drags.
     """
-    rectangles: list[QRect] = []
-    for dock in main_window.findChildren(QDockWidget):
-        if (
-            dock.isVisible()
-            and not dock.isFloating()
-            and main_window.dockWidgetArea(dock)
-            != Qt.DockWidgetArea.NoDockWidgetArea
-        ):
-            origin = dock.mapTo(main_window, QPoint(0, 0))
-            rectangles.append(QRect(origin, dock.size()))
-
-    center = main_window.centralWidget()
-    if center is not None and center.isVisible():
-        origin = center.mapTo(main_window, QPoint(0, 0))
-        rectangles.append(QRect(origin, center.size()))
+    rectangles = _dock_rectangles(main_window)
 
     separator_extent = main_window.style().pixelMetric(
         QStyle.PixelMetric.PM_DockWidgetSeparatorExtent,
