@@ -121,15 +121,13 @@ class ColorVersionToolsPanel(QDialog):
                 return
             self._project = result  # 主工程回读
         else:
-            # 无栈时直接应用到工程（测试路径）；EditCommand 协议 apply
-            # 可返回 (new_project, updated_command) 二元组（Activate
-            # 等）——归一取工程，更新后命令留待读取 missing_plugins。
+            # 无栈时直接应用到工程（测试路径）；BE-01 后 Activate 返回
+            # ProjectTransactionResult（兼容旧 EditCommand 二元组）——
+            # consume_project_result 归一取工程，更新后命令留待读取
+            # missing_plugins。
+            from src.features.edit.core.commands import consume_project_result
             result = command.apply(self._project)
-            if isinstance(result, tuple):
-                updated_command, result = result[1], result[0]
-                if updated_command is not None:
-                    command = updated_command
-            self._project = result
+            self._project, command = consume_project_result(command, result)
         self._last_command = command
         self._refresh()
 
@@ -169,17 +167,25 @@ class ColorVersionToolsPanel(QDialog):
             QMessageBox.warning(self, "拒绝", str(exc))
             return
         # N04：激活与保存/锁定同走命令出口——不再绕过 executor 直改
-        # 面板私有工程（旧路径主工程/命令栈完全不知情）。缺失提示从
-        # 刷新后的版本 payload 读（保存期持久化的 missing_plugins_hint
-        # ——executor/直应用两路一致，不依赖栈内更新后的命令对象）。
+        # 面板私有工程（旧路径主工程/命令栈完全不知情）。DIAG-01：缺失
+        # 提示统一消费 plugin_diagnostics（保存期持久化的诊断快照；
+        # 旧工程无该字段时由 version_plugin_diagnostics 现算，未核对与
+        # 无缺失明确区分）。
         self._execute(cmd)
         payload = (self._state().get("versions") or {}).get(name) or {}
-        hint = payload.get("missing_plugins_hint") or ()
-        if hint:
+        from src.features.edit.core.color_versions import (
+            version_plugin_diagnostics,
+        )
+        diagnostics = version_plugin_diagnostics(payload)
+        missing = diagnostics.get("missing") or []
+        if diagnostics.get("unverified"):
+            self._status.setText("插件清单未核对（注册表不可用），"
+                                 "激活照常、载荷已保留")
+        elif missing:
             QMessageBox.information(
                 self, "激活完成",
-                f"缺 {len(hint)} 个插件"
-                f"（{', '.join(list(hint)[:5])}）——"
+                f"缺 {len(missing)} 个插件"
+                f"（{', '.join(list(missing)[:5])}）——"
                 "渲染将走缺失明示")
 
     def _on_toggle_lock(self) -> None:

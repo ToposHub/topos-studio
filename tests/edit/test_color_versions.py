@@ -28,6 +28,7 @@ from src.features.edit.core.color_versions import (
     SetStackLockCommand,
     is_stack_locked,
     lock_shared_stacks,
+    promote_default_version,
     shared_stack_ids,
     stack_dependent_clips,
     versions_state,
@@ -90,8 +91,8 @@ class TestNamedVersions:
         p = SaveColorVersionCommand.create(p, "s1", "C").apply(p)
 
         for name, exposure in (("A", 5.0), ("B", 20.0), ("C", 40.0)):
-            p_next, applied = ActivateColorVersionCommand.create(
-                "s1", name).apply(p)
+            result = ActivateColorVersionCommand.create("s1", name).apply(p)
+            p_next, applied = result.project, result.updated_command
             assert p_next.color_stacks["s1"].grading_params[
                 "exposure"] == exposure
             reverted = applied.undo(p_next)  # 单步回退
@@ -105,7 +106,8 @@ class TestNamedVersions:
         p = _project()
         p = SaveColorVersionCommand.create(p, "s1", "A").apply(p)
         p = _set_exposure(p, 30.0)
-        p_next, _ = ActivateColorVersionCommand.create("s1", "A").apply(p)
+        p_next = ActivateColorVersionCommand.create(
+            "s1", "A").apply(p).project
         stack = p_next.color_stacks["s1"]
         assert stack.stack_id == "s1"
         assert stack.scope == "clip_local"
@@ -177,7 +179,8 @@ class TestSharedLookLock:
         """锁防误改 look，不防版本管理（保存/激活/删除版本可用）。"""
         p, _ = lock_shared_stacks(_project())
         p2 = SaveColorVersionCommand.create(p, "s1", "V1").apply(p)
-        p3, _ = ActivateColorVersionCommand.create("s1", "V1").apply(p2)
+        p3 = ActivateColorVersionCommand.create(
+            "s1", "V1").apply(p2).project
         assert versions_state(p3, "s1")["active"] == "V1"
 
     def test_impact_preview_dependent_clips(self):
@@ -195,7 +198,8 @@ class TestInteractionWithF41:
         p = SaveColorVersionCommand.create(p, "s1", "A").apply(p)
         p = _set_exposure(p, 25.0)
         p = SaveColorVersionCommand.create(p, "s1", "B").apply(p)
-        p2, _ = ActivateColorVersionCommand.create("s1", "A").apply(p)
+        p2 = ActivateColorVersionCommand.create(
+            "s1", "A").apply(p).project
         for clip in p2.timelines["tl1"].video_tracks[0].clips:
             assert clip.color_trim_stack_id == f"trim-{clip.clip_id}"
         assert p2.color_stacks["trim-c1"].grading_params["saturation"] == 5.0
@@ -208,7 +212,8 @@ class TestInteractionWithF41:
         p = _project()
         p = SaveColorVersionCommand.create(p, "s1", "A").apply(p)
         p = _set_exposure(p, 33.0)
-        p2, _ = ActivateColorVersionCommand.create("s1", "A").apply(p)
+        p2 = ActivateColorVersionCommand.create(
+            "s1", "A").apply(p).project
 
         exporter = TimelineExporter.__new__(TimelineExporter)
         exporter._project = SimpleNamespace(color_stacks=p2.color_stacks)
@@ -218,6 +223,51 @@ class TestInteractionWithF41:
             clip_id="c1", source_frame=0)
         grade = exporter._get_clip_color_grade(layer)
         assert grade["grading_params"]["exposure"] == 5.0  # 版本 A 内容
+
+
+class TestVersionTableIOFidelity:
+    """IO-01 · 版本表（含 BE-04 default_version 键）保存/加载保真。"""
+
+    def _roundtrip(self, project):
+        return convert_topos_project_to_edit_project(
+            convert_edit_project_to_topos_project(project), full_data={})
+
+    def test_full_table_roundtrip_preserves_every_field(self):
+        """版本内容/active/locked/default_version/未知 payload 字段保真。"""
+        from src.features.edit.core.color_versions import (
+            DeleteAllVersionsCommand, SaveColorVersionCommand,
+        )
+        p = _project()
+        p = SaveColorVersionCommand.create(p, "s1", "A").apply(p)
+        p = SaveColorVersionCommand.create(p, "s1", "B").apply(p)
+        # 未知 payload 字段（未来 schema 前向兼容）——注入将被保留的 B
+        table = dict(p.color_stack_versions)
+        table["s1"]["versions"]["B"]["future_field"] = {"nested": [1, 2]}
+        p = p.with_color_stack_versions(table)
+        p, _migrate = promote_default_version(p, "s1")
+        p = DeleteAllVersionsCommand.create(p, "s1").apply(p).project
+
+        restored = self._roundtrip(p)
+        state = versions_state(restored, "s1")
+        assert set(state["versions"]) == {state["default_version"]}
+        assert state["active"] == state["default_version"] == "B"
+        assert state["versions"]["B"]["future_field"] == {"nested": [1, 2]}
+        assert state["versions"]["B"]["grading_params"] == \
+            versions_state(p, "s1")["versions"]["B"]["grading_params"]
+
+    def test_locked_flag_roundtrip(self):
+        from src.features.edit.core.color_versions import SetStackLockCommand
+        p = _project()
+        p = SetStackLockCommand.create(p, "s1", True).apply(p)
+        assert self._roundtrip(p).color_stack_versions["s1"]["locked"] is True
+
+    def test_old_project_without_keys_loads_empty(self):
+        blank = self._roundtrip(
+            EditProject(project_id="q", name="Q"))
+        assert blank.color_stack_versions == {}
+        assert versions_state(blank, "s1") == {
+            "active": None, "locked": False, "versions": {},
+            "default_version": None}
 
 
 class TestPluginManifest:
@@ -234,3 +284,70 @@ class TestPluginManifest:
         assert payload["plugin_versions"] == {"fx.denoise.v2": "2.3"}
         # 未知插件不丢载荷（missing_plugins 计算失败时保守为空）
         assert "layers" in payload
+
+
+class TestPluginDiagnostics:
+    """DIAG-01 · 统一诊断字段：missing/unverified 区分 + 持久化。"""
+
+    def test_diagnostics_persisted_and_distinguished(self):
+        from src.features.edit.core.color_versions import (
+            version_plugin_diagnostics,
+        )
+        stack = ColorStackData(
+            stack_id="s1",
+            layers=({"plugin_id": "fx.notinstalled.v1",
+                     "plugin_version": "1.0"},))
+        p = EditProject(project_id="p", name="P",
+                        color_stacks={"s1": stack})
+        p2 = SaveColorVersionCommand.create(p, "s1", "V").apply(p)
+        payload = versions_state(p2, "s1")["versions"]["V"]
+        # 保存时持久化统一字段
+        assert "plugin_diagnostics" in payload
+        diagnostics = version_plugin_diagnostics(payload)
+        assert isinstance(diagnostics["unverified"], bool)
+        # 注册表可用时给出真实缺失清单（fx.notinstalled 未注册）
+        assert "fx.notinstalled.v1" in diagnostics["missing"]
+        assert diagnostics["unverified"] is False
+
+    def test_diagnostics_registry_unavailable_marks_unverified(self):
+        """注册表不可用：unverified=True，不当"无缺失"。"""
+        import src.features.edit.core.color_versions as cv
+        from src.features.edit.core.project import EditProject as EP
+        from src.shared.project.color_stack import ColorStackData as CS
+
+        p = EP(project_id="p", name="P",
+               color_stacks={"s1": CS(
+                   stack_id="s1", grading_params={"exposure": 1.0},
+                   layers=({"plugins": (
+                       {"plugin_id": "fx.any", "plugin_version": "1.0"},)},))})
+
+        class _BrokenManager:
+            def get_all_plugins(self):
+                raise RuntimeError("registry down")
+
+        import src.features.color.core.plugin_manager as pm
+        original = pm.get_plugin_manager
+        pm.get_plugin_manager = lambda: _BrokenManager()
+        try:
+            p2 = cv.SaveColorVersionCommand.create(p, "s1", "V").apply(p)
+            saved = cv.versions_state(p2, "s1")["versions"]["V"]
+            diagnostics = cv.version_plugin_diagnostics(saved)
+            assert diagnostics["unverified"] is True
+            assert diagnostics["missing"] == []  # 保守为空，不冒充已核对
+        finally:
+            pm.get_plugin_manager = original
+
+    def test_lock_rejects_param_write_but_allows_version_mgmt(self):
+        """锁语义：普通参数写锁定栈零写入；版本管理照常（DIAG-01）。"""
+        p, _ = lock_shared_stacks(_project())
+        from src.features.edit.core.color_versions import (
+            RenameColorVersionCommand, SaveColorVersionCommand,
+        )
+        with pytest.raises(ValueError, match="已锁定"):
+            UpdateColorStackCommand(
+                command_id="x", label="L", stack_id="s1",
+                grading_params={"exposure": 9.0}).apply(p)
+        p2 = SaveColorVersionCommand.create(p, "s1", "V1").apply(p)
+        p3 = RenameColorVersionCommand.create(
+            p2, "s1", "V1", "Renamed").apply(p2)
+        assert "Renamed" in versions_state(p3, "s1")["versions"]

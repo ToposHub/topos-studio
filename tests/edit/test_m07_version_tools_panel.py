@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 pytestmark = pytest.mark.edit_core
 
 from src.features.edit.ui.m07_version_tools_panel import ColorVersionToolsPanel
+from src.features.edit.core.commands import ProjectTransactionResult
 from src.features.edit.core.project import EditProject, MediaAsset, ProjectBin
 from src.shared.project.color_stack import ColorStackData
 
@@ -62,8 +63,11 @@ class TestVersionToolsPanelExecutor:
         def executor(command):
             submitted.append(command)
             result = command.apply(state["project"])
-            if isinstance(result, tuple):  # EditCommand 协议二元组归一
+            # BE-01：Activate 返回 ProjectTransactionResult（兼容旧二元组）
+            if isinstance(result, tuple):
                 result = result[0]
+            if isinstance(result, ProjectTransactionResult):
+                result = result.project
             state["project"] = result
             return state["project"]  # 正典链返回新工程
 
