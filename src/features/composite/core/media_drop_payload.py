@@ -217,7 +217,37 @@ def resolve_drop_payloads(mime_data: Any,
         ]
         return _reject_audio_payloads(payloads)
 
+    return resolve_asset_ids(asset_ids, project=project,
+                             asset_lookup=asset_lookup,
+                             fallback_paths=fallback_paths)
+
+
+def resolve_asset_ids(asset_ids: List[str],
+                      project: Any = None,
+                      asset_lookup: Any = None,
+                      fallback_paths: Optional[List[str]] = None
+                      ) -> List[MediaDropPayload]:
+    """Resolve asset ids (no Qt dependency) → :class:`MediaDropPayload` list.
+
+    Shared by the mime bridge (:func:`resolve_drop_payloads`) and the node
+    canvas drop consumer, which receives the already-parsed id list through
+    the editor's ``assets_dropped`` signal (AUD-10503 page-side wiring).
+
+    Args:
+        asset_ids: asset ids as dragged from the media pool.
+        project: optional :class:`EditProject`-like object exposing
+            ``assets`` for id → asset resolution.
+        asset_lookup: optional callable ``(asset_id) -> asset-or-dict``
+            overriding ``project``.
+        fallback_paths: optional local paths dragged alongside the ids
+            (order-paired fallback when an id cannot be resolved through the
+            project — see :func:`resolve_drop_payloads`).
+
+    Audio assets are rejected (AUD-5004); ids that resolve to nothing and
+    have no paired fallback path are skipped with a warning.
+    """
     payloads: List[MediaDropPayload] = []
+    fallback = list(fallback_paths or [])
     for index, aid in enumerate(asset_ids):
         asset = None
         if asset_lookup is not None:
@@ -231,8 +261,8 @@ def resolve_drop_payloads(mime_data: Any,
             # MediaPool includes local URLs alongside the authoritative asset
             # ids. Pairing them by order keeps drag/drop usable even when a
             # panel was opened before its EditProject reference was rebound.
-            if index < len(fallback_paths):
-                path = fallback_paths[index]
+            if index < len(fallback):
+                path = fallback[index]
                 payloads.append(MediaDropPayload(
                     asset_id=aid,
                     path=path,

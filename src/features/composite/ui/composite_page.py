@@ -38,7 +38,8 @@ from src.features.composite.nodes.node_state import NodeState
 from src.features.composite.core.node_engine import NodeGraph, NODE_REGISTRY
 from src.features.composite.core.layer_stack_controller import LayerStackController
 from src.features.composite.core.media_drop_payload import (
-    resolve_drop_payloads, MEDIA_TYPE_MODEL3D,
+    resolve_drop_payloads, resolve_asset_ids, MEDIA_TYPE_MODEL3D,
+    MEDIA_TYPE_VIDEO,
 )
 from src.features.composite.nodes.color_node import COLORNode  # Deprecated - kept for isinstance checks
 from src.features.composite.nodes.topos_color_node import ToposColorNode
@@ -650,6 +651,10 @@ class CompositePage(QWidget):
         self._node_editor.nodes_duplicated.connect(self._on_nodes_duplicated)
         self._node_editor.nodes_batch_removed.connect(self._on_nodes_batch_removed)
         self._node_editor.placeholder_node_added.connect(self._on_placeholder_node_added)
+        # AUD-10503 页面侧接线：媒体池素材拖到节点画布 → asset-backed 节点。
+        # 编辑器只识别媒体池 MIME 并发信号；asset 解析与建节点归页面
+        # （见 _on_editor_assets_dropped）。
+        self._node_editor.assets_dropped.connect(self._on_editor_assets_dropped)
         editor_layout.addWidget(self._node_editor)
 
         # Minimap overlay (bottom-right corner)
@@ -977,6 +982,61 @@ class CompositePage(QWidget):
         self._refresh_keyframes_panel()
         self._evaluate_graph()
         return True
+
+    def _on_editor_assets_dropped(self, asset_ids: List[str],
+                                  scene_pos: Tuple[float, float]) -> None:
+        """AUD-10503 页面侧消费者：媒体池素材拖放到节点画布。
+
+        编辑器识别媒体池 MIME 后发射 ``assets_dropped``（asset id 列表 +
+        场景坐标）；本方法解析 asset 并创建节点，与 Keyframes 图层树 drop
+        保持同一职责边界（widget 不做 asset 解析）。每个素材按 media_type
+        建 ``image_input`` / ``video_frame`` 节点或 3D 分裂图
+        （Scene3D+Model3D，与 URL 文件拖放一致），水平排开 220px，整次
+        拖拽成组为单步 undo。
+        """
+        actions = self._node_editor.editor_actions()
+        if actions is None or not asset_ids:
+            return
+        payloads = resolve_asset_ids(list(asset_ids), project=self._project)
+        if not payloads:
+            return
+        grouped = self._undo_stack is not None
+        if grouped:
+            self._undo_stack.begin_group()
+        added = 0
+        try:
+            x = float(scene_pos[0])
+            y = float(scene_pos[1])
+            for payload in payloads:
+                if payload.media_type == MEDIA_TYPE_MODEL3D:
+                    scene = actions.create_3d_scene_with_children(
+                        x, y, model_path=payload.path or None)
+                    if scene is not None:
+                        added += 1
+                else:
+                    node = actions.add_node(
+                        payload.node_type, x, y,
+                        parameters={"file_path": payload.path})
+                    if node is not None:
+                        added += 1
+                        if (payload.media_type == MEDIA_TYPE_VIDEO
+                                and payload.path):
+                            # AUD-10502：元数据探测在后台线程，Keyframes
+                            # 随后可显示完整素材长度（与 URL 拖放一致）。
+                            probe = getattr(
+                                self._node_editor,
+                                "_schedule_video_metadata_probe", None)
+                            if callable(probe):
+                                probe(payload.path)
+                x += 220.0
+            if grouped:
+                self._undo_stack.end_group("Add media nodes")
+        except Exception as exc:
+            if grouped:
+                self._undo_stack.end_group("Add media nodes")
+                if added:
+                    self._undo_stack.undo()
+            logger.warning("Composite node-canvas media drop failed: %s", exc)
 
     def _sync_layer_stack_after_node_edit(self) -> None:
         """Refresh layer awareness after a NodeGraph-owned edit.

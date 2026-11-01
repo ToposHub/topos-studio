@@ -455,6 +455,15 @@ class NodeEditorWidget(QGraphicsView):
 
     # ── Node Management ──
 
+    def editor_actions(self) -> Optional[NodeEditorActions]:
+        """Return the programmatic node-operation entry, or None pre-bind.
+
+        The actions object exists once a graph is bound (``build_from_graph``);
+        the page uses it for node creation that must emit ``node_added`` /
+        ``graph_changed`` (e.g. the AUD-10503 media-pool canvas drop consumer).
+        """
+        return self._actions
+
     def add_node_visual(self, node: Node) -> None:
         """Add a visual node item for the given node data."""
         # Check if this is a placeholder node (not fully implemented)
