@@ -328,7 +328,7 @@ def sanitize_preset(
     - promotes legacy HSL Curves/Mixer/Warper ids to Color Mapping;
     - promotes the retired Soft Clip panel to the combined Curves palette;
     - drops panels disabled for the current work mode
-      (video: image-only Library/export; image: timeline clips);
+      (video: image-only Library/export/Crop/Deblur/Info; image: timeline clips);
     - keeps the viewport always visible.
     """
     registered = set(registered_panel_ids)
@@ -344,7 +344,8 @@ def sanitize_preset(
     if "color.curves" in registered and set(preset.visible_panels) & {"color.soft_clip", "color.hsl_curves"}:
         resolved.add("color.curves")
     if work_mode == "video":
-        resolved -= {"workspace.library", "workspace.export"}
+        resolved -= {"workspace.library", "workspace.export",
+                     "color.crop", "color.deblur", "workspace.info"}
     elif work_mode == "image":
         resolved -= {"color.timeline_clips"}
     resolved |= set(_ALWAYS_VISIBLE)

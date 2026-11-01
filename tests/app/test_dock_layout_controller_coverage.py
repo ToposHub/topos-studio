@@ -306,7 +306,7 @@ def _show_all_page_docks(h: _DockHost) -> None:
         "dock_composite_asset_dependency", "dock_composite_scene_outliner",
         "dock_composite_material", "dock_composite_scope",
         "dock_color_timeline_clips", "dock_deliver", "dockVideoBatchExport",
-        "dock_library", "dock_export",
+        "dock_library", "dock_export", "dock_deblur", "dock_crop", "dock_info",
     ):
         getattr(h, attr).setVisible(True)
 
@@ -574,6 +574,10 @@ def test_enforce_video_mode_hides_image_only_docks(
 
     assert _hidden(host, "dock_library"), "video mode must hide the image Library"
     assert _hidden(host, "dock_export"), "video mode must hide image Batch Export"
+    # Deblur/Crop/Info 是图片编辑专属工具，剪辑（视频）模式强制隐藏。
+    assert _hidden(host, "dock_deblur"), "video mode must hide the image-only Deblur"
+    assert _hidden(host, "dock_crop"), "video mode must hide the image-only Crop"
+    assert _hidden(host, "dock_info"), "video mode must hide the image-only Info"
 
 
 def test_enforce_image_mode_hides_video_only_docks(
@@ -591,6 +595,9 @@ def test_enforce_image_mode_hides_video_only_docks(
     # Image-only docks stay usable in image mode.
     assert not _hidden(host, "dock_library")
     assert not _hidden(host, "dock_export")
+    assert not _hidden(host, "dock_deblur")
+    assert not _hidden(host, "dock_crop")
+    assert not _hidden(host, "dock_info")
 
 
 def test_enforce_caption_workspace_is_hidden_on_non_edit_pages(
@@ -779,6 +786,10 @@ def test_apply_default_layout_video_mode_hides_image_panels(
     layout_host.apply_default_layout()
     assert _hidden(layout_host, "dock_library")
     assert _hidden(layout_host, "dock_export")
+    # 图片专属工具面板在视频模式的硬编码默认布局中同样不出现（首启无闪烁）。
+    assert _hidden(layout_host, "dock_deblur")
+    assert _hidden(layout_host, "dock_crop")
+    assert _hidden(layout_host, "dock_info")
 
 
 def test_apply_default_layout_image_mode_hides_video_panels(
@@ -788,6 +799,10 @@ def test_apply_default_layout_image_mode_hides_video_panels(
     assert _hidden(layout_host, "dock_color_timeline_clips")
     assert _hidden(layout_host, "dockVideoBatchExport")
     assert not _hidden(layout_host, "dock_library")
+    # 图片专属工具面板在图片模式保持可用。
+    assert not _hidden(layout_host, "dock_deblur")
+    assert not _hidden(layout_host, "dock_crop")
+    assert not _hidden(layout_host, "dock_info")
 
 
 def test_apply_default_layout_keeps_plugin_when_state_saved(

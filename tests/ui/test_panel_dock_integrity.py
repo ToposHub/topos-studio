@@ -271,6 +271,38 @@ class TestProductModeFiltering:
 
 
 # ---------------------------------------------------------------------------
+# Work-mode filtering (Window > Panels menu data source)
+# ---------------------------------------------------------------------------
+
+class TestWorkModeFiltering:
+    IMAGE_ONLY_TOOL_PANELS = {"color.crop", "color.deblur", "workspace.info"}
+
+    @staticmethod
+    def _panel_ids(registry: PanelRegistry, work_mode: str) -> set:
+        grouped = registry.get_panels_by_category(work_mode=work_mode)
+        return {d.panel_id for descs in grouped.values() for d in descs}
+
+    def test_video_mode_hides_image_only_tool_panels(self):
+        """剪辑（视频）模式下 Panels 菜单不出现图片专属的 Crop/Deblur/Info。"""
+        ids = self._panel_ids(_register_all_available(), "video")
+        assert self.IMAGE_ONLY_TOOL_PANELS.isdisjoint(ids), (
+            f"image-only tool panels leaked into video mode: "
+            f"{sorted(self.IMAGE_ONLY_TOOL_PANELS & ids)}")
+        # 既有 image-only 面板同样被过滤（回归保护）。
+        assert "workspace.library" not in ids
+        assert "workspace.export" not in ids
+        # video-only 面板仍在。
+        assert "color.timeline_clips" in ids
+
+    def test_image_mode_keeps_image_only_tool_panels(self):
+        """图片模式保留图片专属的 Crop/Deblur/Info，隐藏 video 专属面板。"""
+        ids = self._panel_ids(_register_all_available(), "image")
+        assert self.IMAGE_ONLY_TOOL_PANELS <= ids
+        assert "color.timeline_clips" not in ids
+        assert "workspace.library" in ids
+
+
+# ---------------------------------------------------------------------------
 # validate_dock_integrity with mocks
 # ---------------------------------------------------------------------------
 

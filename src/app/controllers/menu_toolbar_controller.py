@@ -269,6 +269,9 @@ class MenuToolbarMixin:
         crop_act = QAction(I18N.tr("action.crop_tool", "Crop Tool..."), self)
         crop_act.setShortcut("C")
         crop_act.triggered.connect(lambda: self.dock_crop.setVisible(True) or self.dock_crop.raise_() or self.crop_panel.set_crop_active(True))
+        # 剪辑（视频）模式下 Crop 面板是图片专属工具，被强制隐藏，
+        # 菜单入口随之隐藏（与 Project Manager action 的模式过滤一致）。
+        crop_act.setVisible(not self._is_video_work_mode())
         edit_menu.addAction(crop_act)
 
         # --- Layer submenu (under Edit) ---
