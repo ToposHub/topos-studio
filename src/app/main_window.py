@@ -5,6 +5,7 @@ import os
 import logging
 import threading
 from typing import TYPE_CHECKING, Any, Optional
+from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import (QMainWindow, QWidget,
                              QMessageBox,
                              QComboBox, QApplication,
@@ -39,6 +40,7 @@ def _config_bool(value, default: bool = False) -> bool:
 from src.features.color.core.image_engine import ImageEngine
 from src.shared.io.file_io import FileIO
 from src.shared.ui.style_sheet import DARK_THEME
+from src.shared.ui.panel_divider import paint_shared_dock_dividers
 from src.shared.db.database import Database
 from src.shared.config.config_manager import ConfigManager
 from src.shared.i18n.i18n import I18N
@@ -329,6 +331,12 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
     # AUD-3513: the audio-backend probe runs on a worker thread; the snapshot
     # is delivered back to the UI thread through this queued signal.
     audio_capabilities_probed = pyqtSignal(object)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().paintEvent(event)
+        painter = QPainter(self)
+        paint_shared_dock_dividers(self, painter)
+        painter.end()
 
     def __init__(self, feature_flags: FeatureFlags = None, feature_registry: FeatureRegistry = None, test_mode: bool = False,
                  startup_project: str = None, startup_no_dialog: bool = False):
