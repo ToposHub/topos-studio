@@ -2306,6 +2306,12 @@ class LayerOpsMixin:
         否则回退引擎历史并同步 UI。"""
         # E11: 时间线编辑此前只进 TimelineView 独立命令栈，全局菜单
         # Undo 永远 disabled 且不作用于时间线历史。
+        versions = getattr(self, "_clip_version_request_host", None)
+        version_target = versions.history_target() if versions is not None else None
+        if version_target is not None and not getattr(self.canvas, "sam_mode_active", False):
+            version_target.undo()
+            self.update_undo_redo_actions()
+            return
         edit_target = self._edit_undo_redo_target()
         if edit_target is not None:
             edit_target.undo()
@@ -2329,6 +2335,12 @@ class LayerOpsMixin:
     def redo(self) -> None:
         """重做：Composite 页激活时优先其 redo；Edit 页命令栈有历史时
         驱动对应栈（E11）；否则引擎历史并同步 UI。"""
+        versions = getattr(self, "_clip_version_request_host", None)
+        version_target = versions.history_target(redo=True) if versions is not None else None
+        if version_target is not None and not getattr(self.canvas, "sam_mode_active", False):
+            version_target.redo()
+            self.update_undo_redo_actions()
+            return
         edit_target = self._edit_undo_redo_target(want_redo=True)
         if edit_target is not None:
             edit_target.redo()
@@ -2338,6 +2350,10 @@ class LayerOpsMixin:
         # Composite page redo takes priority when active
         if self._composite_available and self.composite_page and self.composite_page._is_active:
             self.composite_page.redo()
+            return
+
+        if self.engine.redo():
+            self._sync_ui_after_undo_redo()
 
     def _sync_ui_after_undo_redo(self) -> None:
         """撤销/重做后同步更新所有 UI 面板。"""

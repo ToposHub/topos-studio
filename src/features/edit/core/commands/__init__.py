@@ -25,7 +25,7 @@ Reference:
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Protocol, Any
+from typing import Protocol, Any, Callable, Mapping
 import uuid
 
 import logging
@@ -267,6 +267,17 @@ class ProjectCommandStack:
         self._max_size: int = max_size
         # N20/RF04：最近一次事务的序列更新（调用方消费后落缓存）
         self.last_sequence_updates: dict = {}
+        self.sequence_provider: Callable[[], Mapping[str, TimelineSequence]] | None = None
+
+    def _validate_sequence_payload(self, command: Any, *, undo: bool = False) -> None:
+        validate = getattr(command, "validate_sequences", None)
+        if callable(validate) and self.sequence_provider is not None:
+            validate(self.sequence_provider(), undo=undo)
+
+    def peek_history_command(self, *, redo: bool = False) -> Any | None:
+        """Inspect the next command without removing it from history."""
+        history = self._redo_stack if redo else self._undo_stack
+        return history[-1] if history else None
 
     def execute(self, command: Any, project: EditProject) -> EditProject:
         """
@@ -279,6 +290,7 @@ class ProjectCommandStack:
         Returns:
             New project after command applied
         """
+        self._validate_sequence_payload(command)
         result = command.apply(project)
         # N20/RF04：项目级事务命令返回结构化 ProjectTransactionResult
         # （含 sequence_map），栈只消费 project 并把 sequence_map 暴露
@@ -320,6 +332,7 @@ class ProjectCommandStack:
         if not self._undo_stack:
             return None
 
+        self._validate_sequence_payload(self._undo_stack[-1], undo=True)
         command = self._undo_stack.pop()
         # AUD-16204: undo 抛异常时回填命令再上抛（与 CommandStack.undo 一致）。
         try:
@@ -356,6 +369,7 @@ class ProjectCommandStack:
         if not self._redo_stack:
             return None
 
+        self._validate_sequence_payload(self._redo_stack[-1])
         command = self._redo_stack.pop()
         # AUD-16204（redo 侧同型）：apply 抛异常时回填命令再上抛。
         try:

@@ -168,8 +168,8 @@ class ColorVersionToolsPanel(QDialog):
             return
         # N04：激活与保存/锁定同走命令出口——不再绕过 executor 直改
         # 面板私有工程（旧路径主工程/命令栈完全不知情）。DIAG-01：缺失
-        # 提示统一消费 plugin_diagnostics（保存期持久化的诊断快照；
-        # 旧工程无该字段时由 version_plugin_diagnostics 现算，未核对与
+        # 提示由 version_plugin_diagnostics 核对当前注册表（不沿用
+        # 保存期诊断快照，避免安装/卸载插件后提示过时），未核对与
         # 无缺失明确区分）。
         self._execute(cmd)
         payload = (self._state().get("versions") or {}).get(name) or {}

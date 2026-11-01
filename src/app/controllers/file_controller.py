@@ -1241,6 +1241,13 @@ class FileOpsMixin:
         undo_label = None
         redo_label = None
 
+        versions = getattr(self, "_clip_version_request_host", None)
+        if versions is not None:
+            if versions.history_target() is not None:
+                can_undo, undo_label = True, versions.get_undo_label()
+            if versions.history_target(redo=True) is not None:
+                can_redo, redo_label = True, versions.get_redo_label()
+
         # E11: Edit 页激活时以时间线/媒体池命令栈为准——时间线编辑此前
         # 只进 TimelineView 独立命令栈，菜单 Undo 一直 disabled。
         if getattr(self, "_edit_available", False) and getattr(self, "current_page", None) == "Edit":
@@ -1772,6 +1779,8 @@ class FileOpsMixin:
         # batch-delete (or its undo/redo) cannot leave the cache out of step.
         self._sync_timeline_sequences_after_project_change(previous_project, project)
 
+        sequence_updates = self._consume_project_sequence_updates(project)
+
         # An asset deletion changes more than the project asset dictionary:
         # timeline clips are references into that dictionary, but the full
         # TimelineSequence objects live in the controller cache.  Keep both
@@ -1780,7 +1789,7 @@ class FileOpsMixin:
             previous_project, project
         )
 
-        if asset_timeline_changed:
+        if asset_timeline_changed or sequence_updates:
             self._refresh_active_timeline_after_asset_sync(project)
 
         # Composite graphs can also hold the deleted asset id.  Keep the
@@ -1799,10 +1808,12 @@ class FileOpsMixin:
         ):
             self._on_timeline_switched(project.active_timeline_id)
 
-        # P6.2: Update TimelinePreviewRenderer project reference (hot update)
-        # This is critical for preview playback after media import
-        if self.timeline_preview_renderer:
-            self.timeline_preview_renderer.set_project(project)
+        self._publish_project_change_to_renderer(
+            previous_project, project, sequence_changed=bool(sequence_updates))
+
+        version_host = getattr(self, "_clip_version_request_host", None)
+        if version_host is not None:
+            version_host.on_project_changed(previous_project, project)
 
         # Update window title to show dirty state
         if self._current_edit_project_filepath:
@@ -1812,6 +1823,64 @@ class FileOpsMixin:
             self.setWindowTitle(f"Topos - {project.name} *")
 
         logger.debug(f"MediaPool project_changed synced to MainWindow: {project.name}")
+
+    def _publish_project_change_to_renderer(
+        self, previous: EditProject | None, current: EditProject, *,
+        sequence_changed: bool = False,
+    ) -> None:
+        """Keep named version metadata from resetting preview decode state."""
+        from dataclasses import fields
+
+        renderer = getattr(self, "timeline_preview_renderer", None)
+        if renderer is None:
+            return
+        ignored = {"color_stacks", "color_stack_versions", "revision", "modified_at"}
+
+        def unchanged(left: object, right: object) -> bool:
+            # Model equality can compare IDs only (MediaAsset/ColorStack).
+            # Immutable payload identity is the safe unchanged-content proof.
+            return (left is right or isinstance(left, (str, int, float, bool, type(None)))
+                    and type(left) is type(right) and left == right)
+
+        color_only = (previous is not None and not sequence_changed
+                      and all(unchanged(getattr(previous, item.name), getattr(current, item.name))
+                              for item in fields(current) if item.name not in ignored))
+        if color_only:
+            method_name = ("update_project_metadata" if previous.color_stacks is current.color_stacks
+                           else "update_color_stacks")
+            publish = getattr(renderer, method_name, None)
+            if callable(publish):
+                publish(current)
+                return
+        renderer.set_project(current)
+
+    def _consume_project_sequence_updates(self, project: EditProject) -> bool:
+        """Publish project transaction sequences on execute, Undo and Redo."""
+        from dataclasses import replace
+
+        panel = getattr(self, "media_pool_panel", None)
+        getter = getattr(panel, "get_command_stack", None)
+        stack = getter() if callable(getter) else None
+        updates = getattr(stack, "last_sequence_updates", None)
+        if not updates:
+            return False
+        sequences = dict(getattr(self, "_current_timeline_sequences", None) or {})
+        for timeline_id, sequence in updates.items():
+            if sequence is None:
+                sequences.pop(timeline_id, None)
+            elif timeline_id in project.timelines:
+                current = sequences.get(timeline_id)
+                apply_to = getattr(sequence, "apply_to", None)
+                if callable(apply_to):
+                    if current is None:
+                        raise ValueError("Cannot publish a version binding without its timeline")
+                    sequence = apply_to(current)
+                revision = max(int(getattr(current, "revision", 0)),
+                               int(getattr(sequence, "revision", 0))) + 1
+                sequences[timeline_id] = replace(sequence, revision=revision)
+        self._current_timeline_sequences = sequences
+        stack.last_sequence_updates = {}
+        return True
 
     def _sync_asset_references_after_project_change(
         self,

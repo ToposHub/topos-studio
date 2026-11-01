@@ -351,3 +351,63 @@ class TestPluginDiagnostics:
         p3 = RenameColorVersionCommand.create(
             p2, "s1", "V1", "Renamed").apply(p2)
         assert "Renamed" in versions_state(p3, "s1")["versions"]
+
+
+class TestCurrentPluginDiagnostics:
+    @pytest.mark.parametrize("installed", [False, True])
+    def test_registry_changes_override_historical_diagnostics_without_mutating_snapshot(self, monkeypatch, installed):
+        import copy
+        import src.features.color.core.plugin_manager as pm
+        from src.features.edit.core.color_versions import version_plugin_diagnostics
+
+        class Manager:
+            def get_all_plugins(self):
+                return {"fx.demo": {"version": "1.0"}} if installed else {}
+
+        monkeypatch.setattr(pm, "get_plugin_manager", lambda: Manager())
+        # Historical state deliberately disagrees with the current installation.
+        payload = {
+            "plugin_versions": {"fx.demo": "1.0"},
+            "plugin_diagnostics": {"missing": ["fx.demo"] if installed else [],
+                                   "unverified": False},
+            "layers": [{"plugins": [{"plugin_id": "fx.demo", "params": {"strength": 0.4}}]}],
+        }
+        before = copy.deepcopy(payload)
+        assert version_plugin_diagnostics(payload) == {
+            "missing": [] if installed else ["fx.demo"], "unverified": False}
+        assert payload == before
+
+    def test_unavailable_registry_does_not_reuse_historical_success(self, monkeypatch):
+        import copy
+        import src.features.color.core.plugin_manager as pm
+        from src.features.edit.core.color_versions import version_plugin_diagnostics
+
+        class Manager:
+            def get_all_plugins(self):
+                raise RuntimeError("registry unavailable")
+
+        monkeypatch.setattr(pm, "get_plugin_manager", lambda: Manager())
+        payload = {
+            "plugin_versions": {"fx.demo": "1.0"},
+            "plugin_diagnostics": {"missing": [], "unverified": False},
+        }
+        before = copy.deepcopy(payload)
+        assert version_plugin_diagnostics(payload) == {"missing": [], "unverified": True}
+        assert payload == before
+
+    def test_available_registry_rechecks_historical_unverified_state(self, monkeypatch):
+        import src.features.color.core.plugin_manager as pm
+        from src.features.edit.core.color_versions import version_plugin_diagnostics
+
+        class Manager:
+            def get_all_plugins(self):
+                return {"fx.demo": {"version": "1.0"}}
+
+        monkeypatch.setattr(pm, "get_plugin_manager", lambda: Manager())
+        payload = {
+            "plugin_versions": {"fx.demo": "1.0"},
+            "plugin_diagnostics": {"missing": [], "unverified": True},
+            "plugin_check_unverified": True,
+        }
+        assert version_plugin_diagnostics(payload) == {"missing": [], "unverified": False}
+        assert payload["plugin_diagnostics"]["unverified"] is True

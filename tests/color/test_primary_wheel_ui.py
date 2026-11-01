@@ -15,6 +15,26 @@ from src.features.color.core.the_decompiler import GradingMath
 from src.features.color.ui.color_wheel import ColorWheel, GradingPanel
 
 
+def test_immediate_version_save_flushes_throttled_wheel_and_slider_before_snapshot(qtbot):
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.current_stack_id = "stack"
+    rendered = {}
+    saved = []
+    panel.grading_changed.connect(lambda *args: rendered.update(gamma=args[1], exposure=args[3]))
+    panel.set_save_callback(lambda params: saved.append((dict(params), dict(rendered))))
+    panel.exp_slider.setValue(1.25)
+    panel.gamma_wheel._on_brightness_drag_changed(0.5)
+    assert panel._grading_update_timer.isActive()
+    assert panel.gamma_wheel._update_timer.isActive()
+    panel.trigger_save()
+    params, snapshot = saved[0]
+    assert snapshot["exposure"] == params["exposure"] == 1.25
+    assert snapshot["gamma"] == params["gamma"]
+    assert not panel._grading_update_timer.isActive()
+    assert not panel.gamma_wheel._update_timer.isActive()
+
+
 @pytest.mark.parametrize("rotation", [0.0, 75.0, 120.0, 270.0])
 def test_rendered_ring_pointer_and_rendered_grade_share_six_hue_directions(qapp, rotation):
     wheel = ColorWheel(rotation_degrees=rotation)

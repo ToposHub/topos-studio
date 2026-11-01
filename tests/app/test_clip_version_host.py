@@ -755,3 +755,158 @@ class TestSignalWiring:
         strip.version_state_requested.emit(target, VersionScope.LOCAL)
         collection = strip.version_ui.collection(target, VersionScope.LOCAL)
         assert collection.connected and collection.loaded
+
+
+class TestProductionAuditRegressions:
+    def test_empty_destination_failure_does_not_publish_stack_or_history(self, env):
+        shell, host, strip = env
+        _save(shell, "loc-2", "Source")
+        before = shell._current_edit_project
+        history = shell.media_pool_panel.get_command_stack().get_history_size()
+        error, _ = _drive(shell, VersionScope.LOCAL,
+                          VersionOperation.COPY_TO_SCOPE, clip_id="c3",
+                          version_id="Source", name=DEFAULT_VERSION_NAME,
+                          destination=VersionScope.REMOTE)
+        assert error  # Default initialization occupies this name.
+        assert shell._current_edit_project is before
+        assert resolve_remote_stack_id(before, "a2") is None
+        assert shell.media_pool_panel.get_command_stack().get_history_size() == history
+
+    def test_empty_domain_create_is_one_undo_unit(self, env):
+        shell, host, strip = env
+        before = shell._current_edit_project
+        error, _ = _drive(shell, VersionScope.REMOTE, VersionOperation.CREATE,
+                          clip_id="c3", name="Shared")
+        assert not error
+        stack = shell.media_pool_panel.get_command_stack()
+        assert stack.get_history_size() == 1
+        remote = resolve_remote_stack_id(shell._current_edit_project, "a2")
+        undone = stack.undo(shell._current_edit_project)
+        assert remote not in undone.color_stacks
+        assert remote not in undone.color_stack_versions
+        assert set(undone.color_stacks) == set(before.color_stacks)
+        redone = stack.redo(undone)
+        assert resolve_remote_stack_id(redone, "a2") == remote
+        assert versions_state(redone, remote)["active"] == "Shared"
+
+    def test_cross_scope_load_reference_and_activation_share_one_history(self, env):
+        shell, host, strip = env
+        _save(shell, "rem-1", "A", exposure=2.0)
+        _save(shell, "rem-1", "B", exposure=8.0)
+        stack = shell.media_pool_panel.get_command_stack()
+        error, _ = _drive(shell, VersionScope.REMOTE, VersionOperation.LOAD,
+                          version_id="A", discard=True)
+        assert not error
+        assert stack.get_history_size() == 1
+        current = shell._current_edit_project
+        assert resolve_clip_binding(current, "tl1", "c1").stack_id == "rem-1"
+        assert current.color_stacks["rem-1"].grading_params["exposure"] == 2.0
+        undone = stack.undo(current)
+        assert resolve_clip_binding(undone, "tl1", "c1").stack_id == "loc-1"
+        assert stack.last_sequence_updates["tl1"].stack_id == "loc-1"
+        assert undone.color_stacks["rem-1"].grading_params["exposure"] == 8.0
+        assert versions_state(undone, "rem-1")["active"] == "B"
+        shell._current_edit_project = undone
+        redone = stack.redo(undone)
+        assert resolve_clip_binding(redone, "tl1", "c1").stack_id == "rem-1"
+        assert redone.color_stacks["rem-1"].grading_params["exposure"] == 2.0
+
+    def test_real_project_refs_resolve_against_controller_sequences(self, env):
+        from src.features.edit.core.project import TimelineSequenceRef
+        shell, host, strip = env
+        sequence = shell._current_edit_project.timelines["tl1"]
+        shell._current_timeline_sequences = {"tl1": sequence}
+        shell._current_edit_project = replace(
+            shell._current_edit_project,
+            timelines={"tl1": TimelineSequenceRef("tl1", "TL")})
+
+        def refresh():
+            sequence_now = shell._current_timeline_sequences["tl1"]
+            shell.edit_page._current_timeline = sequence_now
+            strip.set_project_and_timeline(shell._current_edit_project, sequence_now)
+        shell.refresh_color_timeline_clip_strip = refresh
+        error, _ = _drive(shell, VersionScope.REMOTE, VersionOperation.CREATE,
+                          clip_id="c3", name="Shared")
+        assert not error
+        error, _ = _drive(shell, VersionScope.REMOTE, VersionOperation.LOAD,
+                          clip_id="c3", version_id="Shared", discard=True)
+        assert not error
+        assert isinstance(shell._current_edit_project.timelines["tl1"], TimelineSequenceRef)
+        binding = resolve_clip_binding(host._domain_project(shell._current_edit_project), "tl1", "c3")
+        assert binding.domain == VersionDomain.REMOTE
+        assert shell.edit_page._current_timeline.video_tracks[0].clips[2].color_shared
+
+    def test_shared_stack_change_updates_visible_other_clip(self, env):
+        shell, host, strip = env
+        session = shell._color_session_manager.get_current_session()
+        session.clip_id = "c2"
+        session.color_stack_id = "rem-1"
+        _save(shell, "rem-1", "A", exposure=2.0)
+        _save(shell, "rem-1", "B", exposure=8.0)
+        error, _ = _drive(shell, VersionScope.REMOTE, VersionOperation.DELETE_ALL,
+                          clip_id="c1")
+        assert not error
+        assert shell.hydrate_calls == ["rem-1"]
+        assert shell.preview_sync_calls == ["c2"]
+
+    def test_delete_all_on_inactive_scope_keeps_visible_local_grade(self, env):
+        shell, host, strip = env
+        _save(shell, "rem-1", "A", exposure=2.0)
+        _save(shell, "rem-1", "B", exposure=8.0)
+        error, _ = _drive(shell, VersionScope.REMOTE, VersionOperation.DELETE_ALL)
+        assert not error
+        assert not shell.hydrate_calls
+        assert not shell.preview_sync_calls
+        assert resolve_clip_binding(shell._current_edit_project, "tl1", "c1").stack_id == "loc-1"
+
+    def test_target_binding_guard_rejects_old_stack_with_same_revision(self, env):
+        shell, host, strip = env
+        target = _target(shell)
+        host.read_versions(target, VersionScope.LOCAL)
+        project = shell._current_edit_project
+        sequence = project.timelines["tl1"]
+        sequence = UpdateClipColorStackCommand.create(
+            "v1", "c1", "rem-1", new_color_shared=True).apply(sequence)
+        shell._current_edit_project = replace(project, timelines={"tl1": sequence})
+        outcomes = []
+        strip.version_ui.operation_finished.connect(outcomes.append)
+        strip.version_ui.submit(target, VersionScope.LOCAL, VersionOperation.CREATE, name="Stale")
+        assert outcomes and "绑定" in outcomes[-1].error
+        assert shell.media_pool_panel.get_command_stack().get_history_size() == 0
+
+
+def test_cross_scope_undo_preserves_later_timeline_edits(env):
+    shell, host, strip = env
+    _save(shell, "rem-1", "Remote")
+    error, _ = _drive(shell, VersionScope.REMOTE, VersionOperation.LOAD,
+                      version_id="Remote", discard=True)
+    assert not error
+    project = shell._current_edit_project
+    sequence = project.timelines["tl1"]
+    track = sequence.video_tracks[0]
+    clips = tuple(replace(clip, source_start=3, source_duration=7)
+                  if clip.clip_id == "c1" else clip for clip in track.clips)
+    edited = replace(sequence, video_tracks=(replace(track, clips=clips),))
+    project = replace(project, timelines={"tl1": edited})
+    undone = shell.media_pool_panel.get_command_stack().undo(project)
+    clip = undone.timelines["tl1"].video_tracks[0].clips[0]
+    assert clip.source_start == 3
+    assert clip.source_duration == 7
+    assert clip.color_stack_id == "loc-1"
+
+
+def test_cross_scope_undo_refuses_deleted_clip_without_losing_history(env):
+    shell, host, strip = env
+    _save(shell, "rem-1", "Remote")
+    error, _ = _drive(shell, VersionScope.REMOTE, VersionOperation.LOAD,
+                      version_id="Remote", discard=True)
+    assert not error
+    project = shell._current_edit_project
+    sequence = project.timelines["tl1"]
+    track = sequence.video_tracks[0]
+    edited = replace(sequence, video_tracks=(replace(track, clips=track.clips[1:]),))
+    project = replace(project, timelines={"tl1": edited})
+    history = shell.media_pool_panel.get_command_stack()
+    with pytest.raises(ValueError, match="不存在"):
+        history.undo(project)
+    assert history.can_undo() and not history.can_redo()

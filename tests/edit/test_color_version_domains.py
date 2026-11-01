@@ -227,3 +227,54 @@ class TestSharedImpactAndLegacyProject:
             "active": None, "locked": False, "versions": {},
             "default_version": None}
         assert snap["live_matches_active"] is False
+
+
+class TestInheritedPrivateStackIsolation:
+    def test_unactivated_split_cannot_resolve_source_clips_private_versions(self):
+        from dataclasses import replace
+
+        source = _local_stack("source-local", clip_id="source", exposure=1.0)
+        p = _project([
+            _clip("source", "a1", "source-local"),
+            _clip("split-right", "a1", "source-local", index=1),
+        ], [source])
+        p = SaveColorVersionCommand.create(p, "source-local", "Original").apply(p)
+        p = p.with_color_stacks({
+            "source-local": replace(source, grading_params={"exposure": 9.0})})
+        assert resolve_local_stack_id(p, "tl1", "source") == "source-local"
+        assert resolve_local_stack_id(p, "tl1", "split-right") is None
+        assert not domain_in_use(p, "tl1", "split-right", VersionDomain.LOCAL)
+        snapshot = domain_snapshot(p, "tl1", "split-right", "a1", VersionDomain.LOCAL)
+        assert snapshot["stack_id"] is None
+        assert not snapshot["stack_exists"]
+        assert not snapshot["domain_in_use"]
+        assert snapshot["versions_state"]["versions"] == {}
+        # No loadable local target leaks from the source clip. A future CREATE
+        # must initialize an independent domain; it must not activate Original
+        # on the source's private stack.
+        assert p.color_stacks["source-local"].grading_params["exposure"] == 9.0
+
+    def test_foreign_current_reference_falls_back_to_owned_stack_without_marking_it_in_use(self):
+        p = _project([_clip("c1", "a1", "foreign")], [
+            _local_stack("foreign", clip_id="c2"),
+            _local_stack("owned", clip_id="c1"),
+        ])
+        assert resolve_local_stack_id(p, "tl1", "c1") == "owned"
+        assert not domain_in_use(p, "tl1", "c1", VersionDomain.LOCAL)
+        assert not domain_snapshot(p, "tl1", "c1", "a1", VersionDomain.LOCAL)["domain_in_use"]
+
+    def test_timeline_ownership_mismatch_is_not_a_local_domain(self):
+        from dataclasses import replace
+
+        foreign = replace(_local_stack("foreign", clip_id="c1"), timeline_id="other-timeline")
+        p = _project([_clip("c1", "a1", "foreign")], [foreign])
+        assert resolve_local_stack_id(p, "tl1", "c1") is None
+        assert not domain_in_use(p, "tl1", "c1", VersionDomain.LOCAL)
+
+    def test_partial_legacy_stamp_allows_only_matching_nonempty_owner(self):
+        from dataclasses import replace
+
+        legacy = replace(_local_stack("legacy", stamped=False), timeline_id="tl1")
+        p = _project([_clip("c1", "a1", "legacy")], [legacy])
+        assert resolve_local_stack_id(p, "tl1", "c1") == "legacy"
+        assert domain_in_use(p, "tl1", "c1", VersionDomain.LOCAL)

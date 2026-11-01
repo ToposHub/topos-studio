@@ -10866,6 +10866,17 @@ class TimelinePreviewRenderer(QObject):
 
         logger.info(f"TimelinePreviewRenderer project updated: {project.project_id}")
 
+    def update_project_metadata(self, project: EditProject) -> None:
+        """Publish nonvisual project metadata without disturbing warm frames.
+
+        The controller uses this only when source, timeline and color content
+        are unchanged (for example a named grade version was renamed).
+        """
+        self._project = project
+        self._asset_resolver = AssetResolver(project)
+        if self._worker:
+            self._worker._asset_resolver = self._asset_resolver
+
     def update_color_stacks(self, project: EditProject) -> None:
         """Publish ColorStack edits without tearing down warm decode state.
 
@@ -10874,6 +10885,10 @@ class TimelinePreviewRenderer(QObject):
         structure, so calling ``set_project`` here would unnecessarily discard
         prebuffer state and make the next frame look like a cold start.
         """
+        # The project-change broadcast and the Color UI host may both publish
+        # this immutable snapshot. One generation invalidation is sufficient.
+        if self._project is project:
+            return
         self._project = project
         self._asset_resolver = AssetResolver(project)
         self._generation_id += 1

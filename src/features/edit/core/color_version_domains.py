@@ -26,7 +26,8 @@ UI 显示或直接改栈的 scope 盖章。片段微调栈 ``color_trim_stack_id
 
 **域栈解析规则：**
 - LOCAL：① clip 当前引用的栈若 scope==clip_local 即为本地域栈
-  （含 legacy 无属主盖章的裸栈，按引用归属）；② clip 已切到共享栈时，
+  且非空属主盖章与当前 timeline/clip 匹配（legacy 无盖章按引用归属）；
+  split 继承其他片段私有栈时不能借用原片段版本；② 当前引用不适用时，
   按 ownership 盖章（scope==clip_local 且 timeline_id+clip_id 属主匹配）
   找回其遗留私有栈；均无 ⇒ 空域（CREATE 时由宿主按策略建栈）。
 - REMOTE：素材共享栈 = scope==asset_default 且 asset_id 匹配的栈
@@ -151,15 +152,24 @@ def _iter_project_clips(project: Any):
 
 def resolve_local_stack_id(project: Any, timeline_id: str,
                            clip_id: str) -> str | None:
-    """LOCAL 域栈解析：当前引用的 clip_local 栈 → 属主盖章遗留栈 → 无。
+    """LOCAL 域栈解析：当前引用的属主匹配栈 → 属主盖章遗留栈 → 无。
 
     微调栈（被任何片段的 color_trim_stack_id 引用）即使在属主盖章上
     匹配也不得命中——trim 栈不属于版本域。
     """
-    binding = resolve_clip_binding(project, timeline_id, clip_id)
-    if binding is not None and binding.stack_scope == _CLIP_LOCAL_SCOPE:
-        return binding.stack_id
     trim_ids = _trim_stack_ids(project)
+    binding = resolve_clip_binding(project, timeline_id, clip_id)
+    if (binding is not None and binding.stack_scope == _CLIP_LOCAL_SCOPE
+            and binding.stack_id not in trim_ids):
+        stack = (getattr(project, "color_stacks", {}) or {}).get(binding.stack_id)
+        owner_clip = str(getattr(stack, "clip_id", "") or "")
+        owner_timeline = str(getattr(stack, "timeline_id", "") or "")
+        # Split/duplicate can inherit a private stack reference. It remains
+        # owned by the source clip until this clip gets its own local stack.
+        # Legacy unstamped references continue to resolve by reference.
+        if ((not owner_clip or owner_clip == str(clip_id))
+                and (not owner_timeline or owner_timeline == str(timeline_id))):
+            return binding.stack_id
     # 片段已切共享栈：按 ownership 盖章找回遗留私有栈
     for stack in (getattr(project, "color_stacks", {}) or {}).values():
         if str(getattr(stack, "stack_id", "")) in trim_ids:
@@ -198,7 +208,11 @@ def domain_in_use(project: Any, timeline_id: str, clip_id: str,
     """该域是否为片段当前实际使用域（✓ 标记依据；两域各自记住 active，
     仅 in_use 域显示 ✓）。"""
     binding = resolve_clip_binding(project, timeline_id, clip_id)
-    return binding is not None and binding.domain == domain
+    if binding is None or binding.domain != domain:
+        return False
+    resolved = resolve_domain_stack_id(
+        project, timeline_id, clip_id, binding.asset_id, domain)
+    return resolved is not None and binding.stack_id == resolved
 
 
 def shared_binding_conflict(project: Any, timeline_id: str,

@@ -19,8 +19,8 @@
 - CREATE：flush 后保存 live 栈；空域在同一事务初始化默认版本（空域
   栈不存在时先按域盖章建栈——LOCAL 携带当前 live 内容、REMOTE 携带
   当前 live 内容，两域策略一致：初始化默认版本 = 镜头当前所见调色）。
-- LOAD：加载指定快照并**切到该域**（非当前域时先经时间线命令切换引用，
-  再激活）；discard_unsaved=True 表示用户已确认用快照覆盖未保存修改
+- LOAD：加载指定快照并**切到该域**（引用变更与激活通过同一项目事务
+  原子发布，单步撤销同时恢复两者）；discard_unsaved=True 表示用户已确认用快照覆盖未保存修改
   （激活=内容互换天然覆盖）。不自动锁共享栈（与显式 Use Shared Grade
   的自动锁区分：版本加载是版本管理，不改共享状态）。
 - RENAME/DUPLICATE/DELETE：仅改版本表，不触发重解码/预览刷新；
@@ -45,6 +45,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any, Callable
 
 from src.features.color.ui.clip_version_ui import (
@@ -98,12 +99,23 @@ class ClipVersionRequestHost:
 
     def __init__(self, owner: Any) -> None:
         self._owner = owner
+        self._last_synced_project: Any = None
+        self._history_boundary: tuple[Any, tuple[Any, ...], tuple[Any, ...]] | None = None
+        self._history_session: tuple[Any, ...] | None = None
 
     # ── 接线 ─────────────────────────────────────────────────────────
 
     def connect_strip(self, strip: Any) -> None:
         strip.version_state_requested.connect(self.read_versions)
         strip.version_operation_requested.connect(self.execute_operation)
+        self._configure_project_stack()
+
+    def _configure_project_stack(self) -> None:
+        stack = self._project_stack()
+        if stack is not None:
+            stack.sequence_provider = lambda: (
+                self._domain_project(self._project()).timelines
+                if self._project() is not None else {})
 
     # ── 宿主环境解析（全部 duck-typed，缺失降级） ─────────────────────
 
@@ -112,6 +124,93 @@ class ClipVersionRequestHost:
 
     def _strip(self) -> Any | None:
         return getattr(self._owner, "color_timeline_clip_strip", None)
+
+    def history_target(self, *, redo: bool = False) -> ClipVersionRequestHost | None:
+        """Route Color's version/grade history to the authoritative project."""
+        if getattr(self._owner, "current_page", None) != "Color":
+            return None
+        session, project = self._active_color_session(), self._project()
+        if (session is None or project is None
+                or getattr(session, "project_id", None) != project.project_id):
+            return None
+        key = (session.project_id, getattr(session, "session_id", None),
+               getattr(session, "timeline_id", None), getattr(session, "clip_id", None))
+        if key != self._history_session:
+            self._history_boundary = self._history_session = None
+            return None
+        if not self._engine_history_at_boundary(redo=redo):
+            return None
+        stack = self._project_stack()
+        peek = getattr(stack, "peek_history_command", None)
+        command = peek(redo=redo) if callable(peek) else None
+
+        def is_color_command(item: Any) -> bool:
+            module = type(item).__module__
+            if module in ("src.features.edit.core.color_versions",
+                          "src.features.edit.core.clip_version_transaction"):
+                return True
+            from src.features.edit.core.commands import UpdateColorStackCommand
+            if isinstance(item, UpdateColorStackCommand):
+                return True
+            return any(is_color_command(child) for child in getattr(item, "sub_commands", ()))
+
+        return self if command is not None and is_color_command(command) else None
+
+    def _remember_version_history(self) -> None:
+        session = self._active_color_session()
+        if session is None:
+            return
+        history = getattr(getattr(self._owner, "engine", None), "history", None)
+        self._history_boundary = (history, tuple(getattr(history, "undo_stack", ())),
+                                  tuple(getattr(history, "redo_stack", ())))
+        self._history_session = (getattr(session, "project_id", None),
+                                 getattr(session, "session_id", None),
+                                 getattr(session, "timeline_id", None),
+                                 getattr(session, "clip_id", None))
+
+    def _engine_history_at_boundary(self, *, redo: bool) -> bool:
+        boundary = self._history_boundary
+        history = getattr(getattr(self._owner, "engine", None), "history", None)
+        if boundary is None or history is not boundary[0]:
+            self._history_boundary = self._history_session = None
+            return False
+        actual = getattr(history, "undo_stack", ())
+        expected = boundary[1]
+        if len(actual) != len(expected) or any(a is not b for a, b in zip(actual, expected)):
+            return False
+        if redo:
+            actual, expected = getattr(history, "redo_stack", ()), boundary[2]
+            return len(actual) == len(expected) and all(a is b for a, b in zip(actual, expected))
+        return True
+
+    def get_undo_label(self) -> str | None:
+        stack = self._project_stack()
+        return stack.get_undo_label() if stack is not None else None
+
+    def get_redo_label(self) -> str | None:
+        stack = self._project_stack()
+        return stack.get_redo_label() if stack is not None else None
+
+    def undo(self) -> None:
+        self._apply_history(redo=False)
+
+    def redo(self) -> None:
+        self._apply_history(redo=True)
+
+    def _apply_history(self, *, redo: bool) -> None:
+        if self.history_target(redo=redo) is None:
+            return
+        stack = self._project_stack()
+        try:
+            updated = (stack.redo(self._project()) if redo else stack.undo(self._project()))
+        except ValueError as exc:
+            strip = self._strip()
+            if strip is not None:
+                strip.version_ui.feedback.emit(str(exc))
+            return
+        if updated is not None:
+            self._publish_project(updated)
+            self._remember_version_history()
 
     def _project_stack(self) -> Any | None:
         panel = getattr(self._owner, "media_pool_panel", None)
@@ -133,6 +232,16 @@ class ClipVersionRequestHost:
             return getter() if callable(getter) else None
         except Exception:  # noqa: BLE001 — 无会话时静默
             return None
+
+    def _domain_project(self, project: Any) -> Any:
+        """Read-only projection: production stores full sequences outside refs."""
+        sequences = getattr(self._owner, "_current_timeline_sequences", None)
+        if not isinstance(sequences, dict):
+            return project
+        timelines = dict(project.timelines)
+        timelines.update({key: sequence for key, sequence in sequences.items()
+                          if key in timelines and sequence is not None})
+        return replace(project, timelines=timelines)
 
     # ── 读取（state_requested → set_clip_version_collection） ────────
 
@@ -156,8 +265,9 @@ class ClipVersionRequestHost:
         """从权威工程组装只读集合（WIRE-01 成功回读同一函数）。"""
         project = project if project is not None else self._project()
         domain = _scope_to_domain(scope)
+        domain_project = self._domain_project(project)
         binding = domains.resolve_clip_binding(
-            project, target.timeline_id, target.clip_id)
+            domain_project, target.timeline_id, target.clip_id)
         if binding is None:
             return ClipVersionCollection(
                 target, scope, connected=False,
@@ -169,7 +279,7 @@ class ClipVersionRequestHost:
                 unavailable_reason="片段素材引用已变化，请刷新版本列表。",
             )
         snapshot = domains.domain_snapshot(
-            project, target.timeline_id, target.clip_id,
+            domain_project, target.timeline_id, target.clip_id,
             target.asset_id, domain)
         state = snapshot["versions_state"]
         default_name = state["default_version"]
@@ -226,6 +336,7 @@ class ClipVersionRequestHost:
 
     def execute_operation(self, request: ClipVersionRequest) -> None:
         """写入请求的单一出口：校验 → flush → 命令栈提交 → 发布 → 回填。"""
+        self._configure_project_stack()
         target: ClipVersionTarget = request.target
         fail = lambda message: self._finish_with_error(request, message)  # noqa: E731
         project = self._project()
@@ -242,17 +353,21 @@ class ClipVersionRequestHost:
         if int(getattr(project, "revision", 0)) != request.expected_revision:
             fail("工程已被其他操作修改（修订号变化）。请刷新版本列表后重试。")
             return
+        domain_project = self._domain_project(project)
         binding = domains.resolve_clip_binding(
-            project, target.timeline_id, target.clip_id)
+            domain_project, target.timeline_id, target.clip_id)
         if binding is None:
             fail("目标片段不存在（可能已被删除）。")
             return
         if binding.asset_id != target.asset_id:
             fail("片段素材引用已变化，请刷新。")
             return
+        if binding.stack_id != target.stack_id:
+            fail("片段调色绑定已变化，请刷新版本列表。")
+            return
         domain = _scope_to_domain(request.scope)
         domain_stack_id = domains.resolve_domain_stack_id(
-            project, target.timeline_id, target.clip_id,
+            domain_project, target.timeline_id, target.clip_id,
             target.asset_id, domain)
         state = (versions_state(project, domain_stack_id)
                  if domain_stack_id else None)
@@ -279,17 +394,16 @@ class ClipVersionRequestHost:
         # 用户可刷新核对（§4.4：超时不代表后端撤销事务）。
         try:
             self._publish_project(new_project)
-            # 内容变更类操作：renderer / hydrate / 缩略图失效
-            # （WIRE-02 + CACHE-01）
-            content_changed = request.operation in (
-                VersionOperation.LOAD, VersionOperation.DELETE_ALL)
-            self._after_content_change(request, new_project, content_changed)
         except Exception:  # noqa: BLE001 — 提交后阶段失败不吞成功事实
             logger.exception(
                 "Clip version post-commit publish failed (request %s)",
                 request.request_id)
         try:
             self._finish_with_success(request, new_project)
+            self._remember_version_history()
+            update_actions = getattr(self._owner, "update_undo_redo_actions", None)
+            if callable(update_actions):
+                update_actions()
         except Exception:  # noqa: BLE001
             logger.exception(
                 "Clip version success backfill failed (request %s)",
@@ -332,26 +446,26 @@ class ClipVersionRequestHost:
         target_scope_domain = _scope_to_domain(request.scope)
 
         def execute(stack_exec):
+            from src.features.edit.core.commands import ProjectMacroCommand
+
             stack_id = domain_stack_id
+            self._flush_edited_stack(stack_id or binding.stack_id)
+            current = self._project()
+            commands = []
+            preview = current
             if stack_id is None:
-                # 空域：先 flush 内容源（镜头当前 live 调色），再按域盖章
-                # 建栈（内容 = flush 后的 live），保证快照含最后参数。
-                self._flush_edited_stack(binding.stack_id)
-                current = self._project()
-                stack_id = self._ensure_domain_stack(
+                preview, create_command, stack_id = self._prepare_domain_stack(
                     current, binding, target_scope_domain,
                     content_source_binding=binding)
-                current = self._project()
-            else:
-                self._flush_edited_stack(stack_id)
-                current = self._project()
-            table = versions_state(current, stack_id)
+                commands.append(create_command)
+            table = versions_state(preview, stack_id)
             if table["versions"]:
-                command = SaveColorVersionCommand.create(
-                    current, stack_id, name)
+                command = SaveColorVersionCommand.create(preview, stack_id, name)
             else:
-                command = create_version_with_default(current, stack_id, name)
-            return stack_exec(command, current)
+                command = create_version_with_default(preview, stack_id, name)
+            commands.append(command)
+            return stack_exec(ProjectMacroCommand.create(
+                f"Create Color Version「{name}」", commands), current)
 
         return execute
 
@@ -441,68 +555,38 @@ class ClipVersionRequestHost:
             raise ValueError("该域没有版本，无法加载。")
         version = self._require_version(request, state)
         scope_domain = _scope_to_domain(request.scope)
-        in_use = binding.domain == scope_domain
+        in_use = binding.domain == scope_domain and binding.stack_id == domain_stack_id
 
         def execute(stack_exec):
-            # 先 flush 正在编辑的域栈：让未落库手势显式进入 live_modified
-            # 判定（不静默丢弃，也不无确认覆盖）。
             self._flush_edited_stack(domain_stack_id)
             current = self._project()
             if not request.discard_unsaved:
                 state_now = versions_state(current, domain_stack_id)
-                if state_now["versions"] and not (
-                        domains.live_matches_active_version(
-                            current, domain_stack_id)):
-                    raise ValueError(
-                        "当前调色有未保存修改；请确认覆盖后重试。")
+                if state_now["versions"] and not domains.live_matches_active_version(current, domain_stack_id):
+                    raise ValueError("当前调色有未保存修改；请确认覆盖后重试。")
             if not in_use:
-                # 换域 = 切换片段引用（既有时间线命令），再激活版本。
-                # 审查 S3：切换引用前先预校验载荷可重建（激活路径同款
-                # 重建试跑），畸形载荷在零提交阶段拒绝。
                 if not version_restorable(current, domain_stack_id, version):
-                    raise ValueError(
-                        "版本快照无法重建（载荷损坏），已拒绝加载。")
-                # 切走前 flush 当前面板手势（真实 flush 的"切栈前提交"）。
-                flush = getattr(self._owner,
-                                "_flush_active_grading_stack_before_switch",
-                                None)
+                    raise ValueError("版本快照无法重建（载荷损坏），已拒绝加载。")
+                flush = getattr(self._owner, "_flush_active_grading_stack_before_switch", None)
                 if callable(flush):
                     flush(domain_stack_id)
                 current = self._project()
-                ref = domains.find_clip_ref(
-                    current, request.target.timeline_id,
-                    request.target.clip_id)
+                projected = self._domain_project(current)
+                ref = domains.find_clip_ref(projected, request.target.timeline_id, request.target.clip_id)
                 if ref is None:
                     raise ValueError("目标片段不存在。")
+                from src.features.edit.core.clip_version_transaction import LoadClipVersionCommand
+                from src.features.edit.core.commands import UpdateClipColorStackCommand
+
                 track_id, _clip = ref
-                switch = getattr(
-                    self._owner, "_apply_clip_color_stack_change", None)
-                if not callable(switch):
-                    raise ValueError("时间线命令入口不可用，无法切换版本域。")
-                if not switch(track_id, request.target.clip_id,
-                              domain_stack_id,
-                              shared=(scope_domain
-                                      == domains.VersionDomain.REMOTE)):
-                    raise ValueError("切换版本域失败。")
-                current = self._project()
-                try:
-                    command = ActivateColorVersionCommand.create(
-                        domain_stack_id, version)
-                    return stack_exec(command, current)
-                except Exception:
-                    # 审查 S3：引用已切但激活失败——切回原栈，不留
-                    # "已换域未加载"的半提交，再原样上抛。
-                    logger.exception(
-                        "Cross-scope LOAD failed after switching %s to %s; "
-                        "rolling back reference", request.target.clip_id,
-                        domain_stack_id)
-                    switch(track_id, request.target.clip_id,
-                           binding.stack_id,
-                           shared=(binding.domain
-                                   == domains.VersionDomain.REMOTE))
-                    raise
-            command = ActivateColorVersionCommand.create(
-                domain_stack_id, version)
+                before = projected.timelines[request.target.timeline_id]
+                after = UpdateClipColorStackCommand.create(
+                    track_id, request.target.clip_id, domain_stack_id,
+                    new_color_shared=scope_domain == domains.VersionDomain.REMOTE).apply(before)
+                command = LoadClipVersionCommand.create(
+                    before, after, domain_stack_id, version, project_id=current.project_id)
+            else:
+                command = ActivateColorVersionCommand.create(domain_stack_id, version)
             return stack_exec(command, current)
 
         return execute
@@ -519,7 +603,7 @@ class ClipVersionRequestHost:
         dest_domain = _scope_to_domain(request.destination_scope)
         name = validate_version_name(request.name)
         dest_stack = domains.resolve_domain_stack_id(
-            project, request.target.timeline_id, request.target.clip_id,
+            self._domain_project(project), request.target.timeline_id, request.target.clip_id,
             request.target.asset_id, dest_domain)
 
         def execute(stack_exec):
@@ -533,23 +617,25 @@ class ClipVersionRequestHost:
                 # 的空域初始化策略）
                 self._flush_edited_stack(binding.stack_id)
                 current = self._project()
-                target_stack = self._ensure_domain_stack(
+                preview, create_command, target_stack = self._prepare_domain_stack(
                     current, binding, dest_domain,
                     content_source_binding=binding)
-                current = self._project()
-            target_state = versions_state(current, target_stack)
+                commands.append(create_command)
+            else:
+                preview = current
+            target_state = versions_state(preview, target_stack)
             if not target_state["versions"]:
                 # 空目标域：同事务初始化默认版本 + 跨栈复制（§4.3/§4.5）
                 init = InitializeDefaultVersionCommand.create(
-                    current, target_stack)
-                intermediate = init.apply(current)
+                    preview, target_stack)
+                intermediate = init.apply(preview)
                 copy_cmd = CopyColorVersionCommand.create(
                     intermediate, domain_stack_id, version,
                     target_stack, name)
                 commands.extend([init, copy_cmd])
             else:
                 commands.append(CopyColorVersionCommand.create(
-                    current, domain_stack_id, version, target_stack, name))
+                    preview, domain_stack_id, version, target_stack, name))
             macro = ProjectMacroCommand.create(
                 f"Copy Color Version「{version}」→「{name}」", commands)
             new_project = stack_exec(macro, current)
@@ -595,12 +681,12 @@ class ClipVersionRequestHost:
         if callable(trigger):
             trigger()
 
-    def _ensure_domain_stack(self, project: Any, binding: domains.ClipStackBinding,
+    def _prepare_domain_stack(self, project: Any, binding: domains.ClipStackBinding,
                              domain: domains.VersionDomain,
                              content_source_binding: domains.ClipStackBinding
-                             ) -> str:
+                             ) -> tuple[Any, Any, str]:
         """空域建栈（WIRE-01 策略）：按域盖章；内容 = 镜头当前 live 调色
-        （两域一致——初始化默认版本即"镜头当前所见调色"）。返回新栈 id。"""
+        （两域一致——初始化默认版本即"镜头当前所见调色"）。只返回预览、命令和 id，不提交。"""
         from src.app.controllers.edit_controller import (
             _CreateStampedColorStackCommand,
         )
@@ -639,85 +725,120 @@ class ClipVersionRequestHost:
             name=name, stamp_fields=stamp_fields,
             label=f"Create {domain.value} version stack "
                   f"({binding.clip_id[:8]})")
-        stack = self._project_stack()
-        if stack is None:
-            raise ValueError("工程命令栈不可用。")
-        self._publish_project(stack.execute(command, current))
+        preview = command.apply(current)
         created = command.created_stack_id or ""
         if not created:
             raise ValueError("版本域建栈失败。")
-        return created
+        return preview, command, created
 
     # ── 发布与回填 ───────────────────────────────────────────────────
 
     def _publish_project(self, new_project: Any) -> None:
+        self._configure_project_stack()
         owner = self._owner
-        owner._current_edit_project = new_project
+        previous = self._project()
         owner.edit_project_dirty = True
         panel = getattr(owner, "media_pool_panel", None)
-        try:
-            set_project = getattr(panel, "set_project", None)
-            if callable(set_project):
-                set_project(new_project)
-            # project_changed 是 pyqtSignal（不可直接调用，须 .emit）；
-            # 测试替身可能是普通可调用——两种形态都支持（审查 C1）。
-            changed = getattr(panel, "project_changed", None)
-            if changed is not None:
-                emitter = getattr(changed, "emit", None)
-                if callable(emitter):
-                    emitter(new_project)
-                elif callable(changed):
-                    changed(new_project)
-        except Exception:  # noqa: BLE001 — 广播失败不撤销已提交事实
-            logger.exception("clip version project_changed broadcast failed")
+        set_project = getattr(panel, "set_project", None)
+        if callable(set_project):
+            set_project(new_project)
+        changed = getattr(panel, "project_changed", None)
+        emitter = getattr(changed, "emit", None)
+        if callable(emitter):
+            emitter(new_project)
+        elif callable(changed):
+            changed(new_project)
+        if self._last_synced_project is not new_project:
+            # Minimal hosts lack MainWindow's publication slot. Production's
+            # slot consumes sequence_map, then invokes on_project_changed.
+            owner._current_edit_project = new_project
+            sequence_updates = getattr(self._project_stack(), "last_sequence_updates", {})
+            sequences = getattr(owner, "_current_timeline_sequences", None)
+            if isinstance(sequences, dict):
+                for timeline_id, update in sequence_updates.items():
+                    apply_to = getattr(update, "apply_to", None)
+                    sequences[timeline_id] = (apply_to(sequences[timeline_id])
+                                              if callable(apply_to) else update)
+            timeline = self._timeline()
+            if timeline is not None and timeline.timeline_id in sequence_updates:
+                update = sequence_updates[timeline.timeline_id]
+                apply_to = getattr(update, "apply_to", None)
+                owner.edit_page._current_timeline = (
+                    sequences[timeline.timeline_id] if isinstance(sequences, dict)
+                    else apply_to(timeline) if callable(apply_to) else update)
+            self.on_project_changed(previous, new_project)
 
-    def _after_content_change(self, request: ClipVersionRequest,
-                              new_project: Any,
-                              content_changed: bool) -> None:
+    def on_project_changed(self, previous: Any, current: Any) -> None:
+        """Synchronize external Undo/Redo as well as menu-originated writes.
+
+        The owner publishes transaction sequence_map before calling this hook.
+        Metadata-only commits refresh DTOs without rebuilding the clip strip.
+        """
+        self._last_synced_project = current
         owner = self._owner
-        if not content_changed:
-            # 仅表操作：不重解码；但版本标签经回填刷新
-            return
-        renderer = getattr(owner, "timeline_preview_renderer", None)
-        update = getattr(renderer, "update_color_stacks", None)
-        if callable(update):
-            update(new_project)
-        domain = _scope_to_domain(request.scope)
-        stack_id = domains.resolve_domain_stack_id(
-            new_project, request.target.timeline_id,
-            request.target.clip_id, request.target.asset_id, domain)
-        # 当前 Color 会话即目标片段时重新 hydrate（防递归护栏）
+        before_stacks = getattr(previous, "color_stacks", {}) or {}
+        after_stacks = getattr(current, "color_stacks", {}) or {}
+        changed_stacks = {key for key in before_stacks.keys() | after_stacks.keys()
+                          if before_stacks.get(key) is not after_stacks.get(key)}
         session = self._active_color_session()
-        if stack_id and session is not None \
-                and getattr(session, "clip_id", None) \
-                == request.target.clip_id:
-            hydrate = getattr(
-                owner, "_load_color_stack_to_grading_panel", None)
-            if callable(hydrate):
-                previous = getattr(
-                    owner, "_color_stack_hydration_in_progress", False)
-                owner._color_stack_hydration_in_progress = True
-                try:
-                    hydrate(stack_id)
-                finally:
-                    owner._color_stack_hydration_in_progress = previous
-            # CACHE-01：失效后调度一次新截图（复用已绘制视口，token
-            # 护栏拒绝迟到帧）——卡片先回到原始缩略图（"待更新"），
-            # 新版本画面由捕获路径异步补上，不拿旧画面顶替。
-            schedule = getattr(
-                owner, "_schedule_color_timeline_clip_preview_sync", None)
-            if callable(schedule):
-                schedule(request.target.clip_id)
-        # CACHE-01：依赖该栈的缩略图失效 + 片段栏重建绑定
-        if stack_id:
+        if (session is not None and getattr(session, "project_id", current.project_id) != current.project_id):
+            session = None
+        clip_id = getattr(session, "clip_id", None)
+        timeline_id = getattr(session, "timeline_id", None)
+        if not timeline_id:
+            timeline_id = getattr(self._timeline(), "timeline_id", None)
+        projected = self._domain_project(current)
+        binding = (domains.resolve_clip_binding(projected, timeline_id, clip_id)
+                   if clip_id and timeline_id else None)
+        visible_changed = (binding is not None and binding.stack_id is not None
+                           and (binding.stack_id in changed_stacks
+                                or getattr(session, "color_stack_id", None) != binding.stack_id))
+        if changed_stacks or visible_changed:
+            renderer = getattr(owner, "timeline_preview_renderer", None)
+            update = getattr(renderer, "update_color_stacks", None)
+            if callable(update):
+                update(current)
+            notify_composite = getattr(owner, "_notify_composite_inputs_stale", None)
+            if callable(notify_composite):
+                for stack_id in changed_stacks:
+                    notify_composite(stack_id)
             strip = self._strip()
-            invalidate = getattr(
-                strip, "invalidate_graded_preview_stacks", None)
+            invalidate = getattr(strip, "invalidate_graded_preview_stacks", None)
             if callable(invalidate):
-                invalidate({stack_id})
-        refresh = getattr(owner, "refresh_color_timeline_clip_strip", None)
-        if callable(refresh):
-            refresh()
+                invalidate(changed_stacks)
+            refresh = getattr(owner, "refresh_color_timeline_clip_strip", None)
+            if callable(refresh):
+                refresh()
+        if visible_changed:
+            sync = getattr(owner, "_sync_active_color_version_stack", None)
+            if callable(sync):
+                sync(binding.stack_id)
+            else:
+                hydrate = getattr(owner, "_load_color_stack_to_grading_panel", None)
+                if callable(hydrate):
+                    previous_guard = getattr(owner, "_color_stack_hydration_in_progress", False)
+                    owner._color_stack_hydration_in_progress = True
+                    try:
+                        hydrate(binding.stack_id)
+                    finally:
+                        owner._color_stack_hydration_in_progress = previous_guard
+            schedule = getattr(owner, "_schedule_color_timeline_clip_preview_sync", None)
+            if callable(schedule):
+                schedule(clip_id)
+        if changed_stacks and self._history_boundary is not None:
+            key = (getattr(session, "project_id", None), getattr(session, "session_id", None),
+                   getattr(session, "timeline_id", None), getattr(session, "clip_id", None))
+            if key == self._history_session:
+                self._remember_version_history()
+            else:
+                self._history_boundary = self._history_session = None
+        strip = self._strip()
+        entries = getattr(strip, "_all_entries", ()) or getattr(strip, "_entries", ())
+        for entry in entries:
+            target = strip._version_target(entry)
+            for scope in VersionScope:
+                if strip.version_ui.collection(target, scope).loaded:
+                    self.read_versions(target, scope)
 
     def _backfill_destination(self, request: ClipVersionRequest,
                                new_project: Any) -> None:
