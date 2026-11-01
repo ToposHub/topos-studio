@@ -1106,8 +1106,8 @@ QMenu::separator {
 }
 
 QMenu::right-arrow {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
 }
 
 QMenu::indicator {
@@ -1636,16 +1636,20 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
 */
 
 QMainWindow::separator {
-    /* 固定 1px 深色线，跨平台保持一致；不依赖系统原生边框 */
-    background-color: __PANEL_DIVIDER__;
+    /* Keep a wider transparent hit area so adjacent dock groups can be resized. */
+    background-color: transparent;
     border: none;
-    width: 1px;
-    height: 1px;
+    width: 8px;
+    height: 8px;
 }
 
 QMainWindow::separator:hover {
-    /* 悬停时仍保持分割线颜色，避免 Windows 下出现平台/主题跳色 */
-    background-color: __PANEL_DIVIDER__;
+    /* Reveal the resize handle on hover without adding a thick idle divider. */
+    background-color: rgba(255, 122, 0, 72);
+}
+
+QMainWindow::separator:pressed {
+    background-color: rgba(255, 122, 0, 128);
 }
 
 /* === Dock 标签栏 === */

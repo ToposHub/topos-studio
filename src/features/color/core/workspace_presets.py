@@ -334,15 +334,14 @@ def sanitize_preset(
     registered = set(registered_panel_ids)
     resolved = set(preset.visible_panels) & registered
 
-    # The three tools used to be independent workspace panels.  Preserve old
-    # saved workspaces by promoting any of their ids to the combined panel.
+    # Warper/Mixer moved into Color Mapping. HSL Curves now live in Curves.
     if (
         "color.mapping" in registered
         and set(preset.visible_panels)
-        & {"color.hsl_curves", "color.mixer", "color.warper"}
+        & {"color.mixer", "color.warper"}
     ):
         resolved.add("color.mapping")
-    if "color.curves" in registered and "color.soft_clip" in preset.visible_panels:
+    if "color.curves" in registered and set(preset.visible_panels) & {"color.soft_clip", "color.hsl_curves"}:
         resolved.add("color.curves")
     if work_mode == "video":
         resolved -= {"workspace.library", "workspace.export"}

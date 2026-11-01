@@ -1811,9 +1811,10 @@ class AsyncRenderer(QThread):
         """Tone-map vectorscope density -> RGBA8 display texture."""
         self._ensure_scope_engine().display_vectorscope(pool, zoom)
 
-    def _scope_accumulate_histogram(self, pool) -> None:
+    def _scope_accumulate_histogram(self, pool: dict, *, include_luma: bool = False,
+                                    curve_mode: str = 'Custom') -> None:
         """Per-channel code-value point splat into the histogram density."""
-        self._ensure_scope_engine().accumulate_histogram(pool)
+        self._ensure_scope_engine().accumulate_histogram(pool, include_luma=include_luma, curve_mode=curve_mode)
 
     def _scope_reduce_histogram(self, pool) -> None:
         """Column-sum the scattered density into log1p totals (512x1)."""
@@ -1822,6 +1823,13 @@ class AsyncRenderer(QThread):
     def _scope_display_histogram(self, pool) -> None:
         """Draw the RGB histogram curves into the display texture."""
         self._ensure_scope_engine().display_histogram(pool)
+
+    def _scope_display_curves_histogram(
+        self, pool: dict, display_size: tuple[int, int], line_width: float,
+        curve_mode: str = 'Custom',
+    ) -> None:
+        """Draw the dedicated YRGB underlay using the shared histogram counts."""
+        self._ensure_scope_engine().display_curves_histogram(pool, display_size, line_width, curve_mode)
 
     def _scope_accumulate_cie(self, pool, demand) -> None:
         """CIE xy chromaticity density (transfer/gamut aware)."""
@@ -1991,6 +1999,7 @@ class AsyncRenderer(QThread):
             parade_id = None
             luma_id = None
             hist_id = None
+            curves_hist_id = None
             cie_id = None
             fc_id = None
             need_wf = mode_needs_waveform(demand.mode)
@@ -2019,10 +2028,17 @@ class AsyncRenderer(QThread):
             if mode_needs_histogram(demand.mode) or bool(
                 getattr(demand, 'histogram_overlay', False)
             ):
-                self._scope_accumulate_histogram(pool)
+                if bool(getattr(demand, 'histogram_overlay', False)):
+                    self._scope_accumulate_histogram(pool, include_luma=True, curve_mode=demand.curves_mode)
+                else:
+                    self._scope_accumulate_histogram(pool)
                 self._scope_reduce_histogram(pool)
                 self._scope_display_histogram(pool)
                 hist_id = pool['hist_display'].glo
+                if bool(getattr(demand, 'histogram_overlay', False)):
+                    self._scope_display_curves_histogram(pool, demand.curves_display_size,
+                                                        demand.curves_line_width, demand.curves_mode)
+                    curves_hist_id = pool['curves_hist_display'].glo
 
             if mode_needs_cie(demand.mode):
                 self._scope_accumulate_cie(pool, demand)
@@ -2054,6 +2070,12 @@ class AsyncRenderer(QThread):
                 luma_texture_id=luma_id,
                 luma_size=waveform_size if luma_id is not None else (0, 0),
                 histogram_texture_id=hist_id,
+                curves_histogram_texture_id=curves_hist_id,
+                curves_mode=demand.curves_mode,
+                curves_histogram_size=(
+                    pool['curves_hist_display_size']
+                    if curves_hist_id is not None else (0, 0)
+                ),
                 histogram_size=(
                     DEFAULT_HISTOGRAM_DISPLAY_SIZE
                     if hist_id is not None else (0, 0)

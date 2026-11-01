@@ -31,6 +31,7 @@ from src.features.color.core.scope_types import (
     DEFAULT_FALSECOLOR_SIZE as FALSECOLOR_SIZE,
     DEFAULT_HISTOGRAM_DENSITY_SIZE as HISTOGRAM_DENSITY_SIZE,
     DEFAULT_HISTOGRAM_DISPLAY_SIZE as HISTOGRAM_DISPLAY_SIZE,
+    DEFAULT_CURVES_HISTOGRAM_SIZE as CURVES_HISTOGRAM_SIZE,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,10 @@ class GpuScopeEngine:
               defs.get("SCOPE_HISTOGRAM_REDUCE_FRAGMENT", ""))
         build("scope_histogram_display", passthrough,
               defs.get("SCOPE_HISTOGRAM_DISPLAY_FRAGMENT", ""))
+        build("scope_curves_histogram_peak", passthrough,
+              defs.get("SCOPE_CURVES_HISTOGRAM_PEAK_FRAGMENT", ""))
+        build("scope_curves_histogram_display", passthrough,
+              defs.get("SCOPE_CURVES_HISTOGRAM_DISPLAY_FRAGMENT", ""))
         build("scope_cie_accum",
               defs.get("SCOPE_CIE_ACCUM_VERTEX", ""),
               defs.get("SCOPE_VECTORSCOPE_ACCUM_FRAGMENT", ""))
@@ -140,6 +145,7 @@ class GpuScopeEngine:
             "scope_histogram_accum", "scope_histogram_reduce",
             "scope_histogram_display", "scope_cie_accum", "scope_cie_display",
             "scope_falsecolor",
+            "scope_curves_histogram_peak", "scope_curves_histogram_display",
         )
         self.shaders_loaded = all(k in self.programs for k in required)
         return self.shaders_loaded
@@ -214,6 +220,11 @@ class GpuScopeEngine:
         hist_display = ensure_tex(
             'hist_display', HISTOGRAM_DISPLAY_SIZE, 4, 'f1')
         ensure_fbo('hist_display_fbo', hist_display)
+        hist_peak = ensure_tex('hist_peak', (1, 1), 4, 'f4')
+        ensure_fbo('hist_peak_fbo', hist_peak)
+        curves_hist = ensure_tex('curves_hist_display',
+                                 pool.get('curves_hist_display_size', CURVES_HISTOGRAM_SIZE), 4, 'f1')
+        ensure_fbo('curves_hist_display_fbo', curves_hist)
 
         cie_density = ensure_tex('cie_density', CIE_SIZE, 1, 'f2')
         ensure_fbo('cie_density_fbo', cie_density)
@@ -489,7 +500,8 @@ class GpuScopeEngine:
         # monochrome red/green/blue panels with the shared value graticule.
         self.display_waveform(pool)
 
-    def accumulate_histogram(self, pool: dict) -> None:
+    def accumulate_histogram(self, pool: dict, *, include_luma: bool = False,
+                             curve_mode: str = 'Custom') -> None:
         """Per-channel code-value point splat (log scale in reduce pass)."""
         prog = self.programs.get('scope_histogram_accum')
         if prog is None:
@@ -501,10 +513,11 @@ class GpuScopeEngine:
         prog['u_sample_tex'].value = 0
         prog['u_sample_size'].value = (float(aw), float(ah))
         prog['u_density_size'].value = (float(hw), float(hh))
+        prog['u_hist_axis'].value = self._curve_axis(curve_mode)
         self._enable_additive()
         try:
             vao = self._points_vao(prog, aw * ah)
-            for ch in (0, 1, 2):
+            for ch in ((0, 1, 2, 3) if include_luma else (0, 1, 2)):
                 prog['u_channel'].value = ch
                 vao.render(mode=moderngl.POINTS, vertices=aw * ah)
         finally:
@@ -537,6 +550,53 @@ class GpuScopeEngine:
         # mapping keeps low-count tails visible (fixed gain, no readback).
         prog['u_max_inv'].value = 1.0 / max(1.0, np.log1p(samples / 48.0))
         self._render_quad(prog)
+
+    def display_curves_histogram(
+        self, pool: dict, display_size: Tuple[int, int] = CURVES_HISTOGRAM_SIZE,
+        line_width: float = 1.0, curve_mode: str = 'Custom',
+    ) -> None:
+        """Draw a linear, peak-normalized YRGB underlay without CPU readback."""
+        display_size = tuple(max(1, int(v)) for v in display_size)
+        if pool['curves_hist_display_size'] != display_size:
+            tex = self.ctx.texture(display_size, 4, dtype='f1')
+            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            tex.repeat_x = False
+            tex.repeat_y = False
+            try:
+                fbo = self.ctx.framebuffer(color_attachments=[tex])
+            except moderngl.Error:
+                tex.release()
+                raise
+            fbo._scope_tex = tex
+            pool['curves_hist_display_fbo'].release()
+            pool['curves_hist_display'].release()
+            pool['curves_hist_display'] = tex
+            pool['curves_hist_display_size'] = display_size
+            pool['curves_hist_display_fbo'] = fbo
+        peak = self.programs['scope_curves_histogram_peak']
+        self._use_target(pool['hist_peak_fbo'], (1, 1))
+        pool['hist_sum'].use(0)
+        peak['u_hist_sum'].value = 0
+        self._render_quad(peak)
+
+        prog = self.programs['scope_curves_histogram_display']
+        self._use_target(pool['curves_hist_display_fbo'], display_size)
+        pool['hist_sum'].use(0)
+        pool['hist_peak'].use(1)
+        prog['u_hist_sum'].value = 0
+        prog['u_hist_peak'].value = 1
+        prog['u_display_size'].value = tuple(float(v) for v in display_size)
+        prog['u_line_width'].value = max(0.5, float(line_width))
+        prog['u_curve_axis'].value = self._curve_axis(curve_mode)
+        self._render_quad(prog)
+
+    @staticmethod
+    def _curve_axis(mode: str) -> int:
+        if mode.startswith('Hue'):
+            return 1
+        if mode.startswith('Sat'):
+            return 2
+        return 3 if mode == 'LumSat' else 0
 
     def accumulate_cie(self, pool: dict, transfer: str = 'srgb',
                        primaries: str = 'bt709') -> None:
@@ -675,11 +735,17 @@ class GpuScopeEngine:
             self.display_waveform(pool, single_channel=True)
             outputs['luma'] = (pool['wf_display'].glo, pool['waveform_size'])
         if mode_needs_histogram(mode) or bool(getattr(demand, 'histogram_overlay', False)):
-            self.accumulate_histogram(pool)
+            self.accumulate_histogram(pool, include_luma=bool(getattr(demand, 'histogram_overlay', False)),
+                                      curve_mode=demand.curves_mode)
             self.reduce_histogram(pool)
             self.display_histogram(pool)
             outputs['histogram'] = (pool['hist_display'].glo,
                                     HISTOGRAM_DISPLAY_SIZE)
+            if bool(getattr(demand, 'histogram_overlay', False)):
+                self.display_curves_histogram(pool, demand.curves_display_size, demand.curves_line_width,
+                                              demand.curves_mode)
+                outputs['curves_histogram'] = (pool['curves_hist_display'].glo,
+                                               pool['curves_hist_display_size'])
         if mode_needs_cie(mode):
             self.accumulate_cie(pool, getattr(demand, 'scope_transfer', 'srgb'),
                                 getattr(demand, 'scope_primaries', 'bt709'))

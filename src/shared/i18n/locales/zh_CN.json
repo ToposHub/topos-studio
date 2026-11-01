@@ -1697,7 +1697,14 @@
     "hue_vs_sat": "色相 vs 饱和度",
     "hue_vs_lum": "色相 vs 亮度",
     "sat_vs_sat": "饱和度 vs 饱和度",
-    "sat_vs_lum": "饱和度 vs 亮度"
+    "sat_vs_lum": "饱和度 vs 亮度",
+    "input_hue": "输入色相",
+    "input_lum": "输入亮度",
+    "input_sat": "输入饱和度",
+    "hue_rotate": "色相旋转",
+    "saturation": "饱和度",
+    "lum": "亮度",
+    "add_anchor": "添加曲线控制点"
   },
   "shortcut_dialog": {
     "title": "键盘快捷键",

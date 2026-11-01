@@ -14,7 +14,7 @@ Visual design inspired by DaVinci Resolve professional color grading UI.
 import numpy as np
 from typing import Dict, Optional, Any, List
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QComboBox, QLabel
-from PyQt6.QtCore import Qt, QPointF, pyqtSignal, QRectF, QTimer
+from PyQt6.QtCore import Qt, QEvent, QPointF, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath, QLinearGradient
 
 try:
@@ -33,6 +33,19 @@ from src.shared.ui.style_sheet import (
     HSL_INFO_LABEL_STYLE,
 )
 from src.shared.assets.icon_manager import icon_color_picker, icon_reset
+from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
+
+
+class _HslCurveOverlay(QWidget):
+    def __init__(self, canvas: 'HSLCurvesWidget') -> None:
+        super().__init__(canvas)
+        self.canvas = canvas
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setStyleSheet('background: transparent;')
+
+    def paintEvent(self, event) -> None:
+        self.canvas._paint_editor(self)
 
 
 # Curve mode definitions with metadata
@@ -108,9 +121,21 @@ class HSLCurvesWidget(QWidget):
     # HSL Color Picker signals
     hsl_picker_toggled = pyqtSignal(bool)  # True = activate picker, False = deactivate
     hsl_color_received = pyqtSignal(float, float, float)  # r, g, b (0-255)
+    mode_changed = pyqtSignal(str)
+    point_state_changed = pyqtSignal()
+    histogram_geometry_changed = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setStyleSheet('background-color: #232326;')
+        self._scope = GpuScopeWidget(self, show_value_axis=False)
+        self._scope.hide()
+        self._has_histogram = False
+        self._overlay = _HslCurveOverlay(self)
+        self._scope_resize_timer = QTimer(self)
+        self._scope_resize_timer.setSingleShot(True)
+        self._scope_resize_timer.setInterval(150)
+        self._scope_resize_timer.timeout.connect(self.histogram_geometry_changed)
         self.setMinimumSize(300, 220)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
@@ -126,7 +151,8 @@ class HSLCurvesWidget(QWidget):
             self.curves[mode] = [QPointF(0, 127.5), QPointF(255, 127.5)]
 
         self.selected_point_idx = -1
-        self.padding = 15  # Edge padding for safe drawing area
+        self.padding = 7
+        self._inspected_point_idx = 0
 
         # === Cache and Throttling ===
         self._lut_cache: Optional[np.ndarray] = None  # Shape: (6, 256)
@@ -175,6 +201,7 @@ class HSLCurvesWidget(QWidget):
 
         # Reset Button
         reset_btn = QPushButton()
+        self.reset_btn = reset_btn
         reset_btn.setIcon(icon_reset())
         reset_btn.setFixedSize(28, 24)
         reset_btn.setToolTip(I18N.tr("tooltip.reset_hsl_curves", "Reset Current Curve"))
@@ -200,21 +227,22 @@ class HSLCurvesWidget(QWidget):
         if mode in CURVE_MODES and mode != self._current_mode:
             self._current_mode = mode
             self.selected_point_idx = -1
+            self._inspected_point_idx = 0
+            self.clear_scope()
             # Update combo box without triggering signal
             idx = MODE_ORDER.index(mode)
             self.mode_combo.blockSignals(True)
             self.mode_combo.setCurrentIndex(idx)
             self.mode_combo.blockSignals(False)
+            self._update_info_label()
+            self.mode_changed.emit(mode)
             self.update()
 
     def _on_mode_changed(self, index: int) -> None:
         """Handle mode combo box selection change."""
         mode = MODE_ORDER[index]
         if mode != self._current_mode:
-            self._current_mode = mode
-            self.selected_point_idx = -1
-            self._update_info_label()
-            self.update()
+            self.current_mode = mode
 
     def _on_picker_toggled(self, checked: bool) -> None:
         """Handle HSL color picker button toggle."""
@@ -232,8 +260,38 @@ class HSLCurvesWidget(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._scope.setGeometry(self.get_draw_rect().toAlignedRect())
+        self._overlay.setGeometry(self.rect())
+        self._overlay.raise_()
         # Position buttons at top-left, floating over the canvas
         self.btn_container.move(self.padding + 5, self.padding + 5)
+        self.btn_container.raise_()
+        self._scope_resize_timer.start()
+
+    def histogram_display_metrics(self) -> tuple[tuple[int, int], float]:
+        rect = self.get_draw_rect().toAlignedRect()
+        dpr = self.devicePixelRatioF()
+        return (max(1, round(rect.width() * dpr)), max(1, round(rect.height() * dpr))), dpr
+
+    def event(self, event: QEvent) -> bool:
+        if (event.type() == QEvent.Type.DevicePixelRatioChange
+                and hasattr(self, '_scope_resize_timer')):
+            self._scope_resize_timer.start()
+        return super().event(event)
+
+    def set_scope_frame(self, tex_id: Optional[int], width: int, height: int) -> None:
+        self._scope.set_scope_frame(tex_id, width, height)
+        self._has_histogram = tex_id is not None
+        self._scope.setVisible(self._has_histogram)
+        self._overlay.raise_()
+        self.btn_container.raise_()
+        self.update()
+
+    def clear_scope(self) -> None:
+        self._has_histogram = False
+        self._scope.clear()
+        self._scope.hide()
+        self.update()
 
     def get_draw_rect(self):
         """
@@ -257,18 +315,19 @@ class HSLCurvesWidget(QWidget):
         my = (wy - rect.top()) / rect.height() * 255
         return mx, my
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
+    def _paint_editor(self, target: QWidget) -> None:
+        painter = QPainter(target)
         # Global antialiasing for smooth curves and points
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         rect = self.get_draw_rect()
 
         # Layer 1: Dynamic gradient background based on current mode
-        self._draw_gradient_background(painter, rect)
+        if not self._has_histogram:
+            self._draw_gradient_background(painter, rect)
 
         # Layer 2: Dark overlay for professional tone
-        self._draw_dark_overlay(painter, rect)
+            self._draw_dark_overlay(painter, rect)
 
         # Layer 3: Grid system with center baseline
         self._draw_grid(painter, rect)
@@ -281,6 +340,7 @@ class HSLCurvesWidget(QWidget):
 
         # Layer 6: Border frame
         self._draw_border(painter, rect)
+        painter.end()
 
     def _draw_gradient_background(self, painter: QPainter, rect: QRectF):
         """
@@ -298,7 +358,7 @@ class HSLCurvesWidget(QWidget):
         if x_axis == 'lum':
             # Luminance gradient: black to white
             gradient.setColorAt(0.0, QColor(0, 0, 0))
-            gradient.setColorAt(1.0, QColor(255, 255, 255))
+            gradient.setColorAt(1.0, QColor(205, 205, 205))
             painter.fillRect(rect, gradient)
 
         elif x_axis == 'hue':
@@ -314,13 +374,13 @@ class HSLCurvesWidget(QWidget):
                 (1.0, QColor(255, 0, 0)),      # Red (wrap)
             ]
             for pos, color in hue_stops:
-                gradient.setColorAt(pos, color)
+                gradient.setColorAt(pos, QColor.fromHsvF(color.hsvHueF(), 1.0, 0.34))
             painter.fillRect(rect, gradient)
 
         elif x_axis == 'sat':
             # Saturation gradient: gray to saturated red
-            gradient.setColorAt(0.0, QColor(128, 128, 128))  # Gray (no saturation)
-            gradient.setColorAt(1.0, QColor(255, 0, 0))      # Saturated red
+            gradient.setColorAt(0.0, QColor(0, 0, 0))
+            gradient.setColorAt(1.0, QColor(205, 205, 205))
             painter.fillRect(rect, gradient)
 
     def _draw_dark_overlay(self, painter: QPainter, rect: QRectF):
@@ -328,8 +388,12 @@ class HSLCurvesWidget(QWidget):
         Overlay semi-transparent dark layer to maintain professional dark tone.
         Prevents the bright gradient from overwhelming the UI.
         """
-        overlay_color = QColor(30, 30, 30, 200)
-        painter.fillRect(rect, overlay_color)
+        if CURVE_MODES[self._current_mode]['x_axis'] == 'hue':
+            shade = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+            shade.setColorAt(0.0, QColor(0, 0, 0, 80))
+            shade.setColorAt(0.5, QColor(0, 0, 0, 0))
+            shade.setColorAt(1.0, QColor(0, 0, 0, 80))
+            painter.fillRect(rect, shade)
 
     def _draw_grid(self, painter: QPainter, rect: QRectF):
         """
@@ -337,24 +401,20 @@ class HSLCurvesWidget(QWidget):
         - Regular grid: subtle, low contrast
         - Center baseline: more visible, acts as visual anchor for 1.0 multiplier
         """
-        # Regular 4x4 grid lines - very subtle
-        grid_pen = QPen(QColor(255, 255, 255, 20), 1.0)
-        grid_pen.setStyle(Qt.PenStyle.SolidLine)
-        painter.setPen(grid_pen)
-
-        # Vertical grid lines (4 divisions)
-        for i in range(1, 4):
-            x = rect.left() + rect.width() * i / 4
-            painter.drawLine(int(x), int(rect.top()), int(x), int(rect.bottom()))
-
-        # Horizontal grid lines (4 divisions)
-        for i in range(1, 4):
-            y = rect.top() + rect.height() * i / 4
-            painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+        for vertical, divisions in ((True, max(4, round(rect.width() / 20))),
+                                    (False, max(4, round(rect.height() / 20)))):
+            for i in range(1, divisions):
+                painter.setPen(QPen(QColor(220, 220, 225, 48 if i % 5 == 0 else 24), 0.6))
+                x = rect.left() + rect.width() * i / divisions
+                y = rect.top() + rect.height() * i / divisions
+                if vertical:
+                    painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+                else:
+                    painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
 
         # Center baseline (Y=127.5, multiplier 1.0) - more prominent
         center_pen = QPen(QColor(255, 255, 255, 80), 1.0)
-        center_pen.setStyle(Qt.PenStyle.DashLine)
+        center_pen.setStyle(Qt.PenStyle.SolidLine)
         painter.setPen(center_pen)
         center_y = rect.top() + rect.height() * 0.5
         painter.drawLine(int(rect.left()), int(center_y), int(rect.right()), int(center_y))
@@ -412,7 +472,7 @@ class HSLCurvesWidget(QWidget):
 
         # Curve pen: thick, bright white for professional look
         curve_color = QColor(240, 240, 240)
-        curve_pen = QPen(curve_color, 2.2)
+        curve_pen = QPen(curve_color, 1.0)
         curve_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         curve_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(curve_pen)
@@ -472,13 +532,13 @@ class HSLCurvesWidget(QWidget):
         """
         Draw subtle border frame around the drawing area.
         """
-        border_pen = QPen(QColor(80, 80, 85), 1.0)
+        border_pen = QPen(QColor(7, 7, 8), 0.8)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(border_pen)
         painter.drawRect(rect)
 
     # ============================================================
-    # DATA LOGIC - UNCHANGED (Do not modify below this section)
+    # CURVE INTERPOLATION AND EDITING
     # ============================================================
 
     def calculate_curve(self, points):
@@ -562,6 +622,7 @@ class HSLCurvesWidget(QWidget):
                 self.interaction_started.emit()
                 self._press_interaction = True
                 self.selected_point_idx = clicked_idx
+                self._inspected_point_idx = clicked_idx
 
                 # === Hue Wrap-around: Sync endpoints on click ===
                 # Only sync when curve has exactly 2 endpoints (no extra control points)
@@ -587,6 +648,7 @@ class HSLCurvesWidget(QWidget):
                     pts.append(new_point)
                     pts.sort(key=lambda p: p.x())
                     self.selected_point_idx = pts.index(new_point)
+                    self._inspected_point_idx = self.selected_point_idx
                     self.update_lut()
         elif event.button() == Qt.MouseButton.RightButton:
             if clicked_idx != -1 and not self._is_endpoint(clicked_idx) and len(pts) > 2:
@@ -597,6 +659,67 @@ class HSLCurvesWidget(QWidget):
                 self.update_lut()
                 self.interaction_ended.emit()
 
+        self._update_info_label()
+        self.update()
+
+    def selected_values(self) -> tuple[float, float]:
+        points = self.curves[self._current_mode]
+        if not points:
+            return 0.0, 0.0 if CURVE_MODES[self._current_mode]['y_type'] == 'shift' else 1.0
+        index = max(0, min(self._inspected_point_idx, len(points) - 1))
+        point = points[index]
+        mode = CURVE_MODES[self._current_mode]
+        x = point.x() / 255.0 * (360.0 if mode['x_axis'] == 'hue' else 1.0)
+        y = self.y_to_hue_shift(point.y()) * 360.0 if mode['y_type'] == 'shift' else self.y_to_multiplier(point.y())
+        return x, y
+
+    def set_selected_value(self, axis: str, value: float) -> None:
+        """Edit the inspected point through the existing LUT/undo signal path."""
+        points = self.curves[self._current_mode]
+        if not points:
+            return
+        index = max(0, min(self._inspected_point_idx, len(points) - 1))
+        point = points[index]
+        mode = CURVE_MODES[self._current_mode]
+        x, y = point.x(), point.y()
+        if axis == 'x':
+            if index == 0 or index == len(points) - 1:
+                return
+            x = value / (360.0 if mode['x_axis'] == 'hue' else 1.0) * 255.0
+            x = max(points[index - 1].x() + 0.1, min(points[index + 1].x() - 0.1, x))
+        else:
+            y = self.hue_shift_to_y(value / 360.0) if mode['y_type'] == 'shift' else self.multiplier_to_y(value)
+            y = max(0.0, min(255.0, y))
+            if self._should_sync_endpoints() and self._is_endpoint(index):
+                points[0] = QPointF(0, y)
+                points[-1] = QPointF(255, y)
+        points[index] = QPointF(x, y)
+        self._lut_dirty = True
+        self.update_lut()
+        self._update_info_label(y)
+        self.update()
+
+    def add_anchor(self, position: float) -> None:
+        """Add or inspect a preset position without displacing the curve."""
+        points = self.curves[self._current_mode]
+        x = max(0.0, min(255.0, position * 255.0))
+        for i, point in enumerate(points):
+            if abs(point.x() - x) < 0.5:
+                self._inspected_point_idx = i
+                self._update_info_label(point.y())
+                self.update()
+                return
+        y = float(np.interp(x, np.arange(256), self.calculate_curve(points)))
+        self.interaction_started.emit()
+        point = QPointF(x, y)
+        points.append(point)
+        points.sort(key=lambda p: p.x())
+        self._inspected_point_idx = points.index(point)
+        self._lut_dirty = True
+        self.update_lut()
+        self.flush()
+        self.interaction_ended.emit()
+        self._update_info_label(y)
         self.update()
 
     def _is_hue_curve(self) -> bool:
@@ -696,6 +819,7 @@ class HSLCurvesWidget(QWidget):
             # Shift type: -0.5 to +0.5 range (for hue)
             shift = self.y_to_hue_shift(y_value)
             self.info_label.setText(f"{shift:+.2f}")
+        self.point_state_changed.emit()
 
     def y_to_multiplier(self, y_value: float) -> float:
         """Convert Y coordinate (0-255) to saturation multiplier (0.0-2.0). INVERTED."""
@@ -824,6 +948,7 @@ class HSLCurvesWidget(QWidget):
                 self.curves[mode] = [QPointF(0, 127.5), QPointF(255, 127.5)]
 
         self.selected_point_idx = -1
+        self._inspected_point_idx = 0
         self._update_info_label()
         self._lut_dirty = True
         
@@ -906,6 +1031,8 @@ class HSLCurvesWidget(QWidget):
         finally:
             self.blockSignals(was_blocked)
 
+        self.point_state_changed.emit()
+
         # AUD-38302: changed 信号必须在 blockSignals 恢复之后发射。
         # 旧实现在 blocked 区内调用 _emit_changed_signal()：
         # 1) Qt 级 blockSignals 直接吞掉 self.changed.emit；
@@ -985,6 +1112,8 @@ class HSLCurvesWidget(QWidget):
                 # Point already exists nearby, just select it instead
                 pts.sort(key=lambda p: p.x())
                 self.selected_point_idx = pts.index(p)
+                self._inspected_point_idx = self.selected_point_idx
+                self._update_info_label(p.y())
                 self.update()
                 return True
 
@@ -994,6 +1123,8 @@ class HSLCurvesWidget(QWidget):
 
         # Update selected point index to the newly added point
         self.selected_point_idx = pts.index(new_point)
+        self._inspected_point_idx = self.selected_point_idx
+        self._update_info_label(new_point.y())
 
         # Emit interaction signals for proper render pipeline.
         # 顺序契约：started（压撤销基线）→ 应用变更（flush 使 changed

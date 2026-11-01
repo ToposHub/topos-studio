@@ -1373,7 +1373,7 @@ class FileOpsMixin:
             # Scope output is GPU-only. The normal frame_ready path submits
             # after the new front texture is published; this explicit refresh
             # also covers an idle pass without a new frame notification.
-            if self._is_scope_panel_visible():
+            if self._is_scope_panel_visible() or self._is_curves_panel_visible():
                 self._submit_gpu_scope_demand(is_playing=False, force=True)
             self.on_render_finished(None, False)
         except Exception:
@@ -5124,6 +5124,7 @@ class FileOpsMixin:
             self.video_controller.frame_ready.connect(self.on_video_frame_ready)  # 更新 Canvas
             self.video_controller.play_state_changed.connect(self.canvas.video_control_bar.on_play_state_changed)
             self.video_controller.play_state_changed.connect(self._on_video_play_state_changed)  # P0-5: debounce cleanup
+            self.video_controller.play_state_changed.connect(self._on_scope_play_state_changed)
             # Color 页音频桥接：graded video_controller 是纯视频引擎，播放状态
             # 变化时镜像到 Edit 页的时间线音频（仅 Color timeline-clip 上下文生效）。
             self.video_controller.play_state_changed.connect(self._on_color_video_play_state_for_audio)
@@ -6314,6 +6315,9 @@ class FileOpsMixin:
 
     def on_video_scrub_started(self, frame_number: int) -> None:
         """Start low-latency viewport scrub preview for Color/Composite bars."""
+        scope_scrub = getattr(self, '_on_scope_scrub_state_changed', None)
+        if callable(scope_scrub):
+            scope_scrub(True)
         color_timeline_controller = self._color_timeline_playback_controller()
         if color_timeline_controller is not None:
             if getattr(color_timeline_controller, "is_playing", False):
@@ -6398,6 +6402,9 @@ class FileOpsMixin:
 
     def on_video_scrub_finished(self, _frame_number: int) -> None:
         """End scrub mode; seek_requested emitted by the bar performs exact seek."""
+        scope_scrub = getattr(self, '_on_scope_scrub_state_changed', None)
+        if callable(scope_scrub):
+            scope_scrub(False)
         if self._color_timeline_playback_controller() is not None:
             return
         self._viewport_scrub_active = False

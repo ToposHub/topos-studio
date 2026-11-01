@@ -1697,7 +1697,14 @@
     "hue_vs_lum": "Hue vs Lum",
     "lum_vs_sat": "Lum vs Sat",
     "sat_vs_sat": "Sat vs Sat",
-    "sat_vs_lum": "Sat vs Lum"
+    "sat_vs_lum": "Sat vs Lum",
+    "input_hue": "Input Hue",
+    "input_lum": "Input Lum",
+    "input_sat": "Input Sat",
+    "hue_rotate": "Hue Rotate",
+    "saturation": "Saturation",
+    "lum": "Lum",
+    "add_anchor": "Add curve control point"
   },
   "shortcut_dialog": {
     "title": "Keyboard Shortcuts",

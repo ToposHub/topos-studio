@@ -399,16 +399,17 @@ void main() {
 // 7. Histogram accumulation (POINTS draw, per-channel columns).
 // -----------------------------------------------------------------------------
 // One vertex per analysis pixel. x = code value (0..1) of the selected
-// channel; y is a golden-ratio scatter so per-texel counts stay far below
+// channel; y is an integer-hash scatter so per-texel counts stay far below
 // the float16 limit while the reduce pass can still recover exact column
-// totals. Channel density is written to .r/.g/.b exactly like the waveform
-// fragment, so SCOPE_WAVEFORM_ACCUM_FRAGMENT is reused as-is.
+// totals. RGB density occupies .rgb; the independent Rec.709 Y density is
+// stored in .a, retaining the same mask weights as the RGB distributions.
 #define SCOPE_HISTOGRAM_ACCUM_VERTEX """
 #version 330
 uniform sampler2D u_sample_tex;
 uniform vec2 u_sample_size;
 uniform vec2 u_density_size;
-uniform int u_channel;         // 0=R, 1=G, 2=B
+uniform int u_channel;         // 0=R, 1=G, 2=B, 3=Y
+uniform int u_hist_axis;       // 0=YRGB, 1=hue, 2=saturation, 3=HSL luminance
 out float v_weight;
 out float v_range_flag;
 void main() {
@@ -418,9 +419,29 @@ void main() {
     vec4 sample_rgba = texelFetch(u_sample_tex, ivec2(sx, sy), 0);
     vec3 c = sample_rgba.rgb;
     float val = (u_channel == 0) ? c.r : ((u_channel == 1) ? c.g : c.b);
+    if (u_channel == 3) val = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float hi = max(max(c.r, c.g), c.b);
+    float lo = min(min(c.r, c.g), c.b);
+    float delta = hi - lo;
+    float saturation = hi > 0.000001 ? clamp(delta / hi, 0.0, 1.0) : 0.0;
+    if (u_channel == 3 && u_hist_axis == 1) {
+        float hue = 0.0;
+        if (delta > 0.000001) {
+            if (hi == c.r) hue = (c.g - c.b) / delta;
+            else if (hi == c.g) hue = 2.0 + (c.b - c.r) / delta;
+            else hue = 4.0 + (c.r - c.g) / delta;
+        }
+        val = fract(hue / 6.0 + 1.0);
+    } else if (u_channel == 3 && u_hist_axis == 2) {
+        val = saturation;
+    } else if (u_channel == 3 && u_hist_axis == 3) {
+        val = dot(c, vec3(0.299, 0.587, 0.114));
+    }
     val = clamp(val, 0.0, 1.0);
     float x_ndc = val * 2.0 - 1.0;
-    float spread = fract(float(idx) * 0.61803398875);
+    // Integer hashing avoids float precision collapse for large sample ids.
+    uint scatter = uint(idx) * 1664525u + 1013904223u;
+    float spread = float(scatter & 65535u) / 65536.0;
     float y_ndc = spread * 2.0 - 1.0;
     float half_cell = 1.0 / u_density_size.x;
     x_ndc = clamp(x_ndc, -1.0 + half_cell, 1.0 - half_cell);
@@ -428,6 +449,7 @@ void main() {
     gl_Position = vec4(x_ndc, y_ndc, 0.0, 1.0);
     gl_PointSize = 1.0;
     v_weight = sample_rgba.a;
+    if (u_channel == 3 && u_hist_axis == 1) v_weight *= saturation;
     v_range_flag = 0.0;
 }
 """
@@ -442,11 +464,12 @@ in float v_weight;
 in float v_range_flag;
 out vec4 f_color;
 void main() {
-    vec3 w = vec3(0.0);
+    vec4 w = vec4(0.0);
     if (u_channel == 0)      w.r = v_weight;
     else if (u_channel == 1) w.g = v_weight;
-    else                     w.b = v_weight;
-    f_color = vec4(w, 0.0);
+    else if (u_channel == 2) w.b = v_weight;
+    else                    w.a = v_weight;
+    f_color = w;
 }
 """
 
@@ -465,11 +488,108 @@ in vec2 v_texcoord;
 out vec4 f_color;
 void main() {
     int col = int(clamp(v_texcoord.x, 0.0, 1.0) * float(HIST_DENSITY_WIDTH - 1) + 0.5);
-    vec3 sum = vec3(0.0);
+    vec4 sum = vec4(0.0);
     for (int row = 0; row < HIST_DENSITY_ROWS; row++) {
-        sum += texelFetch(u_density, ivec2(col, row), 0).rgb;
+        sum += texelFetch(u_density, ivec2(col, row), 0);
     }
-    f_color = vec4(log(sum + vec3(1.0)), 1.0);
+    f_color = log(sum + vec4(1.0));
+}
+"""
+
+// Curves use a separate display surface: linear YRGB distributions, with
+// independent peak normalization. All reduction stays on the render thread.
+#define SCOPE_CURVES_HISTOGRAM_PEAK_FRAGMENT """
+#version 330
+uniform sampler2D u_hist_sum;
+in vec2 v_texcoord;
+out vec4 f_color;
+vec4 counts(int col) {
+    vec2 uv = vec2((float(clamp(col, 0, 511)) + 0.5) / 512.0, v_texcoord.y);
+    return exp(texture(u_hist_sum, uv)) - vec4(1.0);
+}
+void main() {
+    vec4 peak = vec4(0.0);
+    for (int col = 0; col < 512; col++) {
+        vec4 value = (counts(col - 2) + counts(col + 2)) * 0.0625
+                   + (counts(col - 1) + counts(col + 1)) * 0.25 + counts(col) * 0.375;
+        peak = max(peak, value);
+    }
+    f_color = max(peak, vec4(0.0001));
+}
+"""
+
+#define SCOPE_CURVES_HISTOGRAM_DISPLAY_FRAGMENT """
+#version 330
+uniform sampler2D u_hist_sum;
+uniform sampler2D u_hist_peak;
+uniform vec2 u_display_size;
+uniform float u_line_width;
+uniform int u_curve_axis;
+in vec2 v_texcoord;
+out vec4 f_color;
+vec4 counts(int col) {
+    return exp(texelFetch(u_hist_sum, ivec2(clamp(col, 0, 511), 0), 0)) - vec4(1.0);
+}
+vec4 height_at(int col) {
+    vec4 value = (counts(col - 2) + counts(col + 2)) * 0.0625
+               + (counts(col - 1) + counts(col + 1)) * 0.25 + counts(col) * 0.375;
+    return value / texelFetch(u_hist_peak, ivec2(0), 0) * 0.98;
+}
+vec3 hue_color(float hue) {
+    vec3 channels = abs(fract(vec3(hue) + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+    return clamp(channels - 1.0, 0.0, 1.0);
+}
+float stroke(float delta) {
+    float gradient = max(length(vec2(dFdx(delta), dFdy(delta))), 0.0000001);
+    float distance_px = abs(delta) / gradient;
+    float half_width = u_line_width * 0.5;
+    return 1.0 - smoothstep(half_width - 0.5, half_width + 0.5, distance_px);
+}
+void main() {
+    float bin = clamp(v_texcoord.x * 512.0 - 0.5, 0.0, 511.0);
+    int col = int(floor(bin));
+    vec4 heights = mix(height_at(col), height_at(min(col + 1, 511)), fract(bin));
+    if (u_curve_axis != 0) {
+        vec3 background = vec3(v_texcoord.x * 0.805);
+        if (u_curve_axis == 1) {
+            background = hue_color(v_texcoord.x) * 0.34
+                       * (1.0 - 0.314 * abs(v_texcoord.y * 2.0 - 1.0));
+        }
+        float pixel = 1.0 / u_display_size.y;
+        // Hue distributions sit below the central adjustment baseline;
+        // luminance/saturation distributions use the full plotting height.
+        float height = heights.a * (u_curve_axis == 1 ? 0.33 : 1.0);
+        float filled = smoothstep(-pixel * 0.5, pixel * 0.5, height - v_texcoord.y);
+        float line = stroke(v_texcoord.y - height) * step(pixel * 0.25, height);
+        vec3 color = background + (vec3(1.0) - background) * filled * 0.12;
+        color = mix(color, background + (vec3(1.0) - background) * 0.58, line * 0.8);
+        f_color = vec4(color, 1.0);
+        return;
+    }
+    vec3 fills[4] = vec3[4](vec3(0.65, 0.07, 0.06), vec3(0.03, 0.36, 0.07),
+                           vec3(0.08, 0.29, 0.56), vec3(0.35, 0.35, 0.37));
+    vec3 lines[4] = vec3[4](vec3(0.59, 0.26, 0.24), vec3(0.16, 0.39, 0.14),
+                           vec3(0.24, 0.41, 0.63), vec3(0.62, 0.62, 0.63));
+    vec3 background = vec3(35.0, 35.0, 38.0) / 255.0;
+    vec3 color = background;
+    float pixel = 1.0 / u_display_size.y;
+    for (int channel = 0; channel < 4; channel++) {
+        int layer = (channel == 3) ? 3 : 2 - channel;
+        float filled = smoothstep(-pixel * 0.5, pixel * 0.5, heights[layer] - v_texcoord.y);
+        float opacity = (layer == 3) ? 0.68 : 0.24;
+        color = mix(color, mix(background, fills[layer], opacity), filled);
+    }
+    for (int channel = 0; channel < 4; channel++) {
+        float delta = v_texcoord.y - heights[channel];
+        // Euclidean distance in final framebuffer pixels: steep segments
+        // receive the same perpendicular stroke width as horizontal ones.
+        float line = stroke(delta);
+        // Empty bins must remain empty, rather than drawing a baseline trace.
+        line *= step(pixel * 0.25, heights[channel]);
+        float opacity = (channel == 3) ? 0.85 : 0.72;
+        color = mix(color, lines[channel], line * opacity);
+    }
+    f_color = vec4(color, 1.0);
 }
 """
 

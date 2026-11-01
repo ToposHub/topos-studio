@@ -1,8 +1,7 @@
 """UI composition, draft isolation and original curve interaction contracts."""
 
-from PyQt6.QtCore import QPointF
+from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtTest import QSignalSpy, QTest
-from PyQt6.QtWidgets import QBoxLayout
 
 from src.features.color.core.workspace_presets import (
     ColorWorkspacePreset, builtin_color_workspaces, sanitize_preset,
@@ -103,18 +102,68 @@ def test_reparented_picker_and_curve_reset_keep_existing_signals(qapp):
 
 def test_responsive_layout_keeps_all_soft_clip_rows_accessible(qapp):
     panel = CurvesPanel(CurvesWidget())
+    assert panel.minimumWidth() == 420
     panel.resize(1000, 420)
     panel.show()
     qapp.processEvents()
-    assert panel.body.direction() == QBoxLayout.Direction.LeftToRight
-    panel.resize(480, 420)
+    assert panel.body.orientation() == Qt.Orientation.Horizontal
+    before = panel.curves_widget.width()
+    panel.body.setSizes([600, 320])
     qapp.processEvents()
-    assert panel.body.direction() == QBoxLayout.Direction.TopToBottom
+    assert panel.curves_widget.width() < before
+    panel.resize(400, 420)
+    qapp.processEvents()
+    assert panel.width() >= 420
+    assert panel.body.orientation() == Qt.Orientation.Horizontal
+    panel.resize(700, 420)
+    qapp.processEvents()
+    panel.body.setSizes([480, 200])
+    qapp.processEvents()
+    expanded_narrow_graph = panel.curves_widget.width()
+    panel.body.setSizes([320, 360])
+    qapp.processEvents()
+    assert panel.curves_widget.width() < expanded_narrow_graph
+    assert panel.curves_widget.geometry().right() < panel.sidebar_scroll.geometry().left()
+    panel.resize(900, 560)
+    qapp.processEvents()
+    assert panel.curves_widget.height() >= panel.body.height() - 4
     panel.sidebar_scroll.ensureWidgetVisible(panel.soft_clip_rows["high_soft"])
     qapp.processEvents()
     row = panel.soft_clip_rows["high_soft"]
     assert row.visibleRegion().boundingRect().height() > 0
     panel.close()
+
+
+def test_empty_curve_grid_survives_resize_and_scope_clear(qapp):
+    canvas = CurvesWidget()
+    canvas.btn_container.hide()
+    canvas.resize(600, 320)
+    canvas.show()
+    qapp.processEvents()
+    for width in (600, 440):
+        canvas.resize(width, 320)
+        canvas.clear()
+        qapp.processEvents()
+        image = canvas.grab().toImage()
+        rect = canvas.get_draw_rect()
+        # Grid is rendered without initializing a GPU presenter or loading media.
+        y = round(rect.top() + 30)
+        colors = {image.pixelColor(x, y).name() for x in range(20, width - 20)}
+        assert len(colors) >= 3
+        # The old 15px black surround must not return.
+        assert image.pixelColor(2, 30).name() == "#232326"
+        assert not canvas._scope.isVisible()
+    canvas.close()
+
+
+def test_histogram_texture_metrics_match_device_pixels(qapp):
+    canvas = CurvesWidget()
+    canvas.resize(720, 360)
+    canvas.devicePixelRatioF = lambda: 2.0
+    size, line_width = canvas.histogram_display_metrics()
+    rect = canvas.get_draw_rect().toAlignedRect()
+    assert size == (rect.width() * 2, rect.height() * 2)
+    assert line_width == 2.0
 
 
 def test_soft_clip_has_no_standalone_panel_entry_and_hdr_uses_curves():

@@ -49,6 +49,7 @@ DEFAULT_VECTORSCOPE_DENSITY_SIZE: tuple[int, int] = (800, 800)
 # Histogram: point-splat density + per-column reduction.
 DEFAULT_HISTOGRAM_DENSITY_SIZE: tuple[int, int] = (512, 256)
 DEFAULT_HISTOGRAM_DISPLAY_SIZE: tuple[int, int] = (512, 300)
+DEFAULT_CURVES_HISTOGRAM_SIZE: tuple[int, int] = (1024, 512)
 # CIE 1931 xy chromaticity plot (matches the CPU widget bin grid).
 DEFAULT_CIE_SIZE: tuple[int, int] = (384, 432)
 # False Color renders the frame (aspect-fit) into a fixed 16:9 canvas.
@@ -112,6 +113,9 @@ class ScopeDemand:
     scope_primaries: str = 'bt709'
     falsecolor_mode: str = 'sdr'
     zebra_threshold: float = 1.0
+    curves_display_size: tuple[int, int] = DEFAULT_CURVES_HISTOGRAM_SIZE
+    curves_line_width: float = 1.0
+    curves_mode: str = 'Custom'
 
 
 @dataclass(frozen=True)
@@ -151,6 +155,9 @@ class ScopeGpuFrame:
     falsecolor_texture_id: Optional[int] = None
     falsecolor_size: tuple[int, int] = (0, 0)
     analysis_ms: float = 0.0
+    curves_histogram_texture_id: Optional[int] = None
+    curves_histogram_size: tuple[int, int] = (0, 0)
+    curves_mode: str = 'Custom'
 
 
 def is_frame_valid_for_demand(

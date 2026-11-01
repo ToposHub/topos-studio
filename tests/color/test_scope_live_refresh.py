@@ -171,3 +171,154 @@ def test_scope_ready_accepts_newer_front_for_current_demand() -> None:
     host.on_gpu_scope_ready(frame)
 
     host.scope_panel.update_gpu_scope.assert_called_once_with(frame)
+
+
+def _show_curves(host: _ScopeRefreshHost) -> None:
+    host.dock_curves = MagicMock()
+    host.dock_curves.isVisible.return_value = True
+    host.curves_panel = MagicMock()
+    host.curves_panel.isVisible.return_value = True
+    host.curves_widget = MagicMock()
+    host.curves_widget.histogram_display_metrics.return_value = ((1024, 512), 1.0)
+
+
+def test_curves_only_playback_submits_no_scope_work() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.scope_panel.isVisible.return_value = False
+    host.video_controller = SimpleNamespace(is_playing=True)
+    host.on_frame_ready(42)
+    host.engine.request_gpu_scope.assert_not_called()
+
+
+def test_playback_keeps_standalone_scope_but_excludes_curves_overlay() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.video_controller = SimpleNamespace(is_playing=True)
+    host.on_frame_ready(42)
+    assert host.engine.request_gpu_scope.call_args.args[0].histogram_overlay is False
+
+
+def test_pause_refreshes_curves_and_cancels_inflight_demand_on_play() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host._on_scope_play_state_changed(True)
+    host.engine.discard_pending_gpu_scope.assert_called_once()
+    assert host._latest_gpu_scope_demand is None
+    host._on_scope_play_state_changed(False)
+    assert host.engine.request_gpu_scope.call_args.args[0].histogram_overlay is True
+
+
+def test_timeline_playback_also_freezes_curves() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.scope_panel.isVisible.return_value = False
+    host._color_timeline_playback_controller = lambda: SimpleNamespace(is_playing=True)
+    host.on_frame_ready(42)
+    host.engine.request_gpu_scope.assert_not_called()
+
+
+def test_late_scope_results_do_not_replace_frozen_curve_histogram() -> None:
+    from src.features.color.core.scope_types import ScopeGpuFrame
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host._latest_gpu_scope_demand = SimpleNamespace(revision=3, source_revision=10)
+    host.video_controller = SimpleNamespace(is_playing=True)
+    frame = ScopeGpuFrame(3, 10, curves_histogram_texture_id=76,
+                          curves_histogram_size=(1024, 512))
+    host.on_gpu_scope_ready(frame)
+    host.curves_widget.set_scope_frame.assert_not_called()
+    host.video_controller.is_playing = False
+    host.on_gpu_scope_ready(frame)
+    host.curves_widget.set_scope_frame.assert_called_once_with(76, 1024, 512)
+
+
+def test_curves_only_scrub_does_not_request_histogram_even_when_forced() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.scope_panel.isVisible.return_value = False
+    host._curves_scope_scrubbing = True
+    host._submit_gpu_scope_demand(is_playing=False, force=True)
+    host.engine.request_gpu_scope.assert_not_called()
+
+
+def test_curve_histogram_sampling_does_not_breathe_between_quality_tiers() -> None:
+    from src.features.color.core.scope_types import HIGH_QUALITY_ANALYSIS_SIZE
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    for interacting, last_activity in ((True, 1.0), (False, 1.0), (False, 0.0)):
+        host.engine.is_interacting = interacting
+        host._gpu_scope_last_activity = last_activity
+        with patch('src.app.controllers.layer_controller.time.monotonic', return_value=1.1):
+            host._submit_gpu_scope_demand(is_playing=False, force=True)
+        assert host.engine.request_gpu_scope.call_args.args[0].analysis_size == HIGH_QUALITY_ANALYSIS_SIZE
+
+
+def test_scrub_preserves_standalone_scopes_without_curve_overlay() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host._viewport_scrub_active = True
+    host.on_frame_ready(42)
+    assert host.engine.request_gpu_scope.call_args.args[0].histogram_overlay is False
+
+
+def test_scrub_start_cancels_pending_and_release_schedules_refresh() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    with patch('src.app.controllers.layer_controller.QTimer.singleShot') as schedule:
+        host._on_scope_scrub_state_changed(True)
+        assert host._scope_scrub_is_active()
+        host.engine.discard_pending_gpu_scope.assert_called_once()
+        host._on_scope_play_state_changed(False)  # Pause emitted by scrub start.
+        assert host.engine.request_gpu_scope.call_args.args[0].histogram_overlay is False
+        host._on_scope_scrub_state_changed(False)
+        assert not host._scope_scrub_is_active()
+        schedule.assert_called_once_with(150, host._on_scope_demand_changed)
+
+
+def test_scrub_rejects_late_curve_descriptor() -> None:
+    from src.features.color.core.scope_types import ScopeGpuFrame
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host._latest_gpu_scope_demand = SimpleNamespace(revision=3, source_revision=10)
+    host._curves_scope_scrubbing = True
+    host.on_gpu_scope_ready(ScopeGpuFrame(3, 10, curves_histogram_texture_id=76,
+                                        curves_histogram_size=(1024, 512)))
+    host.curves_widget.set_scope_frame.assert_not_called()
+
+
+def test_gpu_presenter_preserves_frame_when_render_mutex_is_busy(qapp) -> None:
+    from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+    from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
+    presenter = GpuScopeWidget()
+    assert presenter.updateBehavior() == QOpenGLWidget.UpdateBehavior.PartialUpdate
+    presenter._gl_ready = True
+    presenter._frame_tex_id = 123
+    presenter._mutex = MagicMock()
+    presenter._mutex.tryLock.return_value = False
+    presenter._blit_shared_texture = MagicMock()
+    presenter.paintGL()
+    presenter._blit_shared_texture.assert_not_called()
+    presenter._mutex.unlock.assert_not_called()
+    assert presenter._frame_tex_id == 123
+
+
+def test_hsl_palette_demand_and_descriptor_target_the_active_hsl_canvas() -> None:
+    from src.features.color.core.scope_types import ScopeGpuFrame
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.curves_panel.curve_mode = 'HueSat'
+    hsl = MagicMock()
+    hsl.histogram_display_metrics.return_value = ((1200, 400), 1.0)
+    host.hsl_curves_panel = SimpleNamespace(hsl_curves_widget=hsl)
+    host.on_frame_ready(42)
+    demand = host.engine.request_gpu_scope.call_args.args[0]
+    assert demand.curves_mode == 'HueSat'
+    assert demand.curves_display_size == (1200, 400)
+    host.on_gpu_scope_ready(ScopeGpuFrame(3, 10, curves_histogram_texture_id=76,
+                                         curves_histogram_size=(1200, 400)))
+    hsl.set_scope_frame.assert_not_called()  # Late Custom texture.
+    host.on_gpu_scope_ready(ScopeGpuFrame(3, 10, curves_histogram_texture_id=76,
+                                         curves_histogram_size=(1200, 400), curves_mode='HueSat'))
+    hsl.set_scope_frame.assert_called_once_with(76, 1200, 400)
+    host.curves_widget.set_scope_frame.assert_not_called()

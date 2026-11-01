@@ -895,6 +895,8 @@ class TestDoRenderGpuScopeAllModes:
         'wf_display': Mock(glo=71),
         'vs_display': Mock(glo=72),
         'hist_display': Mock(glo=73),
+        'curves_hist_display': Mock(glo=76),
+        'curves_hist_display_size': (1024, 512),
         'cie_display': Mock(glo=74),
         'fc_display': Mock(glo=75),
     }
@@ -918,6 +920,7 @@ class TestDoRenderGpuScopeAllModes:
         r._scope_accumulate_histogram = Mock()
         r._scope_reduce_histogram = Mock()
         r._scope_display_histogram = Mock()
+        r._scope_display_curves_histogram = Mock()
         r._scope_accumulate_cie = Mock()
         r._scope_display_cie = Mock()
         r._scope_display_falsecolor = Mock()
@@ -951,6 +954,17 @@ class TestDoRenderGpuScopeAllModes:
         r._scope_reduce_histogram.assert_called_once()
         r._scope_display_histogram.assert_called_once()
         assert r._emitted[0].histogram_texture_id == 73
+        r._scope_display_curves_histogram.assert_not_called()
+
+    def test_curves_histogram_has_its_own_descriptor(self):
+        r = self._make_renderer()
+        demand = ScopeDemand(revision=5, source_revision=10, mode='waveform',
+                             display_size=(100, 100), histogram_overlay=True)
+        AsyncRenderer._do_render_gpu_scope(r, demand)
+        r._scope_accumulate_histogram.assert_called_once()
+        r._scope_display_curves_histogram.assert_called_once()
+        assert r._emitted[0].curves_histogram_texture_id == 76
+        assert r._emitted[0].curves_histogram_size == (1024, 512)
 
     def test_cie_mode(self):
         r = self._make_renderer()

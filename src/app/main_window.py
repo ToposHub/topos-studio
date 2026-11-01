@@ -1301,12 +1301,11 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
         self.denoise_panel = DenoisePanel()
         self.deblur_panel = DeblurPanel()
         self.curves_widget = CurvesWidget()
-        self.curves_panel = CurvesPanel(self.curves_widget)
         self.hsl_curves_panel = HSLCurvesPanel(engine=self.engine)
+        self.curves_panel = CurvesPanel(self.curves_widget, hsl_panel=self.hsl_curves_panel)
         self.warper_panel = WarperPanel()
         self.mixer_panel = MixerPanel()
         self.color_mapping_panel = ColorMappingPanel(
-            self.hsl_curves_panel,
             self.warper_panel,
             self.mixer_panel,
         )
@@ -1546,6 +1545,9 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
             self.engine.gpu_scope_ready.connect(self.on_gpu_scope_ready)
         if hasattr(self.scope_panel, 'demand_changed'):
             self.scope_panel.demand_changed.connect(self._on_scope_demand_changed)
+        self.curves_widget.histogram_geometry_changed.connect(self._on_scope_demand_changed)
+        self.hsl_curves_panel.hsl_curves_widget.histogram_geometry_changed.connect(self._on_scope_demand_changed)
+        self.curves_panel.curve_mode_changed.connect(self._on_scope_demand_changed)
         if hasattr(self, "_on_color_monitor_frame_ready"):
             self.engine.frame_ready.connect(self._on_color_monitor_frame_ready)
         self.engine.color_output_changed.connect(self._on_color_output_changed)
@@ -1963,6 +1965,9 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
             if hasattr(self.timeline_panel, 'playback_state_changed'):
                 self.timeline_panel.playback_state_changed.connect(
                     self._on_playback_state_for_mg_idle
+                )
+                self.timeline_panel.playback_state_changed.connect(
+                    self._on_scope_play_state_changed
                 )
             self._ensure_mg_idle_cache_scheduler()
 
