@@ -302,6 +302,8 @@ class ColorModule:
             dock_attr="dock_info",
             order=400,
             default_visible=False,
+            # Info 显示的是单张静态图的 EXIF/相机元数据，视频流程无用。
+            work_mode="image",
         ))
         panel_registry.register(PanelDescriptor(
             panel_id="workspace.layers",
@@ -472,6 +474,8 @@ class ColorModule:
             dock_attr="dock_crop",
             order=950,
             default_visible=False,
+            # 裁切/变换针对单张图片设计，剪辑（视频）模式不提供。
+            work_mode="image",
         ))
 
         # AI tools (denoise/deblur — bundled with color but conditional)
@@ -496,6 +500,8 @@ class ColorModule:
             dock_attr="dock_deblur",
             order=1010,
             default_visible=False,
+            # 去模糊针对单张图片设计，剪辑（视频）模式不提供。
+            work_mode="image",
         ))
 
         # Advanced panels

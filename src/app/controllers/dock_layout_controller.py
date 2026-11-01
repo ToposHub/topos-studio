@@ -2403,8 +2403,10 @@ class DockLayoutMixin:
         # that do not belong to the active workflow.
         work_mode = self._current_work_mode()
         if work_mode == "video":
-            # Video workflow: hide image-only Library and Batch Export panels.
-            for attr in ("dock_library", "dock_export"):
+            # Video workflow: hide image-only Library, Batch Export and the
+            # image-only tool panels (Deblur / Crop / Info).
+            for attr in ("dock_library", "dock_export",
+                         "dock_deblur", "dock_crop", "dock_info"):
                 d = getattr(self, attr, None)
                 if d is not None:
                     d.setVisible(False)
@@ -3027,20 +3029,23 @@ class DockLayoutMixin:
         This corrects layouts that were saved with incorrect dock visibility,
         e.g. an old Color page layout that includes dock_composite as visible.
 
-        Work-mode aware: in video mode the image-only Library and Batch Export
-        docks are forced hidden; in image mode they stay usable. Media Pool is
-        already unavailable in image mode (Edit feature disabled at startup).
+        Work-mode aware: in video mode the image-only Library, Batch Export,
+        Deblur, Crop & Transform and Info docks are forced hidden; in image
+        mode they stay usable. Media Pool is already unavailable in image mode
+        (Edit feature disabled at startup).
         """
         # Work-mode scoped docks. Video mode is timeline-centric: the image
-        # Library and the image Batch Export (dock_export) panels are hidden.
-        # Image mode hides the video-only Color Timeline Clips panel (it has
-        # no Edit timeline to read from).
+        # Library, the image Batch Export (dock_export) and the image-only
+        # tool panels (Deblur / Crop & Transform / Info) are hidden. Image
+        # mode hides the video-only Color Timeline Clips panel (it has no
+        # Edit timeline to read from).
         work_mode = self._current_work_mode()
         if work_mode == "video":
-            if getattr(self, "dock_library", None) is not None:
-                self.dock_library.setVisible(False)
-            if getattr(self, "dock_export", None) is not None:
-                self.dock_export.setVisible(False)
+            for attr in ("dock_library", "dock_export",
+                         "dock_deblur", "dock_crop", "dock_info"):
+                d = getattr(self, attr, None)
+                if d is not None:
+                    d.setVisible(False)
         elif work_mode == "image":
             if getattr(self, "dock_color_timeline_clips", None) is not None:
                 self.dock_color_timeline_clips.setVisible(False)

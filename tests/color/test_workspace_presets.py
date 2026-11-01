@@ -71,24 +71,29 @@ def test_sanitize_filters_and_migrates():
         visible_panels=frozenset({
             "workspace.viewport", "color.grading", "color.gone_in_v2",
             "workspace.library", "workspace.export", "color.timeline_clips",
+            "color.crop", "color.deblur", "workspace.info",
         }))
     # 未知面板被丢弃（升级迁移），viewport 永远保留
     resolved = sanitize_preset(preset, ["workspace.viewport", "color.grading"], "all")
     assert resolved == frozenset({"workspace.viewport", "color.grading"})
-    # video 模式隐藏图像专属面板
+    # video 模式隐藏图像专属面板（含图片专属工具 Crop/Deblur/Info）
     resolved_video = sanitize_preset(
         preset,
         ["workspace.viewport", "color.grading", "workspace.library",
-         "workspace.export", "color.timeline_clips"],
+         "workspace.export", "color.timeline_clips",
+         "color.crop", "color.deblur", "workspace.info"],
         "video")
     assert resolved_video == frozenset({"workspace.viewport", "color.grading",
                                         "color.timeline_clips"})
-    # image 模式隐藏时间线面板
+    # image 模式隐藏时间线面板，图片专属工具保留
     resolved_image = sanitize_preset(
         preset,
-        ["workspace.viewport", "color.timeline_clips", "workspace.library"],
+        ["workspace.viewport", "color.timeline_clips", "workspace.library",
+         "color.crop", "color.deblur", "workspace.info"],
         "image")
-    assert resolved_image == frozenset({"workspace.viewport", "workspace.library"})
+    assert resolved_image == frozenset({"workspace.viewport", "workspace.library",
+                                        "color.crop", "color.deblur",
+                                        "workspace.info"})
 
     # Legacy secondary-color workspaces promote any former remapping tool to
     # the new combined Color Mapping dock.
