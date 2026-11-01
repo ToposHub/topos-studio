@@ -1,0 +1,59 @@
+[
+  {
+    "arm": "normal",
+    "elapsed_s": 4.307623579000392,
+    "source_events": 21,
+    "first": 0,
+    "last": 83,
+    "render_events": 20,
+    "render_fps": 4.642931220243973,
+    "ui_gap_p95_ms": 259.5607739995103,
+    "ui_gap_max_ms": 279.7071479999431,
+    "present_gap_p95_ms": 255.5111219999162,
+    "renderer": {
+      "dropped_preview_frames": 0,
+      "queue_depth": 1,
+      "processed_frames": 72,
+      "coalesced_video_commands": 0,
+      "coalesced_lane_commands": 10
+    }
+  },
+  {
+    "arm": "scopes_hidden",
+    "elapsed_s": 4.272389106000446,
+    "source_events": 31,
+    "first": 4,
+    "last": 106,
+    "render_events": 30,
+    "render_fps": 7.021832341503229,
+    "ui_gap_p95_ms": 132.0525089995499,
+    "ui_gap_max_ms": 308.1374719995438,
+    "present_gap_p95_ms": 132.01761199979956,
+    "renderer": {
+      "dropped_preview_frames": 0,
+      "queue_depth": 0,
+      "processed_frames": 108,
+      "coalesced_video_commands": 0,
+      "coalesced_lane_commands": 12
+    }
+  },
+  {
+    "arm": "tools_hidden",
+    "elapsed_s": 4.286685207000119,
+    "source_events": 32,
+    "first": 3,
+    "last": 107,
+    "render_events": 31,
+    "render_fps": 7.231695005123604,
+    "ui_gap_p95_ms": 154.19102699979703,
+    "ui_gap_max_ms": 186.65386900011072,
+    "present_gap_p95_ms": 172.27343000013207,
+    "renderer": {
+      "dropped_preview_frames": 0,
+      "queue_depth": 0,
+      "processed_frames": 142,
+      "coalesced_video_commands": 0,
+      "coalesced_lane_commands": 12
+    }
+  }
+]

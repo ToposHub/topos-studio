@@ -153,7 +153,14 @@ class TrackingBinding:
         self.modified_at = time.time()
 
     def clear_manual_correction(self, frame: int) -> None:
-        if self.manual_corrections.pop(frame, None) is not None:
+        removed = self.manual_corrections.pop(frame, None) is not None
+        if self.base_geometry is not None:
+            overrides = self.base_geometry.get("_frame_geometry", {})
+            if isinstance(overrides, dict):
+                removed = overrides.pop(str(frame), None) is not None or removed
+            if not overrides:
+                self.base_geometry.pop("_frame_geometry", None)
+        if removed:
             self.result_version += 1
             self.modified_at = time.time()
 
@@ -165,6 +172,8 @@ class TrackingBinding:
         self.has_backward = False
         if not keep_manual:
             self.manual_corrections.clear()
+            if self.base_geometry is not None:
+                self.base_geometry.pop("_frame_geometry", None)
         self.result_version += 1
         self.modified_at = time.time()
 

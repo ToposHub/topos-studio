@@ -11,16 +11,17 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from typing import Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
-from PyQt6.QtWidgets import QCheckBox, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen, QPolygonF
+from PyQt6.QtWidgets import QCheckBox, QGridLayout, QHBoxLayout, QSlider, QVBoxLayout, QWidget
 from src.shared.i18n.i18n import tr
 
 SeriesPoint = Tuple[int, float]
 
-GRAPH_BG = QColor(0x11, 0x12, 0x16)
+GRAPH_BG = QColor(0x20, 0x20, 0x24)
 GRID_COLOR = QColor(0x2A, 0x2C, 0x33)
 AXIS_TEXT_COLOR = QColor(0x8C, 0x8C, 0x8C)
 PLAYHEAD_COLOR = QColor(0xFF, 0x40, 0x40)
@@ -28,9 +29,9 @@ KEYFRAME_COLOR = QColor(0xD8, 0xD8, 0xD8)
 MANUAL_KEY_COLOR = QColor(0xC7, 0x7D, 0xFF)
 FAILED_KEY_COLOR = QColor(0xFF, 0x4D, 0x5E)
 
-TIME_RULER_H = 22      # 上方时间刻度区高度
-VALUE_AXIS_W = 38      # 左侧数值刻度宽度
-SCROLLBAR_W = 10       # 右侧滚动条预留宽度
+TIME_RULER_H = 30      # 上方时间刻度区高度
+VALUE_AXIS_W = 22      # 左侧数值刻度宽度
+SCROLLBAR_W = 4       # 右侧滚动条预留宽度
 PLAYHEAD_TRI = 8       # 播放头三角标尺寸
 KEYFRAME_SIZE = 6      # 关键帧菱形尺寸
 
@@ -105,6 +106,8 @@ class _GraphView(QWidget):
     """曲线绘制区（纯绘制 + 播放头定位与缩放交互）。"""
 
     frame_clicked = pyqtSignal(int)
+    scrub_started = pyqtSignal(int)
+    scrub_finished = pyqtSignal(int)
 
     def __init__(self, parent: Optional["TrackerGraph"] = None) -> None:
         super().__init__(parent)
@@ -119,6 +122,11 @@ class _GraphView(QWidget):
         self._keyframes: List[int] = []
         self._manual_frames: List[int] = []
         self._failed_frames: List[int] = []
+        self._fps = 24.0
+        self._timecode_start = 0
+        self._clip_extent: Optional[Tuple[int, int]] = None
+        self._value_zoom = 1.0
+        self._scrubbing = False
         self._mode = "clip"          # clip / frame
         self._hover: Optional[QPoint] = None
 
@@ -160,7 +168,7 @@ class _GraphView(QWidget):
 
     def _plot_rect(self) -> QRectF:
         w = self.width() - VALUE_AXIS_W - SCROLLBAR_W
-        h = self.height() - TIME_RULER_H
+        h = self.height() - TIME_RULER_H - 8
         return QRectF(VALUE_AXIS_W, TIME_RULER_H, max(10.0, w), max(10.0, h))
 
     def _frame_extent(self) -> Tuple[float, float]:
@@ -169,9 +177,9 @@ class _GraphView(QWidget):
         if self._mode == "frame":
             return (self._reference_frame - FRAME_MODE_WINDOW,
                     self._reference_frame + FRAME_MODE_WINDOW)
-        lo, hi = frame_range(self._series)
+        lo, hi = self._clip_extent or frame_range(self._series)
         if hi <= lo:
-            hi = lo + 1
+            lo, hi = max(0, self._current_frame), max(0, self._current_frame) + 100
         return (float(lo), float(hi))
 
     def frame_to_x(self, frame: float) -> float:
@@ -179,14 +187,14 @@ class _GraphView(QWidget):
         rect = self._plot_rect()
         if hi <= lo:
             return rect.left()
-        return rect.left() + (frame - lo) / (hi - lo) * rect.width()
+        return rect.left() + 8.0 + (frame - lo) / (hi - lo) * max(1.0, rect.width() - 16.0)
 
     def x_to_frame(self, x: float) -> float:
         lo, hi = self._frame_extent()
         rect = self._plot_rect()
         if rect.width() <= 0:
             return lo
-        return lo + (x - rect.left()) / rect.width() * (hi - lo)
+        return lo + (x - rect.left() - 8.0) / max(1.0, rect.width() - 16.0) * (hi - lo)
 
     def value_to_y(self, value: float, vmin: float, vmax: float) -> float:
         rect = self._plot_rect()
@@ -214,6 +222,9 @@ class _GraphView(QWidget):
         visible_keys = [k for k in CURVE_COMPONENTS
                         if self._visible.get(k) and self._series.get(k)]
         vmin, vmax = value_range(self._series, visible_keys)
+        center = (vmin + vmax) / 2.0
+        half = (vmax - vmin) / (2.0 * self._value_zoom)
+        vmin, vmax = center - half, center + half
 
         self._draw_grid(painter, rect, vmin, vmax)
         self._draw_time_ruler(painter)
@@ -227,40 +238,48 @@ class _GraphView(QWidget):
 
     def _draw_grid(self, painter: QPainter, rect: QRectF,
                    vmin: float, vmax: float) -> None:
-        pen = QPen(GRID_COLOR, 1)
-        pen.setCosmetic(True)
-        painter.setPen(pen)
-        # 水平网格：每 25% 一条
+        painter.setPen(QPen(QColor("#101114"), 1))
+        painter.drawRect(rect)
+        if not any(self._series.values()):
+            return
+        painter.setPen(QPen(GRID_COLOR, 1))
         for i in range(1, 4):
             y = rect.top() + rect.height() * i / 4.0
             painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
-        # 左侧数值刻度
-        painter.setPen(AXIS_TEXT_COLOR)
-        font = QFont()
-        font.setPixelSize(9)
-        painter.setFont(font)
-        for i in range(5):
-            v = vmax - (vmax - vmin) * i / 4.0
-            y = rect.top() + rect.height() * i / 4.0
-            painter.drawText(
-                QRectF(0, y - 7, VALUE_AXIS_W - 4, 14),
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                f"{v:.2f}",
-            )
+
+    def set_timebase(self, fps: float, start: int = 0) -> None:
+        if fps > 0:
+            self._fps = float(fps)
+        self._timecode_start = int(start)
+        self.update()
+
+    def set_frame_range(self, start: int, end: int) -> None:
+        self._clip_extent = (int(start), max(int(start), int(end)))
+        self.update()
+
+    def timecode(self, frame: int) -> str:
+        nominal = max(1, round(self._fps))
+        total = max(0, int(frame) + self._timecode_start)
+        seconds, frames = divmod(total, nominal)
+        minutes, seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{frames:02d}"
 
     def _draw_time_ruler(self, painter: QPainter) -> None:
         lo, hi = self._frame_extent()
+        painter.fillRect(QRectF(VALUE_AXIS_W, 0, self._plot_rect().width(), TIME_RULER_H),
+                         QColor("#262929"))
         painter.setPen(AXIS_TEXT_COLOR)
         font = QFont()
-        font.setPixelSize(9)
+        font.setPixelSize(10)
         painter.setFont(font)
-        step = max(1, int((hi - lo) / 8))
-        f = int(lo)
-        while f <= hi:
-            x = self.frame_to_x(f)
-            painter.drawLine(QPointF(x, TIME_RULER_H - 5), QPointF(x, TIME_RULER_H))
-            painter.drawText(QPointF(x + 2, TIME_RULER_H - 7), str(f))
-            f += step
+        count = max(1, int(self._plot_rect().width() / 110))
+        step = max(1, int((hi - lo) / count))
+        for frame in range(int(lo), int(hi) + 1, step):
+            x = self.frame_to_x(frame)
+            painter.drawLine(QPointF(x, 0), QPointF(x, TIME_RULER_H - 6))
+            if x + 86 <= self._plot_rect().right():
+                painter.drawText(QPointF(x + 8, 17), self.timecode(frame))
 
     def _draw_curve(self, painter: QPainter, key: str,
                     vmin: float, vmax: float) -> None:
@@ -268,39 +287,45 @@ class _GraphView(QWidget):
         pen = QPen(color, 1)
         pen.setCosmetic(True)
         painter.setPen(pen)
-        pts = downsample(self._series[key], 1500)
+        pts = downsample(self._series[key], max(100, self.width() * 2))
+        painter.save()
+        painter.setClipRect(self._plot_rect())
         prev: Optional[QPointF] = None
         frames = {f for f in self._failed_frames}
         for f, v in pts:
             p = QPointF(self.frame_to_x(f), self.value_to_y(v, vmin, vmax))
             if prev is not None and f not in frames:
                 painter.drawLine(prev, p)  # 失败帧处断开，不画假连续
-            prev = p
+            prev = None if f in frames else p
+        painter.restore()
+
+    def current_value(self, key: str) -> float:
+        points = self._series.get(key, [])
+        if not points:
+            return 0.0
+        index = bisect_right(points, (self._current_frame, float("inf"))) - 1
+        return float(points[max(0, index)][1])
 
     def _draw_last_values(self, painter: QPainter, keys: List[str],
                           vmin: float, vmax: float) -> None:
         font = QFont()
-        font.setPixelSize(9)
+        font.setPixelSize(11)
         painter.setFont(font)
-        for key in keys:
-            pts = self._series[key]
-            if not pts:
-                continue
-            f, v = pts[-1]
-            color, _ = CURVE_COMPONENTS[key]
-            painter.setPen(color)
-            # 末值标签靠近图表右边缘时向左收，避免被裁掉。
-            x = min(self.frame_to_x(f) + 3, self.width() - 34)
-            painter.drawText(
-                QPointF(x, self.value_to_y(v, vmin, vmax) + 3),
-                f"{v:.2f}",
-            )
+        keys = [key for key in CHECKBOX_KEYS if self._visible.get(key)]
+        for index, key in enumerate(keys):
+            painter.setPen(CURVE_COMPONENTS[key][0])
+            painter.drawText(QRectF(self._plot_rect().right() - (len(keys) - index) * 54,
+                                   self.height() - 44, 48, 18),
+                             Qt.AlignmentFlag.AlignCenter, f"{self.current_value(key):.2f}")
 
     def _draw_markers(self, painter: QPainter, vmin: float, vmax: float) -> None:
         half = KEYFRAME_SIZE / 2.0
         bottom = self._plot_rect().bottom()
+        painter.save()
+        painter.setClipRect(self._plot_rect())
+        manual_frames = set(self._manual_frames)
         for f in self._keyframes:
-            if f in self._manual_frames:
+            if f in manual_frames:
                 continue
             x = self.frame_to_x(f)
             self._draw_diamond(painter, x, bottom - half - 2, half, KEYFRAME_COLOR)
@@ -310,6 +335,7 @@ class _GraphView(QWidget):
         for f in self._failed_frames:
             x = self.frame_to_x(f)
             self._draw_triangle(painter, x, bottom - 3, FAILED_KEY_COLOR)
+        painter.restore()
 
     @staticmethod
     def _draw_diamond(painter: QPainter, x: float, y: float, half: float,
@@ -338,7 +364,10 @@ class _GraphView(QWidget):
         pen.setCosmetic(True)
         painter.setPen(pen)
         painter.drawLine(QPointF(x, 0), QPointF(x, rect.bottom()))
-        self._draw_triangle(painter, x, PLAYHEAD_TRI, PLAYHEAD_COLOR)
+        painter.setBrush(PLAYHEAD_COLOR)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPolygon(QPolygonF([QPointF(x - 7, 0), QPointF(x + 7, 0),
+            QPointF(x + 7, 6), QPointF(x, 13), QPointF(x - 7, 6)]))
 
     def _draw_hover(self, painter: QPainter, vmin: float, vmax: float) -> None:
         assert self._hover is not None
@@ -368,6 +397,8 @@ class _GraphView(QWidget):
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         self._hover = event.position().toPoint()
+        if self._scrubbing:
+            self._seek_from_x(event.position().x())
         self.update()
 
     def leaveEvent(self, event) -> None:  # noqa: N802
@@ -376,8 +407,42 @@ class _GraphView(QWidget):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
-            frame = int(round(self.x_to_frame(event.position().x())))
+            self._scrubbing = True
+            self._seek_from_x(event.position().x(), emit_seek=False)
+            self.scrub_started.emit(self._current_frame)
+            self._seek_from_x(event.position().x())
+            event.accept()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._seek_from_x(event.position().x(), emit_seek=False)
+            self._scrubbing = False
+            self.scrub_finished.emit(self._current_frame)
+            self.frame_clicked.emit(self._current_frame)
+            event.accept()
+
+    def _seek_from_x(self, x: float, *, emit_seek: bool = True) -> None:
+        lo, hi = self._clip_extent or self._frame_extent()
+        frame = max(int(lo), min(int(hi), int(round(self.x_to_frame(x)))))
+        self.set_current_frame(frame)
+        if emit_seek:
             self.frame_clicked.emit(frame)
+
+    def set_horizontal_position(self, value: int) -> None:
+        """Adjust horizontal magnification around the current playhead."""
+        lo, hi = self._clip_extent or frame_range(self._series)
+        length = max(1.0, float(hi - lo))
+        if value <= 0:
+            self._view_lo = self._view_hi = None
+        else:
+            span = max(1.0, length / (2.0 ** (value / 150.0)))
+            start = max(float(lo), min(float(hi) - span, self._current_frame - span / 2.0))
+            self._view_lo, self._view_hi = start, start + span
+        self.update()
+
+    def set_vertical_zoom(self, value: int) -> None:
+        self._value_zoom = 2.0 ** ((100 - value) / 25.0)
+        self.update()
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         lo, hi = self._frame_extent()
@@ -411,6 +476,8 @@ class TrackerGraph(QWidget):
     """
 
     frame_clicked = pyqtSignal(int)
+    scrub_started = pyqtSignal(int)
+    scrub_finished = pyqtSignal(int)
 
     def __init__(self, parent=None, show_controls: bool = True) -> None:
         super().__init__(parent)
@@ -442,12 +509,46 @@ class TrackerGraph(QWidget):
 
         self.view = _GraphView(self)
         self.view.frame_clicked.connect(self.frame_clicked.emit)
-        layout.addWidget(self.view, 1)
+        self.view.scrub_started.connect(self.scrub_started.emit)
+        self.view.scrub_finished.connect(self.scrub_finished.emit)
+        plot = QGridLayout()
+        plot.setContentsMargins(0, 0, 19, 2)
+        plot.setSpacing(1)
+        plot.addWidget(self.view, 0, 0)
+        self.vertical_zoom = QSlider(Qt.Orientation.Vertical, self)
+        self.vertical_zoom.setRange(0, 100)
+        self.vertical_zoom.setInvertedAppearance(True)
+        self.vertical_zoom.setValue(100)
+        self.vertical_zoom.setFixedWidth(12)
+        self.vertical_zoom.setToolTip(tr("tracker.vertical_zoom", "Vertical curve zoom"))
+        self.vertical_zoom.valueChanged.connect(self.view.set_vertical_zoom)
+        plot.addWidget(self.vertical_zoom, 0, 1)
+        self.horizontal_position = QSlider(Qt.Orientation.Horizontal, self)
+        self.horizontal_position.setRange(0, 1000)
+        self.horizontal_position.setFixedHeight(12)
+        self.horizontal_position.setToolTip(tr("tracker.horizontal_zoom", "Horizontal curve zoom"))
+        self.horizontal_position.valueChanged.connect(self.view.set_horizontal_position)
+        self.horizontal_zoom = self.horizontal_position
+        horizontal_row = QHBoxLayout()
+        horizontal_row.setContentsMargins(VALUE_AXIS_W, 0, SCROLLBAR_W, 0)
+        horizontal_row.addWidget(self.horizontal_position)
+        plot.addLayout(horizontal_row, 1, 0)
+        self.setStyleSheet("QSlider::groove:horizontal { height: 3px; background: #16171A; }"
+            "QSlider::handle:horizontal { background: #969994; width: 9px; margin: -3px 0; border-radius: 4px; }"
+            "QSlider::groove:vertical { width: 3px; background: #16171A; }"
+            "QSlider::handle:vertical { background: #969994; height: 9px; margin: 0 -3px; border-radius: 4px; }")
+        layout.addLayout(plot, 1)
 
     # 数据接口透传
 
     def set_series(self, series: Dict[str, List[SeriesPoint]]) -> None:
         self.view.set_series(series)
+
+    def set_timebase(self, fps: float, start: int = 0) -> None:
+        self.view.set_timebase(fps, start)
+
+    def set_frame_range(self, start: int, end: int) -> None:
+        self.view.set_frame_range(start, end)
 
     def set_current_frame(self, frame: int) -> None:
         self.view.set_current_frame(frame)

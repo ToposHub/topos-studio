@@ -35,7 +35,10 @@ from __future__ import annotations
 import os
 import logging
 import uuid
-from typing import Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Union
+
+if TYPE_CHECKING:
+    from src.shared.tracking.track_data import TrackingBinding
 
 from PyQt6.QtWidgets import QMessageBox
 import numpy as np
@@ -80,7 +83,7 @@ class ColorControllerMixin:
             self.engine.img_full_original, self.engine.layers,
             self.engine.active_layer_index, copy_image=False)
 
-    def on_mask_shape_added(self, shape_type) -> None:
+    def on_mask_shape_added(self, shape_type: str) -> None:
         """Handle mask shape addition with context-aware placement."""
         self.mask_panel.btn_brush.setChecked(False)
         self.mask_panel.btn_sam.setChecked(False)
@@ -92,7 +95,22 @@ class ColorControllerMixin:
         self._push_mask_structure_snapshot()
 
         # 实例化新遮罩形状
-        shape = MaskShape(shape_type)
+        shape = MaskShape("curve" if shape_type == "polygon" else shape_type)
+        if shape_type == "polygon":
+            shape.name = "Polygon"
+        video_panel = getattr(self.mask_panel, "video_panel", None)
+        if video_panel is not None and not video_panel.isHidden():
+            image_size = getattr(self.canvas, "logical_size", None)
+            image_height = image_size.height() if image_size is not None else None
+            if isinstance(image_height, (int, float)) and image_height > 0:
+                aspect = image_size.width() / image_size.height()
+                video_panel.set_frame_aspect(aspect)
+                if shape_type == "circle":
+                    shape.size = [0.15, 0.15 * aspect]
+                    shape.feather = 4.13
+                elif shape_type == "rect":
+                    shape.size = [0.4, 0.4]
+                    shape.edge_softness = [1.25] * 4
 
         # 上下文感知：检查当前是否选中了一个群组
         target_group: Optional[MaskGroup] = None
@@ -111,18 +129,20 @@ class ColorControllerMixin:
         layer.is_dirty = True
         layer.mask_dirty = True
 
+        # Leaving pen mode clears scene selection. Do it before activating the
+        # new window, otherwise Circle/Rect/Gradient are immediately deselected.
+        if shape_type not in ("curve", "polygon"):
+            self.canvas.set_drawing_mode(False)
         self.mask_panel.update_shapes_list(layer.mask_shapes)
         self.canvas.update_mask_overlay(layer)
         self.canvas.set_active_shape(shape.id)
         self.mask_panel.select_shape(shape.id)
         self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
 
-        if shape_type == "curve":
+        if shape_type in ("curve", "polygon"):
+            self.canvas.set_mask_creation_mode(shape_type)
             self.canvas.set_drawing_mode(True)
             self.status_bar.showMessage("Pen Tool Active", 5000)
-        else:
-            self.canvas.set_drawing_mode(False)
-
         self.request_render()
         self._trigger_autosave()
 
@@ -141,9 +161,14 @@ class ColorControllerMixin:
             if not layer.get_mask_item_by_id(shape_id): return
             # BUG-C4-01：删除遮罩前提交撤销快照（找不到目标时不产生空快照）
             self._push_mask_structure_snapshot()
-            if self.canvas.active_shape_id == shape_id: self.canvas.set_active_shape(None)
+            previous_id = self.canvas.active_shape_id
             self.canvas.set_drawing_mode(False)
             layer.remove_shape(shape_id)
+            if previous_id and layer.get_mask_item_by_id(previous_id) is not None:
+                self.canvas.set_active_shape(previous_id)
+            else:
+                self.canvas.set_active_shape(None)
+            self.canvas.update_mask_overlay(layer)
             self.mask_panel.update_shapes_list(list(layer.mask_shapes))
             # 若删除的是当前激活窗口，跟踪器同步解绑（树更新后会自动
             # 选中最后一项并重新触发绑定）
@@ -298,8 +323,23 @@ class ColorControllerMixin:
             params: 变更字段字典（feather/opacity/center/size 等），
                 稍后由 :meth:`process_mask_update` 统一写入图层。
         """
-        self.pending_mask_updates[shape_id] = params
+        self.pending_mask_updates.setdefault(shape_id, {}).update(params)
         if not self.mask_update_timer.isActive(): self.mask_update_timer.start()
+
+    def _sync_window_geometry_controls(self, shape: MaskShape) -> None:
+        """Show displayed geometry rather than the untransformed reference."""
+        from src.features.color.tracking.tracking_evaluator import capture_base_geometry
+        getter = getattr(self.engine, "get_tracked_geometry", None)
+        geometry = getter(shape) if callable(getter) else None
+        if not isinstance(geometry, dict):
+            geometry = capture_base_geometry(shape)
+        video_panel = getattr(self.mask_panel, "video_panel", None)
+        image_size = getattr(self.canvas, "logical_size", None)
+        if video_panel is not None and image_size is not None and image_size.height() > 0:
+            video_panel.set_frame_aspect(image_size.width() / image_size.height())
+        if video_panel is not None:
+            video_panel.set_geometry(geometry)
+        self.mask_panel.set_transform_params(geometry["center"], geometry["size"], geometry["rotation"])
 
     def on_mask_shape_selected(self, shape_id) -> None:
         """画布侧选中遮罩：同步 Mask 面板参数与变换控件。
@@ -321,7 +361,7 @@ class ColorControllerMixin:
                     self.mask_panel.set_transform_visible('group')
                 elif isinstance(s, MaskShape):
                     self.mask_panel.set_params(s.feather, s.opacity, getattr(s, 'blur', 0), getattr(s, 'clean_black', 0), getattr(s, 'clean_white', 0))
-                    self.mask_panel.set_transform_params(s.center, s.size, s.rotation)
+                    self._sync_window_geometry_controls(s)
                     self.mask_panel.set_transform_visible(s.type)
 
     def on_panel_shape_selected(self, shape_id) -> None:
@@ -343,7 +383,7 @@ class ColorControllerMixin:
                     self.mask_panel.set_transform_visible('group')
                 elif isinstance(s, MaskShape):
                     self.mask_panel.set_params(s.feather, s.opacity, getattr(s, 'blur', 0), getattr(s, 'clean_black', 0), getattr(s, 'clean_white', 0))
-                    self.mask_panel.set_transform_params(s.center, s.size, s.rotation)
+                    self._sync_window_geometry_controls(s)
                     self.mask_panel.set_transform_visible(s.type)
 
     # 可跟踪的几何窗口类型（位图/画笔蒙版是像素级数据，无几何区域可跟踪）
@@ -439,9 +479,19 @@ class ColorControllerMixin:
                 binding = store.get_binding(clip_id, shape_id)
 
         self.tracker_panel.set_tracking_binding(binding)
-        source_frame = getattr(session, "source_frame", None)
-        if source_frame is not None:
-            self.tracker_panel.set_current_frame(int(source_frame))
+        self._sync_tracker_clip_range()
+        if binding is not None:
+            self.tracker_panel.graph.set_frame_range(binding.source_frame_start, binding.source_frame_end)
+            base = binding.base_geometry or {}
+            self.tracker_panel.set_params({**base.get("_tracker_settings", {}),
+                "mode": binding.mode.value, "channels": base.get("_motion_channels", {})})
+        controller = getattr(self, "video_controller", None)
+        fps = getattr(controller, "fps", 24.0)
+        if isinstance(fps, (int, float)) and fps > 0:
+            self.tracker_panel.graph.set_timebase(float(fps))
+        _, source_frame = self._tracker_render_context()
+        self.tracker_panel.set_current_frame(source_frame)
+        self._tracker_params = self.tracker_panel.get_params()
 
     def _on_matte_preview_requested(self, style: str) -> None:
         """P1-COLOR-08: qualifier 面板请求切换/关闭 matte 预览。
@@ -488,6 +538,7 @@ class ColorControllerMixin:
             if hasattr(self.canvas, "hide_tracker_overlay"):
                 self.canvas.hide_tracker_overlay()
             return
+        self._sync_tracker_clip_range()
         shape_id = getattr(self.canvas, "active_shape_id", None)
         if shape_id:
             layer = self.engine.get_active_layer()
@@ -514,7 +565,43 @@ class ColorControllerMixin:
         layer = self.engine.get_active_layer()
         shape = layer.get_mask_item_by_id(shape_id) if layer and shape_id else None
         if shape is not None and not isinstance(shape, MaskGroup):
+            clip_id, _ = self._tracker_render_context()
+            binding = self.engine.tracking_store.get_binding(clip_id, shape_id) if clip_id else None
+            channels = params.get("channels")
+            if binding is not None and binding.base_geometry is not None and isinstance(channels, dict):
+                if binding.base_geometry.get("_motion_channels") != channels:
+                    self._push_mask_structure_snapshot()
+                    binding.base_geometry["_motion_channels"] = dict(channels)
+                    binding.result_version += 1
+                    layer.mask_dirty = True
+                    self.canvas.update_mask_overlay(layer)
+                    self._sync_window_geometry_controls(shape)
+                    self.request_render()
+                    self._trigger_autosave()
             self._sync_tracker_overlay(shape)
+
+    def _clear_tracker_tracking(self) -> None:
+        """Clear the selected window's tracking through the existing store."""
+        clip_id, _ = self._tracker_render_context()
+        shape_id = getattr(self, "_tracker_shape_id", None)
+        if not clip_id or not shape_id:
+            return
+        binding = self.engine.tracking_store.get_binding(clip_id, shape_id)
+        if binding is None:
+            return
+        self._cancel_tracker_tracking()
+        self.tracking_service.invalidate(clip_id=clip_id)
+        self._push_mask_structure_snapshot()
+        binding.clear_results(keep_manual=False)
+        if binding.base_geometry is not None:
+            binding.base_geometry.pop("_frame_geometry", None)
+        self.tracker_panel.set_tracking_binding(binding)
+        layer = self.engine.get_active_layer()
+        if layer is not None:
+            layer.mask_dirty = True
+            self.canvas.update_mask_overlay(layer)
+        self.request_render()
+        self._trigger_autosave()
 
     # ------------------------------------------------------------------
     # 跟踪结果应用（渲染端）
@@ -544,7 +631,10 @@ class ColorControllerMixin:
         if engine is None or not hasattr(engine, "refresh_tracking_masks"):
             return
         try:
-            updated = engine.refresh_tracking_masks(int(source_frame))
+            updated = engine.refresh_tracking_masks(
+                int(source_frame), preview=(self._is_video_playing()
+                    or bool(getattr(self, '_viewport_scrub_active', False))
+                    or bool(getattr(self, '_tracker_graph_scrubbing', False))))
         except Exception:  # noqa: BLE001 - 帧刷新失败不允许阻塞播放管线
             logger.warning("跟踪蒙版随帧刷新失败", exc_info=True)
             return
@@ -554,6 +644,20 @@ class ColorControllerMixin:
         dock = getattr(self, "dock_tracker", None)
         if dock is not None and dock.isVisible():
             self.tracker_panel.set_current_frame(int(source_frame))
+        layer = engine.get_active_layer()
+        shape_id = getattr(self.canvas, "active_shape_id", None)
+        shape = layer.get_mask_item_by_id(shape_id) if layer is not None and shape_id else None
+        if isinstance(shape, MaskShape) and not self._is_video_playing():
+            self._sync_window_geometry_controls(shape)
+            params = getattr(self, "_tracker_params", None)
+            if isinstance(params, dict) and params.get("interactive"):
+                self._sync_tracker_overlay(shape)
+
+    def _on_color_tracking_play_state_changed(self, is_playing: bool) -> None:
+        """Restore still-quality masks after the live playback preview tier."""
+        controller = getattr(self, 'video_controller', None)
+        if not is_playing and controller is not None:
+            self._on_color_tracking_frame_changed(int(controller.current_frame))
 
     def _on_tracker_pattern_committed(self, region: tuple) -> None:
         """画布拖动 pattern 框：写回窗口几何并同步面板/渲染（达芬奇语义）。"""
@@ -568,19 +672,29 @@ class ColorControllerMixin:
             x, y, w, h = (float(v) for v in region)
         except (TypeError, ValueError):
             return
+        if not np.isfinite([x, y, w, h]).all() or w <= 0.0 or h <= 0.0:
+            return
         # AUD-2302：拖拽提交是用户可见的几何变更，改动前提交撤销快照
         # （与 on_mask_shape_removed 同语义；目标缺失/区域非法时不产生
         # 空快照，参数防抖微调仍走 process_mask_update 刻意不入栈）
         self._push_mask_structure_snapshot()
-        shape.center = [x + w / 2.0, y + h / 2.0]
-        shape.size = [max(w, 0.001), max(h, 0.001)]
-        layer.is_dirty = True
-        layer.mask_dirty = True
-        if isinstance(shape, MaskShape):
-            self.mask_panel.set_transform_params(shape.center, shape.size, shape.rotation)
-        self.canvas.update_mask_overlay(layer)
-        self.request_render()
-        self._trigger_autosave()
+        from src.features.color.tracking.tracking_evaluator import apply_transform_to_geometry, capture_base_geometry
+        geometry = self.engine.get_tracked_geometry(shape)
+        if not isinstance(geometry, dict):
+            geometry = capture_base_geometry(shape)
+        px, py, pw, ph = self._tracker_region_from_shape(shape)
+        image = self.engine.img_full_original
+        if image is None:
+            return
+        height, width = image.shape[:2]
+        sx, sy = w / max(pw, 1e-6), h / max(ph, 1e-6)
+        delta = np.array([[sx, 0.0, (x - sx * px) * width],
+                          [0.0, sy, (y - sy * py) * height], [0.0, 0.0, 1.0]])
+        desired = apply_transform_to_geometry(geometry, delta, (width, height))
+        self.on_mask_shape_updated(shape.id, {k: desired[k] for k in
+            ("center", "size", "rotation", "points", "grad_points") if k in desired})
+        self.process_mask_update()
+        self._sync_tracker_overlay(shape)
 
     def _on_tracker_search_committed(self, region: tuple) -> None:
         """画布拖动 search 框：由 search/pattern 面积比反推搜索倍率。"""
@@ -625,13 +739,25 @@ class ColorControllerMixin:
         """窗口区域：有跟踪结果时按当前帧求值几何计算。"""
         get_geometry = getattr(self.engine, "get_tracked_geometry", None)
         geometry = get_geometry(shape) if callable(get_geometry) else None
-        if geometry is not None:
-            return self._region_from_geometry(
-                geometry.get("center", [0.5, 0.5]),
-                geometry.get("size", [0.3, 0.3]),
-            )
-        center = getattr(shape, "center", [0.5, 0.5])
-        size = getattr(shape, "size", [0.3, 0.3])
+        if not isinstance(geometry, dict):
+            from src.features.color.tracking.tracking_evaluator import capture_base_geometry
+            geometry = capture_base_geometry(shape)
+        center, size = geometry.get("center"), geometry.get("size")
+        if not isinstance(center, (list, tuple, np.ndarray)) or not isinstance(size, (list, tuple, np.ndarray)):
+            raise ValueError("Window geometry must contain a center and size")
+        if len(center) != 2 or len(size) != 2 or not np.isfinite([*center, *size]).all():
+            raise ValueError("Window geometry must contain finite coordinate pairs")
+        kind = geometry.get("type", getattr(shape, "type", ""))
+        if kind == "circle":
+            size = [float(value) * 2.0 for value in size]
+        elif kind == "curve" and geometry.get("points"):
+            points = np.asarray([p[k] for p in geometry["points"] for k in ("pos", "c1", "c2")])
+            low, high = points.min(axis=0), points.max(axis=0)
+            center, size = (low + high) / 2.0, np.maximum(high - low, .01)
+        elif kind == "gradient" and geometry.get("grad_points"):
+            points = np.asarray(geometry["grad_points"])
+            low, high = points.min(axis=0), points.max(axis=0)
+            center, size = (low + high) / 2.0, np.maximum(high - low, .1)
         return self._region_from_geometry(center, size)
 
     def _tracker_search_from_pattern(
@@ -659,6 +785,10 @@ class ColorControllerMixin:
         dock = getattr(self, "dock_tracker", None)
         if dock is not None and not dock.isVisible():
             return
+        params = getattr(self, "_tracker_params", None)
+        if isinstance(params, dict) and not params.get("interactive", False):
+            self.canvas.hide_tracker_overlay()
+            return
         image = getattr(self.engine, "img_full_original", None)
         if image is None:
             return
@@ -667,6 +797,117 @@ class ColorControllerMixin:
         search = self._tracker_search_from_pattern(pattern)
         height, width = image.shape[:2]
         self.canvas.show_tracker_overlay(width, height, pattern, search)
+        overlay = self.canvas.tracker_overlay
+        interactive = bool(params.get("interactive", False)) if isinstance(params, dict) else False
+        overlay.set_interactive(interactive)
+        clip_id, frame = self._tracker_render_context()
+        binding = self.engine.tracking_store.get_binding(clip_id, shape.id) if clip_id else None
+        if binding is not None:
+            from src.features.color.ui.tracker_overlay import FeaturePointStatus
+            from src.shared.tracking.point_manager import active_observations
+            obs = active_observations(binding.observations.get(frame, ()), binding)
+            points = [(o.x / width, o.y / height, FeaturePointStatus.VALID) for o in obs]
+            ids = [o.feature_id for o in obs]
+            excluded = [self._tracker_map_feature(binding, p, frame, inverse=False)
+                        for p in (binding.base_geometry or {}).get("_excluded_points", [])]
+            if excluded:
+                keep = [all(np.hypot((p[0] - x) * width, (p[1] - y) * height) > 5.0
+                            for x, y in excluded) for p in points]
+                points = [p for p, visible in zip(points, keep) if visible]
+                ids = [fid for fid, visible in zip(ids, keep) if visible]
+            for fid, coords in (binding.base_geometry or {}).get("_user_points", {}).items():
+                if int(fid) not in ids and int(fid) not in binding.excluded_feature_ids:
+                    x, y = self._tracker_map_feature(binding, coords, frame, inverse=False)
+                    # LK observation indices may change after redetection. A
+                    # user point retains its own ID and replaces nearby auto
+                    # observations so it remains selectable across frames.
+                    keep = [np.hypot((p[0] - x) * width, (p[1] - y) * height) > 5.0 for p in points]
+                    points = [p for p, visible in zip(points, keep) if visible]
+                    ids = [point_id for point_id, visible in zip(ids, keep) if visible]
+                    ids.append(int(fid))
+                    points.append((x, y, FeaturePointStatus.VALID))
+            overlay.set_features(points, ids, binding.locked_feature_ids)
+
+    def _tracker_point_binding(self) -> tuple[MaskShape | MaskGroup | None, TrackingBinding | None, int]:
+        """Resolve selected window and its current binding for point edits."""
+        shape_id = getattr(self, "_tracker_shape_id", None)
+        layer = self.engine.get_active_layer()
+        shape = layer.get_mask_item_by_id(shape_id) if layer is not None and shape_id else None
+        clip_id, frame = self._tracker_render_context()
+        binding = self.engine.tracking_store.get_binding(clip_id, shape_id) if clip_id and shape_id else None
+        return shape, binding, frame
+
+    def _tracker_map_feature(self, binding: TrackingBinding, point: Sequence[float],
+                             frame: int, inverse: bool) -> tuple[float, float]:
+        """Convert a normalized point between original and current reference."""
+        image = self.engine.img_full_original
+        if image is None:
+            return float(point[0]), float(point[1])
+        h, w = image.shape[:2]
+        transform = binding.transform_at(frame)
+        matrix = transform.matrix_np if transform is not None else np.eye(3)
+        if inverse:
+            matrix = np.linalg.inv(matrix)
+        result = matrix @ [point[0] * w, point[1] * h, 1.0]
+        return float(result[0] / result[2] / w), float(result[1] / result[2] / h)
+
+    def _on_tracker_insert_point_requested(self) -> None:
+        overlay = self.canvas.tracker_overlay
+        if overlay.set_insert_mode(self.tracker_panel.btn_insert_point.isChecked()):
+            self.canvas.setFocus()
+
+    def _on_tracker_feature_inserted(self, x: float, y: float) -> None:
+        shape, binding, frame = self._tracker_point_binding()
+        if not isinstance(shape, MaskShape):
+            return
+        self._push_mask_structure_snapshot()
+        if binding is None:
+            binding, _ = self._ensure_tracker_binding(shape)
+        points = binding.base_geometry.setdefault("_user_points", {})
+        all_ids = [o.feature_id for obs in binding.observations.values() for o in obs]
+        fid = max([*all_ids, *(int(k) for k in points), 999999]) + 1
+        points[str(fid)] = list(self._tracker_map_feature(binding, [x, y], frame, inverse=True))
+        binding.lock_feature(fid)
+        self.tracker_panel.btn_insert_point.setChecked(False)
+        self._sync_tracker_overlay(shape)
+        self._trigger_autosave()
+
+    def _on_tracker_set_point_requested(self) -> None:
+        shape, binding, frame = self._tracker_point_binding()
+        fid = self.canvas.tracker_overlay.selected_feature_id
+        if binding is None or fid is None:
+            return
+        self._push_mask_structure_snapshot()
+        obs = next((o for o in binding.observations.get(frame, ()) if o.feature_id == fid), None)
+        if obs is not None:
+            image = self.engine.img_full_original
+            point = [obs.x / image.shape[1], obs.y / image.shape[0]]
+            binding.base_geometry.setdefault("_user_points", {})[str(fid)] = list(
+                self._tracker_map_feature(binding, point, frame, inverse=True))
+        binding.lock_feature(fid)
+        self._sync_tracker_overlay(shape)
+        self._trigger_autosave()
+
+    def _on_tracker_delete_point_requested(self) -> None:
+        shape, binding, frame = self._tracker_point_binding()
+        fid = self.canvas.tracker_overlay.selected_feature_id
+        if binding is None or fid is None:
+            return
+        self._push_mask_structure_snapshot()
+        point = binding.base_geometry.setdefault("_user_points", {}).pop(str(fid), None)
+        if point is None:
+            obs = next((o for o in binding.observations.get(frame, ()) if o.feature_id == fid), None)
+            if obs is not None:
+                image = self.engine.img_full_original
+                point = self._tracker_map_feature(binding,
+                    [obs.x / image.shape[1], obs.y / image.shape[0]], frame, inverse=True)
+        if point is not None:
+            binding.base_geometry.setdefault("_excluded_points", []).append(list(point))
+        binding.unlock_feature(fid)
+        binding.exclude_feature(fid)
+        self._sync_tracker_overlay(shape)
+        self.tracker_panel.set_selected_feature(None)
+        self._trigger_autosave()
 
     def _tracker_session(self):
         """返回当前 ColorSession（无会话管理器或无会话时为 None）。"""
@@ -683,7 +924,9 @@ class ColorControllerMixin:
             or getattr(self, "current_file_path", "")
             or ""
         )
-        reference = getattr(session, "source_frame", None)
+        reference = getattr(getattr(self, "video_controller", None), "current_frame", None)
+        if not isinstance(reference, (int, float)):
+            reference = getattr(session, "source_frame", None)
         if reference is None:
             reference = getattr(getattr(self, "video_controller", None), "current_frame", 0)
         reference = int(reference or 0)
@@ -715,7 +958,8 @@ class ColorControllerMixin:
 
     def _tracker_params_to_engine_factory(self, params: dict) -> None:
         """将面板参数注入每个异步 worker 使用的 Tracker2D。"""
-        from src.features.color.tracking.feature_detector import DetectorConfig, FeatureDetector
+        from src.features.color.tracking.feature_detector import DetectorConfig
+        from src.features.color.tracking.window_points import WindowPointDetector
         from src.features.color.tracking.tracker_2d import Tracker2D, TrackerConfig
         from src.features.color.tracking.types import FailurePolicy
 
@@ -724,7 +968,7 @@ class ColorControllerMixin:
             "stop": FailurePolicy.STOP,
             "hold": FailurePolicy.HOLD_LAST,
             "recapture": FailurePolicy.RECAPTURE,
-        }.get(str(params.get("failure_policy", "stop")), FailurePolicy.STOP)
+        }.get(str(params.get("failure_policy", "recapture")), FailurePolicy.RECAPTURE)
         min_confidence = max(0.0, min(1.0, float(params.get("min_confidence", 0.35))))
         config = TrackerConfig(
             weak_confidence=min_confidence,
@@ -735,12 +979,24 @@ class ColorControllerMixin:
             max_features=feature_count,
             min_features=max(4, min(feature_count, 8)),
         )
+        shape, binding, frame = self._tracker_point_binding()
+        seeds, excluded = [], []
+        if binding is not None:
+            pattern = binding.pattern_region
+            for key, target in (("_user_points", seeds), ("_excluded_points", excluded)):
+                source = (binding.base_geometry or {}).get(key, {})
+                values = source.values() if isinstance(source, dict) else source
+                for point in values:
+                    x, y = self._tracker_map_feature(binding, point, frame, inverse=False)
+                    target.append(((x - pattern[0]) / max(pattern[2], 1e-6),
+                                   (y - pattern[1]) / max(pattern[3], 1e-6)))
         service = getattr(self, "tracking_service", None)
         if service is not None:
             service.set_tracker_factory(
                 lambda: Tracker2D(
                     config=config,
-                    detector=FeatureDetector(detector_config),
+                    detector=WindowPointDetector(detector_config, tuple(seeds), tuple(excluded),
+                                                 params.get("algorithm") == "point"),
                 )
             )
 
@@ -770,26 +1026,28 @@ class ColorControllerMixin:
             )
             store.add_binding(binding)
 
-        geometry_changed = (
-            binding.pattern_region != pattern
-            or binding.search_region != search
-            or binding.reference_frame != reference
-            or binding.source_frame_start != frame_start
-            or binding.source_frame_end != frame_end
-            or binding.mode != mode
-        )
-        if geometry_changed and (binding.transforms or binding.manual_corrections):
-            binding.clear_results(keep_manual=True)
+        # Results are expressed relative to the original reference. Starting
+        # another pass at the playhead must preserve earlier frames and edits.
+        has_results = bool(binding.transforms or binding.manual_corrections)
+        previous = binding.transform_at(reference) if has_results else None
+        self._tracker_reference_matrix = previous.matrix_np if previous is not None else np.eye(3)
         binding.shape_name = str(getattr(shape, "name", None) or "Window 1")
         binding.pattern_region = pattern
         binding.search_region = search
-        binding.reference_frame = reference
+        if not has_results:
+            binding.reference_frame = reference
         binding.source_frame_start = frame_start
         binding.source_frame_end = frame_end
         binding.mode = mode
-        binding.base_geometry = capture_base_geometry(shape)
+        if not has_results or binding.base_geometry is None:
+            metadata = {k: v for k, v in (binding.base_geometry or {}).items() if k.startswith("_")}
+            binding.base_geometry = {**capture_base_geometry(shape), **metadata}
+        binding.base_geometry["_motion_channels"] = dict(params.get("channels", {}))
+        binding.base_geometry["_tracker_settings"] = {
+            k: v for k, v in params.items() if k not in ("interactive", "correction_mode", "channels")}
         self.tracker_panel.set_tracking_binding(binding)
         self.tracker_panel.set_current_frame(reference)
+        self.tracker_panel.graph.set_frame_range(frame_start, frame_end)
         return binding, (clip_id, shape_id, media_path, reference, frame_start, frame_end)
 
     def _start_tracker_auto_tracking(self) -> None:
@@ -817,6 +1075,7 @@ class ColorControllerMixin:
             return
 
         try:
+            self._push_mask_structure_snapshot()
             binding, context = self._ensure_tracker_binding(shape)
             clip_id, shape_id, media_path, reference, frame_start, frame_end = context
             from src.features.color.tracking.tracker_2d import TrackDirection
@@ -853,6 +1112,9 @@ class ColorControllerMixin:
             self._tracker_params_to_engine_factory(params)
             self._active_tracker_task = (clip_id, shape_id)
             self._active_tracker_directions = directions
+            self._tracker_single_step_target = (
+                request_end if direction == "forward" else request_start
+            ) if single_frame else None
             self.tracker_panel.set_state(PanelState.RUNNING)
             from src.features.color.tracking.frame_sampler import AnalysisQuality
             quality = {
@@ -860,6 +1122,13 @@ class ColorControllerMixin:
                 "standard": AnalysisQuality.NORMAL,
                 "high": AnalysisQuality.HIGH,
             }.get(str(params.get("quality", "standard")), AnalysisQuality.NORMAL)
+            analysis_geometry = dict(self.engine.get_tracked_geometry(shape) or binding.base_geometry)
+            # The analysis cache must distinguish edited point sets, algorithm
+            # selection and solver settings, even when window geometry matches.
+            analysis_geometry["_analysis_settings"] = {
+                k: v for k, v in params.items() if k not in ("interactive", "correction_mode")}
+            analysis_geometry["_point_selection"] = {
+                k: (binding.base_geometry or {}).get(k) for k in ("_user_points", "_excluded_points")}
             self.tracking_service.start(
                 clip_id=clip_id,
                 shape_id=shape_id,
@@ -872,7 +1141,7 @@ class ColorControllerMixin:
                 mode=binding.mode,
                 quality=quality,
                 directions=directions,
-                shape_geometry=binding.base_geometry,
+                shape_geometry=analysis_geometry,
             )
         except Exception as exc:  # noqa: BLE001 - UI must recover to failed state
             logger.exception("启动跟踪失败")
@@ -883,6 +1152,7 @@ class ColorControllerMixin:
 
     def _retrack_tracker_failed(self) -> None:
         """只重跑当前绑定中的失败帧。"""
+        self._tracker_single_step_target = None
         shape_id = getattr(self, "_tracker_shape_id", None)
         layer = self.engine.get_active_layer()
         shape = layer.get_mask_item_by_id(shape_id) if layer and shape_id else None
@@ -910,6 +1180,11 @@ class ColorControllerMixin:
                 TrackDirection.FORWARD, TrackDirection.BACKWARD
             )
             self.tracker_panel.set_state(PanelState.RUNNING)
+            analysis_geometry = dict(self.engine.get_tracked_geometry(shape) or binding.base_geometry)
+            analysis_geometry["_analysis_settings"] = {
+                k: v for k, v in params.items() if k not in ("interactive", "correction_mode")}
+            analysis_geometry["_point_selection"] = {
+                k: (binding.base_geometry or {}).get(k) for k in ("_user_points", "_excluded_points")}
             self.tracking_service.retrack_failed(
                 clip_id=clip_id,
                 shape_id=shape_id,
@@ -922,7 +1197,7 @@ class ColorControllerMixin:
                 frame_end=frame_end,
                 mode=binding.mode,
                 quality=quality,
-                shape_geometry=binding.base_geometry,
+                shape_geometry=analysis_geometry,
             )
         except Exception as exc:  # noqa: BLE001 - UI must recover
             logger.exception("重跟踪失败帧失败")
@@ -945,8 +1220,21 @@ class ColorControllerMixin:
         if binding is None:
             return
         frame = int(getattr(self.tracker_panel.graph.view, "_current_frame", 0))
+        self._push_mask_structure_snapshot()
         binding.clear_manual_correction(frame)
         self.tracker_panel.set_tracking_binding(binding)
+        layer = self.engine.get_active_layer()
+        if layer is not None:
+            layer.mask_dirty = True
+            self.canvas.update_mask_overlay(layer)
+        self.request_render()
+        self._trigger_autosave()
+        layer = self.engine.get_active_layer()
+        shape = layer.get_mask_item_by_id(shape_id) if layer is not None else None
+        if isinstance(shape, MaskShape):
+            self.canvas.update_mask_overlay(layer)
+            self._sync_window_geometry_controls(shape)
+            self._sync_tracker_overlay(shape)
 
     def _export_tracker_corner_pin(self) -> None:
         """导出当前绑定的 Corner Pin JSON。"""
@@ -1010,15 +1298,31 @@ class ColorControllerMixin:
         binding = self.engine.tracking_store.get_binding(clip_id, shape_id)
         if binding is None:
             return
+        from src.features.color.tracking.types import TrackTransform
+        reference_matrix = getattr(self, "_tracker_reference_matrix", np.eye(3))
         for frame, transform in (getattr(result, "transforms", {}) or {}).items():
+            transform = TrackTransform.from_matrix(
+                frame, transform.matrix_np @ reference_matrix,
+                transform.confidence, transform.status, transform.failure_reason)
             binding.apply_result(transform, (getattr(result, "observations", {}) or {}).get(frame))
         directions = getattr(self, "_active_tracker_directions", ())
         from src.features.color.tracking.tracker_2d import TrackDirection
         binding.has_forward = binding.has_forward or TrackDirection.FORWARD in directions
         binding.has_backward = binding.has_backward or TrackDirection.BACKWARD in directions
         self.tracker_panel.set_tracking_binding(binding)
+        target = getattr(self, "_tracker_single_step_target", None)
+        if target is not None:
+            self._tracker_single_step_target = None
+            self._seek_tracker_frame(int(target))
+        self._trigger_autosave()
         # 跟踪结果即时生效：当前帧若落在结果范围内，立刻重建蒙版并重绘，
         # 无需等待下一次播放/手动刷新（达芬奇行为）
+        layer = self.engine.get_active_layer()
+        shape = layer.get_mask_item_by_id(shape_id) if layer is not None else None
+        if isinstance(shape, MaskShape):
+            self.canvas.update_mask_overlay(layer)
+            self._sync_window_geometry_controls(shape)
+            self._sync_tracker_overlay(shape)
         refresh = getattr(self.engine, "refresh_tracking_masks", None)
         if callable(refresh):
             try:
@@ -1034,25 +1338,66 @@ class ColorControllerMixin:
     def _on_tracker_task_failed(self, task_key: str, _generation: int, message: str) -> None:
         """跟踪任务失败回调：面板显示失败原因并进入 FAILED 态。"""
         if self._tracker_task_matches(task_key):
+            self._tracker_single_step_target = None
             from src.features.color.ui.tracker_status import PanelState
             self.tracker_panel.set_failure_reason(message)
             self.tracker_panel.set_state(PanelState.FAILED)
 
     def _on_tracker_task_cancelled(self, task_key: str, _generation: int) -> None:
-        """跟踪任务取消回调：面板回到 EMPTY 态。"""
+        """Stop analysis while retaining already completed window tracking."""
         if self._tracker_task_matches(task_key):
+            self._tracker_single_step_target = None
+            active = getattr(self, "_active_tracker_task", None)
+            binding = self.engine.tracking_store.get_binding(*active) if active is not None else None
+            if binding is not None and binding.frame_range_with_results() is not None:
+                self.tracker_panel.set_tracking_binding(binding)
+                return
             from src.features.color.ui.tracker_status import PanelState
             self.tracker_panel.set_state(PanelState.EMPTY)
 
     def _cancel_tracker_tracking(self) -> None:
         """取消当前激活的跟踪任务（若有）。"""
+        self._tracker_single_step_target = None
         active = getattr(self, "_active_tracker_task", None)
         if active is not None:
             self.tracking_service.cancel(*active)
 
     def _on_tracker_graph_frame_clicked(self, frame: int) -> None:
         """跟踪曲线图点击帧：跳转播放头到该帧。"""
+        if getattr(self, '_tracker_graph_scrubbing', False):
+            self.on_video_scrub_moved(self._color_source_frame_to_local_frame(int(frame)))
+            return
+        if getattr(self, '_tracker_graph_settle_pending', False):
+            self._tracker_graph_settle_pending = False
+            self.on_video_seek(self._color_source_frame_to_local_frame(int(frame)))
+            self.tracker_panel.set_current_frame(int(frame))
+            return
         self._seek_tracker_frame(int(frame))
+
+    def _on_tracker_graph_scrub_started(self, frame: int) -> None:
+        """Use the viewport's nonblocking scrub lane in source coordinates."""
+        self._tracker_graph_scrubbing = True
+        self._tracker_graph_settle_pending = False
+        self.on_video_scrub_started(self._color_source_frame_to_local_frame(int(frame)))
+
+    def _on_tracker_graph_scrub_finished(self, frame: int) -> None:
+        """Let the final graph seek settle at the exact decoded frame."""
+        self._tracker_graph_scrubbing = False
+        self._tracker_graph_settle_pending = True
+        self.on_video_scrub_finished(self._color_source_frame_to_local_frame(int(frame)))
+
+    def _sync_tracker_clip_range(self) -> None:
+        """Initialize the scrub ruler even before the first window is created."""
+        panel = getattr(self, 'tracker_panel', None)
+        controller = getattr(self, 'video_controller', None)
+        if panel is None or controller is None:
+            return
+        _clip, _media, current, first, last = self._tracker_frame_context()
+        panel.graph.set_frame_range(first, last)
+        fps = getattr(controller, 'fps', 24.0)
+        if isinstance(fps, (int, float)) and fps > 0.0:
+            panel.graph.set_timebase(float(fps))
+        panel.set_current_frame(current)
 
     def _on_tracker_nav_requested(self, action: str) -> None:
         """Tracker 工具栏导航（first/prev/next/last）受片段帧范围约束。"""
@@ -1510,6 +1855,7 @@ class ColorControllerMixin:
         for shape_id, params in self.pending_mask_updates.items():
             s = layer.get_mask_item_by_id(shape_id)
             if s:
+                recorded_fields = list(params)
                 if isinstance(s, MaskGroup):
                     # MaskGroup 只支持 opacity 参数
                     if "opacity" in params:
@@ -1523,7 +1869,29 @@ class ColorControllerMixin:
                     if "operation" in params:
                         s.operation = params["operation"]
                 elif isinstance(s, MaskShape):
+                    geometry_fields = {"center", "size", "rotation", "points", "grad_points"}
+                    geometry_updates = {k: v for k, v in params.items() if k in geometry_fields}
+                    tracked_edit = False
+                    if geometry_updates:
+                        clip_id, frame = self._tracker_render_context()
+                        store = getattr(self.engine, "tracking_store", None)
+                        binding = store.get_binding(clip_id, shape_id) if store is not None and clip_id else None
+                        if binding is not None and binding.base_geometry is not None and (
+                                binding.transforms or binding.manual_corrections):
+                            from src.features.color.tracking.window_edit import edit_tracked_geometry
+                            geometry = self.engine.get_tracked_geometry(s)
+                            image = getattr(self.engine, "img_full_original", None)
+                            if isinstance(geometry, dict) and image is not None:
+                                desired = {**geometry, **geometry_updates}
+                                mode = self.tracker_panel.get_params().get("correction_mode", "clip")
+                                edit_tracked_geometry(binding, desired, frame,
+                                                      (image.shape[1], image.shape[0]), mode)
+                                tracked_edit = True
+                                recorded_fields = [k for k in params if k not in geometry_fields]
+                                self.tracker_panel.set_tracking_binding(binding)
                     for k, v in params.items():
+                        if tracked_edit and k in geometry_fields:
+                            continue
                         if k == 'center':
                             s.center = list(v)
                         elif k == 'size':
@@ -1535,7 +1903,7 @@ class ColorControllerMixin:
                 last_updated_shape = s
                 updates_applied = True
                 # P1-COLOR-09: 记录本次真正提交的数值字段（供关键帧录制）
-                updated_fields.append((shape_id, list(params.keys())))
+                updated_fields.append((shape_id, recorded_fields))
 
         self.pending_mask_updates.clear()
 
@@ -1556,11 +1924,9 @@ class ColorControllerMixin:
                         getattr(last_updated_shape, 'clean_black', 0),
                         getattr(last_updated_shape, 'clean_white', 0)
                     )
-                    self.mask_panel.set_transform_params(
-                        last_updated_shape.center,
-                        last_updated_shape.size,
-                        last_updated_shape.rotation
-                    )
+                    self._sync_window_geometry_controls(last_updated_shape)
+            self.canvas.update_mask_overlay(layer)
+            self._trigger_autosave()
 
     # ------------------------------------------------------------------
     # LUT operations

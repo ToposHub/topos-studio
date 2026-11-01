@@ -1,6 +1,6 @@
 # Topos Color：DaVinci 风格跟踪器完整实施计划
 
-> 文档状态：规划中  
+> 文档状态：历史实施计划；2026-11-02 Window/Tracker UI 与交互重设计的实际交付和剩余差距见 [验证报告](validation/window_tracker_2026-11-02/README.md)。本文各阶段条目不代表已全部验收。
 > 建立日期：2026-08-23  
 > 目标模块：Color 页面 / 蒙版跟踪器  
 > 技术栈：PyQt6 + QGraphicsView/QPainter + ModernGL + OpenCV + NumPy + SciPy

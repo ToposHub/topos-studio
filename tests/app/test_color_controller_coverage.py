@@ -55,7 +55,7 @@ from src.features.color.core.grade_keyframes import (
     mask_track_name,
 )
 from src.features.color.core.layer import Layer, MaskGroup, MaskShape
-from src.features.color.tracking.types import TrackingMode
+from src.features.color.tracking.types import TrackingMode, TrackTransform, TrackStatus, FailureReason
 from src.shared.i18n.i18n import I18N
 from src.shared.tracking.track_data import TrackingBinding
 from src.shared.video.denoise.params import VideoDenoiseParams
@@ -146,6 +146,7 @@ class _FakeEngine:
         self.current_file_path: str = ""
         self.video_denoise_params: Optional[VideoDenoiseParams] = None
         self.tracking_store: MagicMock = MagicMock()
+        self.tracking_store.get_binding.return_value = None
         self.renderer: Optional[MagicMock] = MagicMock()
         self.source_bake_file_name: Optional[str] = None
         self.source_bake_type: Optional[str] = None
@@ -171,6 +172,9 @@ class _FakeEngine:
     def get_active_layer(self) -> Optional[Layer]:
         if 0 <= self.active_layer_index < len(self.layers):
             return self.layers[self.active_layer_index]
+        return None
+
+    def get_tracked_geometry(self, shape: MaskShape) -> None:
         return None
 
     # -- recorded engine API ------------------------------------------------
@@ -233,6 +237,7 @@ class _ColorHost(QMainWindow, ColorControllerMixin):
         self.engine = _FakeEngine()
         self.canvas = MagicMock()
         self.canvas.active_shape_id = None
+        self.canvas.logical_size = None
         self.canvas.get_crop_data.return_value = None
         self.mask_panel = MagicMock()
         self.layer_panel = MagicMock()
@@ -735,6 +740,7 @@ def test_brush_toggled_on_reuses_existing_brush_shape(
     brush = _add_shape(layer, "brush")
     host.on_brush_toggled(True)
     assert len(layer.mask_shapes) == 1, "no duplicate brush shapes"
+    assert layer.mask_shapes[0] is brush
     host.mask_panel.update_shapes_list.assert_not_called()
 
 
@@ -1031,16 +1037,16 @@ def test_mask_shape_updated_debounces_and_applies(
     # A second queued update must not restart the running timer.
     host.on_mask_shape_updated(shape.id, {"feather": 14})
     assert len(starts) == 1
-    assert host.pending_mask_updates[shape.id] == {"feather": 14}
+    assert host.pending_mask_updates[shape.id] == {"feather": 14, "opacity": .4}
 
     _flush_timer(qapp, host)
 
     assert shape.feather == 14
-    assert shape.opacity == 1.0, "superseded params dict replaces, not merges"
+    assert shape.opacity == .4, "coalesced updates retain independent fields"
     assert host.pending_mask_updates == {}
     assert layer.is_dirty and layer.mask_dirty
     assert host.render_calls == 1
-    host.mask_panel.set_params.assert_called_once_with(14, 1.0, 0.0, 0.0, 0.0)
+    host.mask_panel.set_params.assert_called_once_with(14, .4, 0.0, 0.0, 0.0)
 
 
 def test_process_mask_update_without_layer_is_noop(host: _ColorHost) -> None:
@@ -1818,7 +1824,7 @@ def test_tracker_region_prefers_tracked_geometry(
     host.engine.get_tracked_geometry = lambda s: {
         "center": [0.2, 0.6], "size": [0.5, 0.2]}
     assert host._tracker_region_from_shape(shape) == pytest.approx(
-        (0.0, 0.5, 0.5, 0.2))
+        (0.0, 0.4, 1.0, 0.4))
 
     # Malformed tracked geometry must not raise into the caller.
     host.engine.get_tracked_geometry = lambda s: {"center": None}
@@ -1866,7 +1872,7 @@ def test_tracker_shape_selected_binds_leaf_with_name(
     host.tracker_panel.toolbar.set_targets.assert_called_once_with(
         [(shape.id, "Hero")], shape.id)
     host.tracker_panel.set_tracking_binding.assert_called_once_with(None)
-    host.tracker_panel.set_current_frame.assert_not_called()
+    host.tracker_panel.set_current_frame.assert_called_once_with(0)
     host.canvas.show_tracker_overlay.assert_not_called(), (
         "dock hidden → overlay must not be drawn")
 
@@ -1890,7 +1896,7 @@ def test_tracker_shape_selected_unbinds_group_and_missing(
 
 
 def test_load_tracker_binding_restores_from_store(host: _ColorHost) -> None:
-    sentinel = object()
+    sentinel = TrackingBinding("b1", "c1", "s1", source_frame_end=20)
     host._color_session_manager = _FakeSessionManager(
         _make_session(clip_id="c1", source_frame=7))
     host.engine.tracking_store.get_binding.return_value = sentinel
@@ -1946,8 +1952,8 @@ def test_tracker_dock_shown_unchanged_binding_only_resyncs_overlay(
     host.canvas.show_tracker_overlay.assert_called_once()
     args = host.canvas.show_tracker_overlay.call_args[0]
     assert args[:2] == (8, 4), "overlay uses the original image dimensions"
-    assert args[2] == pytest.approx((0.35, 0.35, 0.3, 0.3))  # pattern
-    assert args[3] == pytest.approx((0.2, 0.2, 0.6, 0.6))    # search ×2
+    assert args[2] == pytest.approx((0.2, 0.2, 0.6, 0.6))  # circle diameter
+    assert args[3] == pytest.approx((0.0, 0.0, 1.0, 1.0))    # search ×2, clamped
 
 
 def test_tracker_target_changed_rebinds_and_ignores_stale(
@@ -1977,13 +1983,13 @@ def test_tracker_params_changed_copies_params_and_syncs_overlay(
     shape = _add_shape(layer, "circle")
     host._tracker_shape_id = shape.id
     host.dock_tracker = _FakeDock(True)
-    params = {"search_multiplier": 2.0, "feature_count": 8}
+    params = {"search_multiplier": 2.0, "feature_count": 8, "interactive": True}
 
     host._on_tracker_params_changed(params)
     params["search_multiplier"] = 9.9  # mutation must not leak
 
     assert host._tracker_params == {"search_multiplier": 2.0,
-                                    "feature_count": 8}
+                                    "feature_count": 8, "interactive": True}
     host.canvas.show_tracker_overlay.assert_called_once()
 
     # Group bound → params stored, overlay untouched.
@@ -2000,11 +2006,12 @@ def test_tracker_pattern_committed_writes_back_geometry(
         host: _ColorHost, layer: Layer) -> None:
     shape = _add_shape(layer, "circle")
     host._tracker_shape_id = shape.id
+    host.canvas.active_shape_id = shape.id
 
     host._on_tracker_pattern_committed((0.1, 0.2, 0.4, 0.2))
 
     assert shape.center == pytest.approx([0.3, 0.3])
-    assert shape.size == pytest.approx([0.4, 0.2])
+    assert shape.size == pytest.approx([0.2, 0.1])
     assert layer.is_dirty and layer.mask_dirty
     host.mask_panel.set_transform_params.assert_called_once_with(
         shape.center, shape.size, shape.rotation)
@@ -2032,7 +2039,7 @@ def test_tracker_search_committed_updates_multiplier(
     host.tracker_panel.get_params.return_value = {"search_multiplier": 1.0}
 
     # Search box twice the pattern size → multiplier 2.0.
-    host._on_tracker_search_committed((0.3, 0.3, 0.4, 0.4))
+    host._on_tracker_search_committed((0.1, 0.1, 0.8, 0.8))
     host.tracker_panel.set_params.assert_called_once_with(
         {"search_multiplier": 2.0})
     assert host._tracker_params is not None
@@ -2041,7 +2048,7 @@ def test_tracker_search_committed_updates_multiplier(
     # Same multiplier → early return, panel untouched.
     host.tracker_panel.set_params.reset_mock()
     host.tracker_panel.get_params.return_value = {"search_multiplier": 2.0}
-    host._on_tracker_search_committed((0.3, 0.3, 0.4, 0.4))
+    host._on_tracker_search_committed((0.1, 0.1, 0.8, 0.8))
     host.tracker_panel.set_params.assert_not_called()
 
     # Degenerate region → guarded no-op.
@@ -2121,18 +2128,20 @@ def test_tracker_frame_context_resolves_timeline_and_total_frames(
 
 def test_color_tracking_frame_changed_render_and_sync_rules(
         host: _ColorHost) -> None:
-    host.engine.refresh_tracking_masks = lambda frame: 2
+    host.engine.refresh_tracking_masks = MagicMock(return_value=2)
     host.dock_tracker = _FakeDock(True)
 
     host._on_color_tracking_frame_changed(9)
+    host.engine.refresh_tracking_masks.assert_called_with(9, preview=False)
     assert host.render_calls == 1
     host.tracker_panel.set_current_frame.assert_called_once_with(9)
 
     host._playing = True
     host._on_color_tracking_frame_changed(10)
+    host.engine.refresh_tracking_masks.assert_called_with(10, preview=True)
     assert host.render_calls == 1, "playing seeks rely on the frame pipeline"
 
-    def _boom(frame: int) -> int:
+    def _boom(frame: int, *, preview: bool = False) -> int:
         raise ValueError("bad frame")
 
     host.engine.refresh_tracking_masks = _boom
@@ -2143,6 +2152,14 @@ def test_color_tracking_frame_changed_render_and_sync_rules(
     host._on_color_tracking_frame_changed(12)
     assert host.render_calls == 1
 
+
+def test_tracking_pause_restores_still_quality(host: _ColorHost) -> None:
+    host.engine.refresh_tracking_masks = MagicMock(return_value=True)
+    host.video_controller = SimpleNamespace(current_frame=17)
+    host._on_color_tracking_play_state_changed(True)
+    host.engine.refresh_tracking_masks.assert_not_called()
+    host._on_color_tracking_play_state_changed(False)
+    host.engine.refresh_tracking_masks.assert_called_once_with(17, preview=False)
 
 def test_tracker_task_finished_applies_results_and_refreshes(
         host: _ColorHost, layer: Layer) -> None:
@@ -2157,11 +2174,11 @@ def test_tracker_task_finished_applies_results_and_refreshes(
     host.engine.refresh_tracking_masks = lambda: True
     host.tracking_service.is_running.return_value = False
     result = SimpleNamespace(
-        transforms={10: "tf"}, observations={10: "obs"})
+        transforms={10: TrackTransform.from_matrix(10, np.eye(3), 1.0, TrackStatus.VALID)}, observations={10: "obs"})
 
     host._on_tracker_task_finished("c1:" + shape.id, 1, result)
 
-    binding.apply_result.assert_called_once_with("tf", "obs")
+    binding.apply_result.assert_called_once_with(result.transforms[10], "obs")
     assert binding.has_forward is True and binding.has_backward is False
     host.tracker_panel.set_tracking_binding.assert_called_once_with(binding)
     assert host.render_calls == 1
@@ -2311,8 +2328,8 @@ def test_ensure_tracker_binding_creates_and_updates(
     assert context == ("c1", shape.id, "/m.mov", 3, 0, 10)
     assert isinstance(binding, TrackingBinding)
     host.engine.tracking_store.add_binding.assert_called_once_with(binding)
-    assert binding.pattern_region == pytest.approx((0.4, 0.4, 0.2, 0.2))
-    assert binding.search_region == pytest.approx((0.3, 0.3, 0.4, 0.4))
+    assert binding.pattern_region == pytest.approx((0.3, 0.3, 0.4, 0.4))
+    assert binding.search_region == pytest.approx((0.1, 0.1, 0.8, 0.8))
     assert binding.reference_frame == 3
     assert binding.source_frame_start == 0 and binding.source_frame_end == 10
     assert binding.mode == TrackingMode.TRANSLATION_ROTATION_SCALE
@@ -2323,7 +2340,7 @@ def test_ensure_tracker_binding_creates_and_updates(
 
     # Existing binding with stale results: geometry change wipes them.
     host.engine.tracking_store.get_binding.return_value = binding
-    binding.transforms = {2: object()}
+    binding.transforms = {2: TrackTransform.from_matrix(2, np.eye(3), 1.0, TrackStatus.VALID)}
     cleared: List[Tuple[Tuple[Any, ...], Dict[str, Any]]] = []
     original_clear = binding.clear_results
 
@@ -2337,8 +2354,8 @@ def test_ensure_tracker_binding_creates_and_updates(
     binding2, _ = host._ensure_tracker_binding(shape)
 
     assert binding2 is binding
-    assert cleared == [((), {"keep_manual": True})]
-    assert binding.pattern_region == pytest.approx((0.5, 0.4, 0.2, 0.2))
+    assert cleared == [], "continuing a pass must retain existing results"
+    assert binding.pattern_region == pytest.approx((0.4, 0.3, 0.4, 0.4))
     assert host.engine.tracking_store.add_binding.call_count == 1
 
 
@@ -2475,8 +2492,8 @@ def test_retrack_failed_frames_or_report_none(
     assert host.status_bar.currentMessage() == "当前没有需要重跟踪的失败帧"
 
     # With failed frames → service retracks both directions.
-    failed_binding = MagicMock()
-    failed_binding.failed_frames.return_value = [5, 6]
+    failed_binding = TrackingBinding("bf", "c1", shape.id)
+    failed_binding.transforms = {5: TrackTransform.failed(5, FailureReason.OCCLUSION)}
     host.engine.tracking_store.get_binding.return_value = failed_binding
     called: Dict[str, Any] = {}
     host.tracking_service.retrack_failed.side_effect = (

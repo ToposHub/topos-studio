@@ -8,6 +8,7 @@
 """
 import numpy as np
 import pytest
+from weakref import WeakKeyDictionary
 
 from src.features.color.core.image_engine import ImageEngine
 from src.features.color.core.layer import Layer, MaskShape
@@ -24,6 +25,7 @@ def make_engine_skeleton() -> ImageEngine:
     """绕过 __init__ 的重依赖，构造只含跟踪求值所需字段的最小实例。"""
     engine = ImageEngine.__new__(ImageEngine)
     engine.tracking_store = TrackingStore()
+    engine._tracking_shape_views = WeakKeyDictionary()
     from src.features.color.tracking.tracking_evaluator import TrackingEvaluator
     engine.tracking_evaluator = TrackingEvaluator(engine.tracking_store)
     engine.tracking_context_provider = None
@@ -214,6 +216,8 @@ class TestEnsureTrackerBinding:
 
         class Panel:
             def __init__(self):
+                from unittest.mock import MagicMock
+                self.graph = MagicMock()
                 self.params = {
                     "mode": "translation", "quality": "standard",
                     "feature_count": 12, "search_multiplier": 2.0,
@@ -249,7 +253,8 @@ class TestEnsureTrackerBinding:
         assert context == ("clip1", shape.id, "/tmp/media.mov", 5, 0, 100)
         assert ctrl.tracker_panel.binding is binding
         assert ctrl.tracker_panel.frame == 5
-        assert binding.pattern_region == (0.4, 0.4, 0.2, 0.2)
+        # Circle model sizes are radii, matching Canvas and the renderer.
+        assert binding.pattern_region == (0.3, 0.3, 0.4, 0.4)
 
     def test_missing_clip_context_raises_valueerror(self):
         shape = MaskShape(MaskShape.CIRCLE)
@@ -260,49 +265,37 @@ class TestEnsureTrackerBinding:
 
 
 class TestPatternCommit:
-    def test_commit_writes_back_shape(self, monkeypatch):
-        ctrl = ColorControllerMixin.__new__(ColorControllerMixin)
+    def test_commit_writes_back_shape(self, qapp):
+        from unittest.mock import MagicMock
+        from types import SimpleNamespace
+
+        ctrl = ColorControllerMixin()
         shape = MaskShape(MaskShape.CIRCLE)
-
-        class Layer:
-            mask_shapes = [shape]
-            is_dirty = False
-            mask_dirty = False
-
-            def get_mask_item_by_id(self, sid):
-                return shape if sid == shape.id else None
-
-        class Engine:
-            active_layer_index = 0
-
-            def get_active_layer(self):
-                return layer
-
-        class Canvas:
-            active_shape_id = shape.id
-            logical_size = None
-
-            def update_mask_overlay(self, _layer):
-                pass
-
-        class Panel:
-            def set_transform_params(self, *args):
-                pass
-
-        layer = Layer()
-        ctrl.engine = Engine()
-        ctrl.canvas = Canvas()
-        ctrl.mask_panel = Panel()
+        layer = Layer("Pattern")
+        layer.mask_shapes = [shape]
+        ctrl.engine = SimpleNamespace(
+            active_layer_index=0, layers=[layer], history=MagicMock(),
+            img_full_original=np.zeros((720, 1280, 3), np.uint8),
+            get_active_layer=lambda: layer, get_tracked_geometry=lambda _shape: None,
+            tracking_store=TrackingStore())
+        ctrl.canvas = MagicMock()
+        ctrl.canvas.active_shape_id = shape.id
+        ctrl.canvas.logical_size = None
+        ctrl.mask_panel = MagicMock()
         ctrl._tracker_shape_id = shape.id
-        calls = {}
-        ctrl.request_render = lambda: calls.setdefault("render", 0)
-        ctrl._trigger_autosave = lambda: calls.setdefault("save", 0)
+        ctrl._tracker_render_context = lambda: ("clip", 0)
+        ctrl._sync_tracker_overlay = MagicMock()
+        ctrl.mask_update_timer = MagicMock()
+        ctrl.pending_mask_updates = {}
+        ctrl.request_render = MagicMock()
+        ctrl._trigger_autosave = MagicMock()
 
         ctrl._on_tracker_pattern_committed((0.2, 0.3, 0.1, 0.2))
         assert shape.center == pytest.approx([0.25, 0.4])
-        assert shape.size == pytest.approx([0.1, 0.2])
+        assert shape.size == pytest.approx([0.05, 0.1])
         assert layer.mask_dirty is True
-        assert "render" in calls and "save" in calls
+        ctrl.request_render.assert_called()
+        ctrl._trigger_autosave.assert_called()
 
     def test_commit_ignores_group(self):
         from src.features.color.core.layer import MaskGroup

@@ -5,13 +5,13 @@ import sys
 
 import pytest
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QImage
+from PyQt6.QtCore import QPoint, QRect, Qt
+from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtWidgets import QDockWidget, QMainWindow, QStyleFactory, QTabBar, QWidget
 
 from src.shared.ui.style_sheet import C, DARK_THEME
 from src.shared.ui.dock_tab_style import apply_dock_tab_bar_style
-from src.shared.ui.panel_divider import PanelDockWidget
+from src.shared.ui.panel_divider import PanelDockWidget, _dock_rectangles, paint_shared_dock_dividers
 
 
 def _style_block(selector: str, *, state: str = "") -> str:
@@ -29,16 +29,14 @@ def test_dock_panels_disable_platform_borders_for_custom_painting() -> None:
     assert "border: none" in dock_style
 
 
-def test_dock_divider_is_a_fixed_custom_one_pixel_line() -> None:
+def test_dock_divider_keeps_the_resize_hit_area_transparent() -> None:
     divider_style = _style_block("QMainWindow::separator")
-    hover_style = _style_block("QMainWindow::separator", state=":hover")
 
-    assert f"background-color: {C.PANEL_DIVIDER}" in divider_style
-    assert "width: 1px" in divider_style
-    assert "height: 1px" in divider_style
+    assert "background-color: transparent" in divider_style
+    assert "width: 8px" in divider_style
+    assert "height: 8px" in divider_style
     assert "border: none" in divider_style
-    assert f"background-color: {C.PANEL_DIVIDER}" in hover_style
-    assert C.ORANGE_PRESS not in hover_style
+    assert C.ORANGE_PRESS not in divider_style
 
 
 def test_nested_splitter_uses_the_same_custom_divider() -> None:
@@ -112,3 +110,50 @@ def test_tabified_docks_use_custom_cross_platform_tab_geometry(qapp) -> None:
     finally:
         host.setStyle(original_style)
         host.close()
+
+
+def test_dividers_scan_only_docks_once_per_paint(qapp, qtbot) -> None:
+    """Playback repaints must not recursively visit inspector content trees."""
+    class RecordingWindow(QMainWindow):
+        def __init__(self) -> None:
+            super().__init__()
+            self.search_options: list[Qt.FindChildOption] = []
+
+        def findChildren(self, *args, **kwargs):
+            self.search_options.append(kwargs.get("options"))
+            return super().findChildren(*args, **kwargs)
+
+    host = RecordingWindow()
+    qtbot.addWidget(host)
+    host.resize(500, 240)
+    center = QWidget()
+    host.setCentralWidget(center)
+    docks = []
+    for area in (Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea):
+        dock = PanelDockWidget("Panel", host)
+        content = QWidget()
+        dock.setWidget(content)
+        host.addDockWidget(area, dock)
+        # Descendant docks are not members of the main window's dock layout.
+        QDockWidget("Nested inspector", content)
+        docks.append(dock)
+    host.show()
+    qapp.processEvents()
+
+    expected = [QRect(widget.mapTo(host, QPoint()), widget.size()) for widget in [*docks, center]]
+    assert _dock_rectangles(host) == expected
+    host.search_options.clear()
+    docks[0]._divider_overlay.grab()
+    assert host.search_options == [Qt.FindChildOption.FindDirectChildrenOnly]
+    host.search_options.clear()
+    image = QImage(host.size(), QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    paint_shared_dock_dividers(host, painter)
+    painter.end()
+    assert host.search_options == [Qt.FindChildOption.FindDirectChildrenOnly]
+
+    docks[1].hide()
+    qapp.processEvents()
+    assert len(_dock_rectangles(host)) == 2
+    assert len(_dock_rectangles(host, exclude=docks[0])) == 1

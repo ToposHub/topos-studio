@@ -1270,10 +1270,9 @@ class LayerOpsMixin:
     def _submit_gpu_scope_demand(self, *, is_playing: bool, force: bool = False) -> None:
         """Build and submit the latest ``ScopeDemand`` to the renderer.
 
-        The demand is coalesced: we only keep the most recent (mode/size/
-        zoom) state and stamp the current source revision.  Throttling is
-        purely time-based here (the renderer lane also coalesces), so a
-        burst of frames produces at most one queued pass per budget window.
+        Standalone scopes are rate-limited and coalesced. Curve underlays
+        are stills: frozen during playback/scrubbing/adjustment, deduplicated
+        by final image and canvas geometry, and disabled on inactive tabs.
 
         Idle high-quality pass: when paused and not interacting, after a
         150 ms quiet window we submit one demand at the high-quality
@@ -1281,11 +1280,14 @@ class LayerOpsMixin:
         """
         try:
             is_playing = is_playing or self._scope_playback_is_active()
-            curves_frozen = is_playing or self._scope_scrub_is_active()
-            if curves_frozen and not self._is_scope_panel_visible():
-                return  # Curves freeze their histogram during play and scrub.
             engine = self.engine
             if engine is None or engine.renderer is None:
+                return
+            interacting = bool(getattr(engine, 'is_interacting', False))
+            curves_frozen = is_playing or interacting or self._scope_scrub_is_active()
+            scope_visible = self._is_scope_panel_visible()
+            curves_overlay = self._is_curves_panel_visible() and not curves_frozen
+            if not scope_visible and not curves_overlay:
                 return
             if not getattr(engine.renderer, 'gpu_scope_enabled', False):
                 return
@@ -1295,7 +1297,6 @@ class LayerOpsMixin:
                 MAX_HZ_PLAYBACK, MAX_HZ_INTERACTING, MAX_HZ_IDLE,
             )
             now = time.monotonic()
-            interacting = bool(getattr(engine, 'is_interacting', False))
             # Pick the refresh budget based on state.
             if is_playing:
                 # Playback uses the quality tier that still measured ~7x
@@ -1311,8 +1312,6 @@ class LayerOpsMixin:
                 max_hz, analysis = MAX_HZ_IDLE, DEFAULT_ANALYSIS_SIZE
             min_interval = 1.0 / max_hz if max_hz > 0.0 else 0.0
             last = float(getattr(self, '_gpu_scope_last_submit', 0.0))
-            if not force and now - last < min_interval:
-                return
 
             # Idle high-quality top-up: after 150 ms of quiet, upgrade the
             # analysis size for a single crisp frame (plan §5.2).
@@ -1323,8 +1322,6 @@ class LayerOpsMixin:
                 analysis = HIGH_QUALITY_ANALYSIS_SIZE
             if is_playing or interacting:
                 self._gpu_scope_last_activity = now
-
-            self._gpu_scope_last_submit = now
 
             panel = getattr(self, 'scope_panel', None)
             if panel is None:
@@ -1341,19 +1338,34 @@ class LayerOpsMixin:
             # per submit, so a frame produced from this demand still matches
             # the panel's current revision when it arrives.
             revision = panel.gpu_demand_revision
-            curves_overlay = self._is_curves_panel_visible() and not curves_frozen
             curves_mode = self._current_curve_mode()
             curves_size, curves_line_width = (1024, 512), 1.0
+            curves_key = None
             if curves_overlay:
                 # A peak-normalized histogram must not alternate between
                 # 320/512/768 sampling grids for the same paused image. Each
                 # grid changes bin counts and causes visible vertical breathing.
                 analysis = HIGH_QUALITY_ANALYSIS_SIZE
                 curves_size, curves_line_width = self._active_curve_canvas().histogram_display_metrics()
+                curves_key = (
+                    engine.scope_source_revision, curves_mode,
+                    curves_size, curves_line_width, mask_layer_id, mask_enabled,
+                )
+                # A paused curve underlay is a still, not another live scope.
+                # Suppress repeated requests for the same completed image.
+                curves_overlay = curves_key != getattr(self, '_curves_scope_completed_key', None)
+                if not scope_visible and (
+                    not curves_overlay
+                    or curves_key == getattr(self, '_curves_scope_pending_key', None)
+                ):
+                    return
+            if not force and not curves_overlay and now - last < min_interval:
+                return
+            self._gpu_scope_last_submit = now
             demand = ScopeDemand(
                 revision=revision,
                 source_revision=engine.scope_source_revision,
-                mode=state['mode'] if self._is_scope_panel_visible() else 'histogram',
+                mode=state['mode'] if scope_visible else 'histogram',
                 display_size=state['display_size'],
                 analysis_size=analysis,
                 vectorscope_zoom=state['vectorscope_zoom'],
@@ -1374,6 +1386,8 @@ class LayerOpsMixin:
             # it drains, which is valid; an older frame must never be shown.
             self._latest_gpu_scope_demand = demand
             engine.request_gpu_scope(demand)
+            if curves_overlay:
+                self._curves_scope_pending_key = curves_key
         except Exception as exc:
             logger.debug("GPU scope demand submit failed: %s", exc)
 
@@ -1416,6 +1430,7 @@ class LayerOpsMixin:
         if active:
             self.engine.discard_pending_gpu_scope()
             self._latest_gpu_scope_demand = None
+            self._curves_scope_pending_key = None
         else:
             # The bar emits its exact seek immediately after scrub_finished.
             # Let that request enter the render queue before refreshing scopes.
@@ -1428,6 +1443,7 @@ class LayerOpsMixin:
         if is_playing:
             self.engine.discard_pending_gpu_scope()
             self._latest_gpu_scope_demand = None
+            self._curves_scope_pending_key = None
         elif self._is_scope_panel_visible() or self._is_curves_panel_visible():
             self._submit_gpu_scope_demand(is_playing=False, force=True)
 
@@ -1439,9 +1455,27 @@ class LayerOpsMixin:
             except Exception:
                 pass
             self._latest_gpu_scope_demand = None
+            self._curves_scope_pending_key = None
             return
         self._gpu_scope_last_submit = 0.0
         self._on_scope_demand_changed()
+
+    def _on_curves_scope_visibility_changed(self, visible: bool) -> None:
+        """Use dock exposure, including tab switches, rather than isVisible alone."""
+        self._curves_scope_dock_active = visible
+        self._curves_scope_pending_key = None
+        self._on_scope_visibility_changed(visible)
+
+    def _on_analysis_scope_visibility_changed(self, visible: bool) -> None:
+        """Do not run a standalone scope behind another dock tab."""
+        self._analysis_scope_dock_active = visible
+        self._on_scope_visibility_changed(visible)
+
+    def _freeze_curves_scope_for_interaction(self) -> None:
+        """Drop queued curve work and reject late descriptors at gesture start."""
+        self.engine.discard_pending_gpu_scope()
+        self._latest_gpu_scope_demand = None
+        self._curves_scope_pending_key = None
 
     def on_gpu_scope_ready(self, frame) -> None:
         """Forward a ``ScopeGpuFrame`` to the panel if still visible."""
@@ -1455,10 +1489,12 @@ class LayerOpsMixin:
             return
         try:
             panel = getattr(self, 'scope_panel', None)
-            if panel is not None:
+            if panel is not None and self._is_scope_panel_visible():
                 panel.update_gpu_scope(frame)
             curves_widget = self._active_curve_canvas() if getattr(self, 'curves_widget', None) is not None else None
-            if (curves_widget is not None and not self._scope_playback_is_active()
+            if (curves_widget is not None and self._is_curves_panel_visible()
+                    and not bool(getattr(self.engine, 'is_interacting', False))
+                    and not self._scope_playback_is_active()
                     and not self._scope_scrub_is_active()
                     and getattr(frame, 'curves_mode', 'Custom') == self._current_curve_mode()
                     and frame.curves_histogram_texture_id is not None):
@@ -1466,6 +1502,10 @@ class LayerOpsMixin:
                     frame.curves_histogram_texture_id,
                     *frame.curves_histogram_size,
                 )
+                pending = getattr(self, '_curves_scope_pending_key', None)
+                if pending is not None:
+                    self._curves_scope_completed_key = (frame.source_revision, *pending[1:])
+                    self._curves_scope_pending_key = None
         except Exception as exc:
             logger.debug("GPU scope present failed: %s", exc)
 
@@ -1483,6 +1523,7 @@ class LayerOpsMixin:
         return bool(
             dock is not None
             and panel is not None
+            and getattr(self, '_analysis_scope_dock_active', None) is not False
             and dock.isVisible()
             and panel.isVisible()
         )
@@ -1496,6 +1537,7 @@ class LayerOpsMixin:
         return bool(
             dock is not None
             and panel is not None
+            and getattr(self, '_curves_scope_dock_active', None) is not False
             and dock.isVisible()
             and panel.isVisible()
         )
@@ -2357,6 +2399,11 @@ class LayerOpsMixin:
 
     def _sync_ui_after_undo_redo(self) -> None:
         """撤销/重做后同步更新所有 UI 面板。"""
+        # A worker started before undo must not overwrite the restored store.
+        service = getattr(self, "tracking_service", None)
+        if service is not None:
+            service.invalidate()
+        self._tracker_single_step_target = None
         # 更新画布
         self.update_canvas()
 
@@ -2372,6 +2419,13 @@ class LayerOpsMixin:
 
         # 更新遮罩覆盖层
         self.canvas.update_mask_overlay(layer)
+
+        shape_id = getattr(self.canvas, "active_shape_id", None)
+        if shape_id and layer is not None and layer.get_mask_item_by_id(shape_id) is not None:
+            self.on_mask_shape_selected(shape_id)
+            self._load_tracker_binding(shape_id)
+        else:
+            self._on_tracker_shape_selected(None)
 
         # P1-COLOR-03: 撤销/重做会改变关键帧轨道，回显 ◆ 按钮态与 ruler 标记
         try:

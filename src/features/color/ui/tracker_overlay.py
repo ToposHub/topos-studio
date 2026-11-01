@@ -23,9 +23,10 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QKeyEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QGraphicsItem,
+    QGraphicsSceneMouseEvent,
     QGraphicsObject,
     QGraphicsRectItem,
     QStyleOptionGraphicsItem,
@@ -189,6 +190,9 @@ class TrackerOverlay(QGraphicsObject):
     # 失败标记点击 → 帧号（供跳转）
     failed_marker_clicked = pyqtSignal(int)
     state_changed = pyqtSignal(object)
+    feature_selected = pyqtSignal(int)
+    feature_inserted = pyqtSignal(float, float)
+    insert_mode_changed = pyqtSignal(bool)
 
     def __init__(self, parent: Optional[QGraphicsItem] = None) -> None:
         super().__init__(parent)
@@ -197,12 +201,18 @@ class TrackerOverlay(QGraphicsObject):
             Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton
         )
         self.setAcceptHoverEvents(True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsFocusable)
 
         self._frame_w = 0.0
         self._frame_h = 0.0
         self._pattern: Optional[Region] = None
         self._search: Optional[Region] = None
         self._features: List[Tuple[float, float, FeaturePointStatus]] = []
+        self._feature_ids: List[int] = []
+        self._locked_feature_ids: set[int] = set()
+        self._selected_feature_id: Optional[int] = None
+        self._interactive = False
+        self._insert_mode = False
         self._path: List[Point] = []               # 完整路径（归一化，不抽样）
         self._failed_markers: Dict[int, Point] = {}
         self._current_transform: Optional[np.ndarray] = None
@@ -244,6 +254,12 @@ class TrackerOverlay(QGraphicsObject):
         if state == self._state:
             return
         self._state = state
+        if state in {OverlayState.TRACKING, OverlayState.IDLE}:
+            self.set_insert_mode(False)
+            self.select_feature(None)
+            self._drag = None
+            self._preview_region = None
+            self._manual_correction_active = False
         self.state_changed.emit(state)
         self.update()
 
@@ -312,9 +328,9 @@ class TrackerOverlay(QGraphicsObject):
     # ================================================================
 
     def set_frame_size(self, width: float, height: float) -> None:
+        self.prepareGeometryChange()
         self._frame_w = float(width)
         self._frame_h = float(height)
-        self.prepareGeometryChange()
         self._sync_handles()
         self.update()
 
@@ -330,10 +346,82 @@ class TrackerOverlay(QGraphicsObject):
         self.update()
 
     def set_features(
-        self, points: List[Tuple[float, float, FeaturePointStatus]]
+        self, points: List[Tuple[float, float, FeaturePointStatus]],
+        feature_ids: Optional[List[int]] = None,
+        locked_ids: Optional[set[int]] = None,
     ) -> None:
+        ids = list(range(len(points))) if feature_ids is None else list(feature_ids)
+        if len(ids) != len(points) or len(set(ids)) != len(ids):
+            raise ValueError("Each feature point requires one unique feature ID")
         self._features = list(points)
+        self._feature_ids = [int(value) for value in ids]
+        self._locked_feature_ids = set(locked_ids or ())
+        if self._selected_feature_id not in self._feature_ids:
+            self.select_feature(None)
         self.update()
+
+    @property
+    def selected_feature_id(self) -> Optional[int]:
+        return self._selected_feature_id
+
+    @property
+    def insert_mode_active(self) -> bool:
+        return self._insert_mode
+
+    def select_feature(self, feature_id: Optional[int]) -> None:
+        if feature_id is not None and feature_id not in self._feature_ids:
+            raise ValueError("Cannot select an unknown tracking point")
+        if feature_id == self._selected_feature_id:
+            return
+        self._selected_feature_id = feature_id
+        self.feature_selected.emit(-1 if feature_id is None else int(feature_id))
+        self.update()
+
+    def set_interactive(self, active: bool) -> None:
+        self._interactive = bool(active)
+        self.setZValue(1000.0 if self._interactive else Z_SEARCH)
+        if not self._interactive:
+            self.set_insert_mode(False)
+            self.select_feature(None)
+        self.update()
+
+    def set_insert_mode(self, active: bool) -> bool:
+        enabled = bool(active and self._interactive and self._visible
+                       and self._state != OverlayState.TRACKING)
+        if self._insert_mode == enabled:
+            return enabled
+        self._insert_mode = enabled
+        if enabled:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
+        else:
+            self.unsetCursor()
+        self.insert_mode_changed.emit(enabled)
+        self.update()
+        return enabled
+
+    def wants_point_interaction(self, scene_pos: QPointF, button: Qt.MouseButton) -> bool:
+        """Let the viewer route explicit point edits ahead of mask selection."""
+        if not self._visible or not self._interactive or self._state == OverlayState.TRACKING:
+            return False
+        return ((self._insert_mode and button in {Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton})
+                or (button == Qt.MouseButton.LeftButton and self._hit_feature(scene_pos) is not None))
+
+    def _hit_feature(self, scene_pos: QPointF) -> Optional[int]:
+        if not self._interactive or self._state == OverlayState.TRACKING:
+            return None
+        views = self.scene().views() if self.scene() is not None else []
+        transform = views[0].viewportTransform() if views else None
+        target = transform.map(scene_pos) if transform is not None else scene_pos
+        best = HIT_TOLERANCE
+        result = None
+        for feature_id, (x, y, _status) in zip(self._feature_ids, self._features):
+            point = self.mapToScene(self._to_scene(x, y))
+            point = transform.map(point) if transform is not None else point
+            distance = math.hypot(point.x() - target.x(), point.y() - target.y())
+            if distance <= best:
+                result, best = feature_id, distance
+        return result
 
     def set_path(self, points: List[Point]) -> None:
         """设置完整跟踪路径（原始数据保留，绘制时才抽样）。"""
@@ -364,6 +452,9 @@ class TrackerOverlay(QGraphicsObject):
         """显示/隐藏整个图层（不影响数据）。"""
         self._visible = active
         if not active:
+            self.set_insert_mode(False)
+            self.select_feature(None)
+            self._drag = None
             self._preview_region = None
         self.setVisible(active)
         self._sync_handles()
@@ -425,7 +516,7 @@ class TrackerOverlay(QGraphicsObject):
         # 路径/当前帧目标框/失败标记）。区域数据保留用于算法计算。
 
         # ---- 1. 特征点（三色；失败点为红色叉号） ----
-        for x, y, status in self._features:
+        for feature_id, (x, y, status) in zip(self._feature_ids, self._features):
             p = self._to_scene(x, y)
             if status == FeaturePointStatus.VALID:
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -442,6 +533,12 @@ class TrackerOverlay(QGraphicsObject):
                     QPointF(p.x() - r, p.y() - r), QPointF(p.x() + r, p.y() + r))
                 painter.drawLine(
                     QPointF(p.x() - r, p.y() + r), QPointF(p.x() + r, p.y() - r))
+
+            if feature_id == self._selected_feature_id or feature_id in self._locked_feature_ids:
+                painter.setPen(_cosmetic_pen(QColor("#FFFFFF"), 1.5))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                radius = FEATURE_RADIUS + (4.0 if feature_id == self._selected_feature_id else 2.0)
+                painter.drawRect(QRectF(p.x() - radius, p.y() - radius, radius * 2, radius * 2))
 
         # ---- 2. 跟踪路径折线（>2000 点抽样显示） ----
         display = self.display_path_points()
@@ -570,8 +667,37 @@ class TrackerOverlay(QGraphicsObject):
                 return frame
         return None
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape and self._insert_mode:
+            self.set_insert_mode(False)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
         pos = event.scenePos()
+        if self._state == OverlayState.TRACKING:
+            event.ignore()
+            return
+        if self._insert_mode:
+            if event.button() == Qt.MouseButton.RightButton:
+                self.set_insert_mode(False)
+                event.accept()
+                return
+            if event.button() == Qt.MouseButton.LeftButton:
+                x, y = self._to_norm(self.mapFromScene(pos))
+                if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
+                    self.set_insert_mode(False)
+                    self.feature_inserted.emit(x, y)
+                    event.accept()
+                    return
+                event.ignore()
+                return
+        feature_id = self._hit_feature(pos)
+        if feature_id is not None and event.button() == Qt.MouseButton.LeftButton:
+            self.select_feature(feature_id)
+            event.accept()
+            return
         frame = self._hit_failed_marker(pos)
         if frame is not None and event.button() == Qt.MouseButton.LeftButton:
             self.failed_marker_clicked.emit(frame)

@@ -53,6 +53,8 @@ class TrackingService(QObject):
     task_progress = pyqtSignal(str, int, int, int)
     # task_key, generation, TrackResult
     task_finished = pyqtSignal(str, int, object)
+    # A user stop keeps completed frames without caching an incomplete pass.
+    task_partial_result = pyqtSignal(str, int, object)
     # task_key, generation, message
     task_failed = pyqtSignal(str, int, str)
     # task_key, generation
@@ -364,6 +366,9 @@ class TrackingService(QObject):
             self.stale_result_discarded.emit(key, gen)
             return
         if result.cancelled:
+            partial = self._apply_merge_filter(result, merge_filter) if merge_filter is not None else result
+            if partial.transforms:
+                self.task_partial_result.emit(key, gen, partial)
             self.task_cancelled.emit(key, gen)
             return
 

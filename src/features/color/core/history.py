@@ -25,7 +25,7 @@ undo()/redo() 采用"当前状态换历史状态"的对称交换语义，新操�
 面板在用户操作处调用），渲染与导出线程不触碰本模块。
 """
 import copy
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 import numpy as np
 
 
@@ -53,6 +53,24 @@ class HistoryManager:
         self.max_steps = max_steps
         self.undo_stack: List[Dict[str, Any]] = []
         self.redo_stack: List[Dict[str, Any]] = []
+        # Optional session state follows every snapshot, including the current
+        # state captured by undo/redo. Existing callers need no new arguments.
+        self.extra_state_provider: Optional[Callable[[], Dict[str, Any]]] = None
+        self.extra_state_restorer: Optional[Callable[[Dict[str, Any]], None]] = None
+
+    def _capture_extra_state(self, state: Dict[str, Any]) -> None:
+        """Freeze additional session data without overriding core fields."""
+        if self.extra_state_provider is None:
+            return
+        extra = self.extra_state_provider()
+        if state.keys() & extra.keys():
+            raise ValueError("History extra state must not replace core snapshot fields")
+        state.update(copy.deepcopy(extra))
+
+    def restore_extra_state(self, state: Dict[str, Any]) -> None:
+        """Restore optional session data when the owner applies a snapshot."""
+        if self.extra_state_restorer is not None:
+            self.extra_state_restorer(state)
 
     def push_state(self, image: np.ndarray, layers: Optional[List] = None, active_layer_index: int = 0,
                    flip_h: Optional[bool] = None, flip_v: Optional[bool] = None,
@@ -96,6 +114,7 @@ class HistoryManager:
             'crop_params': copy.deepcopy(crop_params) if crop_params is not None else None,
         }
 
+        self._capture_extra_state(state)
         self.undo_stack.append(state)
 
         # 限制栈大小
@@ -141,6 +160,7 @@ class HistoryManager:
                 'crop_params': (copy.deepcopy(current_crop_params)
                                 if current_crop_params is not None else None),
             }
+            self._capture_extra_state(redo_state)
             self.redo_stack.append(redo_state)
 
         return self.undo_stack.pop()
@@ -184,6 +204,7 @@ class HistoryManager:
                 'crop_params': (copy.deepcopy(current_crop_params)
                                 if current_crop_params is not None else None),
             }
+            self._capture_extra_state(undo_state)
             self.undo_stack.append(undo_state)
 
         return self.redo_stack.pop()

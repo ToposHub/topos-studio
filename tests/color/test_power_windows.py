@@ -9,7 +9,6 @@
 """
 from unittest.mock import MagicMock
 
-import pytest
 
 from src.features.color.core.layer import Layer, MaskGroup, MaskShape
 
@@ -28,7 +27,7 @@ def test_maskshape_locked_default_and_roundtrip():
     assert restored.locked is True
     assert restored.id == shape.id
     # 旧工程无 locked 键 → False
-    legacy = MaskShape.from_dict({**data, "locked": None})
+    assert not MaskShape.from_dict({**data, "locked": None}).locked
     legacy_data = {k: v for k, v in data.items() if k != "locked"}
     assert MaskShape.from_dict(legacy_data).locked is False
 
@@ -286,6 +285,7 @@ def test_locked_param_applied_via_process_mask_update():
     ctrl.canvas.active_shape_id = None
     ctrl.mask_panel = MagicMock()
     ctrl.request_render = lambda: None
+    ctrl._trigger_autosave = lambda: None
 
     ctrl.pending_mask_updates = {
         shape.id: {"locked": True},

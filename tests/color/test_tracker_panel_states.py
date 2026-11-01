@@ -26,13 +26,28 @@ from src.features.color.ui.tracker_graph import (
     frame_range,
     value_range,
 )
-from src.features.color.ui.tracker_panel import EMPTY_HINT, TrackerPanel
+from src.features.color.ui.tracker_panel import TrackerPanel
 from src.features.color.ui.tracker_status import LIGHT_COLORS, PanelState
 from src.features.color.ui.tracker_toolbar import TrackerToolBar
 
 
+_panels: list[TrackerPanel] = []
+
+
+@pytest.fixture(autouse=True)
+def cleanup_panels(qapp):
+    """Keep shown top-level widgets alive until their queued paints finish."""
+    yield
+    for panel in _panels:
+        panel.close()
+        panel.deleteLater()
+    _panels.clear()
+    qapp.processEvents()
+
+
 def make_panel() -> TrackerPanel:
     panel = TrackerPanel()
+    _panels.append(panel)
     panel.show()  # 使子控件 isVisible() 反映自身可见性标志
     return panel
 
@@ -45,14 +60,19 @@ class TestPanelStates:
     def test_empty_state_defaults(self, qapp):
         panel = make_panel()
         assert panel.state == PanelState.EMPTY
-        assert panel.empty_hint.isVisible()
-        assert panel.empty_hint.text() == EMPTY_HINT
-        assert not panel.graph.isVisible()
+        assert not panel.empty_hint.isVisible()
+        assert panel.graph.isVisible()
+        assert not panel.toolbar.isVisible()
         assert not panel.btn_forward.isEnabled()
         assert not panel.btn_backward.isEnabled()
         assert not panel.btn_stop.isEnabled()
         for widget in panel._param_widgets:
             assert not widget.isEnabled()
+        # Motion preferences can be chosen before creating a window, as in
+        # Resolve; analysis still requires an actual target.
+        assert all(box.isEnabled() for box in panel.channel_boxes.values())
+        assert panel.channel_3d.isEnabled()
+        assert panel.cloud_combo.isEnabled()
 
     def test_bound_shape_success_enables_controls(self, qapp):
         panel = make_panel()
@@ -87,7 +107,8 @@ class TestPanelStates:
         panel.channel_boxes["tx"].click()
         assert not panel.graph.view._visible["tx"]
         panel.segment_buttons["frame"].click()
-        assert panel.graph.view._mode == "frame"
+        assert panel.get_params()["correction_mode"] == "frame"
+        assert panel.graph.view._mode == "clip"
 
     def test_narrow_channel_layout_does_not_overlap(self, qapp):
         """窄 Dock 下通道与 Clip/Frame 必须保持独立几何区域。"""
@@ -182,12 +203,13 @@ class TestPanelStates:
         panel.set_state(PanelState.SUCCESS)
         panel.set_bound_shape(None)
         assert panel.state == PanelState.EMPTY
-        assert panel.empty_hint.isVisible()
+        assert not panel.empty_hint.isVisible()
+        assert panel.graph.isVisible()
 
     def test_width_bounds(self, qapp):
         panel = make_panel()
         assert panel.minimumWidth() == 320
-        assert panel.maximumWidth() == 900
+        assert panel.maximumWidth() == 1800
 
 
 # ================================================================
@@ -203,7 +225,7 @@ class TestParams:
         assert params["feature_count"] == 12
         assert params["search_multiplier"] == pytest.approx(2.0)
         assert params["min_confidence"] == pytest.approx(0.35)
-        assert params["failure_policy"] == "stop"
+        assert params["failure_policy"] == "recapture"
 
     def test_set_get_roundtrip(self, qapp):
         panel = make_panel()
@@ -250,6 +272,7 @@ class TestParams:
         panel.set_tracking_binding(binding)
 
         assert panel.graph.view._series["tx"]
+        assert panel.graph.view.current_value("scale") == 1.0
         assert panel.graph.view._reference_frame == 2
         assert panel.graph.view._failed_frames == [3]
 
@@ -277,13 +300,15 @@ class TestParams:
 # ================================================================
 
 class TestCloudCombo:
-    def test_cloud_disabled_with_tooltip(self, qapp):
+    def test_cloud_tracker_is_a_local_algorithm(self, qapp):
         panel = make_panel()
-        assert not panel.cloud_available
-        item = panel.cloud_combo.model().item(1)
-        assert not (item.flags() & Qt.ItemFlag.ItemIsEnabled)
-        assert "本地跟踪" in panel.cloud_combo.toolTip()
-        assert panel.cloud_combo.currentIndex() == 0  # 默认本地跟踪
+        assert panel.cloud_combo.currentText() == "Cloud Tracker"
+        assert panel.cloud_combo.itemText(1) == "Point Tracker"
+        seen = []
+        panel.toolbar.tool_changed.connect(seen.append)
+        panel.cloud_combo.setCurrentIndex(1)
+        assert seen == ["point"]
+        assert panel.toolbar.current_tool() == "point"
 
     def test_cloud_enabled_when_available(self, qapp):
         panel = make_panel()
@@ -326,8 +351,8 @@ class TestToolbar:
 
 class TestGraphSpec:
     def test_layout_constants(self):
-        assert TIME_RULER_H == 22
-        assert VALUE_AXIS_W == 38
+        assert TIME_RULER_H == 30
+        assert VALUE_AXIS_W == 22
 
     def test_curve_colors(self):
         assert CURVE_COMPONENTS["tx"][0] == QColor(0x00, 0xE0, 0xB0)
@@ -428,3 +453,102 @@ class TestSignals:
         graph.frame_clicked.connect(seen.append)
         graph.view.frame_clicked.emit(42)
         assert seen == [42]
+
+
+def test_reference_width_uses_single_transport_row(qapp):
+    panel = make_panel()
+    panel.set_bound_shape("Window 1")
+    panel.resize(786, 418)
+    qapp.processEvents()
+    assert panel._control_area.height() == 44
+    widgets = [panel._transport_widget, panel._channel_widget, panel._segment_widget]
+    positions = [widget.mapTo(panel._control_area, QPoint(0, 0)).y() for widget in widgets]
+    assert max(positions) - min(positions) < 5
+
+
+def test_channels_and_perspective_emit_real_parameters(qapp):
+    panel = make_panel()
+    panel.set_bound_shape("Window 1")
+    seen = []
+    panel.params_changed.connect(seen.append)
+    panel.channel_boxes["scale"].click()
+    assert seen[-1]["channels"]["scale"] is False
+    panel.channel_3d.click()
+    assert seen[-1]["mode"] == "homography"
+    assert seen[-1]["channels"]["perspective"] is True
+    panel.set_params({"mode": "trs", "channels": {"scale": True}, "correction_mode": "frame"})
+    assert panel.get_params()["mode"] == "trs"
+    assert panel.get_params()["channels"]["scale"] is True
+    assert panel.get_params()["correction_mode"] == "frame"
+    assert len(seen) == 2
+
+
+def test_reference_transport_signals_and_dedicated_stop(qapp):
+    panel = make_panel()
+    panel.set_bound_shape("Window 1")
+    seen = []
+    panel.track_backward_one_requested.connect(lambda: seen.append("back_one"))
+    panel.track_auto_requested.connect(lambda: seen.append("auto"))
+    panel.clear_tracking_requested.connect(lambda: seen.append("clear"))
+    panel.cancel_requested.connect(lambda: seen.append("stop"))
+    panel.btn_backward_one.click()
+    panel.btn_auto.click()
+    panel.btn_clear.click()
+    panel.set_state(PanelState.RUNNING)
+    assert not panel.btn_auto.isEnabled()
+    panel.btn_stop.click()
+    assert seen == ["back_one", "auto", "clear", "stop"]
+
+
+def test_graph_reads_current_frame_and_scrubs_within_clip(qapp):
+    graph = TrackerGraph()
+    graph.set_timebase(25.0)
+    graph.set_frame_range(100, 200)
+    graph.set_series({"tx": [(100, 0.0), (150, 5.0), (200, 10.0)]})
+    graph.set_current_frame(150)
+    assert graph.view.current_value("tx") == 5.0
+    assert graph.view.timecode(150) == "00:00:06:00"
+    seen = []
+    graph.frame_clicked.connect(seen.append)
+    graph.view._seek_from_x(-10000)
+    graph.view._seek_from_x(10000)
+    assert seen == [100, 200]
+    assert graph.vertical_zoom.value() == 100
+    assert graph.vertical_zoom.invertedAppearance()
+    graph.vertical_zoom.setValue(75)
+    assert graph.view._value_zoom == 2.0
+
+
+def test_new_parameters_restore_without_emitting(qapp):
+    panel = make_panel()
+    panel.set_bound_shape("Window 1")
+    seen = []
+    algorithm_events = []
+    panel.params_changed.connect(seen.append)
+    panel.toolbar.tool_changed.connect(algorithm_events.append)
+    panel.set_params({"algorithm": "point", "channels": {"tx": False, "perspective": True},
+                      "correction_mode": "frame", "interactive": True})
+    params = panel.get_params()
+    assert params["algorithm"] == "point"
+    assert panel.toolbar.current_tool() == "point"
+    assert params["mode"] == "homography"
+    assert params["channels"]["tx"] is False
+    assert params["channels"]["perspective"] is True
+    assert params["correction_mode"] == "frame"
+    assert params["interactive"] is True
+    assert seen == []
+    assert algorithm_events == []
+    panel.cloud_combo.setCurrentIndex(0)
+    assert seen[-1]["algorithm"] == "region"
+
+
+def test_series_updates_keep_explicit_clip_range_and_zoom(qapp):
+    graph = TrackerGraph()
+    graph.set_frame_range(100, 500)
+    graph.horizontal_zoom.setValue(150)
+    extent = graph.view._frame_extent()
+    graph.set_series({"tx": [(200, 0.5), (300, 1.0)]})
+    assert graph.view._frame_extent() == extent
+    assert graph.view._clip_extent == (100, 500)
+    graph.horizontal_zoom.setValue(0)
+    assert graph.view._frame_extent() == (100.0, 500.0)
