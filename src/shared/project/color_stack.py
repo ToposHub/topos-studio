@@ -117,6 +117,9 @@ class ColorStackData:
     layers: tuple[dict[str, Any], ...] = ()
     active_layer_index: int = 0
     raw_params: dict[str, Any] = field(default_factory=dict)
+    # 调色节点图（B02：color_graph.schema_version 独立于 stack schema；
+    # None = 旧工程/未建图。合法图优先于 legacy layers（B03 迁移语义）。
+    color_graph: "ColorGraphData | None" = None
     # P1-COLOR-13: per-clip 视频降噪参数（VideoDenoiseParams.to_dict；
     # None = 该 clip 未启用，切 clip 时据此重置引擎会话防串扰）
     video_denoise: dict[str, Any] | None = None
@@ -134,6 +137,7 @@ class ColorStackData:
         "created_at", "modified_at", "scope", "source_kind",
         "timeline_id", "clip_id", "trackings",
         "layers", "active_layer_index", "raw_params", "video_denoise", "video_stabilization",
+        "color_graph",
     })
 
     def __post_init__(self) -> None:
@@ -307,6 +311,15 @@ class ColorStackData:
             modified_at=time.time(),
         )
 
+    def with_color_graph(self, graph: "ColorGraphData | None") -> ColorStackData:
+        """创建新实例，携带/清除调色节点图（B02）。
+
+        graph 为 None 表示显式清除（如 reset_graph）。图本体是不可变
+        ColorGraphData（parse 边界已冻结参数），此处不再深拷贝；语义
+        修改（结构/参数）属于 render 内容，更新 modified_at。
+        """
+        return replace(self, color_graph=graph, modified_at=time.time())
+
     def to_dict(self) -> dict[str, Any]:
         """序列化到字典。
 
@@ -341,6 +354,8 @@ class ColorStackData:
         if self.layers:
             data["layers"] = [dict(layer) for layer in self.layers]
             data["active_layer_index"] = self.active_layer_index
+        if self.color_graph is not None:
+            data["color_graph"] = self.color_graph.to_dict()
         if self.raw_params:
             data["raw_params"] = self.raw_params
         if self.video_stabilization:
@@ -356,9 +371,16 @@ class ColorStackData:
         """从字典反序列化。
 
         未知键忽略；schema_version 缺失按 v1（无 layers）处理。
+        ``color_graph`` 存在但非法时抛 ``GraphSchemaError``（B03：显式
+        诊断，不静默回退 legacy layers 让用户看旧效果）。
         """
         layers = data.get("layers") or ()
         raw_params = data.get("raw_params") or {}
+        graph_payload = data.get("color_graph")
+        color_graph = None
+        if graph_payload is not None:
+            from src.shared.project.color_graph import ColorGraphData
+            color_graph = ColorGraphData.from_dict(graph_payload)
         return ColorStackData(
             stack_id=data.get("stack_id", str(uuid.uuid4())),
             asset_id=data.get("asset_id"),
@@ -386,6 +408,7 @@ class ColorStackData:
             layers=tuple(layers) if isinstance(layers, (list, tuple)) else (),
             active_layer_index=int(data.get("active_layer_index", 0) or 0),
             raw_params=raw_params if isinstance(raw_params, dict) else {},
+            color_graph=color_graph,
             video_denoise=(
                 data.get("video_denoise")
                 if isinstance(data.get("video_denoise"), dict) else None),
