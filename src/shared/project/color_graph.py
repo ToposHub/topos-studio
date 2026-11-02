@@ -164,11 +164,14 @@ NODE_PORT_CATALOG: Mapping[NodeType, Tuple[ColorPortSpec, ...]] = MappingProxyTy
 # ── params 冻结 ──────────────────────────────────────────────────────────
 
 def freeze_params(value: Any, depth: int = 0, *,
-                  context: str = "params") -> Any:
+                  context: str = "params",
+                  allow_paths: bool = False) -> Any:
     """递归冻结参数容器：dict→mappingproxy、list→tuple；标量校验。
 
     拒绝：NaN/Inf、绝对路径字符串、不可序列化对象（Qt/GPU 句柄等）。
     parse/构造边界调用一次，之后的实例不可被外部原地修改。
+    ``allow_paths=True`` 仅供 B03 ``legacy_payload``（迁移期原始 Layer
+    载荷，路径在 B14 资源闭包统一转工程引用）——params 永远走默认严格态。
     """
     if depth > MAX_PARAM_RECURSION:
         raise GraphSchemaError("recursion_limit",
@@ -183,7 +186,7 @@ def freeze_params(value: Any, depth: int = 0, *,
                 "non_finite_number", f"{context} 含 NaN/Inf: {value!r}")
         return float(value)
     if isinstance(value, str):
-        if _ABSOLUTE_PATH_RE.match(value):
+        if _ABSOLUTE_PATH_RE.match(value) and not allow_paths:
             raise GraphSchemaError(
                 "absolute_path",
                 f"{context} 含机器绝对路径 {value!r}；资源须用工程 asset/payload 引用")
@@ -195,7 +198,8 @@ def freeze_params(value: Any, depth: int = 0, *,
                 raise GraphSchemaError(
                     "illegal_param_key", f"{context} 键必须是字符串: {key!r}")
             frozen[key] = freeze_params(item, depth + 1,
-                                        context=f"{context}.{key}")
+                                        context=f"{context}.{key}",
+                                        allow_paths=allow_paths)
         return MappingProxyType(frozen)
     if isinstance(value, (list, tuple)):
         return tuple(freeze_params(item, depth + 1,
@@ -226,6 +230,10 @@ class ColorNodeData:
     enabled: bool = True
     label: str = ""                   # UI 元信息（不是身份/执行顺序）
     shared_definition_id: str | None = None
+    # B03 迁移期显式载体：Layer.to_dict(None) 原始载荷（含 active_lut_path
+    # 等路径字符串与 bitmap 引用——freeze 豁免路径检查，B14 资源闭包时
+    # 统一转工程 asset 引用）。反向投影 legacy layers 的事实来源。
+    legacy_payload: Mapping[str, Any] = field(default_factory=dict)
     # Compound 内部子图（嵌套 ColorGraphData；depth 校验在 parse）
     compound_children: "ColorGraphData | None" = None
     # 未知 node type 的原始 payload 保留（load→save 不丢）
@@ -236,6 +244,11 @@ class ColorNodeData:
             raise GraphSchemaError("illegal_param_key", "node_id 不能为空")
         object.__setattr__(self, "params", freeze_params(
             dict(self.params), context=f"node[{self.node_id}].params"))
+        if self.legacy_payload:
+            object.__setattr__(self, "legacy_payload", freeze_params(
+                dict(self.legacy_payload),
+                context=f"node[{self.node_id}].legacy_payload",
+                allow_paths=True))
         if self.node_type not in {t.value for t in NodeType}:
             # 未知类型：params 保留原样（只读浏览），不在此抛错
             pass
@@ -268,6 +281,8 @@ class ColorNodeData:
             data["label"] = self.label
         if self.shared_definition_id is not None:
             data["shared_definition_id"] = self.shared_definition_id
+        if self.legacy_payload:
+            data["legacy_payload"] = unfreeze_params(dict(self.legacy_payload))
         if self.compound_children is not None:
             data["compound_children"] = self.compound_children.to_dict()
         data.update(self._extra_fields)
@@ -290,6 +305,7 @@ class ColorNodeData:
         if type_version < 1:
             raise GraphSchemaError("unknown_node_type",
                                    f"node[{node_id}] type_version < 1")
+        legacy_raw = data.get("legacy_payload")
         children_raw = data.get("compound_children")
         children = (ColorGraphData.from_dict(children_raw)
                     if isinstance(children_raw, Mapping) else None)
@@ -305,13 +321,15 @@ class ColorNodeData:
             enabled=enabled,
             label=str(data.get("label") or ""),
             shared_definition_id=data.get("shared_definition_id"),
+            legacy_payload=(dict(legacy_raw)
+                            if isinstance(legacy_raw, Mapping) else dict()),
             compound_children=children,
             _extra_fields=split_extras(data, ColorNodeData._KNOWN_KEYS),
         )
 
     _KNOWN_KEYS: ClassVar[frozenset[str]] = frozenset({
         "node_id", "node_type", "type_version", "params", "enabled",
-        "label", "shared_definition_id", "compound_children",
+        "label", "shared_definition_id", "legacy_payload", "compound_children",
     })
 
 
@@ -406,6 +424,46 @@ class SharedDefinitionData:
     _KNOWN_KEYS: ClassVar[frozenset[str]] = frozenset({
         "definition_id", "name", "node_type", "type_version", "version", "params",
     })
+
+
+def _check_reachability(nodes: Mapping[str, ColorNodeData],
+                        edges: Sequence[ColorEdgeData],
+                        source_id: str, output_id: str
+                        ) -> list["GraphSchemaError"]:
+    """每个节点必须从 Source 可达且可达 Output；否则报 isolated_node。
+
+    未接线的合法形态（用户新建后暂未连线）在 schema 层允许——这是
+    ``validate()`` 的**图级**规则，service 提交前可按阶段放宽提示级别；
+    但引擎/hydrator 消费的图必须全连通（断链=丢效果）。
+    """
+    forward: dict[str, list[str]] = {nid: [] for nid in nodes}
+    backward: dict[str, list[str]] = {nid: [] for nid in nodes}
+    for edge in edges:
+        if edge.src_node in nodes and edge.dst_node in nodes:
+            forward[edge.src_node].append(edge.dst_node)
+            backward[edge.dst_node].append(edge.src_node)
+
+    def _reachable(start: str, adjacency: Mapping[str, list[str]]) -> set[str]:
+        seen = {start}
+        stack = [start]
+        while stack:
+            current = stack.pop()
+            for nxt in adjacency.get(current, ()):
+                if nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return seen
+
+    from_source = _reachable(source_id, forward)
+    to_output = _reachable(output_id, backward)
+    errors: list[GraphSchemaError] = []
+    for nid in nodes:
+        if nid not in from_source or nid not in to_output:
+            errors.append(GraphSchemaError(
+                "isolated_node",
+                f"node[{nid}] 不在 Source→Output 连通域内（断链或孤立）",
+                node_id=nid))
+    return errors
 
 
 @dataclass(frozen=True)
@@ -677,6 +735,21 @@ class ColorGraphData:
 
     def is_valid(self) -> bool:
         return not self.validate()
+
+    def validate_execution(self) -> list[GraphSchemaError]:
+        """执行级校验（B08 编译/B09 执行前）：结构合法 + 全连通。
+
+        结构层允许未连接节点（用户新建暂未连线，§6.3"未连接节点允许
+        保留，导出只取依赖锥"）；执行/引擎消费前必须全连通——断链 =
+        丢效果，必须显式拒绝。
+        """
+        errors = list(self.validate())
+        nodes = {n.node_id: n for n in self.nodes}
+        if (self.source_node_id in nodes and self.output_node_id in nodes
+                and not any(e.code == "node_not_found" for e in errors)):
+            errors.extend(_check_reachability(
+                nodes, self.edges, self.source_node_id, self.output_node_id))
+        return errors
 
     # ── 序列化 ──
 
