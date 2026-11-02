@@ -1121,3 +1121,39 @@ def _remap_edge(edge: ColorEdgeData, remap: Mapping[str, str]) -> ColorEdgeData:
         dst_node=remap.get(edge.dst_node, edge.dst_node),
         dst_port=edge.dst_port,
         slot_id=edge.slot_id)
+
+
+def can_export_lut(graph: ColorGraphData) -> tuple[bool, str]:
+    # 可投影类型集合（与迁移严格投影同口径）
+    from src.features.color.core.color_graph_migration import (
+        _PROJECTABLE_TYPES,
+    )
+    """LUT 导出资格（B14.5）：图必须 pointwise 可表达。
+
+    严格判定：仅 Source→Corrector…→Output 单链（无 key 边/混合器/
+    splitter/compound/shared/alpha）；每个 Corrector 的 legacy_payload
+    不含蒙版/限定器/跟踪/AI matte/插件/关键帧/变形器（空间或时域算子
+    使 3D LUT 不可表达）。不满足返回 (False, 原因)——上层必须拒绝或
+    要求显式排除，不自动丢弃效果导出"看似成功"的 cube。
+    """
+    if not isinstance(graph, ColorGraphData) or graph.validate():
+        return False, "graph_invalid"
+    if graph.shared_definitions or graph.alpha_output_node_id:
+        return False, "shared_definitions_or_alpha_present"
+    for node in graph.nodes:
+        if node.node_type not in _PROJECTABLE_TYPES:
+            return False, f"node_type_{node.node_type}"
+        if node.node_type == NodeType.CORRECTOR.value:
+            payload = dict(node.legacy_payload or {})
+            for blocker, label in (
+                    ("mask_shapes", "windows_masks"),
+                    ("grade_keyframes", "keyframes_temporal"),
+                    ("plugins", "plugins"),
+                    ("warper_params", "warper_spatial"),
+                    ("ai_matte", "ai_matte")):
+                if payload.get(blocker):
+                    return False, label
+            qualifier = payload.get("qualifier_params") or {}
+            if qualifier.get("enabled", False):
+                return False, "qualifier_spatial"
+    return True, "pointwise_serial_chain"
