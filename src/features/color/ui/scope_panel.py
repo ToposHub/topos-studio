@@ -34,6 +34,11 @@ from src.shared.ui.widgets.vectorscope_widget import (
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import apply_combo_dropdown_style
 
+def _scope_diag():
+    """S01 接收段诊断（惰性取模块属性，测试可替换单例）。"""
+    from src.features.color.core.scope_diagnostics import scope_diagnostics
+    return scope_diagnostics
+
 
 def _scope_header_font() -> QFont:
     font = QFont("Arial")
@@ -1275,10 +1280,16 @@ class ScopePanel(QWidget):
         silently dropped.  No pixel arrays are involved.
         """
         if frame is None:
+            _scope_diag().record("panel", "frame_none")
             return
         if int(getattr(frame, 'revision', -1)) != self.gpu_demand_revision:
+            _scope_diag().record("panel", "stale_revision",
+                                 revision=getattr(frame, 'revision', None),
+                                 demand_revision=self.gpu_demand_revision)
             return
         if self._scope_source != 'graded':
+            _scope_diag().record("panel", "source_not_graded",
+                                 detail=str(self._scope_source))
             return  # GPU 分析只针对调色后输出（P1-COLOR-07）
         # Present the texture.  The presenter only stores the descriptor;
         # actual GL work happens in paintGL under the GL mutex.
