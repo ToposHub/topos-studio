@@ -151,7 +151,12 @@ NODE_PORT_CATALOG: Mapping[NodeType, Tuple[ColorPortSpec, ...]] = MappingProxyTy
         ColorPortSpec("b", PortKind.IMAGE, PortDirection.IN),
         ColorPortSpec("image", PortKind.IMAGE, PortDirection.OUT),
     ),
-    NodeType.COMPOUND: (),   # 由 compound mapping 定义（B11 展开时校验）
+    NodeType.COMPOUND: (
+        # 边界端口（B04 结构）：image 直通；key 等动态 mapping 由 B11
+        # 按 children 边界扩展校验（params.boundary_mapping）。
+        ColorPortSpec("image", PortKind.IMAGE, PortDirection.IN),
+        ColorPortSpec("image", PortKind.IMAGE, PortDirection.OUT),
+    ),
     NodeType.OUTPUT: (
         ColorPortSpec("image", PortKind.IMAGE, PortDirection.IN),
     ),
