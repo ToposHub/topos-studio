@@ -216,9 +216,13 @@ class AsyncRenderer(QThread):
         # S04/B16.5：图执行（N07）。scope 全帧先接（S04）；生产开关
         # （B16.5）扩展到 preview/color output。plan 缓存键含 graph_revision
         # + source_content_revision（引擎图 revision），与 scope 内容失效
-        # 语义一致；租约至多持有一帧（消费/下一帧释放）。
+        # 语义一致；B08 §5.4 预算淘汰（LRU 续命）；租约至多持有一帧
+        # （消费/下一帧释放）。
+        from src.features.color.core.color_graph_compiler import (
+            BoundedPlanCache,
+        )
         self._graph_executor: Optional[object] = None
-        self._graph_plan_cache: Dict[tuple, Any] = {}
+        self._graph_plan_cache: BoundedPlanCache = BoundedPlanCache()
         self._graph_lease: Optional[tuple] = None
         # gpu_scope_enabled: master rollback switch. When False the renderer
         # never runs the GPU scope lane; the UI may show the CPU fallback
