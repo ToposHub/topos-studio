@@ -165,7 +165,12 @@ def f03_layer_stack() -> List[Layer]:
     l1.grading_params["contrast"] = -0.2
 
     l2 = _neutral_layer("Tone Curve")
-    l2.curves_lut = _curve_lut(((0.0, 0.0), (0.25, 0.18), (0.75, 0.82), (1.0, 1.0)))
+    # 曲线以可持久化控制点定义（UI 屏幕坐标约定：y=0 顶部=最大输出；
+    # 恒等曲线 = [(0,255),(255,0)]）。LUT 由数据派生——legacy save/load
+    # 只持久化控制点，LUT 是渲染侧缓存（B09 迁移链路必须可重建）。
+    l2.curves_data = {"M": [(0, 255), (64, 209), (191, 46), (255, 0)]}
+    from src.features.color.core.layer import build_curves_lut_from_data
+    l2.curves_lut = build_curves_lut_from_data(l2.curves_data)
     l2.grading_params["saturation"] = 1.15
     return [l0, l1, l2]
 

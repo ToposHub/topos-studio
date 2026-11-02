@@ -270,7 +270,10 @@ def generate(output_dir: Path) -> Dict[str, Any]:
             if not layer.visible:
                 continue  # E03 _do_render_impl 同语义
             flags = {"has_curves": layer.curves_lut is not None}
-            current = _render_layer_pass(ctx, pipeline, current, layer, flags=flags)
+            bindings = (f03_plugin_stub_binding(),) \
+                if layer.name == "Tone Curve" else ()
+            current = _render_layer_pass(ctx, pipeline, current, layer,
+                                         bindings=bindings, flags=flags)
         np.save(output_dir / "f03_l1_bypassed.npy", current)
         manifest["references"]["f03_l1_bypassed"] = _stats(current)
 

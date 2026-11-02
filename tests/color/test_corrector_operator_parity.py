@@ -168,7 +168,8 @@ class TestGoldenParity:
             layers = f03_layer_stack()
             layers[1].visible = False
             out = run_serial_passes(
-                ctx, pipeline, f01_hdr_ramp(64), [_layer_dto(l) for l in layers])
+                ctx, pipeline, f01_hdr_ramp(64), [_layer_dto(l) for l in layers],
+                bindings_per_layer=[None, None, (f03_plugin_stub_binding(),)])
             ref = _baseline("f03_l1_bypassed")
             np.testing.assert_array_equal(out, ref)
         finally:
