@@ -78,7 +78,7 @@ class CapabilityReport:
 
     @property
     def executable(self) -> bool:
-        return not any(status == "unsupported"
+        return not any(status in ("unsupported", "pending")
                        for _, status in self.unsupported_status)
 
     unsupported_status: tuple[tuple[str, str], ...] = field(default_factory=tuple)
@@ -135,9 +135,11 @@ class ColorGraphRenderPlan:
             status = catalog.get(render_pass.op, "unsupported")
             label = f"{render_pass.index}:{render_pass.node_id}:{render_pass.op}"
             statuses.append((label, status))
-            if status != "exact":
-                # fail-closed：unsupported 与 pending 都不可执行（B10
-                # 落实 mixer 数学后翻 exact）
+            if status not in ("exact", "fallback"):
+                # fail-closed：unsupported 与 pending 拒绝执行。fallback
+                # （B12 起 CPU/Metal 的 Corrector 族）= 基础域完整执行 +
+                # 越域参数在 pass 级显式拒绝（production_layer_domain_
+                # errors），预检放行、执行期 fail-closed
                 unsupported.append((label, (
                     f"算子 {render_pass.op} 后端状态 {status}"
                     "（unsupported/pending 均拒绝执行）")))
