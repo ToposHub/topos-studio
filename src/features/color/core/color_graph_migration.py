@@ -293,14 +293,15 @@ def project_legacy_layers(graph: ColorGraphData) -> list[dict[str, Any]]:
         nxt_id = out_edges[current.node_id][0].dst_node
         current = by_id[nxt_id]
         if current.node_type == NodeType.CORRECTOR.value:
-            # 完整 unfreeze：legacy_payload 内层是 mappingproxy/tuple
-            # （Layer.from_dict 只接受原生 dict/list）
-            payload = unfreeze_params(dict(current.legacy_payload))
-            # 图侧编辑过的结构化字段回写（enabled/opacity/blend/bake 标记）
-            payload["visible"] = current.enabled
-            payload["opacity"] = current.params.get(
-                "opacity", payload.get("opacity", 1.0))
-            payload["blend_mode"] = current.params.get(
-                "blend_mode", payload.get("blend_mode", "Normal"))
-            layers.append(payload)
+            # 生产合并（S04/B06.5）：legacy_payload 基底 + node.params
+            # 结构化域（grade/qualifier/opacity/blend/enabled）——图命令
+            # 编辑过的 grade 必须随投影回到引擎，否则图→引擎回路丢参数。
+            # include_lut_cache=False：持久化边界语义（Layer.from_dict
+            # 按控制点重建 LUT，载荷守恒按 JSON 形态比较）
+            from src.features.color.core.color_graph_param_source import (
+                node_layer_payload,
+            )
+            payload = node_layer_payload(current, include_lut_cache=False)
+            if payload is not None:
+                layers.append(payload)
     return layers

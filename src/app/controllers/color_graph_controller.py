@@ -916,6 +916,320 @@ class LegacyGradingAdapter:
         return self._bridge.flush_transaction()
 
 
+# ── B06.5：真实 app 装配（MainWindow 持有）────────────────────────────────
+
+class ColorGraphAppHost:
+    """节点面板/调色手势接权威图的真实宿主（B06 剩余接线）。
+
+    装配关系（MainWindow ``_wire_color_graph_host``）：
+
+    - **clip 水合**：``page_controller._load_color_stack_to_grading_panel``
+      尾部调用 ``on_clip_stack_loaded``——bind_stack + 会话切换 + 从
+      ``stack.color_graph`` 水合投影（无图栈不挂起面板，首次编辑经
+      ``ApplyColorGraphCommand`` 自动迁移建图）。
+    - **提交后同步**：bridge 的 ``set_project`` 回调（命令提交/undo/redo
+      都会经过）把当前栈重投影到引擎（``apply_stack_to_engine``，含 S04
+      图登记）+ 调色面板 + 重渲染——图命令立即反映到画面。
+    - **E09 图编辑上下文**：节点面板选中 Corrector 时（显式图编辑态），
+      GradingPanel 读句柄、grade 手势经 ``LegacyGradingAdapter`` 事务
+      （一次手势一个 command；拖动期间 legacy 引擎通道同值预览，
+      flush 后投影收敛）。未选中节点 = 原工作流，零行为变更。
+    - **scope owner 真实 ID**（§6.4）：clip→stack_id；group pre/post→
+      当前 clip 所在组的 (group_id, stage) 并重绑组栈；timeline→
+      timeline ID（图编辑为 E27 后续，只记录 owner 不改绑）。
+    """
+
+    def __init__(self, *, get_project, set_project, project_stack,
+                 engine_provider, request_render, panels_provider=None,
+                 set_hydration_guard=None,
+                 color_context_provider=None) -> None:
+        self._get_project = get_project
+        self._project_stack = project_stack
+        self._engine_provider = engine_provider
+        self._request_render = request_render
+        self._panels_provider = panels_provider
+        self._set_hydration_guard = set_hydration_guard or (lambda _on: None)
+        self._color_context_provider = color_context_provider
+        self._coordinator = ColorGraphSessionCoordinator(
+            session_id="", on_load_graph=self._on_projection_load)
+        self._raw_set_project = set_project
+        self._bridge = GraphProjectBridge(
+            self._coordinator, project_stack, get_project,
+            set_project=self._on_project_published)
+        self._host = ColorGraphPanelHost(self._bridge, self._coordinator)
+        self._adapter = LegacyGradingAdapter(self._host, self._bridge)
+        self._bound_stack_id = ""
+        self._clip_stack_id = ""
+        self._panel = None
+        self._publishing = False
+
+    # ── 装配 ──
+
+    def attach_panel(self, panel: Any) -> None:
+        self._panel = panel
+        self._host.attach_panel(panel)
+        scope_signal = getattr(panel, "scope_changed", None)
+        if scope_signal is not None:
+            scope_signal.connect(self._on_scope_menu)
+
+    @property
+    def panel_host(self) -> ColorGraphPanelHost:
+        return self._host
+
+    @property
+    def bridge(self) -> GraphProjectBridge:
+        return self._bridge
+
+    # ── clip 水合钩子 ──
+
+    def on_clip_stack_loaded(self, stack_id: str, *,
+                             scope: str = "clip",
+                             scope_owner_id: str | None = None) -> None:
+        stack_id = str(stack_id or "")
+        self._clip_stack_id = stack_id
+        owner = (scope_owner_id or stack_id or None)
+        try:
+            self._host.on_clip_switch(stack_id or "clip-session", owner,
+                                      flush_pending=True)
+        except Exception:  # noqa: BLE001 —— 切换失败保留上一会话并留日志
+            logger.warning("graph host clip switch failed", exc_info=True)
+        self._bind_and_hydrate(stack_id, scope, owner)
+        self._refresh_group_availability()
+
+    def _bind_and_hydrate(self, stack_id: str, scope: str,
+                          scope_owner_id) -> None:
+        """绑定栈并水合投影；无图栈用迁移视图（首次命令自动建图）。"""
+        self._bridge.bind_stack(stack_id)
+        self._bound_stack_id = stack_id
+        graph = self._stack_graph(stack_id)
+        if graph is None:
+            project = self._get_project() if self._get_project else None
+            stack = (project.color_stacks.get(stack_id)
+                     if project and stack_id else None)
+            if stack is not None:
+                from src.features.color.core.color_graph_migration import (
+                    migrate_legacy_stack,
+                )
+                try:
+                    graph = migrate_legacy_stack(stack)
+                except Exception:  # noqa: BLE001 —— 损坏栈不水合（不臆测）
+                    logger.warning(
+                        "graph host: legacy migration view failed for %s",
+                        stack_id[:8], exc_info=True)
+                    graph = None
+        if graph is not None:
+            self._hydrate(graph, scope, scope_owner_id)
+
+    def _stack_graph(self, stack_id: str):
+        project = self._get_project() if self._get_project else None
+        if project is None or not stack_id:
+            return None
+        stack = project.color_stacks.get(stack_id)
+        return getattr(stack, "color_graph", None) if stack else None
+
+    def _hydrate(self, graph, scope: str, scope_owner_id) -> None:
+        if self._coordinator.state != GraphSessionState.HYDRATING:
+            # switch_session 已置 HYDRATING（on_clip_switch 先行）；仅在
+            # 独立水合（无切换）时补锁
+            self._coordinator.begin_hydrate(scope, scope_owner_id)
+        else:
+            # switch_session 保留旧 scope（host.on_clip_switch 契约按当前
+            # scope 切换）：scope 菜单切换时在此补设，投影才不会被
+            # _is_stale 当作跨会话丢弃
+            self._coordinator.scope = scope
+            self._coordinator.scope_owner_id = scope_owner_id
+        self._coordinator.hydrate_projection(GraphProjection(
+            session_id=self._coordinator.session_id,
+            session_generation=self._coordinator.generation,
+            scope=scope, scope_owner_id=scope_owner_id,
+            graph=graph.to_dict(),
+            graph_revision=graph.graph_revision))
+
+    def _on_projection_load(self, graph_payload, scope) -> None:
+        """协调器投影回调 → 面板水合（锁内，无 intent 回流）。"""
+        if self._coordinator.last_ack is not None:
+            self._host.on_projection(self._coordinator.last_ack)
+
+    # ── scope owner 真实 ID（§6.4）──
+
+    def _color_context(self) -> tuple[str, str]:
+        provider = self._color_context_provider
+        try:
+            if provider is not None:
+                timeline_id, clip_id = provider()
+                return str(timeline_id or ""), str(clip_id or "")
+        except Exception:  # noqa: BLE001
+            pass
+        return ("", "")
+
+    def _current_group_owner(self):
+        """当前 clip 所在调色组 → (group_id, pre_stack, post_stack)。"""
+        project = self._get_project() if self._get_project else None
+        groups = getattr(project, "color_groups", None) if project else None
+        if not groups:
+            return None
+        timeline_id, clip_id = self._color_context()
+        if not clip_id:
+            return None
+        for group in groups.values():
+            for member in getattr(group, "members", ()) or ():
+                if (str(getattr(member, "clip_id", "") or "") == clip_id
+                        and (not timeline_id or str(getattr(
+                            member, "timeline_id", "") or "") == timeline_id)):
+                    return (group.group_id,
+                            getattr(group, "pre_group_stack_id", None),
+                            getattr(group, "post_group_stack_id", None))
+        return None
+
+    def _refresh_group_availability(self) -> None:
+        panel = self._panel
+        setter = getattr(panel, "set_group_available", None)
+        if callable(setter):
+            setter(self._current_group_owner() is not None)
+
+    def _on_scope_menu(self, scope: str) -> None:
+        """面板 scope 菜单 → 真实 owner 解析与重绑（不新造 group）。"""
+        if scope in ("group_pre_clip", "group_post_clip"):
+            owner = self._current_group_owner()
+            if owner is None:
+                return
+            group_id, pre_stack, post_stack = owner
+            stack_id = (pre_stack if scope == "group_pre_clip"
+                        else post_stack)
+            stage = "pre" if scope == "group_pre_clip" else "post"
+            if not stack_id:
+                return  # 该阶段无栈：菜单动作无效，保持当前 scope
+            self._host.on_clip_switch(
+                f"group-{group_id}-{stage}", f"{group_id}:{stage}",
+                flush_pending=True)
+            self._bind_and_hydrate(stack_id, scope, f"{group_id}:{stage}")
+        elif scope == "timeline":
+            # timeline 图编辑属 E27：记录 owner 身份（协调器会话），不改绑
+            timeline_id, _clip_id = self._color_context()
+            if timeline_id:
+                self._coordinator.scope_owner_id = timeline_id
+
+    # ── 提交/undo/redo 后的引擎同步（set_project 回调） ──
+
+    def _on_project_published(self, project) -> None:
+        """bridge set_project 回调：先替换工程（必须始终执行——命令
+        发布后 get_project 以此为准），再同步引擎/面板/渲染。
+
+        ``_publishing`` 防重入：宿主 setter 若回调本方法（或引擎同步
+        间接触发发布链），同一条发布链只替换工程并同步一次。
+        """
+        if self._publishing:
+            return
+        self._publishing = True
+        try:
+            if self._raw_set_project is not None:
+                self._raw_set_project(project)
+            self._set_hydration_guard(True)
+            try:
+                self._sync_engine_from_bound_stack(project)
+            finally:
+                self._set_hydration_guard(False)
+        finally:
+            self._publishing = False
+
+    def _sync_engine_from_bound_stack(self, project) -> None:
+        if not self._bound_stack_id:
+            return
+        stack = getattr(project, "color_stacks", {}).get(
+            self._bound_stack_id)
+        engine = self._engine_provider() if self._engine_provider else None
+        if stack is None or engine is None:
+            return
+        from src.features.color.adapters.color_stack_hydrator import (
+            ColorStackHydrator,
+        )
+        hydrator = ColorStackHydrator()
+        hydrator.apply_stack_to_engine(stack, engine)
+        if self._panels_provider is not None:
+            panels = self._panels_provider()
+            if panels:
+                hydrator.apply_stack_to_panels(stack, panels)
+        if self._request_render is not None:
+            try:
+                self._request_render()
+            except Exception:  # noqa: BLE001 —— 渲染失败不回滚工程
+                logger.warning("graph host post-commit render failed",
+                               exc_info=True)
+
+    def undo(self) -> bool:
+        return self._bridge._undo_once()
+
+    def redo(self) -> bool:
+        return self._bridge._redo_once()
+
+    # ── E09 图编辑上下文 ──
+
+    def graph_edit_context_active(self) -> bool:
+        handle = self._host.active_handle
+        return (self._bound_stack_id != "" and handle is not None
+                and handle.is_corrector)
+
+    def active_grade_node_id(self) -> str:
+        handle = self._host.active_handle
+        return handle.node_id if handle is not None else ""
+
+    def panel_grade_params(self) -> dict | None:
+        """句柄读路径（B06.2）：图命令域 grade 合并视图。"""
+        handle = self._host.active_handle
+        if handle is None or not handle.is_corrector:
+            return None
+        grade = dict(handle.grade_params())
+        payload = self._node_payload(handle.node_id)
+        if payload:
+            base = dict(payload.get("grading_params") or {})
+            base.update(grade)
+            return base
+        return grade
+
+    def _node_payload(self, node_id: str):
+        graph = self._stack_graph(self._bound_stack_id)
+        if graph is None:
+            return None
+        for node in graph.nodes:
+            if node.node_id == node_id:
+                return dict(node.legacy_payload or {})
+        return None
+
+    def align_engine_active_layer(self, node_id: str) -> bool:
+        """图节点 → 引擎活动层对齐（§6.5 source_layer_id 唯一许可路径）。"""
+        graph = self._stack_graph(self._bound_stack_id)
+        engine = self._engine_provider() if self._engine_provider else None
+        if graph is None or engine is None:
+            return False
+        payload = None
+        for node in graph.nodes:
+            if node.node_id == node_id:
+                payload = dict(node.legacy_payload or {})
+                break
+        layer_id = payload.get("id") if payload else None
+        if not layer_id:
+            return False
+        for index, layer in enumerate(getattr(engine, "layers", ()) or ()):
+            if getattr(layer, "id", None) == layer_id:
+                engine.active_layer_index = index
+                return True
+        return False
+
+    def begin_grade_gesture(self, transaction_id: str) -> None:
+        self._adapter.begin_gesture(transaction_id)
+
+    def grade_gesture_open(self) -> bool:
+        return bool(getattr(self._adapter, "_gesture_open", False))
+
+    def submit_grade_change(self, node_id: str, param_name: str, value,
+                            transaction_id: str) -> bool:
+        return self._adapter.submit_param_change(
+            node_id, param_name, value, transaction_id)
+
+    def end_grade_gesture(self) -> bool:
+        return self._adapter.end_gesture()
+
+
 # ── 权威图 → 面板 GraphDraft 投影（单向；draft 只是提案展示） ────────────
 
 def graph_payload_to_draft(payload: Mapping[str, Any]):

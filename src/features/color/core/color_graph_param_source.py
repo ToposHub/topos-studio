@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping
 
+import numpy as np
+
 from src.shared.project.color_graph import (
     ColorGraphData,
     NodeType,
@@ -39,13 +41,19 @@ _DICT_PARAM_OVERLAYS = (
 )
 
 
-def node_layer_payload(node: Any) -> dict[str, Any] | None:
+def node_layer_payload(node: Any, *,
+                       include_lut_cache: bool = True) -> dict[str, Any] | None:
     """单节点 → 合并后的 Layer DTO（非 Corrector 返回 None）。
 
     图内新建的 Corrector（``op_insert_corrector``/``op_add_layer_branch``
     等）没有 legacy_payload——以生产默认 Layer DTO（``Layer(label)`` 的
     ``to_dict``）为基底，再覆盖 node.params 结构化域。CPU oracle 与 GL
     两侧拿到同一份完整 DTO，避免"缺省值各自解释"。
+
+    :param include_lut_cache: True（执行语义）时从 ``curves_data`` 重建
+        ``curves_lut`` 嵌套 list；False（持久化边界语义，
+        ``project_legacy_layers``）保留载荷原值——``Layer.from_dict``
+        会按控制点重建，载荷守恒按 JSON 形态比较。
     """
     if node.node_type not in (NodeType.CORRECTOR.value,
                               NodeType.SHARED_CORRECTOR.value):
@@ -71,12 +79,14 @@ def node_layer_payload(node: Any) -> dict[str, Any] | None:
         payload["opacity"] = params["opacity"]
     if "blend_mode" in params:
         payload["blend_mode"] = params["blend_mode"]
-    # 曲线 LUT 重建（save/load 语义：控制点持久化，LUT 是缓存）
-    if payload.get("curves_data") and not _lut_current(payload):
+    # 曲线 LUT 重建（save/load 语义：控制点持久化，LUT 是缓存）。
+    # 输出为原生嵌套 list（与 Layer.to_dict 持久化形态一致；执行器/
+    # oracle 侧 np.asarray 同样可用）
+    if include_lut_cache and payload.get("curves_data") and not _lut_current(payload):
         from src.features.color.core.layer import build_curves_lut_from_data
         try:
-            payload["curves_lut"] = build_curves_lut_from_data(
-                dict(payload["curves_data"]))
+            lut = build_curves_lut_from_data(dict(payload["curves_data"]))
+            payload["curves_lut"] = np.asarray(lut).tolist()
         except Exception:  # noqa: BLE001 —— 坏曲线按 identity（缺省）处理
             payload.pop("curves_lut", None)
             payload.pop("curves_data", None)
