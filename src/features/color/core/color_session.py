@@ -515,6 +515,8 @@ class ColorSessionManager:
         # 最近使用的 session 移到尾部，超限时从头部（最旧）淘汰。
         self._session_history: 'OrderedDict[str, ColorSession]' = OrderedDict()
         self._max_history: int = 64
+        # B06.4：会话切换观察者（节点图宿主注册；见 add_session_observer）
+        self._session_observers: list = []
 
         logger.debug("ColorSessionManager initialized")
 
@@ -523,6 +525,23 @@ class ColorSessionManager:
     def get_current_session(self) -> ColorSession | None:
         """获取当前 session"""
         return self._current_session
+
+    def add_session_observer(self, callback) -> None:
+        """注册会话切换观察者（B06.4）。
+
+        回调签名 ``callback(session_or_none)``；``set_current_session`` /
+        ``clear_current_session`` 时同步触发。节点图宿主用它执行：
+        结束/取消当前事务 → generation 递增 → 重新水合 scope → 丢弃
+        晚到事件。观察者异常只记录不阻断会话切换。
+        """
+        self._session_observers.append(callback)
+
+    def _notify_observers(self, session) -> None:
+        for observer in list(self._session_observers):
+            try:
+                observer(session)
+            except Exception:  # noqa: BLE001 —— 观察者故障不阻断切换
+                logger.warning("session observer failed", exc_info=True)
 
     def set_current_session(self, session: ColorSession) -> None:
         """
@@ -539,12 +558,14 @@ class ColorSessionManager:
         history[session.session_id] = session
         while len(history) > self._max_history:
             history.popitem(last=False)
+        self._notify_observers(session)
 
         logger.info(f"ColorSession set: {session}")
 
     def clear_current_session(self) -> None:
         """清除当前 session"""
         self._current_session = None
+        self._notify_observers(None)
         logger.debug("ColorSession cleared")
 
     def has_active_session(self) -> bool:
