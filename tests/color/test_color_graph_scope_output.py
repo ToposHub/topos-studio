@@ -367,8 +367,9 @@ class TestScopeGraphSplice:
                 "color_graph_snapshot": SimpleNamespace(),
                 "layers": [{"id": "L1", "is_baked": True}],
             }
-            assert AsyncRenderer._execute_graph_frame(
-                r, params, 64, 64, Mock()) is None
+            tex, deferred = AsyncRenderer._execute_graph_frame(
+                r, params, 64, 64, Mock())
+            assert tex is None and deferred, "baked 帧应暂缓（回落旧循环）"
             assert diag.count(
                 "execute", "graph_deferred_legacy_feature") == 1
         finally:
@@ -388,8 +389,9 @@ class TestScopeGraphSplice:
             r.ai_plugin_textures = {}
             broken = SimpleNamespace(graph="not-a-graph")
             params = {"color_graph_snapshot": broken, "layers": []}
-            assert AsyncRenderer._execute_graph_frame(
-                r, params, 64, 64, Mock()) is None
+            tex, deferred = AsyncRenderer._execute_graph_frame(
+                r, params, 64, 64, Mock())
+            assert tex is None and not deferred, "编译失败必须 fail-closed"
             assert diag.count("execute", "graph_exception") == 1
         finally:
             diag_mod.scope_diagnostics = original
@@ -415,12 +417,12 @@ class TestScopeGraphSplice:
                                   data=source.astype(np.float16))
             try:
                 for i in range(2):
-                    tex = AsyncRenderer._execute_graph_frame(
+                    tex, deferred = AsyncRenderer._execute_graph_frame(
                         r,
                         {"color_graph_snapshot": snapshot,
                          "render_request_id": f"req-{i}", "layers": []},
                         32, 32, src_tex)
-                    assert tex is not None
+                    assert tex is not None and not deferred
                     executor, request_id = r._graph_lease
                     assert len(executor._published) == 1
                 r._release_graph_lease()
@@ -431,6 +433,83 @@ class TestScopeGraphSplice:
             finally:
                 src_tex.release()
         finally:
+            ctx.release()
+
+    def test_repeated_request_id_gets_unique_leases(self):
+        """缺陷回归（发布-释放竞态）：scope 重渲染复用同一冻结
+        render_request_id——每次执行必须拿到唯一租约 id，且当前输出的
+        纹理不被前次释放路径归池。"""
+        import src.features.color.core.scope_diagnostics as diag_mod
+        from src.features.color.core.scope_diagnostics import ScopeDiagnostics
+        diag = ScopeDiagnostics(enabled=True)
+        original = diag_mod.scope_diagnostics
+        diag_mod.scope_diagnostics = diag
+        ctx = moderngl.create_standalone_context(require=330)
+        try:
+            r = AsyncRenderer.__new__(AsyncRenderer)
+            r.ctx = ctx
+            r.pipeline = None
+            r.ai_plugin_textures = {}
+            r._graph_executor = None
+            r._graph_plan_cache = {}
+            r._graph_lease = None
+            r._render_quad = lambda prog: None
+            r._bind_aux_textures_single_layer = lambda prog, layer: None
+            r._generate_matte = lambda *a, **k: None
+            graph = _migrated_graph()
+            snapshot = freeze_graph(graph, session_id="s04")
+            source = f01_hdr_ramp(32)
+            src_tex = ctx.texture((32, 32), components=4, dtype="f2",
+                                  data=source.astype(np.float16))
+            try:
+                params = {"color_graph_snapshot": snapshot,
+                          "render_request_id": "same-id", "layers": []}
+                lease_ids = []
+                for _ in range(3):
+                    tex, deferred = AsyncRenderer._execute_graph_frame(
+                        r, params, 32, 32, src_tex)
+                    assert tex is not None and not deferred
+                    executor, request_id = r._graph_lease
+                    # 当前租约仍在发布表（未被前次释放路径弹掉/归池）
+                    assert executor._published[request_id].output_texture \
+                        is tex
+                    lease_ids.append(request_id)
+                assert len(set(lease_ids)) == 3, (
+                    "同一 render_request_id 的重复执行必须唯一租约")
+            finally:
+                src_tex.release()
+        finally:
+            diag_mod.scope_diagnostics = original
+            ctx.release()
+
+    def test_executor_same_id_republish_releases_previous(self):
+        """执行器防御路径：同 id 覆盖发布时旧输出归池（不泄漏）。"""
+        ctx = moderngl.create_standalone_context(require=330)
+        try:
+            executor = ColorGraphExecutor(ctx)
+            graph = _migrated_graph()
+            plan = compile_graph(freeze_graph(graph, session_id="d"),
+                                 size=(32, 32))
+            provider = graph_node_layer_provider(graph)
+            src = f01_hdr_ramp(32)
+            src_tex = ctx.texture((32, 32), components=4, dtype="f2",
+                                  data=src.astype(np.float16))
+            try:
+                first = executor.execute_plan(
+                    plan, src_tex, request_id="dup", source_size=(32, 32),
+                    layer_param_provider=provider)
+                pooled_before = executor.pooled_texture_count()
+                second = executor.execute_plan(
+                    plan, src_tex, request_id="dup", source_size=(32, 32),
+                    layer_param_provider=provider)
+                # 旧输出已归池（防御路径），新输出在发布表
+                assert executor.pooled_texture_count() == pooled_before + 1
+                assert executor._published["dup"] is second
+                assert second.output_texture is not first.output_texture
+            finally:
+                src_tex.release()
+        finally:
+            executor.release_pool()
             ctx.release()
 
 

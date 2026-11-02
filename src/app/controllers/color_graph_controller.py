@@ -1089,6 +1089,17 @@ class ColorGraphAppHost:
 
     def _on_scope_menu(self, scope: str) -> None:
         """面板 scope 菜单 → 真实 owner 解析与重绑（不新造 group）。"""
+        if scope == "clip":
+            # 回 clip：重绑 clip 栈（否则浏览组栈后，clip scope 的编辑
+            # 会误提交组 grade）
+            if self._clip_stack_id and self._bound_stack_id != \
+                    self._clip_stack_id:
+                self._host.on_clip_switch(
+                    self._clip_stack_id, self._clip_stack_id,
+                    flush_pending=True)
+                self._bind_and_hydrate(
+                    self._clip_stack_id, "clip", self._clip_stack_id)
+            return
         if scope in ("group_pre_clip", "group_post_clip"):
             owner = self._current_group_owner()
             if owner is None:
@@ -1104,10 +1115,17 @@ class ColorGraphAppHost:
                 flush_pending=True)
             self._bind_and_hydrate(stack_id, scope, f"{group_id}:{stage}")
         elif scope == "timeline":
-            # timeline 图编辑属 E27：记录 owner 身份（协调器会话），不改绑
+            # timeline 图编辑属 E27：记录 owner 身份；当前无 timeline
+            # grade 栈模型，解绑使编辑显式拒绝（fail-visible，不误写
+            # clip/组栈）
             timeline_id, _clip_id = self._color_context()
             if timeline_id:
                 self._coordinator.scope_owner_id = timeline_id
+            self._host.on_clip_switch(
+                f"timeline-{timeline_id or 'x'}", timeline_id or None,
+                flush_pending=True)
+            self._bridge.bind_stack("")
+            self._bound_stack_id = ""
 
     # ── 提交/undo/redo 后的引擎同步（set_project 回调） ──
 
@@ -1162,16 +1180,74 @@ class ColorGraphAppHost:
     def redo(self) -> bool:
         return self._bridge._redo_once()
 
+    def refresh_bound_graph(self) -> None:
+        """外部提交（保存边界一致化/粘贴/版本）后刷新绑定栈的图登记。
+
+        引擎图 stash（S04 scope 执行输入）与面板投影随工程图更新；
+        无图栈清登记。图 revision 未变时不重水合面板（避免无谓闪烁）。
+        """
+        graph = self._stack_graph(self._bound_stack_id)
+        engine = (self._engine_provider()
+                  if self._engine_provider else None)
+        if engine is None:
+            return
+        if graph is not None:
+            engine.set_active_color_graph(graph,
+                                          stack_id=self._bound_stack_id)
+            last_revision = (self._coordinator.last_ack.graph_revision
+                             if self._coordinator.last_ack else None)
+            if last_revision != graph.graph_revision:
+                self._hydrate(graph, self._coordinator.scope,
+                              self._coordinator.scope_owner_id)
+        else:
+            engine.clear_active_color_graph()
+
     # ── E09 图编辑上下文 ──
 
     def graph_edit_context_active(self) -> bool:
+        """图编辑上下文（grade 手势路由图的判定）。
+
+        - 节点面板选中 Corrector：显式图编辑态（B06.2）；
+        - 未选中但 ``color_graph_render_enabled``（B16.5 flag）开启且栈
+          携带图：canvas/scope 已由图执行渲染，legacy 通道只是同值预览
+          ——wheel 一律走图，避免两通道分叉；
+        - 其余（未选中 + flag 关）：原工作流零变更。
+        """
+        if self._bound_stack_id == "":
+            return False
         handle = self._host.active_handle
-        return (self._bound_stack_id != "" and handle is not None
-                and handle.is_corrector)
+        if handle is not None:
+            return handle.is_corrector
+        if self._stack_graph(self._bound_stack_id) is None:
+            return False
+        engine = (self._engine_provider()
+                  if self._engine_provider else None)
+        return bool(getattr(engine, "color_graph_render_enabled", False))
 
     def active_grade_node_id(self) -> str:
         handle = self._host.active_handle
-        return handle.node_id if handle is not None else ""
+        if handle is not None:
+            return handle.node_id
+        if not self.graph_edit_context_active():
+            return ""  # 非路由态（flag 关 + 无选择）：不提供节点身份
+        # flag 模式：引擎活动层 → source_layer_id 反查节点
+        engine = (self._engine_provider()
+                  if self._engine_provider else None)
+        if engine is None:
+            return ""
+        layer = (engine.get_active_layer()
+                 if hasattr(engine, "get_active_layer") else None)
+        layer_id = getattr(layer, "id", None)
+        if not layer_id:
+            return ""
+        graph = self._stack_graph(self._bound_stack_id)
+        if graph is None:
+            return ""
+        for node in graph.nodes:
+            payload = dict(node.legacy_payload or {})
+            if payload.get("id") == layer_id:
+                return node.node_id
+        return ""
 
     def panel_grade_params(self) -> dict | None:
         """句柄读路径（B06.2）：图命令域 grade 合并视图。"""

@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import Any, Mapping
 
 from src.shared.project.color_graph import (
@@ -202,6 +203,73 @@ def _flat_view_nonempty(stack: ColorStackData) -> bool:
     return bool(differs or stack.curves_data or stack.hsl_curve_data
                 or stack.mixer_params or stack.lut_path
                 or stack.soft_clip_params.get("enabled"))
+
+
+def reconcile_projectable_graph(
+    graph: ColorGraphData,
+    layers: Any,
+    *,
+    active_layer_index: int = 0,
+) -> tuple[ColorGraphData, bool]:
+    """保存边界：可投影图与引擎层快照一致化（B06 collect 权威图收口）。
+
+    背景：legacy 写通道（wheel 手势/层操作）只落 ``stack.layers``，
+    ``stack.color_graph`` 不动——重载时图优先（E07）会静默丢掉这些编辑。
+    可投影（串行）图的 layers 是两通道的**并集视图**（图命令提交后会重
+    投影引擎），因此以 layers 重新迁移即全量一致（参数/顺序/增删/旁路）。
+
+    - 无变化（layers 与当前图投影 JSON 形态一致）→ ``(graph, False)``
+      （不动 revision，避免每次手势提交推 revision）；
+    - 有变化 → 重新迁移，**保留旧图布局**（``ui_state``，node_id 稳定）
+      与 shared/锁等 layers 表达不了的图侧状态，revision = 旧 + 1；
+    - 图不可投影（分支/compound 等复杂结构 layers 表达不了）→
+      ``(graph, False)``：图保持权威不同步（legacy 写通道对复杂图的
+      失配是登记债务，见台账 E10/E27；不应把复杂图压平丢结构）。
+    """
+    import json as _json
+
+    if not isinstance(layers, (list, tuple)):
+        return graph, False
+    if not can_project_to_legacy_layers(graph):
+        return graph, False
+
+    def _norm(payloads: Any) -> str | None:
+        try:
+            return _json.dumps(payloads, default=list, sort_keys=True)
+        except (TypeError, ValueError):
+            return None  # 快照含不可序列化值：跳过相等捷径，走迁移校验
+
+    try:
+        current_projection = project_legacy_layers(graph)
+    except LegacyMigrationError:
+        return graph, False
+    if (_norm(current_projection) is not None
+            and _norm(current_projection) == _norm(list(layers))):
+        return graph, False
+
+    probe = ColorStackData.create(asset_id=None, name="reconcile")
+    probe_stack = probe.with_layers(
+        [dict(p) for p in layers],
+        active_layer_index=int(active_layer_index or 0))
+    try:
+        fresh = migrate_legacy_stack(probe_stack)
+    except Exception:  # noqa: BLE001 —— 坏快照不碰权威图
+        return graph, False
+    if fresh.validate():
+        return graph, False
+    reconciled = replace(
+        fresh,
+        graph_id=graph.graph_id,
+        shared_definitions=graph.shared_definitions,
+        working_color_context=graph.working_color_context,
+        ui_state=graph.ui_state,
+        minimum_reader_version=max(
+            graph.minimum_reader_version, fresh.minimum_reader_version),
+        graph_revision=int(graph.graph_revision) + 1,
+    )
+    if reconciled.validate():
+        return graph, False
+    return reconciled, True
 
 
 def _flat_layer_view(stack: ColorStackData) -> dict[str, Any]:

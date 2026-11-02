@@ -1393,9 +1393,16 @@ class LayerOpsMixin:
                 scope_frame = int(frame_ctx()[1] or 0) if frame_ctx else 0
             except Exception:  # noqa: BLE001 —— 身份取值失败按 0（下界）
                 scope_frame = 0
+            # 身份会话：图链接栈用图栈 ID；无图栈用面板绑定栈 ID（否则
+            # 所有无图栈共享空会话，clip 区分只剩 revision 契约兜底）
+            session_id = str(
+                getattr(engine, 'active_color_graph_stack_id', '') or '')
+            if not session_id:
+                grading_panel = getattr(self, 'grading_panel', None)
+                session_id = str(
+                    getattr(grading_panel, 'current_stack_id', '') or '')
             identity = ScopeSampleIdentity(
-                session_id=str(
-                    getattr(engine, 'active_color_graph_stack_id', '') or ''),
+                session_id=session_id,
                 scope_owner_id=None,
                 graph_revision=int(
                     getattr(engine, 'color_graph_revision', 0) or 0),
@@ -1863,12 +1870,14 @@ class LayerOpsMixin:
                 saturation/vibrance/mid_detail/hue_shift/highlights 依次取值。
         """
         if self.engine.get_current_image() is None: return
-        # B06.2 图编辑上下文（节点面板选中 Corrector）：grade 手势经图
-        # 事务（一次手势一个 command），legacy 引擎通道同值预览
+        # B06.2 图编辑上下文（节点面板选中 Corrector，或 B16.5 flag 下
+        # 图链接栈）：grade 手势经图事务（一次手势一个 command），legacy
+        # 引擎通道同值预览。无法定位目标节点（如复杂图 stale 层）时回
+        # 落 legacy 路径——手势绝不能被静默吞掉。
         graph_host = getattr(self, 'color_graph_host', None)
         if graph_host is not None and graph_host.graph_edit_context_active():
-            self._route_grading_to_graph(graph_host, args)
-            return
+            if self._route_grading_to_graph(graph_host, args):
+                return
         self.engine.grade_image(*args)
         # P1-COLOR-03: 关键帧模式下 / 参数已动画时，把修改记录为当前帧关键帧
         self._maybe_record_grade_keyframes(args)
@@ -1880,7 +1889,7 @@ class LayerOpsMixin:
         else:
             self.request_render()
 
-    def _route_grading_to_graph(self, graph_host, args) -> None:
+    def _route_grading_to_graph(self, graph_host, args) -> bool:
         """图编辑上下文的 grade 手势路由（B06.2）。
 
         - 图侧：grade_patch 并入手势事务（interaction_ended 时 flush 一次
@@ -1889,10 +1898,14 @@ class LayerOpsMixin:
           flush 后 ``_on_project_published`` 重投影收敛到同一值。
         - 关键帧：该上下文暂缓（节点关键帧域未图域化——登记债务，见
           台账 B06；legacy 上下文不受影响）。
+        - 返回 False：无法定位目标节点（复杂图 stale 层等）——调用方
+          回落 legacy 路径，手势不静默丢失。服务端拒绝（如栈锁）时
+          返回 True（手势归属图上下文，锁语义=完全拒绝，不走 legacy
+          绕过）。
         """
         node_id = graph_host.active_grade_node_id()
         if not node_id:
-            return
+            return False
         if not graph_host.grade_gesture_open():
             counter = int(getattr(self, '_graph_gesture_counter', 0)) + 1
             self._graph_gesture_counter = counter
@@ -1913,6 +1926,7 @@ class LayerOpsMixin:
             self._debounce_grading_render()
         else:
             self.request_render()
+        return True
 
     def on_tonal_saturation_changed(self, lift_sat: float,
                                     gamma_sat: float,

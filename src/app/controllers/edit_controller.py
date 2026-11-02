@@ -2146,10 +2146,26 @@ class EditControllerMixin:
         self._current_edit_project = new_project
         self.edit_project_dirty = True
 
-        # Update engine layers
+        # B06 保存边界一致化后：图宿主重读绑定栈的图（引擎图 stash/
+        # 面板投影刷新）。否则 legacy 通道编辑进图后，scope（图执行）
+        # 与 canvas（legacy 循环）在下次水合前渲染分叉。
+        graph_host = getattr(self, 'color_graph_host', None)
+        if graph_host is not None:
+            try:
+                graph_host.refresh_bound_graph()
+            except Exception:
+                logger.debug(
+                    "graph host refresh after stack commit failed",
+                    exc_info=True)
+
+        # Update engine layers：只回写**活动层**（live 通道已写同值）。
+        # 此前把扁平参数铺到所有层——非活动层的独立调色被冲掉，下一次
+        # 手势的 layers_snapshot 会把压平结果永久写入工程（per-layer
+        # 数据损坏）。
         if self.engine.layers:
-            for layer in self.engine.layers:
-                layer.grading_params = dict(grading_params)
+            idx = getattr(self.engine, "active_layer_index", 0) or 0
+            if 0 <= idx < len(self.engine.layers):
+                self.engine.layers[idx].grading_params = dict(grading_params)
 
         # The live preview has already rendered through the mergeable grading
         # lane.  The final ColorStack commit must not enqueue a full FIFO frame
