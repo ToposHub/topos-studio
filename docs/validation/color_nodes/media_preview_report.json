@@ -1,0 +1,27 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "real_app_import_and_source_thumbnail",
+  "per_node_rendering": "not_implemented",
+  "asset_id": "aa5e7e89-c2dc-48c9-948f-c0fe5e5593b3",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 124
+  },
+  "clip_id": "6e6bbb04-1544-414f-9231-01dab83fbefc",
+  "timeline_id": "52937cd1-29df-474e-899a-f8cb101656f1",
+  "current_file_matches_source": true,
+  "current_page": "Color",
+  "thumbnail_size": [
+    512,
+    288
+  ],
+  "thumbnail_rgb_std": 66.625,
+  "corrector_thumbnails_present": 2,
+  "source_tooltip": "Source preview — evaluated node output will be available after backend integration.",
+  "status": "passed",
+  "error": "",
+  "elapsed_seconds": 8.61
+}

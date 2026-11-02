@@ -6,6 +6,7 @@ and various menu-driven actions.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import os
 import logging
 
@@ -63,6 +64,25 @@ class _DependencyReportWorker(QRunnable):
 
 class MenuToolbarMixin:
     """Mixin that provides menu, toolbar, statusbar and shortcut methods."""
+
+    # Keep the legacy local argument names for setup_menus/_register_all_shortcuts.
+    # The IDs and callbacks belong exclusively to the UI-only node editor.
+    _COLOR_NODE_ACTIONS: tuple[tuple[str, str, str, str], ...] = (
+        ("add_layer_act", "add_serial", "Add Serial Node", "Alt+S"),
+        ("del_layer_act", "delete", "Delete Node", "Backspace"),
+        ("rename_layer_act", "label", "Node Label", ""),
+        ("toggle_vis_act", "enable", "Enable/Disable Selected Nodes", "Ctrl+D"),
+        ("disable_all_act", "enable_all", "Enable/Disable All Nodes", "Alt+Ctrl+D"),
+        ("reset_layer_act", "reset", "Reset Node Grade", ""),
+        ("copy_layer_act", "copy", "Copy Node Grade", "Ctrl+C"),
+        ("paste_layer_act", "paste", "Paste Node Grade", "Ctrl+V"),
+        ("duplicate_layer_act", "duplicate", "Duplicate Node", ""),
+        ("serial_before_act", "add_before", "Add Serial Before Current", "Shift+Alt+S"),
+        ("parallel_node_act", "add_parallel", "Add Parallel Node", "Alt+P"),
+        ("layer_node_act", "add_layer", "Add Layer Node", "Alt+L"),
+        ("outside_node_act", "add_outside", "Add Outside Node", "Alt+O"),
+        ("splitter_node_act", "splitter_combiner", "Add Splitter Combiner Node", ""),
+    )
 
     # ------------------------------------------------------------------
     # Menu construction
@@ -192,12 +212,12 @@ class MenuToolbarMixin:
         edit_menu = self.menu_edit
         undo_act = edit_menu.addAction(I18N.tr("action.undo", "Undo"))
         undo_act.setShortcut(QKeySequence.StandardKey.Undo)
-        undo_act.triggered.connect(self.undo)
+        undo_act.triggered.connect(lambda: self._route_color_node_history(False))
         self.undo_action_menu = undo_act # Keep reference to update state
 
         redo_act = edit_menu.addAction(I18N.tr("action.redo", "Redo"))
         redo_act.setShortcut(QKeySequence.StandardKey.Redo)
-        redo_act.triggered.connect(self.redo)
+        redo_act.triggered.connect(lambda: self._route_color_node_history(True))
         self.redo_action_menu = redo_act
 
         edit_menu.addSeparator()
@@ -274,60 +294,17 @@ class MenuToolbarMixin:
         crop_act.setVisible(not self._is_video_work_mode())
         edit_menu.addAction(crop_act)
 
-        # --- Layer submenu (under Edit) ---
-        self.menu_layer = edit_menu.addMenu(I18N.tr("menu.layer", "&Layer"))
-
-        add_layer_act = QAction(I18N.tr("action.new_layer", "New Layer"), self)
-        add_layer_act.setShortcut("Ctrl+Shift+N")
-        add_layer_act.triggered.connect(self.on_layer_added)
-        self.menu_layer.addAction(add_layer_act)
-
-        del_layer_act = QAction(I18N.tr("action.delete_layer", "Delete Current Layer"), self)
-        del_layer_act.setShortcut("Ctrl+Shift+Delete")
-        del_layer_act.triggered.connect(lambda: self.on_layer_removed(self.engine.active_layer_index))
-        self.menu_layer.addAction(del_layer_act)
-
-        self.menu_layer.addSeparator()
-
-        rename_layer_act = QAction(I18N.tr("action.rename_layer", "Rename Layer..."), self)
-        rename_layer_act.setShortcut("F2")
-        rename_layer_act.triggered.connect(self.rename_current_layer)
-        self.menu_layer.addAction(rename_layer_act)
-
-        toggle_vis_act = QAction(I18N.tr("action.toggle_visibility", "Toggle Layer Visibility"), self)
-        toggle_vis_act.setShortcut("Ctrl+D")
-        toggle_vis_act.triggered.connect(self.toggle_current_layer_visibility)
-        self.menu_layer.addAction(toggle_vis_act)
-
-        disable_all_act = QAction(I18N.tr("action.disable_all_layers", "Disable All Layers"), self)
-        disable_all_act.setShortcut("Alt+D")
-        disable_all_act.triggered.connect(self.disable_all_layers)
-        self.menu_layer.addAction(disable_all_act)
-
-        self.menu_layer.addSeparator()
-
-        reset_layer_act = QAction(I18N.tr("action.reset_layer", "Reset Current Layer"), self)
-        reset_layer_act.setShortcut("Ctrl+Shift+L")
-        reset_layer_act.triggered.connect(lambda: self.on_layer_reset(self.engine.active_layer_index))
-        self.menu_layer.addAction(reset_layer_act)
-
-        self.menu_layer.addSeparator()
-
-        # Layer Copy/Paste/Duplicate actions
-        copy_layer_act = QAction(I18N.tr("action.copy_layer", "Copy Layer Parameters"), self)
-        copy_layer_act.setShortcut("Ctrl+Shift+C")
-        copy_layer_act.triggered.connect(self.on_layer_copy)
-        self.menu_layer.addAction(copy_layer_act)
-
-        paste_layer_act = QAction(I18N.tr("action.paste_layer", "Paste Layer Parameters"), self)
-        paste_layer_act.setShortcut("Ctrl+Shift+V")
-        paste_layer_act.triggered.connect(self.on_layer_paste)
-        self.menu_layer.addAction(paste_layer_act)
-
-        duplicate_layer_act = QAction(I18N.tr("action.duplicate_layer", "Duplicate Layer"), self)
-        duplicate_layer_act.setShortcut("Shift+D")
-        duplicate_layer_act.triggered.connect(self.on_layer_duplicate)
-        self.menu_layer.addAction(duplicate_layer_act)
+        # --- Nodes submenu (under Edit); presentation draft only ---
+        node_actions = self._create_color_node_menu(edit_menu)
+        add_layer_act = node_actions["add_layer_act"]
+        del_layer_act = node_actions["del_layer_act"]
+        rename_layer_act = node_actions["rename_layer_act"]
+        toggle_vis_act = node_actions["toggle_vis_act"]
+        disable_all_act = node_actions["disable_all_act"]
+        reset_layer_act = node_actions["reset_layer_act"]
+        copy_layer_act = node_actions["copy_layer_act"]
+        paste_layer_act = node_actions["paste_layer_act"]
+        duplicate_layer_act = node_actions["duplicate_layer_act"]
 
         # --- Effects Menu ---
         self.menu_effects = menu_bar.addMenu(I18N.tr("menu.effects", "&Effects"))
@@ -532,6 +509,147 @@ class MenuToolbarMixin:
     # Shortcut display helpers
     # ------------------------------------------------------------------
 
+    def _create_color_node_menu(self, edit_menu: QMenu) -> dict[str, QAction]:
+        """Mount node commands without changing legacy layers or render state."""
+        from src.features.color.ui.node_editor_state import NodeKind
+
+        self.menu_layer = edit_menu.addMenu(I18N.tr("color_nodes.nodes", "&Nodes"))
+        self.menu_layer.setObjectName("ColorNodesMenu")
+        panel = getattr(self, "color_node_panel", None)
+        view = panel.view if panel is not None else None
+
+        def edit(action: str, operation: Callable[[], Any]) -> None:
+            if view is not None:
+                view.apply_edit(action, operation)
+
+        def label_node() -> None:
+            if view is not None:
+                view.setFocus(Qt.FocusReason.MenuBarFocusReason)
+                view.label_selected()
+
+        callbacks = {
+            "add_layer_act": lambda: edit("add_serial", view.state.add_serial),
+            "del_layer_act": self._delete_color_node_selection,
+            "rename_layer_act": label_node,
+            "toggle_vis_act": lambda: view.toggle_selected(),
+            "disable_all_act": lambda: view.toggle_all(),
+            "reset_layer_act": lambda: edit("reset_grade", lambda: view.state.reset_grades(view._editable_ids())),
+            "copy_layer_act": lambda: view.copy_grade(),
+            "paste_layer_act": lambda: view.paste_grade(),
+            "duplicate_layer_act": lambda: edit("duplicate_nodes", lambda: view.state.duplicate_nodes(view._editable_ids())),
+            "serial_before_act": lambda: edit("add_serial_before", lambda: view.state.add_serial(before=True)),
+            "parallel_node_act": lambda: edit("add_parallel", lambda: view.state.add_branch(NodeKind.PARALLEL_MIXER)),
+            "layer_node_act": lambda: edit("add_layer", lambda: view.state.add_branch(NodeKind.LAYER_MIXER)),
+            "outside_node_act": lambda: edit("add_outside", view.state.add_outside),
+            "splitter_node_act": lambda: edit("add_splitter_combiner", view.state.add_splitter_combiner),
+        }
+        actions: dict[str, QAction] = {}
+        for name, action_id, label, shortcut in self._COLOR_NODE_ACTIONS:
+            if name in {"rename_layer_act", "reset_layer_act", "copy_layer_act", "serial_before_act"}:
+                self.menu_layer.addSeparator()
+            action = QAction(I18N.tr(f"color_nodes.{action_id}", label), view or self)
+            action.setObjectName(f"color_nodes.{action_id}")
+            # Even the user's global_shortcuts preference must preserve the
+            # node canvas boundary. QLineEdit/other pages keep their own keys.
+            action.setProperty("force_widget_shortcut", True)
+            action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+            action.setShortcut(QKeySequence(shortcut))
+            action.setEnabled(view is not None)
+            action.triggered.connect(lambda _checked=False, callback=callbacks[name]: callback())
+            if view is not None:
+                view.addAction(action)
+            self.menu_layer.addAction(action)
+            actions[name] = action
+        self._color_node_menu_actions = actions
+        self.menu_layer.aboutToShow.connect(self._refresh_color_node_menu)
+        edit_menu.aboutToShow.connect(self._refresh_color_node_history_actions)
+        return actions
+
+    def _refresh_color_node_menu(self) -> None:
+        """Refresh menu availability without replacing the registered actions."""
+        from src.features.color.ui.node_editor_items import ConnectionItem
+        from src.features.color.ui.node_editor_state import NodeKind
+
+        panel = getattr(self, "color_node_panel", None)
+        if panel is None:
+            return
+        view = panel.view
+        selected = view._editable_ids()
+        actions = self._color_node_menu_actions
+        for name in ("rename_layer_act", "toggle_vis_act", "reset_layer_act",
+                     "copy_layer_act", "duplicate_layer_act"):
+            actions[name].setEnabled(bool(selected))
+        actions["paste_layer_act"].setEnabled(bool(selected) and view._copied_grade is not None)
+        actions["del_layer_act"].setEnabled(
+            bool(selected) or any(isinstance(item, ConnectionItem) for item in view.scene().selectedItems())
+        )
+        active = view.state.graph.nodes.get(view.state.graph.active_id)
+        can_branch = active is not None and active.kind in (NodeKind.CORRECTOR, NodeKind.COMPOUND)
+        for name in ("parallel_node_act", "layer_node_act", "outside_node_act"):
+            actions[name].setEnabled(can_branch)
+        actions["splitter_node_act"].setEnabled(
+            active is not None and "image_out" in view.state.ports(active.id)
+        )
+
+    def _register_color_node_shortcuts(self, actions: dict[str, QAction]) -> None:
+        """Register visible node actions with explicitly local shortcut scope."""
+        for name, action_id, label, shortcut in self._COLOR_NODE_ACTIONS:
+            action = actions.get(name)
+            if action is not None:
+                self.shortcut_manager.register(
+                    f"color_nodes.{action_id}", I18N.tr(f"color_nodes.{action_id}", label),
+                    "Nodes", shortcut, action,
+                )
+
+    def _delete_color_node_selection(self) -> None:
+        """Delete selected draft wires or nodes, including menu invocations."""
+        from src.features.color.ui.node_editor_items import ConnectionItem
+
+        panel = getattr(self, "color_node_panel", None)
+        if panel is None:
+            return
+        view = panel.view
+        edges = [item.connection for item in view.scene().selectedItems() if isinstance(item, ConnectionItem)]
+        if edges:
+            view.apply_edit("disconnect", lambda: view.state.disconnect_many(edges), edges)
+        else:
+            view.apply_edit("delete_nodes", lambda: view.state.delete_nodes(view._editable_ids()))
+
+    def _route_color_node_history(self, redo: bool = False) -> None:
+        """Route menu/toolbar history to the focused UI draft when appropriate."""
+        panel = getattr(self, "color_node_panel", None)
+        focus = QApplication.focusWidget()
+        if panel is not None and focus is not None and (focus is panel or panel.isAncestorOf(focus)):
+            view = panel.view
+            view.apply_edit("redo" if redo else "undo", view.state.redo if redo else view.state.undo)
+            return
+        if redo:
+            self.redo()
+        else:
+            self.undo()
+
+    def _refresh_color_node_history_actions(self) -> None:
+        """Show local history availability before opening the Edit menu."""
+        panel = getattr(self, "color_node_panel", None)
+        focus = QApplication.focusWidget()
+        if panel is not None and focus is not None and (focus is panel or panel.isAncestorOf(focus)):
+            state = panel.view.state
+            for name, enabled, key, label in (
+                ("undo_action_menu", state.can_undo, "action.undo", "Undo"),
+                ("redo_action_menu", state.can_redo, "action.redo", "Redo"),
+                ("undo_action", state.can_undo, "action.undo", "Undo"),
+                ("redo_action", state.can_redo, "action.redo", "Redo"),
+            ):
+                action = getattr(self, name, None)
+                if action is not None:
+                    action.setEnabled(enabled)
+                    action.setText(I18N.tr(key, label))
+            return
+        # Restore the existing non-node menu state without editing its history.
+        update = getattr(self, "update_undo_redo_actions", None)
+        if callable(update):
+            update()
+
     def _update_menu_shortcut_display(self) -> None:
         """将已注册的快捷键以 \\t 格式追加到菜单项文本，确保 toolbar 弹出菜单中可见。"""
         for menu in (self.menu_file, self.menu_edit, self.menu_effects,
@@ -586,16 +704,10 @@ class MenuToolbarMixin:
         sm.register("image.flip_v", I18N.tr("action.flip_vertical", "Flip Vertical"), "Edit", "", kwargs["flip_v_act"])
         sm.register("image.crop", I18N.tr("action.crop_tool", "Crop Tool..."), "Edit", "C", kwargs["crop_act"])
 
-        # Layer actions
-        sm.register("layer.new", I18N.tr("action.new_layer", "New Layer"), "Layer", "Ctrl+Shift+N", kwargs["add_layer_act"])
-        sm.register("layer.delete", I18N.tr("action.delete_layer", "Delete Current Layer"), "Layer", "Ctrl+Shift+Delete", kwargs["del_layer_act"])
-        sm.register("layer.rename", I18N.tr("action.rename_layer", "Rename Layer..."), "Layer", "F2", kwargs["rename_layer_act"])
-        sm.register("layer.toggle_vis", I18N.tr("action.toggle_visibility", "Toggle Visibility"), "Layer", "Ctrl+D", kwargs["toggle_vis_act"])
-        sm.register("layer.disable_all", I18N.tr("action.disable_all_layers", "Disable All Layers"), "Layer", "Alt+D", kwargs["disable_all_act"])
-        sm.register("layer.reset", I18N.tr("action.reset_layer", "Reset Current Layer"), "Layer", "Ctrl+Shift+L", kwargs["reset_layer_act"])
-        sm.register("layer.copy", I18N.tr("action.copy_layer", "Copy Layer Params"), "Layer", "Ctrl+Shift+C", kwargs["copy_layer_act"])
-        sm.register("layer.paste", I18N.tr("action.paste_layer", "Paste Layer Params"), "Layer", "Ctrl+Shift+V", kwargs["paste_layer_act"])
-        sm.register("layer.duplicate", I18N.tr("action.duplicate_layer", "Duplicate Layer"), "Layer", "Shift+D", kwargs["duplicate_layer_act"])
+        # Nodes are local UI commands; none of these invoke layer controllers.
+        node_actions = dict(getattr(self, "_color_node_menu_actions", {}))
+        node_actions.update({name: kwargs[name] for name, *_ in self._COLOR_NODE_ACTIONS if name in kwargs})
+        self._register_color_node_shortcuts(node_actions)
 
         # Window actions
         sm.register("window.minimize", I18N.tr("action.minimize", "Minimize"), "Window", "Ctrl+M", kwargs["min_act"])
@@ -1411,9 +1523,9 @@ class MenuToolbarMixin:
 
         # Actions for Undo/Redo (Hidden from toolbar but exist for shortcuts)
         self.undo_action = QAction(I18N.tr("action.undo", "Undo"), self)
-        self.undo_action.triggered.connect(self.undo)
+        self.undo_action.triggered.connect(lambda: self._route_color_node_history(False))
         self.redo_action = QAction(I18N.tr("action.redo", "Redo"), self)
-        self.redo_action.triggered.connect(self.redo)
+        self.redo_action.triggered.connect(lambda: self._route_color_node_history(True))
 
         # === 创建工具栏主容器 ===
         toolbar_container = QWidget()

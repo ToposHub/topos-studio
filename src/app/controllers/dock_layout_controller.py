@@ -280,7 +280,9 @@ class DockLayoutMixin:
         self.dock_info = create_custom_dock(I18N.tr("panel.info", "Info"), self.info_panel, "dockInfo")
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_info)
 
-        self.dock_layers = create_custom_dock(I18N.tr("panel.layers", "Layers"), self.layer_panel, "dockLayers")
+        # Preserve the dock identity used by saved layouts; replace only its
+        # visible UI. Backend migration is tracked in the Color Nodes plan.
+        self.dock_layers = create_custom_dock(I18N.tr("color_nodes.nodes", "Nodes"), self.color_node_panel, "dockLayers")
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_layers)
 
         # Tracker 面板：按达芬奇曲线窗口提供足够横向空间，默认隐藏

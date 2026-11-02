@@ -307,8 +307,8 @@ class ColorModule:
         ))
         panel_registry.register(PanelDescriptor(
             panel_id="workspace.layers",
-            title_key="panel.layers",
-            fallback_title="Layers",
+            title_key="color_nodes.nodes",
+            fallback_title="Nodes",
             feature_id="color",
             category="Workspace",
             dock_attr="dock_layers",
