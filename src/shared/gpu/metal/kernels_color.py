@@ -582,3 +582,477 @@ def soft_clip_reference(
         )
         res = res * scale[..., None]
     return res.astype(_F32)
+
+
+# ---------------------------------------------------------------------------
+# 调色节点图算子 MSL compute kernels（计划 B12.3，E23；N10 执行器消费）
+# ---------------------------------------------------------------------------
+
+# 语义对齐要点：
+# - 分支/键/通道算子与 docs/color_nodes_mixer_spec.md（v1 冻结）及
+#   src/features/color/shaders/node_ops_gl.py 的 GL fragment 逐条对应；
+#   buffer 布局为 RGBA16F 线性数组（half4 = 4×float16，与 kernels.py
+#   的 CPU staging 桥约定一致）。
+# - graph_grading 是 GRADING_SNIPPET/CURVES_SNIPPET 的 compute 形态翻译
+#   （GLSL 权威文本的逐条同序移植，参照 shader_nodes_msl 的翻译契约；
+#   门禁走 G2 容差：SDR ≤1/255、HDR ≤2e-3 rel）。curves LUT 以 768
+#   float 线性 buffer 传入（texel 中心 LINEAR 采样 ≡ 整数索引取整，
+#   曲线外线性外推 + 软性保护与 GLSL 同序）。
+# - HDR 语义：RGB 路径不 clamp（负值/HDR >1 保留）；key 域按 spec 有界
+#   [0,1]（key_mix/补集是 matte 语义，非图像域）。
+# - 邻域参数（mid_detail/sharpness）、插件、mixer/warper/LUT3D/fx 不在
+#   kernel 内——N10 执行器按能力矩阵 fail-closed 拒绝，不静默近似。
+
+METAL_GRAPH_OPS_MSL = """
+#include <metal_stdlib>
+using namespace metal;
+
+struct GraphSizeParams {
+    uint32_t width;
+    uint32_t height;
+    float    a;        // 通用标量（opacity 等）
+    int32_t  b;        // 通用枚举（mode/channel）
+};
+
+struct GraphGradingParams {
+    float exposure;
+    float temp;
+    float tint;
+    float contrast;
+    float saturation;
+    float vibrance;
+    float shadow;
+    float highlights;
+    float hue_shift;
+    float lift_saturation;
+    float gamma_saturation;
+    float gain_saturation;
+    float lift_x;  float lift_y;  float lift_z;
+    float gamma_x; float gamma_y; float gamma_z;
+    float gain_x;  float gain_y;  float gain_z;
+    float opacity;
+    uint32_t mask_mode;   // 0 = 无 matte（k = opacity）；1 = matte buffer
+    uint32_t has_curves;  // 0 = 跳过 curves
+};
+
+static inline float3 mix3(float3 x, float3 y, float t) {
+    return x * (1.0 - t) + y * t;
+}
+
+kernel void graph_copy(
+    device const half4* in  [[buffer(0)]],
+    device half4*       out [[buffer(1)]],
+    constant GraphSizeParams& p [[buffer(2)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= p.width || gid.y >= p.height) { return; }
+    size_t idx = gid.y * (size_t)p.width + gid.x;
+    out[idx] = in[idx];
+}
+
+// spec §1：out.rgb = mix(base.rgb, branch.rgb, k)；alpha = base.a
+kernel void graph_parallel_mix(
+    device const half4* base   [[buffer(0)]],
+    device const half4* branch [[buffer(1)]],
+    device const half4* key    [[buffer(2)]],
+    device half4*       out    [[buffer(3)]],
+    constant GraphSizeParams& p [[buffer(4)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= p.width || gid.y >= p.height) { return; }
+    size_t idx = gid.y * (size_t)p.width + gid.x;
+    float4 b = float4(base[idx]);
+    float4 br = float4(branch[idx]);
+    float k = clamp(float(key[idx].r), 0.0, 1.0);
+    out[idx] = half4(float4(mix3(b.rgb, br.rgb, k), b.a));
+}
+
+// spec §2：mode 0 Normal / 1 Add / 2 Subtract / 3 Multiply / 4 Screen
+kernel void graph_layer_mix(
+    device const half4* bottom [[buffer(0)]],
+    device const half4* top    [[buffer(1)]],
+    device half4*       out    [[buffer(2)]],
+    constant GraphSizeParams& p [[buffer(3)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= p.width || gid.y >= p.height) { return; }
+    size_t idx = gid.y * (size_t)p.width + gid.x;
+    float3 a = float4(bottom[idx]).rgb;
+    float3 b = float4(top[idx]).rgb;
+    float op = p.a;
+    float3 outc;
+    if (p.b == 0)      { outc = a * (1.0 - op) + b * op; }
+    else if (p.b == 1) { outc = a + b * op; }
+    else if (p.b == 2) { outc = a - b * op; }
+    else if (p.b == 3) { outc = a * (1.0 - op + op * b); }
+    else               { outc = 1.0 - (1.0 - a) * (1.0 - b * op); }
+    out[idx] = half4(float4(outc, float4(bottom[idx]).a));
+}
+
+// spec §3：key 布尔混合（add=max / subtract / intersect），输出 R 通道
+kernel void graph_key_mix(
+    device const half4* ka [[buffer(0)]],
+    device const half4* kb [[buffer(1)]],
+    device half4*       out [[buffer(2)]],
+    constant GraphSizeParams& p [[buffer(3)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= p.width || gid.y >= p.height) { return; }
+    size_t idx = gid.y * (size_t)p.width + gid.x;
+    float a = clamp(float(ka[idx].r), 0.0, 1.0);
+    float b = clamp(float(kb[idx].r), 0.0, 1.0);
+    float k;
+    if (p.b == 0)      { k = max(a, b); }
+    else if (p.b == 1) { k = clamp(a - b, 0.0, 1.0); }
+    else               { k = a * b; }
+    out[idx] = half4(float4(k, k, k, 1.0));
+}
+
+// spec §4：key 补集（matte 域有界）
+kernel void graph_key_complement(
+    device const half4* key [[buffer(0)]],
+    device half4*       out [[buffer(1)]],
+    constant GraphSizeParams& p [[buffer(2)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= p.width || gid.y >= p.height) { return; }
+    size_t idx = gid.y * (size_t)p.width + gid.x;
+    float k = clamp(float(key[idx].r), 0.0, 1.0);
+    float c = 1.0 - k;
+    out[idx] = half4(float4(c, c, c, 1.0));
+}
+
+kernel void graph_key_passthrough(
+    device const half4* key [[buffer(0)]],
+    device half4*       out [[buffer(1)]],
+    constant GraphSizeParams& p [[buffer(2)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= p.width || gid.y >= p.height) { return; }
+    size_t idx = gid.y * (size_t)p.width + gid.x;
+    float k = clamp(float(key[idx].r), 0.0, 1.0);
+    out[idx] = half4(float4(k, k, k, 1.0));
+}
+
+// spec §5：channel 0/1/2 → 灰度载体（alpha 随图像）
+kernel void graph_splitter(
+    device const half4* in  [[buffer(0)]],
+    device half4*       out [[buffer(1)]],
+    constant GraphSizeParams& p [[buffer(2)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= p.width || gid.y >= p.height) { return; }
+    size_t idx = gid.y * (size_t)p.width + gid.x;
+    float4 t = float4(in[idx]);
+    float v = t.r;
+    if (p.b == 1) { v = t.g; }
+    else if (p.b == 2) { v = t.b; }
+    out[idx] = half4(float4(float3(v), t.a));
+}
+
+// spec §5：R/G/B 载体重组（alpha 取 R 载体）
+kernel void graph_combiner(
+    device const half4* r_in [[buffer(0)]],
+    device const half4* g_in [[buffer(1)]],
+    device const half4* b_in [[buffer(2)]],
+    device half4*       out  [[buffer(3)]],
+    constant GraphSizeParams& p [[buffer(4)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= p.width || gid.y >= p.height) { return; }
+    size_t idx = gid.y * (size_t)p.width + gid.x;
+    float r = float(r_in[idx].r);
+    float g = float(g_in[idx].g);
+    float b = float(b_in[idx].b);
+    float a = float(r_in[idx].a);
+    out[idx] = half4(float4(r, g, b, a));
+}
+
+// composition main epilogue 的通用形态：out.rgb = mix(a.rgb, b.rgb, mask.r*op)
+kernel void graph_masked_mix(
+    device const half4* a_in [[buffer(0)]],
+    device const half4* b_in [[buffer(1)]],
+    device const half4* mask [[buffer(2)]],
+    device half4*       out  [[buffer(3)]],
+    constant GraphSizeParams& p [[buffer(4)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= p.width || gid.y >= p.height) { return; }
+    size_t idx = gid.y * (size_t)p.width + gid.x;
+    float4 a = float4(a_in[idx]);
+    float4 b = float4(b_in[idx]);
+    float k = clamp(float(mask[idx].r), 0.0, 1.0) * p.a;
+    out[idx] = half4(float4(mix3(a.rgb, b.rgb, k), a.a));
+}
+
+// —— GRADING_SNIPPET.rgb2hsv/hsv2rgb 逐条翻译（与 MSL_HSV_FUNCS 同源）——
+static inline float3 graph_rgb2hsv(float3 c) {
+    float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    float4 p = mix(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
+    float4 q = mix(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return float3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+static inline float3 graph_hsv2rgb(float3 c) {
+    float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    float3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+// —— GRADING_SNIPPET.apply_grading 逐条翻译（点态基础域；mid_detail/
+//    sharpness 邻域位不在此 kernel——执行器 fail-closed 拒绝）——
+static inline float3 graph_apply_grading(float3 color, constant GraphGradingParams& p) {
+    // 1. Exposure
+    float exposure = p.exposure;
+    float exp_stops = (exposure / 100.0) * (exposure / 100.0) * 6.0;
+    if (exposure < 0.0) { exp_stops = -exp_stops; }
+    color *= pow(2.0, exp_stops);
+
+    // 2. White Balance
+    float3 wb = float3(1.0 + p.temp / 200.0, 1.0 - p.tint / 200.0,
+                       1.0 - p.temp / 200.0);
+    color *= wb;
+
+    // 3. Contrast（pivot 0.18）
+    if (p.contrast != 0.0) {
+        float c_factor = 1.0 + p.contrast / 100.0;
+        color = sign(color) * pow(abs(color) / 0.18, float3(c_factor)) * 0.18;
+    }
+
+    // 4. Lift / Gamma / Gain（wheel 已转 RGB 增益）
+    float3 lift = float3(p.lift_x, p.lift_y, p.lift_z);
+    float3 gamma = float3(p.gamma_x, p.gamma_y, p.gamma_z);
+    float3 gain = float3(p.gain_x, p.gain_y, p.gain_z);
+    float3 l = (lift - 1.0) * 0.2;
+    color = color * gain * (1.0 - l) + l;
+
+    float3 safe_gamma = max(gamma, float3(0.01));
+    float3 gm = float3(pow(2.0, -log2(safe_gamma.r)),
+                       pow(2.0, -log2(safe_gamma.g)),
+                       pow(2.0, -log2(safe_gamma.b)));
+    float3 res;
+    res.x = (color.x > 0.0 && color.x <= 1.0) ? pow(color.x, gm.x)
+            : (color.x > 1.0) ? (gm.x * (color.x - 1.0) + 1.0) : gm.x * color.x;
+    res.y = (color.y > 0.0 && color.y <= 1.0) ? pow(color.y, gm.y)
+            : (color.y > 1.0) ? (gm.y * (color.y - 1.0) + 1.0) : gm.y * color.y;
+    res.z = (color.z > 0.0 && color.z <= 1.0) ? pow(color.z, gm.z)
+            : (color.z > 1.0) ? (gm.z * (color.z - 1.0) + 1.0) : gm.z * color.z;
+    color = res;
+
+    // 安全修复：暗部负值软性保护（luma 压缩前计算，与 GLSL 同序）
+    float luma_post_grading = dot(color, float3(0.299, 0.587, 0.114));
+    if (luma_post_grading < 0.0) {
+        for (int i = 0; i < 3; i++) {
+            float x = color[i];
+            if (x < -0.5) { x = -0.5 - (abs(x + 0.5) * 0.1); }
+            color[i] = x;
+        }
+        float min_channel = min(min(color.r, color.g), color.b);
+        float max_channel = max(max(color.r, color.g), color.b);
+        if (max_channel - min_channel > 0.15 && min_channel < 0.0) {
+            float balance_factor = clamp(abs(min_channel) * 0.25, 0.0, 0.15);
+            color = mix(color, float3(luma_post_grading), balance_factor);
+        }
+    }
+
+    // 5. Shadows（power 曲线）
+    if (p.shadow != 0.0) {
+        float shadow_factor = 1.0 + (p.shadow / 100.0);
+        if (shadow_factor > 0.0) {
+            float3 clamped_c = clamp(color, 0.0, 1.0);
+            color = pow(clamped_c, float3(1.0 / shadow_factor))
+                    + (color - clamped_c);
+        }
+    }
+
+    // 6. Highlights（Reinhard）
+    if (p.highlights != 0.0) {
+        float max_c = max(max(color.r, color.g), color.b);
+        if (max_c > 0.1) {
+            float mapped_max = max_c;
+            if (p.highlights < 0.0) {
+                float k = abs(p.highlights / 100.0) * 2.0;
+                mapped_max = 0.1 + (max_c - 0.1) / (1.0 + k * (max_c - 0.1));
+            } else {
+                float k = (p.highlights / 100.0) * 0.5;
+                mapped_max = 0.1 + (max_c - 0.1) * (1.0 + k);
+            }
+            color *= (mapped_max / max_c);
+        }
+    }
+
+    // 6.5 色调区间饱和度
+    if (p.lift_saturation != 0.0 || p.gamma_saturation != 0.0
+            || p.gain_saturation != 0.0) {
+        float tonal_lum = clamp(dot(color, float3(0.299, 0.587, 0.114)),
+                                0.0, 1.0);
+        float s0 = smoothstep(0.0, 0.5, tonal_lum);
+        float s1 = smoothstep(0.5, 1.0, tonal_lum);
+        float tonal_shadow_w = 1.0 - s0;
+        float tonal_mid_w = s0 * (1.0 - s1);
+        float tonal_high_w = s1;
+        float tonal_amount = p.lift_saturation * tonal_shadow_w
+                           + p.gamma_saturation * tonal_mid_w
+                           + p.gain_saturation * tonal_high_w;
+        if (tonal_amount != 0.0) {
+            float tonal_gray = dot(color, float3(0.299, 0.587, 0.114));
+            color = mix(float3(tonal_gray), color, 1.0 + tonal_amount / 100.0);
+        }
+    }
+
+    // 7. Vibrance
+    if (p.vibrance != 0.0) {
+        float gray = dot(color, float3(0.299, 0.587, 0.114));
+        float max_c = max(color.r, max(color.g, color.b));
+        float sat = max_c - gray;
+        float amt = p.vibrance / 100.0;
+        float boost = amt * (1.0 - clamp(sat, 0.0, 1.0));
+        color = mix(color, float3(gray), -boost);
+    }
+
+    // 9. Hue Shift（符号防护）
+    if (p.hue_shift != 0.0) {
+        float3 sign_c = sign(color);
+        float3 hsv = graph_rgb2hsv(abs(color));
+        hsv.x = fract(hsv.x + p.hue_shift / 360.0);
+        color = sign_c * graph_hsv2rgb(hsv);
+    }
+
+    // 10. Saturation
+    if (p.saturation != 0.0) {
+        float gray = dot(color, float3(0.299, 0.587, 0.114));
+        color = mix(float3(gray), color, 1.0 + p.saturation / 100.0);
+    }
+    return color;
+}
+
+// —— CURVES_SNIPPET.apply_curves 逐条翻译（LUT 为 768 float 线性 buffer）——
+static inline float graph_curves_channel(float x, int ch,
+                                         device const float* curves) {
+    float v0 = curves[0 * 3 + ch];
+    float v1 = curves[1 * 3 + ch];
+    float v254 = curves[254 * 3 + ch];
+    float v255 = curves[255 * 3 + ch];
+    float slope_low = (v1 - v0) * 255.0;
+    float slope_high = (v255 - v254) * 255.0;
+    if (x < 0.0) { return v0 + x * slope_low; }
+    if (x > 1.0) { return v255 + (x - 1.0) * slope_high; }
+    int idx = (int)clamp(x * 255.0 + 0.5, 0.0, 255.0);
+    return curves[idx * 3 + ch];
+}
+
+static inline float graph_curves_guard(float x) {
+    if (x < -0.5) { x = -0.5 - (abs(x + 0.5) * 0.1); }
+    if (x > 2.0) { x = 2.0 + (x - 2.0) * 0.1; }
+    return x;
+}
+
+static inline float3 graph_apply_curves(float3 color, device const float* curves) {
+    float3 res;
+    res.r = graph_curves_channel(color.r, 0, curves);
+    res.g = graph_curves_channel(color.g, 1, curves);
+    res.b = graph_curves_channel(color.b, 2, curves);
+    res.r = graph_curves_guard(res.r);
+    res.g = graph_curves_guard(res.g);
+    res.b = graph_curves_guard(res.b);
+    float min_channel = min(min(res.r, res.g), res.b);
+    float max_channel = max(max(res.r, res.g), res.b);
+    if (max_channel - min_channel > 0.15 && min_channel < 0.0) {
+        float3 diff = res - float3(min_channel);
+        float balance_factor = clamp(abs(min_channel) * 0.3, 0.0, 0.2);
+        res = res - diff * balance_factor;
+    }
+    return res;
+}
+
+// Corrector 单 pass：grading → curves → epilogue（mix(input, graded, k*op)）
+kernel void graph_grading(
+    device const half4* src      [[buffer(0)]],
+    device const half4* mask     [[buffer(1)]],
+    device half4*       out      [[buffer(2)]],
+    device const float* curves   [[buffer(3)]],   // 768 float（恒绑定）
+    constant GraphGradingParams& p [[buffer(4)]],
+    constant GraphSizeParams& s [[buffer(5)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= s.width || gid.y >= s.height) { return; }
+    size_t idx = gid.y * (size_t)s.width + gid.x;
+    float4 src4 = float4(src[idx]);
+    float3 color = src4.rgb;
+
+    color = graph_apply_grading(color, p);
+    if (p.has_curves != 0u) {
+        color = graph_apply_curves(color, curves);
+    }
+
+    float k = p.opacity;
+    if (p.mask_mode == 1u) {
+        k = clamp(float(mask[idx].r), 0.0, 1.0) * p.opacity;
+    }
+    out[idx] = half4(float4(mix3(src4.rgb, color, k), src4.a));
+}
+"""
+
+# GraphSizeParams / GraphGradingParams 的 numpy 布局（4 字节字段紧排）
+GRAPH_SIZE_PARAMS_DTYPE = np.dtype([
+    ("width", "<u4"), ("height", "<u4"),
+    ("a", "<f4"), ("b", "<i4"),
+])
+
+GRAPH_GRADING_PARAMS_DTYPE = np.dtype([
+    ("exposure", "<f4"), ("temp", "<f4"), ("tint", "<f4"),
+    ("contrast", "<f4"), ("saturation", "<f4"), ("vibrance", "<f4"),
+    ("shadow", "<f4"), ("highlights", "<f4"), ("hue_shift", "<f4"),
+    ("lift_saturation", "<f4"), ("gamma_saturation", "<f4"),
+    ("gain_saturation", "<f4"),
+    ("lift_x", "<f4"), ("lift_y", "<f4"), ("lift_z", "<f4"),
+    ("gamma_x", "<f4"), ("gamma_y", "<f4"), ("gamma_z", "<f4"),
+    ("gain_x", "<f4"), ("gain_y", "<f4"), ("gain_z", "<f4"),
+    ("opacity", "<f4"),
+    ("mask_mode", "<u4"), ("has_curves", "<u4"),
+])
+
+
+def make_graph_size_params(width: int, height: int, a: float = 0.0,
+                           b: int = 0) -> np.ndarray:
+    """打包 MSL ``GraphSizeParams``（通用 size/标量/枚举槽）。"""
+    params = np.zeros(1, dtype=GRAPH_SIZE_PARAMS_DTYPE)
+    params["width"] = int(width)
+    params["height"] = int(height)
+    params["a"] = float(a)
+    params["b"] = int(b)
+    return params
+
+
+def make_graph_grading_params(
+    *, exposure: float, temp: float, tint: float, contrast: float,
+    saturation: float, vibrance: float, shadow: float, highlights: float,
+    hue_shift: float, lift_saturation: float, gamma_saturation: float,
+    gain_saturation: float, lift, gamma, gain, opacity: float,
+    mask_mode: int, has_curves: bool,
+) -> np.ndarray:
+    """打包 MSL ``GraphGradingParams``（字段与 struct 逐一对齐）。"""
+    scalars = [exposure, temp, tint, contrast, saturation, vibrance, shadow,
+               highlights, hue_shift, lift_saturation, gamma_saturation,
+               gain_saturation, *lift, *gamma, *gain, opacity]
+    if not all(np.isfinite(float(v)) for v in scalars):
+        raise ValueError(f"graph_grading: 参数含非有限值 {scalars!r}")
+    params = np.zeros(1, dtype=GRAPH_GRADING_PARAMS_DTYPE)
+    for name, value in zip(params.dtype.names[:12],
+                           scalars[:12]):
+        params[name] = float(value)
+    params["lift_x"], params["lift_y"], params["lift_z"] = map(float, lift)
+    params["gamma_x"], params["gamma_y"], params["gamma_z"] = map(float, gamma)
+    params["gain_x"], params["gain_y"], params["gain_z"] = map(float, gain)
+    params["opacity"] = float(opacity)
+    params["mask_mode"] = int(mask_mode)
+    params["has_curves"] = 1 if has_curves else 0
+    return params
+
+
+def curves_lut_to_flat_buffer(lut) -> np.ndarray:
+    """(256, 1, 3)/(256, 3) LUT → kernel 侧 768 float 线性 buffer。"""
+    arr = np.asarray(lut, dtype=np.float32).reshape(256, 3)
+    return np.ascontiguousarray(arr.reshape(-1))

@@ -859,3 +859,73 @@ def get_effect_catalog() -> EffectCatalog:
             if _catalog_instance is None:
                 _catalog_instance = EffectCatalog()
     return _catalog_instance
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 调色节点图三后端能力矩阵（计划 B12.1，E30/E31 接点）
+# ──────────────────────────────────────────────────────────────────────────
+
+def graph_backend_capability_matrix() -> Dict[str, Dict[str, str]]:
+    """图 node + 参数域 → 各后端 exact/fallback/unsupported 能力矩阵。
+
+    数据源是三个后端的**实际目录**（GL=N05 编译器目录、CPU=N09 oracle
+    域、Metal=N10 目录）——不从「存在 shader 函数」推断，目录与实测
+    不符时按计划降级为未就绪（B12.4 实机证据见
+    ``docs/validation/color_nodes/backend_matrix.md``）。
+
+    Corrector 行细分参数域（基础点态 grading/curves 为三后端共有；
+    插件/邻域/LUT3D 等按后端声明，非 exact 即显式拒绝，不静默近似）。
+    """
+    from src.features.color.core.color_graph_compiler import (
+        GL_CAPABILITY_CATALOG,
+    )
+    from src.features.color.core.color_graph_cpu import (
+        CPU_CAPABILITY_CATALOG,
+    )
+    from src.features.color.core.color_graph_metal import (
+        METAL_CAPABILITY_CATALOG,
+    )
+
+    ops = sorted(set(GL_CAPABILITY_CATALOG)
+                 | set(CPU_CAPABILITY_CATALOG)
+                 | set(METAL_CAPABILITY_CATALOG))
+    matrix: Dict[str, Dict[str, str]] = {
+        op: {
+            "gl": GL_CAPABILITY_CATALOG.get(op, "unsupported"),
+            "cpu": CPU_CAPABILITY_CATALOG.get(op, "unsupported"),
+            "metal": METAL_CAPABILITY_CATALOG.get(op, "unsupported"),
+        }
+        for op in ops
+    }
+    # Corrector 参数域细分（op 目录之外的第二轴；fail-closed 判据来自
+    # N09/N10 共用的 production_layer_domain_errors）
+    matrix["corrector:param_domains"] = {
+        "gl": "exact",  # 生产 composition shader 全域（含插件经绑定）
+        "cpu": "fallback",  # 基础点态域 + curves；其余显式 UnsupportedNode
+        "metal": "fallback",  # 基础点态域 + curves；其余 fail-closed 拒绝
+    }
+    return matrix
+
+
+def graph_node_backend_options() -> List[Dict[str, Any]]:
+    """从实际 operator 支持生成 UI 可选项（B12.1）。
+
+    每项：{"node_type", "backends": {...}, "ui_enabled": bool,
+    "exact_backends": [..]}。``ui_enabled`` 仅在至少一个后端非
+    unsupported 时为 True——UI 只呈现实际可执行的选项，provider 未
+    实现的选项如实禁用（不出现「能建图但任何后端都拒绝执行」项）。
+    """
+    matrix = graph_backend_capability_matrix()
+    options: List[Dict[str, Any]] = []
+    for node_type, backends in matrix.items():
+        if node_type == "corrector:param_domains":
+            continue
+        statuses = [s for s in backends.values() if s != "unsupported"]
+        options.append({
+            "node_type": node_type,
+            "backends": dict(backends),
+            "exact_backends": sorted(
+                k for k, v in backends.items() if v == "exact"),
+            "ui_enabled": bool(statuses),
+        })
+    return options

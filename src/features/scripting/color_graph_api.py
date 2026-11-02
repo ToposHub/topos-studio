@@ -81,18 +81,20 @@ class ColorGraphScriptAPI:
                 "nodes": len(graph.nodes)}
 
     def inspect_capabilities(self, stack_id: str) -> dict[str, Any]:
-        from src.features.color.core.color_graph_compiler import (
-            GL_CAPABILITY_CATALOG,
+        """图内各算子的三后端能力可见（GL/CPU/Metal，B12.1 矩阵数据源）。"""
+        from src.features.shared.effects.effect_catalog import (
+            graph_backend_capability_matrix,
         )
         graph = self.get_graph(stack_id)
         if graph is None:
             return {"has_graph": False}
         ops = sorted({n.node_type for n in graph.nodes})
+        matrix = graph_backend_capability_matrix()
         return {"has_graph": True,
                 "node_types": ops,
-                "backend_gl": {op: GL_CAPABILITY_CATALOG.get(op,
-                                                             "unsupported")
-                               for op in ops}}
+                "backend_gl": {op: matrix[op]["gl"] for op in ops},
+                "backend_cpu": {op: matrix[op]["cpu"] for op in ops},
+                "backend_metal": {op: matrix[op]["metal"] for op in ops}}
 
     def legacy_layers_view(self, stack_id: str) -> list[dict[str, Any]]:
         """旧 layers 兼容视图（只读）；复杂 DAG 显式报错不压平。"""
