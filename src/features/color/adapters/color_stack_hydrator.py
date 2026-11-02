@@ -21,6 +21,11 @@ from typing import Any, Iterator, Optional
 import numpy as np
 
 from src.shared.project.color_stack import ColorStackData
+from src.shared.project.color_graph import GraphSchemaError
+from src.features.color.core.color_graph_migration import (
+    can_project_to_legacy_layers,
+    project_legacy_layers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,11 +187,15 @@ class ColorStackHydrator:
     ) -> None:
         """Write the stack state into the engine.
 
-        schema v2（P0-COLOR-02 统一契约）：
-        - 栈携带完整 Layer 快照（``stack.layers`` 非空）时按**完整恢复**：
-          直接重建 engine.layers（含蒙版/限定器/变形器/效果/插件/混合/
-          烘焙/图层身份），并对齐 active_layer_index。
-        - 旧栈（v1，无快照）回退为把平铺精简键广播到所有层。
+        schema v2（P0-COLOR-02 统一契约）+ B03 图优先级：
+        - 栈携带**合法 color_graph**（B03 迁移产物/新图）时：可无损投影
+          的串行图按 ``project_legacy_layers`` 重建 engine.layers（图是
+          唯一权威，legacy layers 只作兼容视图）；不可投影的复杂图**不**
+          从隐藏 layers 恢复（不制造双权威），记录诊断——真实图渲染由
+          B09 接通。
+        - 损坏图（validate 非空）抛 ``GraphSchemaError``，**不**静默回退
+          legacy layers 让用户看到旧效果。
+        - 无图时按原契约：``stack.layers`` 非空完整恢复；v1 平铺键广播。
 
         This mirrors the logic that previously lived in
         ``_load_color_stack_to_grading_panel``.
@@ -217,6 +226,49 @@ class ColorStackHydrator:
             logger.debug("apply_stack_to_engine: video_denoise restore "
                          "failed", exc_info=True)
 
+        # B03 加载优先级：合法 color_graph → legacy layers → v1 平铺。
+        graph = getattr(stack, "color_graph", None)
+        if graph is not None:
+            errors = graph.validate()
+            if errors:
+                # 损坏新图显式报错，不静默换旧图（用户会误以为效果丢失）
+                raise GraphSchemaError(
+                    errors[0].code,
+                    f"stack {stack.stack_id[:8]} 携带损坏 color_graph: "
+                    f"{errors[0]}", node_id=errors[0].node_id)
+            if can_project_to_legacy_layers(graph):
+                from src.features.color.core.layer import Layer as _Layer
+                restored = []
+                for index, payload in enumerate(project_legacy_layers(graph)):
+                    try:
+                        restored.append(_Layer.from_dict(dict(payload)))
+                    except Exception:
+                        logger.warning(
+                            "apply_stack_to_engine: graph-derived layer #%d "
+                            "corrupt in stack %s", index, stack.stack_id[:8],
+                            exc_info=True)
+                if restored:
+                    engine.layers = restored
+                    engine.active_layer_index = 0
+                else:
+                    logger.warning(
+                        "apply_stack_to_engine: graph of stack %s projected "
+                        "0 valid layers; keeping current engine layers",
+                        stack.stack_id[:8])
+            else:
+                # 复杂 DAG：不从隐藏 layers 恢复（双权威禁止）。旧引擎
+                # 渲染尚未接图（B09），此处只记录诊断——面板/保存读图。
+                logger.info(
+                    "apply_stack_to_engine: stack %s carries non-projectable "
+                    "color graph (%d nodes); legacy engine layers untouched "
+                    "until graph execution lands (B09)",
+                    stack.stack_id[:8], len(graph.nodes))
+        else:
+            self._apply_legacy_layers_or_flat(stack, engine)
+        # 通用部分：tracking store 重建（原图/旧层路径共用）
+        self._apply_tracking_store(stack, engine)
+
+    def _apply_legacy_layers_or_flat(self, stack, engine) -> None:
         layers_snapshot = getattr(stack, "layers", None) or ()
         if layers_snapshot:
             from src.features.color.core.layer import Layer
@@ -304,23 +356,24 @@ class ColorStackHydrator:
             logger.debug("apply_stack_to_engine: no engine layers, skipping")
             return
 
-        # 恢复跟踪绑定（阶段 1）：旧工程无 trackings 键时得到空存储，不影响其他字段。
-        # 切换片段时用目标栈整体替换，避免上一个片段的绑定泄漏到当前片段。
+        logger.debug("apply_stack_to_engine: applied stack %s", stack.stack_id[:8])
+
+    def _apply_tracking_store(self, stack, engine) -> None:
+        """恢复跟踪绑定：目标栈整体替换，避免上一片段绑定泄漏。
+
+        旧工程无 trackings 键时得到空存储；``ColorStackData`` 曾双实现，
+        旧运行时对象可能没有该属性——缺失按空存储恢复，不阻断应用。
+        """
         tracking_store = getattr(engine, "tracking_store", None)
         if tracking_store is not None:
             from src.features.color.tracking.tracking_store import TrackingStore
 
-            # ``ColorStackData`` 曾在 edit core 与 shared project 各有一份
-            # 实现；旧工程或旧运行时对象可能还没有 trackings 属性。缺失
-            # 时按空存储恢复，不能在进入 Color 页面时阻断整个应用。
             restored = TrackingStore.from_dict(
                 getattr(stack, "trackings", {}) or {}
             )
             tracking_store.clear()
             for binding in restored.all_bindings():
                 tracking_store.add_binding(binding)
-
-        logger.debug("apply_stack_to_engine: applied stack %s", stack.stack_id[:8])
 
     # ------------------------------------------------------------------
     # Apply stack → UI panels
