@@ -1920,6 +1920,14 @@ class AsyncRenderer(QThread):
             logger.debug("graph lease release failed", exc_info=True)
         self._graph_lease = None
 
+    def _release_graph_resources(self) -> None:
+        """清理路径：租约 + plan 缓存 + 执行器纹理池。"""
+        self._release_graph_lease()
+        self._graph_plan_cache.clear()
+        executor = getattr(self, '_graph_executor', None)
+        if executor is not None:
+            executor.release_pool()
+
     def _graph_execution_deferred_reason(self, params) -> Optional[str]:
         """图执行暂缓判定：legacy 专属特性仍需旧循环的帧走旧循环。
 
@@ -6834,8 +6842,7 @@ class AsyncRenderer(QThread):
 
             # S04：释放图执行租约与 plan 缓存（执行器其余资源随 ctx 释放）
             try:
-                self._release_graph_lease()
-                self._graph_plan_cache.clear()
+                self._release_graph_resources()
             except Exception:
                 logger.debug("Failed to release graph lease in cleanup")
 
