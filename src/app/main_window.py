@@ -1487,6 +1487,73 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         # 视频控制器（延迟初始化，需要等待 engine）
         self.video_controller = None
 
+        # B06.5：真实节点面板接权威图（coordinator/bridge/host 装配）。
+        # 失败不阻断启动（color_graph_host=None → 原工作流不变）。
+        self._wire_color_graph_host()
+
+    def _wire_color_graph_host(self) -> None:
+        """装配 ColorGraphAppHost（节点面板/调色手势接权威图）。
+
+        - 工程/命令栈：media_pool 的 ProjectCommandStack（图命令与
+          edit 命令同一 undo 栈）；
+        - clip 水合钩子在 ``_load_color_stack_to_grading_panel`` 尾部
+          （bind_stack + 投影水合）；
+        - 提交后引擎同步经 bridge 的 set_project 回调（重投影 + 渲染）。
+        """
+        self.color_graph_host = None
+        try:
+            if getattr(self, "media_pool_panel", None) is None:
+                logger.info(
+                    "color graph host: edit unavailable; node panel stays "
+                    "UI-only this session")
+                return
+            from src.app.controllers.color_graph_controller import (
+                ColorGraphAppHost,
+            )
+            cmd_stack = self.media_pool_panel.get_command_stack()
+
+            def _get_project():
+                return getattr(self, "_current_edit_project", None)
+
+            def _set_project(project):
+                self._current_edit_project = project
+                self.edit_project_dirty = True
+
+            def _request_render():
+                engine = getattr(self, "engine", None)
+                if engine is not None:
+                    engine.render_pipeline(render_reason='grading')
+
+            def _color_context():
+                manager = getattr(self, "_color_session_manager", None)
+                session = (manager.get_current_session()
+                           if manager is not None else None)
+                if session is None:
+                    return ("", "")
+                return (getattr(session, "timeline_id", "") or "",
+                        getattr(session, "clip_id", "") or "")
+
+            self.color_graph_host = ColorGraphAppHost(
+                get_project=_get_project,
+                set_project=_set_project,
+                project_stack=cmd_stack,
+                engine_provider=lambda: getattr(self, "engine", None),
+                request_render=_request_render,
+                panels_provider=self._collect_color_panels,
+                set_hydration_guard=self._set_color_stack_hydration_guard,
+                color_context_provider=_color_context,
+            )
+            self.color_graph_host.attach_panel(self.color_node_panel)
+            logger.debug("color graph host wired (node panel projection-"
+                         "backed)")
+        except Exception:
+            logger.warning("color graph host wiring failed", exc_info=True)
+            self.color_graph_host = None
+
+    def _set_color_stack_hydration_guard(self, on: bool) -> None:
+        """图宿主投影同步期间的面板回流抑制（与既有水合守卫同一标志）。"""
+        self._color_stack_hydration_in_progress = bool(on)
+
     def _script_timeline_context(self, what: str, clip_id: str = None):
         """P1-COLOR-24: 脚本 API 的时间线只读上下文 provider。
 

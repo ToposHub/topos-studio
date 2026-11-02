@@ -1885,6 +1885,15 @@ class MenuToolbarMixin:
         # their final value before autosave and before the next undo gesture.
         if getattr(self, "pending_mask_updates", None):
             self.process_mask_update()
+        # B06.2：图编辑上下文的 grade 手势收束（一次手势一个 graph
+        # command；flush 后引擎经投影重水合同值收敛）
+        graph_host = getattr(self, "color_graph_host", None)
+        if graph_host is not None:
+            try:
+                graph_host.end_grade_gesture()
+            except Exception:
+                logger.debug("graph grade gesture flush failed",
+                             exc_info=True)
         self.idle_render_timer.start(); self._trigger_autosave()
 
         # Optimization: Do NOT trigger full quality decode here synchronously.

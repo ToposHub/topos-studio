@@ -1863,12 +1863,52 @@ class LayerOpsMixin:
                 saturation/vibrance/mid_detail/hue_shift/highlights 依次取值。
         """
         if self.engine.get_current_image() is None: return
+        # B06.2 图编辑上下文（节点面板选中 Corrector）：grade 手势经图
+        # 事务（一次手势一个 command），legacy 引擎通道同值预览
+        graph_host = getattr(self, 'color_graph_host', None)
+        if graph_host is not None and graph_host.graph_edit_context_active():
+            self._route_grading_to_graph(graph_host, args)
+            return
         self.engine.grade_image(*args)
         # P1-COLOR-03: 关键帧模式下 / 参数已动画时，把修改记录为当前帧关键帧
         self._maybe_record_grade_keyframes(args)
         # S5.C: 播放中调色参数变化时更新 cached render params
         self._invalidate_video_render_params_if_playing()
         # P0-5: debounce during playback to avoid render-queue flooding
+        if self._is_video_playing():
+            self._debounce_grading_render()
+        else:
+            self.request_render()
+
+    def _route_grading_to_graph(self, graph_host, args) -> None:
+        """图编辑上下文的 grade 手势路由（B06.2）。
+
+        - 图侧：grade_patch 并入手势事务（interaction_ended 时 flush 一次
+          command；GraphTransactionBuffer 合并为权威图快照）。
+        - 预览：legacy 引擎通道同值直写（活动层经 source_layer_id 对齐），
+          flush 后 ``_on_project_published`` 重投影收敛到同一值。
+        - 关键帧：该上下文暂缓（节点关键帧域未图域化——登记债务，见
+          台账 B06；legacy 上下文不受影响）。
+        """
+        node_id = graph_host.active_grade_node_id()
+        if not node_id:
+            return
+        if not graph_host.grade_gesture_open():
+            counter = int(getattr(self, '_graph_gesture_counter', 0)) + 1
+            self._graph_gesture_counter = counter
+            self._graph_gesture_tid = f"grading-{counter}"
+            graph_host.begin_grade_gesture(self._graph_gesture_tid)
+        current = graph_host.panel_grade_params() or {}
+        for name, value in zip(self._GRADING_SIGNAL_KEYS, args):
+            if current.get(name) == value:
+                continue
+            patch_value = (value if isinstance(value, (tuple, list))
+                           else float(value))
+            graph_host.submit_grade_change(
+                node_id, name, patch_value, self._graph_gesture_tid)
+        graph_host.align_engine_active_layer(node_id)
+        self.engine.grade_image(*args)
+        self._invalidate_video_render_params_if_playing()
         if self._is_video_playing():
             self._debounce_grading_render()
         else:

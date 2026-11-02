@@ -3178,6 +3178,16 @@ class PageManagementMixin:
         hydrator.hydrate(stack, self.engine, panels)
         self._refresh_video_preview_after_color_stack_hydration()
 
+        # B06.5：图宿主随 clip 水合重绑（bind_stack + 会话切换 + 投影
+        # 水合；scope owner = 真实 stack_id）
+        graph_host = getattr(self, 'color_graph_host', None)
+        if graph_host is not None:
+            try:
+                graph_host.on_clip_stack_loaded(
+                    stack_id, scope_owner_id=stack_id or None)
+            except Exception:
+                logger.debug("graph host clip rebind failed", exc_info=True)
+
         logger.debug(f"Loaded color stack {stack_id} to all panels via hydrator")
 
     def _sync_active_color_version_stack(self, stack_id: str) -> None:
