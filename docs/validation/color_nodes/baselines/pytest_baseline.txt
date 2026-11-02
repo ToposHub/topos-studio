@@ -16,3 +16,15 @@ tests/color/test_legacy_baseline_behaviors.py .................          [ 88%]
 tests/color/test_color_graph_baseline_fixtures.py ...........            [100%]
 
 ============================== 95 passed in 3.67s ==============================
+
+## B07 记录（2026-11-02）
+
+- 已知存量失配（与节点后端无关）：tests/color/golden/shader_golden_corpus.json
+  的 grading_extreme/checker 用例在本机基提交（e43cec9^，B07 改动前）即位级
+  失配——GPU 指纹/驱动漂移所致。按 ADR 0004 须人工审查后以
+  TOPOS_UPDATE_SHADER_GOLDEN=1 重归档并写入台账 0004a；本任务未重归档。
+- B00 基线修正：f03_l1_bypassed 初版生成器漏了 E03 的 invisible 层跳过
+  语义（跳层逻辑在渲染循环而非 shader）。已修正生成器并重新归档；
+  f01/f02/f03_serial 未受影响（bit 不变）。
+- B07 parity：N06 standalone（run_serial_passes）与本目录基线位级一致
+  （neutral/L0/三层串行+插件/旁路 4 组 golden，同 GPU 指纹门禁）。
