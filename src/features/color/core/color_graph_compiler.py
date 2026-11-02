@@ -134,8 +134,12 @@ class ColorGraphRenderPlan:
             status = catalog.get(render_pass.op, "unsupported")
             label = f"{render_pass.index}:{render_pass.node_id}:{render_pass.op}"
             statuses.append((label, status))
-            if status == "unsupported":
-                unsupported.append((label, f"后端不支持算子 {render_pass.op}"))
+            if status != "exact":
+                # fail-closed：unsupported 与 pending 都不可执行（B10
+                # 落实 mixer 数学后翻 exact）
+                unsupported.append((label, (
+                    f"算子 {render_pass.op} 后端状态 {status}"
+                    "（unsupported/pending 均拒绝执行）")))
         return CapabilityReport(
             backend="gl", supported_ops=tuple(
                 op for op, st in catalog.items() if st == "exact"),
