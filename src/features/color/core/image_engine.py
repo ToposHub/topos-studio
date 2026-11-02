@@ -51,6 +51,9 @@ from PyQt6.QtCore import (
     QRectF, QThread, QEventLoop, QTimer,
 )
 from src.features.color.core.history import HistoryManager
+from src.features.color.core.corrector_render_service import (
+    CorrectorDiagnostic,
+)
 from src.features.color.core.layer import Layer, MaskShape, MaskGroup
 from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
@@ -3631,44 +3634,20 @@ class ImageEngine(QObject):
                 # 任何异常都必须归还池管理（此前仅正常路径/编译失败
                 # 路径释放，uniform 上传或 aux 纹理创建抛异常时脱池）。
                 try:
-                    # Build composition shader for this layer
-                    has_curves = self.pipeline.has_active_curves_lut(layer.curves_lut)
-                    has_warper = layer.warper_params is not None
-                    has_lut3d = layer.active_lut_path is not None
-                    scp = layer.soft_clip_params or {}
-                    has_soft_clip = scp.get('enabled', False)
-                    # 曲线面板四参数柔化裁切：非恒等才编译进管线
-                    has_curves_soft_clip = not curves_soft_clip_is_identity(
-                        getattr(layer, 'curves_soft_clip', None))
-
-                    # Phase 2: Matte already includes qualifier, so disable shader-side qualifier
-                    has_qualifier = False
-
-                    has_hsl_curve = self.pipeline.has_active_hsl_curve_lut(layer.hsl_curve_lut)
-                    has_mixer = self.pipeline.has_active_mixer_params(layer.mixer_params)
-
-                    # Get plugins for this layer（P7-01：解析为权威 PluginBinding，
-                    # index 保留原始占位——加载失败的插件不影响后续插件前缀）
-                    from src.features.color.core.shader_compiler import (
-                        plugin_bindings_from_instances,
+                    # B07.3：编译段统一经 N06 prepare_corrector（与 E03 渲染
+                    # 线程同一实现；旗标计算/插件 binding/缓存键一致）。
+                    from src.features.color.core.corrector_render_service import (
+                        prepare_corrector,
                     )
-                    layer_plugins = plugin_bindings_from_instances(
-                        layer.plugins) if getattr(layer, 'plugins', None) else []
-
-                    prog_comp = self.pipeline.build_composition_shader(
-                        has_curves=has_curves,
-                        has_warper=has_warper,
-                        has_lut3d=has_lut3d,
-                        has_soft_clip=has_soft_clip,
-                        grain_enabled=False,
-                        has_qualifier=has_qualifier,
-                        has_hsl_curve=has_hsl_curve,
-                        has_mixer=has_mixer,
-                        has_curves_soft_clip=has_curves_soft_clip,
-                        plugins=layer_plugins,
-                        request_id=render_request_id,
-                        layer_id=layer.id,
-                    )
+                    prepared = prepare_corrector(
+                        self.pipeline, layer,
+                        request_id=render_request_id, layer_id=layer.id)
+                    prog_comp = (prepared.program
+                                 if not isinstance(prepared, CorrectorDiagnostic)
+                                 else None)
+                    layer_plugins = (list(prepared.bindings)
+                                     if not isinstance(prepared, CorrectorDiagnostic)
+                                     else [])
 
                     if not prog_comp:
                         # Full-resolution output is an export artifact.  A missing

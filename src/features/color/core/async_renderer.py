@@ -42,6 +42,10 @@
 import moderngl
 import cv2
 import numpy as np
+
+from src.features.color.core.corrector_render_service import (
+    CorrectorDiagnostic,
+)
 import queue
 import time
 import os
@@ -2969,63 +2973,49 @@ class AsyncRenderer(QThread):
                     current_target_fbo = pong_fbo
                 continue
 
-            has_curves = self.pipeline.has_active_curves_lut(layer.get('curves_lut'))
-            has_warper = layer.get('warper_params') is not None
-            has_lut3d = layer.get('active_lut_path') is not None
-            scp = layer.get('soft_clip_params') or {}
-            has_soft_clip = scp.get('enabled', False)
-            # 曲线面板四参数柔化裁切：非恒等才编译进管线（默认恒等直通）
-            has_curves_soft_clip = not curves_soft_clip_is_identity(
-                layer.get('curves_soft_clip'))
-            has_hsl_curve = self.pipeline.has_active_hsl_curve_lut(layer.get('hsl_curve_lut'))
-            has_mixer = self.pipeline.has_active_mixer_params(layer.get('mixer_params'))
-
-            # Get plugins for this layer（P7-01：解析为权威 PluginBinding）
-            from src.features.color.core.shader_compiler import (
-                plugin_bindings_from_instances,
+            # B07.3：单层算子经 N06 corrector_render_service 执行（与原
+            # inline 块调用序逐行一致；E02 全分辨率旧路与 standalone
+            # 测试共用同一实现，保留对照入口）。
+            from src.features.color.core.corrector_render_service import (
+                prepare_corrector,
+                render_corrector_gl,
             )
-            plugin_bindings = plugin_bindings_from_instances(
-                layer.get('plugins', []))
-
-            prog_comp = self.pipeline.build_composition_shader(
-                has_curves=has_curves, has_warper=has_warper,
-                has_lut3d=has_lut3d, has_soft_clip=has_soft_clip,
-                grain_enabled=False, has_hsl_curve=has_hsl_curve,
-                has_mixer=has_mixer, has_curves_soft_clip=has_curves_soft_clip,
-                plugins=plugin_bindings,
-                request_id=render_request_id,
-                layer_id=l_id,
-            )
-            if not prog_comp:
+            prepared = prepare_corrector(
+                self.pipeline, layer,
+                request_id=render_request_id, layer_id=l_id)
+            if isinstance(prepared, CorrectorDiagnostic):
                 # P0-COL-01/P1-OBS-01：编译失败不允许静默丢层。编译器内部
                 # 已 record_compile_failure（含插件标识）；这里把「该层在本
                 # pass 被跳过」本身落到日志，让“导出成功但少了某层效果”
-                # 可以从日志/诊断定位到具体层。
+                # 可以从日志/诊断定位到具体层。（依赖锥导出硬门在 B13。）
                 logger.warning(
                     "Composition shader build failed; layer skipped in this "
-                    "pass (layer_id=%s, plugins=%s) — see render diagnostics",
-                    l_id,
-                    [p.get('plugin_id') or p.get('type')
-                     for p in layer.get('plugins', [])],
+                    "pass (layer_id=%s, code=%s, plugins=%s) — see render "
+                    "diagnostics",
+                    l_id, prepared.code, prepared.plugin_ids,
                 )
                 continue
+            plugin_bindings = prepared.bindings
 
             current_target_fbo.use()
-            self.ctx.viewport = (0, 0, w, h)
-            self.ctx.clear(0.0, 0.0, 0.0, 0.0) # Ensure target is clean for alpha blending if any
             # P0-COL-03：AI 结果纹理是该层的新 source，合成 pass 必须消费
             # 它（matte 已在上面消费同一纹理）。此前 ai_tex 只进 matte，
             # 这里仍绑定栈前缀结果，AI 像素从不进入最终画面。
             pass_input_tex = (ai_tex_used if ai_tex_used is not None
                               else current_source_tex)
-            pass_input_tex.use(0)
-            matte_tex.use(1)
-            prog_comp['u_input_tex'].value = 0
-            prog_comp['u_matte_tex'].value = 1
-            
-            self._update_composition_uniforms(prog_comp, layer, grain_params, w, h, raw_preview, grain_visible_rect, bindings=plugin_bindings)
-            self._bind_aux_textures_single_layer(prog_comp, layer)
-            self._render_quad(prog_comp)
+            render_corrector_gl(
+                self.ctx, prepared,
+                layer=layer,
+                grade_input_tex=pass_input_tex,
+                matte_tex=matte_tex,
+                viewport=(w, h),
+                update_uniforms=lambda prog: self._update_composition_uniforms(
+                    prog, layer, grain_params, w, h, raw_preview,
+                    grain_visible_rect, bindings=plugin_bindings),
+                bind_aux=lambda prog: self._bind_aux_textures_single_layer(
+                    prog, layer),
+                render_quad=self._render_quad,
+            )
             
             # NOTE: We do NOT release matte_tex here because it's now owned by the cache
             # if matte_tex != self.white_tex:

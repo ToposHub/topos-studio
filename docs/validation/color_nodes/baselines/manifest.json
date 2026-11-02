@@ -178,8 +178,8 @@
       }
     }
   },
-  "generated_at_utc": "2026-11-02T10:19:17.030089+00:00",
-  "git_sha": "e43cec9689eddafa82243ab55e35c0cc42036842",
+  "generated_at_utc": "2026-11-02T11:06:15.077247+00:00",
+  "git_sha": "b435ab019546ba932b0096fe798f11d259a71589",
   "gpu": {
     "renderer": "AMD Radeon RX 6800 OpenGL Engine",
     "vendor": "ATI Technologies Inc.",
@@ -193,9 +193,9 @@
   },
   "perf_f08_light": {
     "note": "standalone ctx 合成 pass 锚点，非整管线 FPS；媒体级 bench 见 B16",
-    "p50_ms": 118.61776300429483,
-    "p95_ms": 142.08004229658403,
-    "p99_ms": 151.8140926011256,
+    "p50_ms": 116.58684499707306,
+    "p95_ms": 141.5588891501102,
+    "p99_ms": 147.99394337991544,
     "workload": "1920x1080 RGBA16F neutral composition pass x300"
   },
   "platform": {
@@ -241,10 +241,10 @@
     "f03_l1_bypassed": {
       "alpha_max": 1.0,
       "alpha_min": 1.0,
-      "max": 2.865234375,
-      "mean": 0.6212107539176941,
-      "min": -0.161865234375,
-      "sha256": "b07d7b5ae50140f5749fde7de98fe12aff662a280ba8b42f2816d00949576495"
+      "max": 2.876953125,
+      "mean": 0.6219233870506287,
+      "min": -0.163818359375,
+      "sha256": "78204dc056bfc874ddc92d165f2fc26d394e80aa12e592e140f6989c58f7e87c"
     },
     "f03_serial": {
       "alpha_max": 1.0,

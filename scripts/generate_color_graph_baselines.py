@@ -261,11 +261,14 @@ def generate(output_dir: Path) -> Dict[str, Any]:
         np.save(output_dir / "f03_serial.npy", current)
         manifest["references"]["f03_serial"] = _stats(current)
 
-        # F03 变体：L1 旁路（enabled/bypass 语义锚点）
+        # F03 变体：L1 旁路（E03 语义：invisible 层整层跳过，非 shader 内
+        # 混合——跳层逻辑住在渲染循环；B07.5 修正了初版基线未跳层的缺陷）
         current = f01_hdr_ramp(64)
         for layer in f03_layer_stack():
             if layer.name == "Lift Shadows":
                 layer.visible = False
+            if not layer.visible:
+                continue  # E03 _do_render_impl 同语义
             flags = {"has_curves": layer.curves_lut is not None}
             current = _render_layer_pass(ctx, pipeline, current, layer, flags=flags)
         np.save(output_dir / "f03_l1_bypassed.npy", current)
