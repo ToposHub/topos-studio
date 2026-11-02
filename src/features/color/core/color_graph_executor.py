@@ -99,7 +99,14 @@ class _Lease:
 
 
 class ColorGraphExecutor:
-    """按 plan 执行（每实例一个 GL 上下文线程；无 Qt）。"""
+    """按 plan 执行（每实例一个 GL 上下文线程；无 Qt）。
+
+    逐 pass 纹理经 ``_pool`` 池化（B16.5 优化面：F08 基准量化过无池化的
+    逐 pass 分配是切换前主要单帧成本）：liveness 到期/租约归还的纹理按
+    尺寸复用，池上限 ``_POOL_MAX_PER_SIZE`` 防无界增长，溢出真实释放。
+    """
+
+    _POOL_MAX_PER_SIZE = 8
 
     def __init__(self, ctx: Any, pipeline: ShaderPipeline | None = None,
                  *, backend_catalog: Mapping[str, str] | None = None) -> None:
@@ -108,6 +115,60 @@ class ColorGraphExecutor:
         self.backend_catalog = backend_catalog
         # revision → 已发布结果（scopes/Composite 消费者经 release_revision 释放）
         self._published: dict[str, GraphExecutionResult] = {}
+        # (w, h) → 空闲纹理栈（同上下文复用；池上限防爆显存）
+        self._pool: dict[tuple, list] = {}
+
+    # ── 纹理池 ──
+
+    def _alloc_texture(self, width: int, height: int):
+        """从池取或新建 RGBA16F 纹理（同一执行器生命周期内复用）。"""
+        key = (int(width), int(height))
+        free = self._pool.get(key)
+        if free:
+            return free.pop()
+        return self.ctx.texture((key[0], key[1]), components=4, dtype="f2")
+
+    def _release_texture(self, tex: Any) -> None:
+        """纹理归还池；池满真实释放。"""
+        try:
+            key = (int(tex.size[0]), int(tex.size[1]))
+        except Exception:  # noqa: BLE001 —— 尺寸不可得即释放
+            try:
+                tex.release()
+            except Exception:
+                pass
+            return
+        free = self._pool.setdefault(key, [])
+        if len(free) < self._POOL_MAX_PER_SIZE:
+            free.append(tex)
+        else:
+            try:
+                tex.release()
+            except Exception:
+                pass
+
+    def release_pool(self) -> int:
+        """释放池内全部空闲纹理（宿主清理时调用）；返回释放数。"""
+        released = 0
+        for free in self._pool.values():
+            for tex in free:
+                try:
+                    tex.release()
+                    released += 1
+                except Exception:  # noqa: BLE001
+                    pass
+        self._pool.clear()
+        for tex in (getattr(self, "_white_mattes", None) or {}).values():
+            try:
+                tex.release()
+                released += 1
+            except Exception:  # noqa: BLE001
+                pass
+        self._white_mattes = {}
+        return released
+
+    def pooled_texture_count(self) -> int:
+        return sum(len(v) for v in self._pool.values())
 
     # ── 主入口 ──
 
@@ -162,7 +223,7 @@ class ColorGraphExecutor:
         node_outputs: dict[str, Any] = {}
 
         def _release_lease(lease: _Lease) -> int:
-            lease.texture.release()
+            self._release_texture(lease.texture)
             return 1
 
         def _release_all() -> int:
@@ -278,20 +339,17 @@ class ColorGraphExecutor:
             for port, ref in render_pass.inputs:
                 if port == "image" and ref is not None:
                     input_tex = node_outputs.get(ref.node_id, source_texture)
-            out_tex = self.ctx.texture((width, height), components=4,
-                                       dtype="f2")
+            out_tex = self._alloc_texture(width, height)
             fbo = self.ctx.framebuffer(color_attachments=[out_tex])
             fbo.use()
-            matte_owned = False
             if matte_provider is not None:
                 # 生产 matte（窗口/qualifier/bitmap）：缓存归宿主，不释放
                 matte = matte_provider(layer, input_tex)
                 if matte is None:
                     matte = self._white_matte(width, height)
-                    matte_owned = True
             else:
+                # 白 matte 常量缓存（随 release_pool 释放），不逐 pass 建毁
                 matte = self._white_matte(width, height)
-                matte_owned = True
             quad_fn = render_quad or (
                 lambda prog: self._default_quad(prog).render(_TRIANGLE_STRIP()))
             if bind_aux is not None:
@@ -306,8 +364,6 @@ class ColorGraphExecutor:
                     layer, width, height, prepared.bindings),
                 bind_aux=aux,
                 render_quad=quad_fn)
-            if matte_owned:
-                matte.release()
             fbo.release()
             return out_tex
 
@@ -480,7 +536,7 @@ class ColorGraphExecutor:
                 vertex_shader=node_ops_gl.NODE_OPS_VERT,
                 fragment_shader=source)
             cache[name] = program
-        out_tex = self.ctx.texture((width, height), components=4, dtype="f2")
+        out_tex = self._alloc_texture(width, height)
         fbo = self.ctx.framebuffer(color_attachments=[out_tex])
         fbo.use()
         for uniform_name, (tex, unit) in textures.items():
@@ -493,7 +549,7 @@ class ColorGraphExecutor:
         return out_tex
 
     def _copy_texture(self, tex: Any, width: int, height: int) -> Any:
-        out = self.ctx.texture((width, height), components=4, dtype="f2")
+        out = self._alloc_texture(width, height)
         fbo = self.ctx.framebuffer(color_attachments=[out])
         fbo.use()
         prog = self._passthrough_program()
@@ -568,9 +624,19 @@ class ColorGraphExecutor:
         return self._hsl_tex
 
     def _white_matte(self, width: int, height: int) -> Any:
-        data = np.ones((height, width, 4), dtype=np.float16)
-        return self.ctx.texture((width, height), components=4,
-                                dtype="f2", data=data)
+        """白 matte（常量内容，按尺寸缓存；随 release_pool 释放）。"""
+        key = (int(width), int(height))
+        cache = getattr(self, "_white_mattes", None)
+        if cache is None:
+            cache = {}
+            self._white_mattes = cache
+        tex = cache.get(key)
+        if tex is None:
+            data = np.ones((key[1], key[0], 4), dtype=np.float16)
+            tex = self.ctx.texture((key[0], key[1]), components=4,
+                                   dtype="f2", data=data)
+            cache[key] = tex
+        return tex
 
     def _passthrough_program(self) -> Any:
         import moderngl
@@ -629,12 +695,15 @@ class ColorGraphExecutor:
         getattr(self, "_cancel_flags", set()).discard(request_id)
 
     def release_revision(self, request_id: str) -> int:
-        """释放已发布结果的持有（scopes/Composite 消费完成后调用）。"""
+        """释放已发布结果的持有（scopes/Composite 消费完成后调用）。
+
+        输出纹理归还池（消费方已在同上下文完成拷贝；池满真实释放）。
+        """
         result = self._published.pop(request_id, None)
         if result is None:
             return 0
         try:
-            result.output_texture.release()
+            self._release_texture(result.output_texture)
             return 1
         except Exception:  # noqa: BLE001
             return 0

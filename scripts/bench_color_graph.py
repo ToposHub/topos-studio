@@ -256,6 +256,12 @@ def run_size(ctx_factory, media: Path, size: tuple[int, int], frames: int,
         present_ms: list[float] = []
         executed_passes: set[int] = set()
         rss_samples: list[float] = []
+        # RSS 基线在帧循环开始时取样（decode/prepare 的保留缓冲属于
+        # 基准台架而非被测路径；多尺寸同进程时避免把解码保留误报为
+        # 渲染泄漏——见 4K 独立进程 0.0MB 对照）
+        gc.collect()
+        rss_baseline = _rss_mb()
+        rss_samples.append(rss_baseline)
         for i, frame in enumerate(decoded):
             if i < warmup:
                 continue   # warmup 帧不计时（驱动首帧抖动）
@@ -406,6 +412,9 @@ def main() -> int:
         print(f"  graph p50 {g['p50']}ms / legacy p50 {l['p50']}ms；"
               f"compile {entry['compile_ms']}ms；"
               f"rss增长 {entry['resource']['rss_growth_mb']}MB")
+        # 释放本尺寸的解码保留缓冲（多尺寸同进程时不把上一尺寸的
+        # 保留内存带入下一尺寸的基线/增长测量）
+        gc.collect()
 
     out = Path(args.report)
     out.parent.mkdir(parents=True, exist_ok=True)

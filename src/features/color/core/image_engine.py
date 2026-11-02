@@ -607,7 +607,10 @@ class ImageEngine(QObject):
         render_params['color_output_target'] = str(target or "composite")
         if quality_mode in ('preview', 'paused', 'export'):
             render_params['video_denoise_quality_mode'] = quality_mode
-        self._attach_color_graph_params(render_params)
+        self._attach_color_graph_params(
+            render_params,
+            execute=(self.color_graph_render_enabled
+                     and str(target or "composite") != 'full_res'))
 
         self.renderer.submit(RenderCommand.RENDER_COLOR_OUTPUT, render_params)
 
@@ -843,15 +846,35 @@ class ImageEngine(QObject):
         self._active_graph_snapshot_cache = snapshot
         return snapshot
 
-    def _attach_color_graph_params(self, render_params: dict) -> None:
+    def _attach_color_graph_params(self, render_params: dict,
+                                   *, execute: bool = False) -> None:
         """render_params 附加图快照（S04 身份 + B16.5 执行输入）。
 
-        只附加快照不开启执行（``color_graph_execute`` 由 scope lane
-        （S04）或 B16.5 生产开关设置）。
+        ``execute=True`` 时一并置 ``color_graph_execute``（B16.5 生产
+        开关：``_do_render_impl`` 的图执行分支）。默认只附加快照——
+        scope lane（S04）自行置位；生产默认保持 legacy 循环，
+        ``TOPOS_COLOR_GRAPH_RENDER`` 开启后 front/color output 切图执行。
         """
         snapshot = self.active_color_graph_snapshot()
         if snapshot is not None:
             render_params['color_graph_snapshot'] = snapshot
+            if execute:
+                render_params['color_graph_execute'] = True
+
+    @property
+    def color_graph_render_enabled(self) -> bool:
+        """B16.5 生产开关：图执行接管 front/color output 渲染。
+
+        默认关闭（legacy layers 循环，位级等价已证）。开启条件：环境
+        变量 ``TOPOS_COLOR_GRAPH_RENDER`` 为真值。full-res 导出路径恒走
+        legacy（f4 dtype/源覆盖语义；可投影图导出等价、复杂图被 B13
+        硬门拒绝，见台账）。
+        """
+        if self.__dict__.get('_color_graph_render_enabled') is None:
+            flag = os.environ.get("TOPOS_COLOR_GRAPH_RENDER", "")
+            self._color_graph_render_enabled = flag.strip().lower() in (
+                "1", "true", "yes", "on")
+        return bool(self._color_graph_render_enabled)
 
     def set_image(self, full, high, low, is_new_file=True, path=None, is_video=False, video_path=None):
         """Sets the source images. Uploads to GPU asynchronously.
@@ -3399,9 +3422,12 @@ class ImageEngine(QObject):
                 # it, briefly flashing the previous shot on Play.
                 'video_generation': int(getattr(self.renderer, '_video_generation_id', 0) or 0),
             }
-            # S04：图快照随参提交（scope lane 复用；执行开关见
-            # _do_render_gpu_scope / B16.5）
-            self._attach_color_graph_params(render_params)
+            # S04：图快照随参提交（scope lane 复用）；B16.5 开关开启时
+            # front/color output 一并切图执行（full-res 导出恒 legacy）
+            self._attach_color_graph_params(
+                render_params,
+                execute=(self.color_graph_render_enabled
+                         and not is_full_res))
             if is_full_res:
                 # CPU-side colour conversion is deliberately limited to
                 # preparing immutable data.  All GL work and the readback are
