@@ -271,6 +271,11 @@ class ColorGraphExecutor:
                 graph_revision=0,
                 executed_passes=executed,
                 released_textures=len(plan.passes) - 1)
+            previous = self._published.get(request_id)
+            if previous is not None and previous is not result:
+                # 同 id 覆盖发布：旧输出已无人释放——归还池防泄漏
+                # （宿主应使用唯一 request_id；此为防御路径）
+                self._release_texture(previous.output_texture)
             self._published[request_id] = result
             return result
         except GraphExecutionCancelled:

@@ -170,6 +170,10 @@ class UpdateColorStackCommand:
     _old_trackings: dict[str, Any] | None = None
     _old_video_denoise: dict[str, Any] | None = None
     _old_video_stabilization: dict[str, Any] | None = None
+    # B06 保存边界图一致化：layers 提交时若栈携带可投影 color_graph，
+    # 同步重导出图（否则 E07 图优先会静默丢掉 legacy 通道编辑）；
+    # undo 以首次快照字节等价恢复。
+    _pre_reconcile_graph: dict[str, Any] | None = None
 
     def apply(self, project: EditProject) -> EditProject:
         """
@@ -216,6 +220,35 @@ class UpdateColorStackCommand:
         object.__setattr__(self, '_old_video_stabilization', copy.deepcopy(stack.video_stabilization))
         object.__setattr__(self, '_old_video_denoise', dict(stack.video_denoise) if stack.video_denoise else None)
 
+        # B06：layers 提交 + 栈携带图 → 图与层快照一致化（legacy 写通道
+        # 的编辑进图；无变化不动 revision；复杂图保持权威不同步）
+        reconciled_graph = None
+        if self.layers is not None and stack.color_graph is not None:
+            from src.features.color.core.color_graph_migration import (
+                reconcile_projectable_graph,
+            )
+            try:
+                reconciled_graph, changed = reconcile_projectable_graph(
+                    stack.color_graph, self.layers,
+                    active_layer_index=(self.active_layer_index
+                                        if self.active_layer_index is not None
+                                        else 0))
+            except Exception:  # noqa: BLE001 —— 一致化失败不阻断层保存
+                logger.debug(
+                    "UpdateColorStackCommand graph reconcile failed",
+                    exc_info=True)
+                reconciled_graph, changed = None, False
+            if changed:
+                if self._pre_reconcile_graph is None:
+                    object.__setattr__(
+                        self, '_pre_reconcile_graph',
+                        stack.color_graph.to_dict())
+                logger.debug(
+                    "UpdateColorStackCommand reconciled color graph for "
+                    "stack %s (rev %s -> %s)", self.stack_id[:8],
+                    stack.color_graph.graph_revision,
+                    reconciled_graph.graph_revision)
+
         new_project = project.update_color_stack(
             stack_id=self.stack_id,
             grading_params=self.grading_params,
@@ -231,6 +264,7 @@ class UpdateColorStackCommand:
             trackings=self.trackings,
             video_denoise=self.video_denoise,
             video_stabilization=self.video_stabilization,
+            color_graph=reconciled_graph,
         )
 
         logger.debug(f"UpdateColorStackCommand applied: {self.stack_id}")
@@ -265,6 +299,9 @@ class UpdateColorStackCommand:
             trackings=self._old_trackings,
             video_stabilization=self._old_video_stabilization,
             video_denoise=self._old_video_denoise if self._old_video_denoise is not None else {},
+            color_graph=(
+                _graph_from_dict(self._pre_reconcile_graph)
+                if self._pre_reconcile_graph is not None else None),
         )
 
         logger.debug(f"UpdateColorStackCommand undone: {self.stack_id}")

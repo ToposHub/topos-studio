@@ -1959,11 +1959,16 @@ class AsyncRenderer(QThread):
 
     def _execute_graph_frame(self, params, w, h, raw_view_tex,
                              is_cancelled=None):
-        """S04/B16.5：同一 raw_view 输入上执行图 plan（N07）。fail-closed。
+        """S04/B16.5：同一 raw_view 输入上执行图 plan（N07）。
 
-        成功返回输出纹理（租约记入 ``_graph_lease``）；失败/能力预检
-        拒绝返回 None——调用方**不**回退旧 layers 循环：复杂图的旧循环
-        渲染的是过期 layers 投影（错图），保留上一帧 + 诊断才是安全行为。
+        返回 ``(output_texture, deferred)``：
+        - 成功：纹理租约记入 ``_graph_lease``，``deferred=False``；
+        - **暂缓**（``deferred=True``）：本帧带 legacy 专属特性
+          （baked/AI 纹理/mask 预览）——调用方回落旧 layers 循环（此类
+          栈今天必然可投影串行，旧循环位级正确，非静默降级）；
+        - **fail-closed**（``None, False``）：能力预检拒绝/编译/执行
+          失败——调用方不回退旧循环（复杂图的旧循环渲染过期 layers
+          投影=错图），保留上一帧 + 诊断才是安全行为。
         """
         from src.features.color.core.color_graph_compiler import compile_graph
         from src.features.color.core.color_graph_param_source import (
@@ -1973,16 +1978,19 @@ class AsyncRenderer(QThread):
 
         snapshot = params.get('color_graph_snapshot')
         if snapshot is None:
-            return None
+            return None, False
         deferred = self._graph_execution_deferred_reason(params)
         if deferred is not None:
             scope_diagnostics.record(
                 "execute", "graph_deferred_legacy_feature", detail=deferred)
-            return None
-        request_id = "graph-{}".format(
-            params.get('render_request_id')
-            or "scope-{}".format(
-                self.__dict__.get('_scope_content_revision', 0)))
+            return None, True
+        # 每次执行唯一 request_id：scope 重渲染会复用同一份冻结
+        # render_request_id——executor 的 _published 按 id 覆盖时旧租约
+        # 会泄漏/误释放（发布-释放-复用竞态），单调计数保证唯一
+        counter = self.__dict__.get('_graph_request_counter', 0) + 1
+        self.__dict__['_graph_request_counter'] = counter
+        request_id = "graph-{}-{}".format(
+            params.get('render_request_id') or 'scope', counter)
         visible_rect = params.get('visible_rect', (0, 0, w, h))
 
         def _matte(layer, input_tex):
@@ -2014,19 +2022,19 @@ class AsyncRenderer(QThread):
                 revision=params.get('render_request_id'),
                 detail="{}: {}".format(type(exc).__name__, exc)[:160])
             logger.warning("graph frame execution failed: %r", exc)
-            return None
+            return None, False
         if not result.published:
             scope_diagnostics.record(
                 "execute", "graph_{}".format(
                     result.diagnostic_code or "not_published"),
                 revision=params.get('render_request_id'),
                 detail=(result.diagnostic_message or "")[:160])
-            return None
+            return None, False
         # 上一帧租约让位（本帧输出已在新租约；输出被拷入持久
         # scope/front 目标后即可释放，至多持有一帧）
         self._release_graph_lease()
         self._graph_lease = (executor, result.request_id)
-        return result.output_texture
+        return result.output_texture, False
 
     def _do_render_gpu_scope(self, demand) -> None:
         """Run the native GPU scope pipeline for a ``ScopeDemand``.
@@ -3103,18 +3111,21 @@ class AsyncRenderer(QThread):
         # S04/B16.5：图执行分支——同一 raw_view 输入上由 N07 按 plan 执行
         # （scope 全帧先接；生产开关由 render params 的 color_graph_execute
         # 控制）。fail-closed：图失败不回退旧循环（复杂图的旧循环渲染的是
-        # 过期 layers 投影=错图），返回 False 保留上一帧 + 诊断。
+        # 过期 layers 投影=错图），返回 False 保留上一帧 + 诊断；暂缓帧
+        # （baked/AI/mask 预览——legacy 专属特性）回落旧循环（此类栈必
+        # 然可投影串行，旧循环位级正确，非静默降级）。
         use_graph_execution = bool(
             params.get('color_graph_execute')
             and params.get('color_graph_snapshot') is not None)
         if use_graph_execution:
-            graph_out_tex = self._execute_graph_frame(
+            graph_out_tex, graph_deferred = self._execute_graph_frame(
                 params, w, h, raw_view_tex, is_cancelled)
-            if graph_out_tex is None:
+            if graph_out_tex is None and not graph_deferred:
                 return False
-            # 图输出接管 comp 结果；grain/防抖/输出阶段照常消费
-            current_source_tex = graph_out_tex
-            layers = ()  # 跳过旧 layers 循环
+            if graph_out_tex is not None:
+                # 图输出接管 comp 结果；grain/防抖/输出阶段照常消费
+                current_source_tex = graph_out_tex
+                layers = ()  # 跳过旧 layers 循环
         for i, layer in enumerate(layers):
             if is_cancelled():
                 logger.info("Render request cancelled before layer %s", i)

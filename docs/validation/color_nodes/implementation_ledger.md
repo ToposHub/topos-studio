@@ -29,6 +29,7 @@
 | B06 剩余接线 | a09b51b | **ColorGraphAppHost**（main_window 装配）：真实 ColorNodePanel 从 UI-only 变投影背书编辑器（无图栈=迁移视图，首次命令自动建图）；提交/undo/redo 后引擎重投影+面板水合+重渲染（修复桥 set_project 丢工程替换）；project_legacy_layers 生产合并（grade 域随投影回引擎）；E09 图编辑上下文（选中 Corrector 时 grade 手势经事务合并一次手势一 command，legacy 通道同值预览，活动层按 source_layer_id 对齐；未选中=零变更）；scope owner 真实 ID（group pre/post→(group_id,stage) 重绑组栈、timeline→timeline ID 只记录）；tests/app 14 项 | E10 tracker/qualifier 仍在引擎投影读路径（投影已随提交同步，值一致；node-ID 绑定为 E27 邻接）；图编辑上下文关键帧暂缓；全局 undo（不经图宿主）后引擎同步缺口 |
 | B16.5 生产接通（flag 门控） | 090ccc0 | **TOPOS_COLOR_GRAPH_RENDER**（默认关）：开启后 front/color output 切图执行（full-res 恒 legacy：f4/源覆盖语义；可投影图位级等价、复杂图 B13 硬门拒绝）；scope 全帧自 S04 起无条件走图；**执行器逐 pass 纹理池化**（(w,h) 池化复用+上限 8/尺寸+白 matte 常量缓存）；F08 复测（300 帧实测）：graph p50 53.6ms@1080p / 234.3ms@4K（池化前 122.1/537.0，**较 legacy 109.0/474.1 快约 2×**），RSS +4.2/+2.8MB 稳定（4K 独立进程 0.0MB 对照证无泄漏；修 bench RSS 基线取样把解码保留误报为泄漏）；11 项门控/池化测试 | **默认启用 NOT RUN**（§7 门：S07 原生验收矩阵 + 原生性能/资源录制）；flag 路径的实机 GUI 冒烟未做（offscreen 只有单测） |
 | B08 §5.4 缓存淘汰 | a02a993 | BoundedPlanCache（plan 纹理预算总额上限默认 256MB，LRU 续命，[]/.get 双读路径，单 plan 超预算不入缓存，≤0 不缓存）；renderer 持有；7 项测试 | 无（预算值首测 256MB，原生长会话后可校准） |
+| 复查批次（隐藏缺陷清剿 + B06 collect 收口） | 本批 | **B06 collect 权威图收口**：UpdateColorStackCommand 在 layers 提交且栈携带可投影图时做 reconcile_projectable_graph（legacy 通道编辑随层快照进图——此前图不动、重载图优先即**静默丢编辑**；无变化不动 revision；复杂图保持权威不同步；undo 以快照字节等价恢复）；edit_controller 提交后 refresh_bound_graph（引擎图 stash/面板投影刷新——否则 scope(图执行)与 canvas(legacy)分叉）。**修复 7 个隐藏缺陷**：①scope 重渲染复用 render_request_id 的发布-释放竞态（当前输出被归池复用=坏图+旧租约泄漏；改唯一计数 id+执行器同 id 覆盖防御归池）；②flag 模式活动层无法映射图节点时手势被静默吞掉（回落 legacy）；③baked/AI/mask 暂缓帧原 fail-closed 冻结 scope（改回落旧循环——此类栈必然可投影，位级正确）；④scope 菜单回 clip 不重绑（组栈编辑误入 clip scope；timeline 解绑 fail-visible）；⑤**存量缺陷**：手势提交尾段把扁平参数铺到所有引擎层（非活动层独立调色被冲掉，下次快照永久压平）；⑥scope 身份无图栈共享空会话（面板栈 ID 兜底）；⑦AppHost._publishing 防重入 | E10 tracker/qualifier node-ID 绑定仍登记（E27 邻接）；图编辑上下文关键帧暂缓；全局 undo 不经图宿主的引擎同步缺口（宿主 undo 已同步） |
 | B16 发布验收（子集） | 5ca7b3c | **B16.1**：capability_inventory.md（39 action 表 + provider 表 + 三后端表 + 旧 layers 写入口扫描：48 写点全分类、待审计 0）；**B16.2**：bench_color_graph.py F08 基准（4K_H264 300 帧 × 1080p/4K，decode/compile/graph/present 分段 + p50/p95/p99 + 丢帧 + RSS 稳定 + 无双执行断言）；**B16.3/16.4**：release_acceptance.md（PASS/NOT RUN 矩阵；跨平台/原生/接通模式如实 NOT RUN） | **B16.5 未满足**（见声明 1）；图执行器逐 pass 纹理分配无池化（bench 已量化，切换前优化面）；Metal/跨平台实机矩阵 NOT RUN |
 
 ## 未开始 / 部分开始
@@ -101,8 +102,9 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
   tests/app/test_color_graph_export_preview.py \
   tests/app/test_color_graph_app_host.py \
   tests/app/test_color_graph_production_switch.py \
+  tests/app/test_color_graph_save_reconcile.py \
   tests/ui/test_color_node_editor_state.py tests/ui/test_color_node_editor_view.py \
   tests/ui/test_color_node_editor_panel.py tests/ui/test_color_node_host_menu.py \
   tests/ui/test_color_node_source_preview.py -q
-# 2026-11-03 实测：681 passed（含 Metal 实机 21 项；EXIT=0）
+# 2026-11-03 实测：699 passed（含 Metal 实机 21 项与复查批次回归；EXIT=0）
 ```

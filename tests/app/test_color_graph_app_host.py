@@ -58,6 +58,8 @@ class _Harness:
         self.engine = Mock()
         self.engine.layers = []
         self.engine.active_layer_index = 0
+        # B16.5 flag 默认关（Mock 属性自动为真值会误开 flag 路由）
+        self.engine.color_graph_render_enabled = False
         self.renders = []
         self.host = ColorGraphAppHost(
             get_project=lambda: self.holder["project"],
@@ -327,9 +329,10 @@ class TestGroupScopeOwner:
         assert h.host._coordinator.scope == "group_pre_clip"
         assert h.host._coordinator.scope_owner_id == "grp-1:pre"
         assert h.host._coordinator.state == GraphSessionState.READY
-        # 回 clip scope：重绑 clip 栈
-        h.host.on_clip_stack_loaded(clip_stack)
+        # 回 clip scope（菜单路径）：重绑 clip 栈
+        h.host._on_scope_menu("clip")
         assert h.host.bridge._stack_id() == clip_stack
+        assert h.host._coordinator.scope == "clip"
 
     def test_no_group_keeps_menu_disabled(self, harness):
         h, stack_id, _graph = harness
@@ -341,12 +344,15 @@ class TestGroupScopeOwner:
         h.host._on_scope_menu("group_pre_clip")
         assert h.host.bridge._stack_id() == stack_id
 
-    def test_timeline_scope_records_owner_only(self, qapp):
+    def test_timeline_scope_records_owner_and_unbinds(self, qapp):
         h, clip_stack, _p, _po, _g = self._harness_with_group(qapp)
         h.host.on_clip_stack_loaded(clip_stack)
         h.host._on_scope_menu("timeline")
         assert h.host._coordinator.scope_owner_id == "tl-1"
-        # 不改绑（timeline 图编辑属 E27）
+        # timeline 无 grade 栈模型（E27）：解绑使编辑显式拒绝（fail-
+        # visible，不误写 clip/组栈）
+        assert h.host.bridge._stack_id() == ""
+        h.host._on_scope_menu("clip")
         assert h.host.bridge._stack_id() == clip_stack
 
 
