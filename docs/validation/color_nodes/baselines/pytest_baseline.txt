@@ -1,0 +1,18 @@
+# B00.4 基线 pytest 证据
+
+- 日期: 2026-11-02T10:20:15Z
+- git: e43cec9689eddafa82243ab55e35c0cc42036842
+- 命令: QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/color/test_image_engine_layers.py tests/color/test_color_state_roundtrip.py tests/color/test_color_stack_hydrator.py tests/app/test_color_stack_switch_persistence.py tests/color/test_legacy_baseline_behaviors.py tests/color/test_color_graph_baseline_fixtures.py -q
+
+plugins: qt-4.5.0
+collected 95 items
+
+tests/color/test_image_engine_layers.py ................................ [ 33%]
+.                                                                        [ 34%]
+tests/color/test_color_state_roundtrip.py ........                       [ 43%]
+tests/color/test_color_stack_hydrator.py ....................            [ 64%]
+tests/app/test_color_stack_switch_persistence.py ......                  [ 70%]
+tests/color/test_legacy_baseline_behaviors.py .................          [ 88%]
+tests/color/test_color_graph_baseline_fixtures.py ...........            [100%]
+
+============================== 95 passed in 3.67s ==============================
