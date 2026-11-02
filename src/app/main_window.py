@@ -1244,6 +1244,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         from src.app.ui.files_panel import FilesPanel
         from src.app.ui.info_panel import InfoPanel
         from src.features.color.ui.layer_panel import LayerPanel
+        from src.features.color.ui.node_editor_panel import ColorNodePanel
         from src.features.color.ui.color_wheel import GradingPanel
         from src.features.color.ui.denoise_panel import DenoisePanel
         from src.features.color.ui.deblur_panel import DeblurPanel
@@ -1300,7 +1301,14 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             logger.warning("Edit benchmark host bridge unavailable: %s", exc)
 
         self.info_panel = InfoPanel()
-        self.layer_panel = LayerPanel()
+        self.layer_panel = LayerPanel(self)
+        self.layer_panel.hide()
+        # UI-only node workspace. Keep the legacy layer presenter available to
+        # existing controllers until the ColorGraph adapter is implemented.
+        # Node edit intents deliberately have no engine/project connections.
+        self.color_node_panel = ColorNodePanel()
+        from src.app.controllers.color_node_preview import ColorNodeSourcePreview
+        self.color_node_source_preview = ColorNodeSourcePreview(self)
         self.grading_panel = GradingPanel()
         # Native Tangent Hub integration is optional and runs its socket worker
         # off the Qt thread. It reuses the grading controller below instead of
