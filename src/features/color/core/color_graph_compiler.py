@@ -270,12 +270,70 @@ def _flatten_graph(graph: ColorGraphData) -> tuple[list[ColorNodeData],
 
 # ── 主入口 ──
 
+class BoundedPlanCache(dict):
+    """编译缓存 + 预算驱动淘汰（B08 §5.4 债务收口）。
+
+    键 = ``snapshot.cache_key()``（compiler 语义不变）；值 = plan。
+    以 plan 纹理预算（``sum(pass.estimated_bytes)``）为总额上限，超限按
+    LRU（命中续命）淘汰最旧。``compile_graph(cache=...)`` 的
+    ``cache.get``/``cache[key]``/赋值用法原样兼容（两条读路径都续命）。
+    预算 ≤0 = 不缓存（透传 dict 行为退化为直写后即弃——调用方自行持有）。
+    """
+
+    def __init__(self, byte_budget: int = 256 * 1024 * 1024) -> None:
+        super().__init__()
+        self.byte_budget = int(byte_budget)
+        self._bytes = 0
+
+    @staticmethod
+    def _plan_bytes(plan: Any) -> int:
+        total = 0
+        for render_pass in getattr(plan, "passes", ()) or ():
+            total += int(getattr(render_pass, "estimated_bytes", 0) or 0)
+        return total
+
+    def _touch(self, key, value) -> None:
+        super().__delitem__(key)
+        super().__setitem__(key, value)
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self._touch(key, value)
+        return value
+
+    def get(self, key, default=None):
+        if key not in self:
+            return default
+        return self[key]
+
+    def __setitem__(self, key, plan):
+        if key in self:
+            self._bytes -= self._plan_bytes(super().__getitem__(key))
+            super().__delitem__(key)
+        if self.byte_budget <= 0:
+            return
+        size = self._plan_bytes(plan)
+        if size > self.byte_budget:
+            return  # 单个 plan 即超预算：不入缓存（否则永远命中无法淘汰）
+        while self._bytes + size > self.byte_budget and self:
+            oldest = next(iter(self))
+            self._bytes -= self._plan_bytes(super().__getitem__(oldest))
+            super().__delitem__(oldest)
+        super().__setitem__(key, plan)
+        self._bytes += size
+
+    @property
+    def total_bytes(self) -> int:
+        return self._bytes
+
+
 def compile_graph(snapshot: ColorGraphSnapshot,
                   *, size: tuple[int, int] = (1920, 1080),
                   cache: dict | None = None) -> ColorGraphRenderPlan:
     """编译 target 依赖锥 → RenderPlan（不触 GPU）。
 
-    ``cache``：可选 dict（调用方持有）；键含 snapshot.cache_key()。
+    ``cache``：可选 dict（调用方持有；``BoundedPlanCache`` 提供预算
+    驱动淘汰）；键含 snapshot.cache_key()。
     """
     started = time.perf_counter()
     if cache is not None:
