@@ -84,3 +84,47 @@ combiner   = vec4(R.r, G.g, B.b, R.a)                          # R.a 承载 alph
 - Layer Mixer 的完整 18 模式（v1 冻结上表 5 种；其余在 catalog 标
   pending 直到补公式+oracle）；
 - 分支 key 的 blur/clean/gain 后处理时序（§4.1 正式冻结时并入）。
+
+## 9. Layer Mixer 全模式表（v1.1，B10 债务收口）
+
+v1.1 冻结 Layer Mixer 的完整模式集。权威公式源 =
+`shader_nodes.BLEND_MODES_SNIPPET.apply_blend_mode`（b=bottom/base，
+a=top/blend_layer）；混合 epilogue 统一为：
+
+```
+out.rgb = mix(bottom.rgb, apply_blend_mode(bottom.rgb, top.rgb, mode), opacity)
+```
+
+该 mix 形式与 v1 冻结的 5 模式内嵌公式**逐模式等价**（Normal/Add/
+Subtract/Multiply/Screen 代数验证），v1 语义不变。
+
+| 模式 | 公式（b=bottom，a=top；权威索引） |
+|---|---|
+| Normal (v1) | a |
+| Multiply (v1) | b·a |
+| Screen (v1) | 1−(1−b)(1−a) |
+| Overlay | b<0.5 ? 2·b·a : 1−2·(1−b)·(1−a)（逐通道；BLEND 3） |
+| Soft Light | a<0.5 ? 2·b·a+b²(1−2a) : √b·(2a−1)+2b(1−a)（逐通道；BLEND 4） |
+| Hard Light | Overlay(a, b)（参数互换；BLEND 5） |
+| Color Dodge | b / max(0.001, 1−a)（BLEND 6） |
+| Color Burn | 1 − (1−b)/max(0.001, a)（BLEND 7） |
+| Darken | min(b, a)（BLEND 8） |
+| Lighten | max(b, a)（BLEND 9） |
+| Difference | abs(b−a)（BLEND 10） |
+| Exclusion | b + a − 2·b·a（BLEND 11） |
+| Hue | hsv2rgb(hsv(a).x, hsv(b).y, hsv(b).z)（BLEND 12） |
+| Saturation | hsv2rgb(hsv(b).x, hsv(a).y, hsv(b).z)（BLEND 13） |
+| Color | hsv2rgb(hsv(a).x, hsv(a).y, hsv(b).z)（BLEND 14；AUD-0910） |
+| Luminosity | hsv2rgb(hsv(b).x, hsv(b).y, hsv(a).z)（BLEND 15） |
+| Addition | b + a（BLEND 16；与 v1 "Add" 同式） |
+| Subtract (Clamped) | max(b−a, 0)（BLEND 17；**带下限钳制**——v1 "Subtract" 为无钳 b−a·op，两者并存） |
+| Divide | b / max(0.001, a)（BLEND 18） |
+| Add / Subtract (v1) | v1 内嵌式（a + b·op / a − b·op，无钳制） |
+
+边界与对齐：
+
+- HSV 四模式按**权威文本无符号防护**（rgb2hsv 直接输入；负值 HDR 行为
+  与 legacy 逐位一致，不额外加防护——与本文件"翻译不演化"契约一致）；
+- max(0.001, ·) 分母下限逐通道；Straight alpha（out.a = bottom.a）；
+- CPU/GL/Metal 三后端同式（N09 oracle / node_ops_gl / E23
+  graph_layer_mix）；能力目录 layer_mixer=exact 覆盖全模式。

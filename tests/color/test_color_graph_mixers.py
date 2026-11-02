@@ -158,3 +158,151 @@ class TestGraphLevelMixerExecution:
         # GL 执行成功即结构语义成立（CPU layer oracle 的 slot 语义在
         # 上方 oracle 组测试锁定）
         assert gl.shape == source.shape
+
+
+# ===========================================================================
+# v1.1（spec §9）：Layer Mixer 全模式（三后端同式对照）
+# ===========================================================================
+
+V11_MODES = ("Overlay", "Soft Light", "Hard Light", "Color Dodge",
+             "Color Burn", "Darken", "Lighten", "Difference", "Exclusion",
+             "Hue", "Saturation", "Color", "Luminosity", "Addition",
+             "Subtract (Clamped)", "Divide")
+
+
+class TestLayerMixerV11Modes:
+    def test_v11_modes_hand_computed_values(self):
+        """抽样手算锚点（opacity=0.5，b=bottom=0.4，a=top=0.8）。"""
+        bottom = np.full((1, 1, 4), 0.4, np.float32)
+        top = np.full((1, 1, 4), 0.8, np.float32)
+        overlay = 2.0 * 0.4 * 0.8                        # b<0.5 低分支
+        dodge = 0.4 / max(1e-3, 1 - 0.8)
+        expected = {
+            "Overlay": 0.4 * 0.5 + overlay * 0.5,
+            "Color Dodge": 0.4 * 0.5 + dodge * 0.5,
+            "Darken": 0.4,                     # min(0.4, 0.8)，op=0.5 → 0.4
+            "Lighten": 0.4 * 0.5 + 0.8 * 0.5,  # max→0.8 再过 mix
+            "Difference": 0.4 * 0.5 + 0.4 * 0.5,   # |0.4-0.8|=0.4 → mix=0.4
+            "Exclusion": 0.4 * 0.5 + (0.4 + 0.8 - 0.64) * 0.5,
+            "Addition": 0.4 * 0.5 + 1.2 * 0.5,  # b+a=1.2 再过 mix
+            "Subtract (Clamped)": 0.4 * 0.5,   # max(0.4-0.8,0)=0 → mix(0.4,0)=0.2
+            "Divide": 0.4 * 0.5 + (0.4 / 0.8) * 0.5,
+        }
+        for mode, want in expected.items():
+            out = layer_mix([bottom, top], [0.5], [mode])
+            assert float(out[0, 0, 0]) == pytest.approx(want, abs=1e-6), mode
+
+    def test_v11_mix_epilogue_equivalence_with_v1(self):
+        """v1.1 mix 形式与 v1 内嵌式代数等价（4 模式 × 多 opacity）。"""
+        rng = np.random.default_rng(11)
+        a = rng.uniform(-0.2, 1.5, (4, 4, 4)).astype(np.float32)
+        b = rng.uniform(-0.2, 1.5, (4, 4, 4)).astype(np.float32)
+        for mode, formula in (("Normal", lambda x, y: x * (1 - 0.7) + y * 0.7),
+                              ("Add", lambda x, y: x + y * 0.7),
+                              ("Multiply", lambda x, y: x * (1 - 0.7 + 0.7 * y)),
+                              ("Screen",
+                               lambda x, y: 1 - (1 - x) * (1 - y * 0.7))):
+            v1 = formula(a[..., :3], b[..., :3])
+            from src.features.color.core.color_graph_cpu import (
+                _apply_blend_mode_cpu,
+            )
+            blended = _apply_blend_mode_cpu(
+                a[..., :3], b[..., :3],
+                {"Normal": "Normal", "Add": "Addition",
+                 "Multiply": "Multiply", "Screen": "Screen"}[mode])
+            v11 = a[..., :3] * 0.3 + blended * 0.7
+            np.testing.assert_allclose(v1, v11, atol=1e-6), mode
+
+    def test_unknown_mode_still_rejected(self):
+        a = np.zeros((1, 1, 4), np.float32)
+        with pytest.raises(UnsupportedNode):
+            layer_mix([a, a], [1.0], ["Mystery"])
+
+    def test_alpha_unchanged_all_modes(self):
+        rng = np.random.default_rng(3)
+        bottom = rng.random((2, 2, 4)).astype(np.float32)
+        top = rng.random((2, 2, 4)).astype(np.float32)
+        for mode in V11_MODES:
+            out = layer_mix([bottom, top], [0.5], [mode])
+            np.testing.assert_array_equal(out[..., 3], bottom[..., 3]), mode
+
+    def test_gl_shader_matches_cpu_all_modes(self):
+        """GL layer_mix fragment vs CPU oracle（双容差门）。"""
+        moderngl = pytest.importorskip("moderngl",
+                                       reason="ModernGL 不可用")
+        from src.features.color.shaders.node_ops_gl import (
+            LAYER_MIX_FRAG,
+            LAYER_MODE_INDEX,
+            NODE_OPS_VERT,
+        )
+        rng = np.random.default_rng(21)
+        size = 16
+        bottom = rng.uniform(0.0, 1.0, (size, size, 4)).astype(np.float32)
+        top = rng.uniform(0.0, 1.0, (size, size, 4)).astype(np.float32)
+        qb = bottom.astype(np.float16).astype(np.float32)
+        qt = top.astype(np.float16).astype(np.float32)
+        ctx = moderngl.create_standalone_context(require=330)
+        try:
+            vert = """#version 330
+            in vec2 in_vert; in vec2 in_texcoord; out vec2 v_uv;
+            void main(){ gl_Position=vec4(in_vert,0.,1.); v_uv=in_texcoord; }"""
+            prog = ctx.program(vertex_shader=vert,
+                               fragment_shader=LAYER_MIX_FRAG)
+            import moderngl as mgl
+            vao = ctx.vertex_array(prog, [(ctx.buffer(np.array(
+                [-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1],
+                dtype="f4").tobytes()), "2f 2f", "in_vert", "in_texcoord")])
+            tex_b = ctx.texture((size, size), components=4, dtype="f2",
+                                data=bottom.astype(np.float16))
+            tex_t = ctx.texture((size, size), components=4, dtype="f2",
+                                data=top.astype(np.float16))
+            out = ctx.texture((size, size), components=4, dtype="f2")
+            fbo = ctx.framebuffer(color_attachments=[out])
+            fbo.use()
+            tex_b.use(0)
+            prog["u_bottom"].value = 0
+            tex_t.use(1)
+            prog["u_top"].value = 1
+            prog["u_opacity"].value = 0.5
+            prog["u_mode"].value = 0
+            # 极点模式（Color Dodge/Burn/Divide 在 top→1 附近对输入
+            # 量化误差有固有放大——权威公式行为）；用 fp16 精确栅格值
+            # （1/8 步长）消除两侧输入差
+            qgrid_b = (np.round(qb * 8.0) / 8.0).astype(np.float32)
+            qgrid_t = (np.round(qt * 8.0) / 8.0).astype(np.float32)
+            grid_b = ctx.texture((size, size), components=4, dtype="f2",
+                                 data=qgrid_b.astype(np.float16))
+            grid_t = ctx.texture((size, size), components=4, dtype="f2",
+                                 data=qgrid_t.astype(np.float16))
+            pole_modes = {"Color Dodge", "Color Burn", "Divide"}
+            for mode in (*V11_MODES, "Normal", "Add", "Subtract",
+                         "Multiply", "Screen"):
+                if mode in pole_modes:
+                    grid_b.use(0)
+                    grid_t.use(1)
+                    cpu_in_b, cpu_in_t = qgrid_b, qgrid_t
+                else:
+                    tex_b.use(0)
+                    tex_t.use(1)
+                    cpu_in_b, cpu_in_t = qb, qt
+                prog["u_mode"].value = LAYER_MODE_INDEX[mode]
+                vao.render(mgl.TRIANGLE_STRIP)
+                gl_out = np.frombuffer(
+                    fbo.read(components=4, dtype="f2"),
+                    dtype=np.float16).reshape(size, size, 4).astype(np.float32)
+                cpu = layer_mix([cpu_in_b, cpu_in_t], [0.5], [mode])
+                diff = np.abs(gl_out.astype(np.float64)
+                              - cpu.astype(np.float64))
+                # 双容差：SDR abs ≤1/255；HDR（极点模式可放大到数百）
+                # rel ≤2e-3（fp16 大值步长固有）
+                sdr = np.abs(cpu) <= 1.0
+                mag = np.maximum(np.abs(cpu.astype(np.float64)), 1e-6)
+                assert diff[sdr].max(initial=0.0) <= 1.0 / 255.0, (
+                    f"{mode}: SDR {diff[sdr].max(initial=0.0):.3e}")
+                rel = diff[~sdr] / mag[~sdr]
+                assert rel.max(initial=0.0) <= 2e-3, (
+                    f"{mode}: HDR rel {rel.max(initial=0.0):.3e}")
+            for t in (out, fbo, tex_b, tex_t, grid_b, grid_t):
+                t.release()
+        finally:
+            ctx.release()

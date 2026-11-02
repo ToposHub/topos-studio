@@ -50,24 +50,111 @@ _BLEND_MODES_CPU = {
     "Normal": lambda a, b, op: a * (1 - op) + b * op,
     "Add": lambda a, b, op: a + b * op,
     "Subtract": lambda a, b, op: a - b * op,
-    "Multiply": lambda a, b, op: a * (1.0 - op + op * b / np.where(
-        np.abs(a) < 1e-12, 1.0, 1.0)) if False else a * (1 - op + op * b),
+    "Multiply": lambda a, b, op: a * (1 - op + op * b),
     "Screen": lambda a, b, op: 1.0 - (1.0 - a) * (1.0 - b * op),
 }
+
+# v1.1（spec §9）：剩余模式 = mix(bottom, apply_blend_mode(bottom, top),
+# opacity)——与 v1 内嵌式逐模式代数等价。权威 =
+# BLEND_MODES_SNIPPET.apply_blend_mode（b=bottom，a=top）。HSV 四模式按
+# 权威文本无符号防护。
+_BLEND_EPS = 1e-3
+
+
+def _overlay(b, a):
+    return np.where(b < 0.5, 2.0 * b * a,
+                    1.0 - 2.0 * (1.0 - b) * (1.0 - a))
+
+
+def _soft_light(b, a):
+    return np.where(a < 0.5,
+                    2.0 * b * a + b * b * (1.0 - 2.0 * a),
+                    np.sqrt(np.maximum(b, 0.0)) * (2.0 * a - 1.0)
+                    + 2.0 * b * (1.0 - a))
+
+
+def _hsv_recompose(b, a, h_from_a, s_from_a, v_from_a):
+    """HSV 四模式（无符号防护，与权威一致）。"""
+    hsv_b = _rgb_to_hsv(b)
+    hsv_a = _rgb_to_hsv(a)
+    h = hsv_a[..., 0] if h_from_a else hsv_b[..., 0]
+    s = hsv_a[..., 1] if s_from_a else hsv_b[..., 1]
+    v = hsv_a[..., 2] if v_from_a else hsv_b[..., 2]
+    return _hsv_to_rgb(np.stack([h, s, v], axis=-1))
+
+
+def _apply_blend_mode_cpu(b, a, mode):
+    """BLEND_MODES_SNIPPET.apply_blend_mode 的 numpy 移植（逐条同式）。"""
+    if mode == "Multiply":
+        return b * a
+    if mode == "Screen":
+        return 1.0 - (1.0 - b) * (1.0 - a)
+    if mode == "Overlay":
+        return _overlay(b, a)
+    if mode == "Soft Light":
+        return _soft_light(b, a)
+    if mode == "Hard Light":
+        return _overlay(a, b)
+    if mode == "Color Dodge":
+        return b / np.maximum(_BLEND_EPS, 1.0 - a)
+    if mode == "Color Burn":
+        return 1.0 - (1.0 - b) / np.maximum(_BLEND_EPS, a)
+    if mode == "Darken":
+        return np.minimum(b, a)
+    if mode == "Lighten":
+        return np.maximum(b, a)
+    if mode == "Difference":
+        return np.abs(b - a)
+    if mode == "Exclusion":
+        return b + a - 2.0 * b * a
+    if mode == "Hue":
+        return _hsv_recompose(b, a, True, False, False)
+    if mode == "Saturation":
+        return _hsv_recompose(b, a, False, True, False)
+    if mode == "Color":
+        return _hsv_recompose(b, a, True, True, False)
+    if mode == "Luminosity":
+        return _hsv_recompose(b, a, False, False, True)
+    if mode == "Addition":
+        return b + a
+    if mode == "Subtract (Clamped)":
+        return np.maximum(b - a, 0.0)
+    if mode == "Divide":
+        return b / np.maximum(_BLEND_EPS, a)
+    return a  # Normal / 未知（与 GLSL mode<=0 同路径）
 
 
 def layer_mix(slots: Sequence[np.ndarray], opacities: Sequence[float],
               modes: Sequence[str]) -> np.ndarray:
-    """spec §2：由下到上折叠（slot 0 为底）。"""
+    """spec §2/§9（v1.1）：由下到上折叠（slot 0 为底）。
+
+    v1 五模式走内嵌式；v1.1 新模式走 ``mix(bottom, apply_blend_mode(
+    bottom, top), opacity)``（两者代数等价，见 spec §9）。
+    """
     if not slots:
         raise ValueError("layer_mix 需要至少一个 slot")
     out = slots[0].copy()
     for slot, opacity, mode in zip(slots[1:], opacities, modes):
         formula = _BLEND_MODES_CPU.get(mode)
-        if formula is None:
-            raise UnsupportedNode(f"Layer 模式 {mode} 未在 v1 规格冻结")
-        out[..., :3] = formula(out[..., :3], slot[..., :3], float(opacity))
+        if formula is not None:
+            out[..., :3] = formula(out[..., :3], slot[..., :3], float(opacity))
+            continue
+        if mode in _BLEND_MODES_V11:
+            op = float(opacity)
+            blended = _apply_blend_mode_cpu(out[..., :3], slot[..., :3],
+                                            mode)
+            out[..., :3] = (out[..., :3] * (1.0 - op) + blended * op)
+            continue
+        raise UnsupportedNode(f"Layer 模式 {mode} 未在规格冻结")
     return out
+
+
+#: v1.1 新增模式集（spec §9 表）
+_BLEND_MODES_V11 = frozenset({
+    "Overlay", "Soft Light", "Hard Light", "Color Dodge", "Color Burn",
+    "Darken", "Lighten", "Difference", "Exclusion", "Hue", "Saturation",
+    "Color", "Luminosity", "Addition", "Subtract (Clamped)", "Divide",
+})
 
 
 def key_mix(keys: Sequence[np.ndarray], mode: str = "add") -> np.ndarray:

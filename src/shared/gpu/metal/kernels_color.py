@@ -667,7 +667,35 @@ kernel void graph_parallel_mix(
     out[idx] = half4(float4(mix3(b.rgb, br.rgb, k), b.a));
 }
 
-// spec §2：mode 0 Normal / 1 Add / 2 Subtract / 3 Multiply / 4 Screen
+// —— GRADING_SNIPPET.rgb2hsv/hsv2rgb 逐条翻译（与 MSL_HSV_FUNCS 同源；
+//    需先于 graph_layer_mix 定义——v1.1 HSV 模式使用）——
+static inline float3 graph_rgb2hsv(float3 c) {
+    float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    float4 p = mix(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
+    float4 q = mix(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return float3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+static inline float3 graph_hsv2rgb(float3 c) {
+    float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    float3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+static inline float graph_overlay(float b, float a) {
+    return b < 0.5 ? (2.0 * b * a) : (1.0 - 2.0 * (1.0 - b) * (1.0 - a));
+}
+
+static inline float graph_soft_light(float b, float a) {
+    return (a < 0.5) ? (2.0 * b * a + b * b * (1.0 - 2.0 * a))
+                     : (sqrt(max(b, 0.0)) * (2.0 * a - 1.0)
+                        + 2.0 * b * (1.0 - a));
+}
+
+// spec §2 v1 + §9 v1.1：mode 0-4 v1 内嵌式；5-20 =
+// mix(bottom, apply_blend_mode(bottom, top), opacity)（权威同式）
 kernel void graph_layer_mix(
     device const half4* bottom [[buffer(0)]],
     device const half4* top    [[buffer(1)]],
@@ -685,7 +713,42 @@ kernel void graph_layer_mix(
     else if (p.b == 1) { outc = a + b * op; }
     else if (p.b == 2) { outc = a - b * op; }
     else if (p.b == 3) { outc = a * (1.0 - op + op * b); }
-    else               { outc = 1.0 - (1.0 - a) * (1.0 - b * op); }
+    else if (p.b == 4) { outc = 1.0 - (1.0 - a) * (1.0 - b * op); }
+    else {
+        float3 blended;
+        if (p.b == 5) {
+            blended = float3(graph_overlay(a.r, b.r), graph_overlay(a.g, b.g),
+                             graph_overlay(a.b, b.b));
+        } else if (p.b == 6) {
+            blended = float3(graph_soft_light(a.r, b.r),
+                             graph_soft_light(a.g, b.g),
+                             graph_soft_light(a.b, b.b));
+        } else if (p.b == 7) {
+            blended = float3(graph_overlay(b.r, a.r), graph_overlay(b.g, a.g),
+                             graph_overlay(b.b, a.b));
+        } else if (p.b == 8)  { blended = a / max(float3(0.001), 1.0 - b); }
+        else if (p.b == 9)  { blended = 1.0 - (1.0 - a) / max(float3(0.001), b); }
+        else if (p.b == 10) { blended = min(a, b); }
+        else if (p.b == 11) { blended = max(a, b); }
+        else if (p.b == 12) { blended = abs(a - b); }
+        else if (p.b == 13) { blended = a + b - 2.0 * a * b; }
+        else if (p.b == 14) {
+            float3 ha = graph_rgb2hsv(a); float3 hb = graph_rgb2hsv(b);
+            blended = graph_hsv2rgb(float3(hb.x, ha.y, ha.z));
+        } else if (p.b == 15) {
+            float3 ha = graph_rgb2hsv(a); float3 hb = graph_rgb2hsv(b);
+            blended = graph_hsv2rgb(float3(ha.x, hb.y, ha.z));
+        } else if (p.b == 16) {
+            float3 ha = graph_rgb2hsv(a); float3 hb = graph_rgb2hsv(b);
+            blended = graph_hsv2rgb(float3(hb.x, hb.y, ha.z));
+        } else if (p.b == 17) {
+            float3 ha = graph_rgb2hsv(a); float3 hb = graph_rgb2hsv(b);
+            blended = graph_hsv2rgb(float3(ha.x, ha.y, hb.z));
+        } else if (p.b == 18) { blended = a + b; }
+        else if (p.b == 19) { blended = max(a - b, 0.0); }
+        else                { blended = a / max(float3(0.001), b); }
+        outc = a * (1.0 - op) + blended * op;
+    }
     out[idx] = half4(float4(outc, float4(bottom[idx]).a));
 }
 
@@ -783,22 +846,6 @@ kernel void graph_masked_mix(
     float4 b = float4(b_in[idx]);
     float k = clamp(float(mask[idx].r), 0.0, 1.0) * p.a;
     out[idx] = half4(float4(mix3(a.rgb, b.rgb, k), a.a));
-}
-
-// —— GRADING_SNIPPET.rgb2hsv/hsv2rgb 逐条翻译（与 MSL_HSV_FUNCS 同源）——
-static inline float3 graph_rgb2hsv(float3 c) {
-    float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
-    float4 p = mix(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
-    float4 q = mix(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
-    float d = q.x - min(q.w, q.y);
-    float e = 1.0e-10;
-    return float3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
-}
-
-static inline float3 graph_hsv2rgb(float3 c) {
-    float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-    float3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
 
 // —— GRADING_SNIPPET.apply_grading 逐条翻译（点态基础域；mid_detail/

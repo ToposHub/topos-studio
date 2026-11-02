@@ -410,3 +410,59 @@ class TestMetalFailClosedAndCancel:
         assert not result.published
         assert result.diagnostic_code in ("bad_source_format",
                                           "execution_error")
+
+
+@requires_metal
+class TestMetalLayerMixV11Modes:
+    """spec §9 v1.1：graph_layer_mix 全模式 Metal kernel vs CPU oracle。"""
+
+    MODES = ("Overlay", "Soft Light", "Hard Light", "Color Dodge",
+             "Color Burn", "Darken", "Lighten", "Difference", "Exclusion",
+             "Hue", "Saturation", "Color", "Luminosity", "Addition",
+             "Subtract (Clamped)", "Divide")
+
+    def test_all_modes_match_cpu(self, metal_ctx):
+        import numpy as np
+        from src.features.color.core.color_graph_cpu import layer_mix
+        from src.features.color.shaders.node_ops_gl import LAYER_MODE_INDEX
+        rng = np.random.default_rng(5)
+        size = 16
+        # 1/8 栅格（fp16 精确）——极点模式对输入量化固有放大
+        bottom = (np.round(rng.uniform(0, 1, (size, size, 4)) * 8) / 8
+                  ).astype(np.float16)
+        top = (np.round(rng.uniform(0, 1, (size, size, 4)) * 8) / 8
+               ).astype(np.float16)
+        qb = bottom.astype(np.float32)
+        qt = top.astype(np.float32)
+        ctx = metal_ctx
+        in_b = ctx.create_buffer_from_numpy(np.ascontiguousarray(bottom))
+        in_t = ctx.create_buffer_from_numpy(np.ascontiguousarray(top))
+        out = ctx.create_buffer(size * size * 8)
+        from src.shared.gpu.metal.kernels_color import (
+            METAL_GRAPH_OPS_MSL,
+            make_graph_size_params,
+        )
+        kernel = ctx.get_cached_kernel("graph_layer_mix")
+        if kernel is None:
+            kernel = ctx.compile_kernel("graph_layer_mix",
+                                        METAL_GRAPH_OPS_MSL)
+        for mode in (*self.MODES, "Normal", "Add", "Subtract",
+                     "Multiply", "Screen"):
+            params = make_graph_size_params(size, size, a=0.5,
+                                            b=LAYER_MODE_INDEX[mode])
+            ctx.dispatch(kernel,
+                         buffers={0: in_b, 1: in_t, 2: out,
+                                  3: ctx.create_buffer_from_numpy(params)},
+                         threads=(size, size, 1))
+            ctx.finish()
+            metal = ctx.read_buffer(out).view(
+                np.float16).reshape(size, size, 4).astype(np.float32)
+            cpu = layer_mix([qb, qt], [0.5], [mode])
+            diff = np.abs(metal.astype(np.float64) - cpu.astype(np.float64))
+            sdr = np.abs(cpu) <= 1.0
+            mag = np.maximum(np.abs(cpu.astype(np.float64)), 1e-6)
+            assert diff[sdr].max(initial=0.0) <= SDR_TOL, (
+                f"{mode}: SDR {diff[sdr].max(initial=0.0):.3e}")
+            rel = diff[~sdr] / mag[~sdr]
+            assert rel.max(initial=0.0) <= HDR_REL, (
+                f"{mode}: HDR rel {rel.max(initial=0.0):.3e}")

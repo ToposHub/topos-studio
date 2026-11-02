@@ -18,7 +18,7 @@
 | B07 Corrector 提取 | 6bc02ed | N06（prepare/render/key/serial）+ E02/E03 统一调用；golden 位级对照 4 组；655 项回归 | Metal/CPU 侧同算子（B12）；qualifier GPU keyer 未入 N06（E03 缓存路径继续） |
 | B08 snapshot/plan | 57699f5 | N04 冻结 + N05 依赖锥/compound 展开/shared 解析/liveness/峰值上界/能力预检/缓存/可解释 JSON；17 项 | 预算驱动的缓存淘汰（§5.4 只落了峰值统计） |
 | B09 GL 执行 | 4740c69 | N07 执行器：逐 pass 取消/liveness 释放/fail-closed/发布语义；**串行图 vs 旧 layers 基线位级一致**（f03_serial+bypass）；11 项 | 未接 E03 生产调度（生产渲染仍走旧 layers 循环；图执行器在 standalone 闭环）；RAW/降噪/防抖/颗粒在图路径的位置迁移未做（旧路径保留） |
-| B10 mixer/key/splitter | 53bccd3 | 规格文档冻结 v1 + N09 CPU oracle + 6 个 GL shader + 执行器 pass + 目录翻 exact；23 项 | Layer 仅 5 模式（其余 pending）；分支 key 后处理时序（blur/clean/gain）未并入；qualifier key 流 GL 生成未接（key 边用白 matte） |
+| B10 mixer/key/splitter | 53bccd3 | 规格文档冻结 v1 + N09 CPU oracle + 6 个 GL shader + 执行器 pass + 目录翻 exact；23 项 | ~~Layer 仅 5 模式~~ **v1.1 已收口（本轮）**：spec §9 全模式表（权威=BLEND_MODES_SNIPPET，mix epilogue 与 v1 内嵌式代数等价；HSV 四模式无符号防护同权威；Subtract(Clamped) 与 v1 Subtract 并存）；CPU/GL/Metal 三后端同式 + 手算锚点 + GL shader 对照 + Metal kernel 对照（mixers 14 + Metal 21）| 分支 key 后处理时序（blur/clean/gain）未并入；qualifier key 流 GL 生成未接（key 边用白 matte） |
 | B11 compound/shared | 7f41d16 | group/ungroup plan+CPU+GL 位级等价；嵌套；多实例不同输入；定义 fanout；make local 隔离；9 项 | compound 动态端口 mapping（key 边跨界仍拒绝）；跨 clip 缓存键落盘 |
 | B13 导出闸门（子集） | 54dd6f1 | 图能力硬门：可投影→图派生；复杂→显式拒绝；legacy 不变；3 项 | Composite/预览统一走 N07；LUT fast path 图资格（can_export_lut 已备未接 E24 调用点）；alpha output 导出格式预检 |
 | B14 持久化核心 | ea9dbd3 | 栈载荷/版本链路图无损往返；未知节点 load→save 保留；LUT pointwise 资格门 + 拒绝矩阵；13 项 | still/剪贴板子图闭包（E25/E09 侧）；组链 E27 图语义；save_router standalone 路径显式携图（已验证载荷层等价） |

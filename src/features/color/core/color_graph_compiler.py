@@ -92,7 +92,7 @@ GL_CAPABILITY_CATALOG: Mapping[str, str] = {
     "shared_corrector": "exact",
     "output": "exact",
     "parallel_mixer": "exact",     # B10：spec v1 + shader + oracle
-    "layer_mixer": "exact",        # v1 五模式（其余模式 catalog pending）
+    "layer_mixer": "exact",        # v1.1 全模式（spec §9，B10 债务收口）
     "key_mixer": "exact",
     "outside": "exact",
     "splitter": "exact",
