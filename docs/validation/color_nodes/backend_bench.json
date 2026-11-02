@@ -1,0 +1,151 @@
+{
+ "kind": "color_graph_backend_bench",
+ "fixture_set": "standard",
+ "timestamp": "2026-11-02T22:39:55",
+ "git": "1405f67",
+ "platform": "macOS-15.3.1-x86_64-i386-64bit",
+ "gpu": {
+  "renderer": "AMD Radeon RX 6800 OpenGL Engine",
+  "version": "4.1 ATI-6.1.13"
+ },
+ "media": "tests/test_videos/4K_H264.mov",
+ "frames_requested": 300,
+ "sizes": [
+  {
+   "size": "1920x1080",
+   "media": "4K_H264.mov",
+   "frames": 300,
+   "decode": {
+    "frames_decoded": 300,
+    "source_size": "3840x2160",
+    "decode_ms": {
+     "p50": 16.548,
+     "p95": 18.105,
+     "p99": 27.329,
+     "max": 115.108,
+     "mean": 17.031
+    },
+    "prepare_ms": {
+     "p50": 53.967,
+     "p95": 68.089,
+     "p99": 74.623,
+     "max": 78.637,
+     "mean": 54.681
+    }
+   },
+   "compile_ms": 450.742,
+   "graph_ms": {
+    "p50": 122.104,
+    "p95": 142.056,
+    "p99": 149.293,
+    "max": 152.405,
+    "mean": 122.291
+   },
+   "present_ms": {
+    "p50": 25.395,
+    "p95": 34.071,
+    "p99": 35.049,
+    "max": 36.044,
+    "mean": 26.681
+   },
+   "legacy_ms": {
+    "p50": 111.246,
+    "p95": 151.754,
+    "p99": 251.56,
+    "max": 408.461,
+    "mean": 117.139
+   },
+   "fps_graph": 8.19,
+   "fps_legacy": 8.99,
+   "dropped_frames": {
+    "graph@60fps": 295,
+    "graph@30fps": 295,
+    "legacy@60fps": 295,
+    "legacy@30fps": 295
+   },
+   "resource": {
+    "rss_samples_mb": [
+     10007.8,
+     10010.1
+    ],
+    "rss_growth_mb": 2.3,
+    "stable": true
+   },
+   "dual_execution": {
+    "graph_executed_passes": [
+     5
+    ],
+    "plan_passes": 5,
+    "note": "图路径逐帧只跑 plan passes；legacy 对照为独立循环，两路径互不调用（无生产双执行）"
+   }
+  },
+  {
+   "size": "3840x2160",
+   "media": "4K_H264.mov",
+   "frames": 300,
+   "decode": {
+    "frames_decoded": 300,
+    "source_size": "3840x2160",
+    "decode_ms": {
+     "p50": 19.265,
+     "p95": 22.948,
+     "p99": 28.013,
+     "max": 47.454,
+     "mean": 19.986
+    },
+    "prepare_ms": {
+     "p50": 248.783,
+     "p95": 312.853,
+     "p99": 389.024,
+     "max": 501.468,
+     "mean": 251.773
+    }
+   },
+   "compile_ms": 854.555,
+   "graph_ms": {
+    "p50": 536.991,
+    "p95": 778.205,
+    "p99": 989.325,
+    "max": 1235.011,
+    "mean": 566.733
+   },
+   "present_ms": {
+    "p50": 124.348,
+    "p95": 148.65,
+    "p99": 158.553,
+    "max": 169.902,
+    "mean": 125.589
+   },
+   "legacy_ms": {
+    "p50": 475.606,
+    "p95": 627.12,
+    "p99": 744.479,
+    "max": 895.801,
+    "mean": 486.632
+   },
+   "fps_graph": 1.86,
+   "fps_legacy": 2.1,
+   "dropped_frames": {
+    "graph@60fps": 295,
+    "graph@30fps": 295,
+    "legacy@60fps": 295,
+    "legacy@30fps": 295
+   },
+   "resource": {
+    "rss_samples_mb": [
+     36150.1,
+     35036.9
+    ],
+    "rss_growth_mb": 1113.2,
+    "stable": false
+   },
+   "dual_execution": {
+    "graph_executed_passes": [
+     5
+    ],
+    "plan_passes": 5,
+    "note": "图路径逐帧只跑 plan passes；legacy 对照为独立循环，两路径互不调用（无生产双执行）"
+   }
+  }
+ ]
+}
