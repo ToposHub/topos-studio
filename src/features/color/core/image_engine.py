@@ -291,7 +291,15 @@ class ImageEngine(QObject):
             "rect": (0.0, 0.0, 1.0, 1.0), # Normalized (x, y, w, h)
             "rotation": 0.0,              # Degrees
         }
-        
+
+        # S04/B16.5：活动图权威（E07 hydrate 写入；快照随 render_params
+        # 提交，执行开关由 scope lane / 生产开关控制）
+        self._active_color_graph = None
+        self._active_graph_stack_id = ""
+        self._active_graph_key = None
+        self._active_graph_snapshot_cache = None
+        self._color_graph_revision = 0
+
         # RAW Background Worker
         self.raw_worker_thread = QThread()
         # 命名：QThread destroyed-while-running 崩溃报告可直指责任线程
@@ -599,6 +607,7 @@ class ImageEngine(QObject):
         render_params['color_output_target'] = str(target or "composite")
         if quality_mode in ('preview', 'paused', 'export'):
             render_params['video_denoise_quality_mode'] = quality_mode
+        self._attach_color_graph_params(render_params)
 
         self.renderer.submit(RenderCommand.RENDER_COLOR_OUTPUT, render_params)
 
@@ -769,6 +778,80 @@ class ImageEngine(QObject):
         """Drop any queued GPU scope demand (seek / clip switch / hide)."""
         if self.renderer is not None and hasattr(self.renderer, 'discard_pending_gpu_scope'):
             self.renderer.discard_pending_gpu_scope()
+
+    # ── 活动图快照（S04/B16.5：图权威随 render_params 提交到渲染线程）──
+
+    def set_active_color_graph(self, graph, *, stack_id: str) -> None:
+        """登记当前 clip 的权威调色图（E07 hydrate 时调用）。
+
+        图本体不可变（frozen dataclasses），此处只记身份与 revision；
+        冻结快照（``freeze_graph``）按 (对象身份, graph_revision, 引擎
+        revision) 缓存——播放期间图不变则不重复深拷贝。
+        """
+        self._active_color_graph = graph
+        self._active_graph_stack_id = str(stack_id or "")
+        key = (id(graph), getattr(graph, "graph_revision", 0))
+        if key != getattr(self, '_active_graph_key', None):
+            self._active_graph_key = key
+            self._color_graph_revision = int(
+                getattr(self, '_color_graph_revision', 0)) + 1
+            self._active_graph_snapshot_cache = None
+
+    def clear_active_color_graph(self) -> None:
+        """清除活动图（clip 切换到无图栈：scope/渲染回 legacy layers）。"""
+        if getattr(self, '_active_color_graph', None) is not None:
+            self._active_color_graph = None
+            self._active_graph_stack_id = ""
+            self._active_graph_key = None
+            self._active_graph_snapshot_cache = None
+            self._color_graph_revision = int(
+                getattr(self, '_color_graph_revision', 0)) + 1
+
+    @property
+    def active_color_graph(self):
+        return getattr(self, '_active_color_graph', None)
+
+    @property
+    def active_color_graph_stack_id(self) -> str:
+        return str(getattr(self, '_active_graph_stack_id', '') or '')
+
+    @property
+    def color_graph_revision(self) -> int:
+        """图 render revision（S05 取样身份；图对象/revision 变化时递增）。"""
+        return int(getattr(self, '_color_graph_revision', 0))
+
+    def active_color_graph_snapshot(self):
+        """活动图的冻结快照（缓存；图不变时 O(1)）。
+
+        ``source_frame=0``/``source_content_revision=引擎图 revision``：
+        图本体与帧无关（temporal 缓存未落地），帧号身份由
+        ``ScopeSampleIdentity.frame`` 承载——plan 缓存在播放期间保持命中。
+        """
+        graph = getattr(self, '_active_color_graph', None)
+        if graph is None:
+            return None
+        cache = getattr(self, '_active_graph_snapshot_cache', None)
+        if cache is not None:
+            return cache
+        from src.features.color.core.color_graph_snapshot import freeze_graph
+        snapshot = freeze_graph(
+            graph,
+            session_id=self.active_color_graph_stack_id,
+            source_frame=0,
+            source_content_revision=self.color_graph_revision,
+        )
+        self._active_graph_snapshot_cache = snapshot
+        return snapshot
+
+    def _attach_color_graph_params(self, render_params: dict) -> None:
+        """render_params 附加图快照（S04 身份 + B16.5 执行输入）。
+
+        只附加快照不开启执行（``color_graph_execute`` 由 scope lane
+        （S04）或 B16.5 生产开关设置）。
+        """
+        snapshot = self.active_color_graph_snapshot()
+        if snapshot is not None:
+            render_params['color_graph_snapshot'] = snapshot
 
     def set_image(self, full, high, low, is_new_file=True, path=None, is_video=False, video_path=None):
         """Sets the source images. Uploads to GPU asynchronously.
@@ -3316,6 +3399,9 @@ class ImageEngine(QObject):
                 # it, briefly flashing the previous shot on Play.
                 'video_generation': int(getattr(self.renderer, '_video_generation_id', 0) or 0),
             }
+            # S04：图快照随参提交（scope lane 复用；执行开关见
+            # _do_render_gpu_scope / B16.5）
+            self._attach_color_graph_params(render_params)
             if is_full_res:
                 # CPU-side colour conversion is deliberately limited to
                 # preparing immutable data.  All GL work and the readback are

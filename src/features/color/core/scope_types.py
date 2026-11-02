@@ -25,7 +25,10 @@ stale "scope flashbacks" after seek / clip switch.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional
+
+if TYPE_CHECKING:  # pragma: no cover — 仅类型，无运行期依赖
+    from src.features.color.core.scope_graph_sampling import ScopeSampleIdentity
 
 
 ScopeMode = Literal[
@@ -117,6 +120,9 @@ class ScopeDemand:
     curves_display_size: tuple[int, int] = DEFAULT_CURVES_HISTOGRAM_SIZE
     curves_line_width: float = 1.0
     curves_mode: str = 'Custom'
+    # S05：完整取样身份（session/owner/graph revision/frame/颜色上下文/
+    # 目标）。缺省 None 保持旧 revision 契约（兼容既有测试与 CPU 路径）。
+    sample_identity: Optional['ScopeSampleIdentity'] = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +165,10 @@ class ScopeGpuFrame:
     curves_histogram_texture_id: Optional[int] = None
     curves_histogram_size: tuple[int, int] = (0, 0)
     curves_mode: str = 'Custom'
+    # S05：执行侧回填的取样身份（source_content_revision 为实际分析的
+    # front revision）。面板经 ``ScopeSampleIdentity.allows`` 拒绝迟到/
+    # 跨 clip/跨图版本结果。
+    sample_identity: Optional['ScopeSampleIdentity'] = None
 
 
 def is_frame_valid_for_demand(
@@ -179,6 +189,13 @@ def is_frame_valid_for_demand(
         return False
     if frame.source_revision < demand.source_revision:
         return False
+    # S05：双端都有身份时叠加完整身份校验（session/owner/graph revision/
+    # 颜色上下文/目标精确相等；content revision/frame 为下界）。单端缺失
+    # 时保持旧 revision 契约（渐进采用）。
+    demand_identity = getattr(demand, 'sample_identity', None)
+    frame_identity = getattr(frame, 'sample_identity', None)
+    if demand_identity is not None and frame_identity is not None:
+        return demand_identity.allows(frame_identity)
     return True
 
 
