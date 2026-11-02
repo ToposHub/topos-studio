@@ -1,0 +1,110 @@
+{
+  "scrubs": [
+    {
+      "requested": 60,
+      "actual": 60,
+      "graph": 60,
+      "bound": null
+    },
+    {
+      "requested": 123,
+      "actual": 123,
+      "graph": 123,
+      "bound": null
+    },
+    {
+      "requested": 0,
+      "actual": 0,
+      "graph": 0,
+      "bound": null
+    }
+  ],
+  "params": {
+    "mode": "trs",
+    "quality": "standard",
+    "feature_count": 64,
+    "search_multiplier": 2.0,
+    "min_confidence": 0.35,
+    "failure_policy": "recapture",
+    "channels": {
+      "tx": true,
+      "ty": true,
+      "scale": true,
+      "rotation": true,
+      "perspective": false
+    },
+    "correction_mode": "clip",
+    "interactive": false,
+    "algorithm": "region"
+  },
+  "endpoint_after_tracking": 123,
+  "frame_size": [
+    1920,
+    1080
+  ],
+  "readouts": {
+    "0": {
+      "tx": 0.0,
+      "ty": -0.0,
+      "scale": 1.0,
+      "rotation": -0.0
+    },
+    "15": {
+      "tx": -2.401710935266806,
+      "ty": 1.0941822412095235,
+      "scale": 1.0234048105876719,
+      "rotation": -0.006488280000476004
+    },
+    "30": {
+      "tx": -15.739373477276558,
+      "ty": 4.5962801540842975,
+      "scale": 1.0050870082457102,
+      "rotation": -0.008558375768970564
+    },
+    "45": {
+      "tx": -21.574555203356795,
+      "ty": 2.673500194375265,
+      "scale": 0.995660605460739,
+      "rotation": -0.009093187824524899
+    },
+    "60": {
+      "tx": 3.361770767320536,
+      "ty": -23.52930673380854,
+      "scale": 1.0671149475207373,
+      "rotation": -0.047666020069641955
+    },
+    "75": {
+      "tx": 14.708944498650794,
+      "ty": -33.480125897926655,
+      "scale": 1.0476969312968114,
+      "rotation": -0.06054849578465676
+    },
+    "90": {
+      "tx": 39.04934360983839,
+      "ty": -7.510659261396313,
+      "scale": 1.0314606018933414,
+      "rotation": -0.05923049673306611
+    },
+    "105": {
+      "tx": 51.34582153528879,
+      "ty": 8.33750736157765,
+      "scale": 1.0100112949032893,
+      "rotation": -0.06212447128069399
+    },
+    "123": {
+      "tx": 53.61130972230012,
+      "ty": 23.77419104219541,
+      "scale": 1.0144118317997275,
+      "rotation": -0.08328418203896297
+    }
+  },
+  "tracking": {
+    "ui_tick_max_gap_ms": 83.61279699965962,
+    "seconds": 5.149902536002628,
+    "count": 124,
+    "states": {
+      "valid": 124
+    },
+    "panel": "PanelState.SUCCESS"
+  }
+}

@@ -893,7 +893,7 @@ class TestAud25806TrackerPanelSetParamsLock:
         panel = TrackerPanel()
         emitted = []
         panel.params_changed.connect(lambda *a: emitted.append(1))
-        panel.feature_spin.setValue(64)
+        panel.feature_spin.setValue(panel.feature_spin.value() + 1)
         assert emitted == [1], "用户交互仍正常广播"
 
 

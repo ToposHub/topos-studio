@@ -2567,6 +2567,18 @@
     "toggle_all": "Select All / None"
   },
   "scope": {
+    "mode_waveform": "Waveform",
+    "mode_vectorscope": "Vectorscope",
+    "mode_split": "Dual View",
+    "mode_parade": "Parade",
+    "mode_luma": "Luma",
+    "mode_histogram": "Histogram",
+    "mode_cie": "CIE Chromaticity",
+    "mode_falsecolor": "False Color",
+    "mode_quad": "Quad View",
+    "mode_all": "All Scopes",
+    "expand": "Expand",
+    "options": "Scope Options",
     "gpu_fallback_banner": "GPU scopes unavailable ({reason}) — fell back to the CPU diagnostic page"
   },
   "edit.properties.raw": "RAW",

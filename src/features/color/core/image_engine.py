@@ -283,6 +283,7 @@ class ImageEngine(QObject):
         self._flip_h = False
         self._flip_v = False
 
+        self.video_stabilization: dict = {}
         self.crop_params = {
             "rect": (0.0, 0.0, 1.0, 1.0), # Normalized (x, y, w, h)
             "rotation": 0.0,              # Degrees
@@ -580,6 +581,9 @@ class ImageEngine(QObject):
             'visible_rect': eff_visible_rect,
             'grain_visible_rect': v_rect,
             'current_lod': 0,
+            'video_stabilization': (getattr(self, 'video_stabilization', {})
+                                    if getattr(self, '_is_video_mode', False) else {}),
+            'stabilization_source_frame': self._tracking_frame_context()[1],
             'layers': layers_data,
                 'show_mask': False,
                 'mask_preview_style': self.mask_preview_style,
@@ -3282,6 +3286,9 @@ class ImageEngine(QObject):
                 'scene_visible_rect': v_rect,  # Original scene coords for UV adjustment
                 'grain_visible_rect': grain_visible_rect,  # Film Grain 专用：原始图像坐标
                 'current_lod': active_lod,
+                'video_stabilization': (getattr(self, 'video_stabilization', {})
+                                        if getattr(self, '_is_video_mode', False) else {}),
+                'stabilization_source_frame': self._tracking_frame_context()[1],
                 'layers': layers_data,
                 'show_mask': self.show_mask_mode,
                 'mask_preview_style': self.mask_preview_style,
@@ -4580,12 +4587,29 @@ class ImageEngine(QObject):
         self._restore_state(state)
         return True
 
+    def get_video_stabilization_state(self) -> dict:
+        """Return an isolated clip snapshot at persistence boundaries."""
+        return copy.deepcopy(self.__dict__.get("video_stabilization", {}))
+
+    def set_video_stabilization_state(self, state: dict) -> None:
+        """Validate once; render requests may share this replace-only snapshot."""
+        from src.shared.tracking.stabilization_state import validate_stabilization_state
+        self.video_stabilization = validate_stabilization_state(state)
+        controller = getattr(self, "video_controller", None)
+        if controller is not None:
+            invalidate = getattr(controller, "invalidate_cached_render_params", None)
+            if callable(invalidate):
+                invalidate()
+
     def _capture_tracking_history_state(self) -> dict:
         """Include window tracking edits in every grading undo snapshot."""
-        return {"trackings": self.tracking_store.to_dict()}
+        return {"trackings": self.tracking_store.to_dict(),
+                "video_stabilization": self.get_video_stabilization_state()}
 
     def _restore_tracking_history_state(self, state: dict) -> None:
         """Replace the store and evaluator together to avoid stale references."""
+        if "video_stabilization" in state:
+            self.set_video_stabilization_state(state["video_stabilization"])
         if "trackings" not in state:
             return
         from src.features.color.tracking.tracking_store import TrackingStore

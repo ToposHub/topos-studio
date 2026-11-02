@@ -613,6 +613,22 @@ class ColorEvaluatorMixin:
                     src_glo, dst, seg_grading, params, w, h,
                     is_main_pass=is_main)
                 src_glo = dst.glo
+            stabilization = merged_params.get('video_stabilization') or {}
+            if stabilization:
+                from src.features.shared.effects.video_stabilization import apply_stabilization_gpu
+                from src.features.shared.effects.effect_pass_runner import EffectPassRunner
+                runtime = getattr(self, '_runtime_context', None)
+                frame = int(params.get('source_frame', getattr(
+                    runtime, 'source_frame', getattr(getattr(self, '_snapshot', None), 'frame_number', 0))))
+                runner = self.__dict__.get('_stabilization_runner')
+                if runner is None:
+                    runner = EffectPassRunner(self.ctx)
+                    self._stabilization_runner = runner
+                result_glo = apply_stabilization_gpu(runner, out_tex.glo, stabilization, frame, w, h)
+                if result_glo != out_tex.glo:
+                    target = self.fb_manager.get_fbo(out_tex)
+                    source = self.fb_manager.get_fbo(runner.output_texture())
+                    self.ctx.copy_framebuffer(target, source)
             # 成功路径：scratch 归还池（所有权已消费完毕）
             for tex in scratch_texs:
                 try:

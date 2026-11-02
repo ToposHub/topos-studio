@@ -745,7 +745,9 @@ class EffectCatalog:
             # Phase 2: the remaining composite Filter nodes — each
             # reuses the node's PARAM_DEFS and the composite shader
             # source, so the Edit panel shows identical controls.
+            from src.features.shared.effects.video_stabilization import stabilization_spec
             for spec in (
+                stabilization_spec(),
                 _build_blur_spec(),
                 _build_sharpen_spec(),
                 _build_denoise_spec(),

@@ -82,3 +82,13 @@ def test_clip_range_initializes_without_any_tracking_data() -> None:
     host.tracker_panel.graph.set_frame_range.assert_called_once_with(50, 149)
     host.tracker_panel.graph.set_timebase.assert_called_once_with(25.0)
     host.tracker_panel.set_current_frame.assert_called_once_with(70)
+
+
+def test_tracker_readout_dimensions_accept_real_canvas_qsizef() -> None:
+    from PyQt6.QtCore import QSizeF
+    host = _ScrubHost()
+    host.video_controller = SimpleNamespace(fps=25)
+    host.canvas = SimpleNamespace(logical_size=QSizeF(1920, 1080))
+    host._tracker_frame_context = lambda: ('clip', 'media.mov', 0, 0, 123)
+    host._sync_tracker_clip_range()
+    host.tracker_panel.set_source_frame_size.assert_called_once_with(1920, 1080)

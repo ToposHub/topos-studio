@@ -34,7 +34,7 @@ VIDEO_FILES = [
 ]
 
 MODES = ['waveform', 'vectorscope', 'split', 'parade', 'luma',
-         'histogram', 'cie', 'falsecolor']
+         'histogram', 'cie', 'falsecolor', 'quad', 'all']
 
 
 def load_real_frame(name: str, time_s: float = 1.0) -> np.ndarray:
@@ -269,13 +269,27 @@ def run_standalone(args) -> bool:
         frame = make_demand(mode, PLAYBACK_ANALYSIS_SIZE)
         outputs = engine.render_demand(frame, tex)
         ctx.finish()
-        key, (tex_id, size) = next(iter(outputs.items()))
-        gl_tex = next(t for t in engine._pool.values()
-                      if isinstance(t, moderngl.Texture) and t.glo == tex_id)
-        img = read_tex(gl_tex)[:, :, :3]
-        lit = float((img.max(axis=2) > 0.05).mean())
-        ok &= report(f"{mode} renders non-empty",
-                     lit > 0.01, f"{size[0]}x{size[1]} lit={lit:.2f}")
+        if mode in ('quad', 'all'):
+            ids = [descriptor[0] for descriptor in outputs.values()]
+            ok &= report(f"{mode} has independent outputs", len(set(ids)) == len(ids))
+        for key, (tex_id, size) in outputs.items():
+            gl_tex = next(t for t in engine._pool.values()
+                          if isinstance(t, moderngl.Texture) and t.glo == tex_id)
+            img = read_tex(gl_tex)[:, :, :3]
+            lit = float((img.max(axis=2) > 0.05).mean())
+            ok &= report(f"{mode}/{key} renders non-empty",
+                         lit > 0.01, f"{size[0]}x{size[1]} lit={lit:.2f}")
+            if mode in ('quad', 'all'):
+                # The multi-view trace must match the same scope rendered
+                # alone, even after another pass reuses the density scratch.
+                single = engine.render_demand(make_demand(key, PLAYBACK_ANALYSIS_SIZE), tex)
+                ctx.finish()
+                single_tex = next(t for t in engine._pool.values()
+                                  if isinstance(t, moderngl.Texture)
+                                  and t.glo == single[key][0])
+                delta = float(np.max(np.abs(img - read_tex(single_tex)[:, :, :3])))
+                ok &= report(f"{mode}/{key} matches single output", delta < 0.01,
+                             f"max_delta={delta:.4f}")
     tex.release()
 
     # ---------------- performance on real frames -----------------------
@@ -455,11 +469,9 @@ def _present_checks(panel) -> bool:
         panel.update_gpu_scope(frame)
         for _ in range(12):
             app.processEvents()
-        from src.features.color.ui.scope_panel import _MODE_PRESENTER_ATTR
-        if mode == 'split':
-            attrs = ['_gpu_wf_presenter', '_gpu_vs_presenter']
-        else:
-            attrs = [_MODE_PRESENTER_ATTR[mode]]
+        from src.features.color.ui.scope_panel import _MODE_PRESENTER_ATTR, _MULTI_LAYOUTS
+        attrs = [_MODE_PRESENTER_ATTR[name]
+                 for name in _MULTI_LAYOUTS.get(mode, (mode,))]
         for attr in attrs:
             presenter = getattr(panel, attr)
             grabbed = presenter.grab()

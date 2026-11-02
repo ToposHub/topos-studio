@@ -923,9 +923,8 @@ class HistogramWidget(QWidget):
         from PyQt6.QtCore import QRectF as _QRectF
 
         painter = QPainter(self)
-        painter.setAntialiasing(True)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = self.rect()
-        w, h = rect.height() and rect.width() or (0, 0)
         w, h = rect.width(), rect.height()
         painter.fillRect(rect, QColor(5, 5, 5))
         if self._hist_rgb is None:

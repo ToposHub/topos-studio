@@ -775,7 +775,7 @@ class TestScopePanelGpuIntegration:
 
     def test_every_mode_dispatches_to_its_own_presenter(self, _qapp):
         from src.features.color.ui.scope_panel import (
-            MODE_ORDER, _MODE_FRAME_FIELD, _MODE_PRESENTER_ATTR, ScopePanel,
+            MODE_ORDER, _MODE_FRAME_FIELD, _MODE_PRESENTER_ATTR, _MULTI_LAYOUTS, ScopePanel,
         )
         from src.features.color.core.scope_types import ScopeGpuFrame
         p = ScopePanel()
@@ -797,8 +797,8 @@ class TestScopePanelGpuIntegration:
                     lambda tid, w, h, _d=delivered: _d.append(tid)
                 )
             p.update_gpu_scope(frame)
-            if mode == 'split':
-                assert len(delivered) == 2
+            if mode in _MULTI_LAYOUTS:
+                assert len(delivered) == len(_MULTI_LAYOUTS[mode])
             else:
                 assert delivered == [100]
 
@@ -893,6 +893,8 @@ class TestDoRenderGpuScopeAllModes:
 
     _POOL = {
         'wf_display': Mock(glo=71),
+        'parade_display': Mock(glo=77),
+        'luma_display': Mock(glo=78),
         'vs_display': Mock(glo=72),
         'hist_display': Mock(glo=73),
         'curves_hist_display': Mock(glo=76),
@@ -993,6 +995,29 @@ class TestDoRenderGpuScopeAllModes:
         AsyncRenderer._do_render_gpu_scope(r, self._demand('split'))
         assert r._emitted[0].waveform_texture_id == 71
         assert r._emitted[0].vectorscope_texture_id == 72
+
+    def test_quad_mode_publishes_four_independent_outputs(self):
+        r = self._make_renderer()
+        AsyncRenderer._do_render_gpu_scope(r, self._demand('quad'))
+        frame = r._emitted[0]
+        assert (frame.waveform_texture_id, frame.vectorscope_texture_id,
+                frame.parade_texture_id, frame.histogram_texture_id) == (71, 72, 77, 73)
+        assert frame.luma_texture_id is None
+        assert frame.falsecolor_texture_id is None
+        r._scope_sample_front.assert_called_once()
+        assert r._scope_display_parade.call_count == 1
+        assert r._scope_display_parade.call_args.kwargs == {'target': 'parade_display'}
+
+    def test_all_mode_samples_once_and_keeps_all_seven_outputs(self):
+        r = self._make_renderer()
+        AsyncRenderer._do_render_gpu_scope(r, self._demand('all'))
+        frame = r._emitted[0]
+        ids = [getattr(frame, f'{mode}_texture_id') for mode in (
+            'waveform', 'vectorscope', 'parade', 'luma', 'histogram', 'cie', 'falsecolor')]
+        assert set(ids) == {71, 72, 73, 74, 75, 77, 78}
+        r._scope_sample_front.assert_called_once()
+        r._scope_display_falsecolor.assert_called_once()
+        assert r._scope_display_luma.call_args.kwargs == {'target': 'luma_display'}
 
 
 # =============================================================================

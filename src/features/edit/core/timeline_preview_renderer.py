@@ -2245,6 +2245,16 @@ class PreviewRenderWorker(QThread):
             # task so the edit GPU compositor can grade the decoded texture
             # before multi-track blending.  Previously the zero-copy path
             # bypassed the stack completely and showed the raw source.
+            from src.features.shared.effects.video_stabilization import clip_stabilization_state
+            from src.shared.tracking.stabilization_state import stabilization_matrix
+            state = clip_stabilization_state(getattr(self._asset_resolver, '_project', None),
+                                             getattr(layer, 'clip', None))
+            if stabilization_matrix(state, int(layer.source_frame)) is not None:
+                # The current timeline GL/Metal geometry path transforms clips
+                # before grading. Use the source-space CPU compositor until
+                # that path can represent the same full projective ordering.
+                trace_info["fallback_reason"] = "video_stabilization_source_space"
+                return False, trace_info
             preview_grade = self._get_preview_color_grade(layer)
             # Same pattern for the clip's video filters (blur / sharpen / ...):
             # snapshot the effect chain on the UI thread so the GPU renderer
@@ -5200,7 +5210,15 @@ class PreviewRenderWorker(QThread):
             sharp = np.dstack([sharp, src[:, :, 3]])
         return sharp
 
-    def _apply_preview_color_grade(
+    def _apply_preview_color_grade(self, frame_data: np.ndarray, layer: ClipLayerInfo) -> np.ndarray:
+        from src.features.shared.effects.video_stabilization import (
+            clip_stabilization_state, apply_stabilization_cpu)
+        graded = self._apply_preview_color_grade_unstabilized(frame_data, layer)
+        state = clip_stabilization_state(getattr(self._asset_resolver, '_project', None),
+                                         getattr(layer, 'clip', None))
+        return apply_stabilization_cpu(graded, state, int(getattr(layer, "source_frame", 0)))
+
+    def _apply_preview_color_grade_unstabilized(
         self,
         frame_data: np.ndarray,
         layer: ClipLayerInfo,

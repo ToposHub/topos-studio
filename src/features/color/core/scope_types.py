@@ -30,7 +30,7 @@ from typing import Literal, Optional
 
 ScopeMode = Literal[
     'waveform', 'vectorscope', 'split', 'parade', 'luma',
-    'histogram', 'cie', 'falsecolor',
+    'histogram', 'cie', 'falsecolor', 'quad', 'all',
 ]
 
 # Default analysis sizes (pre-sampled front texture dimensions).
@@ -82,8 +82,9 @@ class ScopeDemand:
             renderer may analyse a newer front texture before the demand
             drains, but must never present an older result after a seek or
             clip switch.
-        mode: Which scope output(s) are required.  ``'split'`` requests
-            both waveform and vectorscope in a single pass.
+        mode: Which scope outputs are required. ``'split'`` requests waveform
+            and vectorscope, ``'quad'`` adds parade and histogram, and ``'all'``
+            requests every scope. All density passes share one source sample.
         display_size: The widget size (w, h) in pixels.  Used by the
             presenter; does not influence analysis cost.
         analysis_size: The pre-sampled front texture size used for
@@ -183,34 +184,34 @@ def is_frame_valid_for_demand(
 
 def mode_needs_waveform(mode: ScopeMode) -> bool:
     """Whether ``mode`` requires a waveform pass."""
-    return mode in ('waveform', 'split')
+    return mode in ('waveform', 'split', 'quad', 'all')
 
 
 def mode_needs_vectorscope(mode: ScopeMode) -> bool:
     """Whether ``mode`` requires a vectorscope pass."""
-    return mode in ('vectorscope', 'split')
+    return mode in ('vectorscope', 'split', 'quad', 'all')
 
 
 def mode_needs_parade(mode: ScopeMode) -> bool:
     """Whether ``mode`` requires the RGB parade passes."""
-    return mode == 'parade'
+    return mode in ('parade', 'quad', 'all')
 
 
 def mode_needs_luma(mode: ScopeMode) -> bool:
     """Whether ``mode`` requires the luma waveform passes."""
-    return mode == 'luma'
+    return mode in ('luma', 'all')
 
 
 def mode_needs_histogram(mode: ScopeMode) -> bool:
     """Whether ``mode`` requires the histogram passes."""
-    return mode == 'histogram'
+    return mode in ('histogram', 'quad', 'all')
 
 
 def mode_needs_cie(mode: ScopeMode) -> bool:
     """Whether ``mode`` requires the CIE chromaticity passes."""
-    return mode == 'cie'
+    return mode in ('cie', 'all')
 
 
 def mode_needs_falsecolor(mode: ScopeMode) -> bool:
     """Whether ``mode`` requires the false color display pass."""
-    return mode == 'falsecolor'
+    return mode in ('falsecolor', 'all')

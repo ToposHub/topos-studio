@@ -4,15 +4,15 @@ Provides professional analysis tools for color grading:
 - RGB Waveform: Luminance distribution per channel
 - Vectorscope: Chrominance (Cb vs Cr) distribution
 
-Features floating selector for mode switching,
+Features a compact scope header for mode switching,
 inspired by DaVinci Resolve professional UI.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
-    QStackedWidget, QPushButton, QMenu, QSplitter, QLabel
+    QStackedWidget, QPushButton, QMenu, QSplitter, QLabel, QDockWidget, QGridLayout
 )
-from PyQt6.QtCore import QTimer, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QAction
+from PyQt6.QtCore import QTimer, QSize, Qt, pyqtSignal, QPointF, QRectF
+from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPen, QPaintEvent
 from typing import Optional
 import numpy as np
 import cv2
@@ -33,7 +33,95 @@ from src.shared.ui.widgets.vectorscope_widget import (
 )
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import apply_combo_dropdown_style
-from src.shared.assets.icon_manager import icon_settings
+
+
+def _scope_header_font() -> QFont:
+    font = QFont("Arial")
+    font.setPixelSize(13)
+    font.setWeight(QFont.Weight.Bold)
+    return font
+
+
+class _ScopeModeCombo(QComboBox):
+    """Flat text selector with a drawn chevron on every Qt platform."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFont(_scope_header_font())
+        self.setFixedHeight(24)
+        self.setMinimumWidth(56)
+        self.setStyleSheet("QComboBox { border: none; background: transparent; }")
+
+    def sizeHint(self) -> QSize:
+        return QSize(self.fontMetrics().horizontalAdvance(self.currentText()) + 30, 24)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(56, 24)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        if self.underMouse():
+            painter.fillRect(self.rect(), QColor("#2a2a2e"))
+        painter.setFont(self.font())
+        painter.setPen(QColor("#e4e4e6"))
+        text_rect = self.rect().adjusted(4, 0, -23, 0)
+        text = self.fontMetrics().elidedText(
+            self.currentText(), Qt.TextElideMode.ElideRight, max(0, text_rect.width()))
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, text)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#929297"), 1.1))
+        x, y = self.width() - 13, self.height() / 2.0
+        painter.drawLine(QPointF(x - 3, y - 2), QPointF(x, y + 1))
+        painter.drawLine(QPointF(x, y + 1), QPointF(x + 3, y - 2))
+        painter.end()
+
+
+class _ScopeHeaderButton(QPushButton):
+    """Resolve-like monochrome controls with full-height dividers."""
+
+    def __init__(self, kind: str, tooltip: str, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.kind = kind
+        self.setFixedSize(36, 24)
+        self.setToolTip(tooltip)
+        self.setAccessibleName(tooltip)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        background = QColor("#2a2a2e" if self.underMouse() or self.isDown() else "#202024")
+        painter.fillRect(self.rect(), background)
+        painter.setPen(QColor("#111114"))
+        painter.drawLine(0, 0, 0, self.height())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#85858a"), 1.0))
+        if self.kind == 'settings':
+            painter.setBrush(background)
+            for y, knob in ((7, 21), (12, 15), (17, 23)):
+                painter.drawLine(QPointF(11, y), QPointF(27, y))
+                painter.drawEllipse(QPointF(knob, y), 1.8, 1.8)
+        elif self.kind == 'expand':
+            for sx in (-1, 1):
+                for sy in (-1, 1):
+                    corner = QPointF(18 + sx * 5, 12 + sy * 5)
+                    painter.drawLine(corner, QPointF(corner.x() - sx * 3, corner.y()))
+                    painter.drawLine(corner, QPointF(corner.x(), corner.y() - sy * 3))
+                    painter.drawLine(corner, QPointF(18 + sx * 2, 12 + sy * 2))
+        elif self.kind in ('single', 'dual', 'quad', 'all'):
+            columns, rows = {'single': (1, 1), 'dual': (2, 1),
+                             'quad': (2, 2), 'all': (3, 3)}[self.kind]
+            if self.isChecked():
+                painter.setPen(QPen(QColor("#e4e4e6"), 1.0))
+            for row in range(rows):
+                for col in range(columns):
+                    painter.drawRect(QRectF(10 + col * 16 / columns,
+                                            6 + row * 12 / rows,
+                                            16 / columns - 1, 12 / rows - 1))
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#85858a"))
+            for x in (12, 18, 24):
+                painter.drawEllipse(QPointF(x, 12), 1.3, 1.3)
+        painter.end()
 
 
 # Scope mode definitions
@@ -81,7 +169,26 @@ SCOPE_MODES = {
 _CPU_ONLY_MODES: set = set()
 
 MODE_ORDER = ['waveform', 'vectorscope', 'split', 'parade', 'luma',
-              'histogram', 'cie', 'falsecolor']
+              'histogram', 'cie', 'falsecolor', 'quad', 'all']
+SCOPE_MODES.update({
+    'quad': {'name': 'quad_view', 'widget_class': None},
+    'all': {'name': 'all_scopes', 'widget_class': None},
+})
+_MULTI_LAYOUTS = {
+    'split': ('waveform', 'vectorscope'),
+    'quad': ('parade', 'waveform', 'vectorscope', 'histogram'),
+    'all': ('parade', 'waveform', 'vectorscope', 'histogram', 'luma', 'cie', 'falsecolor'),
+}
+_SCOPE_NAMES = {
+    'waveform': 'Waveform', 'vectorscope': 'Vectorscope', 'split': 'Dual View',
+    'parade': 'Parade', 'luma': 'Luma', 'histogram': 'Histogram',
+    'cie': 'CIE Chromaticity', 'falsecolor': 'False Color',
+    'quad': 'Quad View', 'all': 'All Scopes',
+}
+
+
+def _scope_name(mode: str) -> str:
+    return I18N.tr(f"scope.mode_{mode}", _SCOPE_NAMES[mode])
 
 # ScopeGpuFrame descriptor field prefix per mode (split handled specially).
 _MODE_FRAME_FIELD = {
@@ -110,8 +217,7 @@ class ScopePanel(QWidget):
     """
     Professional analysis panel with waveform and vectorscope.
 
-    Uses a floating selector (ComboBox) for mode switching,
-    positioned at the top-left corner of the panel.
+    Uses a compact header for mode switching and scope settings.
 
     Features:
     - RGB Waveform mode
@@ -172,6 +278,118 @@ class ScopePanel(QWidget):
 
         self.init_ui()
 
+    def _add_single_page(self, stack: QStackedWidget, mode: str,
+                         widget: QWidget, pages: dict) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        widget.setMinimumSize(0, 0)
+        layout.addWidget(widget)
+        stack.addWidget(page)
+        pages[mode] = page
+
+    def _make_multi_page(self, mode: str, backend: str) -> QWidget:
+        page = QWidget()
+        grid = QGridLayout(page)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(1)
+        cells = {}
+        columns = 2 if mode == 'quad' else 3
+        for index, scope_mode in enumerate(_MULTI_LAYOUTS[mode]):
+            cell = QWidget()
+            body = QVBoxLayout(cell)
+            body.setContentsMargins(0, 0, 0, 0)
+            body.setSpacing(0)
+            header = QWidget()
+            header.setFixedHeight(24)
+            header.setStyleSheet("background: #202024;")
+            controls = QHBoxLayout(header)
+            controls.setContentsMargins(8, 0, 0, 0)
+            controls.setSpacing(0)
+            label = QLabel(_scope_name(scope_mode))
+            label.setFont(_scope_header_font())
+            label.setStyleSheet("color: #e4e4e6; background: transparent;")
+            controls.addStretch(1)
+            controls.addWidget(label)
+            controls.addSpacing(12)
+            settings = _ScopeHeaderButton('settings', I18N.tr('analysis.settings', 'Settings'), header)
+            settings.clicked.connect(lambda _=False, b=settings: self._show_settings_menu(anchor=b))
+            controls.addWidget(settings)
+            body.addWidget(header)
+            cells[scope_mode] = body
+            grid.addWidget(cell, index // columns, index % columns)
+        for column in range(columns):
+            grid.setColumnStretch(column, 1)
+        for row in range((len(cells) + columns - 1) // columns):
+            grid.setRowStretch(row, 1)
+        self._multi_cells[backend][mode] = cells
+        return page
+
+    def _cpu_scope_widgets(self) -> dict:
+        return {
+            'waveform': self.waveform_widget, 'vectorscope': self.vectorscope_widget,
+            'parade': self.parade_widget, 'luma': self.luma_widget,
+            'histogram': self.histogram_widget, 'cie': self.cie_widget,
+            'falsecolor': self.falsecolor_widget,
+        }
+
+    def _configure_scope_layout(self, mode: str) -> None:
+        """Move the existing presenters; allocate no extra GL contexts."""
+        gpu_widgets = {key: getattr(self, attr, None)
+                       for key, attr in _MODE_PRESENTER_ATTR.items()}
+        for backend, pages, widgets in (
+            ('cpu', self._cpu_single_pages, self._cpu_scope_widgets()),
+            ('gpu', self._gpu_single_pages, gpu_widgets),
+        ):
+            targets = self._multi_cells[backend].get(mode, {})
+            for key, page in pages.items():
+                widget = widgets.get(key)
+                if widget is None:
+                    continue
+                target = targets.get(key, page.layout())
+                target.addWidget(widget, 1)
+                widget.show()
+        if mode == 'split' and self._gpu_splitter is not None:
+            self._gpu_splitter.addWidget(self._gpu_wf_presenter)
+            self._gpu_splitter.addWidget(self._gpu_vs_presenter)
+            self._gpu_splitter.setSizes([400, 400])
+        self._update_layout_controls()
+
+    def _update_layout_controls(self, *_) -> None:
+        dock = self._host_dock()
+        multi = self._current_mode in _MULTI_LAYOUTS
+        self.layout_toolbar.setVisible(multi or (dock is not None and dock.isFloating()))
+        self.mode_combo.setVisible(not multi)
+        self.settings_btn.setVisible(not multi)
+        for mode, button in self.layout_buttons.items():
+            button.setChecked(self._current_mode == mode or (
+                mode == 'waveform' and not multi))
+
+    def _host_dock(self) -> Optional[QDockWidget]:
+        parent = self.parentWidget()
+        while parent is not None:
+            if isinstance(parent, QDockWidget):
+                return parent
+            parent = parent.parentWidget()
+        return None
+
+    def open_floating(self) -> None:
+        """Open the live scope dock from the viewer context menu."""
+        if self._current_mode not in _MULTI_LAYOUTS:
+            self.set_mode('quad')
+        dock = self._host_dock()
+        if dock is not None:
+            dock.setFloating(True)
+            dock.resize(max(900, dock.width()), max(600, dock.height()))
+            dock.show()
+            dock.raise_()
+            dock.activateWindow()
+        else:
+            self.resize(900, 600)
+            self.show()
+        self._update_layout_controls()
+
     def init_ui(self) -> None:
         """Initialize the UI layout."""
         # Main layout
@@ -202,8 +420,11 @@ class ScopePanel(QWidget):
         self.waveform_widget = WaveformWidget()
         self.vectorscope_widget = VectorscopeWidget()
 
-        self.stack.addWidget(self.waveform_widget)  # Index 0
-        self.stack.addWidget(self.vectorscope_widget)  # Index 1
+        self._cpu_single_pages = {}
+        self._gpu_single_pages = {}
+        self._multi_cells = {'cpu': {}, 'gpu': {}}
+        self._add_single_page(self.stack, 'waveform', self.waveform_widget, self._cpu_single_pages)
+        self._add_single_page(self.stack, 'vectorscope', self.vectorscope_widget, self._cpu_single_pages)
         self.parade_widget = ParadeWidget()
         self.luma_widget = LumaWaveformWidget()
         self.histogram_widget = HistogramWidget()
@@ -223,6 +444,7 @@ class ScopePanel(QWidget):
 
         # Use splitter for resizable split view
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(1)
         self.splitter.setStyleSheet(f"""
             QSplitter {{
                 background-color: #050505;
@@ -238,11 +460,11 @@ class ScopePanel(QWidget):
 
         split_layout.addWidget(self.splitter)
         self.stack.addWidget(self.split_container)  # Index 2
-        self.stack.addWidget(self.parade_widget)      # Index 3 (P1-COLOR-06)
-        self.stack.addWidget(self.luma_widget)        # Index 4
-        self.stack.addWidget(self.histogram_widget)   # Index 5
-        self.stack.addWidget(self.cie_widget)         # Index 6
-        self.stack.addWidget(self.falsecolor_widget)  # Index 7
+        self._add_single_page(self.stack, 'parade', self.parade_widget, self._cpu_single_pages)
+        self._add_single_page(self.stack, 'luma', self.luma_widget, self._cpu_single_pages)
+        self._add_single_page(self.stack, 'histogram', self.histogram_widget, self._cpu_single_pages)
+        self._add_single_page(self.stack, 'cie', self.cie_widget, self._cpu_single_pages)
+        self._add_single_page(self.stack, 'falsecolor', self.falsecolor_widget, self._cpu_single_pages)
 
         cpu_layout.addWidget(self.stack)
         self.display_stack.addWidget(cpu_page)  # outer index 0
@@ -269,13 +491,11 @@ class ScopePanel(QWidget):
             )
             # GPU split container mirrors the CPU splitter layout.
             self._gpu_splitter = QSplitter(Qt.Orientation.Horizontal)
+            self._gpu_splitter.setHandleWidth(1)
             self._gpu_splitter.setStyleSheet(f"""
                 QSplitter {{ background-color: #050505; }}
                 QSplitter::handle {{ background-color: {C.PANEL_DIVIDER}; width: 1px; }}
             """)
-            self._gpu_splitter.addWidget(self._gpu_wf_presenter)
-            self._gpu_splitter.addWidget(self._gpu_vs_presenter)
-            self._gpu_splitter.setSizes([200, 200])
 
             # Professional scope presenters (parade / luma / histogram /
             # cie / falsecolor). Parade and luma share the waveform value
@@ -289,6 +509,7 @@ class ScopePanel(QWidget):
             )
             self._gpu_histogram_presenter = GpuScopeWidget(
                 preserve_aspect=False, show_value_axis=False,
+                show_histogram_axis=True,
             )
             try:
                 from src.shared.ui.widgets.cie_scope_widget import (
@@ -308,14 +529,14 @@ class ScopePanel(QWidget):
             # Mirror the CPU stack page order exactly (MODE_ORDER indices):
             # 0=waveform, 1=vectorscope, 2=split, 3=parade, 4=luma,
             # 5=histogram, 6=cie, 7=falsecolor.
-            self._gpu_stack.addWidget(self._gpu_wf_presenter)       # index 0
-            self._gpu_stack.addWidget(self._gpu_vs_presenter)       # index 1
+            self._add_single_page(self._gpu_stack, 'waveform', self._gpu_wf_presenter, self._gpu_single_pages)
+            self._add_single_page(self._gpu_stack, 'vectorscope', self._gpu_vs_presenter, self._gpu_single_pages)
             self._gpu_stack.addWidget(self._gpu_splitter)           # index 2
-            self._gpu_stack.addWidget(self._gpu_parade_presenter)   # index 3
-            self._gpu_stack.addWidget(self._gpu_luma_presenter)     # index 4
-            self._gpu_stack.addWidget(self._gpu_histogram_presenter)  # index 5
-            self._gpu_stack.addWidget(self._gpu_cie_presenter)      # index 6
-            self._gpu_stack.addWidget(self._gpu_fc_presenter)       # index 7
+            self._add_single_page(self._gpu_stack, 'parade', self._gpu_parade_presenter, self._gpu_single_pages)
+            self._add_single_page(self._gpu_stack, 'luma', self._gpu_luma_presenter, self._gpu_single_pages)
+            self._add_single_page(self._gpu_stack, 'histogram', self._gpu_histogram_presenter, self._gpu_single_pages)
+            self._add_single_page(self._gpu_stack, 'cie', self._gpu_cie_presenter, self._gpu_single_pages)
+            self._add_single_page(self._gpu_stack, 'falsecolor', self._gpu_fc_presenter, self._gpu_single_pages)
             # Back-compat alias used by older present paths.
             self._gpu_presenter = self._gpu_wf_presenter
         except Exception as exc:
@@ -333,6 +554,10 @@ class ScopePanel(QWidget):
             self._gpu_cie_presenter = None
             self._gpu_fc_presenter = None
             self._gpu_presenter = None
+
+        for layout_mode in ('quad', 'all'):
+            self.stack.addWidget(self._make_multi_page(layout_mode, 'cpu'))
+            self._gpu_stack.addWidget(self._make_multi_page(layout_mode, 'gpu'))
 
         gpu_page_layout = QVBoxLayout(gpu_page)
         gpu_page_layout.setContentsMargins(0, 0, 0, 0)
@@ -372,88 +597,93 @@ class ScopePanel(QWidget):
                 self._on_falsecolor_variant_changed
             )
 
-        # Floating selector container - minimal transparent style
+        # Resolve-style scope header: keep controls outside the plot so they
+        # never obscure live waveform detail.
         self.selector_container = QWidget(self)
+        self.selector_container.setObjectName("scopeHeader")
+        self.selector_container.setFixedHeight(24)
         self.selector_container.setStyleSheet("""
-            QWidget {
-                background-color: rgba(255, 255, 255, 20);
-                border-radius: 4px;
+            QWidget#scopeHeader {
+                background-color: #202024;
+                border-bottom: 1px solid #111114;
+            }
+            QLabel#scopeTitle {
+                color: #e4e4e6;
+                background: transparent;
+                border: none;
+                padding: 0;
             }
         """)
         selector_layout = QHBoxLayout(self.selector_container)
-        selector_layout.setContentsMargins(4, 2, 4, 2)
+        selector_layout.setContentsMargins(10, 0, 0, 0)
+        selector_layout.setSpacing(0)
+
+        self.scope_title = QLabel(I18N.tr("workspace.scopes", "Scopes"))
+        self.scope_title.setObjectName("scopeTitle")
+        self.scope_title.setFont(_scope_header_font())
+        selector_layout.addWidget(self.scope_title)
+        selector_layout.addStretch(1)
+
+        self.layout_toolbar = QWidget(self.selector_container)
+        layout_controls = QHBoxLayout(self.layout_toolbar)
+        layout_controls.setContentsMargins(0, 0, 0, 0)
+        layout_controls.setSpacing(0)
+        self.layout_buttons = {}
+        for kind, mode in (('single', 'waveform'), ('dual', 'split'),
+                           ('quad', 'quad'), ('all', 'all')):
+            button = _ScopeHeaderButton(kind, _scope_name(mode), self.layout_toolbar)
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, m=mode: self.set_mode(m))
+            layout_controls.addWidget(button)
+            self.layout_buttons[mode] = button
+        selector_layout.addWidget(self.layout_toolbar)
+        self.layout_toolbar.hide()
 
         # Mode selector ComboBox
-        self.mode_combo = QComboBox()
-        self.mode_combo.setFixedHeight(20)
+        self.mode_combo = _ScopeModeCombo()
         for mode in MODE_ORDER:
-            i18n_key = f"analysis.{SCOPE_MODES[mode]['name']}"
-            default_name = SCOPE_MODES[mode]['name']
-            translated_name = I18N.tr(i18n_key, default_name)
-            self.mode_combo.addItem(translated_name, mode)
+            self.mode_combo.addItem(_scope_name(mode), mode)
 
-        self.mode_combo.setStyleSheet("""
-            QComboBox {
-                background-color: transparent;
-                color: rgba(255, 255, 255, 180);
-                border: none;
-                padding: 0px 6px;
-                font-size: 11px;
-                min-width: 80px;
-            }
-            QComboBox:hover {
-                color: rgba(255, 255, 255, 230);
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 14px;
-                background: transparent;
-                subcontrol-origin: padding;
-                subcontrol-position: right;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 3px solid transparent;
-                border-right: 3px solid transparent;
-                border-top: 4px solid rgba(255, 255, 255, 150);
-                margin-right: 4px;
-            }
-        """)
         apply_combo_dropdown_style(self.mode_combo)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         selector_layout.addWidget(self.mode_combo)
 
-        # Settings button (gear icon) - replaces zoom button
-        self.settings_btn = QPushButton()
-        self.settings_btn.setFixedSize(20, 20)
-        self.settings_btn.setToolTip(I18N.tr("analysis.settings", "Settings"))
-        self._update_settings_button()
+        self.settings_btn = _ScopeHeaderButton(
+            'settings', I18N.tr("analysis.settings", "Settings"), self.selector_container)
         self.settings_btn.clicked.connect(self._show_settings_menu)
         selector_layout.addWidget(self.settings_btn)
+        self.expand_btn = _ScopeHeaderButton(
+            'expand', I18N.tr("scope.expand", "Expand"), self.selector_container)
+        self.expand_btn.clicked.connect(self._expand_scope)
+        selector_layout.addWidget(self.expand_btn)
+        self.more_btn = _ScopeHeaderButton(
+            'more', I18N.tr("scope.options", "Scope Options"), self.selector_container)
+        self.more_btn.clicked.connect(self._show_options_menu)
+        selector_layout.addWidget(self.more_btn)
 
         # P1-COLOR-07: 输入源标签（明确 scope 分析的是哪一阶段）
-        self.source_label = QLabel()
+        self.source_label = QLabel(self)
+        self.source_label.hide()
         self.source_label.setStyleSheet(
             "QLabel { background-color: transparent;"
             " color: rgba(120, 220, 160, 200); border: none;"
             " padding: 0px 4px; font-size: 11px; }")
-        selector_layout.addWidget(self.source_label)
         self._update_source_label()
 
         # M19.3b: 测量域角标——域/采样/单位三要素短标注（完整声明在
         # tooltip：输入通路/几何/与导出域差一层显示变换，见类 docstring）
-        self.domain_badge = QLabel()
+        self.domain_badge = QLabel(self)
+        self.domain_badge.hide()
         self.domain_badge.setStyleSheet(
             "QLabel { background-color: transparent;"
             " color: rgba(150, 190, 255, 200); border: none;"
             " padding: 0px 4px; font-size: 11px; }")
-        selector_layout.addWidget(self.domain_badge)
         self._update_domain_badge()
 
         self.selector_container.adjustSize()
 
-        # Position selector at top-left
-        self.selector_container.move(5, 5)
+        # The selector spans the panel header; the plot starts below it.
+        main_layout.insertWidget(0, self.selector_container)
 
         # Panel border
         self.setStyleSheet("""
@@ -463,30 +693,46 @@ class ScopePanel(QWidget):
             }
         """)
 
-    def _update_settings_button(self) -> None:
-        """Update the settings button icon and style."""
-        icon = icon_settings(color="#b4b4b4")
-        self.settings_btn.setIcon(icon)
-        self.settings_btn.setIconSize(QSize(16, 16))
-        self.settings_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                border: none;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 30);
-                border-radius: 3px;
-            }
-            QPushButton:pressed {
-                background-color: rgba(255, 255, 255, 50);
-                border-radius: 3px;
-            }
-        """)
+    def _expand_scope(self) -> None:
+        """Float/redock the host dock, or expand a standalone scope window."""
+        dock = self._host_dock()
+        if dock is not None:
+            if dock.isFloating():
+                dock.setFloating(False)
+            else:
+                self.open_floating()
+            self._update_layout_controls()
+            return
+        window = self.window()
+        if window.isMaximized():
+            window.showNormal()
+        else:
+            window.showMaximized()
 
-    def _show_settings_menu(self) -> None:
+    def _show_options_menu(self) -> None:
+        self._show_settings_menu(anchor=self.more_btn)
+
+    def _show_settings_menu(self, *, anchor: Optional[QWidget] = None) -> None:
         """Show the settings menu."""
         menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #252529; color: #dddde0; border: 1px solid #111114; }"
+            "QMenu::item { padding: 5px 20px; }"
+            "QMenu::item:selected { background: #414146; }"
+        )
+        for label in (self.source_label, self.domain_badge):
+            info = menu.addAction(label.text())
+            info.setEnabled(False)
+            info.setToolTip(label.toolTip())
+        menu.setToolTipsVisible(True)
+        menu.addSeparator()
+        for mode in ('waveform', 'split', 'quad', 'all'):
+            action = menu.addAction(_scope_name(mode))
+            action.setCheckable(True)
+            action.setChecked(self._current_mode == mode or (
+                mode == 'waveform' and self._current_mode not in _MULTI_LAYOUTS))
+            action.triggered.connect(lambda _=False, m=mode: self.set_mode(m))
+        menu.addSeparator()
 
         # Vectorscope Zoom section
         zoom_label = QAction(I18N.tr("analysis.vectorscope_zoom", "Vectorscope Zoom"), menu)
@@ -565,7 +811,8 @@ class ScopePanel(QWidget):
             menu.addAction(act)
 
         # Apply settings to all vectorscope widgets
-        menu.exec(self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft()))
+        button = anchor if anchor is not None else self.settings_btn
+        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
 
     def set_scope_source(self, source: str) -> None:
         """切换 scope 输入源（P1-COLOR-07）。
@@ -765,6 +1012,8 @@ class ScopePanel(QWidget):
             # Apply to all vectorscope widgets
             self.vectorscope_widget.set_zoom(level)
             self.split_vectorscope.set_zoom(level)
+            if self._gpu_vs_presenter is not None:
+                self._gpu_vs_presenter.set_vectorscope_zoom(float(level))
             # Zoom is a demand state change -> bump revision so in-flight
             # GPU scope frames for the old zoom are discarded.
             self.bump_demand_revision()
@@ -787,6 +1036,7 @@ class ScopePanel(QWidget):
         mode = MODE_ORDER[index]
         if mode != self._current_mode:
             self._current_mode = mode
+            self._configure_scope_layout(mode)
             self.stack.setCurrentIndex(index)
             self._apply_mode_page(mode, index)
             # Keep the GPU stack in sync so a switch while GPU display is
@@ -803,12 +1053,19 @@ class ScopePanel(QWidget):
                 self._process_pending_image()
 
     def resizeEvent(self, event) -> None:
-        """Handle resize - reposition floating selector."""
+        """Handle resize and invalidate size-dependent scope output."""
         super().resizeEvent(event)
-        self.selector_container.move(5, 5)
         # A resize changes display_size, so the next demand needs a new
         # revision to invalidate any in-flight GPU scope frame.
         self.bump_demand_revision()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        dock = self._host_dock()
+        if dock is not None and getattr(self, '_bound_scope_dock', None) is not dock:
+            dock.topLevelChanged.connect(self._update_layout_controls)
+            self._bound_scope_dock = dock
+        self._update_layout_controls()
 
     def hideEvent(self, event) -> None:
         """Panel hidden: clear the GPU presenter.
@@ -912,30 +1169,34 @@ class ScopePanel(QWidget):
                         interpolation=cv2.INTER_NEAREST,
                     )
 
-        # 只计算当前模式需要的 widget，避免后台浪费CPU
-        if self._current_mode == 'waveform':
-            self.waveform_widget.update_waveform(image)
-        elif self._current_mode == 'vectorscope':
-            if image.shape[2] >= 3:
-                image_rgb = image[:, :, ::-1]
-                self.vectorscope_widget.update_vectorscope(image_rgb, mask)
-        elif self._current_mode == 'split':
-            self.split_waveform.update_waveform(image)
-            if image.shape[2] >= 3:
-                image_rgb = image[:, :, ::-1]
-                self.split_vectorscope.update_vectorscope(image_rgb, mask)
-        elif self._current_mode == 'parade':
-            self.parade_widget.update_parade(image)
-        elif self._current_mode == 'luma':
-            self.luma_widget.update_luma_waveform(image)
-        elif self._current_mode == 'histogram':
-            self.histogram_widget.update_histogram(image)
-        elif self._current_mode == 'cie':
-            if image.shape[2] >= 3:
-                image_rgb = image[:, :, ::-1]
-                self.cie_widget.update_cie(image_rgb, mask)
-        elif self._current_mode == 'falsecolor':
-            self.falsecolor_widget.update_false_color(image)
+        visible_modes = (_MULTI_LAYOUTS[self._current_mode]
+                         if self._current_mode in ('quad', 'all')
+                         else (self._current_mode,))
+        for mode in visible_modes:
+            # 只计算当前模式需要的 widget，避免后台浪费CPU
+            if mode == 'waveform':
+                self.waveform_widget.update_waveform(image)
+            elif mode == 'vectorscope':
+                if image.shape[2] >= 3:
+                    image_rgb = image[:, :, ::-1]
+                    self.vectorscope_widget.update_vectorscope(image_rgb, mask)
+            elif mode == 'split':
+                self.split_waveform.update_waveform(image)
+                if image.shape[2] >= 3:
+                    image_rgb = image[:, :, ::-1]
+                    self.split_vectorscope.update_vectorscope(image_rgb, mask)
+            elif mode == 'parade':
+                self.parade_widget.update_parade(image)
+            elif mode == 'luma':
+                self.luma_widget.update_luma_waveform(image)
+            elif mode == 'histogram':
+                self.histogram_widget.update_histogram(image)
+            elif mode == 'cie':
+                if image.shape[2] >= 3:
+                    image_rgb = image[:, :, ::-1]
+                    self.cie_widget.update_cie(image_rgb, mask)
+            elif mode == 'falsecolor':
+                self.falsecolor_widget.update_false_color(image)
 
         # 缓存最后一次图像，供模式切换时使用
         self._last_image = image
@@ -954,16 +1215,11 @@ class ScopePanel(QWidget):
     def set_mode(self, mode: str) -> None:
         """Set the scope mode programmatically."""
         if mode in SCOPE_MODES and mode != self._current_mode:
-            self._current_mode = mode
             idx = MODE_ORDER.index(mode)
             self.mode_combo.blockSignals(True)
             self.mode_combo.setCurrentIndex(idx)
             self.mode_combo.blockSignals(False)
-            self.stack.setCurrentIndex(idx)
-            if getattr(self, '_gpu_stack', None) is not None:
-                self._gpu_stack.setCurrentIndex(min(idx, self._gpu_stack.count() - 1))
-            self._apply_mode_page(mode, idx)
-            self.bump_demand_revision()
+            self._on_mode_changed(idx)
 
     # ------------------------------------------------------------------
     # GPU scope path (native pipeline)
@@ -1046,33 +1302,19 @@ class ScopePanel(QWidget):
     def _present_gpu_frame(self, frame) -> None:
         """Forward the frame to the matching GPU presenter(s).
 
-        Every mode except ``split`` maps to exactly one ``ScopeGpuFrame``
-        texture descriptor (field prefix == mode name); ``split`` feeds the
-        waveform and vectorscope presenters from a single pass.
+        Multi-view layouts distribute independent texture descriptors to
+        the visible presenters; single view forwards just its chosen mode.
         """
         try:
-            if self._current_mode == 'split':
-                wf_presenter = getattr(self, '_gpu_wf_presenter', None)
-                vs_presenter = getattr(self, '_gpu_vs_presenter', None)
-                if wf_presenter is not None and frame.waveform_texture_id is not None:
-                    wf_presenter.set_scope_frame(
-                        frame.waveform_texture_id, *frame.waveform_size
-                    )
-                if vs_presenter is not None and frame.vectorscope_texture_id is not None:
-                    vs_presenter.set_scope_frame(
-                        frame.vectorscope_texture_id, *frame.vectorscope_size
-                    )
-                return
-            prefix = _MODE_FRAME_FIELD.get(self._current_mode)
-            if prefix is None:
-                return
-            presenter = getattr(self, _MODE_PRESENTER_ATTR[prefix], None)
-            if presenter is None:
-                return
-            tex_id = getattr(frame, f'{prefix}_texture_id', None)
-            size = getattr(frame, f'{prefix}_size', (0, 0))
-            if tex_id is not None:
-                presenter.set_scope_frame(tex_id, *size)
+            modes = _MULTI_LAYOUTS.get(self._current_mode, (self._current_mode,))
+            for prefix in modes:
+                presenter = getattr(self, _MODE_PRESENTER_ATTR.get(prefix, ''), None)
+                if presenter is None:
+                    continue
+                tex_id = getattr(frame, f'{prefix}_texture_id', None)
+                size = getattr(frame, f'{prefix}_size', (0, 0))
+                if tex_id is not None:
+                    presenter.set_scope_frame(tex_id, *size)
         except Exception as exc:
             # AUD-25610：GPU 呈现失败不能静默——frame 描述符字段缺失/更名
             # （AttributeError）、size 解包不符（TypeError）或共享纹理失败

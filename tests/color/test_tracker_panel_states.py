@@ -222,7 +222,7 @@ class TestParams:
         params = panel.get_params()
         assert params["mode"] == "trs"
         assert params["quality"] == "standard"
-        assert params["feature_count"] == 12
+        assert params["feature_count"] == 64
         assert params["search_multiplier"] == pytest.approx(2.0)
         assert params["min_confidence"] == pytest.approx(0.35)
         assert params["failure_policy"] == "recapture"
@@ -552,3 +552,28 @@ def test_series_updates_keep_explicit_clip_range_and_zoom(qapp):
     assert graph.view._clip_extent == (100, 500)
     graph.horizontal_zoom.setValue(0)
     assert graph.view._frame_extent() == (100.0, 500.0)
+
+
+def test_motion_readouts_use_window_pivot_upwards_tilt_and_radians(qapp):
+    import math
+    import numpy as np
+    from src.shared.tracking.types import TrackTransform, TrackStatus
+    panel = make_panel()
+    panel.set_source_frame_size(1920, 1080)
+    # A pure rotation about an off-center window has nonzero matrix translation
+    # but must report zero Pan/Tilt; storage and geometry stay in degrees.
+    cx, cy = .4 * 1920, .6 * 1080
+    angle = .1
+    a, b = math.cos(angle), math.sin(angle)
+    matrix = np.array([[a, -b, cx - a * cx + b * cy],
+                       [b, a, cy - b * cx - a * cy], [0, 0, 1]])
+    transform = TrackTransform.from_matrix(1, matrix, .95, TrackStatus.VALID)
+    binding = SimpleNamespace(shape_name='Circle', reference_frame=0,
+                              base_geometry={'center': [.4, .6]},
+                              transforms={1: transform}, manual_corrections={})
+    panel.set_tracking_binding(binding)
+    series = panel.graph.view._series
+    assert series['tx'][0][1] == pytest.approx(0.0, abs=1e-9)
+    assert series['ty'][0][1] == pytest.approx(0.0, abs=1e-9)
+    assert series['rotation'][0][1] == pytest.approx(-.1)
+    assert transform.rotation == pytest.approx(math.degrees(.1))

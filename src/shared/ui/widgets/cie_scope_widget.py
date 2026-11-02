@@ -19,8 +19,8 @@ import math
 from typing import List, Optional, Tuple
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPainterPath
-from PyQt6.QtWidgets import QMenu
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPainterPath, QPaintEvent, QResizeEvent
+from PyQt6.QtWidgets import QMenu, QWidget
 
 from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
 from src.shared.ui.widgets.vectorscope_widget import CIE_SPECTRAL_LOCUS
@@ -160,6 +160,21 @@ def cubic_bezier_point(p0: Tuple[float, float], c1: Tuple[float, float],
             a * p0[1] + b * c1[1] + c * c2[1] + d * p3[1])
 
 
+class _CieChromeOverlay(QWidget):
+    """Keep chart annotations above the native shared-texture blit."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setStyleSheet("background: transparent;")
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        self.parentWidget()._draw_cie_overlay(painter)
+        painter.end()
+
+
 class CieGpuScopeWidget(GpuScopeWidget):
     """CIE chromaticity presenter with reference-style plot chrome.
 
@@ -181,6 +196,11 @@ class CieGpuScopeWidget(GpuScopeWidget):
         # 重算 Catmull-Rom/Bézier 采样与普朗克/昼光轨迹求值。
         self._locus_polyline: Optional[List[Tuple[QColor, float, float]]] = None
         self._ct_polylines: dict = {}
+        self._chrome_overlay = _CieChromeOverlay(self)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._chrome_overlay.setGeometry(self.rect())
 
     def _get_locus_polyline(self) -> List[Tuple[QColor, float, float]]:
         """预计算光谱轨迹 xy 域折线（颜色随波长插值），只算一次。"""
@@ -333,44 +353,47 @@ class CieGpuScopeWidget(GpuScopeWidget):
             self.show_gamuts.append(name)
         elif not on and name in self.show_gamuts:
             self.show_gamuts.remove(name)
+        self._chrome_overlay.update()
         self.update()
 
     def set_gamut_filled(self, on: bool) -> None:
         self.show_gamut_filled = bool(on)
+        self._chrome_overlay.update()
         self.update()
 
     def set_show_locus(self, on: bool) -> None:
         self.show_locus = bool(on)
+        self._chrome_overlay.update()
         self.update()
 
     def set_show_ee_point(self, on: bool) -> None:
         self.show_ee_point = bool(on)
+        self._chrome_overlay.update()
         self.update()
 
     def set_show_grid(self, on: bool) -> None:
         self.show_grid = bool(on)
+        self._chrome_overlay.update()
         self.update()
 
     def set_show_labels(self, on: bool) -> None:
         self.show_labels = bool(on)
+        self._chrome_overlay.update()
         self.update()
 
     def set_color_temp_curve(self, curve: Optional[str]) -> None:
         if curve in (None, 'daylight', 'blackbody'):
             self.color_temp_curve = curve
+            self._chrome_overlay.update()
             self.update()
 
     # ------------------------------------------------------------------
     # Chrome painting
     # ------------------------------------------------------------------
     def _paint_scope_chrome(self) -> None:  # pragma: no cover - Qt/GL
-        painter = QPainter()
-        if not painter.begin(self):
-            return
-        try:
-            self._draw_cie_overlay(painter)
-        finally:
-            painter.end()
+        # QWidget composition preserves the plot lines that macOS's GL
+        # paint engine can otherwise clip away inside the blit rectangle.
+        pass
 
     def _draw_cie_overlay(self, painter: QPainter) -> None:
         """Draw the full reference-style plot chrome with ``painter``.

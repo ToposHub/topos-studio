@@ -327,7 +327,9 @@ class PageContextManager:
         )
 
 
-class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, ColorControllerMixin, CompositeControllerMixin, MenuToolbarMixin, PageManagementMixin, DockLayoutMixin, LayerOpsMixin, ColorWorkspaceMixin, FileOpsMixin, AiEditingMixin):
+from src.app.controllers.stabilizer_controller import StabilizerControllerMixin
+
+class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, DeliverControllerMixin, ColorControllerMixin, CompositeControllerMixin, MenuToolbarMixin, PageManagementMixin, DockLayoutMixin, LayerOpsMixin, ColorWorkspaceMixin, FileOpsMixin, AiEditingMixin):
     # AUD-3513: the audio-backend probe runs on a worker thread; the snapshot
     # is delivered back to the UI thread through this queued signal.
     audio_capabilities_probed = pyqtSignal(object)
@@ -1736,6 +1738,7 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
             self._on_tracker_graph_frame_clicked)
         self.tracker_panel.graph.scrub_started.connect(self._on_tracker_graph_scrub_started)
         self.tracker_panel.graph.scrub_finished.connect(self._on_tracker_graph_scrub_finished)
+        self._init_stabilizer()
         self.tracking_service.task_started.connect(self._on_tracker_task_started)
         self.tracking_service.task_progress.connect(self._on_tracker_task_progress)
         self.tracking_service.task_finished.connect(self._on_tracker_task_finished)
@@ -2081,6 +2084,12 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin, Color
             except Exception:
                 logger.exception("MainWindow: Tangent Hub shutdown failed")
             try:
+                stabilization_service = getattr(self, "stabilization_service", None)
+                if stabilization_service is not None:
+                    stabilization_service.shutdown()
+                stabilization_plan_service = getattr(self, "stabilization_plan_service", None)
+                if stabilization_plan_service is not None:
+                    stabilization_plan_service.shutdown()
                 tracking_service = getattr(self, "tracking_service", None)
                 if tracking_service is not None:
                     tracking_service.shutdown()

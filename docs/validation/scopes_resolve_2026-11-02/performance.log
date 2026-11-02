@@ -1,0 +1,104 @@
+[1/2] standalone GPU pipeline (correctness + timing)
+  shaders: 11 scope programs compiled OK
+  -- correctness (synthetic frames) --
+    [PASS] histogram[R] vs numpy — total_err=0.0021 corr=1.0000
+    [PASS] histogram[G] vs numpy — total_err=0.0020 corr=1.0000
+    [PASS] histogram[B] vs numpy — total_err=0.0022 corr=1.0000
+    [PASS] cie pure-red peak at 709 red — peak=(307,273) expected≈(307,274) dist=0.6 bins
+    [PASS] parade thirds channel-isolated (density) — dominance ratios=[np.float32(7989.2), np.float32(4376.6), np.float32(7058.2)]
+    [PASS] parade R ramp spans full third — cols 0..340 of 341
+    [PASS] falsecolor luma 0.55 -> green stop — center px=[0. 1. 0.]
+    [PASS] zebra stripes over exposure — white=0.50 gray=0.50
+    [PASS] luma trace is neutral (white) — median chroma=0.000
+  -- display content (real frame) --
+  video: 4K_H264.mov frame=3840x2160 @1.0s
+    [PASS] waveform renders non-empty — 1024x300 lit=0.39
+    [PASS] vectorscope renders non-empty — 800x800 lit=0.02
+    [PASS] split renders non-empty — 1024x300 lit=0.39
+    [PASS] parade renders non-empty — 1024x300 lit=0.37
+    [PASS] luma renders non-empty — 1024x300 lit=0.36
+    [PASS] histogram renders non-empty — 512x300 lit=0.52
+    [PASS] cie renders non-empty — 384x432 lit=0.02
+    [PASS] falsecolor renders non-empty — 512x288 lit=1.00
+  -- performance (real frames, avg of 30 passes) --
+  video: 4K_H264.mov frame=3840x2160 @1.0s
+    source 3840x2160 [4K_H264.mov]
+      playback512 waveform        6.34 ms/pass
+      playback512 vectorscope     2.02 ms/pass
+      playback512 split          10.94 ms/pass
+      playback512 parade          5.20 ms/pass
+      playback512 luma            2.01 ms/pass
+      playback512 histogram       4.96 ms/pass
+      playback512 cie             1.91 ms/pass
+      playback512 falsecolor      0.07 ms/pass
+            hq768 waveform       12.48 ms/pass
+            hq768 vectorscope     4.20 ms/pass
+            hq768 split          16.43 ms/pass
+            hq768 parade         11.98 ms/pass
+            hq768 luma            4.27 ms/pass
+            hq768 histogram       9.01 ms/pass
+            hq768 cie             4.23 ms/pass
+            hq768 falsecolor      0.08 ms/pass
+          idle320 waveform        2.27 ms/pass
+          idle320 vectorscope     0.97 ms/pass
+          idle320 split           2.22 ms/pass
+          idle320 parade          2.43 ms/pass
+          idle320 luma            0.58 ms/pass
+          idle320 histogram       1.95 ms/pass
+          idle320 cie             0.83 ms/pass
+          idle320 falsecolor      0.07 ms/pass
+  video: 2K_h264.mp4 frame=1920x1080 @1.0s
+    source 1920x1080 [2K_h264.mp4]
+      playback512 waveform        5.49 ms/pass
+      playback512 vectorscope     2.18 ms/pass
+      playback512 split           8.33 ms/pass
+      playback512 parade          5.26 ms/pass
+      playback512 luma            1.49 ms/pass
+      playback512 histogram       5.50 ms/pass
+      playback512 cie             2.03 ms/pass
+      playback512 falsecolor      0.09 ms/pass
+            hq768 waveform        9.86 ms/pass
+            hq768 vectorscope     3.47 ms/pass
+            hq768 split          17.71 ms/pass
+            hq768 parade         13.24 ms/pass
+            hq768 luma            3.56 ms/pass
+            hq768 histogram      13.88 ms/pass
+            hq768 cie             5.26 ms/pass
+            hq768 falsecolor      0.06 ms/pass
+          idle320 waveform        2.02 ms/pass
+          idle320 vectorscope     0.85 ms/pass
+          idle320 split           2.72 ms/pass
+          idle320 parade          2.21 ms/pass
+          idle320 luma            0.92 ms/pass
+          idle320 histogram       3.26 ms/pass
+          idle320 cie             0.68 ms/pass
+          idle320 falsecolor      0.06 ms/pass
+  video: 2K_prores422HQ.mov frame=1920x1080 @1.0s
+    source 1920x1080 [2K_prores422HQ.mov]
+      playback512 waveform        4.91 ms/pass
+      playback512 vectorscope     1.64 ms/pass
+      playback512 split           7.53 ms/pass
+      playback512 parade          5.98 ms/pass
+      playback512 luma            1.40 ms/pass
+      playback512 histogram       5.67 ms/pass
+      playback512 cie             2.12 ms/pass
+      playback512 falsecolor      0.06 ms/pass
+            hq768 waveform       19.17 ms/pass
+            hq768 vectorscope     4.97 ms/pass
+            hq768 split          18.13 ms/pass
+            hq768 parade         16.47 ms/pass
+            hq768 luma            5.24 ms/pass
+            hq768 histogram      15.46 ms/pass
+            hq768 cie             8.13 ms/pass
+            hq768 falsecolor      0.06 ms/pass
+          idle320 waveform        2.19 ms/pass
+          idle320 vectorscope     1.64 ms/pass
+          idle320 split           5.64 ms/pass
+          idle320 parade          3.79 ms/pass
+          idle320 luma            0.94 ms/pass
+          idle320 histogram       4.68 ms/pass
+          idle320 cie             0.91 ms/pass
+          idle320 falsecolor      0.06 ms/pass
+  video: 4K_H264.mov frame=3840x2160 @1.0s
+    CPU reference (single-channel waveform only): 62.78 ms — GPU runs all channels + display
+  => standalone: ALL PASS

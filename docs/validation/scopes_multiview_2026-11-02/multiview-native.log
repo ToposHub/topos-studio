@@ -1,0 +1,28 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+INFO:OpenGL.acceleratesupport:No OpenGL_accelerate module loaded: No module named 'OpenGL_accelerate'
+2026-11-02 15:05:06.796 Python[52073:1689967] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-02 15:05:06.796 Python[52073:1689967] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+  video: 2K_h264.mp4 frame=1920x1080 @1.0s
+    [PASS] presenter blit waveform — 960x616 lit=0.56
+    [PASS] presenter blit vectorscope — 960x616 lit=0.03
+    [PASS] presenter blit split — 480x616 lit=0.53
+    [PASS] presenter blit split — 479x616 lit=0.03
+    [PASS] presenter blit parade — 960x616 lit=0.52
+    [PASS] presenter blit luma — 960x616 lit=0.49
+    [PASS] presenter blit histogram — 960x616 lit=0.57
+    [PASS] presenter blit cie — 960x616 lit=0.06
+    [PASS] presenter blit falsecolor — 960x616 lit=0.88
+    [PASS] presenter blit quad — 480x284 lit=0.50
+    [PASS] presenter blit quad — 479x284 lit=0.54
+    [PASS] presenter blit quad — 480x283 lit=0.03
+    [PASS] presenter blit quad — 479x283 lit=0.52
+    [PASS] presenter blit all — 319x181 lit=0.49
+    [PASS] presenter blit all — 320x181 lit=0.52
+    [PASS] presenter blit all — 319x181 lit=0.03
+    [PASS] presenter blit all — 319x180 lit=0.46
+    [PASS] presenter blit all — 320x180 lit=0.45
+    [PASS] presenter blit all — 319x180 lit=0.14
+    [PASS] presenter blit all — 319x181 lit=0.99

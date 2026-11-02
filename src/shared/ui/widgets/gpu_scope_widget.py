@@ -30,9 +30,10 @@ import logging
 import math
 from typing import Optional
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QSurfaceFormat
+from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QSurfaceFormat, QPaintEvent, QResizeEvent
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+from PyQt6.QtWidgets import QWidget
 
 # PyOpenGL provides a complete, driver-resolved binding for the framebuffer
 # / blit entry points this presenter needs.  It operates on whatever GL
@@ -64,7 +65,7 @@ _VS_TARGET_COLORS = {
 
 
 def draw_vectorscope_targets(painter: QPainter, cx: float, cy: float,
-                             radius: float) -> None:
+                             radius: float, *, reference_style: bool = False) -> None:
     """Draw the six 75%/100% saturation target boxes + labels.
 
     Pure QPainter annotation so it can render into a QImage in tests.
@@ -85,6 +86,19 @@ def draw_vectorscope_targets(painter: QPainter, cx: float, cy: float,
         y_100 = cy - cr * radius * 2.0
         x_75 = cx + cb * radius * 2.0 * 0.75
         y_75 = cy - cr * radius * 2.0 * 0.75
+        if reference_style:
+            # Broadcast-style 75% targets: open corners and a single amber
+            # label leave the signal legible, including near the rim.
+            painter.setPen(QPen(QColor(150, 122, 46), 1.0))
+            x, y = round(x_75), round(y_75)
+            for sx in (-1, 1):
+                for sy in (-1, 1):
+                    painter.drawLine(x + sx * 7, y + sy * 7,
+                                     x + sx * 3, y + sy * 7)
+                    painter.drawLine(x + sx * 7, y + sy * 7,
+                                     x + sx * 7, y + sy * 3)
+            painter.drawText(x + 9, y + 13, color_name)
+            continue
         target_color = _VS_TARGET_COLORS.get(color_name, QColor(150, 150, 150))
 
         painter.setPen(QPen(target_color, 1.5))
@@ -107,6 +121,26 @@ def draw_vectorscope_targets(painter: QPainter, cx: float, cy: float,
         )
 
 
+class _VectorscopeTargetsOverlay(QWidget):
+    """Static annotations composited by Qt above the shared GL texture."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.zoom = 1.0
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setStyleSheet("background: transparent;")
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        radius = max(1.0, (min(self.width(), self.height()) - 24) / 2.0)
+        draw_vectorscope_targets(painter, self.width() / 2.0,
+                                 self.height() / 2.0, radius * self.zoom,
+                                 reference_style=True)
+        painter.end()
+
+
 class GpuScopeWidget(QOpenGLWidget):
     """Presents a renderer-produced RGBA scope texture.
 
@@ -127,6 +161,7 @@ class GpuScopeWidget(QOpenGLWidget):
         show_value_axis: bool = True,
         legend: str = '',
         show_vectorscope_targets: bool = False,
+        show_histogram_axis: bool = False,
     ) -> None:
         super().__init__(parent)
         # tryLock may intentionally skip a blit during a seek/render. Qt's
@@ -164,6 +199,10 @@ class GpuScopeWidget(QOpenGLWidget):
         # The baked GPU graticule only has rings / crosshair / skin-tone
         # line; the targets are UI chrome drawn by this presenter.
         self._show_vectorscope_targets = bool(show_vectorscope_targets)
+        self._show_histogram_axis = bool(show_histogram_axis)
+        self._targets_overlay = (
+            _VectorscopeTargetsOverlay(self) if show_vectorscope_targets else None
+        )
         # Latest descriptor received from the renderer.  Only the texture id
         # + size are used here.
         self._frame_tex_id: Optional[int] = None
@@ -183,6 +222,17 @@ class GpuScopeWidget(QOpenGLWidget):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    def set_vectorscope_zoom(self, zoom: float) -> None:
+        """Keep chroma reference positions aligned with magnified samples."""
+        if self._targets_overlay is not None:
+            self._targets_overlay.zoom = max(1.0, float(zoom))
+            self._targets_overlay.update()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if self._targets_overlay is not None:
+            self._targets_overlay.setGeometry(self.rect())
+
     def set_scope_frame(self, tex_id: Optional[int], width: int, height: int) -> None:
         """Publish a new GPU scope texture descriptor (thread-safe via signal)."""
         self._frame_tex_id = tex_id
@@ -283,43 +333,26 @@ class GpuScopeWidget(QOpenGLWidget):
 
     def _paint_scope_chrome(self) -> None:  # pragma: no cover - Qt/GL required
         """Paint UI annotations (value axis labels / legend) after the blit."""
-        if self._show_vectorscope_targets and self._preserve_aspect:
-            self._paint_vectorscope_targets()
         if self._show_value_axis and not self._preserve_aspect:
             self._paint_waveform_scale()
         if self._legend:
             self._paint_legend()
+        if self._show_histogram_axis:
+            self._paint_histogram_axis()
 
-    def _paint_vectorscope_targets(self) -> None:  # pragma: no cover - Qt/GL
-        """Draw the 6-colour target boxes over the blitted vectorscope.
-
-        Geometry mirrors ``_blit_shared_texture``'s square letterbox: the
-        vectorscope frame is square (Cb/Cr ∈ [-0.5, 0.5] across the full
-        texture), so 100% saturation sits exactly at half the blit size.
-        """
-        dpr = self.devicePixelRatioF()
-        w = self.width() * dpr
-        h = self.height() * dpr
-        fw, fh = max(1, self._frame_w), max(1, self._frame_h)
-        if not self._preserve_aspect:
-            return
-        scale = min(w / fw, h / fh)
-        dw, dh = fw * scale, fh * scale
-        cx = (w - dw) / 2.0 + dw / 2.0
-        cy = (h - dh) / 2.0 + dh / 2.0
-        radius = dw / 2.0  # Cb/Cr 0.5 (100% sat) == half the blit size
-        painter = QPainter()
-        if not painter.begin(self):
-            return
-        try:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setFont(QFont("Arial", 8))
-            # QPainter on a QOpenGLWidget works in logical pixels; the
-            # geometry above is in device pixels, so scale the transform.
-            painter.scale(1.0 / dpr, 1.0 / dpr)
-            draw_vectorscope_targets(painter, cx, cy, radius)
-        finally:
-            painter.end()
+    def _paint_histogram_axis(self) -> None:
+        """Draw the histogram's top 10-bit ruler in logical pixels."""
+        painter = QPainter(self)
+        painter.setFont(QFont("Arial", 8))
+        painter.setPen(QColor(150, 122, 46))
+        left, right = 20, max(21, self.width() - 10)
+        for step in range(33):
+            x = round(left + (right - left) * step / 32.0)
+            painter.drawLine(x, 22, x, 27 if step % 4 else 30)
+            if step % 4 == 0:
+                code = min(1023, step * 32)
+                painter.drawText(x - (12 if step == 32 else 5), 16, str(code))
+        painter.end()
 
     def _paint_legend(self) -> None:  # pragma: no cover - Qt required
         """Draw the false color exposure-stop legend as UI chrome.
@@ -330,7 +363,7 @@ class GpuScopeWidget(QOpenGLWidget):
         per (legend, transfer) — paintGL runs at display rate.
         """
         import numpy as np
-        from PyQt6.QtGui import QImage, QRectF
+        from PyQt6.QtGui import QImage
         from src.shared.ui.widgets.vectorscope_widget import (
             build_false_color_lut,
         )
@@ -489,7 +522,9 @@ class GpuScopeWidget(QOpenGLWidget):
         if self._preserve_aspect:
             # Vectorscope is square in data space; letterbox it so circles do
             # not become ellipses in a wide/tall dock or split view.
-            scale = min(w / max(1, fw), h / max(1, fh))
+            inset = round(12 * dpr) if self._show_vectorscope_targets else 0
+            scale = min(max(1, w - 2 * inset) / max(1, fw),
+                        max(1, h - 2 * inset) / max(1, fh))
             dw = int(fw * scale)
             dh = int(fh * scale)
             dx0 = (w - dw) // 2
@@ -499,8 +534,13 @@ class GpuScopeWidget(QOpenGLWidget):
             # stretch the complete texture to the available panel exactly as
             # the legacy CPU widget does. This removes the large black bars
             # that previously compressed the visible waveform into a strip.
-            dx0 = min(self._axis_left_px, max(0, w - 1))
+            dx0 = min(round(self._axis_left_px * dpr), max(0, w - 1))
             dy0, dw, dh = 0, max(1, w - dx0), h
+            if self._show_histogram_axis:
+                dx0 = min(round(20 * dpr), max(0, w - 1))
+                dy0 = round(8 * dpr)
+                dw = max(1, w - dx0 - round(10 * dpr))
+                dh = max(1, h - dy0 - round(30 * dpr))
         src_x0, src_y0, src_x1, src_y1 = self._blit_src_rect(fw, fh)
         if self._flip_y:
             src_y0, src_y1 = src_y1, src_y0

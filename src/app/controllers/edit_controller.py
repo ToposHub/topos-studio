@@ -2080,6 +2080,8 @@ class EditControllerMixin:
         # Initialize them alongside the other snapshot fields.
         trackings = None
         video_denoise = None
+        video_stabilization = (self.engine.get_video_stabilization_state()
+            if callable(getattr(self.engine, "get_video_stabilization_state", None)) else None)
 
         if self.engine.layers:
             layer = self.engine.layers[0]
@@ -2137,6 +2139,7 @@ class EditControllerMixin:
             raw_params=raw_params,
             trackings=trackings,
             video_denoise=video_denoise,
+            video_stabilization=video_stabilization,
         )
         cmd_stack = self.media_pool_panel.get_command_stack()
         new_project = cmd_stack.execute(command, self._current_edit_project)

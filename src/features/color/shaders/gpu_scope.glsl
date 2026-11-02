@@ -285,8 +285,8 @@ void main() {
 // 5. Vectorscope display / tone-map pass (full-screen quad)
 // -----------------------------------------------------------------------------
 // Tone-maps the R16F density into a colourful vectorscope, draws the circular
-// graticule (75% / 50% / 25% rings), the six color targets and the skin-tone
-// line — all procedurally, matching the CPU widget's visual reference.
+// graticule with an amber outer rim, angle ticks and crosshairs.
+// The presenter adds the six labelled chroma targets as UI annotations.
 #define SCOPE_VECTORSCOPE_DISPLAY_FRAGMENT """
 #version 330
 uniform sampler2D u_density;
@@ -313,12 +313,6 @@ vec3 cbcr_to_rgb(float cb, float cr) {
     return clamp(vec3(r, g, b), 0.0, 1.0);
 }
 
-// Draw a ring of given radius (in Cb/Cr units) and line width (in uv units).
-float ring(float radius_cb, float width_uv, vec2 cbcr_center) {
-    float d = abs(length(cbcr_center) - radius_cb);
-    return 1.0 - smoothstep(0.0, width_uv, d);
-}
-
 void main() {
     vec2 uv = v_texcoord;
     vec2 cbcr = to_cbcr(uv);
@@ -326,55 +320,34 @@ void main() {
 
     float density = texture(u_density, uv).r;
     float norm = density * u_max_inv;
-    float brightness = pow(norm, 0.7) * 2.0;          // CPU uses *2.0 cap
-    brightness = clamp(brightness, 0.0, 1.0);
+    float brightness = clamp(pow(norm, 0.7) * 2.0, 0.0, 1.0);
     vec3 heat = cbcr_to_rgb(cbcr.x, cbcr.y);
-    // Saturation boost (CPU uses 1.5x).
     vec3 boosted = mix(vec3(dot(heat, vec3(0.2126, 0.7152, 0.0722))), heat, 1.5);
     vec3 out_rgb = boosted * brightness;
-    float alpha = pow(norm, 0.6);
+    // Keep the existing measurement-space clipping and zoom behaviour.
+    if (sat > 0.5) out_rgb = vec3(0.0);
 
-    // ---- graticule (procedural) ----
-    float width_uv = 1.5 / u_density_size.x;
-    // 75% / 50% / 25% saturation rings (radius in Cb/Cr units).
-    float g75 = ring(0.5 * 0.75, width_uv, cbcr);
-    float g50 = ring(0.5 * 0.50, width_uv, cbcr);
-    float g25 = ring(0.5 * 0.25, width_uv * 0.6, cbcr);
-    float grid = max(g75 * 0.30, max(g50 * 0.22, g25 * 0.12));
-    vec3 grid_color = vec3(0.20, 0.20, 0.20);
-
-    // center cross
-    float cross_w = 2.0 / u_density_size.x;
-    float cross =
-        (1.0 - smoothstep(0.0, cross_w, abs(cbcr.x))) * 0.4 +
-        (1.0 - smoothstep(0.0, cross_w, abs(cbcr.y))) * 0.4;
-
-    // skin tone line at 123 degrees, length 0.75 of radius
-    float ang = radians(123.0);
-    vec2 dir = vec2(cos(ang), sin(ang));
-    float along = dot(cbcr, dir);
-    float perp = abs(dot(cbcr, vec2(-dir.y, dir.x)));
-    float skin = (along > 0.0 && along < 0.5 * 0.75)
-        ? (1.0 - smoothstep(0.0, width_uv, perp)) * 0.5 : 0.0;
-    vec3 skin_color = vec3(1.0, 0.71, 0.47);
-
-    // Mask everything outside the 100% ring.
-    if (sat > 0.5) {
-        out_rgb = vec3(0.0);
-        alpha = 0.0;
-        grid = 0.0;
-        cross = 0.0;
-        skin = 0.0;
-    }
-
-    vec3 col = out_rgb;
-    col = max(col, grid * grid_color);
-    col = max(col, cross * grid_color);
-    col = max(col, skin * skin_color);
-    alpha = clamp(max(alpha, max(grid, max(cross, skin))), 0.0, 1.0);
-    // Background fill so the scope reads on any panel colour.
-    col += vec3(0.02, 0.02, 0.02) * (1.0 - alpha);
-    f_color = vec4(col, 1.0);
+    // Fixed display-space rim and ticks, independent of signal zoom. One
+    // angular calculation replaces a loop over all tick marks per fragment.
+    vec2 p = uv - vec2(0.5);
+    float radius = length(p);
+    float pixel = 1.0 / u_density_size.x;
+    float rim_radius = 0.497;
+    float rim = 1.0 - smoothstep(pixel * 0.25, pixel * 1.1,
+                                abs(radius - rim_radius));
+    const float tau = 6.28318530718;
+    float tick_position = radius > pixel ? atan(p.y, p.x) / tau * 72.0 : 0.0;
+    float tick_index = floor(tick_position + 0.5);
+    float tick_distance = abs(tick_position - tick_index) * tau / 72.0 * radius;
+    float major = 1.0 - step(0.5, mod(abs(tick_index), 3.0));
+    float tick_length = mix(0.018, 0.035, major);
+    float tick = (1.0 - smoothstep(pixel * 0.2, pixel, tick_distance))
+        * step(rim_radius - tick_length, radius) * step(radius, rim_radius);
+    float cross = (1.0 - smoothstep(pixel * 0.2, pixel, min(abs(p.x), abs(p.y))))
+        * step(radius, rim_radius);
+    float grid = max(rim * 0.85, max(tick * 0.75, cross * 0.55));
+    vec3 amber = vec3(0.40, 0.32, 0.075);
+    f_color = vec4(max(out_rgb, amber * grid), 1.0);
 }
 """
 
@@ -596,8 +569,8 @@ void main() {
 // -----------------------------------------------------------------------------
 // 9. Histogram display (full-screen quad, curve fill).
 // -----------------------------------------------------------------------------
-// Draws the three channel curves as translucent fills over black with
-// 0% / 50% / 100% graticule lines. Fixed normalization (see waveform) keeps
+// Draws separate R/G/B rows over black with amber code-value grid lines.
+// Fixed normalization (see waveform) keeps
 // the pass free of any density readback.
 #define SCOPE_HISTOGRAM_DISPLAY_FRAGMENT """
 #version 330
@@ -610,32 +583,28 @@ void main() {
     int col = int(clamp(v_texcoord.x, 0.0, 1.0) * 511.0 + 0.5);
     vec3 log_sum = texelFetch(u_hist_sum, ivec2(col, 0), 0).rgb;
     vec3 norm = clamp(log_sum * u_max_inv, vec3(0.0), vec3(1.0));
-    float y = v_texcoord.y;
+    // GL bottom-up coordinates: B on the bottom, G in the middle, R on top.
+    float row_position = min(v_texcoord.y * 3.0, 2.999999);
+    int channel = 2 - int(floor(row_position));
+    float y = fract(row_position);
     vec3 colors[3] = vec3[3](
-        vec3(1.0, 0.23, 0.23),
-        vec3(0.23, 1.0, 0.23),
-        vec3(0.23, 0.47, 1.0)
+        vec3(1.0, 0.035, 0.06),
+        vec3(0.025, 1.0, 0.035),
+        vec3(0.025, 0.40, 1.0)
     );
-    vec3 fill = vec3(0.0);
-    vec3 trace = vec3(0.0);
-    float trace_width = 1.35 / u_display_size.y;
-    for (int channel = 0; channel < 3; channel++) {
-        float distance_to_curve = abs(y - norm[channel]);
-        float line = 1.0 - smoothstep(trace_width, trace_width * 2.0, distance_to_curve);
-        float under_curve = step(y, norm[channel]);
-        fill += colors[channel] * under_curve * 0.15;
-        trace += colors[channel] * line * 0.78;
-    }
-    vec3 background = vec3(0.137, 0.137, 0.149);
-    vec3 col3 = clamp(background + fill + trace, vec3(0.0), vec3(1.0));
-    // Graticule: vertical 0% / 50% / 100% references plus the baseline.
-    float px = 1.5 / u_display_size.x;
-    float g0 = 1.0 - smoothstep(0.0, px, v_texcoord.x);
-    float g50 = 1.0 - smoothstep(0.0, px, abs(v_texcoord.x - 0.5));
-    float g100 = 1.0 - smoothstep(0.0, px, abs(v_texcoord.x - 1.0));
-    float base = 1.0 - smoothstep(0.0, 1.5 / u_display_size.y, y);
-    vec3 grid = vec3(0.20) * max(max(g0, g50 * 0.7), max(g100 * 0.7, base * 0.6));
-    f_color = vec4(max(col3, grid), 1.0);
+    float height = norm[channel] * 0.94;
+    float trace_width = 3.0 / u_display_size.y;
+    float line = 1.0 - smoothstep(trace_width * 0.35, trace_width,
+                                 abs(y - height));
+    float under_curve = step(y, height);
+    vec3 signal = colors[channel] * (under_curve * 0.16 + line * 0.82);
+    // Eight major code divisions mirror the top ruler's 0..1023 labels.
+    float gx = abs(v_texcoord.x * 8.0 - floor(v_texcoord.x * 8.0 + 0.5)) / 8.0;
+    float grid = 1.0 - smoothstep(0.25 / u_display_size.x,
+                                 1.0 / u_display_size.x, gx);
+    float baseline = 1.0 - smoothstep(0.0, trace_width * 0.6, y);
+    vec3 amber = vec3(0.30, 0.24, 0.055);
+    f_color = vec4(max(signal, amber * max(grid * 0.65, baseline * 0.75)), 1.0);
 }
 """
 

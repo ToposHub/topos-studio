@@ -134,3 +134,32 @@ def test_canvas_explicit_video_style_reaches_existing_and_new_items(qapp):
     canvas.set_video_window_mode(False)
     assert not item._video_window_mode
     canvas.close()
+
+
+@pytest.mark.parametrize('handle_name,delta', [('resize_br', (40, 30)), ('rotate', (25, 0)),
+                                             ('feather_r', (20, 0))])
+def test_mouse_drag_uses_real_handle_hit_target_and_balanced_interaction(
+        qapp, window_item, handle_name, delta):
+    from PyQt6.QtCore import QPoint, Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QGraphicsView
+    item, canvas = window_item()
+    view = QGraphicsView(item.scene())
+    view.setSceneRect(0, 0, 1000, 600)
+    view.resize(1020, 640)
+    view.show()
+    qapp.processEvents()
+    handle = item.handles[handle_name]
+    start = view.mapFromScene(handle.scenePos())
+    end = start + QPoint(*delta)
+    before = (list(item.size), item.rotation, item.feather)
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(view.viewport(), end, delay=20)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+    qapp.processEvents()
+    assert (item.size, item.rotation, item.feather) != before
+    canvas.interaction_started.emit.assert_called_once()
+    canvas.interaction_ended.emit.assert_called_once()
+    assert canvas.mask_shape_changed.emit.call_count >= 1
+    assert not handle._is_dragging
+    view.close()

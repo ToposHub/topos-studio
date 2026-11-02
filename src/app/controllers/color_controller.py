@@ -478,12 +478,22 @@ class ColorControllerMixin:
             if store is not None:
                 binding = store.get_binding(clip_id, shape_id)
 
-        self.tracker_panel.set_tracking_binding(binding)
         self._sync_tracker_clip_range()
+        self.tracker_panel.set_tracking_binding(binding)
         if binding is not None:
             self.tracker_panel.graph.set_frame_range(binding.source_frame_start, binding.source_frame_end)
             base = binding.base_geometry or {}
-            self.tracker_panel.set_params({**base.get("_tracker_settings", {}),
+            settings = dict(base.get("_tracker_settings", {}))
+            # Upgrade the former default preset on the next analysis, without
+            # rewriting stored results merely by opening a window. Explicit
+            # non-default legacy presets and new-version preferences survive.
+            revision = settings.get("solver_revision", 0)
+            if (isinstance(revision, (int, float)) and revision < 2
+                    and settings.get("algorithm", "region") == "region"
+                    and settings.get("feature_count", 12) == 12
+                    and settings.get("failure_policy", "stop") == "stop"):
+                settings.update(feature_count=64, failure_policy="recapture")
+            self.tracker_panel.set_params({**settings,
                 "mode": binding.mode.value, "channels": base.get("_motion_channels", {})})
         controller = getattr(self, "video_controller", None)
         fps = getattr(controller, "fps", 24.0)
@@ -644,6 +654,9 @@ class ColorControllerMixin:
         dock = getattr(self, "dock_tracker", None)
         if dock is not None and dock.isVisible():
             self.tracker_panel.set_current_frame(int(source_frame))
+            stable = getattr(self.tracker_panel, "stabilizer", None)
+            if stable is not None:
+                stable.graph.set_current_frame(int(source_frame))
         layer = engine.get_active_layer()
         shape_id = getattr(self.canvas, "active_shape_id", None)
         shape = layer.get_mask_item_by_id(shape_id) if layer is not None and shape_id else None
@@ -963,7 +976,7 @@ class ColorControllerMixin:
         from src.features.color.tracking.tracker_2d import Tracker2D, TrackerConfig
         from src.features.color.tracking.types import FailurePolicy
 
-        feature_count = max(4, int(params.get("feature_count", 12)))
+        feature_count = max(4, min(1000, int(params.get("feature_count", 64))))
         policy = {
             "stop": FailurePolicy.STOP,
             "hold": FailurePolicy.HOLD_LAST,
@@ -974,6 +987,11 @@ class ColorControllerMixin:
             weak_confidence=min_confidence,
             valid_confidence=max(0.60, min_confidence),
             failure_policy=policy,
+            adaptive_appearance=True,
+            lk_consensus_windows=(15, 21, 31) if (
+                params.get("algorithm", "region") == "region"
+                and params.get("mode", "trs") in ("translation", "trs")
+            ) else (),
         )
         detector_config = DetectorConfig(
             max_features=feature_count,
@@ -1044,7 +1062,9 @@ class ColorControllerMixin:
             binding.base_geometry = {**capture_base_geometry(shape), **metadata}
         binding.base_geometry["_motion_channels"] = dict(params.get("channels", {}))
         binding.base_geometry["_tracker_settings"] = {
-            k: v for k, v in params.items() if k not in ("interactive", "correction_mode", "channels")}
+            **{k: v for k, v in params.items() if k not in ("interactive", "correction_mode", "channels")},
+            "solver_revision": 3,
+        }
         self.tracker_panel.set_tracking_binding(binding)
         self.tracker_panel.set_current_frame(reference)
         self.tracker_panel.graph.set_frame_range(frame_start, frame_end)
@@ -1126,7 +1146,10 @@ class ColorControllerMixin:
             # The analysis cache must distinguish edited point sets, algorithm
             # selection and solver settings, even when window geometry matches.
             analysis_geometry["_analysis_settings"] = {
-                k: v for k, v in params.items() if k not in ("interactive", "correction_mode")}
+                **{k: v for k, v in params.items() if k not in ("interactive", "correction_mode")},
+                "appearance_model": "verified_rolling_v1",
+                "flow_model": "multiscale_median_v1",
+            }
             analysis_geometry["_point_selection"] = {
                 k: (binding.base_geometry or {}).get(k) for k in ("_user_points", "_excluded_points")}
             self.tracking_service.start(
@@ -1182,7 +1205,10 @@ class ColorControllerMixin:
             self.tracker_panel.set_state(PanelState.RUNNING)
             analysis_geometry = dict(self.engine.get_tracked_geometry(shape) or binding.base_geometry)
             analysis_geometry["_analysis_settings"] = {
-                k: v for k, v in params.items() if k not in ("interactive", "correction_mode")}
+                **{k: v for k, v in params.items() if k not in ("interactive", "correction_mode")},
+                "appearance_model": "verified_rolling_v1",
+                "flow_model": "multiscale_median_v1",
+            }
             analysis_geometry["_point_selection"] = {
                 k: (binding.base_geometry or {}).get(k) for k in ("_user_points", "_excluded_points")}
             self.tracking_service.retrack_failed(
@@ -1314,6 +1340,17 @@ class ColorControllerMixin:
         if target is not None:
             self._tracker_single_step_target = None
             self._seek_tracker_frame(int(target))
+        elif (directions and not getattr(result, "cancelled", False)
+              and not self.tracking_service.is_running(clip_id, shape_id)):
+            # A completed pass leaves the viewer at its analyzed endpoint,
+            # including a pass started in the middle of a trimmed clip.
+            completed = [frame for frame in
+                         (binding.transforms or getattr(result, "transforms", {}))
+                         if binding.source_frame_start <= frame <= binding.source_frame_end]
+            if completed:
+                endpoint = (max(completed) if directions[-1] == TrackDirection.FORWARD
+                            else min(completed))
+                self._seek_tracker_frame(int(endpoint))
         self._trigger_autosave()
         # 跟踪结果即时生效：当前帧若落在结果范围内，立刻重建蒙版并重绘，
         # 无需等待下一次播放/手动刷新（达芬奇行为）
@@ -1392,12 +1429,21 @@ class ColorControllerMixin:
         controller = getattr(self, 'video_controller', None)
         if panel is None or controller is None:
             return
+        size = getattr(getattr(self, "canvas", None), "logical_size", None)
+        if size is not None:
+            width, height = size.width(), size.height()
+            if (isinstance(width, (int, float)) and isinstance(height, (int, float))
+                    and np.isfinite(width) and np.isfinite(height)):
+                panel.set_source_frame_size(int(width), int(height))
         _clip, _media, current, first, last = self._tracker_frame_context()
         panel.graph.set_frame_range(first, last)
         fps = getattr(controller, 'fps', 24.0)
         if isinstance(fps, (int, float)) and fps > 0.0:
             panel.graph.set_timebase(float(fps))
         panel.set_current_frame(current)
+        sync_stabilizer = getattr(self, "_sync_stabilizer_panel", None)
+        if callable(sync_stabilizer) and hasattr(self, "stabilization_service"):
+            sync_stabilizer()
 
     def _on_tracker_nav_requested(self, action: str) -> None:
         """Tracker 工具栏导航（first/prev/next/last）受片段帧范围约束。"""
@@ -1419,7 +1465,8 @@ class ColorControllerMixin:
         controller = getattr(self, "video_controller", None)
         seek = getattr(controller, "seek_to_frame", None)
         if callable(seek):
-            seek(int(frame))
+            to_local = getattr(self, "_color_source_frame_to_local_frame", None)
+            seek(int(to_local(frame)) if callable(to_local) else int(frame))
         self.tracker_panel.set_current_frame(int(frame))
 
     # ------------------------------------------------------------------

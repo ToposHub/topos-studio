@@ -1061,6 +1061,8 @@ class FileOpsMixin:
         if create_standalone_session:
             self._update_composite_for_standalone_image(path, restored_composite=restored_composite_graph)
 
+        # Whole-frame video motion must never carry into still-image tools.
+        self.engine.set_video_stabilization_state({})
         # Load original image first (sets img_source_full = original)
         self.engine.set_image(full, high, low, path=path)
 
@@ -5237,6 +5239,11 @@ class FileOpsMixin:
 
         # 加载视频
         if self.video_controller.load_video(path):
+            self.engine.set_video_stabilization_state({})
+            service = getattr(self, 'stabilization_service', None)
+            if service is not None:
+                self._cancel_stabilization()
+                self._stabilizer_params_timer.stop()
             # 重置所有调色相关面板的参数（防止旧视频的调色应用到新视频）
             self.grading_panel.reset_all()
             if hasattr(self.hsl_curves_panel, 'reset_all_curves'):
@@ -7163,6 +7170,7 @@ class FileOpsMixin:
                 self.raw_panel.set_params(project_data['raw_params'])
 
             # M5: 恢复视频降噪参数（时域+空域，非破坏）
+            self.engine.set_video_stabilization_state(project_data.get('video_stabilization') or {})
             video_denoise = project_data.get('video_denoise')
             if video_denoise:
                 self.engine.set_video_denoise_state(video_denoise)
@@ -7204,6 +7212,11 @@ class FileOpsMixin:
                 self.save_router.save()
 
             self.video_controller.unload_video()
+            service = getattr(self, 'stabilization_service', None)
+            if service is not None:
+                self._cancel_stabilization()
+                self._stabilizer_params_timer.stop()
+            self.engine.set_video_stabilization_state({})
             # 隐藏 Canvas 上的视频控制栏
             self.canvas.video_control_bar.hide_for_image()
             # 断开信号连接
