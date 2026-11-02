@@ -1000,6 +1000,33 @@ class ColorGraphService:
         return self._commit(graph, candidate,
                             {definition_id: definition_id})
 
+    def op_update_shared_definition_params(self, graph: ColorGraphData,
+                                            definition_id: str,
+                                            params: Mapping[str, Any]
+                                            ) -> GraphEditResult:
+        """更新共享定义参数：所有引用该定义的图 revision 一起失效（fanout
+        由 bridge 跨栈执行；本 op 负责单图内定义版本+引用节点缓存失效）。"""
+        definition = next((d for d in graph.shared_definitions
+                           if d.definition_id == definition_id), None)
+        if definition is None:
+            return self._fail(graph, "node_not_found",
+                              f"shared 定义不存在: {definition_id}")
+        referenced = any(n.shared_definition_id == definition_id
+                         for n in graph.nodes)
+        new_definition = replace(definition,
+                                 params=dict(params),
+                                 version=definition.version + 1)
+        definitions = tuple(new_definition if d.definition_id == definition_id
+                            else d for d in graph.shared_definitions)
+        candidate = replace(graph, shared_definitions=definitions)
+        # 无引用节点时定义更新不改 render revision（执行策略级）
+        return self._commit(graph, candidate, {}, render_change=referenced)
+
+    def op_unlock_stack(self, graph: ColorGraphData) -> GraphEditResult:
+        """解锁由 stack 级元信息承载（with_graph_locked）；占位 op 用于
+        command 路由统一。"""
+        return GraphEditResult(True, graph, {}, {})
+
     def op_make_local_corrector(self, graph: ColorGraphData,
                                 node_ids: Sequence[str]) -> GraphEditResult:
         """深复制定义为本地参数，解除引用（不解除用户锁）。"""
