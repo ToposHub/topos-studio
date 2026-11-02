@@ -45,7 +45,7 @@ def _serial_graph(n_correctors: int = 1) -> ColorGraphData:
         node = ColorNodeData(
             node_id=str(uuid.uuid4()), node_type=NodeType.CORRECTOR.value,
             label=f"C{i}",
-            params={"grading": {"exposure": 0.1 * i}})
+            params={"grade": {"exposure": 0.1 * i}})
         nodes.append(node)
         edges.append(ColorEdgeData(
             edge_id=str(uuid.uuid4()), src_node=prev, src_port="image",
