@@ -2625,6 +2625,7 @@ class EditProject:
         trackings: dict[str, Any] | None = None,
         video_denoise: dict[str, Any] | None = None,
         video_stabilization: dict[str, Any] | None = None,
+        color_graph: Any | None = None,
     ) -> EditProject:
         """
         更新调色栈参数 (P9.1)。
@@ -2677,6 +2678,8 @@ class EditProject:
             )
         if trackings is not None:
             stack = stack.with_trackings(trackings)
+        if color_graph is not None:
+            stack = stack.with_color_graph(color_graph)
         if video_stabilization is not None:
             stack = stack.with_video_stabilization(video_stabilization)
         if video_denoise is not None:

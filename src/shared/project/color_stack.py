@@ -120,6 +120,9 @@ class ColorStackData:
     # 调色节点图（B02：color_graph.schema_version 独立于 stack schema；
     # None = 旧工程/未建图。合法图优先于 legacy layers（B03 迁移语义）。
     color_graph: "ColorGraphData | None" = None
+    # B05.4 栈锁：编辑权限元信息（不影响像素；锁定时除解锁外的图
+    # command 冲突拒绝）。节点级锁在 node.params.locked，两者独立。
+    graph_locked: bool = False
     # P1-COLOR-13: per-clip 视频降噪参数（VideoDenoiseParams.to_dict；
     # None = 该 clip 未启用，切 clip 时据此重置引擎会话防串扰）
     video_denoise: dict[str, Any] | None = None
@@ -137,7 +140,7 @@ class ColorStackData:
         "created_at", "modified_at", "scope", "source_kind",
         "timeline_id", "clip_id", "trackings",
         "layers", "active_layer_index", "raw_params", "video_denoise", "video_stabilization",
-        "color_graph",
+        "color_graph", "graph_locked",
     })
 
     def __post_init__(self) -> None:
@@ -311,6 +314,10 @@ class ColorStackData:
             modified_at=time.time(),
         )
 
+    def with_graph_locked(self, locked: bool) -> ColorStackData:
+        """创建新实例，设置/清除栈锁（编辑权限元信息，不更新 modified_at）。"""
+        return replace(self, graph_locked=locked)
+
     def with_color_graph(self, graph: "ColorGraphData | None") -> ColorStackData:
         """创建新实例，携带/清除调色节点图（B02）。
 
@@ -356,6 +363,8 @@ class ColorStackData:
             data["active_layer_index"] = self.active_layer_index
         if self.color_graph is not None:
             data["color_graph"] = self.color_graph.to_dict()
+        if self.graph_locked:
+            data["graph_locked"] = True
         if self.raw_params:
             data["raw_params"] = self.raw_params
         if self.video_stabilization:
@@ -409,6 +418,7 @@ class ColorStackData:
             active_layer_index=int(data.get("active_layer_index", 0) or 0),
             raw_params=raw_params if isinstance(raw_params, dict) else {},
             color_graph=color_graph,
+            graph_locked=bool(data.get("graph_locked", False)),
             video_denoise=(
                 data.get("video_denoise")
                 if isinstance(data.get("video_denoise"), dict) else None),

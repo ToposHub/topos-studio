@@ -28,6 +28,13 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional
 
+from src.features.edit.core.commands.color_commands import (
+    ApplyColorGraphCommand,
+    GraphCommandConflict,
+    GraphTransactionBuffer,
+    SetColorGraphLockCommand,
+)
+
 
 # ── Action 契约表 ────────────────────────────────────────────────────────
 
@@ -409,3 +416,184 @@ class ColorGraphSessionCoordinator:
         self._on_load_graph(projection.graph, projection.scope)
         if self.state != GraphSessionState.READY:
             self._set_state(GraphSessionState.READY)
+
+
+# ── B05：intent → 工程 command 桥（纯 Python，B06 再挂 Qt 面板） ────────
+
+class GraphProjectBridge:
+    """规范化 intent → ApplyColorGraphCommand → ProjectCommandStack。
+
+    职责（B05.3/B05.4）：
+    - ``submit``：ready/pending 语义沿用
+      :class:`ColorGraphSessionCoordinator`；接项目栈后 undo/redo 走
+      ``graph_undo/graph_redo`` 命令（不再回退 UI draft）。
+    - 事务合并：同 ``transaction_id`` 的连续 intent 由
+      :class:`GraphTransactionBuffer` 合并为一个 snapshot command。
+    - 栈锁：locked 栈的提交在 command.apply 冲突（code=stack_locked），
+      bridge 转成 reject 回调。
+    - shared fanout：定义参数更新跨栈广播——每个引用栈一个 command，
+      一次 undo 全还原（undo 还原依赖索引由整图快照天然承载）。
+    """
+
+    def __init__(self, coordinator: ColorGraphSessionCoordinator,
+                 project_stack, get_project, set_project=None) -> None:
+        """:param project_stack: ProjectCommandStack；:param get_project:
+        返回当前 EditProject 的零参调用；:param set_project: 命令执行后
+        发布新工程的回调（B06 挂宿主替换入口；缺省只读）。"""
+        self._coordinator = coordinator
+        self._project_stack = project_stack
+        self._get_project = get_project
+        self._set_project = set_project or (lambda _p: None)
+        self._buffer = GraphTransactionBuffer()
+
+    def _publish(self, project) -> None:
+        self._set_project(project)
+
+    # ── 单发 intent ──
+
+    def submit(self, intent: GraphIntent) -> bool:
+        """提交单事务 intent；成功返回 True 并更新协调器投影。"""
+        project = self._get_project()
+        stack = project.color_stacks.get(intent.stack_id) \
+            if intent.stack_id else None
+        if stack is None:
+            return False
+        expected = intent.expected_graph_revision
+        if expected is None and stack.color_graph is not None:
+            expected = stack.color_graph.graph_revision
+        command = ApplyColorGraphCommand.create(
+            stack_id=intent.stack_id,
+            operation=intent.command,
+            arguments=dict(intent.arguments),
+            expected_graph_revision=expected,
+            transaction_id=intent.transaction_id,
+        )
+        return self._execute(command, intent)
+
+    # ── 事务合并（参数拖动等手势） ──
+
+    def begin_transaction(self, transaction_id: str) -> None:
+        project = self._get_project()
+        graph = self._current_graph(project)
+        from src.features.color.core.color_graph_migration import (
+            migrate_legacy_stack,
+        )
+        if graph is None:
+            stack = self._current_stack(project)
+            graph = migrate_legacy_stack(stack) if stack else None
+        self._buffer.begin(graph.to_dict() if graph else {}, transaction_id)
+
+    def add_to_transaction(self, result, transaction_id: str,
+                           operation: str = "") -> None:
+        """把 service 成功结果（GraphEditResult）并入当前事务。"""
+        self._buffer.add(result.graph.to_dict(), transaction_id,
+                         operation, dict(result.id_mapping))
+
+    def flush_transaction(self) -> bool:
+        command = self._buffer.flush(self._stack_id())
+        if command is None:
+            return False
+        intent = GraphIntent(
+            intent_id=command.command_id,
+            session_id=self._coordinator.session_id,
+            session_generation=self._coordinator.generation,
+            scope=self._coordinator.scope,
+            scope_owner_id=self._coordinator.scope_owner_id,
+            stack_id=self._stack_id(),
+            compound_path=(),
+            action="apply_snapshot", command="apply_snapshot",
+            category=IntentCategory.STRUCTURE,
+            arguments={}, expected_graph_revision=None,
+            transaction_id=command.transaction_id)
+        return self._execute(command, intent)
+
+    # ── shared 定义 fanout（B05.4） ──
+
+    def update_shared_definition(self, definition_id: str,
+                                 params: Mapping[str, Any]) -> list[str]:
+        """跨栈更新共享定义：所有引用栈一个 command、一起失效。"""
+        project = self._get_project()
+        updated: list[str] = []
+        for stack_id, stack in list(project.color_stacks.items()):
+            graph = stack.color_graph
+            if graph is None or not any(
+                    d.definition_id == definition_id
+                    for d in graph.shared_definitions):
+                continue
+            command = ApplyColorGraphCommand.create(
+                stack_id=stack_id,
+                operation="update_shared_definition_params",
+                arguments={"definition_id": definition_id,
+                           "params": dict(params)},
+            )
+            try:
+                project = self._project_stack.execute(command, project)
+                self._publish(project)
+                updated.append(stack_id)
+            except Exception:  # noqa: BLE001 —— fanout 单栈失败不阻断其余
+                continue
+        return updated
+
+    def set_stack_lock(self, stack_id: str, locked: bool) -> bool:
+        """栈锁是工程元信息：走 SetColorGraphLockCommand（可 undo）。"""
+        project = self._get_project()
+        stack = project.color_stacks.get(stack_id)
+        if stack is None:
+            return False
+        command = SetColorGraphLockCommand.create(stack_id, locked)
+        try:
+            self._publish(self._project_stack.execute(command, project))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    # ── 内部 ──
+
+    def _stack_id(self) -> str:
+        return getattr(self._coordinator, "_bridge_stack_id", "") or ""
+
+    def bind_stack(self, stack_id: str) -> None:
+        self._coordinator._bridge_stack_id = stack_id
+
+    def _current_project(self):
+        return self._get_project()
+
+    def _current_stack(self, project):
+        stack_id = self._stack_id()
+        return project.color_stacks.get(stack_id) if stack_id else None
+
+    def _current_graph(self, project):
+        stack = self._current_stack(project)
+        return stack.color_graph if stack else None
+
+    def _execute(self, command: ApplyColorGraphCommand,
+                 intent: GraphIntent) -> bool:
+        if not self._coordinator.submit(intent):
+            return False
+        try:
+            new_project = self._project_stack.execute(
+                command, self._get_project())
+            self._publish(new_project)
+        except Exception as exc:  # noqa: BLE001 —— 冲突 → reject
+            self._coordinator.pending = None
+            if self._coordinator.state == GraphSessionState.PENDING:
+                self._coordinator._set_state(GraphSessionState.READY)
+            code = getattr(exc, "code", "command_failed")
+            self._coordinator.accept_reject(
+                IntentRejection(code=code, message=str(exc),
+                                graph_revision=command.expected_graph_revision),
+                intent_id=intent.intent_id)
+            return False
+        project = self._get_project()
+        stack = project.color_stacks.get(command.stack_id)
+        graph = stack.color_graph if stack else None
+        projection = GraphProjection(
+            session_id=self._coordinator.session_id,
+            session_generation=self._coordinator.generation,
+            scope=self._coordinator.scope,
+            scope_owner_id=self._coordinator.scope_owner_id,
+            graph=graph.to_dict() if graph else None,
+            graph_revision=graph.graph_revision if graph else 0,
+            id_mapping=command.get_id_mapping())
+        self._coordinator.accept_ack(projection, intent_id=intent.intent_id)
+        return True

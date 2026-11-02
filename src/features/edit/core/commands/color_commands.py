@@ -762,3 +762,337 @@ class MakeLocalGradeCopyCommand:
             source_stack_id=source_stack_id,
             new_stack_name=new_stack_name,
         )
+
+
+# ================================================================
+# B05: Color Graph Commands —— 调色节点图的权威工程事务
+# ================================================================
+
+
+class GraphCommandConflict(Exception):
+    """图 command 冲突（stale revision / 栈锁 / service 拒绝）。
+
+    冲突时工程**完全不变**且命令不进入 undo 历史；诊断携带稳定 code：
+    - ``stale_revision``：expected_graph_revision 与当前不符
+    - ``stack_locked``：栈锁生效
+    - ``service_rejected``：N02 领域校验拒绝（code 见 GraphSchemaError）
+    """
+
+    def __init__(self, code: str, message: str,
+                 diagnostics: Any = None) -> None:
+        super().__init__(f"[{code}] {message}")
+        self.code = code
+        self.diagnostics = diagnostics
+
+
+def _graph_service():
+    from src.features.color.core.color_graph_service import ColorGraphService
+    return ColorGraphService()
+
+
+def _graph_from_dict(payload: dict[str, Any]):
+    from src.shared.project.color_graph import ColorGraphData
+    return ColorGraphData.from_dict(payload)
+
+
+@dataclass(frozen=True)
+class ApplyColorGraphCommand:
+    """把一次 N02 图事务提交为工程 command（B05.1）。
+
+    两种载荷：
+    - **operation 模式**：``operation`` + ``arguments``，apply 时经
+      ColorGraphService 在当前图上执行（服务端重新验证一切）。
+    - **snapshot 模式**：``operation="apply_snapshot"`` +
+      ``arguments={"graph": <to_dict>}``——事务合并（同一 transaction_id
+      的参数拖动）flush 出的**最终权威图**，一次 command、一次 undo。
+
+    ``expected_graph_revision`` 乐观并发：与当前图 revision 不符抛
+    ``GraphCommandConflict("stale_revision")``，工程不变。
+    undo 恢复前图（字节等价，含 shared 定义/资源引用/revision）。
+    """
+
+    command_id: str
+    label: str
+    stack_id: str
+    operation: str
+    arguments: dict[str, Any]
+    expected_graph_revision: int | None = None
+    transaction_id: str | None = None
+    # undo/redo 快照（首次 apply 时填充；redo 以快照重放保证字节等价，
+    # 不再重跑 operation 分配新随机 ID）
+    _old_graph: dict[str, Any] | None = None
+    _new_graph: dict[str, Any] | None = None
+    _id_mapping: dict[str, str] | None = None
+
+    # ── apply ──
+
+    def apply(self, project: EditProject) -> EditProject:
+        stack = project.color_stacks.get(self.stack_id)
+        if stack is None:
+            raise GraphCommandConflict(
+                "stack_missing", f"调色栈不存在: {self.stack_id}")
+        if self._new_graph is not None:
+            # redo 重放：以快照恢复（与首次执行字节等价）
+            return self._apply_snapshot(project, stack,
+                                        _graph_from_dict(self._new_graph),
+                                        dict(self._id_mapping or {}))
+        if stack.graph_locked and self.operation not in (
+                "unlock_stack", "set_edit_lock"):
+            raise GraphCommandConflict(
+                "stack_locked",
+                f"栈 {self.stack_id[:8]} 已锁定，拒绝图编辑 "
+                f"{self.operation}")
+
+        from src.features.color.core.color_graph_migration import (
+            migrate_legacy_stack,
+        )
+        graph = stack.color_graph
+        if graph is None:
+            # 首次建图：从 legacy 状态迁移（显式、幂等；迁移失败=冲突）
+            graph = migrate_legacy_stack(stack)
+
+        if (self.expected_graph_revision is not None
+                and graph.graph_revision != self.expected_graph_revision):
+            raise GraphCommandConflict(
+                "stale_revision",
+                f"期望 revision {self.expected_graph_revision} != 当前 "
+                f"{graph.graph_revision}")
+
+        if self.operation == "apply_snapshot":
+            from src.shared.project.color_graph import GraphSchemaError
+            try:
+                new_graph = _graph_from_dict(dict(self.arguments["graph"]))
+            except GraphSchemaError as exc:
+                raise GraphCommandConflict(
+                    "service_rejected", f"快照图非法: {exc}",
+                    diagnostics=[exc]) from None
+            id_mapping = dict(self.arguments.get("id_mapping") or {})
+        else:
+            result = _graph_service().apply_intent(
+                graph, self.operation, self.arguments)
+            if not result.ok:
+                raise GraphCommandConflict(
+                    "service_rejected",
+                    f"{self.operation} 被拒绝: "
+                    f"{[str(d) for d in result.diagnostics[:2]]}",
+                    diagnostics=result.diagnostics)
+            new_graph = result.graph
+            id_mapping = dict(result.id_mapping)
+            object.__setattr__(self, "_new_graph", new_graph.to_dict())
+            object.__setattr__(self, "_id_mapping", id_mapping)
+        return self._apply_snapshot(project, stack, new_graph, id_mapping)
+
+    def _apply_snapshot(self, project: EditProject, stack,
+                        new_graph, id_mapping: dict) -> EditProject:
+        from src.shared.project.color_graph import GraphSchemaError
+        errors = new_graph.validate()
+        if errors:
+            raise GraphCommandConflict(
+                "service_rejected", f"目标图非法: {errors[0]}",
+                diagnostics=errors)
+        old_graph = stack.color_graph
+        if old_graph is not None and self._old_graph is None:
+            object.__setattr__(self, "_old_graph", old_graph.to_dict())
+        new_project = project.update_color_stack(
+            self.stack_id, color_graph=new_graph)
+        logger.debug(
+            "ApplyColorGraphCommand applied: %s (rev %s -> %d)",
+            self.operation,
+            getattr(old_graph, "graph_revision", "?"),
+            new_graph.graph_revision)
+        return new_project
+
+    def get_id_mapping(self) -> dict[str, str]:
+        """首次执行分配的稳定 ID 映射（redo 重放同一份）。"""
+        return dict(self._id_mapping or
+                    self.arguments.get("id_mapping") or {})
+
+    # ── undo / redo 语义 ──
+
+    def undo(self, project: EditProject) -> EditProject:
+        if self._old_graph is None:
+            logger.warning("ApplyColorGraphCommand undo: no snapshot")
+            return project
+        restored = _graph_from_dict(self._old_graph)
+        return project.update_color_stack(self.stack_id, color_graph=restored)
+
+    def get_projection(self, project: EditProject):
+        """命令应用后的权威图（N08 ack 投影用）。"""
+        stack = project.color_stacks.get(self.stack_id)
+        return stack.color_graph if stack else None
+
+    # ── 序列化（持久化契约：键不重命名） ──
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "ApplyColorGraphCommand",
+            "label": self.label,
+            "stack_id": self.stack_id,
+            "operation": self.operation,
+            "arguments": self.arguments,
+            "expected_graph_revision": self.expected_graph_revision,
+            "transaction_id": self.transaction_id,
+            "old_graph": self._old_graph,
+            "new_graph": self._new_graph,
+            "id_mapping": self._id_mapping,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> ApplyColorGraphCommand:
+        return ApplyColorGraphCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Apply Color Graph"),
+            stack_id=data["stack_id"],
+            operation=data["operation"],
+            arguments=dict(data.get("arguments") or {}),
+            expected_graph_revision=data.get("expected_graph_revision"),
+            transaction_id=data.get("transaction_id"),
+            _old_graph=data.get("old_graph"),
+            _new_graph=data.get("new_graph"),
+            _id_mapping=data.get("id_mapping"),
+        )
+
+    @staticmethod
+    def create(stack_id: str, operation: str,
+               arguments: dict[str, Any] | None = None,
+               expected_graph_revision: int | None = None,
+               transaction_id: str | None = None,
+               label: str | None = None) -> ApplyColorGraphCommand:
+        return ApplyColorGraphCommand(
+            command_id=str(uuid.uuid4()),
+            label=label or f"Color Graph: {operation}",
+            stack_id=stack_id,
+            operation=operation,
+            arguments=dict(arguments or {}),
+            expected_graph_revision=expected_graph_revision,
+            transaction_id=transaction_id)
+
+
+class GraphTransactionBuffer:
+    """同 transaction_id 的连续图事务合并为一个 command（B05.2）。
+
+    参数拖动（50 次）、move+insert、branch 创建、compound 成员更新
+    等手势共用一个 transaction_id：buffer 记录**首个**操作的 before 图
+    与**每个**操作后的图，flush 时以 ``apply_snapshot`` 一次提交——
+    一个 command、一次 revision 推进链、一次 undo。
+    """
+
+    def __init__(self) -> None:
+        self._first_graph: dict | None = None
+        self._last_graph: dict | None = None
+        self._transaction_id: str | None = None
+        self._operations: list[str] = []
+        self._id_mapping: dict[str, str] = {}
+
+    @property
+    def active(self) -> bool:
+        return self._transaction_id is not None
+
+    def add(self, graph_payload_after: dict[str, Any],
+            transaction_id: str, operation: str,
+            id_mapping: dict[str, str] | None = None) -> None:
+        if self._transaction_id not in (None, transaction_id):
+            raise RuntimeError(
+                f"事务缓冲冲突: {self._transaction_id} vs {transaction_id}")
+        if self._first_graph is None:
+            self._first_graph = None  # 由调用方在 begin 时提供
+        self._transaction_id = transaction_id
+        self._last_graph = graph_payload_after
+        self._operations.append(operation)
+        if id_mapping:
+            self._id_mapping.update(id_mapping)
+
+    def begin(self, first_graph_payload: dict[str, Any],
+              transaction_id: str) -> None:
+        if self.active and self._transaction_id != transaction_id:
+            raise RuntimeError("上一个事务未 flush")
+        if self._first_graph is None or self._transaction_id != transaction_id:
+            self._first_graph = first_graph_payload
+            self._transaction_id = transaction_id
+
+    def flush(self, stack_id: str) -> ApplyColorGraphCommand | None:
+        """产出合并 command；无累积返回 None。"""
+        if self._last_graph is None or self._first_graph is None:
+            return None
+        operations = "+".join(self._operations[:3]) + (
+            f"+{len(self._operations) - 3}ops"
+            if len(self._operations) > 3 else "")
+        command = ApplyColorGraphCommand(
+            command_id=str(uuid.uuid4()),
+            label=f"Color Graph: {operations}",
+            stack_id=stack_id,
+            operation="apply_snapshot",
+            arguments={"graph": self._last_graph,
+                       "id_mapping": dict(self._id_mapping)},
+            expected_graph_revision=None,
+            transaction_id=self._transaction_id,
+            _old_graph=self._first_graph,
+        )
+        self._first_graph = None
+        self._last_graph = None
+        self._transaction_id = None
+        self._operations = []
+        self._id_mapping = {}
+        return command
+
+
+@dataclass(frozen=True)
+class SetColorGraphLockCommand:
+    """栈锁元信息 command（B05.4）：锁定/解锁，可 undo，不改像素。"""
+
+    command_id: str
+    label: str
+    stack_id: str
+    locked: bool
+    _old_locked: bool | None = None
+
+    def apply(self, project: EditProject) -> EditProject:
+        stack = project.color_stacks.get(self.stack_id)
+        if stack is None:
+            raise GraphCommandConflict(
+                "stack_missing", f"调色栈不存在: {self.stack_id}")
+        object.__setattr__(self, "_old_locked", stack.graph_locked)
+        new_stack = stack.with_graph_locked(self.locked)
+        new_stacks = dict(project.color_stacks)
+        new_stacks[self.stack_id] = new_stack
+        from dataclasses import replace as _replace
+        return _replace(project, color_stacks=new_stacks)
+
+    def undo(self, project: EditProject) -> EditProject:
+        if self._old_locked is None:
+            return project
+        stack = project.color_stacks.get(self.stack_id)
+        if stack is None:
+            return project
+        new_stacks = dict(project.color_stacks)
+        new_stacks[self.stack_id] = stack.with_graph_locked(self._old_locked)
+        from dataclasses import replace as _replace
+        return _replace(project, color_stacks=new_stacks)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetColorGraphLockCommand",
+            "label": self.label,
+            "stack_id": self.stack_id,
+            "locked": self.locked,
+            "old_locked": self._old_locked,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> SetColorGraphLockCommand:
+        return SetColorGraphLockCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Color Graph Lock"),
+            stack_id=data["stack_id"],
+            locked=bool(data["locked"]),
+            _old_locked=data.get("old_locked"),
+        )
+
+    @staticmethod
+    def create(stack_id: str, locked: bool) -> SetColorGraphLockCommand:
+        return SetColorGraphLockCommand(
+            command_id=str(uuid.uuid4()),
+            label=("Lock" if locked else "Unlock") + " Color Graph",
+            stack_id=stack_id, locked=locked)
