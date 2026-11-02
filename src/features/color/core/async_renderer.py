@@ -213,6 +213,13 @@ class AsyncRenderer(QThread):
         self._scope_color_output_revision: int = -1
         self._scope_color_output_max_dim: int = 0
         self._last_scope_render_params: Optional[dict] = None
+        # S04/B16.5：图执行（N07）。scope 全帧先接（S04）；生产开关
+        # （B16.5）扩展到 preview/color output。plan 缓存键含 graph_revision
+        # + source_content_revision（引擎图 revision），与 scope 内容失效
+        # 语义一致；租约至多持有一帧（消费/下一帧释放）。
+        self._graph_executor: Optional[object] = None
+        self._graph_plan_cache: Dict[tuple, Any] = {}
+        self._graph_lease: Optional[tuple] = None
         # gpu_scope_enabled: master rollback switch. When False the renderer
         # never runs the GPU scope lane; the UI may show the CPU fallback
         # only while paused. See plan §10.
@@ -1890,6 +1897,125 @@ class AsyncRenderer(QThread):
                         logger.debug('GPU resource release failed during cleanup', exc_info=True)
             engine._points_vao_cache.clear()
 
+    # ── 图执行（S04 scope 全帧；B16.5 生产开关复用同一路径）────────────
+
+    def _ensure_graph_executor(self):
+        """N07 执行器（共享 ShaderPipeline：与旧 layers 循环同一缓存）。"""
+        if self._graph_executor is None:
+            from src.features.color.core.color_graph_executor import (
+                ColorGraphExecutor,
+            )
+            self._graph_executor = ColorGraphExecutor(
+                self.ctx, pipeline=self.pipeline)
+        return self._graph_executor
+
+    def _release_graph_lease(self) -> None:
+        """释放上一帧图输出租约（至多持有一帧；消费/下一帧时让位）。"""
+        executor, request_id = self._graph_lease or (None, None)
+        if executor is None:
+            return
+        try:
+            executor.release_revision(request_id)
+        except Exception:
+            logger.debug("graph lease release failed", exc_info=True)
+        self._graph_lease = None
+
+    def _graph_execution_deferred_reason(self, params) -> Optional[str]:
+        """图执行暂缓判定：legacy 专属特性仍需旧循环的帧走旧循环。
+
+        baked 层 / AI 插件结果纹理 / mask 预览按 legacy 层语义挂在
+        engine 层 id 与预览路径上；携带它们的栈今天必然是可投影串行图
+        ——旧循环位级正确（B09 证明），不属静默降级。图路径补齐这些
+        特性后本判定退场（登记债务，见台账 B09/B16.5）。
+        """
+        if params.get('show_mask'):
+            return 'mask_preview'
+        layers = params.get('layers') or ()
+        for layer in layers:
+            if not isinstance(layer, dict):
+                continue
+            if layer.get('is_baked'):
+                return 'baked_layer'
+            l_id = layer.get('id')
+            plugins = layer.get('plugins') or []
+            if l_id and any(
+                    p.get('type') == 'ai' and p.get('enabled', True)
+                    for p in plugins if isinstance(p, dict)):
+                if any(key[0] == l_id for key in self.ai_plugin_textures):
+                    return 'ai_plugin_texture'
+        return None
+
+    def _execute_graph_frame(self, params, w, h, raw_view_tex,
+                             is_cancelled=None):
+        """S04/B16.5：同一 raw_view 输入上执行图 plan（N07）。fail-closed。
+
+        成功返回输出纹理（租约记入 ``_graph_lease``）；失败/能力预检
+        拒绝返回 None——调用方**不**回退旧 layers 循环：复杂图的旧循环
+        渲染的是过期 layers 投影（错图），保留上一帧 + 诊断才是安全行为。
+        """
+        from src.features.color.core.color_graph_compiler import compile_graph
+        from src.features.color.core.color_graph_param_source import (
+            graph_node_layer_provider,
+        )
+        from src.features.color.core.scope_diagnostics import scope_diagnostics
+
+        snapshot = params.get('color_graph_snapshot')
+        if snapshot is None:
+            return None
+        deferred = self._graph_execution_deferred_reason(params)
+        if deferred is not None:
+            scope_diagnostics.record(
+                "execute", "graph_deferred_legacy_feature", detail=deferred)
+            return None
+        request_id = "graph-{}".format(
+            params.get('render_request_id')
+            or "scope-{}".format(
+                self.__dict__.get('_scope_content_revision', 0)))
+        visible_rect = params.get('visible_rect', (0, 0, w, h))
+
+        def _matte(layer, input_tex):
+            # 与旧循环同一 matte 生成器（窗口/qualifier/bitmap；缓存归
+            # renderer，执行器不释放）
+            return self._generate_matte(
+                layer, input_tex or raw_view_tex, w, h, visible_rect)
+
+        try:
+            executor = self._ensure_graph_executor()
+            plan = compile_graph(snapshot, size=(w, h),
+                                 cache=self._graph_plan_cache)
+            result = executor.execute_plan(
+                plan, raw_view_tex,
+                request_id=request_id,
+                source_size=(w, h),
+                cancel_check=(lambda _rid: bool(is_cancelled()))
+                if is_cancelled is not None else None,
+                layer_param_provider=graph_node_layer_provider(
+                    snapshot.graph),
+                render_quad=self._render_quad,
+                bind_aux=lambda prog, layer:
+                    self._bind_aux_textures_single_layer(prog, layer),
+                matte_provider=_matte,
+            )
+        except Exception as exc:  # noqa: BLE001 —— 编译/执行异常 fail-closed
+            scope_diagnostics.record(
+                "execute", "graph_exception",
+                revision=params.get('render_request_id'),
+                detail="{}: {}".format(type(exc).__name__, exc)[:160])
+            logger.warning("graph frame execution failed: %r", exc)
+            return None
+        if not result.published:
+            scope_diagnostics.record(
+                "execute", "graph_{}".format(
+                    result.diagnostic_code or "not_published"),
+                revision=params.get('render_request_id'),
+                detail=(result.diagnostic_message or "")[:160])
+            return None
+        # 上一帧租约让位（本帧输出已在新租约；输出被拷入持久
+        # scope/front 目标后即可释放，至多持有一帧）
+        self._release_graph_lease()
+        self._graph_lease = (executor, result.request_id)
+        return result.output_texture
+
     def _do_render_gpu_scope(self, demand) -> None:
         """Run the native GPU scope pipeline for a ``ScopeDemand``.
 
@@ -2001,6 +2127,11 @@ class AsyncRenderer(QThread):
                 # never render an invisible full-resolution duplicate.
                 output_params['max_proxy_dim'] = requested_max_dim
                 output_params['color_output_target'] = 'scope'
+                if scope_params.get('color_graph_snapshot') is not None:
+                    # S04：scope 全帧接同一 immutable 图快照/plan（N07，
+                    # 不再循环旧 layers）。图执行失败在渲染路径内
+                    # fail-closed：保留上一帧 + 结构化诊断，不冒充成功。
+                    output_params['color_graph_execute'] = True
                 if not self._do_render_color_output(output_params):
                     scope_diagnostics.record(
                         "execute", "color_output_failed",
@@ -2118,9 +2249,15 @@ class AsyncRenderer(QThread):
             self.ctx.finish()
 
             analysis_ms = (time.monotonic() - t0) * 1000.0
+            demand_identity = getattr(demand, 'sample_identity', None)
             frame = ScopeGpuFrame(
                 revision=demand.revision,
                 source_revision=self._scope_source_revision,
+                # S05：执行侧回填身份（实际分析的 front revision 为下界）
+                sample_identity=(
+                    demand_identity.with_source_content_revision(
+                        self._scope_source_revision)
+                    if demand_identity is not None else None),
                 waveform_texture_id=wf_id,
                 waveform_size=waveform_size if need_wf else (0, 0),
                 vectorscope_texture_id=vs_id,
@@ -2951,6 +3088,21 @@ class AsyncRenderer(QThread):
         active_matte = None
 
         total_layers = max(1, len(layers))
+        # S04/B16.5：图执行分支——同一 raw_view 输入上由 N07 按 plan 执行
+        # （scope 全帧先接；生产开关由 render params 的 color_graph_execute
+        # 控制）。fail-closed：图失败不回退旧循环（复杂图的旧循环渲染的是
+        # 过期 layers 投影=错图），返回 False 保留上一帧 + 诊断。
+        use_graph_execution = bool(
+            params.get('color_graph_execute')
+            and params.get('color_graph_snapshot') is not None)
+        if use_graph_execution:
+            graph_out_tex = self._execute_graph_frame(
+                params, w, h, raw_view_tex, is_cancelled)
+            if graph_out_tex is None:
+                return False
+            # 图输出接管 comp 结果；grain/防抖/输出阶段照常消费
+            current_source_tex = graph_out_tex
+            layers = ()  # 跳过旧 layers 循环
         for i, layer in enumerate(layers):
             if is_cancelled():
                 logger.info("Render request cancelled before layer %s", i)
@@ -6679,6 +6831,13 @@ class AsyncRenderer(QThread):
                 self._release_gpu_scope_pool()
             except Exception:
                 logger.debug("Failed to release GPU scope pool in cleanup")
+
+            # S04：释放图执行租约与 plan 缓存（执行器其余资源随 ctx 释放）
+            try:
+                self._release_graph_lease()
+                self._graph_plan_cache.clear()
+            except Exception:
+                logger.debug("Failed to release graph lease in cleanup")
 
             if self.fb_manager: self.fb_manager.cleanup()
             self._process_garbage(force=True)

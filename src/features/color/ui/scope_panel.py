@@ -1272,6 +1272,14 @@ class ScopePanel(QWidget):
     def gpu_demand_revision(self) -> int:
         return int(getattr(self, '_gpu_demand_revision', 0))
 
+    def set_gpu_demand_identity(self, identity) -> None:
+        """S05：登记当前取样身份（控制器提交 demand 时同步）。
+
+        ``update_gpu_scope`` 以此拒绝 revision 撞号但身份不符的迟到结果
+        （切 clip/图版本/颜色上下文后旧帧不闪回）。
+        """
+        self._gpu_demand_identity = identity
+
     def update_gpu_scope(self, frame) -> None:
         """Receive a ``ScopeGpuFrame`` descriptor from the renderer.
 
@@ -1291,6 +1299,20 @@ class ScopePanel(QWidget):
             _scope_diag().record("panel", "source_not_graded",
                                  detail=str(self._scope_source))
             return  # GPU 分析只针对调色后输出（P1-COLOR-07）
+        # S05：身份拒绝（session/owner/graph revision/颜色上下文/目标精确
+        # 相等；content revision/frame 为下界）
+        demand_identity = getattr(self, '_gpu_demand_identity', None)
+        frame_identity = getattr(frame, 'sample_identity', None)
+        if demand_identity is not None:
+            if frame_identity is None or not demand_identity.allows(
+                    frame_identity):
+                _scope_diag().record(
+                    "panel", "identity_mismatch",
+                    revision=getattr(frame, 'revision', None),
+                    detail="demand={} frame={}".format(
+                        getattr(demand_identity, 'target', None),
+                        getattr(frame_identity, 'target', None)))
+                return
         # Present the texture.  The presenter only stores the descriptor;
         # actual GL work happens in paintGL under the GL mutex.
         self._present_gpu_frame(frame)

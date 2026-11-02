@@ -236,6 +236,12 @@ class ColorStackHydrator:
                     errors[0].code,
                     f"stack {stack.stack_id[:8]} 携带损坏 color_graph: "
                     f"{errors[0]}", node_id=errors[0].node_id)
+            # S04：图权威登记进引擎（快照随 render_params 提交；scope
+            # 全帧经同一图 plan 执行）。复杂 DAG 同样登记——legacy 投影
+            # 不可用时图执行是唯一正确像素来源。
+            setter = getattr(engine, 'set_active_color_graph', None)
+            if callable(setter):
+                setter(graph, stack_id=stack.stack_id)
             if can_project_to_legacy_layers(graph):
                 from src.features.color.core.layer import Layer as _Layer
                 restored = []
@@ -265,6 +271,10 @@ class ColorStackHydrator:
                     stack.stack_id[:8], len(graph.nodes))
         else:
             self._apply_legacy_layers_or_flat(stack, engine)
+            # S04：无图栈清掉上一 clip 的图登记（scope/渲染回 legacy）
+            clearer = getattr(engine, 'clear_active_color_graph', None)
+            if callable(clearer):
+                clearer()
         # 通用部分：tracking store 重建（原图/旧层路径共用）
         self._apply_tracking_store(stack, engine)
 

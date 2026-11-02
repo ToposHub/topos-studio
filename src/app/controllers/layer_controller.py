@@ -1381,6 +1381,32 @@ class LayerOpsMixin:
                                      detail=f"interval={min_interval:.3f}s")
                 return
             self._gpu_scope_last_submit = now
+            # S05：完整取样身份（session/owner/graph revision/frame/颜色
+            # 上下文/目标）。graded GPU 通道恒 target=output（S03：节点
+            # 选择只是导航，不隐式改测量输入；source/reference 走 CPU 路
+            # 径不经本需求）。
+            from src.features.color.core.scope_graph_sampling import (
+                ScopeSampleIdentity, TARGET_OUTPUT,
+            )
+            frame_ctx = getattr(engine, '_tracking_frame_context', None)
+            try:
+                scope_frame = int(frame_ctx()[1] or 0) if frame_ctx else 0
+            except Exception:  # noqa: BLE001 —— 身份取值失败按 0（下界）
+                scope_frame = 0
+            identity = ScopeSampleIdentity(
+                session_id=str(
+                    getattr(engine, 'active_color_graph_stack_id', '') or ''),
+                scope_owner_id=None,
+                graph_revision=int(
+                    getattr(engine, 'color_graph_revision', 0) or 0),
+                source_content_revision=int(engine.scope_source_revision),
+                frame=scope_frame,
+                color_context=(
+                    state.get('scope_transfer', 'srgb'),
+                    state.get('scope_primaries', 'bt709'),
+                ),
+                target=TARGET_OUTPUT,
+            )
             demand = ScopeDemand(
                 revision=revision,
                 source_revision=engine.scope_source_revision,
@@ -1395,6 +1421,7 @@ class LayerOpsMixin:
                 curves_display_size=curves_size,
                 curves_line_width=curves_line_width,
                 curves_mode=curves_mode,
+                sample_identity=identity,
                 scope_transfer=state.get('scope_transfer', 'srgb'),
                 scope_primaries=state.get('scope_primaries', 'bt709'),
                 falsecolor_mode=state.get('falsecolor_mode', 'sdr'),
@@ -1404,6 +1431,10 @@ class LayerOpsMixin:
             # request. GPU_SCOPE may analyse a newer front texture by the time
             # it drains, which is valid; an older frame must never be shown.
             self._latest_gpu_scope_demand = demand
+            # S05：面板登记当前身份（迟到/跨 clip/跨图版本结果拒绝）
+            set_identity = getattr(panel, 'set_gpu_demand_identity', None)
+            if callable(set_identity):
+                set_identity(identity)
             engine.request_gpu_scope(demand)
             _scope_diag().record_activity(now)
             if curves_overlay:

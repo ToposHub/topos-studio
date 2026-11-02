@@ -373,8 +373,11 @@ class ColorGraphMetalExecutor:
                      if ref is not None]
             if not slots:
                 return self._copy(source_buffer, width, height)
-            mode_index = LAYER_MODE_INDEX.get(
-                str(render_pass.params.get("blend_mode", "Normal")), 0)
+            from src.features.color.core.color_graph_param_source import (
+                mixer_composite_params,
+            )
+            blend_mode, opacity = mixer_composite_params(render_pass.params)
+            mode_index = LAYER_MODE_INDEX.get(blend_mode, 0)
             current = slots[0]
             folded = False
             for top in slots[1:]:
@@ -383,7 +386,7 @@ class ColorGraphMetalExecutor:
                                {0: current, 1: top, 2: out,
                                 3: self._params_buffer(
                                     make_graph_size_params(
-                                        width, height, a=1.0,
+                                        width, height, a=opacity,
                                         b=mode_index))},
                                size)
                 if folded:

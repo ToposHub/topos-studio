@@ -650,14 +650,20 @@ def run_plan_cpu(plan: ColorGraphRenderPlan, source: np.ndarray,
                          render_pass.inputs,
                          key=lambda pr: (pr[1].slot_id if pr[1] else ""))
                      if ref is not None]
-            opacities = [1.0] * max(0, len(slots) - 1)
-            modes = ["Normal"] * max(0, len(slots) - 1)
+            from src.features.color.core.color_graph_param_source import (
+                mixer_composite_params,
+            )
+            # mixer 的合成参数来自节点 params（provider 只服务 Corrector
+            # DTO；混用 provider 载荷会把所有 mixer 模式静默回退 Normal）
+            blend_mode, opacity = mixer_composite_params(render_pass.params)
+            opacities = [opacity] * max(0, len(slots) - 1)
+            modes = [blend_mode] * max(0, len(slots) - 1)
             outputs[render_pass.node_id] = layer_mix(slots, opacities, modes)
         elif render_pass.op == "key_mixer":
             keys = [outputs[ref.node_id]
                     for _port, ref in render_pass.inputs if ref is not None]
             outputs[render_pass.node_id] = key_mix(
-                keys, str(params.get("mode", "add")))
+                keys, str(render_pass.params.get("mode", "add")))
         elif render_pass.op == "outside":
             base = _first("image")
             if base is None:

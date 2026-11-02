@@ -121,11 +121,23 @@ class ColorGraphExecutor:
         cancel_check: Callable[[str], bool] | None = None,
         layer_param_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
         render_quad: Callable[[Any], None] | None = None,
+        bind_aux: Callable[[Any, Mapping[str, Any]], None] | None = None,
+        matte_provider: Callable[[Mapping[str, Any], Any], Any] | None = None,
     ) -> GraphExecutionResult:
         """执行 plan；source pass 消费 ``source_texture``（租借不持有）。
 
         ``layer_param_provider``：node_id → Corrector 的 Layer DTO（迁移图
-        里参数在 legacy_payload；执行器按节点取参数交给 N06）。
+        里参数在 legacy_payload；执行器按节点取参数交给 N06）。生产侧用
+        ``graph_node_layer_provider``（legacy_payload + node.params 合并）。
+
+        ``bind_aux``：宿主委托的 aux 纹理绑定器 ``(prog, layer)``（S04/
+        B16.5：AsyncRenderer 用生产 ``_bind_aux_textures_single_layer``，
+        warper/LUT3D/curves 与旧循环同构——identity 兜底语义一致）。
+
+        ``matte_provider``：宿主委托的 matte 生成器 ``(layer, input_tex) →
+        matte_tex``（生产 ``_generate_matte``：窗口/qualifier/bitmap mask）。
+        返回纹理归提供方所有（缓存），执行器不释放；缺省用白 matte
+        （qualifier GPU keyer 入图是登记债务）。
         """
         request_id = request_id or str(uuid.uuid4())
         width, height = (int(source_size[0]) or source_texture.size[0],
@@ -173,7 +185,8 @@ class ColorGraphExecutor:
 
                 out_tex = self._execute_pass(
                     render_pass, source_texture, node_outputs,
-                    layer_param_provider, render_quad, width, height)
+                    layer_param_provider, render_quad, width, height,
+                    bind_aux, matte_provider)
                 leases.append(_Lease(out_tex, render_pass.node_id,
                                      render_pass.release_after))
                 node_outputs[render_pass.node_id] = out_tex
@@ -228,7 +241,8 @@ class ColorGraphExecutor:
                       source_texture: Any,
                       node_outputs: Mapping[str, Any],
                       layer_param_provider, render_quad,
-                      width: int, height: int) -> Any:
+                      width: int, height: int,
+                      bind_aux=None, matte_provider=None) -> Any:
         if render_pass.op == "source":
             # source = 输入纹理直通（新租约纹理承载，源纹理归调用方）
             return self._copy_texture(source_texture, width, height)
@@ -268,10 +282,22 @@ class ColorGraphExecutor:
                                        dtype="f2")
             fbo = self.ctx.framebuffer(color_attachments=[out_tex])
             fbo.use()
-            matte = self._white_matte(width, height)
+            matte_owned = False
+            if matte_provider is not None:
+                # 生产 matte（窗口/qualifier/bitmap）：缓存归宿主，不释放
+                matte = matte_provider(layer, input_tex)
+                if matte is None:
+                    matte = self._white_matte(width, height)
+                    matte_owned = True
+            else:
+                matte = self._white_matte(width, height)
+                matte_owned = True
             quad_fn = render_quad or (
                 lambda prog: self._default_quad(prog).render(_TRIANGLE_STRIP()))
-            aux = self._layer_aux_textures(layer, render_pass.node_id)
+            if bind_aux is not None:
+                aux = lambda prog: bind_aux(prog, layer)  # noqa: E731
+            else:
+                aux = self._layer_aux_textures(layer, render_pass.node_id)
             render_corrector_gl(
                 self.ctx, prepared, layer=layer,
                 grade_input_tex=input_tex, matte_tex=matte,
@@ -280,7 +306,8 @@ class ColorGraphExecutor:
                     layer, width, height, prepared.bindings),
                 bind_aux=aux,
                 render_quad=quad_fn)
-            matte.release()
+            if matte_owned:
+                matte.release()
             fbo.release()
             return out_tex
 
@@ -309,14 +336,17 @@ class ColorGraphExecutor:
                      if ref is not None]
             if not slots:
                 return self._copy_texture(source_texture, width, height)
-            mode_index = LAYER_MODE_INDEX.get(
-                str(render_pass.params.get("blend_mode", "Normal")), 0)
+            from src.features.color.core.color_graph_param_source import (
+                mixer_composite_params,
+            )
+            blend_mode, opacity = mixer_composite_params(render_pass.params)
+            mode_index = LAYER_MODE_INDEX.get(blend_mode, 0)
             current = slots[0]
             for top in slots[1:]:
                 current = self._run_op_shader(
                     "layer_mix",
                     {"u_bottom": (current, 0), "u_top": (top, 1)},
-                    {"u_opacity": 1.0, "u_mode": mode_index},
+                    {"u_opacity": opacity, "u_mode": mode_index},
                     width, height, release_inputs=[])
             return self._copy_texture(current, width, height)
 
@@ -475,11 +505,22 @@ class ColorGraphExecutor:
 
     def _layer_aux_textures(self, layer, node_id: str):
         """per-layer aux 纹理绑定（curves unit 2 / hsl unit 3；与生产
-        ``_bind_aux_textures_single_layer`` 同构——identity 默认兜底）。"""
+        ``_bind_aux_textures_single_layer`` 同构——identity 默认兜底）。
+
+        standalone 兜底不提供 warper/LUT3D 纹理：shader 声明了这两个
+        sampler 而本执行器无法绑定时 fail-closed（不绑定的 sampler 落
+        unit 0 会采到输入图——错图而非缺效果）。宿主（AsyncRenderer）
+        应经 ``execute_plan(bind_aux=...)`` 委托生产绑定器获得全 aux 同构。
+        """
         base_unit = 2
 
         def bind(prog: Any) -> None:
             unit = base_unit
+            if "u_warper_tex" in prog or "u_lut_tex" in prog:
+                raise GraphExecutionFailure(
+                    "aux_texture_missing",
+                    f"pass {node_id}: shader 声明 warper/LUT3D 采样器，"
+                    "standalone 执行器无法绑定（宿主须委托 bind_aux）")
             if "u_curves_tex" in prog:
                 tex = self._curves_texture(layer, node_id)
                 tex.use(unit)
