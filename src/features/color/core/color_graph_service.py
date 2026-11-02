@@ -721,6 +721,22 @@ class ColorGraphService:
             "color_space": ("color", "color_space"),
             "gamma": ("color", "gamma"),
         }
+        if name == "grade_patch":
+            # B06.2 旧面板手势过渡：图内 grade 域单键 patch（B09 前旧
+            # 引擎经 legacy 投影消费；服务端仍走完整事务/校验）
+            if not isinstance(value, tuple) or len(value) != 2:
+                return self._fail(graph, "illegal_param_key",
+                                  "grade_patch 需要 (param_name, value) 元组",
+                                  node_id=node_id)
+            grade = dict(node.params.get("grade") or {})
+            grade[str(value[0])] = value[1]
+            params = dict(node.params)
+            params["grade"] = grade
+            new_node = replace(node, params=params)
+            nodes = tuple(new_node if n.node_id == node_id else n
+                          for n in graph.nodes)
+            candidate = replace(graph, nodes=nodes)
+            return self._commit(graph, candidate, {})
         if name not in allowed:
             return self._fail(graph, "illegal_param_key",
                               f"未知节点选项: {name}（须显式登记 schema 键）",
