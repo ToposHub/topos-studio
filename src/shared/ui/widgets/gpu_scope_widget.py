@@ -50,6 +50,13 @@ from OpenGL.GL import (
 
 logger = logging.getLogger(__name__)
 
+
+def _scope_diag():
+    """S01 呈现段诊断（可关闭；纯计数，不在 GL 路径加锁外开销）。"""
+    from src.features.color.core.scope_diagnostics import scope_diagnostics
+    return scope_diagnostics
+
+
 # Default format: compatibility with the rest of the app (4.1 core surface).
 _DEFAULT_FMT = QSurfaceFormat.defaultFormat()
 
@@ -311,6 +318,8 @@ class GpuScopeWidget(QOpenGLWidget):
         # keep showing the previous frame.
         mutex = getattr(self, '_mutex', None)
         if mutex is not None and not mutex.tryLock():
+            _scope_diag().record("widget", "mutex_busy",
+                                 tex_id=self._frame_tex_id)
             return
         try:
             # Qt's own GL compositing can leave a stale error flag in this
@@ -322,6 +331,9 @@ class GpuScopeWidget(QOpenGLWidget):
             try:
                 self._blit_shared_texture()
             except Exception as exc:
+                _scope_diag().record("widget", "blit_failed",
+                                     tex_id=self._frame_tex_id,
+                                     detail=str(exc)[:120])
                 logger.debug("GpuScopeWidget blit failed: %s", exc)
             try:
                 self._paint_scope_chrome()
@@ -488,6 +500,7 @@ class GpuScopeWidget(QOpenGLWidget):
         src = self._frame_tex_id
         # Validate the shared texture name is still a live GL texture.
         if not glIsTexture(src):
+            _scope_diag().record("widget", "texture_not_shared", tex_id=src)
             return
 
         # Lazily allocate the read FBO that wraps the shared source texture.
@@ -502,6 +515,8 @@ class GpuScopeWidget(QOpenGLWidget):
         )
         status = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER)
         if status != GL_FRAMEBUFFER_COMPLETE:
+            _scope_diag().record("widget", "fbo_incomplete",
+                                 tex_id=src, detail=f"0x{status:X}")
             logger.debug("GpuScopeWidget read FBO incomplete: 0x%X", status)
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0)
             return

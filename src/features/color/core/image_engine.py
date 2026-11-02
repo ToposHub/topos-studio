@@ -745,6 +745,12 @@ class ImageEngine(QObject):
         the video lane.
         """
         if self.renderer is None:
+            from src.features.color.core.scope_diagnostics import (
+                scope_diagnostics,
+            )
+            scope_diagnostics.record(
+                "queue", "no_renderer",
+                revision=getattr(demand, "revision", None))
             return
         self.renderer.submit(RenderCommand.RENDER_GPU_SCOPE, demand)
 

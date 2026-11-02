@@ -45,6 +45,14 @@ from PyQt6.QtWidgets import QMessageBox, QGraphicsScene
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
 
 from src.features.color.core.layer import MaskShape, MaskGroup
+
+
+def _scope_diag():
+    """S01 分段诊断（可关闭；计数器 + 最后上下文，无逐帧日志）。
+
+    惰性取模块属性（测试可替换进程级单例）。"""
+    from src.features.color.core.scope_diagnostics import scope_diagnostics
+    return scope_diagnostics
 from src.shared.io.file_io import FileIO
 from src.shared.i18n.i18n import I18N
 
@@ -1282,14 +1290,20 @@ class LayerOpsMixin:
             is_playing = is_playing or self._scope_playback_is_active()
             engine = self.engine
             if engine is None or engine.renderer is None:
+                _scope_diag().record("submit", "no_renderer")
                 return
             interacting = bool(getattr(engine, 'is_interacting', False))
             curves_frozen = is_playing or interacting or self._scope_scrub_is_active()
             scope_visible = self._is_scope_panel_visible()
             curves_overlay = self._is_curves_panel_visible() and not curves_frozen
             if not scope_visible and not curves_overlay:
+                _scope_diag().record("submit", "panel_hidden",
+                                     source_revision=engine.scope_source_revision)
                 return
             if not getattr(engine.renderer, 'gpu_scope_enabled', False):
+                # 含 shader 编译失败后的永久关闭（S01：必须可诊断）
+                _scope_diag().record("submit", "gpu_lane_disabled",
+                                     source_revision=engine.scope_source_revision)
                 return
             from src.features.color.core.scope_types import (
                 ScopeDemand, DEFAULT_ANALYSIS_SIZE, PLAYBACK_ANALYSIS_SIZE,
@@ -1325,6 +1339,7 @@ class LayerOpsMixin:
 
             panel = getattr(self, 'scope_panel', None)
             if panel is None:
+                _scope_diag().record("submit", "panel_missing")
                 return
             state = panel.demand_state()
             active_layer = engine.get_active_layer()
@@ -1358,8 +1373,12 @@ class LayerOpsMixin:
                     not curves_overlay
                     or curves_key == getattr(self, '_curves_scope_pending_key', None)
                 ):
+                    _scope_diag().record("submit", "curves_dedup_skip",
+                                         source_revision=engine.scope_source_revision)
                     return
             if not force and not curves_overlay and now - last < min_interval:
+                _scope_diag().record("submit", "rate_limited",
+                                     detail=f"interval={min_interval:.3f}s")
                 return
             self._gpu_scope_last_submit = now
             demand = ScopeDemand(
@@ -1386,9 +1405,12 @@ class LayerOpsMixin:
             # it drains, which is valid; an older frame must never be shown.
             self._latest_gpu_scope_demand = demand
             engine.request_gpu_scope(demand)
+            _scope_diag().record_activity(now)
             if curves_overlay:
                 self._curves_scope_pending_key = curves_key
         except Exception as exc:
+            _scope_diag().record("submit", "submit_exception",
+                                 detail=str(exc)[:120])
             logger.debug("GPU scope demand submit failed: %s", exc)
 
     def _on_scope_demand_changed(self) -> None:
@@ -1480,12 +1502,18 @@ class LayerOpsMixin:
     def on_gpu_scope_ready(self, frame) -> None:
         """Forward a ``ScopeGpuFrame`` to the panel if still visible."""
         if not (self._is_scope_panel_visible() or self._is_curves_panel_visible()) or frame is None:
+            _scope_diag().record("panel", "not_visible_on_return",
+                                 revision=getattr(frame, "revision", None))
             return
         from src.features.color.core.scope_types import is_frame_valid_for_demand
 
         if not is_frame_valid_for_demand(
             frame, getattr(self, '_latest_gpu_scope_demand', None)
         ):
+            _scope_diag().record("panel", "stale_return",
+                                 revision=getattr(frame, "revision", None),
+                                 source_revision=getattr(
+                                     frame, "source_revision", None))
             return
         try:
             panel = getattr(self, 'scope_panel', None)
@@ -1506,7 +1534,10 @@ class LayerOpsMixin:
                 if pending is not None:
                     self._curves_scope_completed_key = (frame.source_revision, *pending[1:])
                     self._curves_scope_pending_key = None
+            _scope_diag().record_activity()
         except Exception as exc:
+            _scope_diag().record("panel", "present_exception",
+                                 detail=str(exc)[:120])
             logger.debug("GPU scope present failed: %s", exc)
 
     def on_scope_snapshot_ready(self, result_img: Optional[np.ndarray]) -> None:

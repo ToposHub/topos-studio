@@ -644,6 +644,13 @@ class AsyncRenderer(QThread):
                 self._pending_slots[lane] = (cmd_type, data)
                 if old is not None:
                     self._coalesced_lane_commands += 1
+                    if lane == RenderLane.GPU_SCOPE:
+                        from src.features.color.core.scope_diagnostics import (
+                            scope_diagnostics as _sd,
+                        )
+                        _sd.record("queue", "coalesced_replaced",
+                                   revision=getattr(data, "revision", None),
+                                   detail="latest-wins 替换旧 demand")
                     # Phase D: release GpuDecodedFrame if old command held one
                     if old[0] == RenderCommand.RENDER_VIDEO_GPU_FRAME:
                         old_data = old[1] or {}
@@ -1602,7 +1609,20 @@ class AsyncRenderer(QThread):
             'persistent_tex_size': self._persistent_tex_size,
             'yuv_rgb_cache_sizes': {str(k): len(v) for k, v in self._yuv_rgb_output_cache.items()},
             'video_render_sync_mode': self.video_render_sync_mode,
+            # S01：示波器链路分段诊断（queue/execute 段；submit/panel/widget
+            # 段见 scope_diagnostics.snapshot()——同一实例）
+            'gpu_scope_diagnostics': self._scope_diag_snapshot(),
         }
+
+    def _scope_diag_snapshot(self) -> Dict[str, Any]:
+        """GPU 示波器诊断快照（stats 内嵌入口；无锁竞争风险——内部持锁）。"""
+        try:
+            from src.features.color.core.scope_diagnostics import (
+                scope_diagnostics,
+            )
+            return scope_diagnostics.snapshot()
+        except Exception:  # noqa: BLE001 —— stats 不因诊断失败而失败
+            return {}
 
     def reset_render_stats(self) -> None:
         """重置渲染统计计数器（每帧开始时调用）"""
@@ -1893,11 +1913,19 @@ class AsyncRenderer(QThread):
             DEFAULT_FALSECOLOR_SIZE,
         )
 
+        from src.features.color.core.scope_diagnostics import scope_diagnostics
+
         if not self.gpu_scope_enabled or not self.ctx:
+            scope_diagnostics.record("execute", "gpu_lane_disabled",
+                                     revision=getattr(demand, "revision", None))
             return
         if not isinstance(demand, ScopeDemand):
+            scope_diagnostics.record("execute", "demand_shape_invalid")
             return
         if self.current_front_tex_id is None:
+            scope_diagnostics.record("execute", "no_front_texture",
+                                     revision=demand.revision,
+                                     mode=demand.mode)
             return
         if not getattr(self, '_gpu_scope_shaders_loaded', False):
             # Shader compile failed at startup — disable the lane. The normal
@@ -1906,6 +1934,10 @@ class AsyncRenderer(QThread):
             self.gpu_scope_enabled = False
             with self._pending_lock:
                 self._pending_slots[RenderLane.GPU_SCOPE] = None
+            scope_diagnostics.record("execute", "shaders_not_loaded",
+                                     revision=demand.revision,
+                                     mode=demand.mode,
+                                     detail="GPU lane permanently disabled")
             return
 
         # Generation guard: only a newer UI demand may invalidate this pass.
@@ -1916,6 +1948,9 @@ class AsyncRenderer(QThread):
         # accepted by ``is_frame_valid_for_demand``); rejecting it starves the
         # scope for the entire duration of playback.
         if demand.revision < self._scope_demand_revision:
+            scope_diagnostics.record("execute", "stale_revision",
+                                     revision=demand.revision,
+                                     demand_revision=self._scope_demand_revision)
             return
 
         t0 = time.monotonic()
@@ -1943,6 +1978,10 @@ class AsyncRenderer(QThread):
             scope_source_is_full_frame = False
             scope_params = getattr(self, '_last_scope_render_params', None)
             if not scope_params:
+                scope_diagnostics.record("execute", "no_render_params",
+                                         revision=demand.revision,
+                                         mode=demand.mode,
+                                         detail="无先前成功发布的渲染参数")
                 return
             content_revision = int(getattr(self, '_scope_content_revision', 0))
             output_revision = int(
@@ -1963,6 +2002,9 @@ class AsyncRenderer(QThread):
                 output_params['max_proxy_dim'] = requested_max_dim
                 output_params['color_output_target'] = 'scope'
                 if not self._do_render_color_output(output_params):
+                    scope_diagnostics.record(
+                        "execute", "color_output_failed",
+                        revision=demand.revision, mode=demand.mode)
                     return
                 self._scope_color_output_revision = content_revision
                 self._scope_color_output_max_dim = requested_max_dim
@@ -1974,6 +2016,11 @@ class AsyncRenderer(QThread):
                 or candidate_size[1] <= 0
             ):
                 self._scope_color_output_revision = -1
+                scope_diagnostics.record(
+                    "execute", "output_texture_invalid",
+                    revision=demand.revision,
+                    tex_id=getattr(candidate, "glo", None),
+                    width=candidate_size[0], height=candidate_size[1])
                 return
             scope_source = candidate
             scope_source_is_full_frame = True
@@ -2118,6 +2165,13 @@ class AsyncRenderer(QThread):
             err_key = "{}@{}".format(
                 type(exc).__name__, tb_lines[-1] if tb_lines else "?"
             )[:200]
+            from src.features.color.core.scope_diagnostics import (
+                scope_diagnostics as _sd,
+            )
+            _sd.record("execute", "pass_exception",
+                       revision=getattr(demand, "revision", None),
+                       mode=getattr(demand, "mode", None),
+                       detail=err_key)
             seen = getattr(self, '_gpu_scope_errors', None)
             if seen is None:
                 seen = {}
