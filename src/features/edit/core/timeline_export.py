@@ -9252,6 +9252,43 @@ class TimelineExporter:
         if stack is None:
             return None
 
+        # B13 图能力硬门：栈携带 color_graph 时旧 layers/平铺路径不得
+        # 静默消费（会丢分支/key/共享/复合效果）。可无损投影的串行图以
+        # 图派生视图继续（stale legacy layers 不覆盖权威）；复杂图显式
+        # 失败——错误不能变"成功但少效果"。（完整图渲染经 N07 执行器
+        # 接入导出属 B13 后续子任务。）
+        color_graph = getattr(stack, "color_graph", None)
+        if color_graph is not None:
+            from src.features.color.core.color_graph_migration import (
+                can_project_to_legacy_layers,
+                project_legacy_layers,
+            )
+            if not can_project_to_legacy_layers(color_graph):
+                raise RuntimeError(
+                    "[color_graph_not_exportable] clip "
+                    f"{getattr(clip, 'clip_id', '?')} 的调色栈携带节点图"
+                    "（含分支/key/共享/compound），旧导出路径无法无损表达；"
+                    "拒绝导出而不是丢弃效果")
+            return TimelineExporter._grade_from_stack(
+                self,
+                stack.with_layers(
+                    project_legacy_layers(color_graph),
+                    active_layer_index=stack.active_layer_index,
+                ).with_color_graph(None), layer)
+
+        return TimelineExporter._grade_from_stack(self, stack, layer)
+
+    def _grade_from_stack(self, stack,
+                          layer: Optional["ClipLayerInfo"] = None
+                          ) -> Optional[Dict[str, Any]]:
+        """从栈载荷构建 grade dict（layers/平铺路径；图门在外层）。"""
+        clip = getattr(layer, "clip", None) if layer is not None else None
+        project = self._project
+        stack_id = (getattr(clip, "color_stack_id", None)
+                    if clip is not None else None) or stack.stack_id
+        timeline = getattr(self, "_timeline", None)
+        timeline_id = getattr(timeline, "timeline_id", None) if (
+            timeline is not None) else getattr(clip, "timeline_id", None)
         grading_params = dict(getattr(stack, "grading_params", {}) or {})
         wheel_defaults = {
             "lift": (0.0, 0.0, 0.0),
