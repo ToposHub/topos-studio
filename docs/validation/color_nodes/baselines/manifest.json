@@ -1,0 +1,259 @@
+{
+  "backend": {
+    "kind": "moderngl standalone context (GL 330 core)",
+    "precision": "RGBA16F ping-pong parity with async_renderer",
+    "readback": "float16 -> float32 stored"
+  },
+  "color_context": {
+    "display_transform": "not applied (reference is pre-display)",
+    "internal_precision": "float32 arrays; GL ping-pong RGBA16F",
+    "working_space": "scene-linear (BT.709 primaries, no transfer)"
+  },
+  "error_contract": {
+    "cpu_oracle_abs": 1e-05,
+    "exact": "纯数据 roundtrip / ID / 命令原子性采用字节级精确比较",
+    "gl_float16_abs": 0.002,
+    "hdr_relative": 0.002,
+    "note": "CPU float32 oracle 基础算子 abs<=1e-5；GL/Metal float16 路径对规范化测试值 abs<=2e-3 并记录 relative/max/mean；HDR 用 relative<=2e-3 + near-zero 规则。实际阈值由 B00/B07 测量冻结。"
+  },
+  "fixture_spec_version": 1,
+  "fixtures": {
+    "color_context": {
+      "display_transform": "not applied (reference is pre-display)",
+      "internal_precision": "float32 arrays; GL ping-pong RGBA16F",
+      "working_space": "scene-linear (BT.709 primaries, no transfer)"
+    },
+    "error_contract": {
+      "cpu_oracle_abs": 1e-05,
+      "exact": "纯数据 roundtrip / ID / 命令原子性采用字节级精确比较",
+      "gl_float16_abs": 0.002,
+      "hdr_relative": 0.002,
+      "note": "CPU float32 oracle 基础算子 abs<=1e-5；GL/Metal float16 路径对规范化测试值 abs<=2e-3 并记录 relative/max/mean；HDR 用 relative<=2e-3 + near-zero 规则。实际阈值由 B00/B07 测量冻结。"
+    },
+    "f01": {
+      "anchors": [
+        -0.25,
+        0.0,
+        0.18,
+        1.0,
+        4.0,
+        16.0
+      ],
+      "sha256_64": "00d6b40686a34b206b077ebd68b553b719cbe775fcfb02c5166dc58b1d0692c7",
+      "sizes": [
+        64,
+        256
+      ]
+    },
+    "f02": {
+      "alpha": "horizontal gradient 0->1; border alpha=0",
+      "border": 4,
+      "palette": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.214,
+          0.1611,
+          0.1285
+        ],
+        [
+          0.859,
+          0.729,
+          0.604
+        ],
+        [
+          0.055,
+          0.055,
+          0.055
+        ],
+        [
+          0.945,
+          0.945,
+          0.945
+        ]
+      ],
+      "sha256_64": "79bf9946de2aaf696c80b0575b427c5251a2382ef58685fb574bbac60e1ea4fc",
+      "size": 64
+    },
+    "f03": {
+      "layers": [
+        {
+          "curves_lut_sha256": null,
+          "grading_params": {
+            "contrast": 0,
+            "exposure": 0.5,
+            "gain": [
+              0.0,
+              0.0,
+              -0.15
+            ],
+            "lift": [
+              0,
+              0,
+              0
+            ],
+            "saturation": 0
+          },
+          "has_curves_lut": false,
+          "name": "Print Warmer"
+        },
+        {
+          "curves_lut_sha256": null,
+          "grading_params": {
+            "contrast": -0.2,
+            "exposure": 0,
+            "gain": [
+              0,
+              0,
+              0
+            ],
+            "lift": [
+              0.0,
+              0.0,
+              0.05
+            ],
+            "saturation": 0
+          },
+          "has_curves_lut": false,
+          "name": "Lift Shadows"
+        },
+        {
+          "curves_lut_sha256": "c7bf0beb37aee1c5277d20de3eabcc0a728a13cb3aef317becbfaf9b7a0db2d2",
+          "grading_params": {
+            "contrast": 0,
+            "exposure": 0,
+            "gain": [
+              0,
+              0,
+              0
+            ],
+            "lift": [
+              0,
+              0,
+              0
+            ],
+            "saturation": 1.15
+          },
+          "has_curves_lut": true,
+          "name": "Tone Curve"
+        }
+      ],
+      "non_commutative": true
+    },
+    "fixture_spec_version": 1,
+    "plugin_stub": {
+      "plugin_content_hash": "462a0a52b45ba1f5",
+      "plugin_id": "baseline_gain_stub",
+      "plugin_version": "1.0.0",
+      "values": {
+        "amount": 1.25
+      }
+    }
+  },
+  "generated_at_utc": "2026-11-02T10:19:17.030089+00:00",
+  "git_sha": "e43cec9689eddafa82243ab55e35c0cc42036842",
+  "gpu": {
+    "renderer": "AMD Radeon RX 6800 OpenGL Engine",
+    "vendor": "ATI Technologies Inc.",
+    "version": "4.1 ATI-6.1.13"
+  },
+  "neutral_drift": {
+    "hdr_abs_max": 0.0029315948486328125,
+    "hdr_rel_max": 0.0004002121859230101,
+    "note": "生产 composition shader neutral 参数下的数值噪声（非位级恒等）",
+    "sdr_abs_max": 0.0001875162124633789
+  },
+  "perf_f08_light": {
+    "note": "standalone ctx 合成 pass 锚点，非整管线 FPS；媒体级 bench 见 B16",
+    "p50_ms": 118.61776300429483,
+    "p95_ms": 142.08004229658403,
+    "p99_ms": 151.8140926011256,
+    "workload": "1920x1080 RGBA16F neutral composition pass x300"
+  },
+  "platform": {
+    "machine": "x86_64",
+    "numpy": "2.5.2",
+    "python": "3.12.14",
+    "release": "24.3.0",
+    "system": "Darwin"
+  },
+  "references": {
+    "f01_l0_grading": {
+      "alpha_max": 1.0,
+      "alpha_min": 1.0,
+      "max": 14.5703125,
+      "mean": 1.4697526693344116,
+      "min": -0.2276611328125,
+      "sha256": "f5c98b69cf33aece5a2538b15bef3bc66b31c24aef46b7f3df63b0de213037d9"
+    },
+    "f01_neutral_256": {
+      "alpha_max": 1.0,
+      "alpha_min": 1.0,
+      "max": 16.0,
+      "mean": 1.516656517982483,
+      "min": -0.25,
+      "sha256": "401404bc8b2916494b4121caed0a325a105c3c73e7674bc5255ea35fe3dc29a9"
+    },
+    "f01_neutral_64": {
+      "alpha_max": 1.0,
+      "alpha_min": 1.0,
+      "max": 16.0,
+      "mean": 1.6141499280929565,
+      "min": -0.25,
+      "sha256": "9a75bbdbfc3a2e1d17d669049c4d1177e5e8ae16505318734d34719a9e00f314"
+    },
+    "f02_neutral": {
+      "alpha_max": 0.9365234375,
+      "alpha_min": 0.0,
+      "max": 1.0,
+      "mean": 0.3610476553440094,
+      "min": 0.0,
+      "sha256": "5c0cc05ce4195fe3410c1e864a9988bf3972e3aa239780efad1c0c0e9b23c158"
+    },
+    "f03_l1_bypassed": {
+      "alpha_max": 1.0,
+      "alpha_min": 1.0,
+      "max": 2.865234375,
+      "mean": 0.6212107539176941,
+      "min": -0.161865234375,
+      "sha256": "b07d7b5ae50140f5749fde7de98fe12aff662a280ba8b42f2816d00949576495"
+    },
+    "f03_serial": {
+      "alpha_max": 1.0,
+      "alpha_min": 1.0,
+      "max": 3.58203125,
+      "mean": 0.7765373587608337,
+      "min": -0.202392578125,
+      "sha256": "60d2b8e77155ff1b648f6218036639629dc466c5b3ef97c680a37b8500d961c2"
+    }
+  },
+  "worktree_dirty": true
+}
