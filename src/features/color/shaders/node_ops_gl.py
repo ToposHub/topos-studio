@@ -29,8 +29,37 @@ void main(){
 }
 """
 
-#: Layer Mixer（spec §2）：mode 0 Normal / 1 Add / 2 Subtract / 3 Multiply / 4 Screen
-LAYER_MIX_FRAG = _OPS_HEADER + """
+#: Layer Mixer（spec §2 v1 + §9 v1.1）：0 Normal / 1 Add / 2 Subtract /
+#: 3 Multiply / 4 Screen；v1.1：5 Overlay / 6 Soft Light / 7 Hard Light /
+#: 8 Color Dodge / 9 Color Burn / 10 Darken / 11 Lighten / 12 Difference /
+#: 13 Exclusion / 14 Hue / 15 Saturation / 16 Color / 17 Luminosity /
+#: 18 Addition / 19 Subtract(Clamped) / 20 Divide。
+#: 权威 = BLEND_MODES_SNIPPET.apply_blend_mode（mix epilogue 形式，
+#: 与 v1 内嵌式代数等价；HSV 四模式无符号防护，同权威文本）。
+_HSV_FUNCS_OPS = """
+vec3 ops_rgb2hsv(vec3 c){
+    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+vec3 ops_hsv2rgb(vec3 c){
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+float ops_overlay(float b, float a){
+    return b < 0.5 ? (2.0 * b * a) : (1.0 - 2.0 * (1.0 - b) * (1.0 - a));
+}
+float ops_soft_light(float b, float a){
+    return (a < 0.5) ? (2.0 * b * a + b * b * (1.0 - 2.0 * a))
+                     : (sqrt(max(b, 0.0)) * (2.0 * a - 1.0) + 2.0 * b * (1.0 - a));
+}
+"""
+
+LAYER_MIX_FRAG = _OPS_HEADER + _HSV_FUNCS_OPS + """
 uniform sampler2D u_bottom;
 uniform sampler2D u_top;
 uniform float u_opacity;
@@ -45,7 +74,43 @@ void main(){
     else if (u_mode == 1) { outc = a + b * u_opacity; }
     else if (u_mode == 2) { outc = a - b * u_opacity; }
     else if (u_mode == 3) { outc = a * (1.0 - u_opacity + u_opacity * b); }
-    else                  { outc = 1.0 - (1.0 - a) * (1.0 - b * u_opacity); }
+    else if (u_mode == 4) { outc = 1.0 - (1.0 - a) * (1.0 - b * u_opacity); }
+    else {
+        // v1.1：blended = apply_blend_mode(bottom, top)；out = mix(bottom,
+        // blended, opacity)
+        vec3 blended;
+        if (u_mode == 5) {
+            blended = vec3(ops_overlay(a.r, b.r), ops_overlay(a.g, b.g),
+                           ops_overlay(a.b, b.b));
+        } else if (u_mode == 6) {
+            blended = vec3(ops_soft_light(a.r, b.r), ops_soft_light(a.g, b.g),
+                           ops_soft_light(a.b, b.b));
+        } else if (u_mode == 7) {
+            blended = vec3(ops_overlay(b.r, a.r), ops_overlay(b.g, a.g),
+                           ops_overlay(b.b, a.b));
+        } else if (u_mode == 8)  { blended = a / max(vec3(0.001), 1.0 - b); }
+        else if (u_mode == 9)  { blended = 1.0 - (1.0 - a) / max(vec3(0.001), b); }
+        else if (u_mode == 10) { blended = min(a, b); }
+        else if (u_mode == 11) { blended = max(a, b); }
+        else if (u_mode == 12) { blended = abs(a - b); }
+        else if (u_mode == 13) { blended = a + b - 2.0 * a * b; }
+        else if (u_mode == 14) {
+            vec3 ha = ops_rgb2hsv(b); vec3 hb = ops_rgb2hsv(a);
+            blended = ops_hsv2rgb(vec3(ha.x, hb.y, hb.z));
+        } else if (u_mode == 15) {
+            vec3 ha = ops_rgb2hsv(b); vec3 hb = ops_rgb2hsv(a);
+            blended = ops_hsv2rgb(vec3(hb.x, ha.y, hb.z));
+        } else if (u_mode == 16) {
+            vec3 ha = ops_rgb2hsv(b); vec3 hb = ops_rgb2hsv(a);
+            blended = ops_hsv2rgb(vec3(ha.x, ha.y, hb.z));
+        } else if (u_mode == 17) {
+            vec3 ha = ops_rgb2hsv(b); vec3 hb = ops_rgb2hsv(a);
+            blended = ops_hsv2rgb(vec3(hb.x, hb.y, ha.z));
+        } else if (u_mode == 18) { blended = a + b; }
+        else if (u_mode == 19) { blended = max(a - b, 0.0); }
+        else                   { blended = a / max(vec3(0.001), b); }
+        outc = a * (1.0 - u_opacity) + blended * u_opacity;
+    }
     f_color = vec4(outc, bottom.a);
 }
 """
@@ -107,8 +172,15 @@ void main(){
 }
 """
 
-LAYER_MODE_INDEX = {"Normal": 0, "Add": 1, "Subtract": 2,
-                    "Multiply": 3, "Screen": 4}
+LAYER_MODE_INDEX = {
+    "Normal": 0, "Add": 1, "Subtract": 2, "Multiply": 3, "Screen": 4,
+    # v1.1（spec §9）
+    "Overlay": 5, "Soft Light": 6, "Hard Light": 7, "Color Dodge": 8,
+    "Color Burn": 9, "Darken": 10, "Lighten": 11, "Difference": 12,
+    "Exclusion": 13, "Hue": 14, "Saturation": 15, "Color": 16,
+    "Luminosity": 17, "Addition": 18, "Subtract (Clamped)": 19,
+    "Divide": 20,
+}
 KEY_MODE_INDEX = {"add": 0, "subtract": 1, "intersect": 2}
 
 #: 执行器分派表：op 名 → fragment 源
