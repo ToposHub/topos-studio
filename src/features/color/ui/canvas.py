@@ -3876,6 +3876,7 @@ class SAMPointItem(QGraphicsItem):
 
 
 class Canvas(QGraphicsView):
+    scopes_requested = pyqtSignal()
     stroke_finished = pyqtSignal(list, tuple, int)
     mask_shape_changed = pyqtSignal(str, dict)
     mask_shape_selected = pyqtSignal(str)
@@ -5040,6 +5041,9 @@ class Canvas(QGraphicsView):
         actual_act = menu.addAction(I18N.tr("viewport.actual_size", "Actual Size"),
                                     lambda: self.viewport_menu._set_actual_size() if hasattr(self, 'viewport_menu') else None)
         actual_act.setShortcut("1")
+
+        menu.addSeparator()
+        menu.addAction(I18N.tr("workspace.scopes", "Scopes"), self.scopes_requested.emit)
 
         menu.addSeparator()
 

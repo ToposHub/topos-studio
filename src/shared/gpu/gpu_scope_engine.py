@@ -206,6 +206,11 @@ class GpuScopeEngine:
         ensure_fbo('wf_density_fbo', wf_density)
         wf_display = ensure_tex('wf_display', waveform_size, 4, 'f1')
         ensure_fbo('wf_display_fbo', wf_display)
+        # Density is reusable scratch space, but simultaneously presented
+        # waveform/parade/luma outputs must keep independent display textures.
+        for key in ('parade_display', 'luma_display'):
+            display = ensure_tex(key, waveform_size, 4, 'f1')
+            ensure_fbo(key + '_fbo', display)
 
         vs_density = ensure_tex('vs_density', vectorscope_size, 1, 'f2')
         ensure_fbo('vs_density_fbo', vs_density)
@@ -403,13 +408,14 @@ class GpuScopeEngine:
         finally:
             self._restore_blend()
 
-    def display_waveform(self, pool: dict, single_channel: bool = False) -> None:
+    def display_waveform(self, pool: dict, single_channel: bool = False,
+                         *, target: str = 'wf_display') -> None:
         """Tone-map waveform/luma density -> RGBA8 with graticule."""
         prog = self.programs.get('scope_waveform_display')
         if prog is None:
             return
         ww, wh = pool['waveform_size']
-        self._use_target(pool['wf_display_fbo'], (ww, wh))
+        self._use_target(pool[target + '_fbo'], (ww, wh))
         pool['wf_density'].use(0)
         prog['u_density'].value = 0
         prog['u_density_size'].value = (float(ww), float(wh))
@@ -494,11 +500,11 @@ class GpuScopeEngine:
             self._restore_blend()
             self.ctx.viewport = (0, 0, ww, wh)
 
-    def display_parade(self, pool: dict) -> None:
+    def display_parade(self, pool: dict, *, target: str = 'wf_display') -> None:
         """Tone-map parade density (reuses the waveform display shader)."""
         # Each third carries exactly one channel, so the RGB tone-map renders
         # monochrome red/green/blue panels with the shared value graticule.
-        self.display_waveform(pool)
+        self.display_waveform(pool, target=target)
 
     def accumulate_histogram(self, pool: dict, *, include_luma: bool = False,
                              curve_mode: str = 'Custom') -> None:
@@ -710,7 +716,7 @@ class GpuScopeEngine:
         outputs: Dict[str, tuple] = {}
 
         needs_sample = (
-            not mode_needs_falsecolor(mode)
+            mode != 'falsecolor'
             or bool(getattr(demand, 'histogram_overlay', False))
         )
         if needs_sample:
@@ -728,12 +734,14 @@ class GpuScopeEngine:
                                       pool['vectorscope_size'])
         if mode_needs_parade(mode):
             self.accumulate_parade(pool)
-            self.display_parade(pool)
-            outputs['parade'] = (pool['wf_display'].glo, pool['waveform_size'])
+            target = 'parade_display' if mode in ('quad', 'all') else 'wf_display'
+            self.display_parade(pool, target=target)
+            outputs['parade'] = (pool[target].glo, pool['waveform_size'])
         if mode_needs_luma(mode):
             self.accumulate_waveform(pool, channel=3)
-            self.display_waveform(pool, single_channel=True)
-            outputs['luma'] = (pool['wf_display'].glo, pool['waveform_size'])
+            target = 'luma_display' if mode == 'all' else 'wf_display'
+            self.display_waveform(pool, single_channel=True, target=target)
+            outputs['luma'] = (pool[target].glo, pool['waveform_size'])
         if mode_needs_histogram(mode) or bool(getattr(demand, 'histogram_overlay', False)):
             self.accumulate_histogram(pool, include_luma=bool(getattr(demand, 'histogram_overlay', False)),
                                       curve_mode=demand.curves_mode)

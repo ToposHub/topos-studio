@@ -2021,6 +2021,9 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
                 logger.warning("Composite cleanup failed for %s: %s", label, exc)
 
         try:
+            stabilization_runner = self.__dict__.pop('_stabilization_runner', None)
+            if stabilization_runner is not None:
+                safe_call('stabilization runner', stabilization_runner.release)
             # Cancel workers before releasing the GL objects they may use.
             ai_manager = getattr(self, '_ai_compute_manager', None)
             if ai_manager:

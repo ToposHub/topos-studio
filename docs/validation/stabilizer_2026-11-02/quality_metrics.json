@@ -1,0 +1,51 @@
+{
+  "homography": {
+    "seconds": 5.751094107996323,
+    "frames": 124,
+    "valid": 124,
+    "failed": [],
+    "zoom": 1.0037577152252197,
+    "raw_path_acceleration_rms_px": 0.379651914834344,
+    "smoothed_path_acceleration_rms_px": 0.04778520018943145
+  },
+  "trs": {
+    "seconds": 5.398487585000112,
+    "frames": 124,
+    "valid": 124,
+    "failed": [],
+    "zoom": 1.0009748935699463,
+    "raw_path_acceleration_rms_px": 0.15768256627635804,
+    "smoothed_path_acceleration_rms_px": 0.023983209454655447
+  },
+  "translation": {
+    "seconds": 5.439721674003522,
+    "frames": 124,
+    "valid": 124,
+    "failed": [],
+    "zoom": 1.0005252957344055,
+    "raw_path_acceleration_rms_px": 0.059902628945742255,
+    "smoothed_path_acceleration_rms_px": 0.017768322322649032
+  },
+  "encoded_frame_comparison": {
+    "0": {
+      "mean_abs_8bit": 1.089278549382716,
+      "p95_abs_8bit": 2.0
+    },
+    "30": {
+      "mean_abs_8bit": 1.1444521604938271,
+      "p95_abs_8bit": 3.0
+    },
+    "60": {
+      "mean_abs_8bit": 1.1409754372427983,
+      "p95_abs_8bit": 2.0
+    },
+    "90": {
+      "mean_abs_8bit": 1.1461927726337449,
+      "p95_abs_8bit": 2.0
+    },
+    "123": {
+      "mean_abs_8bit": 1.1648334619341565,
+      "p95_abs_8bit": 3.0
+    }
+  }
+}

@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 import logging
+import copy
 import uuid
 
 from src.features.edit.core.timeline_v2 import TimelineSequence
@@ -154,6 +155,7 @@ class UpdateColorStackCommand:
     raw_params: dict[str, Any] | None = None
     trackings: dict[str, Any] | None = None
     video_denoise: dict[str, Any] | None = None
+    video_stabilization: dict[str, Any] | None = None
     # Old values for undo
     _old_grading_params: dict[str, Any] | None = None
     _old_curves_data: dict[str, Any] | None = None
@@ -167,6 +169,7 @@ class UpdateColorStackCommand:
     _old_raw_params: dict[str, Any] | None = None
     _old_trackings: dict[str, Any] | None = None
     _old_video_denoise: dict[str, Any] | None = None
+    _old_video_stabilization: dict[str, Any] | None = None
 
     def apply(self, project: EditProject) -> EditProject:
         """
@@ -210,6 +213,7 @@ class UpdateColorStackCommand:
         object.__setattr__(self, '_old_active_layer_index', stack.active_layer_index)
         object.__setattr__(self, '_old_raw_params', dict(stack.raw_params) if stack.raw_params else None)
         object.__setattr__(self, '_old_trackings', dict(stack.trackings) if stack.trackings is not None else {})
+        object.__setattr__(self, '_old_video_stabilization', copy.deepcopy(stack.video_stabilization))
         object.__setattr__(self, '_old_video_denoise', dict(stack.video_denoise) if stack.video_denoise else None)
 
         new_project = project.update_color_stack(
@@ -226,6 +230,7 @@ class UpdateColorStackCommand:
             raw_params=self.raw_params,
             trackings=self.trackings,
             video_denoise=self.video_denoise,
+            video_stabilization=self.video_stabilization,
         )
 
         logger.debug(f"UpdateColorStackCommand applied: {self.stack_id}")
@@ -258,6 +263,7 @@ class UpdateColorStackCommand:
             active_layer_index=self._old_active_layer_index,
             raw_params=self._old_raw_params,
             trackings=self._old_trackings,
+            video_stabilization=self._old_video_stabilization,
             video_denoise=self._old_video_denoise if self._old_video_denoise is not None else {},
         )
 
@@ -285,6 +291,8 @@ class UpdateColorStackCommand:
             "old_soft_clip_params": self._old_soft_clip_params,
             "old_lut_path": self._old_lut_path,
             "old_lut_intensity": self._old_lut_intensity,
+            "video_stabilization": copy.deepcopy(self.video_stabilization),
+            "old_video_stabilization": copy.deepcopy(self._old_video_stabilization),
         }
 
     @staticmethod
@@ -301,6 +309,8 @@ class UpdateColorStackCommand:
             soft_clip_params=data.get("soft_clip_params"),
             lut_path=data.get("lut_path"),
             lut_intensity=data.get("lut_intensity"),
+            video_stabilization=data.get("video_stabilization"),
+            _old_video_stabilization=data.get("old_video_stabilization"),
             _old_grading_params=data.get("old_grading_params"),
             _old_curves_data=data.get("old_curves_data"),
             _old_hsl_curve_data=data.get("old_hsl_curve_data"),
@@ -325,6 +335,7 @@ class UpdateColorStackCommand:
         raw_params: dict[str, Any] | None = None,
         trackings: dict[str, Any] | None = None,
         video_denoise: dict[str, Any] | None = None,
+        video_stabilization: dict[str, Any] | None = None,
     ) -> UpdateColorStackCommand:
         """Factory method to create command."""
         return UpdateColorStackCommand(
@@ -343,6 +354,7 @@ class UpdateColorStackCommand:
             raw_params=raw_params,
             trackings=trackings,
             video_denoise=video_denoise,
+            video_stabilization=copy.deepcopy(video_stabilization),
         )
 
 

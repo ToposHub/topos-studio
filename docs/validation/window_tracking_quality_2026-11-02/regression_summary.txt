@@ -1,0 +1,9 @@
+Broad focused regression: 950 passed, 1 skipped in 69.70s.
+Includes opt-in real user footage, adaptive appearance safety, shared tracking, UI, scopes, playback wiring, persistence and worker lifecycle.
+Final endpoint/trim regression after range-clamping review: 170 passed in 9.67s.
+Ruff: all checks passed for touched production paths and new tests.
+Python compilation and git diff --check: passed.
+Native production MainWindow: initial no-data ruler drags 0 -> 60 -> 123 -> 0 settled on the requested frames.
+Native default Circle: 124/124 VALID frames in 4.44 seconds including completion settling; actual preview and graph advanced to frame 123.
+Native readouts matched source-pixel matrices at frames 0,30,60,90,123; source frame size 1920x1080.
+Separate real-video probe from reference frame 61: backward 62 VALID, forward 63 VALID; merged 124/124 VALID.

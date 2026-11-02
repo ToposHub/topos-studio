@@ -6309,6 +6309,9 @@ class TimelineExporter:
             return None
 
         layer = layers[0]
+        from src.shared.tracking.stabilization_state import stabilization_matrix
+        if stabilization_matrix(self._clip_stabilization_state(layer), int(layer.source_frame)) is not None:
+            return None
         clip = getattr(layer, "clip", None)
         if clip is None:
             return None
@@ -7831,6 +7834,12 @@ class TimelineExporter:
         then only forwards those planes to the Topos encoder. OpenGL keeps its
         broader existing stack path.
         """
+        from src.shared.tracking.stabilization_state import stabilization_matrix
+        if any(stabilization_matrix(self._clip_stabilization_state(layer),
+                                    int(getattr(layer, 'source_frame', 0))) is not None
+               for layer in sorted_layers):
+            self._record_gpu_fallback('video_stabilization_source_space')
+            return None
         import numpy as np
 
         if self._gpu_render_disabled:
@@ -9639,7 +9648,17 @@ class TimelineExporter:
                 out[name] = params_dict[name]
         return out
 
-    def _apply_color_grade(
+    def _clip_stabilization_state(self, layer: "ClipLayerInfo") -> dict:
+        from src.features.shared.effects.video_stabilization import clip_stabilization_state
+        return clip_stabilization_state(getattr(self, '_project', None), getattr(layer, 'clip', None))
+
+    def _apply_color_grade(self, frame_data: "np.ndarray", layer: "ClipLayerInfo") -> "np.ndarray":
+        from src.features.shared.effects.video_stabilization import apply_stabilization_cpu
+        graded = self._apply_color_grade_unstabilized(frame_data, layer)
+        return apply_stabilization_cpu(graded, self._clip_stabilization_state(layer),
+                                       int(getattr(layer, 'source_frame', 0)))
+
+    def _apply_color_grade_unstabilized(
         self,
         frame_data: "np.ndarray",
         layer: "ClipLayerInfo",

@@ -1,0 +1,8 @@
+Final focused regression: 962 passed, 1 skipped in 91.12 seconds.
+Includes real 124-frame user clip, mid-clip bidirectional coverage, synthetic TRS ground truth, scene-cut/occlusion rejection, cancellation, median/majority/nonfinite flow tests, worker/cache lifecycle, persistence/history, mask UI, scopes and playback integration.
+Ruff, Python compilation and git diff --check: passed.
+Native production MainWindow: 124/124 VALID; 5.1499 seconds including settling; source/graph endpoint 123; source size 1920x1080.
+Native 10 ms heartbeat maximum gap during tracking: 83.61 ms (not an FPS benchmark).
+Eight-frame approximate Resolve comparison: mean corner difference 11.122 -> 6.144 px; maximum 32.222 -> 14.810 px.
+New independent four-frame comparison: mean 9.968 -> 6.199 px.
+3D/homography and Point Tracker retain their existing flow policy.

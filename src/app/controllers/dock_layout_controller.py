@@ -352,6 +352,7 @@ class DockLayoutMixin:
         # Hidden scopes must not consume GPU analysis time. Showing the dock
         # also triggers an immediate demand for the current front texture.
         self.dock_analysis.visibilityChanged.connect(self._on_analysis_scope_visibility_changed)
+        self.canvas.scopes_requested.connect(self.scope_panel.open_floating)
 
         # The image batch-export panel. Renamed for clarity so a future
         # video batch-export panel can coexist without confusing users.

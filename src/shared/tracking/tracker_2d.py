@@ -74,6 +74,9 @@ class TrackerConfig:
     lk_max_level: int = 3
     lk_epsilon: float = 0.03
     lk_max_iter: int = 30
+    # Empty retains the legacy single-window flow. Window Cloud tracking opts
+    # into several patch scales to reduce aperture/patch-size sensitivity.
+    lk_consensus_windows: Tuple[int, ...] = ()
 
     # ---- forward-backward 检查 ----
     fb_max_distance: float = 1.6     # 往返误差阈值（分析像素）
@@ -495,10 +498,8 @@ class Tracker2D:
         mode = request.mode
         n = len(prev_pts)
 
-        cur_pts_raw, status, _err = cv2.calcOpticalFlowPyrLK(
-            prev_gray, cur_gray, prev_pts, None,
-            winSize=win_size, maxLevel=cfg.lk_max_level, criteria=criteria,
-        )
+        cur_pts_raw, status = self._track_flow(
+            prev_gray, cur_gray, prev_pts, win_size, criteria)
         tracked = (
             status.reshape(-1) == 1
             if status is not None
@@ -508,10 +509,8 @@ class Tracker2D:
         # ---- forward-backward 检查 ----
         fb_pass = np.zeros(n, dtype=bool)
         if cur_pts_raw is not None and np.any(tracked):
-            back_pts, back_status, _ = cv2.calcOpticalFlowPyrLK(
-                cur_gray, prev_gray, cur_pts_raw[tracked], None,
-                winSize=win_size, maxLevel=cfg.lk_max_level, criteria=criteria,
-            )
+            back_pts, back_status = self._track_flow(
+                cur_gray, prev_gray, cur_pts_raw[tracked], win_size, criteria)
             if back_pts is not None and back_status is not None:
                 ok = back_status.reshape(-1) == 1
                 dist = np.linalg.norm(
@@ -755,6 +754,44 @@ class Tracker2D:
             appearance_similarity=appearance,
             local_appearance_similarity=local_appearance,
         )
+
+    def _track_flow(
+        self, previous: np.ndarray, current: np.ndarray, points: np.ndarray,
+        win_size: Tuple[int, int], criteria: tuple,
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """Fuse independently tracked patch scales before the unchanged FB gate.
+
+        Each point needs a majority of successful, finite scale estimates.
+        Missing estimates never contribute zero-valued positions to a median.
+        The same fusion is used in the reverse pass, so scale consensus does
+        not bypass the forward/backward or appearance loss checks.
+        """
+        windows = self.config.lk_consensus_windows
+        if not windows:
+            tracked, status, _error = cv2.calcOpticalFlowPyrLK(
+                previous, current, points, None, winSize=win_size,
+                maxLevel=self.config.lk_max_level, criteria=criteria)
+            return tracked, status
+        count = len(points)
+        positions = np.zeros((len(windows), count, 2), dtype=np.float32)
+        valid = np.zeros((len(windows), count), dtype=bool)
+        for index, size in enumerate(windows):
+            tracked, status, _error = cv2.calcOpticalFlowPyrLK(
+                previous, current, points, None, winSize=(size, size),
+                maxLevel=self.config.lk_max_level, criteria=criteria)
+            if tracked is None or status is None:
+                continue
+            positions[index] = tracked.reshape(-1, 2)
+            valid[index] = ((status.reshape(-1) == 1)
+                            & np.isfinite(positions[index]).all(axis=1))
+        fused = np.zeros((count, 2), dtype=np.float32)
+        available = valid.any(axis=0)
+        if available.any():
+            candidates = np.where(valid[:, available, None],
+                                  positions[:, available], np.nan)
+            fused[available] = np.nanmedian(candidates, axis=0)
+        status = (valid.sum(axis=0) > len(windows) // 2).astype(np.uint8)
+        return fused, status.reshape(-1, 1)
 
     def _can_update_appearance(
         self, step: "_FrameStep", sharpness: float, mode: TrackingMode,

@@ -1,0 +1,18 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 170 items
+
+tests/color/test_window_controller_flow.py ....................          [ 11%]
+tests/color/test_tracker_graph_scrubbing.py .....                        [ 14%]
+tests/app/test_color_controller_coverage.py ............................ [ 31%]
+........................................................................ [ 73%]
+.............                                                            [ 81%]
+tests/color/test_window_tracking_integration.py ......                   [ 84%]
+tests/color/test_tracking_serialization.py ..........                    [ 90%]
+tests/color/test_tracking_service.py ................                    [100%]
+
+============================= 170 passed in 9.67s ==============================

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import replace
 from pathlib import Path
 from threading import Event
@@ -89,7 +90,8 @@ def test_unverified_or_weak_frames_cannot_adapt_template(change: dict[str, Any])
     )
 
 
-def test_cancel_still_stops_at_the_next_frame_boundary() -> None:
+@pytest.mark.parametrize('windows', [(), (15, 21, 31)])
+def test_cancel_still_stops_at_the_next_frame_boundary(windows: tuple[int, ...]) -> None:
     sampler = _ChangingCardSampler()
     cancel = Event()
     progress: list[tuple[int, int]] = []
@@ -99,7 +101,7 @@ def test_cancel_still_stops_at_the_next_frame_boundary() -> None:
         if done == 5:
             cancel.set()
 
-    result = Tracker2D(TrackerConfig(adaptive_appearance=True)).track(
+    result = Tracker2D(TrackerConfig(adaptive_appearance=True, lk_consensus_windows=windows)).track(
         sampler.request(), sampler=sampler, cancel_token=cancel, progress_cb=on_progress,
     )
     assert result.cancelled
@@ -107,14 +109,15 @@ def test_cancel_still_stops_at_the_next_frame_boundary() -> None:
     assert progress[-1] == (5, sampler.count - 1)
 
 
+@pytest.mark.parametrize('windows', [(), (15, 21, 31)])
 @pytest.mark.parametrize('name', ['occlusion', 'scene_cut'])
-def test_adaptation_preserves_loss_detection_and_geometric_truth(name: str) -> None:
+def test_adaptation_preserves_loss_detection_and_geometric_truth(name: str, windows: tuple[int, ...]) -> None:
     directory = ts.fixture_dir()
     manifest = ts.load_manifest(directory, name)
     corners = ts.reference_corners(manifest)
     seen_losses = 0
     for direction in (TrackDirection.FORWARD, TrackDirection.BACKWARD):
-        tracker = Tracker2D(TrackerConfig(adaptive_appearance=True))
+        tracker = Tracker2D(TrackerConfig(adaptive_appearance=True, lk_consensus_windows=windows))
         result = tracker.track(ts.build_request(directory, name, TrackingMode.TRANSLATION, direction))
         for frame, transform in result.transforms.items():
             meta = manifest['frames'][frame]
@@ -129,9 +132,29 @@ def test_adaptation_preserves_loss_detection_and_geometric_truth(name: str) -> N
     assert seen_losses > 0
 
 
+@pytest.mark.parametrize('windows', [(), (15, 21, 31)])
+def test_window_preset_keeps_bidirectional_synthetic_trs_accuracy(windows: tuple[int, ...]) -> None:
+    directory = ts.fixture_dir()
+    manifest = ts.load_manifest(directory, 'trs')
+    corners = ts.reference_corners(manifest)
+    tracker = Tracker2D(TrackerConfig(adaptive_appearance=True, lk_consensus_windows=windows),
+                        FeatureDetector(DetectorConfig(max_features=64)))
+    transforms = ts.track_both_directions(
+        directory, 'trs', TrackingMode.TRANSLATION_ROTATION_SCALE, tracker)
+    errors = []
+    for frame, transform in transforms.items():
+        if transform.status == TrackStatus.FAILED:
+            continue
+        expected = np.asarray(manifest['frames'][frame]['homography']).reshape(3, 3)
+        errors.append(ts.corner_error(transform.matrix_np, expected, corners))
+    assert len(errors) >= len(manifest['frames']) * .95
+    assert np.mean(errors) < 1.5
+    assert max(errors) < 3.0
+
+
 @pytest.mark.real_media
-@pytest.mark.parametrize('features', [12, 64])
-def test_user_window_clip_tracks_every_frame(features: int) -> None:
+@pytest.mark.parametrize('features,reference', [(12, 0), (64, 0), (64, 61)])
+def test_user_window_clip_tracks_every_frame(features: int, reference: int) -> None:
     configured = os.environ.get('TOPOS_TRACKING_REAL_VIDEO')
     if not configured:
         pytest.skip('Set TOPOS_TRACKING_REAL_VIDEO to opt into the local 124-frame user clip')
@@ -140,16 +163,47 @@ def test_user_window_clip_tracks_every_frame(features: int) -> None:
         pytest.skip(f'Local tracking clip is unavailable: {path.name}')
     request = TrackRequest(
         media_path=str(path), pattern_region=(.35, .2333333333, .3, .5333333334),
-        search_region=(.2, 0.0, .6, 1.0), reference_frame=0, frame_start=0, frame_end=123,
+        search_region=(.2, 0.0, .6, 1.0), reference_frame=reference, frame_start=0, frame_end=123,
         mode=TrackingMode.TRANSLATION_ROTATION_SCALE, quality=AnalysisQuality.NORMAL,
         shape_geometry={'type': 'circle', 'center': [.5, .5],
                         'size': [.15, .2666666667], 'rotation': 0.0},
     )
-    result = Tracker2D(
-        TrackerConfig(adaptive_appearance=True, failure_policy=FailurePolicy.RECAPTURE),
+    tracker = Tracker2D(
+        TrackerConfig(adaptive_appearance=True, failure_policy=FailurePolicy.RECAPTURE,
+                      lk_consensus_windows=(15, 21, 31) if features == 64 else ()),
         FeatureDetector(DetectorConfig(max_features=features)),
-    ).track(request)
+    )
+    result = tracker.track(request)
+    if reference:
+        backward = tracker.track(replace(request, direction=TrackDirection.BACKWARD))
+        result = replace(result, transforms={**result.transforms, **backward.transforms})
+        assert not backward.cancelled
     assert not result.cancelled
     assert set(result.transforms) == set(range(124))
     assert all(item.status == TrackStatus.VALID for item in result.transforms.values())
     assert all(np.isfinite(item.matrix_np).all() for item in result.transforms.values())
+    if features == 64 and reference == 0:
+        # Approximate observations from a NEW default Circle in the local
+        # Resolve comparison, with 3D off. Pan/Tilt are converted from its 4K
+        # readouts to this 1080p source. Rounded UI samples are a parity bound,
+        # not ground truth or a claim of identical proprietary algorithms.
+        reference = {15: (-4.22, -4.525, 1.01, .01),
+                     30: (-19.51, -3.48, 1.01, .0),
+                     45: (-22.635, .93, 1.01, .0),
+                     60: (4.185, 24.515, 1.06, .03),
+                     75: (17.47, 32.405, 1.03, .06),
+                     90: (40.245, 8.275, 1.03, .06),
+                     105: (51.22, -6.61, 1.01, .07),
+                     123: (58.81, -17.46, 1.03, .09)}
+        corners = np.array([[-288, -288], [288, -288], [288, 288], [-288, 288]])
+        errors = []
+        for frame, (dx, dy, scale, angle) in reference.items():
+            rotation = np.array([[math.cos(angle), -math.sin(angle)],
+                                 [math.sin(angle), math.cos(angle)]])
+            observed = corners @ rotation.T * scale + [960 + dx, 540 + dy]
+            estimated = cv2.perspectiveTransform(
+                (corners + [960, 540]).astype(np.float64).reshape(1, -1, 2),
+                result.transforms[frame].matrix_np)[0]
+            errors.extend(np.linalg.norm(estimated - observed, axis=1))
+        assert np.mean(errors) < 10.0
+        assert max(errors) < 20.0

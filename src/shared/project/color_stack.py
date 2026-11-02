@@ -31,7 +31,8 @@ from src.shared.extra_fields import preserves_extras, split_extras
 #      src/features/color/core/curves_soft_clip.py）。权威状态始终是
 #      Layer 快照内的同名字段；平铺键只服务旧格式回退与面板直读。
 #      读端不分支版本号（缺失键 = 默认恒等），写端恒写当前版本。
-COLOR_STACK_SCHEMA_VERSION = 3
+# v4 - optional per-clip camera stabilization, absent in legacy stacks.
+COLOR_STACK_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,7 @@ class ColorStackData:
     # P1-COLOR-13: per-clip 视频降噪参数（VideoDenoiseParams.to_dict；
     # None = 该 clip 未启用，切 clip 时据此重置引擎会话防串扰）
     video_denoise: dict[str, Any] | None = None
+    video_stabilization: dict[str, Any] = field(default_factory=dict)
     # DESK-04A：未来 schema 未知键保留（load→save 不丢）
     _extra_fields: dict = field(default_factory=dict, repr=False, compare=False)
 
@@ -131,7 +133,7 @@ class ColorStackData:
         "lut_path", "lut_intensity",
         "created_at", "modified_at", "scope", "source_kind",
         "timeline_id", "clip_id", "trackings",
-        "layers", "active_layer_index", "raw_params", "video_denoise",
+        "layers", "active_layer_index", "raw_params", "video_denoise", "video_stabilization",
     })
 
     def __post_init__(self) -> None:
@@ -276,6 +278,12 @@ class ColorStackData:
         return replace(
             self, video_denoise=video_denoise, modified_at=time.time())
 
+    def with_video_stabilization(self, state: dict[str, Any]) -> ColorStackData:
+        """Freeze versioned per-clip camera stabilization (empty clears it)."""
+        from src.shared.tracking.stabilization_state import validate_stabilization_state
+        return replace(self, video_stabilization=validate_stabilization_state(state),
+                       modified_at=time.time())
+
     def with_trackings(self, trackings: dict[str, Any]) -> ColorStackData:
         """创建新实例，更新蒙版跟踪数据（TrackingStore 序列化字典）"""
         return replace(self, trackings=copy.deepcopy(trackings), modified_at=time.time())
@@ -335,6 +343,8 @@ class ColorStackData:
             data["active_layer_index"] = self.active_layer_index
         if self.raw_params:
             data["raw_params"] = self.raw_params
+        if self.video_stabilization:
+            data["video_stabilization"] = copy.deepcopy(self.video_stabilization)
         if self.video_denoise:
             data["video_denoise"] = self.video_denoise
         # DESK-04A：未知键原样回写（不覆盖已知键——extras 只含未知键）
@@ -379,6 +389,7 @@ class ColorStackData:
             video_denoise=(
                 data.get("video_denoise")
                 if isinstance(data.get("video_denoise"), dict) else None),
+            video_stabilization=_load_stabilization(data.get("video_stabilization")),
             _extra_fields=split_extras(data, ColorStackData._KNOWN_KEYS),
         )
 
@@ -399,3 +410,8 @@ class ColorStackData:
             f"asset_id={self.asset_id!r}, "
             f"name={self.name!r})"
         )
+
+
+def _load_stabilization(state: object) -> dict[str, Any]:
+    from src.shared.tracking.stabilization_state import validate_stabilization_state
+    return validate_stabilization_state(state)

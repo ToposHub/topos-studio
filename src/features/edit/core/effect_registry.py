@@ -597,6 +597,8 @@ class EffectRegistry:
             # 旧实现单个 spec 抛异常会让循环内尚未注册的全部 video filter
             # 一并消失（叠加 AUD-16804 的场景则直接炸掉单例构造）。
             for spec in catalog.get_all_specs():
+                if spec.internal:
+                    continue
                 try:
                     self.register(_spec_to_definition(spec))
                 except Exception as spec_err:  # noqa: BLE001 — 单条隔离

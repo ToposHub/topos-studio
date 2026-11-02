@@ -151,10 +151,10 @@ class TestHistogramWidget:
 
 class TestScopePanelModes:
     def test_mode_registry_complete(self):
-        """模式表包含八个专业模式（P1-COLOR-06 两批扩展后）。"""
+        """Keep single-mode indices stable while adding multi-view layouts."""
         assert MODE_ORDER == ['waveform', 'vectorscope', 'split',
                               'parade', 'luma', 'histogram', 'cie',
-                              'falsecolor']
+                              'falsecolor', 'quad', 'all']
         for mode in MODE_ORDER:
             assert mode in SCOPE_MODES
 

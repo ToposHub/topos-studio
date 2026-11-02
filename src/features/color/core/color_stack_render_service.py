@@ -93,6 +93,7 @@ class ColorStackRenderService:
             "soft_clip_params": dict(stack.soft_clip_params) if hasattr(stack, 'soft_clip_params') else {},
             "lut_path": stack.lut_path if hasattr(stack, 'lut_path') else None,
             "lut_intensity": stack.lut_intensity if hasattr(stack, 'lut_intensity') else 1.0,
+            "video_stabilization": getattr(stack, "video_stabilization", {}),
         }
 
     def _resolve_preset(
@@ -134,6 +135,7 @@ class ColorStackRenderService:
             "soft_clip_params": dict(embedded_stack.get("soft_clip_params", {})),
             "lut_path": embedded_stack.get("lut_path"),
             "lut_intensity": embedded_stack.get("lut_intensity", 1.0),
+            "video_stabilization": embedded_stack.get("video_stabilization", {}),
         }
 
     @staticmethod

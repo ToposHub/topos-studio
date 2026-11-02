@@ -1786,9 +1786,10 @@ class AsyncRenderer(QThread):
         """Luma waveform density (BT.709 Y, white trace via channel 3)."""
         self._ensure_scope_engine().accumulate_waveform(pool, channel=3)
 
-    def _scope_display_luma(self, pool) -> None:
+    def _scope_display_luma(self, pool: dict, *, target: str = 'wf_display') -> None:
         """Tone-map luma density (waveform display renders the white trace)."""
-        self._ensure_scope_engine().display_waveform(pool)
+        self._ensure_scope_engine().display_waveform(pool, single_channel=True,
+                                                   target=target)
 
     def _scope_display_waveform(self, pool) -> float:
         """Tone-map waveform/luma density -> RGBA8 with graticule."""
@@ -1799,9 +1800,9 @@ class AsyncRenderer(QThread):
         """RGB parade: waveform accumulation viewport-partitioned in thirds."""
         self._ensure_scope_engine().accumulate_parade(pool)
 
-    def _scope_display_parade(self, pool) -> None:
+    def _scope_display_parade(self, pool: dict, *, target: str = 'wf_display') -> None:
         """Tone-map parade density (waveform display over channel thirds)."""
-        self._ensure_scope_engine().display_parade(pool)
+        self._ensure_scope_engine().display_parade(pool, target=target)
 
     def _scope_accumulate_vectorscope(self, pool, zoom: float) -> None:
         """Accumulate density into the R16F vectorscope texture."""
@@ -1982,7 +1983,7 @@ class AsyncRenderer(QThread):
                 mask_texture = self.layer_textures.get(
                     demand.mask_layer_id, {}
                 ).get('mask')
-            if not mode_needs_falsecolor(demand.mode) or bool(
+            if demand.mode != 'falsecolor' or bool(
                 getattr(demand, 'histogram_overlay', False)
             ):
                 self._scope_sample_front(
@@ -2017,13 +2018,21 @@ class AsyncRenderer(QThread):
 
             if mode_needs_parade(demand.mode):
                 self._scope_accumulate_parade(pool)
-                self._scope_display_parade(pool)
-                parade_id = pool['wf_display'].glo
+                if demand.mode in ('quad', 'all'):
+                    self._scope_display_parade(pool, target='parade_display')
+                    parade_id = pool['parade_display'].glo
+                else:
+                    self._scope_display_parade(pool)
+                    parade_id = pool['wf_display'].glo
 
             if mode_needs_luma(demand.mode):
                 self._scope_accumulate_luma(pool)
-                self._scope_display_luma(pool)
-                luma_id = pool['wf_display'].glo
+                if demand.mode == 'all':
+                    self._scope_display_luma(pool, target='luma_display')
+                    luma_id = pool['luma_display'].glo
+                else:
+                    self._scope_display_luma(pool)
+                    luma_id = pool['wf_display'].glo
 
             if mode_needs_histogram(demand.mode) or bool(
                 getattr(demand, 'histogram_overlay', False)
@@ -2588,6 +2597,35 @@ class AsyncRenderer(QThread):
                     )
                     return False
 
+        # Render the full graded source before stabilization. The final warp
+        # then samples the requested viewport ROI, so zoom/pan cannot reveal
+        # missing offscreen pixels or move grading masks separately.
+        stabilization_state = params.get('video_stabilization') or {}
+        stabilization_output_rect = None
+        stabilization_frame = int(params.get('stabilization_source_frame', 0))
+        if stabilization_state:
+            from src.shared.tracking.stabilization_state import stabilization_matrix
+            if stabilization_matrix(stabilization_state, stabilization_frame) is not None:
+                native_w = float(stabilization_state['source_width'])
+                native_h = float(stabilization_state['source_height'])
+                input_w, input_h = self.video_source_size if (
+                    self.current_video_texture is not None or self.current_video_planes is not None
+                ) else self.source_image_size
+                if has_source_override:
+                    input_h, input_w = source_image.shape[:2]
+                input_w, input_h = float(input_w or native_w), float(input_h or native_h)
+                scene_rect = params.get('scene_visible_rect')
+                if scene_rect:
+                    stabilization_output_rect = tuple(scene_rect)
+                else:
+                    vx, vy, vw, vh = params.get('visible_rect') or (0., 0., input_w, input_h)
+                    stabilization_output_rect = (vx * native_w / input_w, vy * native_h / input_h,
+                                                 vw * native_w / input_w, vh * native_h / input_h)
+                params = dict(params)
+                full_rect = (0., 0., input_w, input_h)
+                params['visible_rect'] = full_rect
+                params['grain_visible_rect'] = full_rect
+
         self.ctx.viewport = (0, 0, w, h)
         layers = params.get('layers', [])
 
@@ -3045,6 +3083,21 @@ class AsyncRenderer(QThread):
                     current_target_tex = pong_tex
                     current_target_fbo = pong_fbo
 
+        if stabilization_output_rect is not None:
+            from src.features.shared.effects.effect_pass_runner import EffectPassRunner
+            from src.features.shared.effects.video_stabilization import apply_stabilization_gpu
+            runner = self.__dict__.get('_stabilization_runner')
+            if runner is None:
+                runner = EffectPassRunner(self.ctx)
+                self._stabilization_runner = runner
+            apply_stabilization_gpu(runner, current_source_tex.glo, stabilization_state,
+                                    stabilization_frame, w, h,
+                                    dtype='f4' if color_output_target == 'full_res' else 'f2',
+                                    output_rect=stabilization_output_rect)
+            current_source_tex = runner.output_texture()
+            if current_source_tex is None:
+                raise RuntimeError('Stabilization produced no render surface')
+
         # ── Output stage ──
         if color_output_mode:
             # Scope uses a private target so its quality-tier resize cannot
@@ -3192,7 +3245,7 @@ class AsyncRenderer(QThread):
                 fp=_fp,
             )
             # Store the scene-visible rect (original image coords) for UV adjustment during zoom
-            self.rendered_visible_rect = params.get('scene_visible_rect', params.get('visible_rect'))
+            self.rendered_visible_rect = params.get('scene_visible_rect', stabilization_output_rect or params.get('visible_rect'))
             # Cache only parameters that reached a successful front publish.
             # A dropped playback/clip-generation render must never replace the
             # scope recipe with stale layers or grading state.
@@ -5631,6 +5684,8 @@ class AsyncRenderer(QThread):
         if bool(self.__dict__.get("video_texture_pending", False)):
             self._force_finish_next_publish = True
         self.video_texture_pending = False
+        render_params = dict(render_params)
+        render_params['stabilization_source_frame'] = int(frame_index)
         self._do_render(render_params, allow_during_playback=True)
         self.debug_last_rendered_video_frame_index = int(frame_index)
         if data.get('reason') == 'seek' or not drop_if_stale:
@@ -5825,6 +5880,8 @@ class AsyncRenderer(QThread):
         if bool(self.__dict__.get("video_texture_pending", False)):
             self._force_finish_next_publish = True
         self.video_texture_pending = False
+        render_params = dict(render_params)
+        render_params['stabilization_source_frame'] = int(frame_index)
         self._do_render(render_params, allow_during_playback=True)
         self.debug_last_rendered_video_frame_index = int(frame_index)
         if data.get('reason') == 'seek' or not drop_if_stale:
@@ -6401,6 +6458,9 @@ class AsyncRenderer(QThread):
         # ``run`` exits its command loop.
         self._release_queued_gpu_frames()
         if self.ctx:
+            runner = self.__dict__.pop('_stabilization_runner', None)
+            if runner is not None:
+                runner.release()
             # 释放 VT 零拷贝桥接的 GL 纹理环（本线程持有上下文）
             vt_bridge = self.__dict__.get('_video_vt_bridge', None)
             if vt_bridge is not None:

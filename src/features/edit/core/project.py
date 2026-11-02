@@ -2624,6 +2624,7 @@ class EditProject:
         raw_params: dict[str, Any] | None = None,
         trackings: dict[str, Any] | None = None,
         video_denoise: dict[str, Any] | None = None,
+        video_stabilization: dict[str, Any] | None = None,
     ) -> EditProject:
         """
         更新调色栈参数 (P9.1)。
@@ -2676,6 +2677,8 @@ class EditProject:
             )
         if trackings is not None:
             stack = stack.with_trackings(trackings)
+        if video_stabilization is not None:
+            stack = stack.with_video_stabilization(video_stabilization)
         if video_denoise is not None:
             # 空 dict 归一为 None（undo 清除通道传 {}）：
             # None = 该 clip 未启用降噪

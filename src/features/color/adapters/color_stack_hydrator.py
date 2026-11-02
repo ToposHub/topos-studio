@@ -195,6 +195,10 @@ class ColorStackHydrator:
             logger.debug("apply_stack_to_engine: no engine, skipping")
             return
 
+        state = getattr(stack, 'video_stabilization', {})
+        setter = getattr(engine, 'set_video_stabilization_state', None)
+        if callable(setter):
+            setter(state if isinstance(state, dict) else {})
         # P1-COLOR-13: per-clip 视频降噪。video_denoise_params 是引擎级
         # 单值——切 clip 时若不先重置，上一个 clip 开着的降噪会串扰本
         # clip；栈携带参数时按快照恢复并推送到渲染器。
@@ -518,6 +522,8 @@ class ColorStackHydrator:
             active_layer_index=active_layer_index,
             raw_params=raw_params,
             video_denoise=video_denoise,
+            video_stabilization=(engine.get_video_stabilization_state()
+                if engine and callable(getattr(engine, 'get_video_stabilization_state', None)) else {}),
         )
 
     # ------------------------------------------------------------------

@@ -1,0 +1,85 @@
+{
+  "scrubs": [
+    {
+      "requested": 60,
+      "actual": 60,
+      "graph": 60,
+      "bound": null
+    },
+    {
+      "requested": 123,
+      "actual": 123,
+      "graph": 123,
+      "bound": null
+    },
+    {
+      "requested": 0,
+      "actual": 0,
+      "graph": 0,
+      "bound": null
+    }
+  ],
+  "params": {
+    "mode": "trs",
+    "quality": "standard",
+    "feature_count": 64,
+    "search_multiplier": 2.0,
+    "min_confidence": 0.35,
+    "failure_policy": "recapture",
+    "channels": {
+      "tx": true,
+      "ty": true,
+      "scale": true,
+      "rotation": true,
+      "perspective": false
+    },
+    "correction_mode": "clip",
+    "interactive": false,
+    "algorithm": "region"
+  },
+  "endpoint_after_tracking": 123,
+  "frame_size": [
+    1920,
+    1080
+  ],
+  "readouts": {
+    "0": {
+      "tx": 0.0,
+      "ty": -0.0,
+      "scale": 1.0,
+      "rotation": -0.0
+    },
+    "30": {
+      "tx": -16.643146335734855,
+      "ty": 4.854876334908113,
+      "scale": 0.993669598054862,
+      "rotation": -0.004950409600928291
+    },
+    "60": {
+      "tx": 3.9161725977097603,
+      "ty": -23.51446729640884,
+      "scale": 1.0541468921041277,
+      "rotation": -0.04520906559104471
+    },
+    "90": {
+      "tx": 36.22720767090232,
+      "ty": -3.225170320118991,
+      "scale": 1.024908974460455,
+      "rotation": -0.038518737018413594
+    },
+    "123": {
+      "tx": 53.52184543892963,
+      "ty": 27.8538636304321,
+      "scale": 1.0004322159782277,
+      "rotation": -0.04320857188670129
+    }
+  },
+  "tracking": {
+    "seconds": 4.016754033000325,
+    "count": 124,
+    "states": {
+      "valid": 124
+    },
+    "panel": "PanelState.SUCCESS"
+  }
+}

@@ -1115,6 +1115,9 @@ class SaveRouter:
                 result['trackings'] = trackings_payload
 
         # P1-COLOR-13: per-clip 视频降噪参数（引擎会话级 → 工程数据）
+        stabilization = getattr(engine, 'get_video_stabilization_state', None)
+        if callable(stabilization):
+            result['video_stabilization'] = stabilization()
         vd_params = getattr(engine, 'video_denoise_params', None)
         if vd_params is not None:
             result['video_denoise'] = vd_params.to_dict()
@@ -1356,6 +1359,9 @@ class SaveRouter:
             if trackings_payload:
                 stack_payload["trackings"] = trackings_payload
 
+        stabilization = getattr(engine, "get_video_stabilization_state", None)
+        if callable(stabilization):
+            stack_payload["video_stabilization"] = stabilization()
         color_stacks_data[stack_id] = stack_payload
 
         return color_stacks_data

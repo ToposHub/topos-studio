@@ -1,0 +1,41 @@
+{
+  "source": {
+    "name": "测试素材01.mov",
+    "width": 1920,
+    "height": 1080,
+    "fps": 25,
+    "frames": 124
+  },
+  "native_analysis_mode": "similarity",
+  "native_analysis_seconds": 5.924049901004764,
+  "native_analysis_valid_frames": 124,
+  "native_analysis_failed_frames": [],
+  "native_checks": {
+    "clip_owned_commit": true,
+    "bypass": true,
+    "camera_lock_with_zero_saved_strength": true,
+    "global_reset_without_window": true,
+    "engine_and_project_undo": true,
+    "redo": true,
+    "topos_archive_save_and_reload": true,
+    "export_bound_to_current_clip_stack": true,
+    "production_export_124_frames": true,
+    "main_window_close_and_service_shutdown": true
+  },
+  "regression": {
+    "passed": 2910,
+    "skipped": 11,
+    "warnings": 4
+  },
+  "post_regression_render_checks": {
+    "passed": 402
+  },
+  "post_regression_ui_and_roi_checks": {
+    "passed": 73
+  },
+  "limitations": [
+    "No numeric comparison against a DaVinci stabilized export",
+    "Edit/Deliver apply source-space stabilization through CPU fallback",
+    "1080p sample is not a 4K60 performance benchmark"
+  ]
+}

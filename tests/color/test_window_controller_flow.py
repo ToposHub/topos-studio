@@ -173,3 +173,100 @@ def test_undo_invalidates_worker_before_refreshing_restored_ui():
     assert events[0] == "invalidate"
     assert ("selection", None) in events
     assert host._tracker_single_step_target is None
+
+
+def test_window_factory_enables_verified_dense_cloud_only(qapp):
+    ctrl, shape, binding, _ = controller(qapp)
+    ctrl.tracking_service = MagicMock()
+    ctrl._tracker_params_to_engine_factory(ctrl.tracker_panel.get_params())
+    tracker = ctrl.tracking_service.set_tracker_factory.call_args.args[0]()
+    assert tracker.config.lk_consensus_windows == (15, 21, 31)
+    assert tracker.config.adaptive_appearance
+    assert tracker.config.failure_policy.value == 'recapture'
+    assert tracker.detector.config.max_features == 64
+    assert not tracker.detector._point_mode
+
+
+@pytest.mark.parametrize('settings,expected_count,expected_policy', [
+    ({'feature_count': 12, 'failure_policy': 'stop'}, 64, 'recapture'),
+    ({'feature_count': 80, 'failure_policy': 'stop'}, 80, 'stop'),
+    ({'solver_revision': 2, 'feature_count': 12, 'failure_policy': 'stop'}, 12, 'stop'),
+    ({'algorithm': 'point', 'feature_count': 12, 'failure_policy': 'stop'}, 12, 'stop'),
+])
+def test_old_default_preset_upgrade_preserves_results_and_explicit_preferences(
+        qapp, settings, expected_count, expected_policy):
+    import copy
+    ctrl, shape, binding, _ = controller(qapp)
+    binding.base_geometry['_tracker_settings'] = copy.deepcopy(settings)
+    before = binding.to_dict()
+    ctrl._color_session_manager = SimpleNamespace(
+        get_current_session=lambda: SimpleNamespace(clip_id='clip'))
+    ctrl._sync_tracker_clip_range = lambda: None
+    ctrl._load_tracker_binding(shape.id)
+    params = ctrl.tracker_panel.get_params()
+    assert params['feature_count'] == expected_count
+    assert params['failure_policy'] == expected_policy
+    assert binding.to_dict() == before
+
+
+@pytest.mark.parametrize('direction,expected', [('forward', 20), ('backward', 0)])
+def test_complete_pass_advances_to_direction_endpoint(qapp, direction, expected):
+    from src.shared.tracking.tracker_2d import TrackDirection
+    ctrl, shape, binding, _ = controller(qapp)
+    ctrl._active_tracker_task = ('clip', shape.id)
+    ctrl._active_tracker_directions = (TrackDirection(direction),)
+    ctrl.tracking_service = SimpleNamespace(task_key=lambda c, s: f'{c}:{s}',
+                                           is_running=lambda c, s: False)
+    ctrl._seek_tracker_frame = MagicMock()
+    ctrl._on_tracker_task_finished(f'clip:{shape.id}', 1,
+                                  SimpleNamespace(transforms={}, cancelled=False))
+    ctrl._seek_tracker_frame.assert_called_once_with(expected)
+
+
+def test_partial_stop_keeps_current_preview(qapp):
+    from src.shared.tracking.tracker_2d import TrackDirection
+    ctrl, shape, binding, _ = controller(qapp)
+    ctrl._active_tracker_task = ('clip', shape.id)
+    ctrl._active_tracker_directions = (TrackDirection.FORWARD,)
+    ctrl.tracking_service = SimpleNamespace(task_key=lambda c, s: f'{c}:{s}',
+                                           is_running=lambda c, s: False)
+    ctrl._seek_tracker_frame = MagicMock()
+    ctrl._on_tracker_task_finished(f'clip:{shape.id}', 1,
+                                  SimpleNamespace(transforms={}, cancelled=True))
+    ctrl._seek_tracker_frame.assert_not_called()
+
+
+def test_tracker_endpoint_source_frame_is_converted_for_trimmed_clip():
+    ctrl = ColorControllerMixin()
+    ctrl.video_controller = SimpleNamespace(seek_to_frame=MagicMock())
+    ctrl.tracker_panel = MagicMock()
+    ctrl._color_source_frame_to_local_frame = lambda frame: frame - 50
+    ctrl._seek_tracker_frame(70)
+    ctrl.video_controller.seek_to_frame.assert_called_once_with(20)
+    ctrl.tracker_panel.set_current_frame.assert_called_once_with(70)
+
+
+@pytest.mark.parametrize('direction,expected', [('forward', 12), ('backward', 5)])
+def test_completion_ignores_retained_results_outside_new_clip_trim(
+        qapp, direction, expected):
+    from src.shared.tracking.tracker_2d import TrackDirection
+    ctrl, shape, binding, _ = controller(qapp)
+    binding.source_frame_start, binding.source_frame_end = 5, 12
+    ctrl._active_tracker_task = ('clip', shape.id)
+    ctrl._active_tracker_directions = (TrackDirection(direction),)
+    ctrl.tracking_service = SimpleNamespace(task_key=lambda c, s: f'{c}:{s}',
+                                           is_running=lambda c, s: False)
+    ctrl._seek_tracker_frame = MagicMock()
+    ctrl._on_tracker_task_finished(f'clip:{shape.id}', 1,
+                                  SimpleNamespace(transforms={}, cancelled=False))
+    ctrl._seek_tracker_frame.assert_called_once_with(expected)
+
+
+@pytest.mark.parametrize('changes', [{'algorithm': 'point'}, {'mode': 'homography'}])
+def test_other_solvers_keep_their_existing_flow_policy(qapp, changes):
+    ctrl, _shape, _binding, _ = controller(qapp)
+    ctrl.tracking_service = MagicMock()
+    params = {**ctrl.tracker_panel.get_params(), **changes}
+    ctrl._tracker_params_to_engine_factory(params)
+    tracker = ctrl.tracking_service.set_tracker_factory.call_args.args[0]()
+    assert tracker.config.lk_consensus_windows == ()

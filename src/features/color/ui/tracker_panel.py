@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -225,6 +226,7 @@ class TrackerPanel(QWidget):
     delete_manual_requested = pyqtSignal()
     reset_current_requested = pyqtSignal()
     corner_pin_export_requested = pyqtSignal()
+    palette_mode_changed = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -239,6 +241,7 @@ class TrackerPanel(QWidget):
 
         self._state = PanelState.EMPTY
         self._bound_shape: Optional[str] = None
+        self._source_frame_size: tuple[int, int] = (0, 0)
         self._selected_feature_id: Optional[int] = None
         self.clear_tracking_requested.connect(self.clear_requested.emit)
         root = QVBoxLayout(self)
@@ -250,7 +253,8 @@ class TrackerPanel(QWidget):
         self.toolbar = TrackerToolBar(self)
         self.toolbar.setObjectName("tracker_context_toolbar")
         self.toolbar.hide()
-        root.addWidget(self._build_control_area())
+        self._window_control_area = self._build_control_area()
+        root.addWidget(self._window_control_area)
         root.addWidget(_separator())
         self.params_area = self._build_params_area()
         # 默认呈现达芬奇的曲线窗口；算法参数通过标题栏“参数”按钮展开。
@@ -270,16 +274,57 @@ class TrackerPanel(QWidget):
         self.graph = TrackerGraph(graph_host, show_controls=False)
         gh_layout.addWidget(self.graph, 1)
         self.graph.frame_clicked.connect(self.jump_frame_requested.emit)
+        self._window_graph_host = graph_host
         root.addWidget(graph_host, 1)
 
         root.addWidget(_separator())
-        root.addWidget(self._build_bottom_bar())
+        self._window_bottom_bar = self._build_bottom_bar()
+        root.addWidget(self._window_bottom_bar)
+        from src.features.color.ui.stabilizer_panel import StabilizerPanel
+        self.stabilizer = StabilizerPanel(self)
+        root.addWidget(self.stabilizer, 1)
+        self.stabilizer.hide()
+        self.palette_mode = "window"
+        self.stabilizer.state_changed.connect(self._sync_reset_button)
 
         self.set_state(PanelState.EMPTY)
 
     # ================================================================
     # 区块构建
     # ================================================================
+
+    def set_palette_mode(self, mode: str) -> None:
+        """Switch camera stabilization independently of the selected mask."""
+        if mode not in ('window', 'stabilizer'):
+            return
+        self.palette_mode = mode
+        stable = mode == 'stabilizer'
+        for widget in (self._window_control_area, self._window_graph_host, self._window_bottom_bar):
+            widget.setVisible(not stable)
+        self.params_area.setVisible(not stable and self.btn_params.isChecked())
+        self.stabilizer.setVisible(stable)
+        self.title_label.setText(tr('tracker.stabilizer.title', 'Tracker - Stabilizer')
+                                 if stable else tr('tracker.title', 'Tracker - Window'))
+        for name, button in self.title_mode_buttons.items():
+            button.setChecked(name == mode)
+        self._sync_reset_button()
+        self.palette_mode_changed.emit(mode)
+
+    def _sync_reset_button(self) -> None:
+        stable = self.palette_mode == 'stabilizer'
+        enabled = (self.stabilizer.can_reset() if stable else
+                   self._bound_shape is not None and self._state != PanelState.RUNNING)
+        self.btn_clear.setEnabled(enabled)
+        label = (tr('tracker.stabilizer.reset', 'Reset Stabilization') if stable else
+                 tr('tracker.clear_all_points', 'Clear All Tracking Points'))
+        self.btn_clear.setToolTip(label)
+        self.btn_clear.setAccessibleName(label)
+
+    def _reset_active_palette(self) -> None:
+        if self.palette_mode == 'stabilizer':
+            self.stabilizer.reset_requested.emit()
+        else:
+            self.clear_tracking_requested.emit()
 
     def _build_title_bar(self) -> QWidget:
         bar = QWidget(self)
@@ -291,6 +336,7 @@ class TrackerPanel(QWidget):
         self.status_light = TrackerStatusLight(bar)
         self.status_light.hide()
         title = QLabel(tr("tracker.title", "Tracker - Window"), bar)
+        self.title_label = title
         title.setObjectName("tracker_title")
         layout.addWidget(title)
         self.shape_name_label = QLabel("", bar)
@@ -305,9 +351,13 @@ class TrackerPanel(QWidget):
             button.setIconSize(QSize(20, 20))
             button.setStyleSheet("border:0; border-left:1px solid #101014; border-radius:0;")
             button.setAccessibleName(label)
-            button.setToolTip(label if key == "window" else tr(
+            button.setToolTip(label if key in ("window", "stabilizer") else tr(
                 "tracker.mode_unavailable", "{mode} is not available").format(mode=label))
-            button.setEnabled(key == "window")
+            button.setEnabled(key != "fx")
+            button.setCheckable(key != "fx")
+            button.setChecked(key == "window")
+            if key != "fx":
+                button.clicked.connect(lambda _checked=False, mode=key: self.set_palette_mode(mode))
             self.title_mode_buttons[key] = button
             layout.addWidget(button)
         self.btn_clear = QPushButton(bar)
@@ -317,7 +367,7 @@ class TrackerPanel(QWidget):
         self.btn_clear.setIconSize(QSize(14, 14))
         self.btn_clear.setStyleSheet("border:0; border-left:1px solid #101014; border-radius:0;")
         self.btn_clear.setToolTip(tr("tracker.clear_all_points", "Clear All Tracking Points"))
-        self.btn_clear.clicked.connect(self.clear_tracking_requested.emit)
+        self.btn_clear.clicked.connect(self._reset_active_palette)
         layout.addWidget(self.btn_clear)
         # Keep the public advanced-parameters toggle for controller/script callers.
         self.btn_params = QPushButton(bar)
@@ -614,8 +664,8 @@ class TrackerPanel(QWidget):
         add_row(1, tr("tracker.analysis_quality", "分析质量"), self.quality_combo)
 
         self.feature_spin = QSpinBox(area)
-        self.feature_spin.setRange(4, 200)
-        self.feature_spin.setValue(12)
+        self.feature_spin.setRange(4, 1000)
+        self.feature_spin.setValue(64)
         self.feature_spin.setToolTip(tr("tracker.feature_count_tooltip", "建议特征点数"))
         self.feature_spin.valueChanged.connect(self._emit_params_changed)
         add_row(2, tr("tracker.feature_count", "特征点数"), self.feature_spin)
@@ -922,7 +972,7 @@ class TrackerPanel(QWidget):
         self.btn_backward_one.setEnabled(bound and not running)
         # Dedicated stop button remains available during analysis.
         self.btn_auto.setEnabled(bound and not running)
-        self.btn_clear.setEnabled(bound and not running)
+        self._sync_reset_button()
         # 隐藏兼容按钮不参与可见布局。
         self.btn_both.setEnabled(bound and not running)
         self.btn_retrack.setEnabled(bound and not running
@@ -991,6 +1041,10 @@ class TrackerPanel(QWidget):
         frame_number = int(frame)
         self.graph.set_current_frame(frame_number)
 
+    def set_source_frame_size(self, width: int, height: int) -> None:
+        """Set source pixel dimensions for window-centered motion readouts."""
+        self._source_frame_size = (max(0, int(width)), max(0, int(height)))
+
     def set_tracking_binding(self, binding: object | None) -> None:
         """把 TrackingBinding 转换为达芬奇曲线窗口需要的显示数据。
 
@@ -1023,17 +1077,29 @@ class TrackerPanel(QWidget):
             "rotation": [],
             "perspective": [],
         }
+        base = getattr(binding, "base_geometry", None) or {}
+        center = base.get("center", (.5, .5))
+        width, height = self._source_frame_size
+        cx, cy = float(center[0]) * width, float(center[1]) * height
         for frame in keyframes:
             transform = all_transforms[frame]
             tx, ty = getattr(transform, "translation", (0.0, 0.0))
             sx, sy = getattr(transform, "scale", (1.0, 1.0))
+            matrix = tuple(getattr(transform, "matrix", ()))
+            if width > 0 and height > 0 and len(matrix) == 9:
+                denominator = matrix[6] * cx + matrix[7] * cy + matrix[8]
+                if abs(denominator) > 1e-12:
+                    tx = (matrix[0] * cx + matrix[1] * cy + matrix[2]) / denominator - cx
+                    ty = (matrix[3] * cx + matrix[4] * cy + matrix[5]) / denominator - cy
             series["tx"].append((int(frame), float(tx)))
-            series["ty"].append((int(frame), float(ty)))
+            # Resolve reports displacement at the window pivot, positive Tilt
+            # upwards, and Rotate in counterclockwise radians. Keep the stored
+            # pixel matrix and degree-based renderer geometry unchanged.
+            series["ty"].append((int(frame), -float(ty)))
             # Resolve's Zoom readout is a ratio: identity is 1.00.
             series["scale"].append((int(frame), (float(sx) + float(sy)) / 2.0))
-            series["rotation"].append((int(frame), float(getattr(transform, "rotation", 0.0))))
+            series["rotation"].append((int(frame), -math.radians(float(getattr(transform, "rotation", 0.0)))))
 
-            matrix = tuple(getattr(transform, "matrix", ()))
             if len(matrix) == 9:
                 series["perspective"].append(
                     (int(frame), float(abs(matrix[6]) + abs(matrix[7])))

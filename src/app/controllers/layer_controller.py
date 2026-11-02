@@ -2404,6 +2404,14 @@ class LayerOpsMixin:
         if service is not None:
             service.invalidate()
         self._tracker_single_step_target = None
+        stabilizer = getattr(self, "stabilization_service", None)
+        if stabilizer is not None:
+            stabilizer.invalidate()
+            self.stabilization_plan_service.invalidate()
+            self._stabilizer_params_timer.stop()
+            self._stabilizer_task = None
+            self.tracker_panel.stabilizer.set_running(False)
+            self._sync_stabilizer_panel()
         # 更新画布
         self.update_canvas()
 
@@ -2432,6 +2440,11 @@ class LayerOpsMixin:
             self._refresh_grade_keyframe_ui()
         except Exception:
             pass
+
+        # Engine history also owns whole-frame stabilization. Commit the
+        # restored snapshot to the clip so Edit/export/save see the same frame.
+        if stabilizer is not None:
+            self._commit_stabilizer_change()
 
     def on_color_picked(self, h, s, v, first) -> None:
         """画布取色器拾色：把 HSV 值交给 qualifier 面板（拖拽加色逻辑）。

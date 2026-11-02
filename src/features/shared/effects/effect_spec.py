@@ -125,6 +125,9 @@ class EffectSpec:
     icon: str = ""
     description: str = ""
     preview_cost: str = "medium"
+    # Registered render passes owned by a dedicated tool are not user-addable
+    # clip effects. They remain discoverable by renderers through the catalog.
+    internal: bool = False
     # O7（timeline_occlusion_culling_optimization_plan）：遮挡安全能力
     # 声明。True 表示该效果不读取/不依赖下层已合成背景，且不会把可见
     # 内容扩展到画布之外——只有显式声明为 True 且覆盖测试通过的效果

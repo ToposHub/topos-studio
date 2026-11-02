@@ -1,0 +1,54 @@
+{
+  "12": {
+    "samples": [
+      {
+        "frame": 30,
+        "mean_cage_corner_difference_px": 17.560439903071206,
+        "max_cage_corner_difference_px": 24.62373252791015
+      },
+      {
+        "frame": 60,
+        "mean_cage_corner_difference_px": 31.980557297020273,
+        "max_cage_corner_difference_px": 44.94688254889707
+      },
+      {
+        "frame": 90,
+        "mean_cage_corner_difference_px": 93.48979552673309,
+        "max_cage_corner_difference_px": 129.3745833642447
+      },
+      {
+        "frame": 123,
+        "mean_cage_corner_difference_px": 141.2270178824408,
+        "max_cage_corner_difference_px": 190.17594713150615
+      }
+    ],
+    "overall_mean_px": 71.06445265231635,
+    "overall_max_px": 190.17594713150615
+  },
+  "64": {
+    "samples": [
+      {
+        "frame": 30,
+        "mean_cage_corner_difference_px": 7.3375851896251465,
+        "max_cage_corner_difference_px": 9.702058112913159
+      },
+      {
+        "frame": 60,
+        "mean_cage_corner_difference_px": 7.006804267616559,
+        "max_cage_corner_difference_px": 7.996135244428307
+      },
+      {
+        "frame": 90,
+        "mean_cage_corner_difference_px": 10.34674244736863,
+        "max_cage_corner_difference_px": 15.518212172761594
+      },
+      {
+        "frame": 123,
+        "mean_cage_corner_difference_px": 24.41229797099453,
+        "max_cage_corner_difference_px": 32.22176408223702
+      }
+    ],
+    "overall_mean_px": 12.275857468901217,
+    "overall_max_px": 32.22176408223702
+  }
+}

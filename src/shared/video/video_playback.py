@@ -2004,6 +2004,7 @@ class VideoPlaybackEngine(QObject):
         """
         params = {
             'viewport_size': (0, 0),  # 由 renderer 使用视频尺寸填充
+            'video_stabilization': getattr(self.engine, 'video_stabilization', {}),
             'layers': [],
             'raw_preview': self._identity_video_raw_params(),
             'film_grain': {},

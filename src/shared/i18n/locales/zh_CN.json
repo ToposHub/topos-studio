@@ -2567,6 +2567,18 @@
     "toggle_all": "全选 / 全不选"
   },
   "scope": {
+    "mode_waveform": "波形",
+    "mode_vectorscope": "矢量",
+    "mode_split": "双视图",
+    "mode_parade": "分量图",
+    "mode_luma": "亮度波形",
+    "mode_histogram": "直方图",
+    "mode_cie": "CIE 色度图",
+    "mode_falsecolor": "假色",
+    "mode_quad": "四视图",
+    "mode_all": "全部示波器",
+    "expand": "展开",
+    "options": "示波器选项",
     "gpu_fallback_banner": "GPU 示波器不可用（{reason}）——已回退 CPU 诊断页"
   },
   "edit.properties.raw": "RAW",
@@ -2855,5 +2867,29 @@
   },
   "fps_indicator": {
     "tooltip": "实时预览帧率"
+  },
+  "tracker": {
+    "stabilizer": {
+      "title": "跟踪器 - 稳定器",
+      "bypass": "旁路稳定",
+      "analyze": "稳定",
+      "stop": "停止",
+      "reset": "重置稳定",
+      "cropping_ratio": "裁切比例",
+      "smooth": "平滑度",
+      "strength": "强度",
+      "camera_lock": "相机锁定",
+      "zoom": "缩放",
+      "mode_perspective": "透视",
+      "mode_similarity": "相似",
+      "mode_translation": "平移",
+      "progress": "分析 {done} / {total} · {percent}%",
+      "needs_video": "需要至少两帧视频",
+      "insufficient_motion": "没有足够可信的全画面运动，请尝试相似或平移模式",
+      "result": "{done} / {total} 帧 · 缩放 {zoom}×",
+      "failed_frames": " · {count} 帧未补偿",
+      "crop_limited": " · 补偿受裁切限制",
+      "mode_changed": "模式已改变，点击稳定重新分析"
+    }
   }
 }
