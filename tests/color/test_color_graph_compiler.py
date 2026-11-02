@@ -250,7 +250,8 @@ class TestCompoundAndSharedExpansion:
 
 
 class TestCapabilityAndCache:
-    def test_capability_pending_mixers_reported(self):
+    def test_mixer_capability_exact_after_b10(self):
+        """B10 后 mixer 族翻 exact；compound（未展开残骸）保持 pending。"""
         service = _service()
         grown = service.apply_intent(_serial(1), "add_parallel_branch", {})
         plan = compile_graph(freeze_graph(grown.graph, session_id="s"),
@@ -259,8 +260,8 @@ class TestCapabilityAndCache:
         statuses = dict(report.unsupported_status)
         mixer_label = next(label for label, _ in statuses.items()
                            if "parallel_mixer" in label)
-        assert statuses[mixer_label] == "pending"
-        # exact 算子可执行、pending 待 B10 翻绿
+        assert statuses[mixer_label] == "exact"
+        assert "parallel_mixer" in report.supported_ops
         assert "corrector" in report.supported_ops
 
     def test_compile_cache_hit(self):

@@ -140,8 +140,8 @@ class TestSerialGraphExecutionParity:
 
 
 class TestCapabilityFailClosed:
-    def test_mixer_plan_refuses_execution(self):
-        """含 pending 算子（mixer）的 plan：fail-closed 拒绝，不发布。"""
+    def test_unknown_op_refuses_execution(self):
+        """目录外算子：fail-closed 拒绝，不发布（B10 mixer 已翻 exact）。"""
         from src.features.color.core.color_graph_service import ColorGraphService
         counter = iter(range(100))
         service = ColorGraphService(id_factory=lambda: f"m{next(counter)}")
@@ -150,7 +150,10 @@ class TestCapabilityFailClosed:
         assert grown.ok
         ctx = moderngl.create_standalone_context(require=330)
         try:
-            executor = ColorGraphExecutor(ctx)
+            executor = ColorGraphExecutor(
+                ctx, backend_catalog={"source": "exact", "corrector": "exact",
+                                      "output": "exact", "parallel_mixer":
+                                      "pending"})
             plan = compile_graph(freeze_graph(grown.graph, session_id="s"),
                                  size=(64, 64))
             src = ctx.texture((64, 64), components=4, dtype="f2")

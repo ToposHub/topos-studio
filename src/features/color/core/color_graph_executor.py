@@ -34,6 +34,10 @@ from src.features.color.core.corrector_render_service import (
     render_corrector_gl,
 )
 from src.features.color.core.shader_compiler import ShaderPipeline
+from src.features.color.shaders.node_ops_gl import (
+    KEY_MODE_INDEX,
+    LAYER_MODE_INDEX,
+)
 
 
 class GraphExecutionCancelled(Exception):
@@ -69,6 +73,20 @@ class GraphExecutionResult:
     released_textures: int = 0
     diagnostic_code: str | None = None
     diagnostic_message: str | None = None
+
+
+class _SplitPlanes:
+    """Splitter 输出载体：R/G/B 三个灰度平面纹理（combiner 消费）。"""
+
+    def __init__(self, planes: list) -> None:
+        self.r, self.g, self.b = planes
+
+    def release(self) -> None:
+        for tex in (self.r, self.g, self.b):
+            try:
+                tex.release()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 @dataclass
@@ -266,6 +284,128 @@ class ColorGraphExecutor:
             fbo.release()
             return out_tex
 
+        if render_pass.op == "parallel_mixer":
+            # spec §1：base 依序被分支按有效 key（缺省全 1）lerp
+            base = self._input_for(render_pass, "base", node_outputs,
+                                   source_texture)
+            branches = [node_outputs[ref.node_id]
+                        for port, ref in render_pass.inputs
+                        if port == "branch" and ref is not None]
+            current = base
+            for branch in branches:
+                current = self._run_op_shader(
+                    "parallel_mix",
+                    {"u_base": (current, 0), "u_branch": (branch, 1),
+                     "u_key": (self._white_matte(width, height), 2)},
+                    {}, width, height, release_inputs=[])
+            return self._copy_texture(current, width, height)
+
+        if render_pass.op == "layer_mixer":
+            # spec §2：slot 升序（由下到上）折叠
+            slots = [node_outputs[ref.node_id]
+                     for _port, ref in sorted(
+                         render_pass.inputs,
+                         key=lambda pr: (pr[1].slot_id if pr[1] else ""))
+                     if ref is not None]
+            if not slots:
+                return self._copy_texture(source_texture, width, height)
+            mode_index = LAYER_MODE_INDEX.get(
+                str(render_pass.params.get("blend_mode", "Normal")), 0)
+            current = slots[0]
+            for top in slots[1:]:
+                current = self._run_op_shader(
+                    "layer_mix",
+                    {"u_bottom": (current, 0), "u_top": (top, 1)},
+                    {"u_opacity": 1.0, "u_mode": mode_index},
+                    width, height, release_inputs=[])
+            return self._copy_texture(current, width, height)
+
+        if render_pass.op == "key_mixer":
+            keys = [node_outputs[ref.node_id]
+                    for _port, ref in sorted(
+                        render_pass.inputs,
+                        key=lambda pr: (pr[1].slot_id if pr[1] else ""))
+                    if ref is not None]
+            if not keys:
+                return self._white_matte(width, height)
+            mode_index = KEY_MODE_INDEX.get(
+                str(render_pass.params.get("mode", "add")), 0)
+            current = keys[0]
+            for other in keys[1:]:
+                current = self._run_op_shader(
+                    "key_mix",
+                    {"u_a": (current, 0), "u_b": (other, 1)},
+                    {"u_mode": mode_index}, width, height, release_inputs=[])
+            return self._copy_texture(current, width, height)
+
+        if render_pass.op == "outside":
+            # spec §4：key_in 补集作为 matte 的 Corrector（N06 数学）
+            layer = (layer_param_provider(render_pass.node_id)
+                     if layer_param_provider else None) or dict(
+                        render_pass.params)
+            override = layer.get("_plugin_bindings") if isinstance(
+                layer, Mapping) else None
+            prepared = prepare_corrector(
+                self.pipeline, layer, layer_id=render_pass.node_id,
+                bindings_override=override or None)
+            if isinstance(prepared, CorrectorDiagnostic):
+                raise GraphExecutionFailure(
+                    "shader_compile_failed", prepared.message,
+                    pass_index=render_pass.index)
+            image_in = self._input_for(render_pass, "image", node_outputs,
+                                       source_texture)
+            key_in = self._input_for(render_pass, "key_in", node_outputs,
+                                     None)
+            matte = (self._run_op_shader(
+                "key_complement", {"u_key": (key_in, 0)}, {},
+                width, height, release_inputs=[])
+                if key_in is not None else self._white_matte(width, height))
+            out_tex = self.ctx.texture((width, height), 4, dtype="f2")
+            fbo = self.ctx.framebuffer(color_attachments=[out_tex])
+            fbo.use()
+            aux = self._layer_aux_textures(layer, render_pass.node_id)
+            render_corrector_gl(
+                self.ctx, prepared, layer=layer,
+                grade_input_tex=image_in, matte_tex=matte,
+                viewport=(width, height),
+                update_uniforms=self._make_uniform_uploader(
+                    layer, width, height, prepared.bindings),
+                bind_aux=aux,
+                render_quad=lambda prog: self._default_quad(prog).render(
+                    _TRIANGLE_STRIP()))
+            return out_tex
+
+        if render_pass.op == "splitter":
+            base = self._input_for(render_pass, "image", node_outputs,
+                                   source_texture)
+            planes = [self._run_op_shader(
+                "splitter", {"u_image": (base, 0)},
+                {"u_channel": ch}, width, height)
+                for ch in range(3)]
+            return _SplitPlanes(planes)
+
+        if render_pass.op == "combiner":
+            r = self._input_for(render_pass, "r", node_outputs, None)
+            g = self._input_for(render_pass, "g", node_outputs, None)
+            b = self._input_for(render_pass, "b", node_outputs, None)
+            if isinstance(r, np.ndarray):
+                rgbs = r
+                r, g, b = rgbs[0], rgbs[1], rgbs[2]
+            if r is None or g is None or b is None:
+                return self._copy_texture(source_texture, width, height)
+            return self._run_op_shader(
+                "combiner",
+                {"u_r": (r, 0), "u_g": (g, 1), "u_b": (b, 2)},
+                {}, width, height, release_inputs=[])
+
+        if render_pass.op == "alpha_output":
+            key = self._input_for(render_pass, "key", node_outputs, None)
+            if key is None:
+                return self._white_matte(width, height)
+            return self._run_op_shader(
+                "key_passthrough", {"u_key": (key, 0)}, {},
+                width, height)
+
         if render_pass.op == "output":
             input_tex = source_texture
             for port, ref in render_pass.inputs:
@@ -279,6 +419,48 @@ class ColorGraphExecutor:
             pass_index=render_pass.index)
 
     # ── 工具 ──
+
+    def _input_for(self, render_pass: RenderPass, port: str,
+                   node_outputs: Mapping[str, Any], default: Any) -> Any:
+        for input_port, ref in render_pass.inputs:
+            if input_port == port and ref is not None:
+                value = node_outputs.get(ref.node_id, default)
+                if isinstance(value, _SplitPlanes):
+                    # splitter 输出按端口取平面（r/g/b 灰度载体）
+                    return getattr(value, ref.port if ref.port in
+                                   ("r", "g", "b") else "r")
+                return value
+        return default
+
+    def _run_op_shader(self, name: str, textures: dict, uniforms: dict,
+                       width: int, height: int, *,
+                       release_inputs: list | None = None) -> Any:
+        """执行 node_ops_gl 算子 shader 一次，返回输出纹理。"""
+        from src.features.color.shaders import node_ops_gl
+        cache = getattr(self, "_op_programs", None)
+        if cache is None:
+            cache = {}
+            self._op_programs = cache
+        source = node_ops_gl.OP_FRAGMENTS.get(name)
+        if source is None:
+            raise GraphExecutionFailure("op_shader_missing", name)
+        program = cache.get(name)
+        if program is None:
+            program = self.ctx.program(
+                vertex_shader=node_ops_gl.NODE_OPS_VERT,
+                fragment_shader=source)
+            cache[name] = program
+        out_tex = self.ctx.texture((width, height), components=4, dtype="f2")
+        fbo = self.ctx.framebuffer(color_attachments=[out_tex])
+        fbo.use()
+        for uniform_name, (tex, unit) in textures.items():
+            tex.use(unit)
+            program[uniform_name].value = unit
+        for uniform_name, value in uniforms.items():
+            program[uniform_name].value = value
+        self._default_quad(program).render(_TRIANGLE_STRIP())
+        fbo.release()
+        return out_tex
 
     def _copy_texture(self, tex: Any, width: int, height: int) -> Any:
         out = self.ctx.texture((width, height), components=4, dtype="f2")

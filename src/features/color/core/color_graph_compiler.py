@@ -46,6 +46,7 @@ class PlanPortRef:
     pass_index: int
     node_id: str
     port: str
+    slot_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -90,13 +91,13 @@ GL_CAPABILITY_CATALOG: Mapping[str, str] = {
     "corrector": "exact",
     "shared_corrector": "exact",
     "output": "exact",
-    "parallel_mixer": "pending",
-    "layer_mixer": "pending",
-    "key_mixer": "pending",
-    "outside": "pending",
-    "splitter": "pending",
-    "combiner": "pending",
-    "alpha_output": "pending",
+    "parallel_mixer": "exact",     # B10：spec v1 + shader + oracle
+    "layer_mixer": "exact",        # v1 五模式（其余模式 catalog pending）
+    "key_mixer": "exact",
+    "outside": "exact",
+    "splitter": "exact",
+    "combiner": "exact",
+    "alpha_output": "exact",
     "compound": "pending",     # 由展开消除；未展开=数据异常
 }
 
@@ -349,13 +350,15 @@ def compile_graph(snapshot: ColorGraphSnapshot,
         known = node.known_type()
         op = known.value if known else "unknown"
         inputs = []
-        for edge in sorted(incoming.get(nid, []), key=lambda e: e.edge_id):
+        for edge in sorted(incoming.get(nid, []),
+                           key=lambda e: (e.slot_id, e.edge_id)):
             if edge.src_node not in cone:
                 continue
             inputs.append((edge.dst_port, PlanPortRef(
                 pass_index=index_of[edge.src_node],
                 node_id=edge.src_node,
-                port=edge.src_port)))
+                port=edge.src_port,
+                slot_id=edge.slot_id)))
         outputs = tuple(p.port_id for p in node.ports()
                         if p.direction.value == "out") if known else ("image",)
         passes.append(RenderPass(
