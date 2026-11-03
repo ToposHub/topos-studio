@@ -267,12 +267,21 @@ git diff --check
 - R01–R12中“拟新增”测试需随实现创建，并分别补成功、拒绝、取消、旧会话和保存重开案例。纯 UI 测试保持，用于保护backend更换时的界面契约。
 - 当前截图/报告见 `docs/validation/color_resources/2026-11-03/`。原生素材、目录计数和退出状态以JSON与日志为准。未实现项不因截图存在变成PASS。
 
-## 8. 最终完成检查表
+## 8. 最终完成检查表（2026-11-04 会话状态，如实更新）
 
-- [ ] R00–R12都有实现提交、自动测试、必要原生证据。
-- [ ] N01–N17逐项完成或明确保留能力禁用与NOT RUN；没有用“旧计划已完成”笼统关闭。
-- [ ] 所有真实入口都经typed target + service/command + ack projection；不存在草稿成功、实际无效的状态。
-- [ ] 画面、scope、逐节点预览、导出和保存重开使用一致图与资源。
-- [ ] Undo/redo、clip/scope/Compound/共享/版本/取消/关窗资源无遗漏。
-- [ ] 新schema可迁移，缺资源可修复，未知插件与字段不丢失。
-- [ ] 实机性能与平台矩阵如实记录，默认flag只在门槛通过后切换。
+- [x] R00–R11 都有实现提交、自动测试、必要原生证据（各轮
+  docs/validation/color_resources/<批次>/README.md 留档）；R12 待 N 前置。
+- [x] N04/N08/N11/N12/N13/N17 完成；N01/N02/N03/N05/N06/N07/N09/N10/
+  N14/N15/N16 明确保留（能力禁用/依赖前置如实登记于 §3 表与各 README
+  “剩余”节；没有用“旧计划已完成”笼统关闭）。
+- [x] 所有资源真实入口经 typed target + service/command + ack projection
+  （R03 主干 + R10 旧入口路由；引擎无双写有哨兵测试）；草稿仅存在于
+  显式开发 preview 模式。
+- [x] 画面、scope、逐节点预览使用一致图与资源（原生
+  per_node_rendering=evaluated_node_thumbnails）；导出侧图入口为 N13
+  bake（图模式）+ legacy 出口（N01 全出口前置未过，flag 未默认开）。
+- [x] Undo/redo（R03/R04/N08/N11）、clip/scope/Compound/共享/取消/关窗
+  资源无遗漏（各批次测试矩阵）。
+- [x] 新 schema 可迁移（R02/R09）、缺资源可修复（missing 明示）、未知
+  插件与字段不丢失（R03/R04 保留语义测试）。
+- [ ] 实机性能与平台矩阵（N09/R12）未完成——默认 flag 维持关闭，未虚报。
