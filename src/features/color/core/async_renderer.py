@@ -2020,6 +2020,13 @@ class AsyncRenderer(QThread):
                     self._bind_aux_textures_single_layer(prog, layer),
                 matte_provider=_matte,
                 dtype=graph_dtype,
+                # N06：节点缓存键的外源身份——源内容 revision（视频每帧
+                # 变→播放期缓存自然不命中；暂停调色命中分叉节点）+
+                # 色彩上下文 + 出口 target（f4/f2 已在键内）
+                cache_context=(
+                    snapshot.source_content_revision,
+                    snapshot.working_color_context or (),
+                    str(params.get('color_output_target') or 'front')),
             )
         except Exception as exc:  # noqa: BLE001 —— 编译/执行异常 fail-closed
             scope_diagnostics.record(
@@ -2039,6 +2046,9 @@ class AsyncRenderer(QThread):
         # scope/front 目标后即可释放，至多持有一帧）
         self._release_graph_lease()
         self._graph_lease = (executor, result.request_id)
+        # N06：命中事件留存（GUI 轮询「实际命中」徽标用；非信号——
+        # 渲染线程只写字，读侧为主线程轮询，无锁竞争面）
+        self.__dict__['last_node_cache_events'] = result.cache_events
         return result.output_texture, False
 
     def _do_render_gpu_scope(self, demand) -> None:

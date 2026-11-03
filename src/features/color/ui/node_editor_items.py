@@ -352,7 +352,22 @@ class NodeCardItem(QGraphicsObject):
             painter.drawRoundedRect(QRectF(47.0, 42.0, 6.0, 4.0), 2.0, 2.0)
             painter.drawRoundedRect(QRectF(51.0, 45.0, 6.0, 4.0), 2.0, 2.0)
         if self.node.cache_mode == "on":
+            # N06：底部蓝条 = 策略指示（cache: on），不承担命中语义
             painter.fillRect(QRectF(4.0, rect.height() - 2.8, 56.0, 1.0), QColor("#329fd6"))
+        if getattr(self, "_cache_hit_active", False):
+            # N06：命中徽标 = 右上角圆点——**仅实际命中**后显示
+            # （上一帧真实命中事件驱动；与策略蓝条严格区分）
+            painter.setBrush(QColor("#57c98a"))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QRectF(rect.width() - 9.0, 3.0, 5.0, 5.0))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def set_cache_hit(self, active: bool) -> None:
+        """N06：实际命中状态（由渲染事件回路驱动；False 即熄灭）。"""
+        if bool(active) == bool(getattr(self, "_cache_hit_active", False)):
+            return
+        self._cache_hit_active = bool(active)
+        self.update()
 
     def setToolTip(self, text: str) -> None:
         """Keep tool usage discoverable when source-preview text is replaced."""

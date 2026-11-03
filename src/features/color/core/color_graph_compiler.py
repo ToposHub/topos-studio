@@ -38,6 +38,64 @@ from src.features.color.core.color_graph_snapshot import ColorGraphSnapshot
 #: RGBA16F 每像素 bytes（§5.4 峰值预算口径）
 BYTES_PER_PIXEL_RGBA16F = 8
 
+#: N06：策略/表现键不参与缓存身份（改 cache_mode/锁/色不失效结果缓存）
+_NON_IDENTITY_PARAM_KEYS = frozenset({
+    "cache_mode", "ui_color", "locked", "label", "layout"})
+
+
+def _cone_identity_digest(node: "ColorNodeData") -> str:
+    """节点自身身份摘要：参数域（剔策略/表现键）+ legacy 载体 + 资源指纹。
+
+    资源指纹复用 R06 的语义但**节点级**聚合（本节点 payload 的插件
+    实例 id/enabled/params/content_hash + LUT ref/强度），独立分支的
+    资源变化不殃及本节点键。
+    """
+    import hashlib
+    from src.shared.project.color_graph import unfreeze_params
+    params = {key: value for key, value in (node.params or {}).items()
+              if key not in _NON_IDENTITY_PARAM_KEYS}
+    payload = unfreeze_params(dict(node.legacy_payload or {}))
+    resources: dict[str, Any] = {}
+    plugins = payload.get("plugins")
+    if plugins:
+        resources["plugins"] = [
+            {"id": p.get("plugin_id"), "enabled": bool(p.get("enabled", True)),
+             "params": p.get("params"),
+             "content": p.get("content_hash")}
+            for p in plugins if isinstance(p, Mapping)]
+    lut_ref = (params.get("resources") or {}).get("lut_ref") \
+        if isinstance(params.get("resources"), Mapping) else None
+    if lut_ref:
+        resources["lut"] = [lut_ref,
+                            (params.get("resources") or {}).get(
+                                "lut_strength", 1.0)]
+    digest = hashlib.sha256()
+    digest.update(repr(sorted(params.items(),
+                              key=lambda kv: str(kv[0]))).encode())
+    # legacy 载体按键排序后整体 repr（含值——grading/curves/qualifier/
+    # 窗口都在这里；unfreeze 后的 dict 插入序对同构造路径稳定）
+    digest.update(repr({key: payload[key]
+                        for key in sorted(payload)}).encode())
+    digest.update(repr(sorted(resources.items(),
+                              key=lambda kv: str(kv[0]))).encode())
+    return digest.hexdigest()
+
+
+def _pass_cone_key(node: "ColorNodeData",
+                   inputs: list, cone_keys: dict[str, str]) -> str:
+    """拓扑序递推的依赖锥键：自身摘要 + 输入端口×上游 cone_key。"""
+    import hashlib
+    digest = hashlib.sha256()
+    digest.update(node.node_type.encode())
+    digest.update(_cone_identity_digest(node).encode())
+    for port, ref in inputs:
+        if ref is None:
+            continue
+        digest.update(f"|{port}@{ref.node_id}:{ref.port}"
+                      f":{ref.slot_id}:{cone_keys.get(ref.node_id, '')}"
+                      .encode())
+    return digest.hexdigest()[:32]
+
 
 @dataclass(frozen=True)
 class PlanPortRef:
@@ -66,6 +124,10 @@ class RenderPass:
     shared_definition_id: str | None = None
     # compound 展开来源（诊断/可解释性）
     expanded_from: str | None = None
+    # N06：依赖锥身份（拓扑序递推：自身参数域+资源指纹+各输入端口的上
+    # 游 cone_key）。改上游/自身/资源→键变；改独立分支/换 viewer 目标
+    # （下游选择）→键不变。执行器的 per-node 输出缓存以它为键。
+    cone_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -405,6 +467,8 @@ def compile_graph(snapshot: ColorGraphSnapshot,
     for edge in cone_edges:
         consumer_count[edge.src_node] += 1
 
+    # N06：拓扑序递推 per-node 依赖锥键（cone_key）
+    cone_keys: dict[str, str] = {}
     for index, nid in enumerate(order):
         node = by_id[nid]
         known = node.known_type()
@@ -421,6 +485,7 @@ def compile_graph(snapshot: ColorGraphSnapshot,
                 slot_id=edge.slot_id)))
         outputs = tuple(p.port_id for p in node.ports()
                         if p.direction.value == "out") if known else ("image",)
+        cone_keys[nid] = _pass_cone_key(node, inputs, cone_keys)
         passes.append(RenderPass(
             index=index,
             node_id=nid,
@@ -431,7 +496,8 @@ def compile_graph(snapshot: ColorGraphSnapshot,
             outputs=outputs,
             consumers=consumer_count[nid],
             estimated_bytes=bytes_per_output,
-            shared_definition_id=node.shared_definition_id))
+            shared_definition_id=node.shared_definition_id,
+            cone_key=cone_keys[nid]))
 
     # release_after = max(消费者 index)；分叉输入保持到所有消费者完成
     last_use: dict[str, int] = {}
