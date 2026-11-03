@@ -1,0 +1,11 @@
+{
+  "a6b5605a-aa0e-4d56-94f7-df8a7ba580c4": {
+    "bin_id": "a6b5605a-aa0e-4d56-94f7-df8a7ba580c4",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "cdb54ef8-13aa-440c-af4b-982ebdc8bd65"
+    ],
+    "timeline_ids": []
+  }
+}

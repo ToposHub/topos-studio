@@ -1,0 +1,15 @@
+{
+  "bfc40337-f655-4122-8c32-e81d5fd3a3fb": {
+    "timeline_id": "bfc40337-f655-4122-8c32-e81d5fd3a3fb",
+    "name": "Timeline 1",
+    "fps": 25.0,
+    "width": 1920,
+    "height": 1080,
+    "sample_rate": 48000,
+    "format_settings": {
+      "media_pool_preview_asset_id": "cdb54ef8-13aa-440c-af4b-982ebdc8bd65",
+      "media_pool_preview_frame": 40
+    },
+    "created_at": 0.0
+  }
+}
