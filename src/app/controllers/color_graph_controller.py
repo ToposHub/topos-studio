@@ -624,28 +624,36 @@ class GraphProjectBridge:
 
     def update_shared_definition(self, definition_id: str,
                                  params: Mapping[str, Any]) -> list[str]:
-        """跨栈更新共享定义：所有引用栈一个 command、一起失效。"""
+        """跨栈更新共享定义（N08：**原子** fanout——一个宏 command、一次
+        undo 全还原；锁定的引用栈显式跳过并从返回列表缺席）。"""
         project = self._get_project()
-        updated: list[str] = []
+        commands = []
+        targets: list[str] = []
         for stack_id, stack in list(project.color_stacks.items()):
             graph = stack.color_graph
             if graph is None or not any(
                     d.definition_id == definition_id
                     for d in graph.shared_definitions):
                 continue
-            command = ApplyColorGraphCommand.create(
+            if getattr(stack, "graph_locked", False):
+                continue  # 栈锁：后端校验（命令冲突域），fail-visible 缺席
+            commands.append(ApplyColorGraphCommand.create(
                 stack_id=stack_id,
                 operation="update_shared_definition_params",
                 arguments={"definition_id": definition_id,
                            "params": dict(params)},
-            )
-            try:
-                project = self._project_stack.execute(command, project)
-                self._publish(project)
-                updated.append(stack_id)
-            except Exception:  # noqa: BLE001 —— fanout 单栈失败不阻断其余
-                continue
-        return updated
+            ))
+            targets.append(stack_id)
+        if not commands:
+            return []
+        try:
+            from src.features.edit.core.commands import ProjectMacroCommand
+            macro = ProjectMacroCommand.create(
+                f"Update shared definition {definition_id[:8]}", commands)
+            self._publish(self._project_stack.execute(macro, project))
+            return targets
+        except Exception:  # noqa: BLE001 —— 宏失败：整批不落地
+            return []
 
     def set_stack_lock(self, stack_id: str, locked: bool) -> bool:
         """栈锁是工程元信息：走 SetColorGraphLockCommand（可 undo）。"""

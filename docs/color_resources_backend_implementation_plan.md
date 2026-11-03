@@ -195,7 +195,7 @@
 | N05 / Node Color Space、Gamma / P1 | 目前禁用、无真实节点级变换。定义输入/输出/工作空间变换位置与版本化枚举，独立node_options字段，避免与primary gamma元组冲突。由后端实际消费。 | 多空间色卡、Gamma roundtrip、HDR、LUT顺序，CPU/GL/Metal按能力验证；关选项=原结果；菜单勾选与保存一致。 | N01、R06 |
 | N06 / Node Cache Auto/On/Off / P1 | 菜单禁用，已有plan LRU不等于节点渲染缓存策略。定义Auto判定、On强制缓存及Off禁止、成本/大小预算；key包含输入与资源revision；状态仅实际命中后显示。 | 改上游/自身/资源/尺寸后失效，下游选择不误失效；Off无缓存；越预算可解释；删除/取消释放；不得以蓝条代替实际缓存命中。 | R06、R08 |
 | N07 / Timeline/组链 / B14 E27 / P0 | Timeline真实栈模型未接通；Group pre/clip/post owner虽已接真实身份，完整图语义输出链仍需专项。为Timeline定义真实owner栈/迁移/命令/保存，再统一pre→clip→post→timeline顺序。 | 两clip共享组、不同组、Timeline最终效果；Color/Edit/导出一致；切scope不写错stack；锁/撤销/资源闭包；无实现则继续只读并提示。 | R03、N01、R09 |
-| N08 / Shared跨clip / B05/B14 / P0 | 跨clip粘贴共享定义、参数fanout与实例覆盖未完整认证。解析定义依赖闭包，冲突重命名/去重规则稳定；跨栈原子fanout，Make Local保留当时结果。 | A/B clip同时引用改参数，两边更新且1undo；跨工程同ID不同内容不覆盖；锁/删/解共享、Compound共享闭包。 | R03、R09 |
+| N08✅ / Shared跨clip / B05/B14 / P0 | 跨clip粘贴共享定义、参数fanout与实例覆盖未完整认证。解析定义依赖闭包，冲突重命名/去重规则稳定；跨栈原子fanout，Make Local保留当时结果。 | A/B clip同时引用改参数，两边更新且1undo；跨工程同ID不同内容不覆盖；锁/删/解共享、Compound共享闭包。 | R03、R09 |
 | N09 / S07、B16 / P0 | 持续播放/4K/浮动resize压力、性能资源录制未完整。前轮9种scope原生截图和短素材冒烟已通过，不等于压力完成。按R12执行完整矩阵，保留NOT RUN平台。 | scopes/s00_s01_record协议，30分钟播放/seek/拖参/切页/多模式/浮动；无texture_not_shared/FBO错误、过期输出和持续泄漏；真实p95预算报告。 | R06、N01 |
 | N10 / keyframes / P1 | 节点图编辑上下文关键帧暂缓，已有底栏图标只识别元数据。定义节点/实例/参数路径、插值/时间base、剪贴板/版本归属；命令与播放评估读取同域。 | 插入/删/移动/插值、效果排序后身份不丢、trim/retime/Compound/shared、seek随机帧与导出一致，撤销一次手势一次command。 | R04、N03、N07 |
 | N11✅ / E12、global history / P0 | standalone历史仍旧适配器；不经图宿主的全局undo/redo对engine同步存在缺口。让项目发布观察者统一重投影、刷新面板/资源/渲染，避免只有图菜单能undo正确。 | 菜单/键盘/全局undo和redo、剪贴板资源、切clip、standalone分别验证；图JSON/engine/Viewer/设置同时回到一致revision。 | R03、N03 |
