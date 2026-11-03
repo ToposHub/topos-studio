@@ -249,7 +249,9 @@ def main() -> int:
             try:
                 now = time.monotonic()
                 elapsed = now - self.started
-                self.rss_samples.append((elapsed, self._rss_mb()))
+                # 绝对时间基（与 _behavior_windows/_clock_times 一致；
+                # 相对基会让分段过滤恒空——曾两次空报告的根因）
+                self.rss_samples.append((now, self._rss_mb()))
                 if elapsed > total_seconds:
                     self.finish(True)
                     return
@@ -401,7 +403,8 @@ def main() -> int:
             elapsed = time.monotonic() - self.started
             # RSS 斜率（MB/10min）：跳过前 60s 预热（着色器/解码缓存）
             rss_slope = 0.0
-            steady = [(t, r) for t, r in self.rss_samples if t >= 60.0]
+            steady = [(t, r) for t, r in self.rss_samples
+                      if t - self.started >= 60.0]
             if len(steady) >= 2:
                 (t0, r0), (t1, r1) = steady[0], steady[-1]
                 span_min = max((t1 - t0) / 60.0, 1e-6)

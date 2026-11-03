@@ -333,6 +333,22 @@ class ColorGraphMetalExecutor:
                     pass_index=render_pass.index)
             input_buf = self._input_for(render_pass, "image", node_outputs,
                                         source_buffer)
+            # N05：节点 Color Space/Gamma 变换 Metal 未接线——显式
+            # 拒绝（不静默跳过变换=错色；N14 恢复）
+            color_domain_m = (render_pass.params.get("color")
+                              if isinstance(render_pass.params, Mapping)
+                              else None)
+            if isinstance(color_domain_m, Mapping) and (
+                    str(color_domain_m.get("color_space",
+                                           "Use Timeline"))
+                    != "Use Timeline"
+                    or str(color_domain_m.get("gamma", "Use Timeline"))
+                    != "Use Timeline"):
+                raise MetalGraphFailure(
+                    "capability_unsupported",
+                    f"pass {render_pass.index}: 节点 Color Space/Gamma "
+                    "Metal 未接线（N05 v1 GL/CPU；N14 恢复）",
+                    pass_index=render_pass.index)
             # N02：key_in 边（外部 key 消费）Metal 未接线——显式拒绝，
             # 不用白 matte 顶替（key 通道接线归 N14）
             if any(port == "key_in" and ref is not None

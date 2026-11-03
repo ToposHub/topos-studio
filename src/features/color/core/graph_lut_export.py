@@ -73,6 +73,17 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
         payload = node_layer_payload(candidate)
         if payload is None:
             continue
+        # N05：节点 Color Space/Gamma 变换未在 bake 数学内（v1）——
+        # 显式拒绝，不产出少变换的 cube
+        color_domain = (candidate.params.get("color")
+                        if isinstance(candidate.params, Mapping) else None)
+        if isinstance(color_domain, Mapping) and (
+                str(color_domain.get("color_space", "Use Timeline"))
+                != "Use Timeline"
+                or str(color_domain.get("gamma", "Use Timeline"))
+                != "Use Timeline"):
+            errors.append(f"{candidate.node_id}: color 域非 Timeline"
+                          "（Color Space/Gamma 变换不在 pointwise bake）")
         payload = dict(payload)
         lut_ref = payload.pop("active_lut_path", None)
         payload.pop("lut_intensity", None)

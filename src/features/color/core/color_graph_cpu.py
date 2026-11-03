@@ -727,12 +727,31 @@ def run_plan_cpu(plan: ColorGraphRenderPlan, source: np.ndarray,
             base = _first("image")
             if base is None:
                 base = source
+            # N05：节点 Color Space/Gamma（与 GL 执行器同一包裹位置：
+            # IDT → matte/grading（LUT 在变换内侧）→ ODT）
+            from src.features.color.core.color_node_color_space import (
+                apply_node_color_space_cpu, node_color_transform_spec,
+            )
+            color_domain = (render_pass.params.get("color")
+                            if isinstance(render_pass.params, Mapping)
+                            else None)
+            cs_spec = (node_color_transform_spec(
+                color_domain.get("color_space"), color_domain.get("gamma"))
+                if isinstance(color_domain, Mapping) else None)
+            if cs_spec is not None:
+                base = base.copy()
+                base[..., :3] = apply_node_color_space_cpu(
+                    base[..., :3], cs_spec)
             external_key = _first_key("key_in")
             matte = _cpu_node_matte(base, params, render_pass, external_key)
             if matte is not None:
                 key_outputs[(render_pass.node_id, "key_out")] = matte
-            outputs[render_pass.node_id] = _corrector_for_params(params)(
-                base, params, mask=matte)
+            out = _corrector_for_params(params)(base, params, mask=matte)
+            if cs_spec is not None:
+                out = out.copy()
+                out[..., :3] = apply_node_color_space_cpu(
+                    out[..., :3], cs_spec, inverse=True)
+            outputs[render_pass.node_id] = out
         elif render_pass.op == "parallel_mixer":
             base = _first("base")
             if base is None:
