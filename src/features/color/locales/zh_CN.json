@@ -312,6 +312,9 @@
     "unsupported_parameter": "暂不支持此参数控件",
     "user_luts": "用户 LUT",
     "writable_corrector": "请选择未锁定的调色节点",
-    "missing_lut": "LUT 资源缺失"
+    "missing_lut": "LUT 资源缺失",
+    "import_started": "正在导入 {count} 个 LUT…",
+    "import_finished": "已导入 {imported} · 重复 {duplicates} · 失败 {failed}",
+    "import_failed": "LUT 导入失败：{error}"
   }
 }

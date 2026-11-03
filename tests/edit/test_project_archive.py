@@ -359,7 +359,9 @@ class TestArchiveLutClosure:
         lut_copied = [r for r in report.copied
                       if r.asset_id.startswith("lut:")]
         assert len(lut_copied) == 1
-        assert os.path.isfile(lut_copied[0].archived_path)
+        # archived_path 契约是相对归档根目录（collect_project 报告字段注释）
+        assert os.path.isfile(
+            os.path.join(str(tmp_path / "arch"), lut_copied[0].archived_path))
 
         # 缺失 LUT：明示警告，不阻断
         stack2 = NS(stack_id="s2", asset_id="a", name="S2",

@@ -1,0 +1,24 @@
+{
+  "format": "topos_project_archive",
+  "schema_version": 3,
+  "created_by": "Topos Color",
+  "project_id": "94167ca6-25cf-40a0-8395-08438e2dd327",
+  "project_mode": "edit_project",
+  "features": [
+    "media_pool",
+    "edit",
+    "color"
+  ],
+  "primary_asset_id": null,
+  "active_timeline_id": "aa4dac0e-8693-4c60-a052-7ab17f3af3a7",
+  "created_at": 1793718644.186038,
+  "modified_at": 1793718644.186068,
+  "last_saved_by": "topos-studio",
+  "required_features": [],
+  "optional_features": [],
+  "present_modules": [
+    "color",
+    "edit"
+  ],
+  "edit_content_schema_version": 4
+}
