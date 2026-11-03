@@ -607,10 +607,10 @@ class ImageEngine(QObject):
         render_params['color_output_target'] = str(target or "composite")
         if quality_mode in ('preview', 'paused', 'export'):
             render_params['video_denoise_quality_mode'] = quality_mode
+        # N01：full-res 出口同样允许图执行（执行器按 target 选 f4 dtype；
+        # 复杂图 fail-closed 保留上一帧/报 failed，不回退旧循环）
         self._attach_color_graph_params(
-            render_params,
-            execute=(self.color_graph_render_enabled
-                     and str(target or "composite") != 'full_res'))
+            render_params, execute=self.color_graph_render_enabled)
 
         self.renderer.submit(RenderCommand.RENDER_COLOR_OUTPUT, render_params)
 
@@ -863,12 +863,14 @@ class ImageEngine(QObject):
 
     @property
     def color_graph_render_enabled(self) -> bool:
-        """B16.5 生产开关：图执行接管 front/color output 渲染。
+        """B16.5 生产开关：图执行接管渲染出口。
 
         默认关闭（legacy layers 循环，位级等价已证）。开启条件：环境
-        变量 ``TOPOS_COLOR_GRAPH_RENDER`` 为真值。full-res 导出路径恒走
-        legacy（f4 dtype/源覆盖语义；可投影图导出等价、复杂图被 B13
-        硬门拒绝，见台账）。
+        变量 ``TOPOS_COLOR_GRAPH_RENDER`` 为真值。N01：出口覆盖
+        front/color output/monitor/**full-res**（执行器按
+        ``color_output_target`` 选 f4/f2 dtype；复杂图 fail-closed 保留
+        上一帧/报 failed，不回退旧循环渲染过期投影）。视频播放出口经
+        ``_build_render_params`` 附同一快照（N01-a）。
         """
         if self.__dict__.get('_color_graph_render_enabled') is None:
             flag = os.environ.get("TOPOS_COLOR_GRAPH_RENDER", "")
@@ -3423,11 +3425,10 @@ class ImageEngine(QObject):
                 'video_generation': int(getattr(self.renderer, '_video_generation_id', 0) or 0),
             }
             # S04：图快照随参提交（scope lane 复用）；B16.5 开关开启时
-            # front/color output 一并切图执行（full-res 导出恒 legacy）
+            # front/color output/full-res 一并切图执行（N01：full-res
+            # 由执行器按 target 用 f4 dtype，复杂图 fail-closed 不回退）
             self._attach_color_graph_params(
-                render_params,
-                execute=(self.color_graph_render_enabled
-                         and not is_full_res))
+                render_params, execute=self.color_graph_render_enabled)
             if is_full_res:
                 # CPU-side colour conversion is deliberately limited to
                 # preparing immutable data.  All GL work and the readback are
@@ -3538,6 +3539,19 @@ class ImageEngine(QObject):
         This ensures that blur and other effects are applied correctly,
         with each layer's output feeding into the next layer's input.
         """
+        # N01：headless 全分辨率出口的 B13 式硬门——活动图不可投影为
+        # legacy layers 时显式失败（渲染 stale 投影=错图，绝不静默）。
+        # headless 出口无图执行宿主（flag 开也走不了执行器），一律拒绝。
+        graph = getattr(self, '_active_color_graph', None)
+        if graph is not None:
+            from src.features.color.core.color_graph_migration import (
+                can_project_to_legacy_layers,
+            )
+            if not can_project_to_legacy_layers(graph):
+                raise RuntimeError(
+                    "[color_graph_not_exportable] headless full-res 出口"
+                    "不支持复杂图（无图执行宿主；显式拒绝而非渲染过期"
+                    "投影）")
         texture_garbage = []
         # AUD-0607：本方法内即时创建（非 pipeline comp_cache 托管）的
         # program 统一登记，finally 释放——此前 prog_raw/prog_pass 任何

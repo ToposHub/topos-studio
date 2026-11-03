@@ -584,6 +584,26 @@ class ColorEvaluatorMixin:
         # Merge resolved params into effect params
         merged_params = {**params, **resolved}
 
+        # N01：Composite ToposColor 出口的 B13 式硬门——栈携带不可投影
+        # 复杂图时显式拒绝（此出口只承载 primary 域，静默压扁=「成功但
+        # 少效果」；与导出同口径 RuntimeError）。
+        project = getattr(self, '_project', None)
+        stack = None
+        stack_id_ref = str(params.get("color_stack_id") or "")
+        if project is not None and stack_id_ref:
+            stack = (getattr(project, "color_stacks", {}) or {}).get(
+                stack_id_ref)
+        color_graph = getattr(stack, "color_graph", None)
+        if color_graph is not None:
+            from src.features.color.core.color_graph_migration import (
+                can_project_to_legacy_layers,
+            )
+            if not can_project_to_legacy_layers(color_graph):
+                raise RuntimeError(
+                    "[color_graph_not_exportable] Composite ToposColor "
+                    "不支持复杂图（primary-only 出口；显式拒绝而非静默"
+                    "压扁——完整图渲染在 Color 页/导出路径）")
+
         prog = self.utility_shaders.get('topos_color')
         if prog is None:
             return {"result": input_tex}

@@ -115,23 +115,30 @@ class ColorGraphExecutor:
         self.backend_catalog = backend_catalog
         # revision → 已发布结果（scopes/Composite 消费者经 release_revision 释放）
         self._published: dict[str, GraphExecutionResult] = {}
-        # (w, h) → 空闲纹理栈（同上下文复用；池上限防爆显存）
+        # (w, h, dtype) → 空闲纹理栈（同上下文复用；池上限防爆显存）。
+        # dtype 进池键（N01：full-res 出口 f4，front 出口 f2——混用会
+        # 精度串位）
         self._pool: dict[tuple, list] = {}
+        # 本次 execute_plan 的中间纹理 dtype（单飞语义：宿主在租约释放
+        # 前不并发提交；execute_plan 进入时设置、finally 恢复）
+        self._run_dtype = "f2"
 
     # ── 纹理池 ──
 
-    def _alloc_texture(self, width: int, height: int):
-        """从池取或新建 RGBA16F 纹理（同一执行器生命周期内复用）。"""
-        key = (int(width), int(height))
+    def _alloc_texture(self, width: int, height: int, dtype: str | None = None):
+        """从池取或新建纹理（同一执行器生命周期内复用）。"""
+        dtype = dtype or self._run_dtype
+        key = (int(width), int(height), dtype)
         free = self._pool.get(key)
         if free:
             return free.pop()
-        return self.ctx.texture((key[0], key[1]), components=4, dtype="f2")
+        return self.ctx.texture((key[0], key[1]), components=4, dtype=dtype)
 
     def _release_texture(self, tex: Any) -> None:
         """纹理归还池；池满真实释放。"""
         try:
-            key = (int(tex.size[0]), int(tex.size[1]))
+            dtype = getattr(tex, "dtype", "f2")
+            key = (int(tex.size[0]), int(tex.size[1]), str(dtype))
         except Exception:  # noqa: BLE001 —— 尺寸不可得即释放
             try:
                 tex.release()
@@ -184,6 +191,7 @@ class ColorGraphExecutor:
         render_quad: Callable[[Any], None] | None = None,
         bind_aux: Callable[[Any, Mapping[str, Any]], None] | None = None,
         matte_provider: Callable[[Mapping[str, Any], Any], Any] | None = None,
+        dtype: str = "f2",
     ) -> GraphExecutionResult:
         """执行 plan；source pass 消费 ``source_texture``（租借不持有）。
 
@@ -218,6 +226,10 @@ class ColorGraphExecutor:
                 diagnostic_code="capability_unsupported",
                 diagnostic_message=f"{label}: {reason}（fail-closed，"
                                    "不产出少效果结果）")
+
+        # dtype 在预检后设置（早退路径不染色；finally 恢复默认）
+        previous_dtype = self._run_dtype
+        self._run_dtype = str(dtype)
 
         cancel = cancel_check or (lambda _rid: False)
         if cancel(request_id):
@@ -309,6 +321,8 @@ class ColorGraphExecutor:
                 released_textures=released,
                 diagnostic_code="execution_error",
                 diagnostic_message=str(exc))
+        finally:
+            self._run_dtype = previous_dtype
 
     # ── 单 pass 分派 ──
 
@@ -534,7 +548,7 @@ class ColorGraphExecutor:
             # Outside 的 key_out = 补集 matte（供下游 key 消费者引用）
             if key_outputs is not None:
                 key_outputs[(render_pass.node_id, "key_out")] = matte
-            out_tex = self.ctx.texture((width, height), 4, dtype="f2")
+            out_tex = self._alloc_texture(width, height)
             fbo = self.ctx.framebuffer(color_attachments=[out_tex])
             fbo.use()
             aux = self._layer_aux_textures(layer, render_pass.node_id)
@@ -743,17 +757,19 @@ class ColorGraphExecutor:
         return self._hsl_tex
 
     def _white_matte(self, width: int, height: int) -> Any:
-        """白 matte（常量内容，按尺寸缓存；随 release_pool 释放）。"""
-        key = (int(width), int(height))
+        """白 matte（常量内容，按尺寸+dtype 缓存；随 release_pool 释放）。"""
+        dtype = self._run_dtype
+        key = (int(width), int(height), dtype)
         cache = getattr(self, "_white_mattes", None)
         if cache is None:
             cache = {}
             self._white_mattes = cache
         tex = cache.get(key)
         if tex is None:
-            data = np.ones((key[1], key[0], 4), dtype=np.float16)
+            data = (np.ones((key[1], key[0], 4), dtype=np.float16) if dtype == "f2"
+                    else np.ones((key[1], key[0], 4), dtype=np.float32))
             tex = self.ctx.texture((key[0], key[1]), components=4,
-                                   dtype="f2", data=data)
+                                   dtype=dtype, data=data)
             cache[key] = tex
         return tex
 

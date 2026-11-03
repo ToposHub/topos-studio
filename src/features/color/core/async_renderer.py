@@ -2003,6 +2003,10 @@ class AsyncRenderer(QThread):
             executor = self._ensure_graph_executor()
             plan = compile_graph(snapshot, size=(w, h),
                                  cache=self._graph_plan_cache)
+            # N01：full-res 出口走 f4（与 legacy 全分辨率精度对齐；
+            # front/composite/scope 维持 f2）
+            graph_dtype = ("f4" if str(params.get('color_output_target')
+                                       or '') == 'full_res' else "f2")
             result = executor.execute_plan(
                 plan, raw_view_tex,
                 request_id=request_id,
@@ -2015,6 +2019,7 @@ class AsyncRenderer(QThread):
                 bind_aux=lambda prog, layer:
                     self._bind_aux_textures_single_layer(prog, layer),
                 matte_provider=_matte,
+                dtype=graph_dtype,
             )
         except Exception as exc:  # noqa: BLE001 —— 编译/执行异常 fail-closed
             scope_diagnostics.record(

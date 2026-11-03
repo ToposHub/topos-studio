@@ -2,8 +2,8 @@
 
 - ``TOPOS_COLOR_GRAPH_RENDER``（默认关）：开启后 engine 在
   render_pipeline/request_color_output 提交 ``color_graph_execute``，
-  ``_do_render_impl`` 图执行分支接管 front/color output（S04 起该分支
-  已在生产路径中；scope 无条件走图执行）；full-res 导出恒 legacy。
+  ``_do_render_impl`` 图执行分支接管 front/color output/full-res（N01：
+  full-res 由执行器按 target 用 f4 dtype；scope 无条件走图执行）。
 - 池化：执行器逐 pass 纹理按尺寸复用（liveness/租约归还进池），池上限
   防爆显存；输出与无池化路径位级一致（parity 套件复跑覆盖）。
 - 默认启用（flag 默认值翻转为开）需 S07 原生验收——本文件锁定门控
@@ -79,17 +79,16 @@ class TestProductionSwitchFlag:
         engine._color_graph_render_enabled = False
         assert not engine.color_graph_render_enabled
 
-    def test_full_res_excluded_from_graph_execution(self, monkeypatch):
-        """full-res 导出恒 legacy（f4 dtype/源覆盖语义；B13 硬门已拒
-        复杂图，可投影图 legacy 位级等价）。"""
+    def test_full_res_included_with_f4_dtype(self, monkeypatch):
+        """N01：full-res 出口同样图执行（执行器按 target 选 f4 dtype；
+        复杂图 fail-closed 不回退）。"""
         monkeypatch.setenv("TOPOS_COLOR_GRAPH_RENDER", "1")
         engine = _engine()
         engine.set_active_color_graph(_graph(), stack_id="st-1")
         params = {"color_output_target": "full_res"}
         engine._attach_color_graph_params(
-            params, execute=(engine.color_graph_render_enabled
-                             and params["color_output_target"] != "full_res"))
-        assert "color_graph_execute" not in params
+            params, execute=engine.color_graph_render_enabled)
+        assert params["color_graph_execute"] is True
         assert "color_graph_snapshot" in params  # 身份仍随参
 
     def test_no_graph_no_flag(self, monkeypatch):

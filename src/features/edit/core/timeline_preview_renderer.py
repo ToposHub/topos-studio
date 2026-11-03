@@ -4967,6 +4967,16 @@ class PreviewRenderWorker(QThread):
                 and not extras_on:
             return None
 
+        # N01：栈带不可投影的复杂图时显式降级标记（Edit 实时预览只承
+        # 载 primary 域——复杂图在此出口不得静默压扁为 primary-only）。
+        graph_unprojectable = preview_graph_unprojectable(stack)
+        if graph_unprojectable:
+            advanced_active = True
+            logger.warning(
+                "Edit preview: stack %s 携带不可投影复杂图——实时"
+                "预览只应用 primary 域（完整图渲染归 Color 页/导出；"
+                "不静默当作完整调色）", stack_id)
+
         return {
             "stack_id": str(stack_id),
             "grading_params": grading_params,
@@ -4974,6 +4984,7 @@ class PreviewRenderWorker(QThread):
             # The GPU pass applies the realtime primary grade; cache/render
             # paths own the heavier curves, LUT and compositing stages.
             "has_advanced_operations": advanced_active,
+            "graph_not_projectable": graph_unprojectable,
             "grade_keyframes": grade_keyframes,
             # F4.1: 链段参数（顺序 pre→trim→post；含高级标记时由应用端
             # 降级处理，不静默丢弃）
@@ -6107,6 +6118,21 @@ class PreviewRenderWorker(QThread):
 # ================================================================
 # TimelinePreviewRenderer - 预览渲染控制器
 # ================================================================
+
+def preview_graph_unprojectable(stack: Any) -> bool:
+    """N01：栈是否携带不可投影为 legacy layers 的复杂图。
+
+    Edit 实时预览只承载 primary 域——复杂图在此出口必须显式降级标记
+    （``graph_not_projectable`` + advanced），不得静默 primary-only。
+    """
+    color_graph = getattr(stack, "color_graph", None)
+    if color_graph is None:
+        return False
+    from src.features.color.core.color_graph_migration import (
+        can_project_to_legacy_layers,
+    )
+    return not can_project_to_legacy_layers(color_graph)
+
 
 class TimelinePreviewRenderer(QObject):
     """

@@ -2090,6 +2090,14 @@ class VideoPlaybackEngine(QObject):
             # 使用降级后的参数（如果正在播放）
             params['film_grain'] = get_degraded_effect_params("film_grain", grain_params)
 
+        # N01：视频播放出口附图快照（flag 开启时图执行接管播放调色；
+        # 快照身份含 graph_revision——图命令提交后缓存经
+        # invalidate_cached_render_params 失效重建）
+        attach = getattr(self.engine, '_attach_color_graph_params', None)
+        if callable(attach):
+            attach(params,
+                   execute=bool(getattr(self.engine,
+                                        'color_graph_render_enabled', False)))
         return params
 
     def invalidate_cached_render_params(self) -> None:
