@@ -401,18 +401,32 @@ def main() -> int:
                     try:
                         mode = next(self.workflow_modes)
                     except StopIteration:
-                        from src.features.color.core.scope_diagnostics import scope_diagnostics
-                        self.report["scope_diagnostics"] = scope_diagnostics.snapshot()
-                        failures = self.report["scope_diagnostics"]["events"]
-                        assert not any(failures.get("widget/" + reason, {}).get("count", 0) for reason in ("texture_not_shared", "fbo_incomplete", "blit_failed")), "native scope presentation failed"
-                        self.host.grab().save(str(output / "workflow_final.png"))
-                        self.host.color_node_panel.grab().save(str(output / "nodes_with_tool_markers.png"))
-                        self.finish(True)
+                        self.phase = "node_thumbnails"
+                        self.thumb_wait_started = time.monotonic()
                         return
                     self.host.scope_panel.set_mode(mode)
                     self.host._on_scope_demand_changed()
                     self.last_scope_mode = mode
                     self.mode_started = time.monotonic()
+                    return
+                if self.phase == "node_thumbnails":
+                    # R08：等待已评估节点缩略图（生产 600ms 定时驱动 + 去抖）。
+                    view = self.host.color_node_panel.view
+                    evaluated = len(getattr(view, "_thumbnails", {}) or {})
+                    if evaluated < 2 and time.monotonic() - self.thumb_wait_started <= 12.0:
+                        return
+                    self.report["per_node_rendering"] = (
+                        "evaluated_node_thumbnails" if evaluated >= 2
+                        else f"source_thumbnail_only (evaluated={evaluated})")
+                    self.report["node_thumbnail_count"] = evaluated
+                    from src.features.color.core.scope_diagnostics import scope_diagnostics
+                    self.report["scope_diagnostics"] = scope_diagnostics.snapshot()
+                    failures = self.report["scope_diagnostics"]["events"]
+                    assert not any(failures.get("widget/" + reason, {}).get("count", 0) for reason in ("texture_not_shared", "fbo_incomplete", "blit_failed")), "native scope presentation failed"
+                    self.host.grab().save(str(output / "workflow_final.png"))
+                    self.host.color_node_panel.grab().save(str(output / "nodes_with_tool_markers.png"))
+                    self.finish(True)
+                    return
             except (StopIteration, KeyError, RuntimeError, ValueError, TypeError, AttributeError, IndexError, OSError, AssertionError) as exc:
                 import traceback
                 traceback.print_exc()

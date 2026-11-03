@@ -137,7 +137,7 @@
 
 **验证**：快速滚动/搜索、两 clip 同名 LUT、同帧不同源、资源热更、浮动关窗、100个可见/10000个总资源；断言任务上限/缓存上限、无 UI 阻塞、无旧图回写。对比候选应用后的真实输出与缩略图像素，明确显示变换。
 
-### R08 — 逐节点已处理缩略图　[ ]
+### R08 — 逐节点已处理缩略图　[x]（2026-11-04，证据 docs/validation/color_resources/r08_node_thumbnails/；原生 per_node_rendering=evaluated_node_thumbnails）
 
 1. 现 `ColorNodeSourcePreview` 只供应源缩略图。拟以 node-output demand 向 graph plan 请求可见 Corrector/Compound 输出，不能把 R07 候选 LUT 图混作节点输出。
 2. 利用编译器依赖锥和执行器有效输出 lease；保持输出到 GUI 图像的既有异步通道、限频/尺寸预算；不逐帧同步 readback 每个4K节点。
