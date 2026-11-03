@@ -125,6 +125,9 @@ ACTION_CONTRACTS: dict[str, ActionContract] = {c.action: c for c in (
                    ("node_ids",), ()),
     ActionContract("paste_grade", "paste_grade_domains", IntentCategory.PARAMETER,
                    ("grade_domains",)),
+    # N12：选择性域粘贴（grade/curves/lut/window/effects；身份重建）
+    ActionContract("paste_domains", "paste_selected_domains",
+                   IntentCategory.PARAMETER, ("node_ids", "payload", "domains")),
     ActionContract("set_node_option", "set_node_option", IntentCategory.PARAMETER,
                    ("node_id", "name", "value"), ("name", "value")),
     # ── 布局 / 元信息 / 策略 ──

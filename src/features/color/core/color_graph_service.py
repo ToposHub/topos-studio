@@ -874,6 +874,94 @@ class ColorGraphService:
             return replace(node, params={**dict(node.params), "grade": dict(grade_domains)})
         return self._patch_nodes_with(graph, node_ids, paste)
 
+    # ═══ N12：选择性域粘贴 ══════════════════════════════════════════
+
+    #: 可粘贴域 → (params 键, legacy_payload 键)；None = 域不在该载体。
+    _PASTE_DOMAIN_TARGETS = {
+        "grade": ("grade", None),
+        "curves": (None, "curves_data"),
+        "lut": ("resources", None),
+        "window": (None, "mask_shapes"),
+        "effects": (None, "plugins"),
+    }
+
+    def op_paste_selected_domains(self, graph: ColorGraphData,
+                                  node_ids: Sequence[str],
+                                  payload: Mapping[str, Any],
+                                  domains: Sequence[str]) -> GraphEditResult:
+        """把剪贴板载荷的**选定域**粘贴到目标 Correctors（N12）。
+
+        - 只写选定的域（仅粘曲线不改 LUT/Window…）；未选域原样保留；
+        - 效果实例/窗口形状**重建本地身份**（新 instance_id/shape id，
+          不共享 legacy Layer ID）；
+        - LUT 以资源引用 + 强度成对粘贴（R05 域）；
+        - 锁定/非 Corrector 目标显式拒绝。
+        """
+        unknown = [d for d in domains if d not in self._PASTE_DOMAIN_TARGETS]
+        if unknown:
+            return self._fail(graph, "illegal_param_key",
+                              f"未知粘贴域: {unknown}")
+        if not isinstance(payload, Mapping):
+            return self._fail(graph, "illegal_param_key",
+                              "payload 必须是 Mapping")
+        targets = list(node_ids)
+        if not targets:
+            return self._fail(graph, "illegal_param_key", "粘贴目标为空")
+        for node_id in targets:
+            node = self._node(graph, node_id)
+            if node is None or node.known_type() not in (
+                    NodeType.CORRECTOR, NodeType.SHARED_CORRECTOR,
+                    NodeType.OUTSIDE):
+                return self._fail(graph, "node_not_found",
+                                  f"粘贴目标不是 Corrector: {node_id}",
+                                  node_id=node_id)
+            if node.params.get("locked"):
+                return self._fail(graph, "node_locked",
+                                  "节点已锁定，先解锁再粘贴", node_id=node_id)
+
+        def paste(node: ColorNodeData) -> ColorNodeData:
+            params = dict(node.params)
+            legacy = dict(node.legacy_payload or {})
+            for domain in domains:
+                data = payload.get(domain)
+                if data is None:
+                    continue
+                param_key, legacy_key = self._PASTE_DOMAIN_TARGETS[domain]
+                if domain == "effects":
+                    # 重建本地身份（新 instance_id；不共享来源身份）
+                    rebuilt = []
+                    for plugin in data if isinstance(data, (list, tuple)) else ():
+                        if isinstance(plugin, Mapping):
+                            plugin = dict(plugin)
+                            plugin["instance_id"] = self._id_factory()
+                            rebuilt.append(plugin)
+                    legacy["plugins"] = rebuilt
+                elif domain == "lut":
+                    resources = dict(params.get("resources") or {})
+                    if isinstance(data, Mapping) and data.get("lut_ref"):
+                        resources["lut_ref"] = data["lut_ref"]
+                        resources["lut_strength"] = data.get("lut_strength", 1.0)
+                    else:
+                        resources.pop("lut_ref", None)
+                        resources.pop("lut_strength", None)
+                    params["resources"] = resources
+                elif domain == "window":
+                    shapes = []
+                    for shape in data if isinstance(data, (list, tuple)) else ():
+                        if isinstance(shape, Mapping):
+                            shape = dict(shape)
+                            if isinstance(shape.get("id"), str):
+                                shape["id"] = self._id_factory()
+                            shapes.append(shape)
+                    legacy["mask_shapes"] = shapes
+                elif param_key is not None:
+                    params[param_key] = copy.deepcopy(data)
+                elif legacy_key is not None:
+                    legacy[legacy_key] = copy.deepcopy(data)
+            return replace(node, params=params, legacy_payload=legacy)
+
+        return self._patch_nodes_with(graph, targets, paste)
+
     def op_reset_graph_parameters(self, graph: ColorGraphData) -> GraphEditResult:
         ids = [n.node_id for n in graph.nodes
                if n.known_type() not in (NodeType.SOURCE, NodeType.OUTPUT)]
