@@ -27,7 +27,7 @@ import enum
 import logging
 import uuid
 from dataclasses import asdict, dataclass, field, is_dataclass
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 from src.features.edit.core.commands.color_commands import (
     ApplyColorGraphCommand,
@@ -167,6 +167,14 @@ ACTION_CONTRACTS: dict[str, ActionContract] = {c.action: c for c in (
                    IntentCategory.PARAMETER, ("node_id", "strength"), ()),
     ActionContract("remove_lut", "remove_node_lut", IntentCategory.PARAMETER,
                    ("node_id",), ()),
+    # N03：非 primary 工具域（Qualifier / Window；typed handle 写入）
+    ActionContract("set_qualifier", "set_node_qualifier", IntentCategory.PARAMETER,
+                   ("node_id", "qualifier"), ()),
+    ActionContract("update_window_shape", "update_node_window_shape",
+                   IntentCategory.PARAMETER,
+                   ("node_id", "shape_id", "attributes"), ()),
+    ActionContract("set_windows", "set_node_window_shapes",
+                   IntentCategory.PARAMETER, ("node_id", "shapes"), ()),
     ActionContract("undo", "graph_undo", IntentCategory.HISTORY, ()),
     ActionContract("redo", "graph_redo", IntentCategory.HISTORY, ()),
     ActionContract("reset_grades", "reset_graph_parameters", IntentCategory.RESET, ()),
@@ -1678,6 +1686,62 @@ class ColorGraphAppHost:
 
     def end_grade_gesture(self) -> bool:
         return self._adapter.end_gesture()
+
+    # ── N03：非 primary 工具域（Qualifier / Window）提交 ──
+
+    def _tool_compound_path(self) -> tuple[str, ...]:
+        """当前选中节点的 compound 下行路径（意图瞬间捕获，不猜）。"""
+        return tuple(node_id for _, node_id in
+                     getattr(self._panel, "_parents", ()))
+
+    def submit_qualifier_change(self, node_id: str,
+                                qualifier_patch: Mapping[str, Any],
+                                transaction_id: str) -> bool:
+        """Qualifier 手势：merge patch 并入当前事务（一次拖动一次 undo）。"""
+        return self._bridge.submit_buffered(
+            "set_node_qualifier",
+            {"node_id": node_id, "qualifier": dict(qualifier_patch)},
+            transaction_id, compound_path=self._tool_compound_path())
+
+    def submit_window_shape_update(self, node_id: str, shape_id: str,
+                                   attributes: Mapping[str, Any],
+                                   transaction_id: str) -> bool:
+        """窗口几何/参数拖动：单形状 patch 并入当前事务。"""
+        return self._bridge.submit_buffered(
+            "update_node_window_shape",
+            {"node_id": node_id, "shape_id": str(shape_id),
+             "attributes": dict(attributes)},
+            transaction_id, compound_path=self._tool_compound_path())
+
+    def submit_window_structural_change(self, node_id: str,
+                                        shapes: Sequence[Any]) -> bool:
+        """窗口结构操作（增/删/复制/建组/层级/清空）：独立单发 command。
+
+        走 normalizer → ``bridge.submit``（与 R03 资源命令同路径）；不并
+        入在途手势事务——结构变更即用户可见的独立 undo 单元。
+        """
+        coordinator = self._coordinator
+        stack_id = self._bridge._stack_id()
+        if not stack_id:
+            return False
+        normalizer = ColorGraphIntentNormalizer(
+            session_id=coordinator.session_id,
+            scope_owner_id=coordinator.scope_owner_id,
+            stack_id=stack_id,
+            expected_graph_revision=(coordinator.last_ack.graph_revision
+                                     if coordinator.last_ack else None),
+            session_generation=coordinator.generation)
+        envelope = {
+            "scope": coordinator.scope,
+            "compound_path": list(self._tool_compound_path()),
+            "payload": {"arguments": {"node_id": node_id,
+                                      "shapes": list(shapes)}},
+        }
+        try:
+            intent = normalizer.normalize("set_windows", envelope)
+        except EnvelopeError:
+            return False
+        return self._bridge.submit(intent)
 
 
 # ── 权威图 → 面板 GraphDraft 投影（单向；draft 只是提案展示） ────────────

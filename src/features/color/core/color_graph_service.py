@@ -30,6 +30,7 @@ from src.shared.project.color_graph import (
     PortDirection,
     PortKind,
     SharedDefinitionData,
+    unfreeze_params,
 )
 
 
@@ -961,6 +962,158 @@ class ColorGraphService:
             return replace(node, params=params, legacy_payload=legacy)
 
         return self._patch_nodes_with(graph, targets, paste)
+
+    # ═══ N03：非 primary 工具域（Qualifier / Window）typed handle 写入 ═══
+
+    def _tool_target_or_fail(self, graph: ColorGraphData,
+                             node_id: str, *, domain: str) -> Any:
+        """Qualifier/Window 域的目标节点校验（Corrector 家族 + 锁）。"""
+        node = self._node(graph, node_id)
+        if node is None or node.known_type() not in (
+                NodeType.CORRECTOR, NodeType.SHARED_CORRECTOR,
+                NodeType.OUTSIDE):
+            return self._fail(graph, "node_not_found",
+                              f"{domain}目标不是 Corrector: {node_id}",
+                              node_id=node_id)
+        if node.params.get("locked"):
+            return self._fail(graph, "node_locked",
+                              f"节点已锁定，先解锁再修改{domain}", node_id=node_id)
+        return node
+
+    def op_set_node_qualifier(self, graph: ColorGraphData, node_id: str,
+                              qualifier: Mapping[str, Any]) -> GraphEditResult:
+        """N03：Qualifier 域 merge patch（``params["qualifier"]``）。
+
+        投影侧 ``_DICT_PARAM_OVERLAYS`` 已把该域并入 ``qualifier_params``
+        （legacy 基底 + 图命令域覆盖）——本 op 是其第一个写入者。浅合并：
+        面板/吸管手势只 patch 变化的键；数值/枚举值经 schema 冻结校验。
+        """
+        node = self._tool_target_or_fail(graph, node_id, domain="Qualifier ")
+        if not isinstance(node, ColorNodeData):
+            return node  # type: ignore[return-value] — _fail 的 GraphEditResult
+        if not isinstance(qualifier, Mapping):
+            return self._fail(graph, "illegal_param_key",
+                              "qualifier 必须是 Mapping", node_id=node_id)
+        merged = dict(node.params.get("qualifier") or {})
+        merged.update({str(key): value
+                       for key, value in qualifier.items()})
+        params = dict(node.params)
+        params["qualifier"] = merged
+        try:
+            new_node = replace(node, params=params)
+        except GraphSchemaError as exc:
+            return self._fail(graph, exc.code, str(exc), node_id=node_id)
+        nodes = tuple(new_node if n.node_id == node_id else n
+                      for n in graph.nodes)
+        return self._commit(graph, replace(graph, nodes=nodes), {})
+
+    @staticmethod
+    def _patch_shape_tree(shapes: Sequence[Any], shape_id: str,
+                          attributes: Mapping[str, Any]) -> tuple[list, bool]:
+        """窗口 dict 树内定位 shape_id 并浅合并 attributes。
+
+        返回 (新树, 是否命中)。群组经 ``children`` 递归；未命中分支原样
+        保留（结构共享，不整体深拷贝）。
+        """
+        new_items: list = []
+        patched = False
+        for item in shapes:
+            if (not patched and isinstance(item, Mapping)
+                    and item.get("id") == shape_id):
+                candidate = dict(item)
+                candidate.update(dict(attributes))
+                new_items.append(candidate)
+                patched = True
+            elif (isinstance(item, Mapping)
+                    and isinstance(item.get("children"), (list, tuple))):
+                children, child_patched = ColorGraphService._patch_shape_tree(
+                    list(item["children"]), shape_id, attributes)
+                if child_patched:
+                    candidate = dict(item)
+                    candidate["children"] = children
+                    new_items.append(candidate)
+                    patched = True
+                else:
+                    new_items.append(item)
+            else:
+                new_items.append(item)
+        return new_items, patched
+
+    def op_update_node_window_shape(self, graph: ColorGraphData,
+                                    node_id: str, shape_id: str,
+                                    attributes: Mapping[str, Any],
+                                    ) -> GraphEditResult:
+        """N03：单窗口形状属性 patch（几何/羽化/不透明度等拖动防抖）。
+
+        身份不变（shape_id 原样保留——画布选中/跟踪绑定稳定）；窗口域
+        存于 ``legacy_payload.mask_shapes``（bitmap 引用等路径字符串只在
+        迁移载体豁免，params 禁止）。MaskGroup 仅接受 opacity/visible/
+        invert/locked/operation（与 legacy ``process_mask_update`` 同集）。
+        """
+        node = self._tool_target_or_fail(graph, node_id, domain="窗口 ")
+        if not isinstance(node, ColorNodeData):
+            return node  # type: ignore[return-value]
+        if not isinstance(attributes, Mapping) or not attributes:
+            return self._fail(graph, "illegal_param_key",
+                              "attributes 必须是非空 Mapping", node_id=node_id)
+        legacy = unfreeze_params(dict(node.legacy_payload or {}))
+        shapes = list(legacy.get("mask_shapes") or [])
+        new_shapes, patched = self._patch_shape_tree(
+            shapes, str(shape_id), dict(attributes))
+        if not patched:
+            return self._fail(graph, "shape_not_found",
+                              f"窗口形状不存在: {shape_id}",
+                              node_id=node_id)
+        legacy["mask_shapes"] = new_shapes
+        try:
+            new_node = replace(node, legacy_payload=legacy)
+        except GraphSchemaError as exc:
+            return self._fail(graph, exc.code, str(exc), node_id=node_id)
+        nodes = tuple(new_node if n.node_id == node_id else n
+                      for n in graph.nodes)
+        return self._commit(graph, replace(graph, nodes=nodes), {})
+
+    def _rebuild_window_ids(self, shapes: Sequence[Any]) -> list:
+        """递归为缺 id 的窗口项分配新身份（给定 id 保留——画布/跟踪绑定
+        稳定；跨节点复制场景由调用方先改 id）。"""
+        rebuilt: list = []
+        for item in shapes:
+            if not isinstance(item, Mapping):
+                rebuilt.append(item)
+                continue
+            candidate = dict(item)
+            if not isinstance(candidate.get("id"), str) or not candidate["id"]:
+                candidate["id"] = self._id_factory()
+            children = candidate.get("children")
+            if isinstance(children, (list, tuple)):
+                candidate["children"] = self._rebuild_window_ids(list(children))
+            rebuilt.append(candidate)
+        return rebuilt
+
+    def op_set_node_window_shapes(self, graph: ColorGraphData, node_id: str,
+                                  shapes: Sequence[Any]) -> GraphEditResult:
+        """N03：窗口域整体替换（结构操作：增/删/复制/建组/层级/清空）。
+
+        ``shapes`` 为 ``MaskShape/MaskGroup.to_dict()`` 列表（活对象由
+        调用方序列化）；给定 id 保留，缺 id 补新。一次调用 = 一次原子
+        command = 一次 undo；legacy undo 快照（history.push_state）在图
+        模式由调用方跳过。
+        """
+        node = self._tool_target_or_fail(graph, node_id, domain="窗口 ")
+        if not isinstance(node, ColorNodeData):
+            return node  # type: ignore[return-value]
+        if not isinstance(shapes, (list, tuple)):
+            return self._fail(graph, "illegal_param_key",
+                              "shapes 必须是列表", node_id=node_id)
+        legacy = unfreeze_params(dict(node.legacy_payload or {}))
+        legacy["mask_shapes"] = self._rebuild_window_ids(list(shapes))
+        try:
+            new_node = replace(node, legacy_payload=legacy)
+        except GraphSchemaError as exc:
+            return self._fail(graph, exc.code, str(exc), node_id=node_id)
+        nodes = tuple(new_node if n.node_id == node_id else n
+                      for n in graph.nodes)
+        return self._commit(graph, replace(graph, nodes=nodes), {})
 
     def op_reset_graph_parameters(self, graph: ColorGraphData) -> GraphEditResult:
         ids = [n.node_id for n in graph.nodes
