@@ -362,6 +362,36 @@ class NodeEditorState:
         NodeEditorState._activate(graph, node.id)
         return node
 
+    def add_window_combo(self, combo: str) -> str:
+        """N15 草图侧：Serial + 默认形状窗口（与 service op 同默认表）。"""
+        from src.features.color.core.color_graph_service import (
+            ColorGraphService,
+        )
+        defaults = dict(ColorGraphService._WINDOW_COMBO_DEFAULTS.get(
+            str(combo).lower()) or {})
+        if not defaults:
+            return ""
+        graph = self.snapshot()
+        node = self._serial(graph, before=False)
+        window = {
+            "id": str(uuid.uuid4()), "type": defaults["type"],
+            "name": defaults.get("name", combo), "center": [0.5, 0.5],
+            "size": defaults.get("size", [0.25, 0.25]), "rotation": 0.0,
+            "feather": defaults.get("feather", 2.0), "opacity": 1.0,
+            "visible": True, "invert": False, "operation": "add",
+        }
+        if "points" in defaults:
+            window["points"] = defaults["points"]
+        if "grad_points" in defaults:
+            window["grad_points"] = defaults["grad_points"]
+        payload = dict(node.backend_payload or {})
+        payload["mask_shapes"] = [window]
+        node.backend_payload = payload
+        node.label = defaults.get("name", combo)
+        self._commit(graph)
+        graph.active_id = node.id
+        return node.id
+
     def add_serial(self, before: bool = False) -> str:
         graph = self.snapshot()
         node = self._serial(graph, before)

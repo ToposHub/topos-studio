@@ -206,6 +206,75 @@ class ColorGraphService:
         candidate = replace(graph, nodes=graph.nodes + (node,), edges=edges)
         return self._commit(graph, candidate, {new_id: new_id})
 
+    # ═══ N15：Resolve 窗口组合（CPW/LPW/PPW/PCW 一键 = Serial+Window）═══
+
+    #: 组合名 → (MaskShape type, 默认形状参数)。语义对照 Resolve 20：
+    #: CPW=Circular Power Window（圆）、LPW=Linear Power Window（线性
+    #: 渐变）、PPW=Polygon Power Window（多边形）、PCW=Power Curve
+    #: Window（平滑曲线）。API 不支持窗口脚本化创建——实机人工对照
+    #: 如实登记为待办（见 n15 README）。
+    _WINDOW_COMBO_DEFAULTS = {
+        "cpw": {"type": "circle", "size": [0.25, 0.25], "feather": 0.0,
+                "name": "Circular Power Window"},
+        "lpw": {"type": "gradient", "size": [0.9, 0.9],
+                "grad_points": [[0.4, 0.3], [0.6, 0.7]],
+                "name": "Linear Power Window"},
+        "ppw": {"type": "curve", "points": [[0.4, 0.4], [0.6, 0.4],
+                                            [0.6, 0.6], [0.4, 0.6]],
+                "name": "Polygon Power Window"},
+        "pcw": {"type": "curve",
+                "points": [[0.42, 0.30], [0.58, 0.30], [0.70, 0.42],
+                           [0.70, 0.58], [0.58, 0.70], [0.42, 0.70],
+                           [0.30, 0.58], [0.30, 0.42]],
+                "name": "Power Curve Window"},
+    }
+
+    def op_add_window_combo(self, graph: ColorGraphData,
+                            active_node_id: str | None = None,
+                            combo: str = "cpw") -> GraphEditResult:
+        """N15：一键 = 新建 Serial Corrector + 挂默认形状窗口（一命令一 undo）。
+
+        - 插入位置与 ``insert_corrector`` 同策略（anchor 后串入）；
+        - 窗口写入新节点的 ``legacy_payload.mask_shapes``（N03 语义：
+          身份独立、可跟踪绑定）；
+        - 默认中性（grading 空、opacity 1、形状居中占画面约 1/4）。
+        """
+        shape = dict(self._WINDOW_COMBO_DEFAULTS.get(str(combo).lower()) or {})
+        if not shape:
+            return self._fail(graph, "illegal_param_key",
+                              f"未知窗口组合: {combo}（cpw/lpw/ppw/pcw）")
+        inserted = self.op_insert_corrector(graph, active_node_id,
+                                            before=False)
+        if not inserted.ok:
+            return inserted
+        new_id = next(iter(inserted.id_mapping.values()))
+        node = self._node(inserted.graph, new_id)
+        window = {
+            "id": self._id_factory(),
+            "type": shape["type"],
+            "name": shape.get("name", combo),
+            "center": [0.5, 0.5],
+            "size": shape.get("size", [0.25, 0.25]),
+            "rotation": 0.0,
+            "feather": shape.get("feather", 2.0),
+            "opacity": 1.0,
+            "visible": True,
+            "invert": False,
+            "operation": "add",
+        }
+        if "points" in shape:
+            window["points"] = shape["points"]
+        if "grad_points" in shape:
+            window["grad_points"] = shape["grad_points"]
+        legacy = dict(node.legacy_payload or {})
+        legacy["mask_shapes"] = [window]
+        new_node = replace(node, legacy_payload=legacy,
+                           label=shape.get("name", combo))
+        nodes = tuple(new_node if n.node_id == new_id else n
+                      for n in inserted.graph.nodes)
+        candidate = replace(inserted.graph, nodes=nodes)
+        return self._commit(inserted.graph, candidate, inserted.id_mapping)
+
     def op_add_node(self, graph: ColorGraphData, kind: str,
                     position: Sequence[float] = (0.0, 0.0)
                     ) -> GraphEditResult:

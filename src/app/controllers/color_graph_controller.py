@@ -175,6 +175,9 @@ ACTION_CONTRACTS: dict[str, ActionContract] = {c.action: c for c in (
                    ("node_id", "shape_id", "attributes"), ()),
     ActionContract("set_windows", "set_node_window_shapes",
                    IntentCategory.PARAMETER, ("node_id", "shapes"), ()),
+    # N15：Resolve 窗口组合（一键 = Serial+默认形状窗口）
+    ActionContract("add_window_combo", "add_window_combo",
+                   IntentCategory.STRUCTURE, ("combo",), ("active_node_id",)),
     ActionContract("undo", "graph_undo", IntentCategory.HISTORY, ()),
     ActionContract("redo", "graph_redo", IntentCategory.HISTORY, ()),
     ActionContract("reset_grades", "reset_graph_parameters", IntentCategory.RESET, ()),
@@ -996,6 +999,12 @@ class ColorGraphPanelHost:
                 before = any(edge.src_node in added and edge.dst_node == anchor
                              for edge in after.connections)
             args = {"active_node_id": anchor, "before": before}
+        elif action == "add_window_combo":
+            # N15：一键 = Serial + 默认形状窗口（combo 从 UI envelope 透传；
+            # active_node_id 同 add_serial 锚点规则）
+            args = {"active_node_id": anchor, "combo": str(
+                (payload.get("combo") if isinstance(payload, Mapping) else "")
+                or "cpw")}
         elif action == "add_parallel":
             args = {"branch_origin_id": anchor}
         elif action == "add_layer":

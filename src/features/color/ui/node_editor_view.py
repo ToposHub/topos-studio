@@ -849,6 +849,18 @@ class ColorNodeView(QGraphicsView):
                 for value in values:
                     self._action(options, key + "_" + value.lower().replace(" ", "_"), value,
                                  lambda k=key, v=value: self._set_grade_value(k, v), checked=active.node_options.get(key, "Use Timeline") == value)
+        # N15：Resolve 窗口组合（CPW/LPW/PPW/PCW 一键 = Serial+默认形状
+        # 窗口；同一 add_window_combo 命令路径——一命令一 undo）
+        combo_menu = menu.addMenu(tr("window_combos", "Power Window Combos"))
+        for combo, title in (("cpw", "Circular (CPW)"), ("lpw", "Linear (LPW)"),
+                             ("ppw", "Polygon (PPW)"), ("pcw", "Curve (PCW)")):
+            self._action(
+                combo_menu, "combo_" + combo, title,
+                lambda c=combo: self.apply_edit(
+                    "add_window_combo",
+                    lambda c=c: self.state.add_window_combo(c),
+                    payload={"combo": c}),
+                enabled=has_node)
         if active is not None and active.kind in (NodeKind.PARALLEL_MIXER, NodeKind.LAYER_MIXER, NodeKind.KEY_MIXER):
             self._action(menu, "add_input", "Add One Input", lambda: self.apply_edit("add_input", lambda: self.state.set_node_fields({active.id}, input_count=active.input_count + 1)))
             if active.kind != NodeKind.KEY_MIXER:
