@@ -164,6 +164,13 @@ class GpuScopeEngine:
         )
         pool = self._pool_cache.get(pool_key)
         if pool is None:
+            # N09 债务修复：尺寸键变化 = 旧尺寸池整体作废（浮窗/resize
+            # 场景每次新键都会留一套全尺寸纹理——曾 1647MB/10min 泄漏）。
+            # 单活动池语义：释放全部旧键池后再建新池。
+            if self._pool_cache:
+                for _old_key, old_pool in self._pool_cache.items():
+                    self._release_pool_entries(old_pool)
+                self._pool_cache.clear()
             pool = {}
             self._pool_cache[pool_key] = pool
         self._pool = pool
@@ -245,6 +252,18 @@ class GpuScopeEngine:
             'vectorscope_size': tuple(vectorscope_size),
         })
         return pool
+
+    @staticmethod
+    def _release_pool_entries(pool: dict) -> None:
+        """释放单池内全部 GL 资源（N09：旧尺寸池作废路径；幂等）。"""
+        for key, obj in list(pool.items()):
+            if key.endswith('_size') or not hasattr(obj, 'release'):
+                continue
+            try:
+                obj.release()
+            except Exception:
+                pass
+        pool.clear()
 
     def release(self) -> None:
         """Release every allocated scope resource (idempotent)."""
