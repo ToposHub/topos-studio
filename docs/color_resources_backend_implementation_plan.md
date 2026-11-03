@@ -198,7 +198,7 @@
 | N08 / Shared跨clip / B05/B14 / P0 | 跨clip粘贴共享定义、参数fanout与实例覆盖未完整认证。解析定义依赖闭包，冲突重命名/去重规则稳定；跨栈原子fanout，Make Local保留当时结果。 | A/B clip同时引用改参数，两边更新且1undo；跨工程同ID不同内容不覆盖；锁/删/解共享、Compound共享闭包。 | R03、R09 |
 | N09 / S07、B16 / P0 | 持续播放/4K/浮动resize压力、性能资源录制未完整。前轮9种scope原生截图和短素材冒烟已通过，不等于压力完成。按R12执行完整矩阵，保留NOT RUN平台。 | scopes/s00_s01_record协议，30分钟播放/seek/拖参/切页/多模式/浮动；无texture_not_shared/FBO错误、过期输出和持续泄漏；真实p95预算报告。 | R06、N01 |
 | N10 / keyframes / P1 | 节点图编辑上下文关键帧暂缓，已有底栏图标只识别元数据。定义节点/实例/参数路径、插值/时间base、剪贴板/版本归属；命令与播放评估读取同域。 | 插入/删/移动/插值、效果排序后身份不丢、trim/retime/Compound/shared、seek随机帧与导出一致，撤销一次手势一次command。 | R04、N03、N07 |
-| N11 / E12、global history / P0 | standalone历史仍旧适配器；不经图宿主的全局undo/redo对engine同步存在缺口。让项目发布观察者统一重投影、刷新面板/资源/渲染，避免只有图菜单能undo正确。 | 菜单/键盘/全局undo和redo、剪贴板资源、切clip、standalone分别验证；图JSON/engine/Viewer/设置同时回到一致revision。 | R03、N03 |
+| N11✅ / E12、global history / P0 | standalone历史仍旧适配器；不经图宿主的全局undo/redo对engine同步存在缺口。让项目发布观察者统一重投影、刷新面板/资源/渲染，避免只有图菜单能undo正确。 | 菜单/键盘/全局undo和redo、剪贴板资源、切clip、standalone分别验证；图JSON/engine/Viewer/设置同时回到一致revision。 | R03、N03 |
 | N12 / B04 B14 剪贴板 / P1 | 完整节点复制本轮已补；选择性paste_grade_domains、跨工程still/clipboard子图资源闭包仍需补。定义选择域语义，复用R09资源闭包，递归重建本地身份。 | 仅粘曲线不改LUT/Window，跨Compound/跨clip/跨工程、共享定义、缺插件保留；多次粘贴不共用legacy Layer ID；undo完整恢复。 | R09、N08 |
 | N13 / E24 LUT导出 / P1 | 既有LUT fast path尚未完整接导出调用点。统一graph pointwise可表达性预检，接正式export_lut；空间/时序/依赖窗口图拒绝并解释。 | 3D色立方golden，串行pointwise+LUT顺序，含Glow/NR/Window/AI的图不能导出“成功但少效果”的cube；重载导出LUT对照。 | R05、R06、N01 |
 | N14 / B12 E22跨后端 / P1 | CPU/Metal只支持基础点态域，fragment全域Metal Corrector未接，插件/HSL/LUT/warper/fx/非Normal等仍fail-closed。逐域实现与能力声明一起提交，不能一口气取消限制。 | 同一fixture跨GL/CPU/Metal、对应平台原生；未知/缺实现继续明确拒绝；Linux/Windows/Apple Silicon/Intel按机器列NOT RUN。 | R06、R12 |

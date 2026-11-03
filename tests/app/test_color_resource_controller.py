@@ -555,3 +555,45 @@ def test_node_lut_menu_shares_command_path(rig, monkeypatch) -> None:
     node = next(n for n in _graph(rig).nodes if n.node_id == rig.corrector)
     assert "lut_ref" not in node.params.get("resources", {})
     get_lut_resource_session().reset()
+
+
+def test_external_project_change_reprojects(rig) -> None:
+    """N11：外部栈 undo（非图菜单路径）后统一重投影到旧 revision。"""
+    rig.controller.activate_effect(
+        {"id": "grain", "kind": "effect", "available": True})
+    assert len(_instances(rig)) == 1
+    revised = _graph(rig).graph_revision
+    # 模拟全局 undo：直接驱动共享工程栈（绕过图桥），再发布新工程
+    undone = rig.graph.cmd_stack.undo(rig.graph.holder["project"])
+    assert undone is not None
+    rig.graph.holder["project"] = undone
+    # 图桥未被调用——last_ack 仍是新 revision（外部变更未感知）
+    assert rig.graph.host._coordinator.last_ack.graph_revision == revised
+    # N11：外部工程变更统一重投影
+    rig.graph.host.on_external_project_change()
+    assert rig.graph.host._coordinator.last_ack.graph_revision == \
+        _graph(rig).graph_revision
+    assert _graph(rig).graph_revision < revised
+    rig.controller.refresh_target()
+    assert _instances(rig) == []  # 面板随权威恢复
+
+
+def test_external_change_is_idempotent_when_revision_matches(rig) -> None:
+    rig.controller.activate_effect(
+        {"id": "grain", "kind": "effect", "available": True})
+    before = rig.graph.host._coordinator.last_ack.graph_revision
+    rig.graph.host.on_external_project_change()  # 自家命令流已推同 ack
+    assert rig.graph.host._coordinator.last_ack.graph_revision == before
+
+
+def test_global_history_gating_helper(rig) -> None:
+    """N11：图会话 READY + 共享栈有历史 → 全局 undo 走图宿主。"""
+    from src.app.controllers.layer_controller import LayerOpsMixin
+    rig.graph.host._project_stack = rig.graph.cmd_stack
+    host = SimpleNamespace(color_graph_host=rig.graph.host)
+    # 借宿主方法（mixin 解析 self 属性）
+    gating = LayerOpsMixin._color_graph_history_available.__get__(host)
+    assert gating() is False  # 栈空（水合未入栈）
+    rig.controller.activate_effect(
+        {"id": "grain", "kind": "effect", "available": True})
+    assert gating() is True

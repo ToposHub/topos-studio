@@ -1312,6 +1312,33 @@ class ColorGraphAppHost:
 
     # ── clip 水合钩子 ──
 
+    def on_external_project_change(self) -> None:
+        """N11：外部工程替换（全局 undo/脚本/其他域命令）后统一重投影。
+
+        任何路径替换 ``_current_edit_project`` 都经此把权威图新投影推给
+        协调器（面板/资源/渲染随 ack 刷新），不再只有图菜单 undo 正确。
+        自家命令流推送过同 revision ack 时幂等跳过。
+        """
+        stack_id = self._bridge._stack_id()
+        if not stack_id:
+            return
+        project = self._get_project()
+        stack = project.color_stacks.get(stack_id) if project else None
+        graph = stack.color_graph if stack else None
+        if graph is None:
+            return
+        last = self._coordinator.last_ack
+        if last is not None and last.graph_revision == graph.graph_revision:
+            return
+        projection = GraphProjection(
+            session_id=self._coordinator.session_id,
+            session_generation=self._coordinator.generation,
+            scope=self._coordinator.scope,
+            scope_owner_id=self._coordinator.scope_owner_id,
+            graph=graph.to_dict(),
+            graph_revision=graph.graph_revision)
+        self._coordinator.hydrate_projection(projection)
+
     def on_clip_stack_loaded(self, stack_id: str, *,
                              scope: str = "clip",
                              scope_owner_id: str | None = None) -> None:

@@ -1,0 +1,11 @@
+{
+  "00c3996e-8d81-43a0-8903-a2c633df2204": {
+    "bin_id": "00c3996e-8d81-43a0-8903-a2c633df2204",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "dee52aa0-b5e9-4dc8-b5f3-0211c39d5976"
+    ],
+    "timeline_ids": []
+  }
+}

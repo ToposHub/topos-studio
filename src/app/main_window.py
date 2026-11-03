@@ -1545,6 +1545,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             def _set_project(project):
                 self._current_edit_project = project
                 self.edit_project_dirty = True
+                # N11：外部工程替换统一重投影（幂等：自家命令流已推同
+                # revision ack 时跳过）。
+                try:
+                    self.color_graph_host.on_external_project_change()
+                except Exception:  # noqa: BLE001 — 重投影失败不阻断发布
+                    pass
 
             def _request_render():
                 engine = getattr(self, "engine", None)
