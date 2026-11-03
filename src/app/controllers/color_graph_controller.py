@@ -1686,6 +1686,23 @@ class ColorGraphAppHost:
         base.update(qualifier)
         return base
 
+    def node_id_for_legacy_layer(self, layer_id: str) -> str:
+        """legacy 层 id → node id 反查（N03 跨节点窗口复制等场景；
+        递归 compound）。找不到返回空串。"""
+        graph = self._stack_graph(self._bound_stack_id)
+        if graph is None or not layer_id:
+            return ""
+        def find(current: Any) -> str:
+            for node in current.nodes:
+                if dict(node.legacy_payload or {}).get("id") == layer_id:
+                    return node.node_id
+                if node.compound_children is not None:
+                    found = find(node.compound_children)
+                    if found:
+                        return found
+            return ""
+        return find(graph)
+
     def align_engine_active_layer(self, node_id: str) -> bool:
         """图节点 → 引擎活动层对齐（§6.5 source_layer_id 唯一许可路径）。"""
         graph = self._stack_graph(self._bound_stack_id)

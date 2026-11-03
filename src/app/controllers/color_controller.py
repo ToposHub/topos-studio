@@ -83,6 +83,59 @@ class ColorControllerMixin:
             self.engine.img_full_original, self.engine.layers,
             self.engine.active_layer_index, copy_image=False)
 
+    # ------------------------------------------------------------------
+    # N03: Window/形状写路径的图模式路由（typed handle）
+    # ------------------------------------------------------------------
+
+    def _graph_tool_route(self):
+        """图编辑上下文的目标（graph_host, node_id）；非路由态返回 None。
+
+        判定与 grade/qualifier 手势一致（B06.2）：选中 Corrector 或
+        B16.5 flag 图链接栈。无法定位节点 → None（回落 legacy，手势
+        不静默丢失）。
+        """
+        graph_host = getattr(self, "color_graph_host", None)
+        if graph_host is None or not graph_host.graph_edit_context_active():
+            return None
+        node_id = graph_host.active_grade_node_id()
+        if not node_id:
+            return None
+        return graph_host, node_id
+
+    def _submit_window_structure(self, graph_route, layer,
+                                 node_id: str | None = None) -> bool:
+        """窗口结构变更（增/删/复制/建组/层级/清空）→ 一次图命令。
+
+        活对象已先行变更（画布/面板即时反馈）；本方法把**整域序列化
+        快照**提交为权威（id 保留——绑定/选中稳定）。在途参数手势先
+        收束（避免权威分叉）。``node_id`` 缺省为路由活动节点；跨节点
+        复制时传目标节点。
+        """
+        graph_host, active_node_id = graph_route
+        target_node = node_id or active_node_id
+        if graph_host.grade_gesture_open():
+            graph_host.end_grade_gesture()
+        if node_id is None:
+            graph_host.align_engine_active_layer(target_node)
+        shapes = [item.to_dict(None) for item in layer.mask_shapes]
+        return graph_host.submit_window_structural_change(target_node, shapes)
+
+    def _submit_window_attribute_patches(self, graph_route,
+                                         patches: dict) -> None:
+        """窗口参数拖动（防抖队列）→ 单形状 patch 并入手势事务。"""
+        graph_host, node_id = graph_route
+        if not patches:
+            return
+        if not graph_host.grade_gesture_open():
+            counter = int(getattr(self, '_graph_gesture_counter', 0)) + 1
+            self._graph_gesture_counter = counter
+            self._graph_gesture_tid = f"window-{counter}"
+            graph_host.begin_grade_gesture(self._graph_gesture_tid)
+        for shape_id, attributes in patches.items():
+            graph_host.submit_window_shape_update(
+                node_id, shape_id, attributes, self._graph_gesture_tid)
+        self._tool_flush_timer().start()
+
     def on_mask_shape_added(self, shape_type: str) -> None:
         """Handle mask shape addition with context-aware placement."""
         self.mask_panel.btn_brush.setChecked(False)
@@ -92,7 +145,10 @@ class ColorControllerMixin:
             return
 
         # BUG-C4-01：新增遮罩是用户可见的结构变更，改动前提交撤销快照
-        self._push_mask_structure_snapshot()
+        # （图模式下 undo 走图命令——跳过 legacy 快照，改完后提交结构命令）
+        graph_route = self._graph_tool_route()
+        if graph_route is None:
+            self._push_mask_structure_snapshot()
 
         # 实例化新遮罩形状
         shape = MaskShape("curve" if shape_type == "polygon" else shape_type)
@@ -143,6 +199,8 @@ class ColorControllerMixin:
             self.canvas.set_mask_creation_mode(shape_type)
             self.canvas.set_drawing_mode(True)
             self.status_bar.showMessage("Pen Tool Active", 5000)
+        if graph_route is not None:
+            self._submit_window_structure(graph_route, layer)
         self.request_render()
         self._trigger_autosave()
 
@@ -160,7 +218,10 @@ class ColorControllerMixin:
             # 修复：使用递归查找替代浅层遍历，支持删除群组内部的嵌套遮罩
             if not layer.get_mask_item_by_id(shape_id): return
             # BUG-C4-01：删除遮罩前提交撤销快照（找不到目标时不产生空快照）
-            self._push_mask_structure_snapshot()
+            # 图模式下 undo 走图命令（结构快照提交）
+            graph_route = self._graph_tool_route()
+            if graph_route is None:
+                self._push_mask_structure_snapshot()
             previous_id = self.canvas.active_shape_id
             self.canvas.set_drawing_mode(False)
             layer.remove_shape(shape_id)
@@ -174,6 +235,8 @@ class ColorControllerMixin:
             # 选中最后一项并重新触发绑定）
             self._on_tracker_shape_selected(getattr(self.canvas, "active_shape_id", None))
             self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
+            if graph_route is not None:
+                self._submit_window_structure(graph_route, layer)
             self.request_render()
             self._trigger_autosave()
 
@@ -202,9 +265,11 @@ class ColorControllerMixin:
         source = layer.get_mask_item_by_id(shape_id)
         if source is None:
             return
-        self.engine.history.push_state(
-            self.engine.img_full_original, self.engine.layers,
-            self.engine.active_layer_index, copy_image=False)
+        graph_route = self._graph_tool_route()
+        if graph_route is None:
+            self.engine.history.push_state(
+                self.engine.img_full_original, self.engine.layers,
+                self.engine.active_layer_index, copy_image=False)
         clone = self._clone_mask_item(source)
         if isinstance(source, MaskGroup):
             # 组复制：放到根级，避免自嵌套
@@ -222,6 +287,8 @@ class ColorControllerMixin:
         self.canvas.set_active_shape(clone.id)
         self.mask_panel.select_shape(clone.id)
         self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
+        if graph_route is not None:
+            self._submit_window_structure(graph_route, layer)
         self.request_render()
 
     def on_copy_masks_to_layer_requested(self) -> None:
@@ -249,9 +316,17 @@ class ColorControllerMixin:
         target = by_action.get(chosen) if chosen is not None else None
         if target is None:
             return
-        self.engine.history.push_state(
-            self.engine.img_full_original, self.engine.layers,
-            self.engine.active_layer_index, copy_image=False)
+        # N03：图模式跨节点复制——目标 legacy 层反查节点；不可解析
+        # （纯 legacy 层）时保持 legacy 行为
+        graph_route = self._graph_tool_route()
+        target_node_id = None
+        if graph_route is not None:
+            target_node_id = graph_route[0].node_id_for_legacy_layer(
+                getattr(target, "id", ""))
+        if graph_route is None or not target_node_id:
+            self.engine.history.push_state(
+                self.engine.img_full_original, self.engine.layers,
+                self.engine.active_layer_index, copy_image=False)
         for item in source.mask_shapes:
             target.mask_shapes.append(self._clone_mask_item(item))
         target.is_dirty = True
@@ -265,6 +340,9 @@ class ColorControllerMixin:
                     "已复制 {count} 个窗口到「{name}」",
                     count=len(source.mask_shapes), name=target.name or target.id[:8]),
             4000)
+        if graph_route is not None and target_node_id:
+            self._submit_window_structure(graph_route, target,
+                                          node_id=target_node_id)
         self.request_render()
 
     def on_all_masks_cleared(self) -> None:
@@ -279,11 +357,18 @@ class ColorControllerMixin:
             self.canvas.clear_sam_points()
 
         # BUG-C4-01：清空所有遮罩前提交撤销快照；无可清内容时不产生空快照
-        if any(lyr.mask_shapes or lyr.ai_matte for lyr in self.engine.layers):
-            self._push_mask_structure_snapshot()
+        # 图模式：只清活动节点（权威域=该节点的窗口），undo 走图命令
+        graph_route = self._graph_tool_route()
+        if graph_route is None:
+            if any(lyr.mask_shapes or lyr.ai_matte for lyr in self.engine.layers):
+                self._push_mask_structure_snapshot()
+            targets = list(self.engine.layers)
+        else:
+            targets = [self.engine.get_active_layer()] \
+                if self.engine.get_active_layer() else []
 
-        # Clear masks for ALL layers, not just the active one
-        for layer in self.engine.layers:
+        # Clear masks（图模式限定活动节点；legacy 清全部层）
+        for layer in targets:
             # Clear all mask shapes from the layer (including Bitmap AI masks from BiRefNet/SAM)
             layer.mask_shapes.clear()
 
@@ -310,6 +395,8 @@ class ColorControllerMixin:
         # Update layer panel to refresh mask icons
         self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
 
+        if graph_route is not None and targets:
+            self._submit_window_structure(graph_route, targets[0])
         # Request render to update the viewport
         self.request_render()
         self._trigger_autosave()
@@ -1485,7 +1572,10 @@ class ColorControllerMixin:
             return
 
         # BUG-C4-01：建组（打包既有窗口或新建空组）是结构变更，先提交撤销快照
-        self._push_mask_structure_snapshot()
+        # 图模式下 undo 走图命令
+        graph_route = self._graph_tool_route()
+        if graph_route is None:
+            self._push_mask_structure_snapshot()
 
         # 情况 1：多选打包建组
         if selected_ids and len(selected_ids) > 0:
@@ -1532,6 +1622,8 @@ class ColorControllerMixin:
             self.canvas.update_mask_overlay(layer)
             self.canvas.set_active_shape(group.id)
             self.mask_panel.select_shape(group.id)
+            if graph_route is not None:
+                self._submit_window_structure(graph_route, layer)
             self.request_render()
             self._trigger_autosave()
             self.status_bar.showMessage(f"Packed {len(ordered_items)} items into new Group", 2000)
@@ -1561,6 +1653,8 @@ class ColorControllerMixin:
         self.canvas.update_mask_overlay(layer)
         self.canvas.set_active_shape(group.id)
         self.mask_panel.select_shape(group.id)
+        if graph_route is not None:
+            self._submit_window_structure(graph_route, layer)
         self.request_render()
         self._trigger_autosave()
         self.status_bar.showMessage(f"Mask Group added: {group.name}", 2000)
@@ -1577,8 +1671,10 @@ class ColorControllerMixin:
 
         # BUG-C4-01：层级拖拽重建数据树前提交撤销快照。必须在
         # ``extract_items`` 之前——该步骤会就地清空群组 children，压栈晚了
-        # 快照就会捕获被拆散的中间态。
-        self._push_mask_structure_snapshot()
+        # 快照就会捕获被拆散的中间态。图模式下 undo 走图命令。
+        graph_route = self._graph_tool_route()
+        if graph_route is None:
+            self._push_mask_structure_snapshot()
 
         # 内部递归函数：提取所有元素到扁平字典，并清空群组的 children
         all_items: Dict[str, Union[MaskShape, MaskGroup]] = {}
@@ -1637,6 +1733,8 @@ class ColorControllerMixin:
         # 设置 dirty 标记并触发渲染
         layer.is_dirty = True
         layer.mask_dirty = True
+        if graph_route is not None:
+            self._submit_window_structure(graph_route, layer)
         self.request_render()
         self._trigger_autosave()
 
@@ -1758,6 +1856,7 @@ class ColorControllerMixin:
 
         # Update the active brush shape's default parameters
         layer = self.engine.get_active_layer()
+        graph_route = self._graph_tool_route()
         if layer:
             for s in self._iter_brush_shapes(layer):
                 if s.id == self.canvas.active_shape_id:
@@ -1765,6 +1864,14 @@ class ColorControllerMixin:
                     s.brush_feather = params["feather"]
                     s.brush_opacity = params["opacity"]
                     s.brush_flow = params["flow"]
+                    if graph_route is not None:
+                        # N03：画笔默认参数 → 图命令（权威；活对象已同值更新）
+                        self._submit_window_attribute_patches(
+                            graph_route, {s.id: {
+                                "brush_size": params["size"],
+                                "brush_feather": params["feather"],
+                                "brush_opacity": params["opacity"],
+                                "brush_flow": params["flow"]}})
                     break
 
     def on_canvas_brush_params_updated(self, params) -> None:
@@ -1801,7 +1908,10 @@ class ColorControllerMixin:
             return
 
         # BUG-C4-01：每条落笔都是一个可撤销单元，写入前提交撤销快照
-        self._push_mask_structure_snapshot()
+        # 图模式下 undo 走图命令
+        graph_route = self._graph_tool_route()
+        if graph_route is None:
+            self._push_mask_structure_snapshot()
 
         # Find the active brush shape (recursive: may live inside a MaskGroup)
         brush_shapes = self._iter_brush_shapes(layer)
@@ -1841,6 +1951,9 @@ class ColorControllerMixin:
         layer.mask_dirty = True
         layer.is_dirty = True
 
+        if graph_route is not None:
+            # N03：画笔落笔（新建形状/追加笔画）→ 结构图命令
+            self._submit_window_structure(graph_route, layer)
         # Request render to update the mask
         self.request_render()
         self._trigger_autosave()
@@ -1893,6 +2006,10 @@ class ColorControllerMixin:
         """
         layer = self.engine.get_active_layer()
         if not layer: return
+        # N03：图模式快照待提交 patch（活对象先行同值更新，图命令随后
+        # 提交为权威——补丁只收实际命中活形状的项）
+        graph_route = self._graph_tool_route()
+        graph_patches: dict = {}
         updates_applied = False
         last_updated_shape = None
         updated_fields = []
@@ -1902,6 +2019,8 @@ class ColorControllerMixin:
         for shape_id, params in self.pending_mask_updates.items():
             s = layer.get_mask_item_by_id(shape_id)
             if s:
+                if graph_route is not None:
+                    graph_patches[shape_id] = dict(params)
                 recorded_fields = list(params)
                 if isinstance(s, MaskGroup):
                     # MaskGroup 只支持 opacity 参数
@@ -1957,6 +2076,10 @@ class ColorControllerMixin:
         if updates_applied:
             layer.is_dirty = True; layer.mask_dirty = True
             self._maybe_record_mask_keyframes(layer, updated_fields)
+            if graph_route is not None:
+                # 图模式：活对象更新已完成（预览），patch 并入手势事务
+                self._submit_window_attribute_patches(graph_route,
+                                                      graph_patches)
             self.request_render()
             # UI Sync: Update sliders ONLY if the current active shape in UI was the one updated.
             # If multiple shapes were updated, the last one in the dict takes precedence for UI display.
@@ -1992,24 +2115,28 @@ class ColorControllerMixin:
         self.engine.set_qualifier_params(params)
         self._invalidate_video_render_params_if_playing()
 
-    def _qualifier_flush_timer(self):
-        """手势自冲刷定时器（吸管/部分滑条无 interaction 包裹——400ms
-        静默后自动 flush，杜绝在途事务悬挂到下一手势）。"""
+    def _tool_flush_timer(self):
+        """工具域手势自冲刷定时器（吸管/部分滑条/防抖队列无 interaction
+        包裹——400ms 静默后自动 flush，杜绝在途事务悬挂到下一手势）。"""
         from PyQt6.QtCore import QObject, QTimer
-        timer = getattr(self, "_qualifier_graph_flush_timer", None)
+        timer = getattr(self, "_tool_graph_flush_timer", None)
         if timer is None:
             parent = self if isinstance(self, QObject) else None
             timer = QTimer(parent)
             timer.setSingleShot(True)
             timer.setInterval(400)
-            timer.timeout.connect(self._flush_qualifier_gesture)
-            self._qualifier_graph_flush_timer = timer
+            timer.timeout.connect(self._flush_tool_gesture)
+            self._tool_graph_flush_timer = timer
         return timer
 
-    def _flush_qualifier_gesture(self) -> None:
+    def _flush_tool_gesture(self) -> None:
         graph_host = getattr(self, "color_graph_host", None)
         if graph_host is not None and graph_host.grade_gesture_open():
             graph_host.end_grade_gesture()
+
+    def _flush_qualifier_gesture(self) -> None:
+        # 兼容别名（N03-b 期名称；测试直呼）
+        self._flush_tool_gesture()
 
     def _route_qualifier_to_graph(self, graph_host, params: dict) -> bool:
         """Qualifier 手势图路由（与 ``_route_grading_to_graph`` 同型）。
@@ -2040,7 +2167,7 @@ class ColorControllerMixin:
         if patch:
             graph_host.submit_qualifier_change(
                 node_id, patch, self._graph_gesture_tid)
-        self._qualifier_flush_timer().start()
+        self._tool_flush_timer().start()
         graph_host.align_engine_active_layer(node_id)
         self.engine.set_qualifier_params(params)  # 同值预览通道
         return True
