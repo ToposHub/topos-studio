@@ -70,6 +70,26 @@ class ColorGraphService:
     def apply_intent(self, graph: ColorGraphData, command: str,
                      arguments: Mapping[str, Any]) -> GraphEditResult:
         """按 B01 契约表的 command 名分派；未知 command 显式拒绝。"""
+        arguments = dict(arguments)
+        compound_path = tuple(arguments.pop("_compound_path", ()))
+        if compound_path:
+            compound = self._node(graph, str(compound_path[0]))
+            if compound is None or compound.compound_children is None:
+                return self._fail(graph, "node_not_found", "compound 路径不存在")
+            child_result = self.apply_intent(
+                compound.compound_children, command,
+                {**arguments, "_compound_path": compound_path[1:]})
+            if not child_result.ok:
+                return GraphEditResult(False, graph, child_result.diagnostics)
+            replacement = replace(compound, compound_children=child_result.graph)
+            candidate = replace(graph, nodes=tuple(
+                replacement if node.node_id == compound.node_id else node
+                for node in graph.nodes))
+            # Layout-only child updates do not invalidate root pixels.
+            render_change = (child_result.graph.graph_revision !=
+                             compound.compound_children.graph_revision)
+            return self._commit(graph, candidate, child_result.id_mapping,
+                                render_change=render_change)
         handler = getattr(self, f"op_{command}", None)
         if handler is None or command.startswith("_"):
             return GraphEditResult(
@@ -203,7 +223,8 @@ class ColorGraphService:
 
     def op_connect_ports(self, graph: ColorGraphData, src_node: str,
                          src_port: str, dst_node: str, dst_port: str,
-                         *, replace_existing: bool = True) -> GraphEditResult:
+                         *, replace_existing: bool = True,
+                         slot_id: str = "") -> GraphEditResult:
         """先完整验证新边，成功后才替换旧边（§6.2 原则）。"""
         for node_id, port_id, direction in (
                 (src_node, src_port, PortDirection.OUT),
@@ -231,13 +252,22 @@ class ColorGraphService:
                 return self._fail(graph, "port_multi",
                                   f"{dst_node}.{dst_port} 已有连接")
             edges = [e for e in edges if e not in existing]
+        elif slot_id:
+            occupied = [edge for edge in edges if edge.dst_node == dst_node
+                        and edge.dst_port == dst_port and edge.slot_id == slot_id]
+            if occupied and not replace_existing:
+                return self._fail(graph, "port_multi", "目标 mixer 槽已有连接")
+            edges = [edge for edge in edges if edge not in occupied]
         # 成环检查：dst 的依赖锥不得包含 src
         reach = self._downstream_closure(graph, dst_node)
         if src_node in reach or src_node == dst_node:
             return self._fail(graph, "cycle",
                               f"连接 {src_node}→{dst_node} 会成环",
                               node_id=dst_node)
-        new_edge = _make_edge(src_node, src_port, dst_node, dst_port)
+        new_edge = _make_edge(src_node, src_port, dst_node, dst_port, slot_id=slot_id)
+        if slot_id:
+            new_edge = replace(new_edge, edge_id=str(uuid.uuid5(
+                uuid.NAMESPACE_URL, new_edge.edge_id + ":" + slot_id)))
         candidate = replace(graph, edges=tuple(edges) + (new_edge,))
         return self._commit(graph, candidate,
                             {new_edge.edge_id: new_edge.edge_id})
@@ -264,6 +294,16 @@ class ColorGraphService:
                               f"边不存在: {edge_id}")
         candidate = replace(
             graph, edges=tuple(e for e in graph.edges if e.edge_id != edge_id))
+        return self._commit(graph, candidate, {})
+
+    def op_disconnect_edges(self, graph: ColorGraphData,
+                            edge_ids: Sequence[str]) -> GraphEditResult:
+        """Remove a set of existing wires as one validated transaction."""
+        requested = set(edge_ids)
+        if not requested or not requested.issubset({edge.edge_id for edge in graph.edges}):
+            return self._fail(graph, "edge_endpoint_missing", "断开连接包含不存在的边")
+        candidate = replace(graph, edges=tuple(
+            edge for edge in graph.edges if edge.edge_id not in requested))
         return self._commit(graph, candidate, {})
 
     # ════════════════════════════════════════════════════════════════
@@ -296,7 +336,7 @@ class ColorGraphService:
             _make_edge(origin_id, "image", branch_id, "image"),
             _make_edge(branch_id, "image", mixer_id, "branch",
                        slot_id=f"{mixer_id}/branch/0"),
-            _make_edge(mixer_id, "image", down.dst_node, "image"),
+            _make_edge(mixer_id, "image", down.dst_node, down.dst_port, slot_id=down.slot_id),
         ]
         candidate = replace(graph,
                             nodes=graph.nodes + (mixer, branch),
@@ -326,7 +366,7 @@ class ColorGraphService:
             _make_edge(origin_id, "image", branch_id, "image"),
             _make_edge(branch_id, "image", mixer_id, "slot",
                        slot_id=f"{mixer_id}/slot/1"),   # 分支压在基底上
-            _make_edge(mixer_id, "image", down.dst_node, "image"),
+            _make_edge(mixer_id, "image", down.dst_node, down.dst_port, slot_id=down.slot_id),
         ]
         candidate = replace(graph,
                             nodes=graph.nodes + (mixer, branch),
@@ -364,7 +404,7 @@ class ColorGraphService:
         edges += [
             _make_edge(source_key_node_id, "image", outside_id, "image"),
             _make_edge(source_key_node_id, "key_out", outside_id, "key_in"),
-            _make_edge(outside_id, "image", down.dst_node, "image"),
+            _make_edge(outside_id, "image", down.dst_node, down.dst_port, slot_id=down.slot_id),
         ]
         candidate = replace(graph,
                             nodes=graph.nodes + (outside,),
@@ -387,7 +427,7 @@ class ColorGraphService:
         edges = [e for e in graph.edges if e.edge_id != down.edge_id]
         edges += [_make_edge(anchor_id, "image", split_id, "image")]
         edges += [_make_edge(split_id, ch, comb_id, ch) for ch in ("r", "g", "b")]
-        edges += [_make_edge(comb_id, "image", down.dst_node, "image")]
+        edges += [_make_edge(comb_id, "image", down.dst_node, down.dst_port, slot_id=down.slot_id)]
         candidate = replace(graph,
                             nodes=graph.nodes + (splitter, combiner),
                             edges=tuple(edges))
@@ -492,7 +532,7 @@ class ColorGraphService:
                         # 上下游桥接（类型一致已由原图保证）
                         add_edges.append(_make_edge(
                             image_ins[0].src_node, image_ins[0].src_port,
-                            image_outs[0].dst_node, image_outs[0].dst_port))
+                            image_outs[0].dst_node, image_outs[0].dst_port, slot_id=image_outs[0].slot_id))
                     # 端点缺失 = 链端删除，允许
                 else:
                     return self._fail(
@@ -534,7 +574,7 @@ class ColorGraphService:
                                 + self._edges_out(graph, node_id))
             if len(ins) == 1 and len(outs) == 1:
                 bridges.append(_make_edge(ins[0].src_node, ins[0].src_port,
-                                          outs[0].dst_node, outs[0].dst_port))
+                                          outs[0].dst_node, outs[0].dst_port, slot_id=outs[0].slot_id))
         kept = tuple(e for e in graph.edges if e.edge_id not in remove_edges)
         seen = {e.edge_id for e in kept}
         for bridge in bridges:
@@ -554,69 +594,85 @@ class ColorGraphService:
     def op_paste_subgraph(self, graph: ColorGraphData,
                           payload_nodes: Sequence[Mapping[str, Any]],
                           payload_edges: Sequence[Mapping[str, Any]] = (),
-                          offset: Sequence[float] = (40.0, 40.0)
+                          offset: Sequence[float] = (40.0, 40.0),
+                          payload_positions: Mapping[str, Sequence[float]] | None = None,
                           ) -> GraphEditResult:
-        """粘贴子图载荷（B14 clipboard 域）：ID 重写后未连接落图。"""
+        """Paste independent nodes, including complete compound payloads."""
+        originals = tuple(ColorNodeData.from_dict(dict(item)) for item in payload_nodes)
+        if not originals or any(node.known_type() in (NodeType.SOURCE, NodeType.OUTPUT)
+                                for node in originals):
+            return self._fail(graph, "illegal_param_key", "粘贴集合为空或包含主端子")
         remap: dict[str, str] = {}
-        nodes: list[ColorNodeData] = []
-        for payload in payload_nodes:
-            data = dict(payload)
-            old_id = data.get("node_id")
-            new_id = self._id_factory()
-            if old_id:
-                remap[old_id] = new_id
-            data["node_id"] = new_id
-            data.pop("compound_children", None)  # 子图粘贴不携带嵌套 compound（B11 扩展）
-            nodes.append(ColorNodeData.from_dict(data))
-        edges: list[ColorEdgeData] = []
-        for payload in payload_edges:
-            data = dict(payload)
-            if data.get("src_node") in remap and data.get("dst_node") in remap:
-                edges.append(_make_edge(remap[data["src_node"]], data["src_port"],
-                                        remap[data["dst_node"]], data["dst_port"],
-                                        slot_id=str(data.get("slot_id") or "")))
-        candidate = replace(graph,
-                            nodes=graph.nodes + tuple(nodes),
-                            edges=graph.edges + tuple(edges))
+        def collect(node: ColorNodeData) -> None:
+            remap[node.node_id] = self._id_factory()
+            if node.compound_children is not None:
+                for child in node.compound_children.nodes:
+                    collect(child)
+        for original in originals:
+            collect(original)
+        def identity(value: Any) -> Any:
+            if isinstance(value, str):
+                if value in remap:
+                    return remap[value]
+                for old, new in remap.items():
+                    if value.startswith(old + "/"):
+                        return new + value[len(old):]
+                return value
+            if isinstance(value, Mapping):
+                return {key: identity(item) for key, item in value.items()}
+            if isinstance(value, (tuple, list)):
+                return [identity(item) for item in value]
+            return value
+        def clone_edge(edge: ColorEdgeData) -> ColorEdgeData:
+            slot_id = identity(edge.slot_id)
+            cloned = _make_edge(remap[edge.src_node], edge.src_port,
+                                remap[edge.dst_node], edge.dst_port, slot_id=slot_id)
+            if slot_id:
+                cloned = replace(cloned, edge_id=str(uuid.uuid5(
+                    uuid.NAMESPACE_URL, cloned.edge_id + ":" + slot_id)))
+            return cloned
+        def clone_node(node: ColorNodeData) -> ColorNodeData:
+            child = node.compound_children
+            if child is not None:
+                child = replace(child,
+                    nodes=tuple(clone_node(item) for item in child.nodes),
+                    edges=tuple(clone_edge(edge) for edge in child.edges),
+                    source_node_id=remap[child.source_node_id],
+                    output_node_id=remap[child.output_node_id],
+                    ui_state=replace(child.ui_state, positions={
+                        remap[key]: position for key, position in child.ui_state.positions.items()
+                        if key in remap}))
+            legacy = dict(node.legacy_payload or {})
+            if legacy:
+                legacy["id"] = remap[node.node_id]
+            return replace(node, node_id=remap[node.node_id],
+                           params=identity(node.params), legacy_payload=legacy,
+                           compound_children=child)
+        originals_ids = {node.node_id for node in originals}
+        edges = tuple(ColorEdgeData.from_dict(dict(item)) for item in payload_edges)
+        edges = tuple(clone_edge(edge) for edge in edges
+                      if edge.src_node in originals_ids and edge.dst_node in originals_ids)
+        positions = dict(graph.ui_state.positions)
+        for old, position in (payload_positions or {}).items():
+            if old in originals_ids:
+                positions[remap[old]] = (float(position[0]) + float(offset[0]),
+                                         float(position[1]) + float(offset[1]))
+        candidate = replace(graph, nodes=graph.nodes + tuple(clone_node(node) for node in originals),
+                            edges=graph.edges + edges,
+                            ui_state=replace(graph.ui_state, positions=positions))
         return self._commit(graph, candidate, remap)
 
     def _copy_nodes(self, graph: ColorGraphData,
                     source_ids: Sequence[str],
                     offset: Sequence[float]) -> GraphEditResult:
         ids = set(source_ids)
-        if not ids:
-            return self._fail(graph, "illegal_param_key", "复制集合为空")
-        remap: dict[str, str] = {}
-        for node_id in ids:
-            if self._node(graph, node_id) is None:
-                return self._fail(graph, "node_not_found",
-                                  f"节点不存在: {node_id}", node_id=node_id)
-            remap[node_id] = self._id_factory()
-        new_nodes = tuple(
-            replace(self._node(graph, old), node_id=new,
-                    shared_definition_id=(  # shared 定义引用保留（定义共享语义）
-                        self._node(graph, old).shared_definition_id))
-            for old, new in remap.items())
-        internal = [e for e in graph.edges
-                    if e.src_node in ids and e.dst_node in ids]
-        new_edges = tuple(
-            _make_edge(remap[e.src_node], e.src_port,
-                       remap[e.dst_node], e.dst_port, slot_id=e.slot_id)
-            for e in internal)
-        positions = dict(graph.ui_state.positions)
-        for old, new in remap.items():
-            if old in positions:
-                pos = positions[old]
-                positions[new] = (pos[0] + float(offset[0]),
-                                  pos[1] + float(offset[1]))
-        ui = replace(graph.ui_state, positions=positions)
-        candidate = replace(graph, nodes=graph.nodes + new_nodes,
-                            edges=graph.edges + new_edges, ui_state=ui)
-        return self._commit(graph, candidate, remap)
-
-    # ════════════════════════════════════════════════════════════════
-    # mixer / 参数 / 元信息
-    # ════════════════════════════════════════════════════════════════
+        if not ids or not ids.issubset({node.node_id for node in graph.nodes}):
+            return self._fail(graph, "node_not_found", "复制集合为空或包含不存在的节点")
+        return self.op_paste_subgraph(
+            graph, [node.to_dict() for node in graph.nodes if node.node_id in ids],
+            [edge.to_dict() for edge in graph.edges
+             if edge.src_node in ids and edge.dst_node in ids], offset,
+            {key: position for key, position in graph.ui_state.positions.items() if key in ids})
 
     def op_add_mixer_slot(self, graph: ColorGraphData,
                           node_id: str) -> GraphEditResult:
@@ -624,7 +680,7 @@ class ColorGraphService:
         if node is None:
             return self._fail(graph, "node_not_found", f"节点不存在: {node_id}")
         if node.node_type not in (NodeType.PARALLEL_MIXER.value,
-                                  NodeType.LAYER_MIXER.value):
+                                  NodeType.LAYER_MIXER.value, NodeType.KEY_MIXER.value):
             return self._fail(graph, "port_not_found",
                               f"{node_id} 不是 mixer，无 slot 可加", node_id=node_id)
         max_slots = 8
@@ -638,10 +694,14 @@ class ColorGraphService:
             return self._fail(graph, "size_limit",
                               f"mixer slot 上限 {max_slots}", node_id=node_id)
         # slot 分配：稳定 slot ID（新分支输入在 B10 执行语义接线时连接）
-        next_index = len(existing)
+        indices = [int(item.rsplit("/", 1)[-1]) for item in existing
+                   if item.rsplit("/", 1)[-1].isdigit()]
+        minimum_index = 1 if node.node_type == NodeType.PARALLEL_MIXER.value else 2
+        next_index = max(minimum_index, max(indices, default=-1) + 1)
+        prefix = {NodeType.PARALLEL_MIXER.value: "branch",
+                  NodeType.LAYER_MIXER.value: "slot", NodeType.KEY_MIXER.value: "key"}[node.node_type]
         params = dict(node.params)
-        params["slots"] = sorted(existing |
-                                 {f"{node_id}/slot-or-branch/{next_index}"})
+        params["slots"] = sorted(existing | {f"{node_id}/{prefix}/{next_index}"})
         new_node = replace(node, params=params)
         nodes = tuple(new_node if n.node_id == node_id else n
                       for n in graph.nodes)
@@ -714,6 +774,8 @@ class ColorGraphService:
         node = self._node(graph, node_id)
         if node is None:
             return self._fail(graph, "node_not_found", f"节点不存在: {node_id}")
+        if node.params.get("locked"):
+            return self._fail(graph, "node_locked", "节点已锁定，先解锁再修改参数", node_id=node_id)
         allowed = {
             "key_invert": ("key_settings", "invert_key_in"),
             "blend_mode": ("mixer", "blend_mode"),
@@ -774,8 +836,36 @@ class ColorGraphService:
                 "key_source_mode", "node_input")}
             if "outside_key_source" in node.params:
                 params["outside_key_source"] = node.params["outside_key_source"]
-            return replace(node, params=params)
+            legacy = node.legacy_payload
+            if legacy:
+                # Reset the same complete grading payload as the legacy UI,
+                # preserving stable identity and unknown extension fields.
+                from src.features.color.core.layer import Layer
+                layer = Layer.from_dict(dict(legacy))
+                layer.reset_params()
+                legacy = {**dict(legacy), **layer.to_dict(None)}
+            return replace(node, params=params, legacy_payload=legacy)
+        locked = next((node for node in graph.nodes if node.node_id in node_ids and node.params.get("locked")), None)
+        if locked is not None:
+            return self._fail(graph, "node_locked", "节点已锁定，先解锁再重置", node_id=locked.node_id)
         return self._patch_nodes_with(graph, node_ids, reset)
+
+    def op_paste_grade_domains(self, graph: ColorGraphData,
+                              node_ids: Sequence[str],
+                              grade_domains: Mapping[str, Any]) -> GraphEditResult:
+        """Paste the copied primary-grade domain to validated Correctors."""
+        if not isinstance(grade_domains, Mapping):
+            return self._fail(graph, "illegal_param_key", "grade_domains 必须是 Mapping")
+        for node_id in node_ids:
+            node = self._node(graph, node_id)
+            if node is not None and node.params.get("locked"):
+                return self._fail(graph, "node_locked", "节点已锁定，先解锁再粘贴", node_id=node_id)
+            if node is None or node.known_type() not in (
+                    NodeType.CORRECTOR, NodeType.SHARED_CORRECTOR, NodeType.OUTSIDE):
+                return self._fail(graph, "node_not_found", "调色粘贴目标不是 Corrector")
+        def paste(node: ColorNodeData) -> ColorNodeData:
+            return replace(node, params={**dict(node.params), "grade": dict(grade_domains)})
+        return self._patch_nodes_with(graph, node_ids, paste)
 
     def op_reset_graph_parameters(self, graph: ColorGraphData) -> GraphEditResult:
         ids = [n.node_id for n in graph.nodes
@@ -833,7 +923,7 @@ class ColorGraphService:
         edges = [e for e in step1.graph.edges if e.edge_id != edge_id]
         edges += [
             _make_edge(edge.src_node, edge.src_port, node_id, "image"),
-            _make_edge(node_id, "image", edge.dst_node, edge.dst_port),
+            _make_edge(node_id, "image", edge.dst_node, edge.dst_port, slot_id=edge.slot_id),
         ]
         candidate = replace(step1.graph, edges=tuple(edges),
                             graph_revision=graph.graph_revision + 1)
@@ -989,7 +1079,8 @@ class ColorGraphService:
     def op_create_shared_definition(self, graph: ColorGraphData,
                                     node_id: str,
                                     name: str = "Shared",
-                                    param_domains: Sequence[str] = ()
+                                    param_domains: Sequence[str] = (),
+                                    locked: bool = False,
                                     ) -> GraphEditResult:
         """把 Corrector 参数抽为共享定义；节点变 SharedCorrector 引用。"""
         node = self._node(graph, node_id)
@@ -1007,7 +1098,8 @@ class ColorGraphService:
             node_type=NodeType.CORRECTOR.value,
             params=dict(node.params))
         new_node = replace(node, node_type=NodeType.SHARED_CORRECTOR.value,
-                           shared_definition_id=definition_id)
+                           shared_definition_id=definition_id,
+                           params={**dict(node.params), **({"locked": True} if locked else {})})
         nodes = tuple(new_node if n.node_id == node_id else n
                       for n in graph.nodes)
         candidate = replace(graph, nodes=nodes,

@@ -68,6 +68,9 @@ class MenuToolbarMixin:
     # Keep the legacy local argument names for setup_menus/_register_all_shortcuts.
     # The IDs and callbacks belong exclusively to the UI-only node editor.
     _COLOR_NODE_ACTIONS: tuple[tuple[str, str, str, str], ...] = (
+        ("previous_node_act", "previous_node", "Previous Node", ""),
+        ("next_node_act", "next_node", "Next Node", ""),
+        ("append_node_act", "append_node", "Append a Node", ""),
         ("add_layer_act", "add_serial", "Add Serial Node", "Alt+S"),
         ("del_layer_act", "delete", "Delete Node", "Backspace"),
         ("rename_layer_act", "label", "Node Label", ""),
@@ -528,6 +531,9 @@ class MenuToolbarMixin:
                 view.label_selected()
 
         callbacks = {
+            "previous_node_act": lambda: view.navigate_node(-1),
+            "next_node_act": lambda: view.navigate_node(1),
+            "append_node_act": lambda: view.append_node(),
             "add_layer_act": lambda: edit("add_serial", view.state.add_serial),
             "del_layer_act": self._delete_color_node_selection,
             "rename_layer_act": label_node,

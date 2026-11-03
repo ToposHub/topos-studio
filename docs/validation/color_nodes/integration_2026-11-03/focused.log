@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 56 items
+
+tests/app/test_color_graph_parameter_feedback.py ..                      [  3%]
+tests/color/test_color_graph_live_ui.py ...............                  [ 30%]
+tests/ui/test_color_node_editor_panel.py ................                [ 58%]
+tests/color/test_color_graph_panel_binding.py .........                  [ 75%]
+tests/app/test_color_graph_app_host.py ..............                    [100%]
+
+============================== 56 passed in 5.50s ==============================

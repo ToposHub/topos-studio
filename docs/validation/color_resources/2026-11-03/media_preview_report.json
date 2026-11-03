@@ -1,0 +1,85 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "native_graph_workflow",
+  "per_node_rendering": "source_thumbnail_only",
+  "asset_id": "1e963be9-c0ab-4812-8964-d44a5b9a568c",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 124
+  },
+  "clip_id": "c04d27f0-3e3e-4cb2-bbb0-dd1c9014313a",
+  "timeline_id": "0c9bc0bd-a66b-4eef-b747-5834bff99160",
+  "current_file_matches_source": true,
+  "current_page": "Color",
+  "thumbnail_size": [
+    512,
+    288
+  ],
+  "thumbnail_rgb_std": 66.625,
+  "corrector_thumbnails_present": 2,
+  "source_tooltip": "Source preview — evaluated node output will be available after backend integration.",
+  "resources": {
+    "status": "passed",
+    "effects_catalog_count": 41,
+    "lut_catalog_count": 5,
+    "left_library_tabs": "passed",
+    "nodes_independently_visible": "passed",
+    "qt_resource_drop": "passed",
+    "per_node_draft": "passed",
+    "floating": "passed",
+    "project_and_engine_unchanged": "passed",
+    "render_integration": "not_connected"
+  },
+  "workflow": {
+    "project_history": "passed",
+    "grade_commit": "passed",
+    "topos_save_reload": "passed",
+    "disconnect_reconnect": "passed",
+    "graph_render_enabled": true
+  },
+  "scope_diagnostics": {
+    "enabled": true,
+    "events": {
+      "submit/curves_dedup_skip": {
+        "count": 1,
+        "last": {
+          "source_revision": 0
+        }
+      },
+      "queue/coalesced_replaced": {
+        "count": 10,
+        "last": {
+          "revision": 11,
+          "detail": "latest-wins 替换旧 demand"
+        }
+      },
+      "execute/no_front_texture": {
+        "count": 7,
+        "last": {
+          "mode": "waveform",
+          "revision": 3
+        }
+      },
+      "panel/stale_return": {
+        "count": 1,
+        "last": {
+          "revision": 3,
+          "source_revision": 1
+        }
+      },
+      "submit/rate_limited": {
+        "count": 11,
+        "last": {
+          "detail": "interval=0.050s"
+        }
+      }
+    },
+    "last_activity": null
+  },
+  "status": "passed",
+  "error": "",
+  "elapsed_seconds": 20.03
+}

@@ -81,3 +81,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/color_graph_capability_report
 # B16.5 flag 冒烟（图执行接管 front/color output；默认关）
 TOPOS_COLOR_GRAPH_RENDER=1 .venv/bin/python <原生启动入口>
 ```
+
+## 2026-11-03 前后端实际复查补充
+
+见 [集成实测报告](integration_2026-11-03/README.md)。本次修复真实UI接线、Compound子图事务、参数回显与示波器共享上下文问题；最终全量3595 passed/5 skipped/1明确排除的既有golden失配，之后面板只读/Compound导航补充回归56 passed。原生图执行开关开启/关闭两种配置的短素材工作流均通过，全部示波器截图已保存。此结果补齐基础原生冒烟，原S07持续播放/4K/浮动窗口压力矩阵仍未完整覆盖；逐节点缩略图与Timeline栈模型等限制见报告，原NOT RUN项不得自动改成全部PASS。

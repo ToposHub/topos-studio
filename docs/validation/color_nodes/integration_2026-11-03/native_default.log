@@ -1,0 +1,63 @@
+ERROR: [ThumbEngine] FFmpeg NOT found! Video thumbnails will fail.
+INFO: No OpenGL_accelerate module loaded: No module named 'OpenGL_accelerate'
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+INFO: Registered feature module: color
+INFO: Color module registered (core feature)
+INFO: Registered feature module: composite
+INFO: Registered page: composite (COMPOSITE)
+INFO: composite module registered
+INFO: Scanning plugin directory: /Users/heng/Documents/vscode/topos-studio/plugins/node_plugins
+INFO: Registered node type 'vintage_tone' from plugin 'vintage_film'
+INFO: Registered node type 'film_grain' from plugin 'vintage_film'
+INFO: Plugin 'vintage_film' v1.0.0 loaded successfully
+INFO: Registered node type 'posterize' from plugin 'posterize'
+INFO: Plugin 'posterize' v1.0.0 loaded successfully
+INFO: Plugin discovery complete: 2 plugins loaded
+INFO: Registered node type 'vintage_tone' in category 'Film'
+INFO: Registered node type 'film_grain' in category 'Film'
+INFO: Registered node type 'posterize' in category 'Filter'
+INFO: Registered 3 node types from plugins
+INFO: Plugin discovery complete: 2 plugins loaded, 3 node types registered
+INFO: Composite: loaded 3 node plugins
+INFO: Loaded 3 node plugins
+INFO: Registered feature module: edit
+INFO: Registered page: edit (EDIT)
+INFO: edit module registered
+INFO: Registered feature module: deliver
+INFO: Registered page: deliver (DELIVER)
+INFO: deliver module registered
+INFO: Registered feature module: teaching_animation
+INFO: Registered Composite node provider: teaching_animation
+INFO: Registered node type 'motion_graphic' in category 'Input'
+INFO: teaching_animation module registered
+INFO: Registered feature module: ai_workflow
+INFO: ai_workflow module registered
+INFO: Optional feature modules registered: ['ai_workflow', 'composite', 'deliver', 'edit', 'teaching_animation']
+qt.qpa.fonts: Populating font family aliases took 504 ms. Replace uses of missing font family "Segoe UI" with one that exists to avoid this cost.
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] submit/curves_dedup_skip #1 {'source_revision': 0}
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] queue/coalesced_replaced #1 {'revision': 1, 'detail': 'latest-wins 替换旧 demand'}
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] execute/no_front_texture #1 {'mode': 'waveform', 'revision': 1}
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] execute/no_front_texture #2 {'mode': 'waveform', 'revision': 2}
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] execute/no_front_texture #3 {'mode': 'waveform', 'revision': 2}
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+2026-11-03 12:24:25.401 Python[17228:348467] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-03 12:24:25.402 Python[17228:348467] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] queue/coalesced_replaced #2 {'revision': 3, 'detail': 'latest-wins 替换旧 demand'}
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] panel/stale_return #1 {'revision': 3, 'source_revision': 1}
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] submit/rate_limited #1 {'detail': 'interval=0.100s'}
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] submit/rate_limited #2 {'detail': 'interval=0.100s'}
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] submit/rate_limited #3 {'detail': 'interval=0.050s'}
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] panel/stale_return #2 {'revision': 3, 'source_revision': 7}
+[WARNING] src.features.color.core.scope_diagnostics: [scope-diag] queue/coalesced_replaced #3 {'revision': 4, 'detail': 'latest-wins 替换旧 demand'}
+{"media": "tests/test_videos/测试素材01.mov", "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd", "validation": "native_graph_workflow", "per_node_rendering": "source_thumbnail_only", "asset_id": "0c3c2f82-a99b-429a-a60f-7ad2484c2c69", "metadata": {"width": 1920, "height": 1080, "fps": 25.0, "total_frames": 124}, "clip_id": "d2adbdd7-6ae9-4df6-ad55-9601cb4c21e3", "timeline_id": "803a28af-ad01-4392-9274-0c8d52d858ce", "current_file_matches_source": true, "current_page": "Color", "thumbnail_size": [512, 288], "thumbnail_rgb_std": 66.625, "corrector_thumbnails_present": 2, "source_tooltip": "Source preview — evaluated node output will be available after backend integration.", "workflow": {"project_history": "passed", "grade_commit": "passed", "topos_save_reload": "passed", "disconnect_reconnect": "passed", "graph_render_enabled": false}, "scope_diagnostics": {"enabled": true, "events": {"submit/curves_dedup_skip": {"count": 1, "last": {"source_revision": 0}}, "queue/coalesced_replaced": {"count": 10, "last": {"revision": 11, "detail": "latest-wins 替换旧 demand"}}, "execute/no_front_texture": {"count": 7, "last": {"mode": "waveform", "revision": 3}}, "panel/stale_return": {"count": 2, "last": {"revision": 3, "source_revision": 7}}, "submit/rate_limited": {"count": 12, "last": {"detail": "interval=0.050s"}}}, "last_activity": null}, "status": "passed", "error": "", "elapsed_seconds": 16.72}

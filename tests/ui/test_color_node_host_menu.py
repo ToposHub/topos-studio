@@ -160,7 +160,8 @@ def test_outside_and_serial_before_menu_actions(host: _Host) -> None:
 def test_node_registry_ids_and_context_survive_global_mode(host: _Host) -> None:
     view = host.color_node_panel.view
     registered = host.shortcut_manager.get_actions_by_category("Nodes")
-    assert len(registered) == 14
+    assert len(registered) == 17
+    assert {"color_nodes.previous_node", "color_nodes.next_node", "color_nodes.append_node"}.issubset({action.id for action in registered})
     assert all(action.id.startswith("color_nodes.") for action in registered)
     for global_mode in (False, True):
         host.shortcut_manager.set_global_mode(global_mode)

@@ -3,7 +3,9 @@
 
 Run in a dedicated application process. The script uses an isolated temporary
 configuration and project; it does not open/save an existing user project.
-This validates source thumbnail presentation, NOT per-node grade evaluation.
+The default validates source thumbnails; --workflow also exercises project-backed
+graph edits, grading, history, project IO and native scope presentation.
+Per-node evaluated thumbnails are not covered by this driver.
 """
 from __future__ import annotations
 
@@ -26,6 +28,8 @@ def main() -> int:
     parser.add_argument("media", type=Path)
     parser.add_argument("--output", type=Path, default=ROOT / "docs/validation/color_nodes")
     parser.add_argument("--keep-open", action="store_true")
+    parser.add_argument("--workflow", action="store_true", help="Exercise authoritative graph edits, grading, undo, project IO and native scopes")
+    parser.add_argument("--resources", action="store_true", help="Verify Effects/LUT UI-only drafts, real Qt drops, layout and floating")
     args = parser.parse_args()
     source = args.media.resolve(strict=True)
     output = args.output.resolve()
@@ -61,6 +65,8 @@ def main() -> int:
                 "validation": "real_app_import_and_source_thumbnail",
                 "per_node_rendering": "not_implemented",
             }
+            self.workflow_modes = iter(("waveform", "parade", "vectorscope", "histogram", "cie", "falsecolor", "split", "quad", "all"))
+            self.mode_started = 0.0
             self.timer = QTimer(self)
             self.timer.setInterval(200)
             self.timer.timeout.connect(self.tick)
@@ -122,8 +128,17 @@ def main() -> int:
                     pixels = pixels[:, :image.width() * 4].reshape(image.height(), image.width(), 4)[..., :3]
                     if float(pixels.std()) < 5.0:
                         raise AssertionError("source thumbnail is blank or flat")
-                    first = panel.view.state.graph.active_id
-                    second = panel.view.apply_edit("add_serial", panel.view.state.add_serial)
+                    if not any(node.kind == NodeKind.CORRECTOR for node in panel.snapshot().nodes.values()):
+                        panel.view.apply_edit("add_serial", panel.view.state.add_serial)
+                    first = next(node.id for node in panel.snapshot().nodes.values() if node.kind == NodeKind.CORRECTOR)
+                    panel.view.cards[first].setSelected(True)
+                    before_ids = set(panel.snapshot().nodes)
+                    panel.view.apply_edit("add_serial", panel.view.state.add_serial)
+                    added = set(panel.snapshot().nodes) - before_ids
+                    if len(added) != 1:
+                        raise AssertionError("serial UI action did not create one authoritative node")
+                    second = added.pop()
+                    self.first, self.second = first, second
                     for node_id in (first, second):
                         card = panel.view.cards[node_id]
                         if card._thumbnail.isNull():
@@ -141,8 +156,180 @@ def main() -> int:
                         corrector_thumbnails_present=2,
                         source_tooltip=panel.view.cards[first].toolTip(),
                     )
-                    self.finish(True)
-            except (RuntimeError, ValueError, TypeError, AttributeError, IndexError, OSError, AssertionError) as exc:
+                    if args.resources:
+                        self.phase = "resources"
+                    elif args.workflow:
+                        self.phase = "workflow"
+                    else:
+                        self.finish(True)
+                    return
+                if self.phase == "resources":
+                    from PyQt6.QtCore import QPointF, Qt
+                    from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+                    from src.features.color.ui.node_resource_mime import resource_mime_data
+                    host = self.host
+                    presenter = host.color_resource_preview
+                    host._migrate_color_resource_dock_layout(force=True)
+                    assert not host.plugin_panel.isVisible(), 'legacy effect controls escaped their hidden container'
+                    assert not host.lut_panel.isVisible(), 'legacy LUT controls escaped their hidden container'
+                    assert host.dock_plugin.widget() is host.color_effects_browser
+                    assert host.dock_lut.widget() is host.color_lut_browser
+                    assert host.dock_plugin in host.tabifiedDockWidgets(host.dock_presets)
+                    assert host.dock_lut in host.tabifiedDockWidgets(host.dock_presets)
+                    assert host.dock_layers not in host.tabifiedDockWidgets(host.dock_plugin)
+                    view = host.color_node_panel.view
+                    sid = host.color_graph_host._bound_stack_id
+                    baseline = host._current_edit_project.color_stacks[sid].color_graph.to_dict()
+                    plugin_snapshot = [dict(item) for item in host.engine.get_active_layer().plugins]
+                    effects = [entry for (kind, _), entry in presenter.catalog.items() if kind == 'effect']
+                    if not effects:
+                        raise AssertionError('application Effects catalog is empty')
+                    entry = next((e for e in effects if e.get('parameters')), effects[0])
+                    presenter.drop(self.first, {'kind': 'effect', 'resource_id': entry['id']})
+                    assert len(presenter._current_draft()['instances']) >= 1
+                    host.dock_plugin.show()
+                    host.dock_plugin.raise_()
+                    self.resource_entry = entry
+                    self.resource_baseline = baseline
+                    self.resource_plugins = plugin_snapshot
+                    self.phase = "resource_settings_capture"
+                    return
+                if self.phase == "resource_settings_capture":
+                    from PyQt6.QtCore import QPointF, Qt
+                    from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+                    from src.features.color.ui.node_resource_mime import resource_mime_data
+                    host = self.host
+                    host.color_effects_browser.grab().save(str(output / 'effects_settings.png'))
+                    host.grab().save(str(output / 'resources_studio.png'))
+                    host.color_effects_browser.tabs.setCurrentIndex(0)
+                    presenter = host.color_resource_preview
+                    view = host.color_node_panel.view
+                    # Native event routing on the graphics viewport, same MIME as library drags.
+                    card = view.cards[self.second]
+                    point = view.mapFromScene(card.mapToScene(card.body_rect().center()))
+                    mime = resource_mime_data(self.resource_entry)
+                    for event in (
+                        QDragEnterEvent(point, Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier),
+                        QDragMoveEvent(point, Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier),
+                        QDropEvent(QPointF(point), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier),
+                    ):
+                        QApplication.sendEvent(view.viewport(), event)
+                        assert event.isAccepted(), 'native resource drop was rejected'
+                    assert presenter._target_id == self.second
+                    assert len(presenter._current_draft()['instances']) >= 1
+                    luts = [entry for (kind, _), entry in presenter.catalog.items() if kind == 'lut']
+                    if not luts:
+                        fixture = config_dir / 'UI Identity.cube'
+                        fixture.write_text('TITLE \"UI Identity\"\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n')
+                        presenter.import_preview([str(fixture)])
+                        luts = [entry for (kind, _), entry in presenter.catalog.items() if kind == 'lut']
+                        self.report['session_test_lut_generated'] = True
+                    if luts:
+                        presenter.activate(luts[0])
+                        presenter.edit('set_lut_strength', {'strength': 0.42})
+                        host.color_lut_browser.set_current_lut(luts[0]['id'], 0.42)
+                    host.dock_plugin.setFloating(True)
+                    host.dock_plugin.resize(360, 650)
+                    host.color_effects_browser.tabs.setCurrentIndex(0)
+                    host.dock_lut.raise_()
+                    self.phase = 'resource_floating_capture'
+                    return
+                if self.phase == 'resource_floating_capture':
+                    from PyQt6.QtCore import Qt
+                    host = self.host
+                    host.color_effects_browser.grab().save(str(output / 'effects_library_floating.png'))
+                    host.color_lut_browser.grab().save(str(output / 'lut_browser_docked.png'))
+                    host.dock_lut.setFloating(True)
+                    host.dock_lut.resize(360, 650)
+                    self.phase = 'resource_lut_floating_capture'
+                    return
+                if self.phase == 'resource_lut_floating_capture':
+                    from PyQt6.QtCore import Qt
+                    host = self.host
+                    host.color_lut_browser.grab().save(str(output / 'lut_browser.png'))
+                    host.dock_lut.setFloating(False)
+                    host.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, host.dock_lut)
+                    host.tabifyDockWidget(host.dock_presets, host.dock_lut)
+                    host.dock_plugin.setFloating(False)
+                    host.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, host.dock_plugin)
+                    host.tabifyDockWidget(host.dock_presets, host.dock_plugin)
+                    sid = host.color_graph_host._bound_stack_id
+                    assert host._current_edit_project.color_stacks[sid].color_graph.to_dict() == self.resource_baseline, 'UI draft mutated graph'
+                    assert host.engine.get_active_layer().plugins == self.resource_plugins, 'UI draft mutated legacy plugins'
+                    self.report['resources'] = {'status': 'passed', 'effects_catalog_count': len([key for key in host.color_resource_preview.catalog if key[0] == 'effect']),
+                        'lut_catalog_count': len([key for key in host.color_resource_preview.catalog if key[0] == 'lut']),
+                        'left_library_tabs': 'passed', 'nodes_independently_visible': 'passed',
+                        'qt_resource_drop': 'passed', 'per_node_draft': 'passed', 'floating': 'passed',
+                        'project_and_engine_unchanged': 'passed', 'render_integration': 'not_connected'}
+                    if args.workflow:
+                        self.phase = 'workflow'
+                    else:
+                        self.finish(True)
+                    return
+                if self.phase == "workflow":
+                    panel, graph_host = self.host.color_node_panel, self.host.color_graph_host
+                    sid = graph_host._bound_stack_id
+                    def graph():
+                        return self.host._current_edit_project.color_stacks[sid].color_graph
+                    assert graph() is not None, "UI edit did not commit to project"
+                    baseline = graph().to_dict()
+                    # Keyboard path must reach project history after authoritative hydration.
+                    panel.view.apply_edit("undo", panel.view.state.undo)
+                    assert self.second not in {n.node_id for n in graph().nodes}
+                    panel.view.apply_edit("redo", panel.view.state.redo)
+                    assert graph().to_dict() == baseline
+                    panel.view.cards[self.first].setSelected(True)
+                    graph_host.begin_grade_gesture("native-verification")
+                    assert graph_host.submit_grade_change(self.first, "exposure", 15.0, "native-verification")
+                    assert graph_host.end_grade_gesture()
+                    graded = graph().to_dict()
+                    assert graded != baseline
+                    assert "primary" in panel.view.cards[self.first].node.tool_indicators, "graded node has no tool marker"
+                    assert self.host.grading_panel.get_current_params()["exposure"] == 15.0, "selected corrector grade is not reflected in panel"
+                    panel.view.apply_edit("add_parallel", lambda: panel.view.state.add_branch(NodeKind.PARALLEL_MIXER))
+                    assert len(graph().nodes) == len(graded["nodes"]) + 2
+                    panel.view.apply_edit("undo", panel.view.state.undo)
+                    assert graph().to_dict() == graded
+                    from src.features.edit.core.edit_project_io import EditProjectIO
+                    io = EditProjectIO()
+                    target = output / "workflow.topos"
+                    assert io.save_project(target, self.host._current_edit_project, create_backup=False, use_ai_callback=False)
+                    reopened = io.load_project(target)
+                    assert reopened is not None
+                    assert reopened[0].color_stacks[sid].color_graph.to_dict() == graded
+                    # Exercise real connection payloads through the UI/host boundary.
+                    edge = next(e for e in panel.snapshot().connections if e.dst_node == self.second)
+                    panel.view.apply_edit("disconnect", lambda: panel.view.state.disconnect(edge), edge)
+                    assert len(graph().edges) == len(baseline["edges"]) - 1
+                    panel.view.apply_edit("connect", lambda: panel.view.state.connect(edge), edge)
+                    assert len(graph().edges) == len(baseline["edges"])
+                    self.report["workflow"] = {"project_history": "passed", "grade_commit": "passed", "topos_save_reload": "passed", "disconnect_reconnect": "passed", "graph_render_enabled": self.host.engine.color_graph_render_enabled}
+                    self.report["per_node_rendering"] = "source_thumbnail_only"
+                    self.report["validation"] = "native_graph_workflow"
+                    self.phase = "scope_modes"
+                    return
+                if self.phase == "scope_modes":
+                    if time.monotonic() - self.mode_started < 1.0:
+                        return
+                    previous = getattr(self, "last_scope_mode", None)
+                    if previous:
+                        self.host.scope_panel.grab().save(str(output / ("scope_" + previous + ".png")))
+                    try:
+                        mode = next(self.workflow_modes)
+                    except StopIteration:
+                        from src.features.color.core.scope_diagnostics import scope_diagnostics
+                        self.report["scope_diagnostics"] = scope_diagnostics.snapshot()
+                        failures = self.report["scope_diagnostics"]["events"]
+                        assert not any(failures.get("widget/" + reason, {}).get("count", 0) for reason in ("texture_not_shared", "fbo_incomplete", "blit_failed")), "native scope presentation failed"
+                        self.host.grab().save(str(output / "workflow_final.png"))
+                        self.host.color_node_panel.grab().save(str(output / "nodes_with_tool_markers.png"))
+                        self.finish(True)
+                        return
+                    self.host.scope_panel.set_mode(mode)
+                    self.host._on_scope_demand_changed()
+                    self.last_scope_mode = mode
+                    self.mode_started = time.monotonic()
+            except (StopIteration, KeyError, RuntimeError, ValueError, TypeError, AttributeError, IndexError, OSError, AssertionError) as exc:
                 self.finish(False, f"{type(exc).__name__}: {exc}")
 
     original_init = MainWindow.__init__

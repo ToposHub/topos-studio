@@ -1330,7 +1330,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.audio_mixer_panel = AudioMixerPanel()
         self.effects_panel = BlurSharpenPanel()
         self.film_grain_panel = FilmGrainPanel()
+        # Legacy controllers still hydrate these controls. Keep their automatic
+        # show() calls inside a permanently hidden compatibility container.
+        self._legacy_color_resource_controls = QWidget(self)
+        self._legacy_color_resource_controls.hide()
         self.lut_panel = LutPanel()
+        self.lut_panel.setParent(self._legacy_color_resource_controls)
+        self.lut_panel.hide()
         self.scope_panel = ScopePanel()
         self.mask_panel = MaskPanel()
         # 单帧遮罩工具（Remove BG / Smart Brush / Brush / Eraser）产出静态
@@ -1361,7 +1367,11 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             self.config_manager.get("default_export_format") or "JPEG",
             self.config_manager.get("default_export_quality") or 85
         )
-        self.plugin_panel = PluginPanel(self.engine)
+        from src.features.color.ui.effects_browser_panel import ColorEffectsBrowser
+        from src.features.color.ui.lut_browser_panel import ColorLutBrowser
+        self.color_effects_browser = ColorEffectsBrowser(self)
+        self.color_lut_browser = ColorLutBrowser(self)
+        self.plugin_panel = PluginPanel(self.engine, self._legacy_color_resource_controls)
         self.plugin_panel.add_effect_requested.connect(self.add_plugin_to_current_layer)
         self.plugin_panel.ai_process_requested.connect(self._on_ai_plugin_process_requested)
 
@@ -1543,12 +1553,41 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 set_hydration_guard=self._set_color_stack_hydration_guard,
                 color_context_provider=_color_context,
             )
+            self.color_graph_host.panel_host.on_handle(self._on_color_graph_handle)
+            self.color_graph_host.panel_host.on_read_only(
+                lambda _node_id, _node_type: self._set_color_graph_panels_enabled(False))
             self.color_graph_host.attach_panel(self.color_node_panel)
             logger.debug("color graph host wired (node panel projection-"
                          "backed)")
         except Exception:
             logger.warning("color graph host wiring failed", exc_info=True)
             self.color_graph_host = None
+
+    def _set_color_graph_panels_enabled(self, enabled: bool) -> None:
+        """Non-corrector selection cannot edit the previous corrector's grade."""
+        panels = list(self._collect_color_panels().values())
+        panels.extend(getattr(self, name, None) for name in (
+            "effects_panel", "qualifier_panel", "warper_panel", "mask_panel",
+            "plugin_panel", "tracker_panel"))
+        for panel in panels:
+            if isinstance(panel, QWidget):
+                panel.setEnabled(enabled)
+
+    def _on_color_graph_handle(self, handle: Any) -> None:
+        """Refresh parameter panels from the selected authoritative corrector."""
+        from src.features.color.core.layer import Layer
+
+        self._set_color_graph_panels_enabled(not bool(handle.params.get("locked", False)))
+        graph_host = self.color_graph_host
+        payload = graph_host._node_payload(handle.node_id) or {}
+        layer = Layer.from_dict(payload)
+        layer.grading_params.update(handle.grade_params())
+        graph_host.align_engine_active_layer(handle.node_id)
+        self._set_color_stack_hydration_guard(True)
+        try:
+            self.update_from_layer(layer)
+        finally:
+            self._set_color_stack_hydration_guard(False)
 
     def _set_color_stack_hydration_guard(self, on: bool) -> None:
         """图宿主投影同步期间的面板回流抑制（与既有水合守卫同一标志）。"""
@@ -2085,6 +2124,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
 
         # Cleanup clip-strip sync signals on window destruction
         self.destroyed.connect(self._cleanup_clip_strip_sync)
+        from src.app.controllers.color_node_tool_feedback import ColorNodeToolFeedback
+        self.color_node_tool_feedback = ColorNodeToolFeedback(self)
+        from src.app.controllers.color_resource_preview import ColorResourcePreview
+        self.color_resource_preview = ColorResourcePreview(self)
 
     def on_engine_error(self, message):
         # Hide progress bar on any error to ensure UI state recovery

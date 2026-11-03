@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
+from .node_resource_mime import decode_resource_mime
 from .node_editor_items import ConnectionItem, NodeCardItem, NodePortItem
 from .node_editor_state import ConnectionDraft, GraphDraft, NodeEditorState, NodeKind
 
@@ -69,6 +70,8 @@ class ColorNodeView(QGraphicsView):
     compound_open_requested = pyqtSignal(str)
     parent_requested = pyqtSignal()
     preview_requested = pyqtSignal(str)
+    resource_drop_requested = pyqtSignal(str, object)
+    scene_refreshed = pyqtSignal()
 
     def __init__(self, parent: Any = None) -> None:
         super().__init__(parent)
@@ -78,6 +81,11 @@ class ColorNodeView(QGraphicsView):
         self.cards: dict[str, NodeCardItem] = {}
         self.links: list[ConnectionItem] = []
         self._syncing = False
+        self._resource_hover_id = ""
+        self.resource_drop_enabled = True
+        self.setAcceptDrops(True)
+        self.project_history_enabled = False
+        self.project_history_available: Callable[[bool], bool] | None = None
         self._hand_mode = False
         self._space_down = False
         self._panning = False
@@ -128,6 +136,7 @@ class ColorNodeView(QGraphicsView):
         """Refresh visual items; never submit renderer work."""
         self._syncing = True
         try:
+            self._set_resource_hover("")
             self._cancel_wire()
             self._insert_target = None
             self._move_start = {}
@@ -161,6 +170,7 @@ class ColorNodeView(QGraphicsView):
         finally:
             self._syncing = False
         self.viewport().update()
+        self.scene_refreshed.emit()
 
     def set_thumbnail(self, node_id: str, pixmap: Any) -> None:
         """Accept a host-supplied thumbnail on the GUI thread (no GPU readback)."""
@@ -192,6 +202,56 @@ class ColorNodeView(QGraphicsView):
                 return item
             item = item.parentItem()
         return None
+
+    def resource_target_at(self, position: QPoint) -> str:
+        """Only a writable Corrector accepts library resources."""
+        if not self.resource_drop_enabled:
+            return ""
+        card = self._card_at(position)
+        if card is not None and card.node.kind == NodeKind.CORRECTOR and not card.node.locked:
+            return card.node.id
+        return ""
+
+    def _set_resource_hover(self, node_id: str) -> None:
+        if node_id == self._resource_hover_id:
+            return
+        for key in (self._resource_hover_id, node_id):
+            card = self.cards.get(key)
+            if card is not None:
+                card.resource_drop_hover = key == node_id
+                card.update()
+        self._resource_hover_id = node_id
+
+    def dragEnterEvent(self, event: Any) -> None:
+        if decode_resource_mime(event.mimeData()) is not None:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: Any) -> None:
+        target = self.resource_target_at(event.position().toPoint()) if decode_resource_mime(event.mimeData()) else ""
+        self._set_resource_hover(target)
+        if target:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event: Any) -> None:
+        self._set_resource_hover("")
+        event.accept()
+
+    def dropEvent(self, event: Any) -> None:
+        token = decode_resource_mime(event.mimeData())
+        target = self.resource_target_at(event.position().toPoint())
+        self._set_resource_hover("")
+        if token is None or not target:
+            event.ignore()
+            return
+        self.resource_drop_requested.emit(target, token)
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
 
     def _port_at(self, position: QPoint) -> NodePortItem | None:
         for item in self.items(position):
@@ -225,6 +285,9 @@ class ColorNodeView(QGraphicsView):
 
     def apply_edit(self, action: str, operation: Callable[[], Any], payload: Any = None) -> Any:
         """One UI operation, one draft history entry and one future host intent."""
+        if self.project_history_enabled and action in {"undo", "redo"}:
+            self.edit_requested.emit(action, {"arguments": payload})
+            return True
         before = self.state.graph
         result = operation()
         changed = before is not self.state.graph
@@ -235,6 +298,35 @@ class ColorNodeView(QGraphicsView):
             self.graph_changed.emit(after)
         self.active_node_changed.emit(self.state.graph.active_id)
         return result
+
+    def navigate_node(self, direction: int) -> None:
+        """Select the previous/next numbered node without editing the graph."""
+        nodes = sorted((node for node in self.state.graph.nodes.values()
+                        if node.kind in (NodeKind.CORRECTOR, NodeKind.COMPOUND)),
+                       key=lambda node: node.number)
+        if not nodes:
+            return
+        ids = [node.id for node in nodes]
+        current = self.state.graph.active_id
+        index = ids.index(current) if current in ids else (-1 if direction > 0 else len(ids))
+        target = ids[max(0, min(len(ids) - 1, index + direction))]
+        self.state.select({target}, target)
+        self.rebuild()
+        self.active_node_changed.emit(target)
+        self.ensureVisible(self.cards[target])
+
+    def append_node(self) -> None:
+        """Insert a serial corrector immediately before the main output."""
+        output = next((node.id for node in self.state.graph.nodes.values()
+                       if node.kind == NodeKind.OUTPUT), "")
+        edge = next((edge for edge in self.state.graph.connections if edge.dst_node == output), None)
+        anchor = edge.src_node if edge else next((node.id for node in self.state.graph.nodes.values()
+                                                 if node.kind == NodeKind.SOURCE), "")
+        if not anchor:
+            return
+        self.state.select({anchor}, anchor)
+        self.active_node_changed.emit(anchor)
+        self.apply_edit("add_serial", self.state.add_serial)
 
     def set_hand_mode(self, hand: bool) -> None:
         self._hand_mode = hand
@@ -652,16 +744,22 @@ class ColorNodeView(QGraphicsView):
         if active is not None and active.shared_id:
             self._action(menu, "local", "Convert to Corrector Node", lambda: self.apply_edit("unlink_shared", lambda: self.state.make_local(selected)))
         if active is not None and active.kind == NodeKind.CORRECTOR:
-            self._action(menu, "key_invert", "Invert Key Input", lambda: self._set_grade_value("key_invert", not bool(active.grade.get("key_invert"))), checked=bool(active.grade.get("key_invert")))
+            unsupported = tr("backend_option_unavailable", "This node option is not yet supported by the render backend.")
+            key_action = self._action(menu, "key_invert", "Invert Key Input", lambda: self._set_grade_value("key_invert", not bool(active.node_options.get("key_invert"))), enabled=False, checked=bool(active.node_options.get("key_invert")))
+            key_action.setToolTip(unsupported)
             lut = menu.addMenu(tr("lut", "LUT"))
-            self._action(lut, "no_lut", "No LUT", lambda: self._set_grade_value("lut_path", ""), checked=not bool(active.grade.get("lut_path")))
+            lut.setEnabled(False)
+            lut.menuAction().setToolTip(unsupported)
+            self._action(lut, "no_lut", "No LUT", lambda: self._set_grade_value("lut_path", ""), checked=not bool(active.node_options.get("lut_path")))
             self._action(lut, "browse_lut", "Browse…", self._choose_lut)
             for key, title, values in (("color_space", "Color Space", ("Use Timeline", "Rec.709", "Rec.2020", "P3-D65", "ACES AP0", "ACES AP1", "DaVinci Wide Gamut")),
                                        ("gamma", "Gamma", ("Use Timeline", "Linear", "Gamma 2.2", "Gamma 2.4", "sRGB", "ST2084", "HLG", "DaVinci Intermediate"))):
                 options = menu.addMenu(tr(key, title))
+                options.setEnabled(False)
+                options.menuAction().setToolTip(unsupported)
                 for value in values:
                     self._action(options, key + "_" + value.lower().replace(" ", "_"), value,
-                                 lambda k=key, v=value: self._set_grade_value(k, v), checked=active.grade.get(key, "Use Timeline") == value)
+                                 lambda k=key, v=value: self._set_grade_value(k, v), checked=active.node_options.get(key, "Use Timeline") == value)
         if active is not None and active.kind in (NodeKind.PARALLEL_MIXER, NodeKind.LAYER_MIXER, NodeKind.KEY_MIXER):
             self._action(menu, "add_input", "Add One Input", lambda: self.apply_edit("add_input", lambda: self.state.set_node_fields({active.id}, input_count=active.input_count + 1)))
             if active.kind != NodeKind.KEY_MIXER:
@@ -672,8 +770,10 @@ class ColorNodeView(QGraphicsView):
                 blend = menu.addMenu(tr("composite_mode", "Composite Mode"))
                 for mode in ("Normal", "Add", "Subtract", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "Difference", "Color", "Luminosity"):
                     self._action(blend, "blend_" + mode.lower().replace(" ", "_"), mode, lambda m=mode: self._set_grade_value("blend_mode", m),
-                                 checked=active.grade.get("blend_mode", "Normal") == mode)
+                                 checked=active.node_options.get("blend_mode", "Normal") == mode)
         cache = menu.addMenu(tr("node_cache", "Node Cache"))
+        cache.setEnabled(False)
+        cache.menuAction().setToolTip(tr("backend_option_unavailable", "This node option is not yet supported by the render backend."))
         for mode in ("auto", "on", "off"):
             self._action(cache, "cache_" + mode, mode.title(), lambda m=mode: self.apply_edit("node_cache", lambda: self.state.set_node_fields(selected, cache_mode=m)), enabled=has_node,
                          checked=active is not None and active.cache_mode == mode)
@@ -698,9 +798,9 @@ class ColorNodeView(QGraphicsView):
         from copy import deepcopy
         active = self.state.graph.nodes.get(self.state.graph.active_id)
         if active is not None:
-            grade = deepcopy(active.grade)
-            grade[name] = value
-            self.apply_edit("set_node_option", lambda: self.state.set_node_fields({active.id}, grade=grade), {"name": name, "value": value})
+            options = deepcopy(active.node_options)
+            options[name] = value
+            self.apply_edit("set_node_option", lambda: self.state.set_node_fields({active.id}, node_options=options), {"name": name, "value": value})
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         card = self._card_at(event.pos())

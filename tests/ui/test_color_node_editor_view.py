@@ -340,3 +340,26 @@ def test_cancel_input_disconnect_restores_wire_without_edit(view: ColorNodeView,
     assert view.state.graph.connections == original.connections
     assert next(link for link in view.links if link.connection == edge).isVisible()
     assert not view.state.can_undo
+
+
+def test_previous_next_selection_does_not_edit_or_create_history(view: ColorNodeView) -> None:
+    first = view.state.graph.active_id
+    second = view.state.add_serial()
+    view.rebuild()
+    edits = []
+    view.edit_requested.connect(lambda *args: edits.append(args))
+    view.navigate_node(-1)
+    assert view.state.graph.active_id == first
+    view.navigate_node(1)
+    assert view.state.graph.active_id == second
+    assert edits == []
+
+
+def test_append_inserts_at_output_even_when_earlier_node_selected(view: ColorNodeView) -> None:
+    first = view.state.graph.active_id
+    second = view.state.add_serial()
+    view.state.select({first}, first)
+    view.rebuild()
+    view.append_node()
+    appended = view.state.graph.active_id
+    assert any(edge.src_node == second and edge.dst_node == appended for edge in view.state.graph.connections)
