@@ -73,6 +73,12 @@ class TrackingBinding:
     base_geometry: Optional[dict] = None
     locked_feature_ids: set[int] = field(default_factory=set)
     excluded_feature_ids: set[int] = field(default_factory=set)
+    # N03 typed handle：绑定归属的图节点身份（图模式下创建/更新绑定时
+    # 捕获；legacy 上下文为空。索引键仍是 (clip_id, shape_id)——旧工程
+    # 无这三字段照常反序列化，向后兼容）。
+    node_id: str = ""
+    compound_path: Tuple[str, ...] = ()
+    session_id: str = ""
     created_at: float = field(default_factory=time.time)
     modified_at: float = field(default_factory=time.time)
 
@@ -247,6 +253,9 @@ class TrackingBinding:
             "base_geometry": self.base_geometry,
             "locked_feature_ids": sorted(self.locked_feature_ids),
             "excluded_feature_ids": sorted(self.excluded_feature_ids),
+            "node_id": self.node_id,
+            "compound_path": list(self.compound_path),
+            "session_id": self.session_id,
             "created_at": self.created_at,
             "modified_at": self.modified_at,
         }
@@ -286,6 +295,10 @@ class TrackingBinding:
             excluded_feature_ids=set(
                 int(v) for v in data.get("excluded_feature_ids", ())
             ),
+            node_id=str(data.get("node_id", "") or ""),
+            compound_path=tuple(
+                str(v) for v in data.get("compound_path", ()) or ()),
+            session_id=str(data.get("session_id", "") or ""),
             created_at=float(data.get("created_at", 0.0)),
             modified_at=float(data.get("modified_at", 0.0)),
         )

@@ -477,8 +477,18 @@ class ColorControllerMixin:
     TRACKABLE_SHAPE_TYPES = ("circle", "rect", "curve", "gradient")
 
     def _iter_trackable_shapes(self) -> List[MaskShape]:
-        """当前图层中可跟踪的形状（叶节点，排除群组/位图/画笔）。"""
+        """当前图层中可跟踪的形状（叶节点，排除群组/位图/画笔）。
+
+        N03：图编辑上下文优先读**选中节点的合并投影**（compound 内
+        成员/图命令写入的窗口都正确），legacy 上下文读活动层。
+        """
         layer = self.engine.get_active_layer()
+        graph_route = self._graph_tool_route()
+        if graph_route is not None:
+            payload = graph_route[0].panel_layer_payload(graph_route[1])
+            if payload:
+                from src.features.color.core.layer import Layer
+                layer = Layer.from_dict(payload)
         if layer is None:
             return []
 
@@ -514,6 +524,23 @@ class ColorControllerMixin:
         """返回第一个可跟踪窗口的 ID（无则 None），用于自动绑定回落。"""
         shapes = self._iter_trackable_shapes()
         return shapes[0].id if shapes else None
+
+    def _tracker_result_layer(self, binding):
+        """N03：按绑定节点身份解析结果同步层。
+
+        异步跟踪任务完成时活动层/选中可能已切走——绑定捕获的 node_id
+        是唯一可信归属（不按当时的 root active_index 猜）。无身份
+        （legacy 绑定）或解析失败（节点已删）回落活动层。
+        """
+        layer = self.engine.get_active_layer()
+        if getattr(binding, "node_id", ""):
+            graph_host = getattr(self, "color_graph_host", None)
+            if graph_host is not None:
+                payload = graph_host.panel_layer_payload(binding.node_id)
+                if payload:
+                    from src.features.color.core.layer import Layer
+                    layer = Layer.from_dict(payload)
+        return layer
 
     def _on_tracker_shape_selected(self, shape_id: str) -> None:
         """把当前蒙版窗口绑定到 TrackerPanel。
@@ -1130,6 +1157,15 @@ class ColorControllerMixin:
                 shape_name=str(getattr(shape, "name", None) or "Window 1"),
             )
             store.add_binding(binding)
+        # N03 typed handle：绑定携带图节点身份（异步任务完成后按此解析
+        # 归属节点，不按当时活动层猜；legacy 上下文为空串）
+        graph_route = self._graph_tool_route()
+        if graph_route is not None:
+            graph_host = graph_route[0]
+            binding.node_id = graph_route[1]
+            binding.compound_path = graph_host._tool_compound_path()
+            binding.session_id = getattr(
+                graph_host._coordinator, "session_id", "")
 
         # Results are expressed relative to the original reference. Starting
         # another pass at the playhead must preserve earlier frames and edits.
@@ -1441,7 +1477,7 @@ class ColorControllerMixin:
         self._trigger_autosave()
         # 跟踪结果即时生效：当前帧若落在结果范围内，立刻重建蒙版并重绘，
         # 无需等待下一次播放/手动刷新（达芬奇行为）
-        layer = self.engine.get_active_layer()
+        layer = self._tracker_result_layer(binding)
         shape = layer.get_mask_item_by_id(shape_id) if layer is not None else None
         if isinstance(shape, MaskShape):
             self.canvas.update_mask_overlay(layer)
