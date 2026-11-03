@@ -1,0 +1,15 @@
+{
+  "db82a3a1-1e11-44a2-be09-ed50c013af3b": {
+    "timeline_id": "db82a3a1-1e11-44a2-be09-ed50c013af3b",
+    "name": "Timeline 1",
+    "fps": 25.0,
+    "width": 1920,
+    "height": 1080,
+    "sample_rate": 48000,
+    "format_settings": {
+      "media_pool_preview_asset_id": "c71015cb-c4e8-48e0-bff4-c65dec449ec6",
+      "media_pool_preview_frame": 66
+    },
+    "created_at": 0.0
+  }
+}

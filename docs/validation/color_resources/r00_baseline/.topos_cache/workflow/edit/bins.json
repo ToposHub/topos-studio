@@ -1,0 +1,11 @@
+{
+  "9d5fefab-d23f-4b99-ae95-12254bdf529d": {
+    "bin_id": "9d5fefab-d23f-4b99-ae95-12254bdf529d",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "c71015cb-c4e8-48e0-bff4-c65dec449ec6"
+    ],
+    "timeline_ids": []
+  }
+}

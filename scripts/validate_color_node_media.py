@@ -306,6 +306,75 @@ def main() -> int:
                     self.report["workflow"] = {"project_history": "passed", "grade_commit": "passed", "topos_save_reload": "passed", "disconnect_reconnect": "passed", "graph_render_enabled": self.host.engine.color_graph_render_enabled}
                     self.report["per_node_rendering"] = "source_thumbnail_only"
                     self.report["validation"] = "native_graph_workflow"
+                    self.phase = "baseline"
+                    return
+                if self.phase == "baseline":
+                    # R00 基线工程：2 Corrector + 1 分支已在图内；此处补 Compound、
+                    # 遗留插件/LUT/未知参数留样和第二 clip，保存基线工程与图 JSON。
+                    from src.features.edit.core.edit_project_io import EditProjectIO
+                    panel = self.host.color_node_panel
+                    graph_host = self.host.color_graph_host
+                    sid = graph_host._bound_stack_id
+
+                    def graph():
+                        return self.host._current_edit_project.color_stacks[sid].color_graph
+
+                    snap = panel.snapshot()
+                    members = sorted(n.id for n in snap.nodes.values() if n.kind == NodeKind.CORRECTOR)
+                    assert members, "baseline graph has no correctors to wrap"
+                    panel.view.apply_edit(
+                        "make_compound", lambda: panel.view.state.make_compound(members))
+                    # service 为 compound 分配权威确定性 id，本地草稿 id 不用于比对。
+                    compounds = [n for n in graph().nodes if n.node_type == "compound"]
+                    assert compounds, "baseline compound was not committed"
+                    compound = compounds[0]
+                    inner = [n for n in (compound.compound_children.nodes or ())
+                             if n.node_type == "corrector"]
+                    assert len(inner) == len(members), "compound children lost members"
+                    compound_id = compound.node_id
+                    (output / "baseline_graph.json").write_text(json.dumps(graph().to_dict(), ensure_ascii=False, indent=2) + "\n")
+                    # 遗留写入口留样（R00 审计对象，非正式命令路径）。
+                    entries = [e for (kind, _), e in self.host.color_resource_preview.catalog.items() if kind == "effect"]
+                    assert entries, "no effect entries for baseline plugin sample"
+                    sample = entries[0]
+                    layer = self.host.engine.get_active_layer()
+                    layer.add_plugin(sample["id"], {p["var_name"]: p.get("default", 0.0) for p in sample.get("parameters", [])})
+                    if layer.plugins:
+                        layer.plugins[-1]["params"]["__unknown_future_param"] = 0.5
+                    fixture = config_dir / "Baseline Identity.cube"
+                    fixture.write_text('TITLE "Baseline Identity"\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n')
+                    lut_applied = self.host.engine.apply_lut(str(fixture))
+                    self.report["baseline_samples"] = {
+                        "plugin_id": sample["id"],
+                        "plugin_instance_order": [p.get("instance_id") for p in layer.plugins],
+                        "unknown_param": "__unknown_future_param",
+                        "lut_applied": bool(lut_applied),
+                        "lut_path": str(fixture),
+                    }
+                    # 第二 clip：同一素材接在首 clip 之后，验证独立色彩栈。
+                    first_clip = self.clip
+                    second_frame = (first_clip.timeline_start or 0) + (first_clip.timeline_duration or 240)
+                    tv = self.host.timeline_panel.timeline_view
+                    track = self.host.edit_page._current_timeline.video_tracks[0]
+                    assert tv._add_asset_as_clip(self.asset, track, second_frame), "second clip insert failed"
+                    timeline = self.host.edit_page._current_timeline
+                    second_clip = next(c for c in timeline.video_tracks[0].clips
+                                       if c.clip_id != first_clip.clip_id)
+                    self.host.open_timeline_clip_in_color(timeline.timeline_id, second_clip.clip_id, 0)
+                    sid2 = self.host.color_graph_host._bound_stack_id
+                    assert sid2 and sid2 != sid, "second clip did not bind an independent color stack"
+                    project = self.host._current_edit_project
+                    assert sid in project.color_stacks and sid2 in project.color_stacks
+                    assert EditProjectIO().save_project(output / "baseline_project.topos", project, create_backup=False, use_ai_callback=False)
+                    self.host.open_timeline_clip_in_color(timeline.timeline_id, first_clip.clip_id, 0)
+                    assert self.host.color_graph_host._bound_stack_id == sid, "rebinding first clip lost its stack"
+                    self.report["baseline"] = {
+                        "compound_node_id": compound_id,
+                        "stack_ids": [sid, sid2],
+                        "clips": 2,
+                        "correctors": 2,
+                        "project_saved": "baseline_project.topos",
+                    }
                     self.phase = "scope_modes"
                     return
                 if self.phase == "scope_modes":
@@ -330,6 +399,8 @@ def main() -> int:
                     self.last_scope_mode = mode
                     self.mode_started = time.monotonic()
             except (StopIteration, KeyError, RuntimeError, ValueError, TypeError, AttributeError, IndexError, OSError, AssertionError) as exc:
+                import traceback
+                traceback.print_exc()
                 self.finish(False, f"{type(exc).__name__}: {exc}")
 
     original_init = MainWindow.__init__

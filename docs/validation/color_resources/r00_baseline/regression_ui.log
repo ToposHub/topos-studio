@@ -1,0 +1,6 @@
+tests/ui/test_color_node_editor_view.py .......................          [ 64%]
+tests/ui/test_color_node_editor_panel.py ................                [ 91%]
+tests/ui/test_factory_default_layout.py .....                            [100%]
+
+============================== 59 passed in 4.53s ==============================
+UI_DONE rc=0
