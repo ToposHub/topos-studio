@@ -1,0 +1,11 @@
+{
+  "2adfbdd5-744d-48eb-9e10-680cb1e6d467": {
+    "bin_id": "2adfbdd5-744d-48eb-9e10-680cb1e6d467",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "26508df4-a706-473a-94ec-78dbacde1456"
+    ],
+    "timeline_ids": []
+  }
+}

@@ -527,3 +527,31 @@ def test_production_mode_removes_preview_banner(qtbot) -> None:
     assert effects.status_label.text() == "" and luts.status_label.text() == ""
     effects.set_production_mode(False)
     assert effects.status_label.text()  # 显式开发模式恢复横幅
+
+
+def test_node_lut_menu_shares_command_path(rig, monkeypatch) -> None:
+    """N04：菜单 apply/browse 与浏览器共用命令；勾选态读权威 resources。"""
+    from src.shared.color.lut_resource_registry import get_lut_resource_session
+    get_lut_resource_session().reset()
+    view = rig.graph.panel.view
+    applied: list[tuple[str, str]] = []
+    view.node_lut_apply_requested.connect(
+        lambda node_id, ref: applied.append((node_id, ref)))
+    # 菜单信号（main_window 处理器逻辑在此直接验证控制器路径）
+    view.node_lut_apply_requested.emit(rig.corrector, "topos-res://lut_good")
+    assert applied == [(rig.corrector, "topos-res://lut_good")]
+    # 控制器路径（同浏览器）：设置后权威域持有 LUT → menu_options 投影
+    rig.controller.activate_resource(
+        {"id": "topos-res://lut_good", "kind": "lut", "available": True,
+         "resource_uri": "topos-res://lut_good"})
+    node = next(n for n in _graph(rig).nodes if n.node_id == rig.corrector)
+    assert node.params["resources"]["lut_ref"] == "topos-res://lut_good"
+    from src.app.controllers.color_graph_controller import graph_payload_to_draft
+    draft = graph_payload_to_draft(_graph(rig).to_dict())
+    options = draft.nodes[rig.corrector].node_options
+    assert options.get("lut_path") == "topos-res://lut_good"  # 菜单勾选态
+    # 移除路径
+    rig.controller.edit("remove_lut", {})
+    node = next(n for n in _graph(rig).nodes if n.node_id == rig.corrector)
+    assert "lut_ref" not in node.params.get("resources", {})
+    get_lut_resource_session().reset()

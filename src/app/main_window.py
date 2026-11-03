@@ -2163,7 +2163,46 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             # R11：真实后端模式——浏览器移除"交互预览"横幅（命令已落图）。
             self.color_effects_browser.set_production_mode(True)
             self.color_lut_browser.set_production_mode(True)
+            # N04：节点右键 LUT 菜单 → 与浏览器共用命令/导入入口。
+            view = self.color_node_panel.view
+            view.node_lut_apply_requested.connect(self._on_node_lut_menu_apply)
+            view.node_lut_browse_requested.connect(self._on_node_lut_menu_browse)
         self.color_resource_catalog_provider.warm_background()
+
+    def _on_node_lut_menu_apply(self, node_id: str, lut_ref: str) -> None:
+        """N04：菜单应用/移除 LUT——与浏览器同一命令路径。"""
+        controller = getattr(self, "color_resource_controller", None)
+        if controller is None:
+            return
+        if lut_ref:
+            entry = {"id": lut_ref, "kind": "lut", "available": True,
+                     "resource_uri": lut_ref}
+            view = self.color_node_panel.view
+            if view.state.graph.active_id != node_id and node_id in view.cards:
+                view.state.graph.active_id = node_id
+                controller.refresh_target()
+            controller.activate_resource(entry)
+        else:
+            controller.edit("remove_lut", {})
+
+    def _on_node_lut_menu_browse(self, node_id: str) -> None:
+        """N04：菜单浏览——R02 导入（验证/注册/暂存）后应用。"""
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "", "", "LUT (*.cube *.3dl *.look)")
+        if not path:
+            return
+        from src.shared.color.lut_resource_registry import (
+            get_lut_resource_session,
+        )
+        results = get_lut_resource_session().import_files([path])
+        controller = getattr(self, "color_resource_controller", None)
+        if controller is None or not results or results[0].entry is None:
+            self.status_bar.showMessage(
+                I18N.tr("resource_browser.import_failed",
+                        "LUT import failed"), 4000)
+            return
+        self._on_node_lut_menu_apply(node_id, results[0].entry.uri)
 
     def _on_node_output_thumbnail_ready(self, node_id: str, image) -> None:
         """GUI 线程：投递已评估节点输出（晚于卡片删除则忽略）。"""
