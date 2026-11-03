@@ -36,6 +36,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import logging
 import math
 from dataclasses import dataclass
@@ -390,7 +392,7 @@ def composition_uniform_values(
     values["u_blend_mode"] = int(bm_idx)
 
     p = _layer_get(layer, "grading_params")
-    if not isinstance(p, dict):
+    if not isinstance(p, Mapping):
         p = {}
     values["u_lift"] = _wheel_rgb(p, "lift")
     values["u_gamma"] = _wheel_rgb(p, "gamma")
@@ -411,7 +413,7 @@ def composition_uniform_values(
     values["u_gain_saturation"] = float(p.get("gain_saturation") or 0.0)
 
     m = _layer_get(layer, "mixer_params")
-    if not isinstance(m, dict):
+    if not isinstance(m, Mapping):
         m = {}
     for color in _MIXER_CHANNELS:
         val = _get_v3(m, color, (0, 0, 0))
@@ -425,7 +427,7 @@ def composition_uniform_values(
     # fx/blur：总是写中性默认（共享缓存 program 的残留 uniforms 会被
     # 覆盖——旧 async 实现跳过空 fx 组导致跨 layer 串参数，见模块文档）。
     fx = _layer_get(layer, "effects_params")
-    if not isinstance(fx, dict):
+    if not isinstance(fx, Mapping):
         fx = {}
     values["u_fx_mode"] = int(fx.get("mode", 0))
     values["u_fx_sharpen"] = float(fx.get("sharpen", 0.0))
@@ -448,7 +450,7 @@ def composition_uniform_values(
                             if tex_size else (float(width), float(height)))
 
     scp = _layer_get(layer, "soft_clip_params") or {}
-    if not isinstance(scp, dict):
+    if not isinstance(scp, Mapping):
         scp = {}
     values["u_sc_enabled"] = bool(scp.get("enabled", False))
     values["u_sc_high"] = float(scp.get("high", 1.0))
@@ -463,10 +465,10 @@ def composition_uniform_values(
     # 曲线面板四参数柔化裁切：每通道读值组 vec3，缺键回退恒等默认
     # （共享缓存 program 的残留 uniforms 被覆盖，与 fx 组同一防串参口径）。
     csc = _layer_get(layer, "curves_soft_clip") or {}
-    if not isinstance(csc, dict):
+    if not isinstance(csc, Mapping):
         csc = {}
     csc_channels = csc.get("channels")
-    if not isinstance(csc_channels, dict):
+    if not isinstance(csc_channels, Mapping):
         csc_channels = {}
     _CS_DEFAULTS = {
         "low_clip": (0.0, 0.0, 0.0),
@@ -479,7 +481,7 @@ def composition_uniform_values(
         for ch_idx, ch_name in enumerate("RGB"):
             ch_values = csc_channels.get(ch_name)
             value = None
-            if isinstance(ch_values, dict):
+            if isinstance(ch_values, Mapping):
                 value = ch_values.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool) \
                     and math.isfinite(float(value)):

@@ -183,6 +183,90 @@ LAYER_MODE_INDEX = {
 }
 KEY_MODE_INDEX = {"add": 0, "subtract": 1, "intersect": 2}
 
+
+#: N05：节点 Color Space/Gamma 变换（编码域⇄工作线性；与
+#: color_node_color_space.py 的 numpy 参考同公式/同常数）
+COLOR_SPACE_TRANSFORM_FRAG = _OPS_HEADER + """
+uniform sampler2D u_image;
+uniform mat3 u_matrix;
+uniform int u_kind;      // 传递函数种类（TF_*）
+uniform int u_decode;    // 1=编码→线性（TF 解码后乘矩阵）；0=线性→编码
+out vec4 f_color;
+
+vec3 tf_decode(vec3 x, int k) {
+    if (k == 1) { return pow(max(x, vec3(0.0)), vec3(2.2)); }
+    if (k == 2) { return pow(max(x, vec3(0.0)), vec3(2.4)); }
+    if (k == 3) {
+        vec3 lo = step(x, vec3(0.04045)) * x / 12.92;
+        vec3 hi = pow(max(x + vec3(0.055), vec3(0.0)) / 1.055, vec3(2.4));
+        return mix(hi, lo, step(x, vec3(0.04045)));
+    }
+    if (k == 4) {  // ST2084（PQ）EOTF（归一线性域）
+        float m1 = 2610.0 / 16384.0;
+        float m2 = 2523.0 / 4096.0 * 128.0;
+        vec3 p = pow(clamp(x, 0.0, 1.0), vec3(1.0 / m2));
+        return pow(max(128.0 * p - 107.0, 0.0)
+                   / max(2413.0 - 2392.0 * p, 1e-12), vec3(1.0 / m1));
+    }
+    if (k == 5) {  // HLG EOTF 逆（信号 → 场景线性）
+        float a = 0.17883277, b = 0.28466892, c2 = 0.55991073;
+        vec3 lo = x * x / 3.0;
+        vec3 hi = (exp((x - c2) / a) + b) / 12.0;
+        return mix(hi, lo, step(x, vec3(0.5)));
+    }
+    if (k == 6) {  // DaVinci Intermediate 逆（连续化构造）
+        float kink = 0.00262409;
+        float slope = 10.0 * kink * 0.6931471805599453;
+        vec3 lo = x / 10.0;
+        vec3 hi = kink * pow(vec3(2.0), (x - kink * 10.0) / slope);
+        return mix(hi, lo, step(x, vec3(kink * 10.0)));
+    }
+    return x;  // identity
+}
+
+vec3 tf_encode(vec3 x, int k) {
+    if (k == 1) { return pow(max(x, vec3(0.0)), vec3(1.0 / 2.2)); }
+    if (k == 2) { return pow(max(x, vec3(0.0)), vec3(1.0 / 2.4)); }
+    if (k == 3) {
+        vec3 lo = 12.92 * x;
+        vec3 hi = 1.055 * pow(max(x, vec3(0.0)), vec3(1.0 / 2.4))
+                  - 0.055;
+        return mix(hi, lo, step(x, vec3(0.0031308)));
+    }
+    if (k == 4) {  // PQ 逆 EOTF（×128 整数形）
+        float m1 = 2610.0 / 16384.0;
+        float m2 = 2523.0 / 4096.0 * 128.0;
+        vec3 c = pow(clamp(x, 0.0, 1.0), vec3(m1));
+        return pow((107.0 + 2413.0 * c) / (128.0 + 2392.0 * c),
+                   vec3(m2));
+    }
+    if (k == 5) {  // HLG OETF（E=1/12 ↔ 信号 0.5）
+        float a = 0.17883277, b = 0.28466892, c2 = 0.55991073;
+        vec3 lo = sqrt(3.0 * max(x, vec3(0.0)));
+        vec3 xs = max(x, vec3(1.0 / 12.0));
+        vec3 hi = a * log(12.0 * xs - b) + c2;
+        return mix(hi, lo, step(x, vec3(1.0 / 12.0)));
+    }
+    if (k == 6) {  // DaVinci Intermediate（连续化构造）
+        float kink = 0.00262409;
+        float slope = 10.0 * kink * 0.6931471805599453;
+        vec3 lo = x * 10.0;
+        vec3 xs = max(x, vec3(kink));
+        vec3 hi = log2(xs / kink) * slope + kink * 10.0;
+        return mix(hi, lo, step(x, vec3(kink)));
+    }
+    return x;
+}
+
+void main() {
+    vec4 px = texture(u_image, v_uv);
+    vec3 outc = (u_decode == 1)
+        ? tf_decode(px.rgb, u_kind) * u_matrix
+        : tf_encode(px.rgb * u_matrix, u_kind);
+    f_color = vec4(outc, px.a);
+}
+"""
+
 #: 执行器分派表：op 名 → fragment 源
 OP_FRAGMENTS = {
     "parallel_mix": PARALLEL_MIX_FRAG,
@@ -193,4 +277,5 @@ OP_FRAGMENTS = {
     "key_complement": KEY_COMPLEMENT_FRAG,
     "key_passthrough": KEY_COMPLEMENT_FRAG.replace(
         "float c = 1.0 - k;", "float c = k;"),
+    "cs_transform": COLOR_SPACE_TRANSFORM_FRAG,
 }

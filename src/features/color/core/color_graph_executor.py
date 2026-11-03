@@ -549,6 +549,23 @@ class ColorGraphExecutor:
             for port, ref in render_pass.inputs:
                 if port == "image" and ref is not None:
                     input_tex = node_outputs.get(ref.node_id, source_texture)
+            # N05：节点 Color Space/Gamma（IDT：编码域→工作线性；grading
+            # 与 LUT 都在变换内侧——LUT 顺序与 R05 处理序一致；ODT 在
+            # render 后逆向包裹回上游空间）。Use Timeline = 恒等原结果。
+            from src.features.color.core.color_node_color_space import (
+                node_color_transform_spec,
+            )
+            color_domain = (render_pass.params.get("color")
+                            if isinstance(render_pass.params, Mapping)
+                            else None)
+            cs_spec = (node_color_transform_spec(
+                color_domain.get("color_space"), color_domain.get("gamma"))
+                if isinstance(color_domain, Mapping) else None)
+            cs_scratch: list = []
+            if cs_spec is not None:
+                input_tex = self._run_cs_transform(
+                    input_tex, cs_spec, width, height, decode=True)
+                cs_scratch.append(input_tex)
             # N02：key_in 边消费——上游 key_out matte（无产物显式拒绝，
             # 不用图像 R 通道/常白替代）；invert_key_in 在此取反
             external_key = self._key_input_for(render_pass, "key_in",
@@ -615,6 +632,14 @@ class ColorGraphExecutor:
                 bind_aux=aux,
                 render_quad=quad_fn)
             fbo.release()
+            if cs_spec is not None:
+                # ODT：graded（工作线性）→ 节点标记空间；原 out 归还池
+                encoded = self._run_cs_transform(
+                    out_tex, cs_spec, width, height, decode=False)
+                self._release_texture(out_tex)
+                out_tex = encoded
+            for scratch_tex in cs_scratch:
+                self._release_texture(scratch_tex)
             return out_tex
 
         if render_pass.op == "parallel_mixer":
@@ -830,6 +855,20 @@ class ColorGraphExecutor:
             if input_port == port and ref is not None:
                 return self._resolve_key_output(ref, render_pass, key_outputs)
         return None
+
+    def _run_cs_transform(self, tex: Any, spec, width: int, height: int,
+                          *, decode: bool) -> Any:
+        """N05：Color Space/Gamma 变换 pass（uniform 与 numpy 参考同源）。"""
+        from src.features.color.core.color_node_color_space import (
+            color_space_gl_uniforms,
+        )
+        uniforms = color_space_gl_uniforms(spec)
+        matrix = uniforms["m_to_linear" if decode else "m_from_linear"]
+        return self._run_op_shader(
+            "cs_transform", {"u_image": (tex, 0)},
+            {"u_matrix": tuple(matrix), "u_kind": uniforms["tf_kind"],
+             "u_decode": 1 if decode else 0},
+            width, height, release_inputs=[])
 
     def _run_op_shader(self, name: str, textures: dict, uniforms: dict,
                        width: int, height: int, *,

@@ -840,14 +840,12 @@ class ColorNodeView(QGraphicsView):
             for key, title, values in (("color_space", "Color Space", ("Use Timeline", "Rec.709", "Rec.2020", "P3-D65", "ACES AP0", "ACES AP1", "DaVinci Wide Gamut")),
                                        ("gamma", "Gamma", ("Use Timeline", "Linear", "Gamma 2.2", "Gamma 2.4", "sRGB", "ST2084", "HLG", "DaVinci Intermediate"))):
                 options = menu.addMenu(tr(key, title))
-                options.setEnabled(False)
-                # N05：Color Space/Gamma 后端消费未交付——菜单保持禁用
-                # （此前引用未定义变量 unsupported，右键 Corrector 必
-                # NameError——N06 批次修复）
-                options.menuAction().setToolTip(
-                    tr("backend_option_unavailable",
-                       "This node option is not yet supported by the "
-                       "render backend."))
+                # N05：后端已消费（GL/CPU 包裹变换；Metal/导出显式拒
+                # 绝）——菜单启用；Use Timeline = 恒等原结果。
+                options.setToolTip(tr("node_color_space_hint",
+                                      "Input transform wraps this node's "
+                                      "grade chain (GL/CPU); Metal/export "
+                                      "reject non-timeline values."))
                 for value in values:
                     self._action(options, key + "_" + value.lower().replace(" ", "_"), value,
                                  lambda k=key, v=value: self._set_grade_value(k, v), checked=active.node_options.get(key, "Use Timeline") == value)
