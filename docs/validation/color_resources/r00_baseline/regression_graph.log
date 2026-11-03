@@ -1,0 +1,6 @@
+tests/color/test_color_graph_persistence.py .............                [ 85%]
+tests/app/test_color_graph_app_host.py ..............                    [ 98%]
+tests/app/test_color_graph_parameter_feedback.py ..                      [100%]
+
+============================= 111 passed in 8.99s ==============================
+GRAPH_DONE rc=0
