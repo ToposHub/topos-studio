@@ -79,6 +79,17 @@ def node_layer_payload(node: Any, *,
         payload["opacity"] = params["opacity"]
     if "blend_mode" in params:
         payload["blend_mode"] = params["blend_mode"]
+    # R05：节点 LUT 资源域 → legacy Layer 消费投影（GL composition 与
+    # 持久化同源；lut_ref 支持 topos-res:// 与旧绝对路径）。设置即
+    # 覆盖 legacy_payload 的旧 LUT；移除（无 lut_ref 键）不复活旧值。
+    from src.features.color.core.color_node_lut_spec import node_lut_projection
+    lut_ref, lut_strength = node_lut_projection(params.get("resources"))
+    if "resources" in params or lut_ref is not None:
+        payload.pop("active_lut_path", None)
+        payload.pop("lut_intensity", None)
+        if lut_ref is not None:
+            payload["active_lut_path"] = lut_ref
+            payload["lut_intensity"] = lut_strength
     # 曲线 LUT 重建（save/load 语义：控制点持久化，LUT 是缓存）。
     # 输出为原生嵌套 list（与 Layer.to_dict 持久化形态一致；执行器/
     # oracle 侧 np.asarray 同样可用）

@@ -106,7 +106,7 @@
 
 **验证**：拟新增 effect instance roundtrip/gesture tests；重复实例、100 次 valueChange=1 undo、取消=0 undo、删后撤销恢复同 ID/顺序；两 clip 相同 node_id 不串参；失效 AI 输出不能写新目标。执行前后保存/重开一致。
 
-### R05 — 节点 LUT 语义、替换与强度　[ ]
+### R05 — 节点 LUT 语义、替换与强度　[x]（2026-11-03，证据 docs/validation/color_resources/r05_lut_semantics/；顺序规格 v1 + 三发射器强度一致 + HDR 恒等缺陷修正 + golden 重归档）
 
 1. 定义 Corrector LUT 处理顺序，与 primary/curves/plugins/key 的顺序形成版本化规格；使用非交换操作测试顺序，不以 identity 通过代替顺序正确。
 2. 节点持有 LUT resource reference + intensity；再次应用替换该节点现 LUT，不新增隐形全局 LUT。不作用于其他选中节点或其他 scope。

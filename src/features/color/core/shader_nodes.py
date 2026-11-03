@@ -637,20 +637,19 @@ vec3 apply_3dlut(vec3 color, sampler3D lut_tex, float intensity) {
     // lut_exporter._apply_3dlut_cpu 的网格点对齐语义一致）。
     float lut_n = float(textureSize(lut_tex, 0).x);
     vec3 lut_result = texture(lut_tex, (sdr_part * (lut_n - 1.0) + 0.5) / lut_n).rgb;
-    vec3 blended_sdr = mix(sdr_part, lut_result, intensity);
 
-    // 比例缩放：保留 HDR 高光的纯正色彩比例
+    // R05 强度混合规格 v1（color_node_lut_spec.blend_node_lut_strength 的
+    // GPU 侧）：base 保持完整输入（含 HDR，intensity=0 严格恒等）；LUT
+    // 分支按原通道最大值比例重建 HDR（保留高光色彩比例，不全局 clamp）；
+    // 负偏移按强度加权加法保留（暗部不色彩反转）。
     float max_orig = max(max(color.r, color.g), color.b);
-    if (max_orig > 1.0) {
-        float max_sdr = max(max(sdr_part.r, sdr_part.g), sdr_part.b);
-        if (max_sdr > 1e-5) {
-            blended_sdr *= (max_orig / max_sdr);
-        }
+    float max_sdr = max(max(sdr_part.r, sdr_part.g), sdr_part.b);
+    vec3 lut_hdr = lut_result;
+    if (max_orig > 1.0 && max_sdr > 1e-5) {
+        lut_hdr *= (max_orig / max_sdr);
     }
-    
-    // 加法偏移：仅用于保留负数暗部不发生色彩反转
     vec3 negative_excess = color - clamp(color, 0.0, 99999.0);
-    return blended_sdr + negative_excess;
+    return mix(color, lut_hdr, intensity) + negative_excess * intensity;
 }
 """
 

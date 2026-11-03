@@ -385,7 +385,7 @@ float3 msl_apply_hsl_curve(float3 color, texture2d<float> hsl_lut_tex, sampler s
 # ── LUT3D_SNIPPET 的 MSL 翻译 ────────────────────────────────────────────
 
 MSL_LUT3D = """
-// —— LUT3D_SNIPPET.apply_3dlut 逐条翻译
+// —— LUT3D_SNIPPET.apply_3dlut 逐条翻译（R05 强度混合规格 v1）
 // GLSL textureSize(lut_tex, 0).x → MSL lut_tex.get_width()（同语义）。
 float3 msl_apply_3dlut(float3 color, texture3d<float> lut_tex, sampler smp,
                        float intensity) {
@@ -394,20 +394,17 @@ float3 msl_apply_3dlut(float3 color, texture3d<float> lut_tex, sampler smp,
     // 映射到 texel 中心坐标后再采样，消除边缘半 texel 拉伸。
     float lut_n = float(lut_tex.get_width());
     float3 lut_result = lut_tex.sample(smp, (sdr_part * (lut_n - 1.0) + 0.5) / lut_n).rgb;
-    float3 blended_sdr = mix(sdr_part, lut_result, intensity);
 
-    // 比例缩放：保留 HDR 高光的纯正色彩比例
+    // base 保持完整输入（intensity=0 严格恒等，含 HDR/负值）；LUT 分支按
+    // 原通道最大值比例重建 HDR；负偏移按强度加权加法保留。
     float max_orig = max(max(color.r, color.g), color.b);
-    if (max_orig > 1.0) {
-        float max_sdr = max(max(sdr_part.r, sdr_part.g), sdr_part.b);
-        if (max_sdr > 1.0e-5) {
-            blended_sdr *= (max_orig / max_sdr);
-        }
+    float max_sdr = max(max(sdr_part.r, sdr_part.g), sdr_part.b);
+    float3 lut_hdr = lut_result;
+    if (max_orig > 1.0 && max_sdr > 1.0e-5) {
+        lut_hdr *= (max_orig / max_sdr);
     }
-
-    // 加法偏移：仅用于保留负数暗部不发生色彩反转
     float3 negative_excess = color - clamp(color, 0.0, 99999.0);
-    return blended_sdr + negative_excess;
+    return mix(color, lut_hdr, intensity) + negative_excess * intensity;
 }
 """
 
