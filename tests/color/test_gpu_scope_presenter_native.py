@@ -66,3 +66,20 @@ def test_native_busy_renderer_keeps_last_frame(qapp):
         assert widget.grabFramebuffer().pixelColor(160, 90) == QColor(5, 5, 5)
     finally:
         widget.close()
+
+
+def test_presenter_uses_default_format_installed_after_module_import(qapp):
+    from PyQt6.QtGui import QSurfaceFormat
+    original = QSurfaceFormat.defaultFormat()
+    configured = QSurfaceFormat(original)
+    configured.setVersion(4, 1)
+    configured.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+    QSurfaceFormat.setDefaultFormat(configured)
+    try:
+        widget = GpuScopeWidget()
+        assert widget.format().version() == (4, 1)
+        assert widget.format().profile() == configured.profile()
+        assert widget.format().samples() == 0
+        widget.close()
+    finally:
+        QSurfaceFormat.setDefaultFormat(original)

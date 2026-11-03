@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.shared.i18n.i18n import I18N
+from .node_tool_indicators import TOOL_LABELS
 
 if TYPE_CHECKING:
     from .node_editor_state import ConnectionDraft, NodeDraft
@@ -151,6 +152,7 @@ class NodeCardItem(QGraphicsObject):
         self._thumbnail = QPixmap()
         self._initializing = True
         self._hovered = False
+        self.resource_drop_hover = False
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsItem.GraphicsItemFlag.ItemIsMovable
@@ -259,7 +261,11 @@ class NodeCardItem(QGraphicsObject):
         painter.setBrush(gradient)
         painter.setPen(QPen(QColor(COLORS["border"]), 1.0))
         painter.drawRoundedRect(rect, 2.0, 2.0)
-        if self.isSelected():
+        if self.resource_drop_hover:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(C.ORANGE), 2.0))
+            painter.drawRoundedRect(rect.adjusted(0.8, 0.8, -0.8, -0.8), 2.0, 2.0)
+        elif self.isSelected():
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(QColor(COLORS["selection"]), 1.2))
             painter.drawRoundedRect(rect.adjusted(0.8, 0.8, -0.8, -0.8), 2.0, 2.0)
@@ -324,12 +330,21 @@ class NodeCardItem(QGraphicsObject):
         if kind == "compound":
             self._paint_diamond(painter, QPointF(38.0, 44.0), 4.5)
             self._paint_diamond(painter, QPointF(42.0, 47.0), 4.5)
-        elif self.node.grade:
-            painter.drawLine(QPointF(33.0, 49.0), QPointF(33.0, 40.0))
-            painter.drawLine(QPointF(33.0, 49.0), QPointF(43.0, 49.0))
-            path = QPainterPath(QPointF(34.0, 48.0))
-            path.cubicTo(39.0, 48.0, 38.0, 41.0, 43.0, 41.0)
-            painter.drawPath(path)
+        else:
+            indicators = self.node.tool_indicators
+            capacity = 2 if self.node.locked or self.node.shared_id else 3
+            visible = indicators[:capacity]
+            overflow = len(indicators) > capacity
+            for index, tool in enumerate(visible):
+                painter.save()
+                painter.translate(30.0 + index * 9.0, 40.0)
+                painter.setOpacity(1.0 if self.node.enabled else 0.45)
+                if overflow and index == capacity - 1:
+                    for x in (1.0, 3.5, 6.0):
+                        painter.drawPoint(QPointF(x, 4.0))
+                else:
+                    self._paint_tool_indicator(painter, tool)
+                painter.restore()
         if self.node.locked:
             painter.drawRoundedRect(QRectF(49.0, 43.0, 6.0, 5.0), 0.5, 0.5)
             painter.drawArc(QRectF(50.0, 39.0, 4.0, 7.0), 0, 180 * 16)
@@ -338,6 +353,60 @@ class NodeCardItem(QGraphicsObject):
             painter.drawRoundedRect(QRectF(51.0, 45.0, 6.0, 4.0), 2.0, 2.0)
         if self.node.cache_mode == "on":
             painter.fillRect(QRectF(4.0, rect.height() - 2.8, 56.0, 1.0), QColor("#329fd6"))
+
+    def setToolTip(self, text: str) -> None:
+        """Keep tool usage discoverable when source-preview text is replaced."""
+        text = text.split("\n\n" + I18N.tr("color_nodes.applied_tools", "Applied tools") + ":", 1)[0]
+        if self.node.tool_indicators:
+            labels = [I18N.tr("color_nodes.tool_" + tool, TOOL_LABELS.get(tool, tool))
+                      for tool in self.node.tool_indicators]
+            text += "\n\n" + I18N.tr("color_nodes.applied_tools", "Applied tools") + ":\n" + "\n".join(labels)
+        super().setToolTip(text)
+
+    @staticmethod
+    def _paint_tool_indicator(painter: QPainter, tool: str) -> None:
+        """Compact monochrome tool silhouettes in an 8×9 footer cell."""
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        if tool == "primary":
+            for x, handle_y in ((1.0, 2.0), (4.0, 6.0), (7.0, 3.5)):
+                painter.drawLine(QPointF(x, 0.0), QPointF(x, 8.0))
+                painter.drawLine(QPointF(x - 1.0, handle_y), QPointF(x + 1.0, handle_y))
+        elif tool == "curves":
+            painter.drawLine(QPointF(0.0, 8.0), QPointF(0.0, 0.0))
+            painter.drawLine(QPointF(0.0, 8.0), QPointF(8.0, 8.0))
+            path = QPainterPath(QPointF(1.0, 7.0))
+            path.cubicTo(5.0, 7.0, 3.0, 1.0, 7.0, 1.0)
+            painter.drawPath(path)
+        elif tool == "color_mapping":
+            painter.drawPolygon(QPolygonF([QPointF(4.0, 0.0), QPointF(8.0, 3.0),
+                QPointF(6.5, 8.0), QPointF(1.5, 8.0), QPointF(0.0, 3.0)]))
+            painter.drawLine(QPointF(0.0, 3.0), QPointF(6.5, 8.0))
+            painter.drawLine(QPointF(8.0, 3.0), QPointF(1.5, 8.0))
+        elif tool == "qualifier":
+            painter.drawLine(QPointF(1.0, 7.0), QPointF(7.0, 1.0))
+            painter.drawLine(QPointF(4.0, 1.0), QPointF(7.0, 4.0))
+            painter.drawLine(QPointF(0.0, 8.0), QPointF(3.0, 7.0))
+        elif tool == "window":
+            painter.drawEllipse(QRectF(1.0, 1.0, 6.0, 6.0))
+            for x, y in ((0.0, 0.0), (6.0, 0.0), (0.0, 6.0), (6.0, 6.0)):
+                painter.drawRect(QRectF(x, y, 2.0, 2.0))
+        elif tool == "blur":
+            painter.drawPolygon(QPolygonF([QPointF(0.0, 7.0), QPointF(4.0, 0.0), QPointF(8.0, 7.0)]))
+            painter.drawLine(QPointF(4.0, 0.0), QPointF(4.0, 7.0))
+        elif tool == "lut":
+            painter.drawRect(QRectF(1.0, 1.0, 6.0, 6.0))
+            painter.drawLine(QPointF(1.0, 1.0), QPointF(7.0, 7.0))
+            painter.drawLine(QPointF(1.0, 7.0), QPointF(7.0, 1.0))
+        elif tool == "ofx":
+            painter.setFont(_font(7))
+            painter.drawText(QRectF(0.0, -1.0, 9.0, 10.0), Qt.AlignmentFlag.AlignCenter, "fx")
+        elif tool == "key":
+            painter.drawEllipse(QRectF(0.0, 0.0, 4.0, 4.0))
+            painter.drawLine(QPointF(3.0, 3.0), QPointF(8.0, 8.0))
+            painter.drawLine(QPointF(6.0, 6.0), QPointF(8.0, 4.0))
+        elif tool == "keyframes":
+            painter.drawPolygon(QPolygonF([QPointF(4.0, 0.0), QPointF(8.0, 4.0),
+                QPointF(4.0, 8.0), QPointF(0.0, 4.0)]))
 
     @staticmethod
     def _paint_diamond(painter: QPainter, center: QPointF, radius: float) -> None:

@@ -272,6 +272,7 @@ class TestGradingGestureRouting:
     def test_no_selection_keeps_legacy_path(self, harness):
         h, stack_id, graph = harness
         h.host.on_clip_stack_loaded(stack_id)
+        h.host.panel_host._on_active_node_changed("")
         assert not h.host.graph_edit_context_active()
         grading = _GradingHarness(h.host, h.engine)
         grading.run(*_tuple_for(_keys(), 12.0))

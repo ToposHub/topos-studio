@@ -343,8 +343,8 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_qualifier)
         self.dock_qualifier.visibilityChanged.connect(lambda v: self.qualifier_panel.set_picker_active(False) if not v else None)
 
-        self.dock_lut = create_custom_dock(I18N.tr("panel.lut", "3D LUT"), self.lut_panel, "dockLut")
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_lut)
+        self.dock_lut = create_custom_dock(I18N.tr("panel.lut", "3D LUT"), getattr(self, "color_lut_browser", self.lut_panel), "dockLut")
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_lut)
 
         self.dock_raw = create_custom_dock(I18N.tr("panel.camera_raw", "Camera Raw"), self.raw_panel, "dockRaw")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_raw)
@@ -365,9 +365,8 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_crop)
 
         # Effects Panel Dock (formerly Plugin Panel)
-        self.dock_plugin = create_custom_dock(I18N.tr("panel.effects", "Effects"), self.plugin_panel, "dockEffects")
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_plugin)
-        self.tabifyDockWidget(self.dock_layers, self.dock_plugin)
+        self.dock_plugin = create_custom_dock(I18N.tr("panel.effects", "Effects"), getattr(self, "color_effects_browser", self.plugin_panel), "dockEffects")
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_plugin)
 
         # Script Editor dock
         self.dock_script = create_custom_dock(I18N.tr("panel.script", "Script"), self.script_panel, "dockScript")
@@ -377,6 +376,8 @@ class DockLayoutMixin:
         # objectName 保持 "dockPresets" 以兼容已保存的布局状态)
         self.dock_presets = create_custom_dock(I18N.tr("panel.gallery", "Gallery"), self.presets_panel, "dockPresets")
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_presets)
+        self.tabifyDockWidget(self.dock_presets, self.dock_lut)
+        self.tabifyDockWidget(self.dock_lut, self.dock_plugin)
 
         # P9.1: Timeline Clip Strip Dock (Color page)
         self.dock_color_timeline_clips = create_custom_dock(
@@ -2097,6 +2098,7 @@ class DockLayoutMixin:
         Effects tab stack, then persists the upgraded Color layout.  Later
         launches leave the user's chosen dock arrangement untouched.
         """
+        self._migrate_color_resource_dock_layout(force=force)
         migration_version = self.config_manager.get(
             _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY
         )
@@ -2141,6 +2143,35 @@ class DockLayoutMixin:
         self._save_current_layout_to_store("Color")
         self.config_manager.save_config()
         logger.info("Migrated legacy color remapping docks to Color Mapping")
+
+    def _migrate_color_resource_dock_layout(self, force: bool = False) -> None:
+        """One-time upgrade; later launches preserve custom/floating arrangements."""
+        key = "color_resource_browser_layout_v1"
+        if self.current_page != "Color" or (not force and self.config_manager.get(key) == 1):
+            return
+        gallery = getattr(self, "dock_presets", None)
+        if gallery is None:
+            return
+        if force:
+            gallery.setFloating(False)
+        if not gallery.isFloating() and self.dockWidgetArea(gallery) != Qt.DockWidgetArea.LeftDockWidgetArea:
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, gallery)
+        for dock in (self.dock_lut, self.dock_plugin):
+            if dock.isFloating() and not force:
+                continue
+            if force:
+                dock.setFloating(False)
+            self.removeDockWidget(dock)
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+            if not gallery.isFloating():
+                self.tabifyDockWidget(gallery, dock)
+            dock.show()
+        self.dock_layers.show()
+        self.dock_layers.raise_()
+        self.page_layouts["Color"] = self.saveState()
+        self.config_manager.set(key, 1, auto_save=False)
+        self._save_current_layout_to_store("Color")
+        self.config_manager.save_config()
 
     def reset_product_layout(self) -> None:
         """Clear all saved layouts for the current product mode only.
@@ -2390,15 +2421,8 @@ class DockLayoutMixin:
         hidden in video mode, and the video-only panel (Color Timeline Clips)
         hidden in image mode, so the first-run layout matches the workflow.
         """
-        # Ensure all are visible and in correct areas
-        # Only hide plugin panel by default if we don't have saved state (first run)
         for d in self.all_docks:
-            if d == self.dock_plugin:
-                # Preserve user's visibility preference if they have saved state
-                if not self._has_saved_state:
-                    d.setVisible(False)  # Plugin panel hidden by default on first run
-            else:
-                d.setVisible(True)
+            d.setVisible(True)
             d.setFloating(False)
 
         # Work-mode scoped docks — keep _enforce_page_dock_visibility semantics
@@ -2434,6 +2458,10 @@ class DockLayoutMixin:
         # Tabify Left Side Panels (Library, Files, and Presets)
         self.tabifyDockWidget(self.dock_library, self.dock_files)
         self.tabifyDockWidget(self.dock_files, self.dock_presets)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_lut)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_plugin)
+        self.tabifyDockWidget(self.dock_presets, self.dock_lut)
+        self.tabifyDockWidget(self.dock_lut, self.dock_plugin)
 
         # Bottom Area Distribution
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_grading)
@@ -2446,7 +2474,6 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_masks)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_qualifier)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_analysis)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_lut)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_raw)
 
         # Tabify Bottom Tools
@@ -2458,8 +2485,7 @@ class DockLayoutMixin:
         self.tabifyDockWidget(self.dock_effects, self.dock_grain)
         self.tabifyDockWidget(self.dock_grain, self.dock_masks)
         self.tabifyDockWidget(self.dock_masks, self.dock_qualifier)
-        self.tabifyDockWidget(self.dock_qualifier, self.dock_lut)
-        self.tabifyDockWidget(self.dock_lut, self.dock_raw)
+        self.tabifyDockWidget(self.dock_qualifier, self.dock_raw)
         # dock_crop is kept separate and not tabified, allowing user to drag it freely
 
         # NEW: Tabify Right Side Panels (Info and Layers)

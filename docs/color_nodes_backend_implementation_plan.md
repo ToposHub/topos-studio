@@ -1,5 +1,9 @@
 # 调色节点后端实施与接线计划
 
+后续统一施工入口：见 [Effects / LUT 接线与节点遗留任务新计划](color_resources_backend_implementation_plan.md)（2026-11-03）。其中单列前后端复查和 Resolve 对照后仍未完成的任务；旧台账的历史完成状态不代表这些后续门槛已通过。
+
+> 2026-11-03更新：本文保留原设计基线；后续已有实现及本次实测修复，当前状态见 [集成实测报告](validation/color_nodes/integration_2026-11-03/README.md) 和实施台账。仍有逐节点缩略图、Timeline scope、默认渲染开关及复杂图出口等限制，不能按历史段落或单测数量认定全部发布完成。
+
 日期：2026-11-02。状态：**计划，后端尚未实施**。适用产品：Topos Studio / Topos Color；技术栈：PyQt6 + ModernGL + GLSL，兼顾 Metal 与 CPU 导出。
 
 本轮已实现节点 UI 和本地交互：`node_editor_state.py` 提供 `NodeDraft/ConnectionDraft/GraphDraft/NodeEditorState`；`node_editor_items.py` 提供 `NodeCardItem/NodePortItem/ConnectionItem`；`node_editor_view.py` 提供 `ColorNodeView`；`node_editor_panel.py` 提供 `ColorNodePanel`（绝对路径见E34–E37）。节点图具有独立的 presentation state、本地undo和intent signals。宿主已经将原图层dock内容替换成节点面板，同时保留旧 `self.layer_panel` 给原controller。所有新的 edit/selection/scope/preview 信号均未连接工程或渲染后端；LUT、color_space、gamma、cache的选择目前只更新draft值。图像、调色工程和导出仍由原后端控制，不能用UI草图冒充已提交的调色工程。本计划中的领域图、command、GPU执行器和接线均为后续工作。

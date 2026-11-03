@@ -42,6 +42,9 @@ class NodeDraft:
     color: str = ""
     input_count: int = 2
     grade: dict[str, Any] = field(default_factory=dict)
+    tool_indicators: tuple[str, ...] = ()
+    backend_payload: dict[str, Any] = field(default_factory=dict)
+    node_options: dict[str, Any] = field(default_factory=dict)
     source_layer_id: str = ""
     cache_mode: str = "auto"
     shared_id: str = ""
@@ -651,7 +654,7 @@ class NodeEditorState:
 
     def set_node_fields(self, ids: Iterable[str], **fields: Any) -> bool:
         allowed = {"label", "enabled", "locked", "color", "input_count", "grade",
-                   "source_layer_id", "cache_mode", "shared_id"}
+                   "source_layer_id", "cache_mode", "shared_id", "node_options"}
         if fields.keys() - allowed:
             raise ValueError("unsupported node field")
         if "input_count" in fields and (not isinstance(fields["input_count"], int) or not 1 <= fields["input_count"] <= 64):

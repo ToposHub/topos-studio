@@ -24,8 +24,9 @@ UI 面板与领域服务都以参数注入，接通（B05/B06）后再挂 QWidge
 from __future__ import annotations
 
 import enum
+import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Callable, Mapping, Optional
 
 from src.features.edit.core.commands.color_commands import (
@@ -34,6 +35,9 @@ from src.features.edit.core.commands.color_commands import (
     GraphTransactionBuffer,
     SetColorGraphLockCommand,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # ── Action 契约表 ────────────────────────────────────────────────────────
@@ -237,7 +241,15 @@ class ColorGraphIntentNormalizer:
             provided = ("node_id",)
             draft = payload.get("draft")
         else:
-            arguments = dict(payload.get("arguments") or {})
+            raw_arguments = payload.get("arguments")
+            if raw_arguments is None:
+                arguments = {}
+            elif isinstance(raw_arguments, Mapping):
+                arguments = dict(raw_arguments)
+            elif is_dataclass(raw_arguments) and not isinstance(raw_arguments, type):
+                arguments = asdict(raw_arguments)
+            else:
+                raise EnvelopeError(f"{action!r} arguments 必须是 Mapping 或数据对象")
             provided = contract.provided_arguments
             draft = payload.get("draft")
 
@@ -461,10 +473,16 @@ class GraphProjectBridge:
         expected = intent.expected_graph_revision
         if expected is None and stack.color_graph is not None:
             expected = stack.color_graph.graph_revision
+        arguments = dict(intent.arguments)
+        operation = intent.command
+        if operation == "disconnect_edge" and "edge_ids" in arguments:
+            operation = "disconnect_edges"
+        if intent.compound_path:
+            arguments["_compound_path"] = intent.compound_path
         command = ApplyColorGraphCommand.create(
             stack_id=intent.stack_id,
-            operation=intent.command,
-            arguments=dict(intent.arguments),
+            operation=operation,
+            arguments=arguments,
             expected_graph_revision=expected,
             transaction_id=intent.transaction_id,
         )
@@ -743,6 +761,12 @@ class ColorGraphPanelHost:
     def attach_panel(self, panel: Any) -> None:
         """连接面板信号（Qt 信号 duck-typed）。"""
         self._panel = panel
+        view = getattr(panel, "view", None)
+        if view is not None:
+            view.project_history_enabled = True
+            view.project_history_available = lambda redo: bool(
+                self._bridge._project_stack.can_redo() if redo else
+                self._bridge._project_stack.can_undo())
         panel.edit_requested.connect(self._on_edit_requested)
         panel.active_node_changed.connect(self._on_active_node_changed)
         panel.scope_changed.connect(self._on_scope_changed)
@@ -767,10 +791,29 @@ class ColorGraphPanelHost:
             return
         if self._panel is None:
             return
+        path = [node_id for _, node_id in getattr(self._panel, "_parents", ())]
+        previous_active = self._active_node_id
         self._sync_lock = True
         try:
             draft = graph_payload_to_draft(projection.graph)
             self._panel.load_graph(draft, scope=projection.scope)
+            for node_id in path:
+                current = self._panel.view.state.graph.nodes.get(node_id)
+                if current is None or current.children is None:
+                    break
+                self._panel.open_compound(node_id)
+            current = self._panel.view.state.graph
+            new_correctors = [key for key in projection.id_mapping.values()
+                              if key in current.nodes and current.nodes[key].kind.value == "corrector"]
+            selected = (new_correctors[-1] if new_correctors else
+                        previous_active if previous_active in current.nodes else
+                        current.active_id if current.active_id in current.nodes else
+                        next((key for key, node in current.nodes.items()
+                              if node.kind.value == "corrector"), ""))
+            current.active_id = selected
+            current.selected_ids = {selected} if selected else set()
+            self._active_node_id = selected
+            self._panel.view.rebuild()
         finally:
             self._sync_lock = False
         self._refresh_handle(projection)
@@ -778,7 +821,14 @@ class ColorGraphPanelHost:
     def _refresh_handle(self, projection: GraphProjection) -> None:
         resolver = GraphHandleResolver(
             projection.session_id, projection.scope_owner_id)
-        handle = (resolver.resolve(projection.graph, self._active_node_id)
+        payload = projection.graph
+        for _, node_id in getattr(self._panel, "_parents", ()):
+            compound = next((node for node in payload.get("nodes", ())
+                             if node.get("node_id") == node_id), None)
+            if compound is None:
+                break
+            payload = compound.get("compound_children") or {}
+        handle = (resolver.resolve(payload, self._active_node_id)
                   if self._active_node_id else None)
         if handle is not None and handle.is_corrector:
             self._active_handle = handle
@@ -791,6 +841,8 @@ class ColorGraphPanelHost:
                 handler(handle.node_id, handle.node_type)
         else:
             self._active_handle = None
+            for handler in self._read_only_handlers:
+                handler("", "")
 
     # ── UI → service ──
 
@@ -799,6 +851,12 @@ class ColorGraphPanelHost:
             return  # hydrate 装载期间不回流 intent
         if self._coordinator.state not in (GraphSessionState.READY,
                                            GraphSessionState.PENDING):
+            return
+        if action == "close_compound":
+            # Child edits are submitted immediately; closing is navigation.
+            return
+        if action in {"undo", "redo"}:
+            self.redo() if action == "redo" else self.undo()
             return
         try:
             normalizer = ColorGraphIntentNormalizer(
@@ -809,12 +867,219 @@ class ColorGraphPanelHost:
                     self._coordinator.last_ack.graph_revision
                     if self._coordinator.last_ack else None),
                 session_generation=self._coordinator.generation)
+            envelope = self._complete_ui_arguments(action, envelope)
             intent = normalizer.normalize(action, envelope)
-        except EnvelopeError:
-            return  # 契约外 action：静默忽略（B01 门禁另有测试兜底）
+        except EnvelopeError as exc:
+            logger.warning("Color graph UI intent rejected (%s): %s", action, exc)
+            if self._coordinator.last_ack is not None:
+                self.on_projection(self._coordinator.last_ack)
+            return
         self._bridge.submit(intent)
         if self._coordinator.last_ack is not None:
             self.on_projection(self._coordinator.last_ack)
+
+    def _complete_ui_arguments(self, action: str, envelope: Any) -> Mapping[str, Any]:
+        """Translate presentation deltas to explicit service arguments.
+
+        The UI draft supplies gesture context only. IDs/edges are resolved
+        against the acknowledged graph; the service still validates edits.
+        """
+        if not isinstance(envelope, Mapping):
+            raise EnvelopeError("envelope 必须是 Mapping")
+        payload = envelope.get("payload")
+        if not isinstance(payload, Mapping):
+            raise EnvelopeError("缺 payload")
+        if action == "close_compound":
+            return envelope
+        projection = self._coordinator.last_ack
+        if projection is None or not isinstance(projection.graph, Mapping):
+            return envelope
+        graph = projection.graph
+        for node_id in envelope.get("compound_path", ()):
+            compound = next((node for node in graph.get("nodes", ())
+                             if node.get("node_id") == node_id), None)
+            if compound is None or not isinstance(compound.get("compound_children"), Mapping):
+                raise EnvelopeError("compound 路径不存在")
+            graph = compound["compound_children"]
+        authoritative = graph_payload_to_draft(graph)
+        raw = payload.get("arguments")
+        args = dict(raw) if isinstance(raw, Mapping) else {}
+        after = payload.get("draft")
+        after_nodes = getattr(after, "nodes", {})
+        ids = set(authoritative.nodes)
+        anchor = self._active_node_id if self._active_node_id in ids else ""
+        if not anchor:
+            anchor = next((key for key, node in authoritative.nodes.items()
+                           if node.kind.value == "corrector"), graph.get("source_node_id", ""))
+        selected = set(getattr(after, "selected_ids", ())) & ids
+        targets = sorted(selected or ({anchor} if anchor else set()))
+        added = set(after_nodes) - ids
+        removed = ids - set(after_nodes) if after is not None else set()
+        if action in {"add_serial", "add_serial_before"}:
+            before = action == "add_serial_before"
+            # Keyboard Shift+Alt+S currently uses the same action name.
+            if added and after is not None:
+                before = any(edge.src_node in added and edge.dst_node == anchor
+                             for edge in after.connections)
+            args = {"active_node_id": anchor, "before": before}
+        elif action == "add_parallel":
+            args = {"branch_origin_id": anchor}
+        elif action == "add_layer":
+            args = {"base_input_id": anchor}
+        elif action == "add_outside":
+            args = {"source_key_node_id": anchor}
+        elif action == "add_splitter_combiner":
+            args = {"node_id": anchor}
+        elif action == "add_key_mixer":
+            args = {"key_source_ids": targets}
+        elif action == "add_node" and len(added) == 1:
+            node = after_nodes[next(iter(added))]
+            args = {"kind": node.kind.value, "position": (node.x, node.y)}
+        elif action == "connect":
+            if is_dataclass(raw):
+                args = asdict(raw)
+            aliases = {"image_in": "image", "image_out": "image",
+                       "red": "r", "green": "g", "blue": "b"}
+            for key in ("src_port", "dst_port"):
+                args[key] = aliases.get(args.get(key), args.get(key))
+            destination = authoritative.nodes.get(args.get("dst_node"))
+            port = str(args.get("dst_port") or "")
+            if destination is not None and port.startswith(("image_in_", "key_in_")):
+                index = int(port.rsplit("_", 1)[-1])
+                if destination.kind.value == "parallel_mixer":
+                    args["dst_port"] = "base" if index == 0 else "branch"
+                    if index:
+                        args["slot_id"] = f"{destination.id}/branch/{index - 1}"
+                elif destination.kind.value == "layer_mixer":
+                    args["dst_port"] = "slot"
+                    args["slot_id"] = f"{destination.id}/slot/{index}"
+                elif destination.kind.value == "key_mixer":
+                    args["dst_port"] = "key"
+                    args["slot_id"] = f"{destination.id}/key/{index}"
+            source = authoritative.nodes.get(args.get("src_node"))
+            if source is not None and source.kind.value == "key_mixer":
+                args["src_port"] = "key"
+        elif action == "disconnect":
+            # Resolve endpoints through the existing projection, including
+            # UI port aliases and mixer slot IDs. No UI IDs become edge IDs.
+            requested = (list(raw) if isinstance(raw, (list, tuple)) else
+                         [raw] if raw is not None else [])
+            remaining = set(getattr(after, "connections", ()))
+            edge_ids = [edge["edge_id"] for edge, draft_edge in zip(
+                graph.get("edges", ()), authoritative.connections)
+                if draft_edge in requested or (not requested and after is not None
+                                                and draft_edge not in remaining)]
+            if not edge_ids:
+                raise EnvelopeError("没有匹配的领域连接")
+            args = ({"edge_id": edge_ids[0]} if len(edge_ids) == 1
+                    else {"edge_ids": edge_ids})
+        elif action in {"delete_nodes", "extract_nodes"}:
+            args = {"node_ids": sorted(removed or set(targets))}
+        elif action in {"remove_alpha_output", "expand_compound", "add_input",
+                        "save_shared"}:
+            args = {"node_id": next(iter(removed), anchor)}
+            if action == "save_shared":
+                args["locked"] = True
+        elif action == "make_compound":
+            args = {"member_ids": sorted(removed)}
+        elif action == "duplicate_nodes":
+            originals = {str(getattr(after_nodes[key], "backend_payload", {}).get("node_id") or "")
+                         for key in added}
+            originals &= ids
+            args = {"source_ids": sorted(originals) or targets}
+            if isinstance(raw, Mapping) and originals:
+                first = next(key for key in added
+                             if after_nodes[key].backend_payload.get("node_id") in originals)
+                old = authoritative.nodes[after_nodes[first].backend_payload["node_id"]]
+                args["offset"] = (after_nodes[first].x - old.x, after_nodes[first].y - old.y)
+        elif action == "paste_nodes":
+            pasted = {key: after_nodes[key] for key in added}
+            payload_nodes = [dict(node.backend_payload) for node in pasted.values()
+                             if getattr(node, "backend_payload", None)]
+            if not payload_nodes or len(payload_nodes) != len(pasted):
+                raise EnvelopeError("剪贴板缺少完整节点载荷")
+            old_ids = {key: node.backend_payload["node_id"] for key, node in pasted.items()}
+            payload_edges = [{"edge_id": f"clipboard-{i}", "src_node": old_ids[edge.src_node],
+                              "src_port": edge.src_port, "dst_node": old_ids[edge.dst_node],
+                              "dst_port": edge.dst_port}
+                             for i, edge in enumerate(after.connections)
+                             if edge.src_node in old_ids and edge.dst_node in old_ids]
+            aliases = {"image_in": "image", "image_out": "image",
+                       "red": "r", "green": "g", "blue": "b"}
+            by_old_id = {node["node_id"]: node for node in payload_nodes}
+            for edge in payload_edges:
+                edge["src_port"] = aliases.get(edge["src_port"], edge["src_port"])
+                edge["dst_port"] = aliases.get(edge["dst_port"], edge["dst_port"])
+                if by_old_id[edge["src_node"]]["node_type"] == "key_mixer":
+                    edge["src_port"] = "key"
+                destination_type = by_old_id[edge["dst_node"]]["node_type"]
+                port = edge["dst_port"]
+                if port.startswith(("image_in_", "key_in_")):
+                    index = int(port.rsplit("_", 1)[-1])
+                    if destination_type == "parallel_mixer":
+                        edge["dst_port"] = "base" if index == 0 else "branch"
+                        if index:
+                            edge["slot_id"] = f"{edge['dst_node']}/branch/{index - 1}"
+                    elif destination_type in ("layer_mixer", "key_mixer"):
+                        name = "slot" if destination_type == "layer_mixer" else "key"
+                        edge["dst_port"] = name
+                        edge["slot_id"] = f"{edge['dst_node']}/{name}/{index}"
+            args = {"payload_nodes": payload_nodes, "payload_edges": payload_edges,
+                    "offset": (0.0, 0.0),
+                    "payload_positions": {old_ids[key]: (node.x, node.y) for key, node in pasted.items()}}
+        elif action == "move_and_insert":
+            positions = dict(raw) if isinstance(raw, Mapping) else {}
+            candidates = []
+            for edge, draft_edge in zip(graph.get("edges", ()), authoritative.connections):
+                if draft_edge not in after.connections:
+                    for node_id in positions:
+                        if any(link.src_node == draft_edge.src_node and link.dst_node == node_id for link in after.connections) and any(
+                                link.src_node == node_id and link.dst_node == draft_edge.dst_node for link in after.connections):
+                            candidates.append((node_id, edge["edge_id"]))
+            if len(candidates) != 1:
+                raise EnvelopeError("无法确定插入的节点与连接")
+            args = {"positions": positions, "node_id": candidates[0][0], "edge_id": candidates[0][1]}
+        elif action == "set_enabled":
+            args = {"node_ids": args.get("node_ids", args.get("ids", targets)),
+                    "enabled": bool(args.get("enabled", True))}
+        elif action == "set_all_enabled":
+            changed = [node for key, node in after_nodes.items()
+                       if key in ids and node.enabled != authoritative.nodes[key].enabled]
+            args = {"enabled": changed[0].enabled if changed else True}
+        elif action in {"reset_grade", "unlink_shared"}:
+            args = {"node_ids": targets}
+        elif action == "paste_grade":
+            changed = [key for key in targets if key in after_nodes
+                       and after_nodes[key].grade != authoritative.nodes[key].grade]
+            if not changed:
+                raise EnvelopeError("没有调色粘贴目标")
+            args = {"node_ids": changed,
+                    "grade_domains": dict(after_nodes[changed[0]].grade)}
+        elif action in {"move_nodes", "auto_layout"}:
+            args = {"positions": {key: (node.x, node.y)
+                                  for key, node in after_nodes.items() if key in ids}}
+        elif action in {"node_color", "lock_node", "node_cache"}:
+            changed = [key for key, node in after_nodes.items() if key in ids
+                       and (node.color, node.locked, node.cache_mode) !=
+                       (authoritative.nodes[key].color, authoritative.nodes[key].locked,
+                        authoritative.nodes[key].cache_mode)]
+            target = after_nodes[changed[0]] if changed else after_nodes.get(anchor)
+            if target is None:
+                raise EnvelopeError("没有可编辑节点")
+            args = {"node_ids": changed or targets}
+            if action == "node_color":
+                # Presentation uses hex swatches; the domain stores names.
+                colors = {"": "default", "#b55148": "red", "#ba824b": "orange",
+                          "#b5a457": "yellow", "#6c9462": "green", "#589c9e": "cyan",
+                          "#587fa9": "blue", "#926ba1": "purple", "#b77892": "pink"}
+                args["color"] = colors.get(target.color, target.color)
+            elif action == "lock_node":
+                args["locked"] = target.locked
+            else:
+                args["mode"] = target.cache_mode
+        elif action == "set_node_option":
+            args.setdefault("node_id", anchor)
+        return {**envelope, "payload": {**payload, "arguments": args}}
 
     def _on_active_node_changed(self, node_id: str) -> None:
         if self._sync_lock:
@@ -888,12 +1153,21 @@ class LegacyGradingAdapter:
         graph = stack.color_graph if stack else None
         if graph is None:
             return False
-        # 图侧先应用（服务端验证），再并入事务
-        node = next((n for n in graph.nodes if n.node_id == node_id), None)
-        if node is None:
+        pending = self._bridge._buffer._last_graph
+        if pending is not None:
+            from src.shared.project.color_graph import ColorGraphData
+            graph = ColorGraphData.from_dict(pending)
+        path = tuple(node_id for _, node_id in
+                     getattr(self._host._panel, "_parents", ()))
+        child_graph = graph
+        for compound_id in path:
+            compound = next((node for node in child_graph.nodes
+                             if node.node_id == compound_id), None)
+            if compound is None or compound.compound_children is None:
+                return False
+            child_graph = compound.compound_children
+        if not any(node.node_id == node_id for node in child_graph.nodes):
             return False
-        grade = dict(node.params.get("grade") or {})
-        grade[param_name] = value
         counter = [0]
 
         def _factory() -> str:
@@ -901,8 +1175,9 @@ class LegacyGradingAdapter:
             return f"gesture-{transaction_id}-{counter[0]}"
 
         service = ColorGraphService(id_factory=_factory)
-        result = service.op_set_node_option(
-            graph, node_id, "grade_patch", (param_name, value))
+        result = service.apply_intent(graph, "set_node_option", {
+            "node_id": node_id, "name": "grade_patch", "value": (param_name, value),
+            "_compound_path": path})
         if not result.ok:
             return False
         self._bridge.add_to_transaction(result, transaction_id,
@@ -1266,10 +1541,16 @@ class ColorGraphAppHost:
         graph = self._stack_graph(self._bound_stack_id)
         if graph is None:
             return None
-        for node in graph.nodes:
-            if node.node_id == node_id:
-                return dict(node.legacy_payload or {})
-        return None
+        def find(current: Any) -> dict[str, Any] | None:
+            for node in current.nodes:
+                if node.node_id == node_id:
+                    return dict(node.legacy_payload or {})
+                if node.compound_children is not None:
+                    found = find(node.compound_children)
+                    if found is not None:
+                        return found
+            return None
+        return find(graph)
 
     def align_engine_active_layer(self, node_id: str) -> bool:
         """图节点 → 引擎活动层对齐（§6.5 source_layer_id 唯一许可路径）。"""
@@ -1316,11 +1597,13 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
     ``node_ports`` 的 presentation 约定重映射（image↔image_in/out、
     mixer 槽序号、splitter 通道名）。
     """
+    from src.features.color.ui.node_tool_indicators import detect_tool_indicators
     from src.features.color.ui.node_editor_state import (
         ConnectionDraft,
         GraphDraft,
         NodeDraft,
         NodeKind,
+        NodeEditorState,
     )
 
     kind_alias = {
@@ -1342,23 +1625,45 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
         params = node.get("params") or {}
         locked = bool(params.get("locked", False))
         cache_mode = str(params.get("cache_mode", "auto"))
-        slots = params.get("slots")
+        slots = set(params.get("slots") or ())
+        slots.update(str(edge.get("slot_id")) for edge in payload.get("edges", ())
+                     if edge.get("dst_node") == node_id and edge.get("slot_id"))
+        slot_indices = [int(slot.rsplit("/", 1)[-1]) for slot in slots
+                        if slot.rsplit("/", 1)[-1].isdigit()]
+        input_count = max(slot_indices, default=-1) + 1
+        if kind == NodeKind.PARALLEL_MIXER:
+            input_count += 1
+        menu_options: dict[str, Any] = {}
+        for section, key, menu_key in (("key_settings", "invert_key_in", "key_invert"),
+                                       ("mixer", "blend_mode", "blend_mode"),
+                                       ("color", "color_space", "color_space"),
+                                       ("color", "gamma", "gamma")):
+            if isinstance(params.get(section), Mapping) and key in params[section]:
+                menu_options[menu_key] = params[section][key]
         nodes[node_id] = NodeDraft(
             id=node_id,
             kind=kind,
             label=str(node.get("label") or ""),
             x=float((positions.get(node_id) or (0.0, 0.0))[0]),
             y=float((positions.get(node_id) or (0.0, 0.0))[1]),
+            tool_indicators=detect_tool_indicators(node.get("legacy_payload"), params),
             number=0,  # load_graph 内部重编号
             enabled=bool(node.get("enabled", True)),
             locked=locked,
-            color=str(params.get("ui_color", "") or ""),
-            input_count=max(2, len(slots) if isinstance(slots, (list, tuple))
-                            else 2),
-            grade=dict(params.get("grade") or {}),
+            color={"default": "", "red": "#b55148", "orange": "#ba824b",
+                   "yellow": "#b5a457", "green": "#6c9462", "cyan": "#589c9e",
+                   "blue": "#587fa9", "purple": "#926ba1", "pink": "#b77892"}.get(
+                       str(params.get("ui_color", "") or ""), str(params.get("ui_color", "") or "")),
+            input_count=max(2, input_count),
+            grade={**dict((node.get("legacy_payload") or {}).get("grading_params") or {}),
+                   **dict(params.get("grade") or {})},
+            backend_payload=dict(node),
+            node_options=menu_options,
             source_layer_id=str(params.get("source_layer_id", "") or ""),
             cache_mode=cache_mode,
             shared_id=str(node.get("shared_definition_id", "") or ""),
+            children=(graph_payload_to_draft(node["compound_children"])
+                      if isinstance(node.get("compound_children"), Mapping) else None),
         )
 
     def _port_name(node_id: str, port: str, out: bool, slot: str) -> str:
@@ -1379,6 +1684,8 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
                 return f"image_in_{index}"
             return "image_out"
         if kind_value == "key_mixer":
+            if out:
+                return "key_out"
             if port == "key":
                 index = 0
                 if slot:
@@ -1414,10 +1721,32 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
                                 str(edge.get("slot_id") or "")),
         ))
 
-    return GraphDraft(
+    display_number = 1
+    for node in nodes.values():
+        if node.kind in (NodeKind.CORRECTOR, NodeKind.COMPOUND):
+            node.number = display_number
+            display_number += 1
+    draft = GraphDraft(
         nodes=nodes,
         connections=connections,
         active_id=str(ui.get("active_node_id") or ""),
         selected_ids=set(ui.get("selected_ids") or ()),
-        next_number=1,
+        next_number=display_number,
     )
+    missing = set(nodes) - set(positions)
+    if missing:
+        # Deterministic presentation fallback for old graphs / new nodes.
+        # Existing user positions remain authoritative and are never changed.
+        state = NodeEditorState(draft)
+        state.auto_layout()
+        used = {(node.x, node.y) for key, node in nodes.items() if key not in missing}
+        for key in nodes:
+            if key not in missing:
+                continue
+            node = nodes[key]
+            candidate = state.graph.nodes[key]
+            node.x, node.y = candidate.x, candidate.y
+            while (node.x, node.y) in used:
+                node.y += 100.0
+            used.add((node.x, node.y))
+    return draft

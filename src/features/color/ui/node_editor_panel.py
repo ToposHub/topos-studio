@@ -340,6 +340,7 @@ class ColorNodePanel(QWidget):
         self.breadcrumb_label.setText(" / ".join(parent.graph.nodes[nid].label or tr("compound_node", "Compound Node")
                                                  for parent, nid in self._parents))
         self.breadcrumb.show()
+        self.active_node_changed.emit(self.view.state.graph.active_id)
 
     def close_compound(self) -> bool:
         if not self._parents:
@@ -362,6 +363,7 @@ class ColorNodePanel(QWidget):
         if self._parents:
             self.breadcrumb_label.setText(" / ".join(p.graph.nodes[nid].label or tr("compound_node", "Compound Node") for p, nid in self._parents))
         self._forward_edit("close_compound", {"node_id": node_id, "draft": parent.snapshot()})
+        self.active_node_changed.emit(self.view.state.graph.active_id)
         return True
 
     def build_options_menu(self) -> QMenu:
@@ -375,8 +377,8 @@ class ColorNodePanel(QWidget):
         add(menu, "show_grid", "Show Grid", self._toggle_grid, checked=self.view.show_grid)
         add(menu, "show_thumbnails", "Show Thumbnails", self._toggle_thumbnails, checked=self.view.show_thumbnails)
         menu.addSeparator()
-        add(menu, "undo", "Undo", lambda: self.view.apply_edit("undo", self.view.state.undo), enabled=self.view.state.can_undo)
-        add(menu, "redo", "Redo", lambda: self.view.apply_edit("redo", self.view.state.redo), enabled=self.view.state.can_redo)
+        add(menu, "undo", "Undo", lambda: self.view.apply_edit("undo", self.view.state.undo), enabled=(self.view.project_history_available(False) if self.view.project_history_available else self.view.state.can_undo))
+        add(menu, "redo", "Redo", lambda: self.view.apply_edit("redo", self.view.state.redo), enabled=(self.view.project_history_available(True) if self.view.project_history_available else self.view.state.can_redo))
         menu.addSeparator()
         add(menu, "reset_keep_nodes", "Reset Grades and Keep Nodes", lambda: self.view.apply_edit("reset_grades", lambda: self.view.state.reset_grades(set(self.view.state.graph.nodes))))
         add(menu, "reset_all", "Reset All Grades and Nodes", lambda: self.view.apply_edit("reset_all", self.view.state.reset_all))

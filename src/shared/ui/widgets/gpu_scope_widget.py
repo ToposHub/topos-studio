@@ -57,8 +57,6 @@ def _scope_diag():
     return scope_diagnostics
 
 
-# Default format: compatibility with the rest of the app (4.1 core surface).
-_DEFAULT_FMT = QSurfaceFormat.defaultFormat()
 
 # Target marker colours (CPU VectorScopeWidget._get_target_color parity).
 _VS_TARGET_COLORS = {
@@ -176,7 +174,10 @@ class GpuScopeWidget(QOpenGLWidget):
         # that early return flash black. Keep the last presented pixels.
         self.setUpdateBehavior(QOpenGLWidget.UpdateBehavior.PartialUpdate)
         # Request a double-buffered core-profile surface matching the app.
-        fmt = QSurfaceFormat(_DEFAULT_FMT)
+        # Resolve at construction time: this module can be imported before
+        # main() installs the core-profile default. A captured import-time
+        # format creates an unshared legacy context on macOS.
+        fmt = QSurfaceFormat(QSurfaceFormat.defaultFormat())
         fmt.setSwapBehavior(QSurfaceFormat.SwapBehavior.DoubleBuffer)
         # Scope output textures are single-sample. The application default
         # requests MSAA, but scaling from a single-sample read FBO into a

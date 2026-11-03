@@ -1,0 +1,52 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 546 items
+
+tests/color/test_color_graph_backend_capabilities.py ........            [  1%]
+tests/color/test_color_graph_baseline_fixtures.py ...........            [  3%]
+tests/color/test_color_graph_cancel_resources.py ........                [  4%]
+tests/color/test_color_graph_commands.py ................                [  7%]
+tests/color/test_color_graph_compiler.py .................               [ 10%]
+tests/color/test_color_graph_compound_shared.py .........                [ 12%]
+tests/color/test_color_graph_cpu_parity.py ...........                   [ 14%]
+tests/color/test_color_graph_gl_execution.py ...                         [ 15%]
+tests/color/test_color_graph_keys.py .........                           [ 16%]
+tests/color/test_color_graph_live_ui.py ...............                  [ 19%]
+tests/color/test_color_graph_migration.py .............................. [ 25%]
+.                                                                        [ 25%]
+tests/color/test_color_graph_mixers.py ..............                    [ 27%]
+tests/color/test_color_graph_panel_binding.py .........                  [ 29%]
+tests/color/test_color_graph_persistence.py .............                [ 31%]
+tests/color/test_color_graph_plan_cache.py .......                       [ 33%]
+tests/color/test_color_graph_schema.py ................................. [ 39%]
+                                                                         [ 39%]
+tests/color/test_color_graph_scope_lifecycle.py .......................  [ 43%]
+tests/color/test_color_graph_scope_output.py ........................... [ 48%]
+.....                                                                    [ 49%]
+tests/color/test_color_graph_scripting_api.py ...........                [ 51%]
+tests/color/test_color_graph_service.py ................................ [ 57%]
+............                                                             [ 59%]
+tests/color/test_color_graph_splitter.py .....                           [ 60%]
+tests/color/test_color_graph_ui_contract.py ......................       [ 64%]
+tests/color/test_color_graph_validation.py ................              [ 67%]
+tests/color/test_color_node_menu_parity.py ..........                    [ 69%]
+tests/app/test_color_graph_app_host.py ..............                    [ 71%]
+tests/app/test_color_graph_clip_switch.py ..........                     [ 73%]
+tests/app/test_color_graph_export_preview.py ...                         [ 73%]
+tests/app/test_color_graph_parameter_feedback.py ..                      [ 74%]
+tests/app/test_color_graph_production_switch.py ...........              [ 76%]
+tests/app/test_color_graph_save_reconcile.py ................            [ 79%]
+tests/ui/test_color_node_editor_panel.py ................                [ 82%]
+tests/ui/test_color_node_editor_state.py ............................... [ 87%]
+..                                                                       [ 88%]
+tests/ui/test_color_node_editor_view.py .......................          [ 92%]
+tests/ui/test_color_node_host_menu.py ....................               [ 96%]
+tests/ui/test_color_node_source_preview.py ......                        [ 97%]
+tests/ui/test_color_node_tool_feedback.py ..                             [ 97%]
+tests/ui/test_node_tool_indicators.py .............                      [100%]
+
+============================= 546 passed in 28.01s =============================
