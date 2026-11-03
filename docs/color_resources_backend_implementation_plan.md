@@ -204,7 +204,7 @@
 | N14 / B12 E22跨后端 / P1 | CPU/Metal只支持基础点态域，fragment全域Metal Corrector未接，插件/HSL/LUT/warper/fx/非Normal等仍fail-closed。逐域实现与能力声明一起提交，不能一口气取消限制。 | 同一fixture跨GL/CPU/Metal、对应平台原生；未知/缺实现继续明确拒绝；Linux/Windows/Apple Silicon/Intel按机器列NOT RUN。 | R06、R12 |
 | N15 / Resolve Serial+Window / P2 | CPW/LPW/PPW/PCW一键组合缺失。先实机核对各窗口含义，再在service原子创建Serial+相应Window默认形状/关联，菜单/快捷键走同一命令。 | 与Resolve实际新建结果对照；1undo删除组合，默认中性、形状/跟踪身份正确，不以单独Window可用冒充组合完成。 | N03、N11 |
 | N16 / 基线与资源治理 / P1 | F06/F07时序/bake fixture生成器仅行为用例；grading_extreme/checker既有位级失配；测试GC/QThread积累有历史债务。补确定性fixture、按ADR核验重归档，逐所有者治理timer/thread/GL lease。 | 不能删断言/放宽误差掩盖失配；记录GPU指纹与逐像素差；重复套件无崩溃和活动QThread残留；DeferredDelete规则保留。 | R00、R06 |
-| N17 / 可选依赖诊断 / P2 | 启动存在ThumbEngine FFmpeg路径和AI模型未安装告警。统一探测来源与可用性状态，区分Qt FFmpeg可用与外部工具缺失；未安装模型不能作为AI通过证据。 | 无FFmpeg/模型环境仍可浏览库、条目提示准确、实际调用明确拒绝或使用已声明替代；日志不泄露无关内容。 | R01、R11 |
+| N17✅ / 可选依赖诊断 / P2 | 启动存在ThumbEngine FFmpeg路径和AI模型未安装告警。统一探测来源与可用性状态，区分Qt FFmpeg可用与外部工具缺失；未安装模型不能作为AI通过证据。 | 无FFmpeg/模型环境仍可浏览库、条目提示准确、实际调用明确拒绝或使用已声明替代；日志不泄露无关内容。 | R01、R11 |
 
 ## 4. 关键规格先固定，避免施工返工
 
