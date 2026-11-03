@@ -2458,6 +2458,18 @@ class LayerOpsMixin:
         has_history = view.can_redo() if want_redo else view.can_undo()
         return view if has_history else None
 
+    def _color_graph_history_available(self) -> bool:
+        """N11：图会话 READY 且共享工程命令栈有可撤销历史。"""
+        from src.app.controllers.color_graph_controller import GraphSessionState
+        host = getattr(self, 'color_graph_host', None)
+        coordinator = getattr(host, '_coordinator', None)
+        if coordinator is None or coordinator.state is not GraphSessionState.READY:
+            return False
+        stack = getattr(host, '_project_stack', None)
+        if stack is None:
+            return False
+        return stack.peek_history_command() is not None
+
     def undo(self) -> None:
         """撤销：Composite 页激活时优先其 undo；SAM 模式撤销采样点；
         Edit 页时间线/媒体池命令栈有历史时驱动对应栈（E11）；
@@ -2480,6 +2492,14 @@ class LayerOpsMixin:
         if self._composite_available and self.composite_page and self.composite_page._is_active:
             self.composite_page.undo()
             return
+
+        # N11：Color 图会话激活且共享工程栈有历史 → 图宿主 undo
+        #（工程栈回滚 + 权威投影重放），不再落 legacy 引擎历史。
+        graph_host = getattr(self, 'color_graph_host', None)
+        if graph_host is not None and self._color_graph_history_available():
+            if graph_host.undo():
+                self.update_undo_redo_actions()
+                return
 
         # SAM mode interception: undo SAM points instead of layer history
         if self.canvas.sam_mode_active:
@@ -2509,6 +2529,13 @@ class LayerOpsMixin:
         if self._composite_available and self.composite_page and self.composite_page._is_active:
             self.composite_page.redo()
             return
+
+        # N11：图会话历史优先于 legacy 引擎（同 undo）。
+        graph_host = getattr(self, 'color_graph_host', None)
+        if graph_host is not None and self._color_graph_history_available():
+            if graph_host.redo():
+                self.update_undo_redo_actions()
+                return
 
         if self.engine.redo():
             self._sync_ui_after_undo_redo()
