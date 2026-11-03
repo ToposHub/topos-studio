@@ -230,6 +230,7 @@ class ColorLutBrowser(QWidget):
         strength.addWidget(self.remove_button)
         layout.addWidget(strength_row)
         self.status_label = QLabel(tr('interaction_preview', 'Interaction preview · not applied to the image'), self)
+        self._production_mode = False
         self.status_label.setObjectName('LutInteractionStatus')
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f'color: {C.TEXT_HINT}; font-size: 10px; padding: 3px 8px;')
@@ -274,6 +275,12 @@ class ColorLutBrowser(QWidget):
         self._populate()
         self._select_resource(selected)
         self._update_current_label()
+
+    def set_production_mode(self, enabled: bool) -> None:
+        """R11：真实后端模式移除"交互预览"横幅（命令已落图）。"""
+        self._production_mode = bool(enabled)
+        self.status_label.setText('' if enabled else tr(
+            'interaction_preview', 'Interaction preview · not applied to the image'))
 
     def browser_state(self) -> dict:
         """R10：用户库偏好（收藏/视图模式/缩略图缩放）——用户配置域。"""

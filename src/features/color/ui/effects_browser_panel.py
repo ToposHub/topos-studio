@@ -157,6 +157,7 @@ class ColorEffectsBrowser(QWidget):
         self.target_label = QLabel()
         self.target_label.setWordWrap(True)
         self.status_label = QLabel(_tr('interaction_preview', 'Interaction preview · not applied to the image'))
+        self._production_mode = False
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f'color:{C.TEXT_HINT};border:0;font-size:10px;')
         self.target_label.setStyleSheet('border:0;')
@@ -202,6 +203,12 @@ class ColorEffectsBrowser(QWidget):
         self.category_combo.setCurrentIndex(max(0, index))
         self.category_combo.blockSignals(False)
         self._refresh_resources()
+
+    def set_production_mode(self, enabled: bool) -> None:
+        """R11：真实后端模式移除"交互预览"横幅（命令已落图）。"""
+        self._production_mode = bool(enabled)
+        self.status_label.setText('' if enabled else _tr(
+            'interaction_preview', 'Interaction preview · not applied to the image'))
 
     def browser_state(self) -> dict:
         """R10：用户库偏好（收藏/分类折叠/视图模式）——存用户配置，

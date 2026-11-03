@@ -2160,6 +2160,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             self.color_resource_preview = None
             self.color_resource_controller = ColorResourceController(
                 self, catalog_provider=self.color_resource_catalog_provider)
+            # R11：真实后端模式——浏览器移除"交互预览"横幅（命令已落图）。
+            self.color_effects_browser.set_production_mode(True)
+            self.color_lut_browser.set_production_mode(True)
         self.color_resource_catalog_provider.warm_background()
 
     def _on_node_output_thumbnail_ready(self, node_id: str, image) -> None:

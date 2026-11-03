@@ -1,0 +1,57 @@
+{
+  "537fa2fb-03c0-4d97-a112-4cffac592825": {
+    "asset_id": "537fa2fb-03c0-4d97-a112-4cffac592825",
+    "path": "/Users/heng/Documents/vscode/topos-studio/tests/test_videos/测试素材01.mov",
+    "media_type": "video",
+    "display_name": "测试素材01.mov",
+    "metadata": {
+      "width": 1920,
+      "height": 1080,
+      "fps": 25.0,
+      "fps_num": 25,
+      "fps_den": 1,
+      "total_frames": 124,
+      "duration_seconds": 4.96,
+      "codec": "h264",
+      "codec_profile": "High",
+      "pixel_format": "yuv420p",
+      "bit_depth": 8,
+      "field_order": null,
+      "timecode": null,
+      "rotation": 0,
+      "has_alpha": false,
+      "format": "MOV",
+      "file_size": 12404013,
+      "media_backend": "ffmpeg",
+      "media_identity": {
+        "size_bytes": 12404013,
+        "mtime_ns": 1793556282544881864,
+        "fingerprint": "size+mtime_ns"
+      },
+      "audio_info": {
+        "channels": 2,
+        "sample_rate": 48000,
+        "codec": "pcm_s24le",
+        "channel_layout": "stereo",
+        "duration_seconds": 4.96
+      }
+    },
+    "thumbnail_key": null,
+    "proxy_path": null,
+    "proxy_status": "none",
+    "is_offline": false,
+    "color_metadata": null,
+    "created_at": 1793724766.782717,
+    "reel": "",
+    "scene": "",
+    "shot": "",
+    "take": "",
+    "keywords": [],
+    "rating": 0,
+    "flag": "none",
+    "color_label": "none",
+    "comment": "",
+    "path_relative": "/Users/heng/Documents/vscode/topos-studio/tests/test_videos/测试素材01.mov",
+    "path_original": "/Users/heng/Documents/vscode/topos-studio/tests/test_videos/测试素材01.mov"
+  }
+}
