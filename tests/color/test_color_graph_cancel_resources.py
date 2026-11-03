@@ -52,6 +52,10 @@ class TestCancellation:
                     source_size=(64, 64),
                     cancel_check=lambda rid: rid == "pre")
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
     def test_mid_execution_cancel_releases_and_does_not_publish(self):
@@ -77,6 +81,10 @@ class TestCancellation:
             assert result.released_textures >= 1
             assert "mid" not in executor._published  # 不发布半帧
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
     def test_cancel_registry_flags(self):
@@ -89,6 +97,10 @@ class TestCancellation:
             executor.clear_cancel("r1")
             assert not executor.is_cancelled("r1")
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
 
@@ -113,6 +125,10 @@ class TestResourceLifecycle:
             assert executor.release_revision("ok") == 0   # 幂等
             src.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
     def test_failure_releases_all_scratch(self):
@@ -137,6 +153,10 @@ class TestResourceLifecycle:
             assert "fail" not in executor._published
             src.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
     def test_liveness_release_frees_intermediates(self):
@@ -157,6 +177,10 @@ class TestResourceLifecycle:
             assert result.released_textures == len(plan.passes) - 1
             src.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
     def test_cached_aux_textures_survive_request_release(self):
@@ -178,6 +202,10 @@ class TestResourceLifecycle:
             assert curves_cache, "curves 缓存应存在"
             src.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
 
@@ -199,4 +227,8 @@ class TestRequestIdentityMatching:
             executor.release_revision("req-42")
             src.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()

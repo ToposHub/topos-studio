@@ -122,6 +122,10 @@ class TestGraphLevelMixerExecution:
             src.release()
             return out
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
     def _branch_graph(self, kind: str):
@@ -305,4 +309,8 @@ class TestLayerMixerV11Modes:
             for t in (out, fbo, tex_b, tex_t, grid_b, grid_t):
                 t.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()

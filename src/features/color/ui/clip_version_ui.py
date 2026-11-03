@@ -235,17 +235,31 @@ class ClipVersionUiController(QObject):
         request = ClipVersionRequest(str(uuid4()), target, scope, operation, state.revision,
                                      version_id, name.strip(), destination_scope, discard_unsaved)
         self._pending[request.request_id] = request
-        timer = QTimer(self)
+        # 有意不设父对象（Python 持有唯一所有权）：宿主 C++ 树可能比
+        # Python 包装器存活更久——Qt 的 deleteLater 在嵌入式/测试事件循
+        # 环里可能永远不投递，父链保活的 QTimer 会在其 lambda 已被 GC
+        # 回收后继续持连接发射，分发进已释放内存即段错误
+        # （"line ??? in <lambda>"）。无父 + Python 持有：包装器回收时
+        # C++ 定时器同步销毁，连接与可调用对象同生共死，悬挂分发在构造
+        # 上不可能。回调对已销毁宿主加 sip 守卫兜底（仓库既有惯例）。
+        timer = QTimer()
         timer.setSingleShot(True)
-        timer.timeout.connect(lambda: self.finish(ClipVersionResult(
-            request.request_id, request.target,
-            error=_tr("timeout", "The version operation timed out. Refresh the list before retrying."),
-        )))
+        timer.timeout.connect(lambda: self._finish_request_timeout(request))
         self._timers[request.request_id] = timer
         timer.start(self._request_timeout_ms)
         self.state_changed.emit(target, scope)
         self.operation_requested.emit(request)
         return request.request_id
+
+    def _finish_request_timeout(self, request: ClipVersionRequest) -> None:
+        """超时兜底（单发定时器回调；宿主 C++ 侧可能已先销毁）。"""
+        from PyQt6 import sip
+        if sip.isdeleted(self):
+            return
+        self.finish(ClipVersionResult(
+            request.request_id, request.target,
+            error=_tr("timeout", "The version operation timed out. Refresh the list before retrying."),
+        ))
 
     def finish(self, result: ClipVersionResult) -> bool:
         request = self._pending.get(result.request_id)

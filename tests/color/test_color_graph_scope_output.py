@@ -62,6 +62,24 @@ def _dual_ok(cpu: np.ndarray, gl: np.ndarray) -> None:
     assert rel.max(initial=0.0) <= HDR_REL
 
 
+def _drain_executor_pools(*executors):
+    """GL teardown 约定：ctx.release() 前清空执行器发布租约与纹理池
+    （悬挂在已销毁上下文上的纹理，后续 GC 触发释放会 segfault——
+    尤其是引用环垃圾延迟到无关测试事件循环里才释放的场景）。"""
+    for ex in executors:
+        if ex is None:
+            continue
+        try:
+            for request_id in list(getattr(ex, "_published", {})):
+                ex.release_revision(request_id)
+        except Exception:
+            pass
+        try:
+            ex.release_pool()
+        except Exception:
+            pass
+
+
 def _migrated_graph():
     return migrate_legacy_stack(_stack_with_layers(f03_layer_stack()))
 
@@ -82,6 +100,7 @@ def _run_gl(ctx, executor, graph, source, size):
         out = np.frombuffer(fbo.read(components=4, dtype="f2"),
                             dtype=np.float16).reshape(
             h, w, 4).astype(np.float32)
+        fbo.release()
         executor.release_revision("s04")
         return out, plan
     finally:
@@ -433,6 +452,7 @@ class TestScopeGraphSplice:
             finally:
                 src_tex.release()
         finally:
+            _drain_executor_pools(executor)
             ctx.release()
 
     def test_repeated_request_id_gets_unique_leases(self):
@@ -480,6 +500,10 @@ class TestScopeGraphSplice:
                 src_tex.release()
         finally:
             diag_mod.scope_diagnostics = original
+            # 末次租约必须显式释放：发布表里的输出纹理悬挂在即将销毁的
+            # ctx 上，靠 GC 延迟释放会在无关测试里 segfault
+            r._release_graph_lease()
+            _drain_executor_pools(r._graph_executor)
             ctx.release()
 
     def test_executor_same_id_republish_releases_previous(self):
@@ -509,7 +533,11 @@ class TestScopeGraphSplice:
             finally:
                 src_tex.release()
         finally:
+            # 发布表中的当前输出（"dup"）也要释放——release_pool 只清池
+            # 与白 matte 缓存，不清存活租约
+            executor.release_revision("dup")
             executor.release_pool()
+            _drain_executor_pools()
             ctx.release()
 
 
@@ -545,6 +573,7 @@ class TestGraphFrameExecutionParity:
                 executor.release_revision("s04-p")
                 src_tex.release()
         finally:
+            _drain_executor_pools(executor)
             ctx.release()
         _dual_ok(cpu.output, gl)
         return gl, cpu.output

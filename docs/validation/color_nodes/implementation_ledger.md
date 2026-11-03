@@ -31,6 +31,7 @@
 | B08 §5.4 缓存淘汰 | a02a993 | BoundedPlanCache（plan 纹理预算总额上限默认 256MB，LRU 续命，[]/.get 双读路径，单 plan 超预算不入缓存，≤0 不缓存）；renderer 持有；7 项测试 | 无（预算值首测 256MB，原生长会话后可校准） |
 | 复查批次（隐藏缺陷清剿 + B06 collect 收口） | 本批 | **B06 collect 权威图收口**：UpdateColorStackCommand 在 layers 提交且栈携带可投影图时做 reconcile_projectable_graph（legacy 通道编辑随层快照进图——此前图不动、重载图优先即**静默丢编辑**；无变化不动 revision；复杂图保持权威不同步；undo 以快照字节等价恢复）；edit_controller 提交后 refresh_bound_graph（引擎图 stash/面板投影刷新——否则 scope(图执行)与 canvas(legacy)分叉）。**修复 7 个隐藏缺陷**：①scope 重渲染复用 render_request_id 的发布-释放竞态（当前输出被归池复用=坏图+旧租约泄漏；改唯一计数 id+执行器同 id 覆盖防御归池）；②flag 模式活动层无法映射图节点时手势被静默吞掉（回落 legacy）；③baked/AI/mask 暂缓帧原 fail-closed 冻结 scope（改回落旧循环——此类栈必然可投影，位级正确）；④scope 菜单回 clip 不重绑（组栈编辑误入 clip scope；timeline 解绑 fail-visible）；⑤**存量缺陷**：手势提交尾段把扁平参数铺到所有引擎层（非活动层独立调色被冲掉，下次快照永久压平）；⑥scope 身份无图栈共享空会话（面板栈 ID 兜底）；⑦AppHost._publishing 防重入 | E10 tracker/qualifier node-ID 绑定仍登记（E27 邻接）；图编辑上下文关键帧暂缓；全局 undo 不经图宿主的引擎同步缺口（宿主 undo 已同步） |
 | B16 发布验收（子集） | 5ca7b3c | **B16.1**：capability_inventory.md（39 action 表 + provider 表 + 三后端表 + 旧 layers 写入口扫描：48 写点全分类、待审计 0）；**B16.2**：bench_color_graph.py F08 基准（4K_H264 300 帧 × 1080p/4K，decode/compile/graph/present 分段 + p50/p95/p99 + 丢帧 + RSS 稳定 + 无双执行断言）；**B16.3/16.4**：release_acceptance.md（PASS/NOT RUN 矩阵；跨平台/原生/接通模式如实 NOT RUN） | **B16.5 未满足**（见声明 1）；图执行器逐 pass 纹理分配无池化（bench 已量化，切换前优化面）；Metal/跨平台实机矩阵 NOT RUN |
+| 段错误根因收口（tests/color 字母序） | 本批 | **确定性段错误根因**（faulthandler + SAVEALL + GC 回调逐层定位）：`QCoreApplication.processEvents()` 不投递 DeferredDelete——pytest-qt 的 close+deleteLater 在无真实事件循环的测试进程里是静默空操作，C++ 控件树连同 pending 15s QTimer 泄漏存活到后续测试；Python 侧（controller/timer 包装器 + lambda）被分代 GC 先行回收后，泄漏的 C++ QTimer 仍持连接发射，分发落进已释放内存 = 无关测试事件处理中 "line ??? in <lambda>" SEGV（起爆点随运行节奏漂移：ui_contract/cpu_parity/keys，恒为 test_clip_version_ui 的 15s 待决请求 +15s 处）；会话前绿是 GC 竞态运气，本会话新测试挪动分配节律后变成确定性。**修复**：①生产 clip_version_ui 请求定时器改无父 QTimer（Python 持有唯一所有权——包装器回收时 C++ 定时器同步销毁，连接与可调用对象同生共死，悬挂分发构造上不可能）+ sip 守卫回调；②tests/color/conftest 每测试收尾显式 sendPostedEvents(None, DeferredDelete)（qtbot 清理从静默空操作变真删除，整类僵尸发射器绝迹）；③scope_output 两个测试的发布租约泄漏（ctx.release 前 _published 未清）+ `_run_gl` fbo 未释放 + `_drain_executor_pools` 加固为"先清租约再清池"；④7 个执行器测试文件补 release_pool before ctx.release（GL teardown 约定）。**验证**：全量 tests/color 字母序 ×2 = 3407 passed 仅余台账既登记的 golden 环境失配；B16 验证命令 3420 passed；台账回归命令 699 passed EXIT=0。**反例登记**：每测试显式 gc.collect() 已实测并否决（把环回收提前到运行中段会在 presets_gallery 的 EXR 写入处以 SIGILL 激化；DeferredDelete 投递 + 自动分代回收同配置全量绿），conftest 注释留档 | 套件级存量债务（非本批引入，当前配置无崩溃）：测试累计引用环垃圾巨大（单次 gen2 回收 6 万+ 对象，含数百 QThread/QTimer 包装器）；Running QThread 包装器被 GC 销毁会 abort（隔离实验证实），当前无触发路径，治理留待后续 |
 
 ## 未开始 / 部分开始
 
@@ -107,4 +108,8 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
   tests/ui/test_color_node_editor_panel.py tests/ui/test_color_node_host_menu.py \
   tests/ui/test_color_node_source_preview.py -q
 # 2026-11-03 实测：699 passed（含 Metal 实机 21 项与复查批次回归；EXIT=0）
+# 2026-11-03 段错误收口后复测：同命令 699 passed EXIT=0；全量
+# `pytest tests/color`（字母序，3409 项）×2 = 3407 passed / 5 skipped /
+# 仅余 test_shader_golden_corpus 环境位级失配（存量登记，ADR 0004）；
+# B16 验证命令（tests/color + clip_switch + export_preview）3420 passed。
 ```

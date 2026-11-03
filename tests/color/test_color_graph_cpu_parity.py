@@ -124,6 +124,10 @@ class TestProductionCorrectorParity:
             executor.release_revision("parity")
             src_tex.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
         return cpu.output, gl_out
 

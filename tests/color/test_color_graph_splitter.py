@@ -79,6 +79,10 @@ class TestSplitCombineGraph:
             # f16 往返容差
             np.testing.assert_allclose(out, source, atol=2e-3)
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
     def test_layout_move_does_not_change_pixels(self):
