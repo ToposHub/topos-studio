@@ -1653,6 +1653,39 @@ class ColorGraphAppHost:
             return None
         return find(graph)
 
+    def panel_layer_payload(self, node_id: str) -> dict[str, Any] | None:
+        """N03：选中节点的**合并投影**（node_layer_payload 语义——legacy
+        基底 + params 域覆盖 + 曲线/LUT 投影）。面板回填（qualifier/
+        窗口/曲线…）一律读它，而不是裸 legacy_payload——否则图命令写
+        入的 params 域（qualifier overlay 等）在面板上不可见。"""
+        graph = self._stack_graph(self._bound_stack_id)
+        if graph is None:
+            return None
+        from src.features.color.core.color_graph_param_source import (
+            node_layer_payload,
+        )
+        def find(current: Any) -> dict[str, Any] | None:
+            for node in current.nodes:
+                if node.node_id == node_id:
+                    return node_layer_payload(node)
+                if node.compound_children is not None:
+                    found = find(node.compound_children)
+                    if found is not None:
+                        return found
+            return None
+        return find(graph)
+
+    def panel_qualifier_params(self) -> dict[str, Any]:
+        """N03：Qualifier 手势的 diff 基（权威 qualifier 投影）。"""
+        handle = self._host.active_handle
+        if handle is None or not handle.is_corrector:
+            return {}
+        qualifier = dict(handle.params.get("qualifier") or {})
+        payload = self.panel_layer_payload(handle.node_id) or {}
+        base = dict(payload.get("qualifier_params") or {})
+        base.update(qualifier)
+        return base
+
     def align_engine_active_layer(self, node_id: str) -> bool:
         """图节点 → 引擎活动层对齐（§6.5 source_layer_id 唯一许可路径）。"""
         graph = self._stack_graph(self._bound_stack_id)

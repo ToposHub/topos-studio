@@ -1976,6 +1976,76 @@ class ColorControllerMixin:
             self._trigger_autosave()
 
     # ------------------------------------------------------------------
+    # N03: Qualifier 面板写入路由（图模式 typed handle / legacy 直写）
+    # ------------------------------------------------------------------
+
+    def on_qualifier_params_changed(self, params: dict) -> None:
+        """Qualifier 面板参数变化：图编辑上下文经 qualifier 图命令（一次
+        手势一次 undo），legacy 上下文直写引擎（N03 前唯一路径）。"""
+        if getattr(self, "_color_stack_hydration_in_progress", False):
+            return  # 程序化回填回流（同值幂等；不开事务不双写）
+        graph_host = getattr(self, "color_graph_host", None)
+        if graph_host is not None and graph_host.graph_edit_context_active():
+            if self._route_qualifier_to_graph(graph_host, params):
+                self._invalidate_video_render_params_if_playing()
+                return
+        self.engine.set_qualifier_params(params)
+        self._invalidate_video_render_params_if_playing()
+
+    def _qualifier_flush_timer(self):
+        """手势自冲刷定时器（吸管/部分滑条无 interaction 包裹——400ms
+        静默后自动 flush，杜绝在途事务悬挂到下一手势）。"""
+        from PyQt6.QtCore import QObject, QTimer
+        timer = getattr(self, "_qualifier_graph_flush_timer", None)
+        if timer is None:
+            parent = self if isinstance(self, QObject) else None
+            timer = QTimer(parent)
+            timer.setSingleShot(True)
+            timer.setInterval(400)
+            timer.timeout.connect(self._flush_qualifier_gesture)
+            self._qualifier_graph_flush_timer = timer
+        return timer
+
+    def _flush_qualifier_gesture(self) -> None:
+        graph_host = getattr(self, "color_graph_host", None)
+        if graph_host is not None and graph_host.grade_gesture_open():
+            graph_host.end_grade_gesture()
+
+    def _route_qualifier_to_graph(self, graph_host, params: dict) -> bool:
+        """Qualifier 手势图路由（与 ``_route_grading_to_graph`` 同型）。
+
+        - 图侧：``set_node_qualifier`` merge patch 并入手势事务（面板
+          ``interaction_ended`` 或 400ms 静默自冲刷 → 一次 command）；
+          diff 基为权威 qualifier 投影（未变化的键不提交）。
+        - 预览：legacy 引擎同值直写（活动层经 source_layer_id 对齐），
+          flush 后投影收敛到同一值。
+        - 返回 False：无法定位目标节点——回落 legacy 路径，手势不静默
+          丢失；服务端拒绝（锁等）时返回 True（完全拒绝，不走 legacy
+          绕过）。
+        """
+        node_id = graph_host.active_grade_node_id()
+        if not node_id:
+            return False
+        if not isinstance(params, dict) or not params:
+            graph_host.align_engine_active_layer(node_id)
+            return True
+        if not graph_host.grade_gesture_open():
+            counter = int(getattr(self, '_graph_gesture_counter', 0)) + 1
+            self._graph_gesture_counter = counter
+            self._graph_gesture_tid = f"qualifier-{counter}"
+            graph_host.begin_grade_gesture(self._graph_gesture_tid)
+        current = graph_host.panel_qualifier_params() or {}
+        patch = {key: value for key, value in params.items()
+                 if current.get(key) != value}
+        if patch:
+            graph_host.submit_qualifier_change(
+                node_id, patch, self._graph_gesture_tid)
+        self._qualifier_flush_timer().start()
+        graph_host.align_engine_active_layer(node_id)
+        self.engine.set_qualifier_params(params)  # 同值预览通道
+        return True
+
+    # ------------------------------------------------------------------
     # LUT operations
     # ------------------------------------------------------------------
 
@@ -2661,9 +2731,11 @@ class ColorControllerMixin:
         """
         # R10：图模式经正式资源命令（add_effect → typed target → 图命令；
         # legacy Layer 不再双写）。旧模式保留 legacy 行为。
+        # 注意：import 必须在分支外——分支内局部 import 会把名字绑定到
+        # 整个函数作用域，legacy 路径将 UnboundLocalError。
+        from src.features.color.core.plugin_manager import get_plugin_manager
         route = self._graph_resource_route()
         if route is not None:
-            from src.features.color.core.plugin_manager import get_plugin_manager
             metadata = get_plugin_manager().get_plugin(plugin_id) or {}
             route.activate_effect(
                 {"id": plugin_id, "kind": "effect", "name": plugin_name,
