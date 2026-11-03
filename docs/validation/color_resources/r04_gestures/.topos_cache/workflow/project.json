@@ -1,0 +1,81 @@
+{
+  "project_id": "716d9af7-7b48-4e93-9a50-466157d74eac",
+  "name": "Color Node Preview Verification",
+  "project_mode": "edit_project",
+  "assets": {
+    "8e1abdb3-2f9b-431a-b874-8cf2abea9fa7": {
+      "asset_id": "8e1abdb3-2f9b-431a-b874-8cf2abea9fa7",
+      "path": "/Users/heng/Documents/vscode/topos-studio/tests/test_videos/测试素材01.mov",
+      "media_type": "video",
+      "display_name": "测试素材01.mov",
+      "is_offline": false,
+      "path_relative": "/Users/heng/Documents/vscode/topos-studio/tests/test_videos/测试素材01.mov",
+      "path_original": "/Users/heng/Documents/vscode/topos-studio/tests/test_videos/测试素材01.mov"
+    }
+  },
+  "bins": {
+    "dd85eaa1-6b0c-4f77-a8af-204d12b73a58": {
+      "bin_id": "dd85eaa1-6b0c-4f77-a8af-204d12b73a58",
+      "name": "Root",
+      "parent_id": null,
+      "asset_count": 1
+    }
+  },
+  "timelines": {
+    "92e1b081-3465-4666-b264-dfef6d0cd063": {
+      "timeline_id": "92e1b081-3465-4666-b264-dfef6d0cd063",
+      "name": "Timeline 1",
+      "fps": 25.0,
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "color_stacks": {
+    "33c047a2-35eb-44fa-bac5-e965ad3f93c6": {
+      "stack_id": "33c047a2-35eb-44fa-bac5-e965ad3f93c6",
+      "asset_id": "8e1abdb3-2f9b-431a-b874-8cf2abea9fa7",
+      "name": "Clip_2b13e1ac",
+      "scope": "clip_local"
+    }
+  },
+  "compositions": {},
+  "deliver_presets": {},
+  "ui_state": {},
+  "settings": {
+    "root_bin_id": "dd85eaa1-6b0c-4f77-a8af-204d12b73a58",
+    "active_comp_clip_id": null,
+    "project_sample_rate": 0,
+    "color_management": {
+      "color.preview.timeline_primaries": "bt709",
+      "color.preview.timeline_transfer": "bt709",
+      "color.preview.image_primaries": "bt709",
+      "color.preview.image_transfer": "iec61966_2_1",
+      "color.output.timeline_primaries": "bt709",
+      "color.output.timeline_transfer": "bt709",
+      "color.output.timeline_range": "limited",
+      "color.output.image_primaries": "bt709",
+      "color.output.image_transfer": "iec61966_2_1",
+      "color.preview.hdr_tonemap": 1,
+      "color.preview.hdr_target_peak": 100,
+      "color.output.hdr_metadata": true,
+      "color.smart_default": true
+    },
+    "render_cache_settings": null,
+    "proxy_policy": null,
+    "source_patch_overrides": {},
+    "color_groups": {},
+    "color_stack_versions": {},
+    "interpretation_overrides": {},
+    "audio_sync_bindings": {},
+    "sync_diagnostics": {},
+    "render_cache_manifests": {},
+    "project_snapshots": {}
+  },
+  "primary_asset_id": null,
+  "primary_color_stack_id": null,
+  "active_timeline_id": "92e1b081-3465-4666-b264-dfef6d0cd063",
+  "active_composition_id": null,
+  "created_at": 1793720061.81936,
+  "modified_at": 1793720068.2595918,
+  "revision": 10
+}

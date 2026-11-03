@@ -528,6 +528,40 @@ class GraphProjectBridge:
         self._buffer.add(result.graph.to_dict(), transaction_id,
                          operation, dict(result.id_mapping))
 
+    def cancel_transaction(self) -> bool:
+        """R04：丢弃在途手势事务（无 command/revision/历史）。"""
+        return self._buffer.cancel()
+
+    def submit_buffered(self, operation: str, arguments: Mapping[str, Any],
+                        transaction_id: str, *,
+                        compound_path: tuple[str, ...] = ()) -> bool:
+        """R04：在当前事务的 pending 图上执行 service 操作并缓冲。
+
+        与 :class:`LegacyGradingAdapter.submit_param_change` 同语义的通用
+        形态：中间结果链在 buffer 内（transient 与图一致），flush 时一次
+        command。service 经 ``color_commands._graph_service()`` 工厂构造
+        （资源权威注入与命令路径同源）。
+        """
+        from src.features.edit.core.commands import color_commands as cc
+        from src.shared.project.color_graph import ColorGraphData
+        project = self._get_project()
+        stack_id = self._stack_id()
+        stack = project.color_stacks.get(stack_id) if stack_id else None
+        graph = stack.color_graph if stack else None
+        if graph is None:
+            return False
+        pending = self._buffer._last_graph
+        if pending is not None:
+            graph = ColorGraphData.from_dict(pending)
+        # compound 路径由 apply_intent 统一下行/校验（node_not_found 拒绝）。
+        result = cc._graph_service().apply_intent(
+            graph, operation, {**arguments, "_compound_path": compound_path})
+        if not result.ok:
+            return False
+        self._buffer.add(result.graph.to_dict(), transaction_id, operation,
+                         dict(result.id_mapping))
+        return True
+
     def flush_transaction(self) -> bool:
         command = self._buffer.flush(self._stack_id())
         if command is None:

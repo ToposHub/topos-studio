@@ -396,8 +396,12 @@ class ColorEffectsBrowser(QWidget):
             integer = kind in ('int', 'integer')
             row = ParamSliderRow(label, low, high, current, step=1.0 if integer else max(0.01, (high-low)/1000),
                                  decimals=0 if integer else 3, label_width=80, value_fixed_width=54)
+            # R04：手势相位完整化——start/change/commit（ParamSliderRow 的
+            # interactionStarted 即拖动起点；取消拾色/未确认颜色不发射）。
+            row.interactionStarted.connect(lambda: change(
+                int(round(row.value())) if integer else row.value(), 'start'))
             row.valueChanged.connect(lambda v: change(int(round(v)) if integer else v, 'change'))
-            row.interactionEnded.connect(lambda: change(int(round(row.value())) if integer else row.value()))
+            row.interactionEnded.connect(lambda: change(int(round(row.value())) if integer else row.value(), 'commit'))
             row.setObjectName('effect_param_' + iid + '_' + name)
             return row
         row = QWidget()

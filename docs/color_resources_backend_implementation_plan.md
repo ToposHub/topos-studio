@@ -95,7 +95,7 @@
 
 **验证**：拟新增 service/command/resource adapter 测试：锁定、Source/Mixer、无目标、删除节点后晚到结果、跨 clip/scope/Compound、revision 冲突、重复 intent；拒绝图字节不变，成功一次操作一次 undo。使用真实项目栈与宿主测试，不只 fake presenter。
 
-### R04 — Effects 实例与参数编辑事务　[ ]
+### R04 — Effects 实例与参数编辑事务　[x]（2026-11-03，证据 docs/validation/color_resources/r04_gestures/；100 拖动=1 undo、取消=0、离散=1，异步守卫就绪）
 
 1. 实例永久 ID 与资源 ID 分开；同资源重复添加允许多个实例。默认值由版本化 schema 构造，不复制其他节点当前值。
 2. 添加/删除/重置/启用/重排更新正确节点的插件域与完整 legacy projection；不直接修改活动 Layer 列表作为权威。
