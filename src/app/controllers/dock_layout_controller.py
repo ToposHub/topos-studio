@@ -343,7 +343,7 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_qualifier)
         self.dock_qualifier.visibilityChanged.connect(lambda v: self.qualifier_panel.set_picker_active(False) if not v else None)
 
-        self.dock_lut = create_custom_dock(I18N.tr("panel.lut", "3D LUT"), getattr(self, "color_lut_browser", self.lut_panel), "dockLut")
+        self.dock_lut = create_custom_dock(I18N.tr("panel.lut", "3D LUT"), self.color_lut_browser, "dockLut")
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_lut)
 
         self.dock_raw = create_custom_dock(I18N.tr("panel.camera_raw", "Camera Raw"), self.raw_panel, "dockRaw")
@@ -364,8 +364,8 @@ class DockLayoutMixin:
         self.dock_crop = create_custom_dock(I18N.tr("panel.crop_transform", "Crop & Transform"), self.crop_panel, "dockCrop")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_crop)
 
-        # Effects Panel Dock (formerly Plugin Panel)
-        self.dock_plugin = create_custom_dock(I18N.tr("panel.effects", "Effects"), getattr(self, "color_effects_browser", self.plugin_panel), "dockEffects")
+        # Effects Panel Dock (formerly Plugin Panel; D2 后唯一宿主是新浏览器)
+        self.dock_plugin = create_custom_dock(I18N.tr("panel.effects", "Effects"), self.color_effects_browser, "dockEffects")
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_plugin)
 
         # Script Editor dock

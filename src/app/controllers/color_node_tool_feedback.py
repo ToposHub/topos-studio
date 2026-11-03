@@ -20,9 +20,11 @@ class ColorNodeToolFeedback(QObject):
             ("grading_panel", "grading_changed"), ("grading_panel", "tonal_saturation_changed"),
             ("curves_widget", "changed"), ("mixer_panel", "mixer_changed"),
             ("warper_panel", "warper_changed"), ("effects_panel", "effects_changed"),
-            ("qualifier_panel", "params_changed"), ("lut_panel", "lut_selected"),
-            ("lut_panel", "lut_removed"), ("lut_panel", "lut_reset"),
-            ("lut_panel", "intensity_changed"), ("mask_panel", "shape_added"),
+            ("qualifier_panel", "params_changed"),
+            # D2：旧 LutPanel 信号源已删除——LUT 标记经浏览器激活
+            # （resource_activated → 命令 → ack 重投影）刷新
+            ("color_lut_browser", "resource_activated"),
+            ("mask_panel", "shape_added"),
             ("mask_panel", "shape_removed"), ("mask_panel", "shape_updated"),
             ("mask_panel", "all_masks_cleared"), ("engine", "mask_shapes_changed"),
         )
@@ -43,7 +45,9 @@ class ColorNodeToolFeedback(QObject):
         if handle is None or not handle.is_corrector:
             return
         layer = host.engine.get_active_layer()
-        payload = graph_host._node_payload(handle.node_id) or {}
+        # N03：读合并投影（params 域覆盖后）——qualifier/window 图命令
+        # 写入的域同样反映到实时标记
+        payload = graph_host.panel_layer_payload(handle.node_id) or {}
         if layer is None or layer.id != payload.get("id"):
             return  # Never attribute a root layer's tools to a nested node.
         card = host.color_node_panel.view.cards.get(handle.node_id)

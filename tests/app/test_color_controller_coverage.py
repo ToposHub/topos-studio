@@ -1736,7 +1736,7 @@ def test_add_plugin_to_current_layer_uses_manifest_defaults(
     assert entry["params"] == {"amount": 0.25}, (
         "defaults must come from the plugin manifest, not hard-coded zeros")
     assert layer.is_dirty
-    host.plugin_panel.set_layer.assert_called_once_with(layer)
+    # D2：旧 PluginPanel 实例已删除——无 set_layer 回填
     host.layer_panel.update_layers.assert_called_once_with(
         host.engine.layers, host.engine.active_layer_index)
     assert host.dock_plugin.visible_calls == [True]
@@ -1763,30 +1763,9 @@ def test_add_plugin_guards_for_missing_layer_and_plugin(
     assert host.render_calls == 0
 
 
-def test_ai_plugin_process_requested_dispatches_to_engine(
-        host: _ColorHost, layer: Layer, monkeypatch: pytest.MonkeyPatch) -> None:
-    manager = _fake_plugin_manager()
-    monkeypatch.setattr(
-        "src.features.color.core.plugin_manager.get_plugin_manager",
-        lambda: manager)
-    instance_id = layer.add_plugin("glow", {"amount": 0.1})
-
-    host._on_ai_plugin_process_requested(instance_id)
-
-    assert host.engine.process_ai_calls == [(0, instance_id)]
-    assert host.status_bar.currentMessage() == "Processing AI effect: Magic Glow..."
-
-
-def test_ai_plugin_process_requested_guards(
-        host: _ColorHost, layer: Layer) -> None:
-    host.engine.active_layer_index = -1
-    host._on_ai_plugin_process_requested("whatever")
-    assert host.status_bar.currentMessage() == "No layer selected."
-    assert host.engine.process_ai_calls == []
-
-    host.engine.active_layer_index = 0
-    host._on_ai_plugin_process_requested("missing-instance")
-    assert host.engine.process_ai_calls == []
+# D2（N03-e）：_on_ai_plugin_process_requested 随旧 PluginPanel 实例删除
+# （该按钮自 R10 起已在隐藏兼容容器中，生产不可达；AI 蒙版处理的入口
+# 在 mask_panel 的 on_birefnet_requested / engine.request_sam_encode）。
 
 
 # ═══════════════════════════════════════════════════════════════════════

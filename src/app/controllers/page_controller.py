@@ -3277,8 +3277,7 @@ class PageManagementMixin:
             panels["hsl_panel"] = self.hsl_curves_panel
         if hasattr(self, 'mixer_panel') and self.mixer_panel:
             panels["mixer_panel"] = self.mixer_panel
-        if hasattr(self, 'lut_panel') and self.lut_panel:
-            panels["lut_panel"] = self.lut_panel
+        # D2：旧 lut_panel 实例已删除（LUT UI = ColorLutBrowser）
         if hasattr(self, 'denoise_panel') and self.denoise_panel:
             panels["denoise_panel"] = self.denoise_panel
         return panels

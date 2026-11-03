@@ -2930,8 +2930,7 @@ class ColorControllerMixin:
         # Add plugin to the layer
         layer.add_plugin(plugin_id, default_params)
 
-        # Update UI
-        self.plugin_panel.set_layer(layer)
+        # Update UI（D2：旧 PluginPanel 已删除——Effects dock 宿主新浏览器）
         self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
         self.dock_plugin.setVisible(True)
         self.dock_plugin.raise_()
@@ -2940,20 +2939,5 @@ class ColorControllerMixin:
         self.status_bar.showMessage(f"Added effect: {plugin_name}", 3000)
         self._trigger_autosave()
 
-    def _on_ai_plugin_process_requested(self, instance_id) -> None:
-        """Handle AI plugin process button click."""
-        if self.engine.active_layer_index < 0:
-            self.status_bar.showMessage("No layer selected.", 3000)
-            return
-
-        layer = self.engine.layers[self.engine.active_layer_index]
-        plugin_inst = layer.get_plugin_instance(instance_id)
-        if not plugin_inst:
-            return
-
-        from src.features.color.core.plugin_manager import get_plugin_manager
-        plugin_data = get_plugin_manager().get_plugin(plugin_inst['plugin_id'])
-        plugin_name = plugin_data.get('name', plugin_inst['plugin_id']) if plugin_data else plugin_inst['plugin_id']
-
-        self.status_bar.showMessage(f"Processing AI effect: {plugin_name}...", 0)
-        self.engine.process_ai_plugin(self.engine.active_layer_index, instance_id)
+    # D2（N03-e）：_on_ai_plugin_process_requested 随旧 PluginPanel 实例删除——
+    # AI 效果处理入口由 Effects 浏览器的实例操作承载（R03 命令路径）。

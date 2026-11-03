@@ -183,8 +183,8 @@ class LayerOpsMixin:
         # 在图层上供渲染/工程兼容，无面板回显（新 UI 为 curves_panel 侧栏，
         # 已在上方 set_layer_state 回填）
         self.qualifier_panel.set_params(layer.qualifier_params)
-        self.lut_panel.set_selected_lut(layer.active_lut_path)
-        self.lut_panel.set_intensity(layer.lut_intensity)
+        # D2：旧 LutPanel 实例已删除——LUT 状态展示在 ColorLutBrowser
+        # （R03 ack 水合）与节点 LUT 菜单（N04），不再经图层回填
         self.warper_panel.set_params(layer.warper_params)
         if layer.mask_shapes:
             s = layer.mask_shapes[-1]
@@ -204,9 +204,6 @@ class LayerOpsMixin:
         layer = self.engine.get_active_layer()
         self.update_from_layer(layer)
         if layer: self.mask_panel.update_shapes_list(layer.mask_shapes)
-
-        # Update plugin panel content (dock visibility is controlled by user via Layout menu)
-        self.plugin_panel.set_layer(layer)
 
         self.update_canvas()
 
@@ -492,8 +489,7 @@ class LayerOpsMixin:
         if active_layer:
             self.update_from_layer(active_layer)
         self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
-        if active_layer:
-            self.plugin_panel.set_layer(active_layer)
+        # D2：旧 PluginPanel 已删除（Effects 浏览器为唯一 UI）
 
         # 立即刷新曲线/HSL 曲线 LUT（跳过节流延迟）
         self.curves_widget.flush()
@@ -606,8 +602,7 @@ class LayerOpsMixin:
         if active_layer:
             self.update_from_layer(active_layer)
         self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
-        if active_layer:
-            self.plugin_panel.set_layer(active_layer)
+        # D2：旧 PluginPanel 已删除（Effects 浏览器为唯一 UI）
 
         # 刷新曲线/HSL 曲线 LUT
         self.curves_widget.flush()
@@ -2566,7 +2561,6 @@ class LayerOpsMixin:
         if layer:
             self.update_from_layer(layer)
             self.mask_panel.update_shapes_list(layer.mask_shapes)
-            self.plugin_panel.set_layer(layer)
 
         # 更新遮罩覆盖层
         self.canvas.update_mask_overlay(layer)

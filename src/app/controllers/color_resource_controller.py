@@ -641,7 +641,8 @@ class ColorResourceController(QObject):
                     error=payload.get('error', '')))
 
     def refresh_catalog(self) -> None:
-        """重投影目录到浏览器（效果 provider + LUT 会话 + 旧画廊只读）。"""
+        """重投影目录到浏览器（效果 provider + LUT 会话；D2 后旧画廊
+        投影来源已删除——LUT 条目唯一来源是资源会话目录）。"""
         combined: dict[tuple[str, str], dict[str, Any]] = {}
         if self.catalog_provider is not None:
             for entry in self.catalog_provider.entries():
@@ -651,22 +652,6 @@ class ColorResourceController(QObject):
                 combined[(entry['kind'], entry['id'])] = entry
         except Exception:  # noqa: BLE001
             pass
-        gallery = getattr(getattr(self.host, 'lut_panel', None), 'lut_gallery', None)
-        if gallery is not None:
-            for index in range(gallery.list_widget.count()):
-                item = gallery.list_widget.item(index)
-                raw = item.data(Qt.ItemDataRole.UserRole)
-                if isinstance(raw, str):
-                    from pathlib import Path
-                    from hashlib import sha256
-                    path = Path(raw).expanduser().resolve()
-                    combined.setdefault(('lut', 'lut:' + sha256(str(path).encode()).hexdigest()), {
-                        'id': 'lut:' + sha256(str(path).encode()).hexdigest(),
-                        'kind': 'lut', 'name': path.stem,
-                        'category': path.parent.name,
-                        'description': _tr('lut_resource_hint',
-                                           'LUT resource · current-frame preview is not connected'),
-                        'source_path': str(path)})
         self.effects.set_resources([e for (kind, _), e in combined.items()
                                     if kind == 'effect'])
         self.luts.set_resources([e for (kind, _), e in combined.items()
