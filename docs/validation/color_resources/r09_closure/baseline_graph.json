@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "graph_id": "2912fbb2-2216-4fde-b051-15b3567a31f0",
+  "nodes": [
+    {
+      "node_id": "de52362e-9446-5c01-8b23-6d8534de798c",
+      "node_type": "source",
+      "type_version": 1,
+      "params": {
+        "key_source_mode": "legacy_raw"
+      },
+      "enabled": true,
+      "label": "Source"
+    },
+    {
+      "node_id": "a511a18c-b074-5c77-8bc9-be6f09cb8c42",
+      "node_type": "output",
+      "type_version": 1,
+      "params": {},
+      "enabled": true,
+      "label": "Output"
+    },
+    {
+      "node_id": "88d06328-f10c-4b5e-b212-a2f091feaea3",
+      "node_type": "compound",
+      "type_version": 1,
+      "params": {},
+      "enabled": true,
+      "compound_children": {
+        "schema_version": 1,
+        "graph_id": "92b62838-66f9-45e7-a196-22053878649c",
+        "nodes": [
+          {
+            "node_id": "88d06328-f10c-4b5e-b212-a2f091feaea3/source",
+            "node_type": "source",
+            "type_version": 1,
+            "params": {},
+            "enabled": true
+          },
+          {
+            "node_id": "a0038c58-981c-40c6-a9f2-f76e8ac05c8a",
+            "node_type": "corrector",
+            "type_version": 1,
+            "params": {
+              "key_source_mode": "node_input",
+              "grade": {
+                "exposure": 15.0
+              }
+            },
+            "enabled": true
+          },
+          {
+            "node_id": "d0526435-21a6-482f-830c-13f5fdc47f79",
+            "node_type": "corrector",
+            "type_version": 1,
+            "params": {
+              "key_source_mode": "node_input"
+            },
+            "enabled": true
+          },
+          {
+            "node_id": "88d06328-f10c-4b5e-b212-a2f091feaea3/output",
+            "node_type": "output",
+            "type_version": 1,
+            "params": {},
+            "enabled": true
+          }
+        ],
+        "edges": [
+          {
+            "edge_id": "3c15f849-0c4c-5bbc-b0e0-44b7a4fb5143",
+            "src_node": "a0038c58-981c-40c6-a9f2-f76e8ac05c8a",
+            "src_port": "image",
+            "dst_node": "d0526435-21a6-482f-830c-13f5fdc47f79",
+            "dst_port": "image"
+          },
+          {
+            "edge_id": "602e3181-1746-59f2-8b7f-f61c98907262",
+            "src_node": "88d06328-f10c-4b5e-b212-a2f091feaea3/source",
+            "src_port": "image",
+            "dst_node": "a0038c58-981c-40c6-a9f2-f76e8ac05c8a",
+            "dst_port": "image"
+          },
+          {
+            "edge_id": "709775c1-13ac-5346-b504-b7b12ed476cc",
+            "src_node": "d0526435-21a6-482f-830c-13f5fdc47f79",
+            "src_port": "image",
+            "dst_node": "88d06328-f10c-4b5e-b212-a2f091feaea3/output",
+            "dst_port": "image"
+          }
+        ],
+        "shared_definitions": [],
+        "source_node_id": "88d06328-f10c-4b5e-b212-a2f091feaea3/source",
+        "output_node_id": "88d06328-f10c-4b5e-b212-a2f091feaea3/output",
+        "working_color_context": {},
+        "graph_revision": 0,
+        "semantic_version": 1,
+        "ui_state": {
+          "positions": {},
+          "collapsed": false,
+          "zoom": 1.0,
+          "viewport_x": 0.0,
+          "viewport_y": 0.0,
+          "selected_ids": [],
+          "active_node_id": "",
+          "layout_revision": 0
+        },
+        "minimum_reader_version": 1
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "96feba16-5771-5f37-9a49-67e47e022d9c",
+      "src_node": "de52362e-9446-5c01-8b23-6d8534de798c",
+      "src_port": "image",
+      "dst_node": "88d06328-f10c-4b5e-b212-a2f091feaea3",
+      "dst_port": "image"
+    },
+    {
+      "edge_id": "2e9f7756-b17f-5a3d-af0a-b5e9daa7b487",
+      "src_node": "88d06328-f10c-4b5e-b212-a2f091feaea3",
+      "src_port": "image",
+      "dst_node": "a511a18c-b074-5c77-8bc9-be6f09cb8c42",
+      "dst_port": "image"
+    }
+  ],
+  "shared_definitions": [],
+  "source_node_id": "de52362e-9446-5c01-8b23-6d8534de798c",
+  "output_node_id": "a511a18c-b074-5c77-8bc9-be6f09cb8c42",
+  "working_color_context": {
+    "origin": "legacy_migration",
+    "stack_schema": "v1"
+  },
+  "graph_revision": 7,
+  "semantic_version": 1,
+  "ui_state": {
+    "positions": {},
+    "collapsed": false,
+    "zoom": 1.0,
+    "viewport_x": 0.0,
+    "viewport_y": 0.0,
+    "selected_ids": [],
+    "active_node_id": "",
+    "layout_revision": 0
+  },
+  "minimum_reader_version": 1
+}

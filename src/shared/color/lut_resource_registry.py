@@ -27,7 +27,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from src.shared.color.lut_loader import load_lut
 from src.shared.project.resource_resolver import (
@@ -315,6 +315,8 @@ class LutResourceSession:
         projections: list[dict[str, Any]] = []
         for entry in self.lut_entries():
             meta = entry.metadata or {}
+            # R09：会话内条目按解析状态投影可用性（缺失=可修复，不冒充可用）。
+            available = self.status_of(entry.uri) == "registered"
             projections.append({
                 "id": entry.uri,
                 "kind": "lut",
@@ -324,7 +326,8 @@ class LutResourceSession:
                 "description": (
                     f"{meta.get('format', 'lut')} · {meta.get('lut_size', '?')}³"
                     + (" · 1D shaper" if meta.get("has_shaper") else "")),
-                "available": True,
+                "available": available,
+                "disabled_reason": "" if available else "lut_unresolvable",
                 "resource_uri": entry.uri,
                 "sha256": entry.sha256,
                 "original_filename": entry.original_filename,
@@ -391,6 +394,86 @@ def staged_archive_path(record: LutResourceRecord) -> str:
     """包内路径：resources/lut/<sha256><ext>（与 make_resource_entry 同构）。"""
     ext = os.path.splitext(record.original_filename or record.source_path)[1].lower()
     return f"resources/lut/{record.sha256}{ext}"
+
+
+# ── R09：图资源引用闭包 ────────────────────────────────────────────────
+
+def collect_graph_lut_closure(graph: Any) -> list[str]:
+    """以图（或图 dict）为权威收集全部 LUT 引用（闭包）。
+
+    遍历全部 Corrector（含 compound children 递归）的
+    ``params.resources.lut_ref`` 与 ``legacy_payload.active_lut_path``
+    （迁移期双载体都算引用）。共享定义随引用它的栈图自然覆盖（B05：
+    fanout 后各栈图持有同 ref）。返回去重列表（保持发现顺序）。
+    """
+    refs: list[str] = []
+    seen: set[str] = set()
+
+    def visit(container: Any) -> None:
+        nodes = container.get("nodes", ()) if isinstance(container, Mapping) \
+            else getattr(container, "nodes", ()) or ()
+        for node in nodes:
+            mapping = node if isinstance(node, Mapping) else None
+            if mapping is None:
+                params = getattr(node, "params", None) or {}
+                legacy = getattr(node, "legacy_payload", None) or {}
+                children = getattr(node, "compound_children", None)
+            else:
+                params = mapping.get("params") or {}
+                legacy = mapping.get("legacy_payload") or {}
+                children = mapping.get("compound_children")
+            resources = params.get("resources") \
+                if isinstance(params, Mapping) else None
+            lut_ref = resources.get("lut_ref") \
+                if isinstance(resources, Mapping) else None
+            legacy_lut = legacy.get("active_lut_path") \
+                if isinstance(legacy, Mapping) else None
+            for ref in (lut_ref, legacy_lut):
+                if isinstance(ref, str) and ref and ref not in seen:
+                    seen.add(ref)
+                    refs.append(ref)
+            if children is not None:
+                visit(children)
+
+    visit(graph)
+    return refs
+
+
+def ensure_graph_lut_closure(graphs: Any, session: "LutResourceSession",
+                             *, project_scope: bool = True,
+                             ) -> dict[str, Any]:
+    """R09 保存闭包：确保图引用的全部 LUT 都在会话索引里。
+
+    - ``topos-res://`` 引用缺失（引用了未导入资源）→ 记 missing（不静默
+      移除，不阻断保存——条目保留可修复状态）；
+    - 旧绝对路径（迁移期载体）且文件存在 → **自动迁移**（导入为工程
+      资源；旧字段保留，由 R05 投影在读取侧优先 resources 域）；
+    - 文件缺失的旧路径 → missing。
+
+    Returns:
+        {"migrated": [uri…], "missing": [ref…], "closure": [ref…]}
+    """
+    closure: list[str] = []
+    for graph in graphs:
+        for ref in collect_graph_lut_closure(graph):
+            if ref not in closure:
+                closure.append(ref)
+    migrated: list[str] = []
+    missing: list[str] = []
+    for ref in closure:
+        if ref.startswith("topos-res://"):
+            if session.status_of(ref) != "registered":
+                missing.append(ref)
+            continue
+        if not isinstance(ref, str) or not os.path.isfile(ref):
+            missing.append(ref)
+            continue
+        uri, status = session.migrate_legacy(ref)
+        if uri and status in ("migrated", "duplicate"):
+            migrated.append(uri)
+        else:
+            missing.append(ref)
+    return {"migrated": migrated, "missing": missing, "closure": closure}
 
 
 # ── 进程级会话（对齐 set_active_project_resolver 的单例模式） ─────────
