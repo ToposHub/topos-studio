@@ -196,7 +196,7 @@
 | N06 / Node Cache Auto/On/Off / P1 | 菜单禁用，已有plan LRU不等于节点渲染缓存策略。定义Auto判定、On强制缓存及Off禁止、成本/大小预算；key包含输入与资源revision；状态仅实际命中后显示。 | 改上游/自身/资源/尺寸后失效，下游选择不误失效；Off无缓存；越预算可解释；删除/取消释放；不得以蓝条代替实际缓存命中。 | R06、R08 |
 | N07 / Timeline/组链 / B14 E27 / P0 | Timeline真实栈模型未接通；Group pre/clip/post owner虽已接真实身份，完整图语义输出链仍需专项。为Timeline定义真实owner栈/迁移/命令/保存，再统一pre→clip→post→timeline顺序。 | 两clip共享组、不同组、Timeline最终效果；Color/Edit/导出一致；切scope不写错stack；锁/撤销/资源闭包；无实现则继续只读并提示。 | R03、N01、R09 |
 | N08✅ / Shared跨clip / B05/B14 / P0 | 跨clip粘贴共享定义、参数fanout与实例覆盖未完整认证。解析定义依赖闭包，冲突重命名/去重规则稳定；跨栈原子fanout，Make Local保留当时结果。 | A/B clip同时引用改参数，两边更新且1undo；跨工程同ID不同内容不覆盖；锁/删/解共享、Compound共享闭包。 | R03、R09 |
-| N09 / S07、B16 / P0 | 持续播放/4K/浮动resize压力、性能资源录制未完整。前轮9种scope原生截图和短素材冒烟已通过，不等于压力完成。按R12执行完整矩阵，保留NOT RUN平台。 | scopes/s00_s01_record协议，30分钟播放/seek/拖参/切页/多模式/浮动；无texture_not_shared/FBO错误、过期输出和持续泄漏；真实p95预算报告。 | R06、N01 |
+| N09✅（录制）/ S07、B16 / P0 | 持续播放/4K/浮动resize压力、性能资源录制未完整。前轮9种scope原生截图和短素材冒烟已通过，不等于压力完成。按R12执行完整矩阵，保留NOT RUN平台。 | scopes/s00_s01_record协议，30分钟播放/seek/拖参/切页/多模式/浮动；无texture_not_shared/FBO错误、过期输出和持续泄漏；真实p95预算报告。 | R06、N01 |
 | N10 / keyframes / P1 | 节点图编辑上下文关键帧暂缓，已有底栏图标只识别元数据。定义节点/实例/参数路径、插值/时间base、剪贴板/版本归属；命令与播放评估读取同域。 | 插入/删/移动/插值、效果排序后身份不丢、trim/retime/Compound/shared、seek随机帧与导出一致，撤销一次手势一次command。 | R04、N03、N07 |
 | N11✅ / E12、global history / P0 | standalone历史仍旧适配器；不经图宿主的全局undo/redo对engine同步存在缺口。让项目发布观察者统一重投影、刷新面板/资源/渲染，避免只有图菜单能undo正确。 | 菜单/键盘/全局undo和redo、剪贴板资源、切clip、standalone分别验证；图JSON/engine/Viewer/设置同时回到一致revision。 | R03、N03 |
 | N12✅ / B04 B14 剪贴板 / P1 | 完整节点复制本轮已补；选择性paste_grade_domains、跨工程still/clipboard子图资源闭包仍需补。定义选择域语义，复用R09资源闭包，递归重建本地身份。 | 仅粘曲线不改LUT/Window，跨Compound/跨clip/跨工程、共享定义、缺插件保留；多次粘贴不共用legacy Layer ID；undo完整恢复。 | R09、N08 |
@@ -274,9 +274,11 @@ git diff --check
 - [x] N02/N03/N04/N08/N11/N12/N13/N17 完成（N02=key 边图域化：key_out
   产物通道+fail-closed+GL/CPU 对拍，证据 n02_key_edges/；N03=
   qualifier/window/tracker typed handle + D2 删除，证据 n03_tool_domains/
-  ）；N01/N05/N06/N07/N09/N10/
-  N14/N15/N16 明确保留（能力禁用/依赖前置如实登记于 §3 表与各 README
-  “剩余”节；没有用“旧计划已完成”笼统关闭）。
+  ）。N01 出口语义完成（full-res f4/播放附快照/复杂图三出口显式拒绝，
+  flag 默认仍关）；N09 录制协议+30 分钟原生实跑完成（五预算过四，
+  RSS 斜率 289MB/10min 超预算 16%——如实登记待治理，证据 n09_stress/）。
+  N05/N06/N07/N10/N14/N15/N16/R12 明确保留（能力禁用/依赖前置如实
+  登记于 §3 表与各 README“剩余”节；没有用“旧计划已完成”笼统关闭）。
 - [x] 所有资源真实入口经 typed target + service/command + ack projection
   （R03 主干 + R10 旧入口路由；引擎无双写有哨兵测试）；草稿仅存在于
   显式开发 preview 模式。
@@ -287,4 +289,6 @@ git diff --check
   资源无遗漏（各批次测试矩阵）。
 - [x] 新 schema 可迁移（R02/R09）、缺资源可修复（missing 明示）、未知
   插件与字段不丢失（R03/R04 保留语义测试）。
-- [ ] 实机性能与平台矩阵（N09/R12）未完成——默认 flag 维持关闭，未虚报。
+- [x] N09 压力录制完成（30 分钟原生实跑，报告+预算对照存档；RSS
+  斜率超预算如实登记为待治理债务）；R12 平台矩阵未完成——默认 flag
+  维持关闭，未虚报。

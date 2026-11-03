@@ -1,0 +1,330 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "n09_stress_session",
+  "minutes": 30.0,
+  "behavior_seconds": 45.0,
+  "platform": "native",
+  "seed": 20261104,
+  "status": "failed",
+  "error": "",
+  "hard_gate_widget_failures": {
+    "texture_not_shared": {},
+    "fbo_incomplete": {},
+    "blit_failed": {}
+  },
+  "budgets": {
+    "playback_clock_p95_ms": 60.0,
+    "render_freshness_fps_min": 0.5,
+    "param_command_p95_ms": 120.0,
+    "seek_to_frame_p95_ms": 400.0,
+    "rss_growth_mb_per_10min": 250.0
+  },
+  "budgets_hit": {
+    "playback_clock_p95_ms": true,
+    "render_freshness_fps_min": true,
+    "param_command_p95_ms": true,
+    "seek_to_frame_p95_ms": true,
+    "rss_growth_mb_per_10min": false
+  },
+  "metrics": {
+    "playback_interframe_ms_report_only": {
+      "count": 490,
+      "p50": 116.07,
+      "p95": 282.4,
+      "p99": 385.81,
+      "max": 1998.96
+    },
+    "render_freshness_fps": 1.087,
+    "steady_playback_window_seconds": 450.8,
+    "steady_playback_render_frames": 490,
+    "playback_clock_ms": {
+      "count": 236,
+      "p50": 40.09,
+      "p95": 47.1,
+      "p99": 95.23,
+      "max": 158.34
+    },
+    "param_command_ms": {
+      "count": 1385,
+      "p50": 4.52,
+      "p95": 6.29,
+      "p99": 35.62,
+      "max": 109.26
+    },
+    "seek_ms": {
+      "count": 293,
+      "p50": 0.1,
+      "p95": 0.22,
+      "p99": 0.61,
+      "max": 57.3
+    },
+    "rss_mb": {
+      "first": 733.7,
+      "peak": 2396.8,
+      "growth_mb_per_10min": 289.2
+    },
+    "counts": {
+      "frames": 2296,
+      "playback_clock_ticks": 240,
+      "is_playing_at_end": false,
+      "param_drags": 1385,
+      "seeks": 293,
+      "scope_mode_switches": 2685,
+      "page_switches": 386,
+      "float_toggles": 473
+    }
+  },
+  "scope_diagnostics_events": {
+    "submit/curves_dedup_skip": {
+      "count": 1,
+      "last": {
+        "source_revision": 0
+      }
+    },
+    "queue/coalesced_replaced": {
+      "count": 2883,
+      "last": {
+        "revision": 2778,
+        "detail": "latest-wins 替换旧 demand"
+      }
+    },
+    "execute/no_front_texture": {
+      "count": 10,
+      "last": {
+        "mode": "waveform",
+        "revision": 3
+      }
+    },
+    "panel/stale_return": {
+      "count": 1406,
+      "last": {
+        "revision": 2778,
+        "source_revision": 2288
+      }
+    },
+    "submit/rate_limited": {
+      "count": 352,
+      "last": {
+        "detail": "interval=0.050s"
+      }
+    },
+    "panel/not_visible_on_return": {
+      "count": 240,
+      "last": {
+        "revision": 979
+      }
+    },
+    "widget/mutex_busy": {
+      "count": 140,
+      "last": {
+        "tex_id": 60
+      }
+    }
+  },
+  "render_stats_keys": [],
+  "behavior_windows": [
+    [
+      3.8,
+      48.9,
+      "playback"
+    ],
+    [
+      48.9,
+      93.9,
+      "seek"
+    ],
+    [
+      93.9,
+      139.0,
+      "param"
+    ],
+    [
+      139.0,
+      184.0,
+      "scope"
+    ],
+    [
+      184.0,
+      229.5,
+      "page"
+    ],
+    [
+      229.5,
+      274.5,
+      "float"
+    ],
+    [
+      274.5,
+      319.6,
+      "playback"
+    ],
+    [
+      319.6,
+      364.6,
+      "playback"
+    ],
+    [
+      364.6,
+      409.7,
+      "seek"
+    ],
+    [
+      409.7,
+      454.7,
+      "param"
+    ],
+    [
+      454.7,
+      499.7,
+      "scope"
+    ],
+    [
+      499.7,
+      545.4,
+      "page"
+    ],
+    [
+      545.4,
+      590.9,
+      "float"
+    ],
+    [
+      590.9,
+      635.9,
+      "playback"
+    ],
+    [
+      635.9,
+      681.0,
+      "playback"
+    ],
+    [
+      681.0,
+      726.1,
+      "seek"
+    ],
+    [
+      726.1,
+      771.2,
+      "param"
+    ],
+    [
+      771.2,
+      816.3,
+      "scope"
+    ],
+    [
+      816.3,
+      861.8,
+      "page"
+    ],
+    [
+      861.8,
+      907.0,
+      "float"
+    ],
+    [
+      907.0,
+      952.2,
+      "playback"
+    ],
+    [
+      952.2,
+      997.3,
+      "playback"
+    ],
+    [
+      997.3,
+      1042.3,
+      "seek"
+    ],
+    [
+      1042.3,
+      1087.4,
+      "param"
+    ],
+    [
+      1087.4,
+      1132.5,
+      "scope"
+    ],
+    [
+      1132.5,
+      1178.7,
+      "page"
+    ],
+    [
+      1178.7,
+      1224.4,
+      "float"
+    ],
+    [
+      1224.4,
+      1269.5,
+      "playback"
+    ],
+    [
+      1269.5,
+      1314.6,
+      "playback"
+    ],
+    [
+      1314.6,
+      1359.6,
+      "seek"
+    ],
+    [
+      1359.6,
+      1404.7,
+      "param"
+    ],
+    [
+      1404.7,
+      1449.7,
+      "scope"
+    ],
+    [
+      1449.7,
+      1495.1,
+      "page"
+    ],
+    [
+      1495.1,
+      1540.3,
+      "float"
+    ],
+    [
+      1540.3,
+      1585.3,
+      "playback"
+    ],
+    [
+      1585.3,
+      1630.4,
+      "playback"
+    ],
+    [
+      1630.4,
+      1675.5,
+      "seek"
+    ],
+    [
+      1675.5,
+      1720.6,
+      "param"
+    ],
+    [
+      1720.6,
+      1765.6,
+      "scope"
+    ],
+    [
+      1765.6,
+      1800.4,
+      "page"
+    ]
+  ],
+  "errors": [],
+  "elapsed_seconds": 1800.4
+}
