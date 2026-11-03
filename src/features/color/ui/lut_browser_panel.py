@@ -245,8 +245,16 @@ class ColorLutBrowser(QWidget):
         self.list_widget.itemDoubleClicked.connect(self._activate)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.more_button.clicked.connect(self._show_options)
-        self.strength_slider.valueChanged.connect(lambda value: self._set_strength(value / 1000.0))
-        self.strength_spin.valueChanged.connect(self._set_strength)
+        # R04：强度手势相位——sliderPressed/Released 界定一次拖动，
+        # spin 键入是离散提交（一次 command）。
+        self.strength_slider.sliderPressed.connect(
+            lambda: self._set_strength_phase('start'))
+        self.strength_slider.valueChanged.connect(
+            lambda value: self._set_strength(value / 1000.0, 'change'))
+        self.strength_slider.sliderReleased.connect(
+            lambda: self._set_strength_phase('commit'))
+        self.strength_spin.valueChanged.connect(
+            lambda value: self._set_strength(float(value), 'commit'))
         self.reset_button.clicked.connect(self._reset_strength)
         self.remove_button.clicked.connect(self._remove_lut)
         self._set_view_mode(True)
@@ -416,12 +424,19 @@ class ColorLutBrowser(QWidget):
         self.strength_spin.setValue(self._strength)
         del slider_lock, spin_lock
 
-    def _set_strength(self, value: float) -> None:
+    def _set_strength_phase(self, phase: str) -> None:
+        if not self._editable or self._current_lut is None:
+            return
+        self.draft_edit_requested.emit(
+            'set_lut_strength', {'strength': self._strength, 'phase': phase})
+
+    def _set_strength(self, value: float, phase: str = 'change') -> None:
         if not self._editable or self._current_lut is None:
             return
         self._strength = min(1.0, max(0.0, float(value)))
         self._sync_strength()
-        self.draft_edit_requested.emit('set_lut_strength', {'strength': self._strength})
+        self.draft_edit_requested.emit(
+            'set_lut_strength', {'strength': self._strength, 'phase': phase})
 
     def _reset_strength(self) -> None:
         if not self._editable or self._current_lut is None:

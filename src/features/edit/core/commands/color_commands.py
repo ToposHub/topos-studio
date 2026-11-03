@@ -1048,6 +1048,19 @@ class GraphTransactionBuffer:
             self._first_graph = first_graph_payload
             self._transaction_id = transaction_id
 
+    def cancel(self) -> bool:
+        """R04：丢弃当前事务（无 command、无 revision 变化）。
+
+        取消拾色/显式取消手势用；返回是否有在途事务被丢弃。
+        """
+        had = self.active
+        self._first_graph = None
+        self._last_graph = None
+        self._transaction_id = None
+        self._operations.clear()
+        self._id_mapping.clear()
+        return had
+
     def flush(self, stack_id: str) -> ApplyColorGraphCommand | None:
         """产出合并 command；无累积返回 None。"""
         if self._last_graph is None or self._first_graph is None:

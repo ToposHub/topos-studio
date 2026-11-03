@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any, Mapping
+from uuid import uuid4
 
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
 
@@ -64,6 +65,8 @@ class ColorResourceController(QObject):
         self.catalog_provider = catalog_provider or host.color_resource_catalog_provider
         self._target_node_id = ''
         self._active_compound_path: tuple[str, ...] = ()
+        # R04：参数手势事务（一次连续拖动 = 一次 undo；取消 = 零命令）。
+        self._gesture: dict[str, Any] | None = None
         # 浏览器信号（与 preview 适配器互斥——main_window 只装一个）。
         self.effects.resource_activated.connect(self.activate_effect)
         self.luts.resource_activated.connect(self.activate_resource)
@@ -252,6 +255,9 @@ class ColorResourceController(QObject):
                                          'message': '无可编辑目标', 'target': None})
             return
         instance_id = payload.get('instance_id')
+        if action == 'set_parameter':
+            self._edit_parameter_phase(node_id, instance_id, payload)
+            return
         if action in _EFFECT_ACTIONS:
             intent_action, mapper = _EFFECT_ACTIONS[action]
             arguments = {'instance_id': instance_id}
@@ -259,13 +265,149 @@ class ColorResourceController(QObject):
             self._submit(intent_action, node_id, arguments)
             return
         if action == 'set_lut_strength':
-            self._submit('set_lut_strength', node_id,
-                         {'strength': float(payload.get('strength', 1.0))})
+            phase = payload.get('phase', 'commit')
+            self._gestured_submit(
+                node_id, 'set_node_lut_strength', 'set_lut_strength',
+                {'strength': float(payload.get('strength', 1.0))}, phase)
         elif action == 'reset_lut_strength':
             self._submit('set_lut_strength', node_id, {'strength': 1.0})
         elif action == 'remove_lut':
             self._submit('remove_lut', node_id, {})
         # 未知 action 忽略（不产生半命令）。
+
+    # ── R04：参数手势事务 ──────────────────────────────────────────
+    def _edit_parameter_phase(self, node_id: str, instance_id: Any,
+                              payload: Mapping[str, Any]) -> None:
+        """set_parameter 的 start/change/commit/cancel 相位机。
+
+        - start：begin_transaction（在途手势先按落定策略 flush）；
+        - change：缓冲提交（transient 与 pending 图一致，不产生 command）；
+        - commit：末次缓冲 + flush → 一个 command 一次 undo；
+        - cancel：discard（零 command，浏览器按权威投影恢复）；
+        - 无 start 的离散 change（spin/键入）：立即单发命令。
+        """
+        name = payload.get('name')
+        value = payload.get('value')
+        phase = payload.get('phase', 'commit')
+        if phase == 'start':
+            self._begin_gesture(node_id, instance_id, name)
+            return
+        if phase == 'cancel':
+            self._cancel_gesture()
+            return
+        arguments = {'instance_id': instance_id, 'name': name, 'value': value}
+        if phase == 'change' and self._gesture is not None:
+            gesture = self._gesture
+            if (gesture['node_id'] != node_id
+                    or gesture['instance_id'] != instance_id):
+                # 目标漂移（非信号驱动路径）：先落定旧手势再拒绝本帧。
+                self._end_gesture()
+                self.resource_rejected.emit({'action': 'set_parameter',
+                                             'code': 'gesture_target_changed',
+                                             'message': '手势目标已切换', 'target': None})
+                return
+            ok = self.graph_host.bridge.submit_buffered(
+                'set_node_effect_parameter', dict(arguments, node_id=node_id),
+                gesture['transaction'],
+                compound_path=self._active_compound_path)
+            if not ok:
+                # 中间帧被 schema 拒绝（越界等）：丢弃该帧，手势保持。
+                self.resource_rejected.emit({'action': 'set_parameter',
+                                             'code': 'param_out_of_range',
+                                             'message': '中间值被拒绝', 'target': None})
+            return
+        # commit（或无手势的离散 change）：末次进入缓冲后 flush。
+        self._gestured_submit(node_id, 'set_node_effect_parameter',
+                              'set_effect_parameter', arguments, phase)
+
+    def _gestured_submit(self, node_id: str, service_operation: str,
+                         intent_action: str,
+                         arguments: Mapping[str, Any], phase: str) -> None:
+        """手势化提交：service 操作名与 intent action 名分开传。
+
+        - 手势在途（change/commit）：缓冲到 pending 图；commit 落定一次
+          command；
+        - 无手势/离散：直接单发 intent 命令（一次 command）。
+        """
+        if phase == 'start':
+            self._begin_gesture(node_id)
+            return
+        if self._gesture is not None and phase in ('change', 'commit'):
+            gesture = self._gesture
+            ok = self.graph_host.bridge.submit_buffered(
+                service_operation, dict(arguments, node_id=node_id),
+                gesture['transaction'],
+                compound_path=self._active_compound_path)
+            if not ok:
+                self.resource_rejected.emit({'action': intent_action,
+                                             'code': 'rejected',
+                                             'message': '手势提交被拒绝', 'target': None})
+                self._cancel_gesture()
+                self.refresh_target()
+                return
+            if phase == 'commit':
+                self._end_gesture()
+                self.refresh_target()
+            return
+        # 离散操作（下拉/bool/确认颜色/键入值）：一次 command。
+        self._submit(intent_action, node_id, arguments)
+
+    def _begin_gesture(self, node_id: str, instance_id: Any = None,
+                       name: Any = None) -> None:
+        """开启参数手势事务（在途手势先落定）。"""
+        self._end_gesture()
+        transaction = uuid4().hex
+        self.graph_host.bridge.begin_transaction(transaction)
+        self._gesture = {'transaction': transaction, 'node_id': node_id,
+                         'instance_id': instance_id, 'name': name}
+
+    def _end_gesture(self) -> None:
+        """落定在途手势（flush → 一个 command）；无手势时无操作。"""
+        if self._gesture is None:
+            return
+        transaction = self._gesture['transaction']
+        self._gesture = None
+        self.graph_host.bridge.flush_transaction()
+
+    def _cancel_gesture(self) -> None:
+        """取消在途手势（零 command；浏览器按权威投影恢复）。"""
+        if self._gesture is None:
+            return
+        self._gesture = None
+        self.graph_host.bridge.cancel_transaction()
+        self.refresh_target()
+
+    # ── R04：AI/离线异步结果守卫 ───────────────────────────────────
+    def issue_async_token(self, instance_id: str) -> dict[str, Any] | None:
+        """异步任务发放令牌（目标 + 意图时刻 revision；不延后捕获）。"""
+        node_id = self._active_effectable_node()
+        target = self._capture_target(node_id) if node_id else None
+        if target is None:
+            return None
+        return {'target': target, 'instance_id': instance_id}
+
+    def verify_async_token(self, token: Any) -> bool:
+        """晚到结果守卫：会话/目标/实例任一失配即丢弃（不写新目标）。"""
+        if not isinstance(token, dict):
+            return False
+        target = token.get('target') or {}
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return False
+        if (target.get('session_id') != coordinator.session_id
+                or target.get('generation') != coordinator.generation
+                or target.get('stack_id') != getattr(
+                    self.graph_host, '_bound_stack_id', '')):
+            return False
+        node = self._authoritative_node(target.get('node_id', ''),
+                                         tuple(target.get('compound_path') or ()))
+        if node is None or node.get('node_type') not in ('corrector',
+                                                         'shared_corrector'):
+            return False
+        plugins = (node.get('legacy_payload') or {}).get('plugins') or []
+        return any(isinstance(p, Mapping)
+                   and p.get('instance_id') == token.get('instance_id')
+                   for p in plugins)
 
     # ── 权威水合 ───────────────────────────────────────────────────
     def _authoritative_graph(self) -> Mapping[str, Any] | None:
@@ -297,6 +439,9 @@ class ColorResourceController(QObject):
 
     def refresh_target(self, *_args: Any) -> None:
         """从权威投影水合浏览器（ack/reject 后统一入口）。"""
+        # R04 确定性结束策略：切节点/clip/scope 触发的水合先把在途参数
+        # 手势落定（flush，不丢已拖数据）；显式 cancel 才走零命令路径。
+        self._end_gesture()
         self._target_node_id = self.panel.view.state.graph.active_id
         self._active_compound_path = tuple(
             item[1] for item in getattr(self.panel, '_parents', ()))

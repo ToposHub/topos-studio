@@ -64,7 +64,9 @@ def test_strength_hydration_is_silent_and_user_edit_emits_intent(qtbot: Any) -> 
     assert panel.strength_spin.value() == 0.42
     assert edits == []
     panel.strength_slider.setValue(600)
-    assert edits == [('set_lut_strength', {'strength': 0.6})]
+    # R04：滑条数值变化带 phase 相位（start/commit 由按下/释放界定；
+    # 程序化 setValue 只产生 change 帧，由适配器按离散规则落命令）。
+    assert edits == [('set_lut_strength', {'strength': 0.6, 'phase': 'change'})]
     panel._remove_lut()
     assert edits[-1] == ('remove_lut', {})
     assert not panel.strength_slider.isEnabled()
