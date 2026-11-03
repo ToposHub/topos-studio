@@ -253,6 +253,10 @@ class TestCompoundBoundaryIntegrity:
                 src.release()
                 return out
             finally:
+                try:
+                    executor.release_pool()
+                except Exception:
+                    pass
                 ctx.release()
 
         np.testing.assert_array_equal(run(graph), run(grouped.graph))

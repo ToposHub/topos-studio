@@ -108,4 +108,8 @@ class TestKeyGraphStructure:
             executor.release_revision("km")
             src.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()

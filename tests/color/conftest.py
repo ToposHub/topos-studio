@@ -21,6 +21,29 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.fixture(autouse=True)
+def _flush_qt_deferred_deletes_at_teardown():
+    """每个测试收尾投递 Qt 延迟删除（P0-QA-02）。
+
+    ``QCoreApplication.processEvents()`` 不投递 DeferredDelete 事件，
+    pytest-qt 的 ``_close_widgets``（close+deleteLater）里的 deleteLater
+    在无真实事件循环的测试进程里等于静默空操作——C++ 控件树连同其
+    pending QTimer 泄漏存活到测试之后，定时器在无关测试的事件处理中
+    发射；其 Python 可调用对象一旦先被 GC 回收，分发即落进已释放内存
+    （确定性复现：全量字母序运行在 test_clip_version_ui 提交的 15s 待
+    决请求定时器 +15s 处 "line ??? in <lambda>" 段错误）。显式投递让
+    每个测试的 C++ 树真正在本测试收尾时销毁。勿在此追加每测试
+    ``gc.collect()``：实测会把引用环回收提前到运行中段，在
+    test_presets_gallery 的 EXR 写入处以 SIGILL 激化（自动分代回收在同
+    配置下全量绿，无需额外收口）。
+    """
+    yield
+    from PyQt6.QtCore import QCoreApplication, QEvent
+    app = QCoreApplication.instance()
+    if app is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def _porcelain():
     """返回 git status --porcelain 行列表；git 不可用时返回 None。"""
     try:

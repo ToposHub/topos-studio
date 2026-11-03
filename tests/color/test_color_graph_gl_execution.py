@@ -98,6 +98,10 @@ class TestSerialGraphExecutionParity:
             executor.release_revision("req-1")
             src_tex.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
     def test_disabled_node_respected_in_execution(self):
@@ -136,6 +140,10 @@ class TestSerialGraphExecutionParity:
             executor.release_revision("r")
             src_tex.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
 
 
@@ -163,4 +171,8 @@ class TestCapabilityFailClosed:
             assert "fail-closed" in result.diagnostic_message
             src.release()
         finally:
+            try:
+                executor.release_pool()
+            except Exception:
+                pass
             ctx.release()
