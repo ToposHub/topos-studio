@@ -1602,7 +1602,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
 
         self._set_color_graph_panels_enabled(not bool(handle.params.get("locked", False)))
         graph_host = self.color_graph_host
-        payload = graph_host._node_payload(handle.node_id) or {}
+        # N03：读合并投影（legacy 基底 + params 域覆盖 + LUT/曲线投影）
+        # ——裸 legacy_payload 会让图命令写入的 qualifier 等域在面板不可见
+        payload = graph_host.panel_layer_payload(handle.node_id) or {}
         layer = Layer.from_dict(payload)
         layer.grading_params.update(handle.grade_params())
         graph_host.align_engine_active_layer(handle.node_id)
@@ -1809,8 +1811,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.mask_panel.hierarchy_updated.connect(self.on_mask_hierarchy_updated)
         self.canvas.brush_stroke_added.connect(self.on_brush_stroke_added)
         self.canvas.brush_params_updated.connect(self.on_canvas_brush_params_updated)
-        self.qualifier_panel.params_changed.connect(self.engine.set_qualifier_params)
-        self.qualifier_panel.params_changed.connect(self._invalidate_video_render_params_if_playing)
+        # N03：Qualifier 写入统一入口（图模式 typed handle 命令 / legacy 直写）
+        self.qualifier_panel.params_changed.connect(self.on_qualifier_params_changed)
         self.qualifier_panel.interaction_started.connect(self.on_interaction_started)
         self.qualifier_panel.interaction_ended.connect(self.on_interaction_ended)
         # P1-COLOR-08: qualifier 面板的 matte 预览模式请求（'' = 关闭）

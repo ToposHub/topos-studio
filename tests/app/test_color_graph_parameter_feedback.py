@@ -7,7 +7,8 @@ from src.app.main_window import MainWindow
 
 def test_selected_corrector_feedback_merges_graph_grade_and_balances_guard():
     graph_host = Mock()
-    graph_host._node_payload.return_value = {"id": "selected-layer", "grading_params": {"exposure": 2.0}}
+    # N03：面板回填读合并投影（panel_layer_payload），不再裸 legacy 载体
+    graph_host.panel_layer_payload.return_value = {"id": "selected-layer", "grading_params": {"exposure": 2.0}}
     handle = SimpleNamespace(node_id="selected-node", params={}, grade_params=lambda: {"exposure": 15.0})
     host = SimpleNamespace(color_graph_host=graph_host, update_from_layer=Mock(),
                            _set_color_stack_hydration_guard=Mock(),
