@@ -128,7 +128,7 @@
 
 **验证**：拓展现有 GL execution/cancel/capability/CPU parity 测试；2个非交换FX、LUT+FX、重复插件、bypass、missing shader、取消、resize、旧 revision、资源更新；有能力的每后端对照固定输入与误差预算，无能力的必须 fail-visible。
 
-### R07 — LUT 缩略图与悬停预览后台任务　[ ]
+### R07 — LUT 缩略图与悬停预览后台任务　[x]（2026-11-04，证据 docs/validation/color_resources/r07_thumbnails/；内容寻址缓存键+世代守卫+预算 LRU；悬停预览为计划可选项，随 R12 评估）
 
 1. 拟新增 thumbnail request DTO：source/frame revision、节点输入端 identity、LUT hash、显示变换、尺寸、session generation；不得只用 filename 缓存。
 2. 在既有解码/渲染队列评估低分辨率节点输入→候选 LUT→显示变换；只处理可见资源，滚动/搜索/关面板取消，做有上限 LRU。
