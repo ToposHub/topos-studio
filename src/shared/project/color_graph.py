@@ -208,7 +208,8 @@ def freeze_params(value: Any, depth: int = 0, *,
         return MappingProxyType(frozen)
     if isinstance(value, (list, tuple)):
         return tuple(freeze_params(item, depth + 1,
-                                   context=f"{context}[{i}]")
+                                  context=f"{context}[{i}]",
+                                  allow_paths=allow_paths)
                      for i, item in enumerate(value))
     raise GraphSchemaError(
         "illegal_param_key",
