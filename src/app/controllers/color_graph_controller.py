@@ -1709,6 +1709,10 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
                                        ("color", "gamma", "gamma")):
             if isinstance(params.get(section), Mapping) and key in params[section]:
                 menu_options[menu_key] = params[section][key]
+        # N04：节点 LUT 菜单读权威资源域（与浏览器同一 topos-res 选择）。
+        resources = params.get("resources") if isinstance(params, Mapping) else None
+        if isinstance(resources, Mapping) and resources.get("lut_ref"):
+            menu_options["lut_path"] = resources["lut_ref"]
         nodes[node_id] = NodeDraft(
             id=node_id,
             kind=kind,

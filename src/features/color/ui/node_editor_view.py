@@ -71,6 +71,8 @@ class ColorNodeView(QGraphicsView):
     parent_requested = pyqtSignal()
     preview_requested = pyqtSignal(str)
     resource_drop_requested = pyqtSignal(str, object)
+    node_lut_apply_requested = pyqtSignal(str, str)   # node_id, lut_ref（''=移除）
+    node_lut_browse_requested = pyqtSignal(str)        # node_id（文件选择经 R02 导入）
     scene_refreshed = pyqtSignal()
 
     def __init__(self, parent: Any = None) -> None:
@@ -748,10 +750,24 @@ class ColorNodeView(QGraphicsView):
             key_action = self._action(menu, "key_invert", "Invert Key Input", lambda: self._set_grade_value("key_invert", not bool(active.node_options.get("key_invert"))), enabled=False, checked=bool(active.node_options.get("key_invert")))
             key_action.setToolTip(unsupported)
             lut = menu.addMenu(tr("lut", "LUT"))
-            lut.setEnabled(False)
-            lut.menuAction().setToolTip(unsupported)
-            self._action(lut, "no_lut", "No LUT", lambda: self._set_grade_value("lut_path", ""), checked=not bool(active.node_options.get("lut_path")))
-            self._action(lut, "browse_lut", "Browse…", self._choose_lut)
+            # N04：经 R02 资源注册 + R05 节点命令（与浏览器共用同一
+            # topos-res 选择/命令路径）。
+            node_id = active.id
+            self._action(lut, "no_lut", "No LUT",
+                         lambda: self.node_lut_apply_requested.emit(node_id, ""),
+                         checked=not bool(active.node_options.get("lut_path")))
+            self._action(lut, "browse_lut", "Browse…",
+                         lambda: self.node_lut_browse_requested.emit(node_id))
+            from src.shared.color.lut_resource_registry import (
+                get_lut_resource_session,
+            )
+            for entry in get_lut_resource_session().lut_entries()[:12]:
+                uri = entry.uri
+                title = (entry.metadata or {}).get("title") or \
+                        entry.original_filename or entry.resource_id
+                self._action(lut, "lut_res_" + entry.resource_id[:12], str(title),
+                             lambda u=uri: self.node_lut_apply_requested.emit(node_id, u),
+                             checked=active.node_options.get("lut_path") == uri)
             for key, title, values in (("color_space", "Color Space", ("Use Timeline", "Rec.709", "Rec.2020", "P3-D65", "ACES AP0", "ACES AP1", "DaVinci Wide Gamut")),
                                        ("gamma", "Gamma", ("Use Timeline", "Linear", "Gamma 2.2", "Gamma 2.4", "sRGB", "ST2084", "HLG", "DaVinci Intermediate"))):
                 options = menu.addMenu(tr(key, title))

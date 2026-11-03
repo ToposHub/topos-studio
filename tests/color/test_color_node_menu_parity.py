@@ -108,6 +108,13 @@ def test_locked_node_rejects_grade_and_reset_until_unlocked(live):
 def test_unsupported_node_transform_and_cache_menus_are_explicitly_disabled(live):
     harness, _ = live
     menu = harness.panel.view.build_context_menu()
-    titles = {'LUT', 'Color Space', 'Gamma', 'Node Cache'}
+    # N04：LUT 菜单已启用（R02 资源注册 + R05 节点命令）；Color Space/
+    # Gamma/Node Cache 仍显式禁用（N05/N06 接线前）。
+    titles = {'Color Space', 'Gamma', 'Node Cache'}
     disabled = {action.text() for action in menu.actions() if action.menu() is not None and not action.menu().isEnabled()}
     assert titles <= disabled
+    lut_menu = next(action for action in menu.actions()
+                    if action.menu() is not None and action.text() == 'LUT')
+    assert lut_menu.menu().isEnabled()
+    texts = [action.text() for action in lut_menu.menu().actions()]
+    assert 'No LUT' in texts and 'Browse…' in texts
