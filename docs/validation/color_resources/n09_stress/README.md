@@ -29,6 +29,23 @@
 rate_limited、stale_return、not_visible_on_return、mutex_busy——
 均为节流/合并/不可见丢弃的设计语义，有计数可查。
 
+## 分段定位（2026-11-04 第二轮，12min × 6 行为窗）
+
+行为窗分段 RSS 斜率（scripts/stress_color_session.py 增补
+per_behavior 分段；三段式 12min 原生实测，seed 同）：
+
+| 行为 | mean MB/10min | max | 判定 |
+|---|---|---|---|
+| **float（浮窗开关+resize）** | **1646.7** | 1646.7 | ❌ 主犯 |
+| **page（Color↔Edit 切页）** | **489.6** | 625.6 | ❌ 次犯 |
+| scope（9 模式轮换） | 51.7 | 72.7 | ⚠️ 轻度 |
+| playback / seek / param | 12.6 / 13.2 / 14.3 | ≤26.8 | ✅ 基线 |
+
+结论：整体 404 MB/10min 几乎全部来自 **浮窗开关与切页路径**；
+播放/调参/seek 主链是干净的（12-18 MB/10min ≈ 预算 250 的 5-7%）。
+治理方向（后续批次）：浮窗关闭路径的 presenter/GL 资源释放、切页
+Color 页渲染资源的滞留回收。修复后复跑本协议即可复验。
+
 ## 判定与登记
 
 - **status=failed（仅 RSS 斜率超预算 16%）**：录制协议本身完成且
