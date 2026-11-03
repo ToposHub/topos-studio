@@ -805,9 +805,9 @@ class ColorNodeView(QGraphicsView):
         if active is not None and active.shared_id:
             self._action(menu, "local", "Convert to Corrector Node", lambda: self.apply_edit("unlink_shared", lambda: self.state.make_local(selected)))
         if active is not None and active.kind == NodeKind.CORRECTOR:
-            unsupported = tr("backend_option_unavailable", "This node option is not yet supported by the render backend.")
-            key_action = self._action(menu, "key_invert", "Invert Key Input", lambda: self._set_grade_value("key_invert", not bool(active.node_options.get("key_invert"))), enabled=False, checked=bool(active.node_options.get("key_invert")))
-            key_action.setToolTip(unsupported)
+            # N02：Invert Key Input 已由图执行消费（key_in 外部 key 取反，
+            # GL/CPU 同组合顺序）——菜单启用。
+            self._action(menu, "key_invert", "Invert Key Input", lambda: self._set_grade_value("key_invert", not bool(active.node_options.get("key_invert"))), enabled=True, checked=bool(active.node_options.get("key_invert")))
             lut = menu.addMenu(tr("lut", "LUT"))
             # N04：经 R02 资源注册 + R05 节点命令（与浏览器共用同一
             # topos-res 选择/命令路径）。
