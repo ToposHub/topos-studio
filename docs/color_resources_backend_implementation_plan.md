@@ -116,7 +116,7 @@
 
 **验证**：2³ identity、通道交换、非线性/非单位 DOMAIN LUT；强度0=未套LUT、1=完整、0.42按规格；重复替换/移除/撤销/重做、嵌套与共享实例；图 JSON、Viewer 与保存重开一致。
 
-### R06 — GL / CPU / Metal / bake 能力与输出一致　[ ]
+### R06 — GL / CPU / Metal / bake 能力与输出一致　[x]（2026-11-04，证据 docs/validation/color_resources/r06_capability/；资源指纹进缓存键 + 预检 + bake 协议，执行器主体为前轮 B16.5）
 
 **位置**：`corrector_render_service.py`、`color_graph_snapshot.py`、`color_graph_compiler.py`、`color_graph_executor.py`、`color_graph_cpu.py`、`color_graph_metal.py`、shared EffectCatalog/pass runner。
 
