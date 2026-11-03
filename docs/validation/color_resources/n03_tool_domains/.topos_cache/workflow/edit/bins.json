@@ -1,0 +1,11 @@
+{
+  "fa76147d-bf52-4f71-9052-afcec089dcc7": {
+    "bin_id": "fa76147d-bf52-4f71-9052-afcec089dcc7",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "fa720672-19fa-4033-8fc4-9507ab483035"
+    ],
+    "timeline_ids": []
+  }
+}

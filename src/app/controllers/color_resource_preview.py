@@ -71,20 +71,9 @@ class ColorResourcePreview(QObject):
         from src.shared.color.lut_resource_registry import get_lut_resource_session
         return get_lut_resource_session()
 
-    def _lut_gallery_entries(self) -> list[dict[str, Any]]:
-        """旧 LUT 面板画廊只读投影（库目录浏览；正式 id 见会话目录）。"""
-        entries: list[dict[str, Any]] = []
-        gallery = getattr(getattr(self.host, 'lut_panel', None), 'lut_gallery', None)
-        if gallery is not None:
-            for index in range(gallery.list_widget.count()):
-                item = gallery.list_widget.item(index)
-                raw_path = item.data(Qt.ItemDataRole.UserRole)
-                if isinstance(raw_path, str):
-                    entries.append(self._lut_entry(raw_path))
-        return entries
-
     def _rebuild_catalog(self) -> None:
-        """合并目录：效果投影 + LUT 会话（工程+导入）+ 旧画廊只读条目。"""
+        """合并目录：效果投影 + LUT 会话（工程+导入）。D2 后旧画廊投影
+        来源（lut_panel）已删除——LUT 条目唯一来源是资源会话目录。"""
         combined: dict[tuple[str, str], dict[str, Any]] = {}
         for entry in self.catalog_provider.entries():
             combined[(entry['kind'], entry['id'])] = entry
@@ -93,8 +82,6 @@ class ColorResourcePreview(QObject):
                 combined[(entry['kind'], entry['id'])] = entry
         except Exception:  # noqa: BLE001 — 会话失败不清空效果目录
             pass
-        for entry in self._lut_gallery_entries():
-            combined.setdefault((entry['kind'], entry['id']), entry)
         self.set_catalog(list(combined.values()))
 
     def _existing_catalog(self) -> list[dict[str, Any]]:
@@ -104,7 +91,6 @@ class ColorResourcePreview(QObject):
             entries.extend(self._lut_session().catalog())
         except Exception:  # noqa: BLE001
             pass
-        entries.extend(self._lut_gallery_entries())
         return entries
 
     def _on_catalog_changed(self) -> None:

@@ -190,7 +190,7 @@
 |---|---|---|---|
 | N01 / B13、B16.5 / P0 | front/color output图执行flag默认关闭，full-res仍走旧出口；复杂图显式拒绝。将完整graph plan交给生产预览与full-res/视频/Edit/Composite路径，统一source覆盖、尺寸和f4精度，避免display transform双执行。先完成各出口语义，再考虑默认开启。 | 原生flag=0/1仅有基础冒烟证据；新增非串行+FX+LUT各出口同帧golden、取消/失败不发布半帧；性能/资源矩阵通过才默认开启。 | R06、R09、N09 |
 | N02 / B07、B10、key / P0 | 图key边仍有白matte限制，Qualifier GPU keyer/窗口/bitmap与blur/clean/gain后处理未完整图域化，Invert Key Input未消费。将key依赖显式编进snapshot/plan，GL/CPU分别定义取反及范围、组合顺序，移除无依据的常白替代。 | 梯度key、窗口、限定器、透明bitmap、Outside、KeyMixer、反相互补、blur/clean/gain组合；alpha输出和source相关性验证；unsupported继续禁用。 | 图编译/执行器；N03目标绑定 |
-| N03 / B06、E10、E27 / P0 | Tracker/Qualifier及非primary工具仍有legacy层读写，复杂图/嵌套选择未统一node-ID。逐面板改 typed handle读取、command提交和事务；取色/跟踪任务绑定node+frame+session；不按root active_index猜节点。 | 两节点不同曲线/Window/Qualifier、Compound内部、共享、切clip时异步跟踪、撤销、保存重开；所有工具参数实际落正确node；无隐藏旧层写入。 | R03、R10 |
+| N03✅ / B06、E10、E27 / P0 | Tracker/Qualifier及非primary工具仍有legacy层读写，复杂图/嵌套选择未统一node-ID。逐面板改 typed handle读取、command提交和事务；取色/跟踪任务绑定node+frame+session；不按root active_index猜节点。 | 两节点不同曲线/Window/Qualifier、Compound内部、共享、切clip时异步跟踪、撤销、保存重开；所有工具参数实际落正确node；无隐藏旧层写入。 | R03、R10 |
 | N04✅ / 节点LUT菜单 / P1 | 菜单现禁用；复用R02/R05新资源注册与节点命令，保持菜单与浏览器显示同一选择。不要再接旧全局LUT。 | 菜单应用与拖入产生相同图载荷、像素、undo；缺失/不支持资源有诊断。 | R02–R06 |
 | N05 / Node Color Space、Gamma / P1 | 目前禁用、无真实节点级变换。定义输入/输出/工作空间变换位置与版本化枚举，独立node_options字段，避免与primary gamma元组冲突。由后端实际消费。 | 多空间色卡、Gamma roundtrip、HDR、LUT顺序，CPU/GL/Metal按能力验证；关选项=原结果；菜单勾选与保存一致。 | N01、R06 |
 | N06 / Node Cache Auto/On/Off / P1 | 菜单禁用，已有plan LRU不等于节点渲染缓存策略。定义Auto判定、On强制缓存及Off禁止、成本/大小预算；key包含输入与资源revision；状态仅实际命中后显示。 | 改上游/自身/资源/尺寸后失效，下游选择不误失效；Off无缓存；越预算可解释；删除/取消释放；不得以蓝条代替实际缓存命中。 | R06、R08 |
@@ -271,7 +271,9 @@ git diff --check
 
 - [x] R00–R11 都有实现提交、自动测试、必要原生证据（各轮
   docs/validation/color_resources/<批次>/README.md 留档）；R12 待 N 前置。
-- [x] N04/N08/N11/N12/N13/N17 完成；N01/N02/N03/N05/N06/N07/N09/N10/
+- [x] N03/N04/N08/N11/N12/N13/N17 完成（N03=qualifier/window/tracker
+  typed handle + D2 旧控件删除，证据 docs/validation/color_resources/
+  n03_tool_domains/）；N01/N02/N05/N06/N07/N09/N10/
   N14/N15/N16 明确保留（能力禁用/依赖前置如实登记于 §3 表与各 README
   “剩余”节；没有用“旧计划已完成”笼统关闭）。
 - [x] 所有资源真实入口经 typed target + service/command + ack projection

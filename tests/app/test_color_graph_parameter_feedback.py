@@ -23,7 +23,8 @@ def test_selected_corrector_feedback_merges_graph_grade_and_balances_guard():
 
 def test_read_only_selection_disables_all_node_parameter_editors(qapp, qtbot):
     from PyQt6.QtWidgets import QWidget
-    names = ("effects_panel", "qualifier_panel", "warper_panel", "mask_panel", "plugin_panel", "tracker_panel")
+    # D2：plugin_panel 已删除（Effects 浏览器为资源目录，不在此禁用集）
+    names = ("effects_panel", "qualifier_panel", "warper_panel", "mask_panel", "tracker_panel")
     widgets = {name: QWidget() for name in names}
     wheel = QWidget()
     for widget in [wheel, *widgets.values()]:

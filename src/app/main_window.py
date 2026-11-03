@@ -1261,10 +1261,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         from src.shared.ui.widgets.curves_widget import CurvesWidget
         from src.features.color.ui.curves_panel import CurvesPanel
         from src.features.color.ui.hsl_curves_panel import HSLCurvesPanel
-        from src.features.color.ui.lut_panel import LutPanel
         from src.features.color.ui.scope_panel import ScopePanel
         from src.shared.export.export_panel import ExportPanel
-        from src.features.color.ui.plugin_panel import PluginPanel
         from src.features.color.ui.presets_panel import PresetsPanel
         from src.features.color.ui.tracker_panel import TrackerPanel
         from src.features.color.tracking.tracking_service import TrackingService
@@ -1342,13 +1340,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.audio_mixer_panel = AudioMixerPanel()
         self.effects_panel = BlurSharpenPanel()
         self.film_grain_panel = FilmGrainPanel()
-        # Legacy controllers still hydrate these controls. Keep their automatic
-        # show() calls inside a permanently hidden compatibility container.
-        self._legacy_color_resource_controls = QWidget(self)
-        self._legacy_color_resource_controls.hide()
-        self.lut_panel = LutPanel()
-        self.lut_panel.setParent(self._legacy_color_resource_controls)
-        self.lut_panel.hide()
+        # D2（N03-e）：旧 LutPanel/PluginPanel 实例已删除——LUT/Effects 的
+        # 唯一 UI 是 ColorLutBrowser/ColorEffectsBrowser（R03/R10 命令路径）。
         self.scope_panel = ScopePanel()
         self.mask_panel = MaskPanel()
         # 单帧遮罩工具（Remove BG / Smart Brush / Brush / Eraser）产出静态
@@ -1388,9 +1381,6 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             self.config_manager.get('color_effects_browser_state', {}))
         self.color_lut_browser.set_browser_state(
             self.config_manager.get('color_lut_browser_state', {}))
-        self.plugin_panel = PluginPanel(self.engine, self._legacy_color_resource_controls)
-        self.plugin_panel.add_effect_requested.connect(self.add_plugin_to_current_layer)
-        self.plugin_panel.ai_process_requested.connect(self._on_ai_plugin_process_requested)
 
         # Scripting
         from src.features.scripting.module import create_script_engine
@@ -1591,7 +1581,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         panels = list(self._collect_color_panels().values())
         panels.extend(getattr(self, name, None) for name in (
             "effects_panel", "qualifier_panel", "warper_panel", "mask_panel",
-            "plugin_panel", "tracker_panel"))
+            "tracker_panel"))
         for panel in panels:
             if isinstance(panel, QWidget):
                 panel.setEnabled(enabled)
@@ -1783,11 +1773,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         # RGB Curves Picker signals
         self.curves_widget.picker_toggled.connect(self.on_curves_picker_toggled)
         self.canvas.curves_color_for_curves.connect(self.on_curves_color_for_curves)
-        self.lut_panel.lut_selected.connect(self.apply_lut_from_path)
-        self.lut_panel.lut_removed.connect(self.on_lut_removed)
-        self.lut_panel.intensity_changed.connect(self.on_lut_intensity_changed)
-        self.lut_panel.lut_reset.connect(self.on_lut_reset)
-        self.lut_panel.decompile_requested.connect(self.on_decompile_lut_requested)
+        # D2：旧 LutPanel 已删除——LUT 应用/强度/重置的唯一入口是
+        # ColorLutBrowser（activate_resource/set_lut_strength）与节点 LUT 菜单
         self.mask_panel.shape_added.connect(self.on_mask_shape_added)
         self.mask_panel.shape_removed.connect(self.on_mask_shape_removed)
         self.mask_panel.shape_selected.connect(self.on_panel_shape_selected)
@@ -1932,11 +1919,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.crop_panel.reset_all_btn.clicked.connect(self.on_crop_reset_all_requested)
         # Note: Crop mode is only activated via crop button click (crop_toggled signal), not by showing the dock
 
-        # Plugin Panel connections
-        self.plugin_panel.params_changed.connect(self.request_render)
-        # P1-COLOR-14: 插件参数修改纳入交互边界（slider 拖动/color 确认可撤销）
-        self.plugin_panel.interaction_started.connect(self.on_interaction_started)
-        self.plugin_panel.interaction_ended.connect(self.on_interaction_ended)
+        # D2：旧 PluginPanel 已删除——插件参数编辑的唯一入口是
+        # ColorEffectsBrowser（R03 set_effect_parameter 命令路径）
 
         # Script Panel connections
         self.script_panel.run_clicked.connect(self.script_engine.execute)

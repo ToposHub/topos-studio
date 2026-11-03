@@ -1,0 +1,149 @@
+{
+  "d81a2e56-3551-4bee-9f5a-5240a1b2aff7": {
+    "schema_version": 4,
+    "stack_id": "d81a2e56-3551-4bee-9f5a-5240a1b2aff7",
+    "asset_id": "fa720672-19fa-4033-8fc4-9507ab483035",
+    "name": "Clip_668b5399",
+    "grading_params": {
+      "lift": [
+        0,
+        0,
+        0
+      ],
+      "gamma": [
+        0,
+        0,
+        0
+      ],
+      "gain": [
+        0,
+        0,
+        0
+      ],
+      "exposure": 0,
+      "temp": 0,
+      "tint": 0,
+      "contrast": 0,
+      "shadow": 0,
+      "highlights": 0,
+      "saturation": 0,
+      "vibrance": 0,
+      "mid_detail": 0,
+      "sharpness": 0,
+      "hue_shift": 0,
+      "lift_saturation": 0,
+      "gamma_saturation": 0,
+      "gain_saturation": 0
+    },
+    "curves_data": {},
+    "hsl_curve_data": {},
+    "mixer_params": {},
+    "soft_clip_params": {
+      "enabled": false,
+      "high": 1.0,
+      "white_point": 1.1,
+      "shoulder_strength": 1.0,
+      "low": 0.0,
+      "black_point": -0.1,
+      "toe_strength": 1.0,
+      "exposure": 0.0
+    },
+    "lut_path": null,
+    "lut_intensity": 1.0,
+    "created_at": 1793728386.590959,
+    "modified_at": 1793728388.313334,
+    "scope": "clip_local",
+    "source_kind": "timeline_clip",
+    "timeline_id": "833cdf41-a8f3-4046-88c0-b83139514ecc",
+    "clip_id": "668b5399-6a17-43a5-8eb5-fb41ad15cb0d",
+    "trackings": {},
+    "color_graph": {
+      "schema_version": 1,
+      "graph_id": "8a6d9e80-8980-4843-af67-7cd50e077bfb",
+      "nodes": [
+        {
+          "node_id": "10b3e8e6-b916-54e8-bd71-38ae1ed31b36",
+          "node_type": "source",
+          "type_version": 1,
+          "params": {
+            "key_source_mode": "legacy_raw"
+          },
+          "enabled": true,
+          "label": "Source"
+        },
+        {
+          "node_id": "249b6624-462b-58e4-be11-5df3dc0afe19",
+          "node_type": "output",
+          "type_version": 1,
+          "params": {},
+          "enabled": true,
+          "label": "Output"
+        },
+        {
+          "node_id": "4944b6ea-1e2e-4c75-9a8a-4be8ed124a75",
+          "node_type": "corrector",
+          "type_version": 1,
+          "params": {
+            "key_source_mode": "node_input",
+            "grade": {
+              "exposure": 15.0
+            }
+          },
+          "enabled": true
+        },
+        {
+          "node_id": "01e7ba59-50e2-44c6-bc08-6815aa78ee87",
+          "node_type": "corrector",
+          "type_version": 1,
+          "params": {
+            "key_source_mode": "node_input"
+          },
+          "enabled": true
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "25f991f7-c135-569c-8b0e-93960200e97b",
+          "src_node": "10b3e8e6-b916-54e8-bd71-38ae1ed31b36",
+          "src_port": "image",
+          "dst_node": "4944b6ea-1e2e-4c75-9a8a-4be8ed124a75",
+          "dst_port": "image"
+        },
+        {
+          "edge_id": "4fb80a1f-530b-5861-a0cb-791f84f31a3a",
+          "src_node": "4944b6ea-1e2e-4c75-9a8a-4be8ed124a75",
+          "src_port": "image",
+          "dst_node": "01e7ba59-50e2-44c6-bc08-6815aa78ee87",
+          "dst_port": "image"
+        },
+        {
+          "edge_id": "cc3793e2-b44c-5e67-b62c-989eeb55d1b0",
+          "src_node": "01e7ba59-50e2-44c6-bc08-6815aa78ee87",
+          "src_port": "image",
+          "dst_node": "249b6624-462b-58e4-be11-5df3dc0afe19",
+          "dst_port": "image"
+        }
+      ],
+      "shared_definitions": [],
+      "source_node_id": "10b3e8e6-b916-54e8-bd71-38ae1ed31b36",
+      "output_node_id": "249b6624-462b-58e4-be11-5df3dc0afe19",
+      "working_color_context": {
+        "origin": "legacy_migration",
+        "stack_schema": "v1"
+      },
+      "graph_revision": 4,
+      "semantic_version": 1,
+      "ui_state": {
+        "positions": {},
+        "collapsed": false,
+        "zoom": 1.0,
+        "viewport_x": 0.0,
+        "viewport_y": 0.0,
+        "selected_ids": [],
+        "active_node_id": "",
+        "layout_revision": 0
+      },
+      "minimum_reader_version": 1
+    }
+  }
+}
