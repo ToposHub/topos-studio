@@ -2126,8 +2126,24 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.destroyed.connect(self._cleanup_clip_strip_sync)
         from src.app.controllers.color_node_tool_feedback import ColorNodeToolFeedback
         self.color_node_tool_feedback = ColorNodeToolFeedback(self)
-        from src.app.controllers.color_resource_preview import ColorResourcePreview
-        self.color_resource_preview = ColorResourcePreview(self)
+        # R03：资源适配器互斥装配——默认正式命令适配器（typed target +
+        # 图命令 + ack 水合）；显式开发 preview 模式（config
+        # color_resource_ui_preview_mode）才装 UI 草稿 presenter。
+        # 两组浏览器信号永不双写。
+        from src.app.controllers.color_resource_catalog import EffectsResourceCatalog
+        self.color_resource_catalog_provider = EffectsResourceCatalog()
+        if self.config_manager.get('color_resource_ui_preview_mode', False):
+            from src.app.controllers.color_resource_preview import ColorResourcePreview
+            self.color_resource_preview = ColorResourcePreview(
+                self, catalog_provider=self.color_resource_catalog_provider)
+        else:
+            from src.app.controllers.color_resource_controller import (
+                ColorResourceController,
+            )
+            self.color_resource_preview = None
+            self.color_resource_controller = ColorResourceController(
+                self, catalog_provider=self.color_resource_catalog_provider)
+        self.color_resource_catalog_provider.warm_background()
 
     def on_engine_error(self, message):
         # Hide progress bar on any error to ensure UI state recovery

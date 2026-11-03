@@ -15,6 +15,7 @@ N08 规范化 intent 的统一入口（B01 ACTION_CONTRACTS.command 分派）。
 
 from __future__ import annotations
 
+import copy
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -62,8 +63,14 @@ class ColorGraphService:
     """结构/参数/布局编辑服务（B04 全量操作 + B05 command 的执行体）。"""
 
     def __init__(self,
-                 id_factory: Callable[[], str] | None = None) -> None:
+                 id_factory: Callable[[], str] | None = None,
+                 effect_schema_provider: Callable[[str], Any] | None = None,
+                 lut_reference_validator: Callable[[str], bool] | None = None) -> None:
         self._id_factory = id_factory or (lambda: str(uuid.uuid4()))
+        # R03：资源权威注入（生产默认 PluginManager/LutResourceSession，
+        # 测试注入 fake）。None 值 = 用懒默认；显式传入 False 禁用校验。
+        self._effect_schema_provider = effect_schema_provider
+        self._lut_reference_validator = lut_reference_validator
 
     # ── 统一 intent 入口（N08 → N02） ──
 
@@ -953,6 +960,369 @@ class ColorGraphService:
         if mode.lower() not in {"auto", "on", "off"}:
             return self._fail(graph, "illegal_param_key", f"未知缓存策略: {mode}")
         return self._patch_nodes(graph, node_ids, cache_mode=mode.lower())
+
+    # ════════════════════════════════════════════════════════════════
+    # R03：资源操作（节点 effects 实例 + 节点 LUT）。
+    # 事实来源：实例列表在 node.legacy_payload["plugins"]（B03 迁移载体，
+    # legacy Layer 反向投影同源）；节点 LUT 在 node.params["resources"]
+    # （lut_ref/lut_strength，B03 已登记的 schema 键）。所有 op 先验证
+    # 目标 Corrector/锁/资源存在/实例归属，失败原图返回（reject 不入史）。
+    # ════════════════════════════════════════════════════════════════
+
+    #: 可挂资源的节点类型（Source/Output/Mixer/Compound 外壳显式拒绝）。
+    _EFFECTABLE_TYPES = (NodeType.CORRECTOR.value,
+                         NodeType.SHARED_CORRECTOR.value)
+
+    def _default_effect_schema(self, resource_id: str):
+        from src.features.color.core.plugin_manager import get_plugin_manager
+        plugin = get_plugin_manager().get_plugin(resource_id)
+        return plugin.get("params") if plugin else None
+
+    def _default_lut_reference_valid(self, lut_ref: str) -> bool:
+        from src.shared.color.lut_resource_registry import get_lut_resource_session
+        return get_lut_resource_session().status_of(lut_ref) == "registered"
+
+    def _effect_schema(self, resource_id: str):
+        provider = self._effect_schema_provider
+        if provider is None:
+            provider = self._default_effect_schema
+        return provider(resource_id) if provider else None
+
+    def _lut_reference_valid(self, lut_ref: str) -> bool:
+        provider = self._lut_reference_validator
+        if provider is None:
+            provider = self._default_lut_reference_valid
+        return bool(provider(lut_ref)) if provider else True
+
+    def _resource_target(self, graph: ColorGraphData,
+                         node_id: str) -> ColorNodeData | GraphEditResult:
+        """目标校验：存在 → Corrector 家族 → 未锁。失败返回 _fail 结果。"""
+        node = self._node(graph, node_id)
+        if node is None:
+            return self._fail(graph, "node_not_found", f"节点不存在: {node_id}")
+        if node.node_type not in self._EFFECTABLE_TYPES:
+            return self._fail(
+                graph, "node_not_effectable",
+                f"目标必须是 Corrector（当前 {node.node_type}）", node_id=node_id)
+        if node.params.get("locked"):
+            return self._fail(graph, "node_locked",
+                              "节点已锁定，先解锁再修改资源", node_id=node_id)
+        return node
+
+    @staticmethod
+    def _validate_effect_param(entry: Mapping[str, Any], value: Any) -> str | None:
+        """按 schema 验证单参数值；返回错误码或 None。
+
+        未知类型不拦截（future schema 透传，UI 显示 unsupported）。
+        """
+        import math
+        kind = str(entry.get("type", "slider"))
+        if kind in ("slider", "float"):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return "param_type_mismatch"
+            if not math.isfinite(float(value)):
+                return "param_type_mismatch"
+            low, high = entry.get("min"), entry.get("max")
+            if low is not None and value < low:
+                return "param_out_of_range"
+            if high is not None and value > high:
+                return "param_out_of_range"
+        elif kind == "int":
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or float(value) != int(value):
+                return "param_type_mismatch"
+            low, high = entry.get("min"), entry.get("max")
+            if low is not None and value < low:
+                return "param_out_of_range"
+            if high is not None and value > high:
+                return "param_out_of_range"
+        elif kind in ("checkbox", "bool", "boolean"):
+            if not isinstance(value, (bool, int)) or (
+                    isinstance(value, int) and value not in (0, 1)):
+                return "param_type_mismatch"
+        elif kind in ("select", "enum", "choice"):
+            options = entry.get("options") or []
+            if isinstance(value, bool) or not isinstance(value, (int, str)):
+                return "param_type_mismatch"
+            if isinstance(value, int) and options and not (0 <= value < len(options)):
+                return "param_out_of_range"
+        elif kind == "color":
+            if not isinstance(value, (list, tuple)) or len(value) < 3 \
+                    or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                               and math.isfinite(float(v)) for v in value[:3]):
+                return "param_type_mismatch"
+        return None
+
+    def _merge_effect_params(self, schema: Any, params: Any,
+                             node_id: str, graph: ColorGraphData,
+                             *, resource_id: str) -> tuple[dict | None, GraphEditResult | None]:
+        """默认值构造 + 显式参数校验；未知键 fail-visible。"""
+        entries = [p for p in (schema or []) if isinstance(p, Mapping)]
+        merged: dict[str, Any] = {}
+        for entry in entries:
+            name = entry.get("var_name")
+            if isinstance(name, str) and name:
+                merged[name] = copy.deepcopy(entry.get("default"))
+        if params is None:
+            return merged, None
+        if not isinstance(params, Mapping):
+            return None, self._fail(graph, "illegal_param_key",
+                                    "params 必须是 Mapping", node_id=node_id)
+        known = {str(e.get("var_name")): e for e in entries}
+        for key, value in dict(params).items():
+            entry = known.get(str(key))
+            if entry is None:
+                return None, self._fail(
+                    graph, "param_unknown",
+                    f"参数不在资源 schema 内: {key}（资源 {resource_id}）",
+                    node_id=node_id)
+            error = self._validate_effect_param(entry, value)
+            if error is not None:
+                return None, self._fail(
+                    graph, error,
+                    f"参数 {key} 的值 {value!r} 不满足 schema 约束", node_id=node_id)
+            merged[str(key)] = copy.deepcopy(value)
+        return merged, None
+
+    def _node_plugins(self, node: ColorNodeData) -> list[Any]:
+        plugins = node.legacy_payload.get("plugins")
+        return list(plugins) if isinstance(plugins, (list, tuple)) else []
+
+    def _replace_node_payload(self, graph: ColorGraphData, node: ColorNodeData,
+                              plugins: list[Any]) -> GraphEditResult:
+        payload = dict(node.legacy_payload)
+        payload["plugins"] = [dict(p) if isinstance(p, Mapping) else p
+                              for p in plugins]
+        new_node = replace(node, legacy_payload=payload)
+        candidate = replace(graph, nodes=tuple(
+            new_node if n.node_id == node.node_id else n for n in graph.nodes))
+        return self._commit(graph, candidate, {})
+
+    @staticmethod
+    def _find_instance(plugins: list[Any], instance_id: str) -> int:
+        for index, plugin in enumerate(plugins):
+            if isinstance(plugin, Mapping) and \
+                    plugin.get("instance_id") == instance_id:
+                return index
+        return -1
+
+    def op_add_node_effect(self, graph: ColorGraphData, node_id: str,
+                           resource_id: str, params: Any = None) -> GraphEditResult:
+        """添加效果实例（同资源允许多实例；默认值来自版本化 schema，
+        不复制其他节点当前值）。"""
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        schema = self._effect_schema(resource_id)
+        if schema is None:
+            return self._fail(graph, "resource_unknown",
+                              f"效果资源不存在或不可用: {resource_id}",
+                              node_id=node_id)
+        merged, failure = self._merge_effect_params(
+            schema, params, node_id, graph, resource_id=resource_id)
+        if failure is not None or merged is None:
+            return failure  # type: ignore[return-value]
+        plugins = self._node_plugins(target)
+        plugins.append({
+            "instance_id": self._id_factory(),
+            "plugin_id": resource_id,
+            "params": merged,
+            "enabled": True,
+            "type": self._effect_plugin_type(resource_id),
+        })
+        return self._replace_node_payload(graph, target, plugins)
+
+    def _effect_plugin_type(self, resource_id: str) -> str:
+        """实例 type 字段与 legacy Layer.add_plugin 对齐（dctl/ai）。
+
+        注入 schema 表（测试）不带类型信息时退回 dctl；生产默认查
+        PluginManager 注册表。
+        """
+        if self._effect_schema_provider is not None:
+            return "dctl"
+        from src.features.color.core.plugin_manager import get_plugin_manager
+        plugin = get_plugin_manager().get_plugin(resource_id)
+        return str(plugin.get("type", "dctl")) if plugin else "dctl"
+        plugins = self._node_plugins(target)
+        plugins.append({
+            "instance_id": self._id_factory(),
+            "plugin_id": resource_id,
+            "params": merged,
+            "enabled": True,
+            "type": plugin_type,
+        })
+        return self._replace_node_payload(graph, target, plugins)
+
+    def op_remove_node_effect(self, graph: ColorGraphData, node_id: str,
+                              instance_id: str) -> GraphEditResult:
+        """删除指定实例（其他实例身份/顺序保持）。"""
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        plugins = self._node_plugins(target)
+        index = self._find_instance(plugins, instance_id)
+        if index < 0:
+            return self._fail(graph, "instance_not_found",
+                              f"实例不属于该节点: {instance_id}", node_id=node_id)
+        del plugins[index]
+        return self._replace_node_payload(graph, target, plugins)
+
+    def op_move_node_effect(self, graph: ColorGraphData, node_id: str,
+                            instance_id: str, index: int) -> GraphEditResult:
+        """重排实例（其他身份保持；越界拒绝）。"""
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        plugins = self._node_plugins(target)
+        current = self._find_instance(plugins, instance_id)
+        if current < 0:
+            return self._fail(graph, "instance_not_found",
+                              f"实例不属于该节点: {instance_id}", node_id=node_id)
+        if isinstance(index, bool) or not isinstance(index, int) \
+                or not 0 <= index < len(plugins):
+            return self._fail(graph, "illegal_index",
+                              f"重排下标越界: {index}", node_id=node_id)
+        plugin = plugins.pop(current)
+        plugins.insert(index, plugin)
+        return self._replace_node_payload(graph, target, plugins)
+
+    def op_set_node_effect_enabled(self, graph: ColorGraphData, node_id: str,
+                                   instance_id: str, enabled: Any) -> GraphEditResult:
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        if not isinstance(enabled, bool):
+            return self._fail(graph, "param_type_mismatch",
+                              "enabled 必须是 bool", node_id=node_id)
+        plugins = self._node_plugins(target)
+        index = self._find_instance(plugins, instance_id)
+        if index < 0:
+            return self._fail(graph, "instance_not_found",
+                              f"实例不属于该节点: {instance_id}", node_id=node_id)
+        plugins[index] = dict(plugins[index], enabled=enabled)
+        return self._replace_node_payload(graph, target, plugins)
+
+    def op_set_node_effect_parameter(self, graph: ColorGraphData, node_id: str,
+                                      instance_id: str, name: str,
+                                      value: Any) -> GraphEditResult:
+        """单参数编辑（按资源 schema 验证类型/范围；未知参数拒绝——
+        控件只编辑已知字段，旧实例的未知字段由本 op 天然保留）。"""
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        plugins = self._node_plugins(target)
+        index = self._find_instance(plugins, instance_id)
+        if index < 0:
+            return self._fail(graph, "instance_not_found",
+                              f"实例不属于该节点: {instance_id}", node_id=node_id)
+        resource_id = str(plugins[index].get("plugin_id", ""))
+        schema = self._effect_schema(resource_id)
+        if schema is None:
+            return self._fail(graph, "resource_unknown",
+                              f"实例引用的资源不可用: {resource_id}",
+                              node_id=node_id)
+        entry = next((e for e in schema if isinstance(e, Mapping)
+                      and e.get("var_name") == name), None)
+        if entry is None:
+            return self._fail(graph, "param_unknown",
+                              f"参数不在资源 schema 内: {name}", node_id=node_id)
+        error = self._validate_effect_param(entry, value)
+        if error is not None:
+            return self._fail(graph, error,
+                              f"参数 {name} 的值 {value!r} 不满足 schema 约束",
+                              node_id=node_id)
+        params = dict(plugins[index].get("params") or {})
+        params[name] = copy.deepcopy(value)
+        plugins[index] = dict(plugins[index], params=params)
+        return self._replace_node_payload(graph, target, plugins)
+
+    def op_reset_node_effect(self, graph: ColorGraphData, node_id: str,
+                             instance_id: str) -> GraphEditResult:
+        """重置该实例的已知参数为 schema 默认值；未知字段原样保留。"""
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        plugins = self._node_plugins(target)
+        index = self._find_instance(plugins, instance_id)
+        if index < 0:
+            return self._fail(graph, "instance_not_found",
+                              f"实例不属于该节点: {instance_id}", node_id=node_id)
+        resource_id = str(plugins[index].get("plugin_id", ""))
+        schema = self._effect_schema(resource_id)
+        if schema is None:
+            return self._fail(graph, "resource_unknown",
+                              f"实例引用的资源不可用: {resource_id}",
+                              node_id=node_id)
+        known = {str(e.get("var_name")) for e in schema
+                 if isinstance(e, Mapping)}
+        params = {key: value for key, value in
+                  dict(plugins[index].get("params") or {}).items()
+                  if key not in known}
+        for entry in schema:
+            if isinstance(entry, Mapping) and entry.get("var_name"):
+                params[str(entry["var_name"])] = copy.deepcopy(entry.get("default"))
+        plugins[index] = dict(plugins[index], params=params)
+        return self._replace_node_payload(graph, target, plugins)
+
+    def _replace_node_resources(self, graph: ColorGraphData, node: ColorNodeData,
+                                 resources: dict[str, Any]) -> GraphEditResult:
+        params = dict(node.params)
+        params["resources"] = resources
+        new_node = replace(node, params=params)
+        candidate = replace(graph, nodes=tuple(
+            new_node if n.node_id == node.node_id else n for n in graph.nodes))
+        return self._commit(graph, candidate, {})
+
+    def op_set_node_lut(self, graph: ColorGraphData, node_id: str,
+                        lut_ref: str, strength: Any = 1.0) -> GraphEditResult:
+        """设置/替换节点 LUT（单槽替换，不叠加；强度一并落盘）。"""
+        import math
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        if lut_ref and not self._lut_reference_valid(lut_ref):
+            return self._fail(graph, "resource_unknown",
+                              f"LUT 资源未注册: {lut_ref}", node_id=node_id)
+        if isinstance(strength, bool) or not isinstance(strength, (int, float)) \
+                or not math.isfinite(float(strength)) or not 0.0 <= float(strength) <= 1.0:
+            return self._fail(graph, "param_out_of_range",
+                              f"lut strength 非法: {strength!r}", node_id=node_id)
+        resources = dict(target.params.get("resources") or {})
+        if lut_ref:
+            resources["lut_ref"] = lut_ref
+            resources["lut_strength"] = float(strength)
+        else:
+            resources.pop("lut_ref", None)
+            resources.pop("lut_strength", None)
+        return self._replace_node_resources(graph, target, resources)
+
+    def op_set_node_lut_strength(self, graph: ColorGraphData, node_id: str,
+                                 strength: Any) -> GraphEditResult:
+        import math
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        if isinstance(strength, bool) or not isinstance(strength, (int, float)) \
+                or not math.isfinite(float(strength)) or not 0.0 <= float(strength) <= 1.0:
+            return self._fail(graph, "param_out_of_range",
+                              f"lut strength 非法: {strength!r}", node_id=node_id)
+        if not target.params.get("resources", {}).get("lut_ref"):
+            return self._fail(graph, "param_unknown",
+                              "节点未持有 LUT，先设置 LUT 再调强度", node_id=node_id)
+        resources = dict(target.params.get("resources") or {})
+        resources["lut_strength"] = float(strength)
+        return self._replace_node_resources(graph, target, resources)
+
+    def op_remove_node_lut(self, graph: ColorGraphData,
+                           node_id: str) -> GraphEditResult:
+        """只移除 LUT（保留其他调色与 resources 内其他键）。"""
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        resources = dict(target.params.get("resources") or {})
+        resources.pop("lut_ref", None)
+        resources.pop("lut_strength", None)
+        return self._replace_node_resources(graph, target, resources)
 
     # ════════════════════════════════════════════════════════════════
     # Compound / Shared 定义

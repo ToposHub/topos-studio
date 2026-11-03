@@ -38,7 +38,10 @@ def main() -> int:
     config_path = config_dir / "config.json"
     config_path.write_text(json.dumps({"locale": "en_US", "work_mode": "video", "current_page": "Color",
                                        "show_welcome_on_startup": False, "auto_load_last_project": False,
-                                       "check_updates_on_startup": False, "auto_save_interval": 0}))
+                                       "check_updates_on_startup": False, "auto_save_interval": 0,
+                                       # R03：验证脚本固定走显式开发 preview 模式（草稿契约断言）；
+                                       # 正式命令适配器由 pytest 宿主矩阵覆盖（R03 验证清单）。
+                                       "color_resource_ui_preview_mode": True}))
     os.environ["TOPOS_CONFIG_PATH"] = str(config_path)
     os.environ["TOPOS_PRODUCT_MODE"] = "studio"
     os.environ["TOPOS_TEST_MODE"] = "1"
