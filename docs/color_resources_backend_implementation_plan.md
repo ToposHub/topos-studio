@@ -82,7 +82,7 @@
 
 **验证**：扩展 `tests/color/test_lut_loader.py`，拟新增资源导入/迁移测试；2³ identity、非 identity、1D、域不为0–1、损坏数据、非 ASCII 名、重名、读失败、取消；移动整个工程后重开、同工程移至另一台机器，引用和结果一致。失败不发布半资源。
 
-### R03 — typed target、命令与 ack/reject 主干　[ ]
+### R03 — typed target、命令与 ack/reject 主干　[x]（2026-11-03，证据 docs/validation/color_resources/r03_controller/；9 资源 op + 契约 + 互斥装配，15 项宿主矩阵）
 
 **位置**：`src/app/controllers/color_graph_controller.py`、`src/features/color/core/color_graph_service.py`、`src/shared/project/color_graph.py`，沿用 `ApplyColorGraphCommand` 与现有项目 command 栈；拟新增 `color_resource_controller.py`。
 
