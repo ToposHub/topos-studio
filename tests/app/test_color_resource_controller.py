@@ -453,3 +453,77 @@ def test_controller_edit_signals_route_through_commands(rig) -> None:
     assert _instances(rig) == []
     # 5 次操作 5 个 command（每个可单独 undo）
     assert len(rig.graph.cmd_stack._undo_stack) == 5
+
+
+# ═══ R11：真实状态投影与诊断 ═════════════════════════════════════════
+
+def test_resource_lut_lights_tool_indicator_via_projection() -> None:
+    """params.resources.lut_ref（权威域）点亮 LUT 标记；移除即灭。"""
+    from src.app.controllers.color_graph_controller import (
+        _indicator_payload,
+    )
+    from src.features.color.ui.node_tool_indicators import detect_tool_indicators
+    legacy = {"active_lut_path": "/old.cube", "lut_intensity": 0.7}
+    params = {"resources": {"lut_ref": "topos-res://lut_new",
+                            "lut_strength": 0.9}}
+    merged = _indicator_payload(legacy, params)
+    assert merged["active_lut_path"] == "topos-res://lut_new"
+    indicators = detect_tool_indicators(merged, params)
+    assert "lut" in indicators
+    removed = _indicator_payload(legacy, {"resources": {"other": 1}})
+    assert "active_lut_path" not in removed  # 移除不复活旧值
+    assert "lut" not in detect_tool_indicators(removed, {})
+
+
+def test_instance_status_projection_from_preflight(rig) -> None:
+    """未知插件实例 → status=resource_unknown（fail-visible，配置保留）。"""
+    rig.controller.activate_effect(
+        {"id": "grain", "kind": "effect", "available": True})
+    node = next(n for n in _graph(rig).nodes if n.node_id == rig.corrector)
+    # 注入未注册插件实例（模拟旧工程缺失插件）
+    from dataclasses import replace as _r
+    idx = [n.node_id for n in _graph(rig).nodes].index(rig.corrector)
+    plugins = [dict(p) for p in node.legacy_payload["plugins"]]
+    plugins.append({"instance_id": "ghost", "plugin_id": "missing_fx",
+                    "params": {}, "enabled": True, "type": "dctl"})
+    patched = _r(_graph(rig), nodes=tuple(
+        _r(n, legacy_payload={**n.legacy_payload, "plugins": plugins})
+        if i == idx else n for i, n in enumerate(_graph(rig).nodes)))
+    from src.shared.project.color_graph import ColorGraphData
+    payload = next(n for n in patched.to_dict()["nodes"]
+                   if n["node_id"] == rig.corrector)
+    instances = rig.controller._project_instances(payload)
+    status = {i["instance_id"]: i["status"] for i in instances}
+    assert status.get("ghost") == "resource_unknown"
+    ghost = next(i for i in instances if i["instance_id"] == "ghost")
+    assert ghost["available"] is False and ghost["disabled_reason"]
+
+
+def test_rejection_diagnostic_carries_target_and_duration(rig) -> None:
+    """拒绝诊断携带 action/code/target/revision/时长（不冒充成功）。"""
+    from src.features.edit.core.commands import color_commands as cc
+    lock = cc.SetColorGraphLockCommand.create(rig.stack_id, True)
+    rig.graph.holder["project"] = rig.graph.cmd_stack.execute(
+        lock, rig.graph.holder["project"])
+    rig.graph.host.on_clip_stack_loaded(rig.stack_id,
+                                        scope_owner_id=rig.stack_id)
+    rig.controller.activate_effect(
+        {"id": "grain", "kind": "effect", "available": True})
+    assert rig.rejections
+    payload = rig.rejections[-1]
+    assert payload["code"] in ("rejected", "node_locked", "stale_session")
+    assert "duration_ms" in payload and payload["duration_ms"] >= 0.0
+    assert (payload.get("target") or {}).get("node_id") == rig.corrector
+
+
+def test_production_mode_removes_preview_banner(qtbot) -> None:
+    from src.features.color.ui.effects_browser_panel import ColorEffectsBrowser
+    from src.features.color.ui.lut_browser_panel import ColorLutBrowser
+    effects = ColorEffectsBrowser()
+    luts = ColorLutBrowser()
+    assert effects.status_label.text()  # preview 横幅存在
+    effects.set_production_mode(True)
+    luts.set_production_mode(True)
+    assert effects.status_label.text() == "" and luts.status_label.text() == ""
+    effects.set_production_mode(False)
+    assert effects.status_label.text()  # 显式开发模式恢复横幅

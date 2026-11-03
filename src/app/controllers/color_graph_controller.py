@@ -1644,6 +1644,20 @@ class ColorGraphAppHost:
 
 # ── 权威图 → 面板 GraphDraft 投影（单向；draft 只是提案展示） ────────────
 
+def _indicator_payload(legacy: Any, params: Mapping[str, Any]) -> dict[str, Any]:
+    """R11：标记读权威资源域——params.resources.lut_ref/lut_strength 并入
+    legacy 视图（与 node_layer_payload 的 R05 投影同语义；移除不复活旧值）。"""
+    merged = dict(legacy) if isinstance(legacy, Mapping) else {}
+    resources = params.get("resources") if isinstance(params, Mapping) else None
+    if isinstance(resources, Mapping) or "lut_ref" in (resources or {}):
+        merged.pop("active_lut_path", None)
+        merged.pop("lut_intensity", None)
+        if isinstance(resources, Mapping) and resources.get("lut_ref"):
+            merged["active_lut_path"] = resources["lut_ref"]
+            merged["lut_intensity"] = resources.get("lut_intensity", 1.0)
+    return merged
+
+
 def graph_payload_to_draft(payload: Mapping[str, Any]):
     """ColorGraphData.to_dict() → 面板 GraphDraft（只读投影）。
 
@@ -1701,7 +1715,8 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
             label=str(node.get("label") or ""),
             x=float((positions.get(node_id) or (0.0, 0.0))[0]),
             y=float((positions.get(node_id) or (0.0, 0.0))[1]),
-            tool_indicators=detect_tool_indicators(node.get("legacy_payload"), params),
+            tool_indicators=detect_tool_indicators(
+                _indicator_payload(node.get("legacy_payload"), params), params),
             number=0,  # load_graph 内部重编号
             enabled=bool(node.get("enabled", True)),
             locked=locked,

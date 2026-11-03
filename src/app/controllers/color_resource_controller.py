@@ -18,9 +18,13 @@
 """
 from __future__ import annotations
 
+import logging
+import time
 from copy import deepcopy
 from typing import Any, Mapping
 from uuid import uuid4
+
+_LOGGER = logging.getLogger(__name__)
 
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
 
@@ -130,6 +134,7 @@ class ColorResourceController(QObject):
             self.resource_rejected.emit({'action': action, 'code': 'envelope_error',
                                          'message': str(exc), 'target': target})
             return False
+        started = time.monotonic()
         if not self.graph_host.bridge.submit(intent):
             # reject：coordinator 已回滚到最近 ack；按权威投影恢复 UI。
             pending = getattr(coordinator, 'pending', None)
@@ -138,8 +143,14 @@ class ColorResourceController(QObject):
             if pending is not None:
                 code = 'stale_session'
                 message = '会话已切换或提交被拒绝'
-            self.resource_rejected.emit({'action': action, 'code': code,
-                                         'message': message, 'target': target})
+            payload = {'action': action, 'code': code,
+                       'message': message, 'target': target,
+                       'duration_ms': round((time.monotonic() - started) * 1000, 1)}
+            _LOGGER.warning('资源命令拒绝: %s (%s) target=%s revision=%s %.1fms',
+                            action, code, (target or {}).get('node_id'),
+                            (target or {}).get('expected_graph_revision'),
+                            payload['duration_ms'])
+            self.resource_rejected.emit(payload)
             self.refresh_target()
             return False
         self.refresh_target()
@@ -475,9 +486,15 @@ class ColorResourceController(QObject):
                                   float(strength) if isinstance(strength, (int, float)) else 1.0)
 
     def _project_instances(self, node: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-        """权威节点实例 → 浏览器投影（schema 来自 catalog，缺资源保留配置）。"""
+        """权威节点实例 → 浏览器投影（schema 来自 catalog，缺资源保留配置）。
+
+        R11：每实例带 status（R06 预检码：resource_unknown/ai_model_missing/
+        shader_missing）与 disabled_reason（可翻译诊断码）；ack 后随权威
+        投影刷新，reject 不留成功状态。
+        """
         if node is None:
             return []
+        issues = self._resource_issues_for(node)
         payload = node.get('legacy_payload')
         plugins = payload.get('plugins') if isinstance(payload, Mapping) else None
         instances: list[dict[str, Any]] = []
@@ -485,17 +502,38 @@ class ColorResourceController(QObject):
             if not isinstance(plugin, Mapping):
                 continue
             resource_id = str(plugin.get('plugin_id', ''))
+            instance_id = str(plugin.get('instance_id', ''))
             entry = self._catalog_entry('effect', resource_id) or {}
+            issue = next((i for i in issues
+                          if i.get('instance_id') == instance_id), None)
+            status = issue.get('code', 'ok') if issue else 'ok'
             instances.append({
-                'instance_id': str(plugin.get('instance_id', '')),
+                'instance_id': instance_id,
                 'resource_id': resource_id,
                 'name': entry.get('name', resource_id),
                 'enabled': bool(plugin.get('enabled', True)),
                 'params': deepcopy(dict(plugin.get('params') or {})),
                 'parameters': deepcopy(entry.get('parameters', [])),
-                'available': bool(entry.get('available', False)) if entry else False,
+                'available': not issue,
+                'status': status,
+                'disabled_reason': status if status != 'ok' else '',
             })
         return instances
+
+    def _resource_issues_for(self, node: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """R06 预检（节点域子集；注册表缺席时无诊断，不阻塞投影）。"""
+        try:
+            from src.features.color.core.color_graph_preflight import (
+                preflight_graph_resources,
+            )
+            from src.shared.project.color_graph import ColorGraphData
+            graph = ColorGraphData.from_dict({
+                'nodes': [dict(node)], 'edges': [],
+                'source_node_id': 'source', 'output_node_id': 'output'})
+            issues = preflight_graph_resources(graph)
+        except Exception:  # noqa: BLE001
+            return []
+        return [i.to_dict() for i in issues if i.node_id == node.get('node_id')]
 
     def _catalog_entry(self, kind: str, resource_id: str) -> dict[str, Any] | None:
         provider = self.catalog_provider
