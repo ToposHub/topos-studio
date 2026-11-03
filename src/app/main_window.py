@@ -2174,6 +2174,15 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             view.node_lut_apply_requested.connect(self._on_node_lut_menu_apply)
             view.node_lut_browse_requested.connect(self._on_node_lut_menu_browse)
         self.color_resource_catalog_provider.warm_background()
+        # N17：可选依赖聚合一条（替代散落 WARNING；目录/预检以
+        # optional_dependencies 为单一探测源）。
+        try:
+            from src.shared.diagnostics.optional_dependencies import (
+                log_startup_summary,
+            )
+            log_startup_summary()
+        except Exception:  # noqa: BLE001 — 诊断失败不阻断启动
+            pass
 
     def _on_node_lut_menu_apply(self, node_id: str, lut_ref: str) -> None:
         """N04：菜单应用/移除 LUT——与浏览器同一命令路径。"""
