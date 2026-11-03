@@ -105,6 +105,7 @@ class ColorNodeView(QGraphicsView):
         self._label_generation = 0
         self._copied_grade: dict[str, Any] | None = None
         self._copied_graph: GraphDraft | None = None
+        self._copied_domains: dict[str, Any] | None = None  # N12 多域剪贴板
         self._thumbnails: dict[str, Any] = {}
         self._source_thumbnail: Any = None
         self._source_preview_text = ""
@@ -581,10 +582,56 @@ class ColorNodeView(QGraphicsView):
         if node is not None:
             self._copied_grade = deepcopy(node.grade)
             self._copied_graph = self.state.snapshot()
+            # N12：多域剪贴板（grade/curves/lut/window/effects 全捕获）。
+            self._copied_domains = self._capture_node_domains(node)
+
+    def _capture_node_domains(self, node) -> dict:
+        from copy import deepcopy
+        payload = node.backend_payload if isinstance(
+            node.backend_payload, dict) else {}
+        legacy = payload.get("legacy_payload") or {}
+        params = payload.get("params") or {}
+        resources = params.get("resources") or {}
+        return {
+            "grade": deepcopy(dict(node.grade or {})),
+            "curves": deepcopy(legacy.get("curves_data")),
+            "lut": ({"lut_ref": resources.get("lut_ref"),
+                     "lut_strength": resources.get("lut_strength", 1.0)}
+                    if isinstance(resources, dict) and resources.get("lut_ref")
+                    else None),
+            "window": deepcopy(legacy.get("mask_shapes")),
+            "effects": deepcopy(legacy.get("plugins")),
+        }
 
     def paste_grade(self) -> None:
         if self._copied_grade is not None:
             self.apply_edit("paste_grade", lambda: self.state.set_node_fields(self._editable_ids(), grade=self._copied_grade))
+
+    def paste_domains(self, domains: tuple[str, ...]) -> None:
+        """N12：选择性粘贴（经 op_paste_selected_domains：身份重建、
+        只写选定域；幂等空载荷无操作）。"""
+        payload = getattr(self, "_copied_domains", None)
+        if not payload:
+            return
+        selected = {d: payload.get(d) for d in domains}
+        if not any(v is not None for v in selected.values()):
+            return
+        ids = self._editable_ids()
+        if not ids:
+            return
+        self.apply_edit(
+            "paste_domains",
+            lambda: self._paste_domains_via_service(ids, selected, domains))
+
+    def _paste_domains_via_service(self, ids, selected, domains) -> None:
+        """本地状态直达 service 语义（编辑经 apply_edit 提交权威）。"""
+        from src.features.color.core.color_graph_service import ColorGraphService
+        result = ColorGraphService().apply_intent(
+            self.state.graph, "paste_selected_domains",
+            {"node_ids": sorted(ids), "payload": selected,
+             "domains": list(domains)})
+        if result.ok:
+            self.state._commit(result.graph)
 
     def select_adjacent(self, offset: int) -> None:
         ids = [node.id for node in sorted(self.state.graph.nodes.values(), key=lambda n: n.number)
@@ -732,6 +779,18 @@ class ColorNodeView(QGraphicsView):
         menu.addSeparator()
         self._action(menu, "reset", "Reset Node Grade", lambda: self.apply_edit("reset_grade", lambda: self.state.reset_grades(selected)), enabled=has_node)
         self._action(menu, "copy", "Copy", self.copy_grade, "Cmd+C", has_node)
+        paste_menu = menu.addMenu(tr("paste_domains", "Paste Domains"))
+        has_clip = getattr(self, "_copied_domains", None) is not None
+        for domain, title in (("grade", "Grade"), ("curves", "Curves"),
+                              ("lut", "LUT"), ("window", "Window"),
+                              ("effects", "Effects")):
+            self._action(paste_menu, "paste_" + domain, title,
+                         lambda d=(domain,): self.paste_domains(d),
+                         enabled=has_clip and has_node)
+        self._action(paste_menu, "paste_all", "All",
+                     lambda: self.paste_domains(
+                         ("grade", "curves", "lut", "window", "effects")),
+                     enabled=has_clip and has_node)
         self._action(menu, "paste", "Paste", self.paste_grade, "Cmd+V", has_node and self._copied_grade is not None)
         self._action(menu, "paste_nodes", "Paste Nodes", lambda: self.apply_edit("paste_nodes", lambda: self.state.paste_nodes(self._copied_graph, self._copied_graph.selected_ids)), enabled=self._copied_graph is not None)
         self._action(menu, "duplicate", "Duplicate Node", lambda: self.apply_edit("duplicate_nodes", lambda: self.state.duplicate_nodes(selected)), enabled=has_node)
