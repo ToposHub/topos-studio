@@ -133,20 +133,29 @@ def test_failure_is_visible_and_placeholder_kept(qtbot: Any,
 
 
 def test_pending_budget_and_cancel_all(qtbot: Any, tmp_path: Path) -> None:
+    import time as _time
     luts = []
     for i in range(6):
         path = tmp_path / f"lut{i}.cube"
         path.write_text(_identity_cube(swap=i % 2 == 0))
         luts.append(path)
     recorder = _Recorder()
-    service = _make_service(recorder, max_pending=2)
+
+    def slow_provider():
+        recorder.provider_calls += 1
+        _time.sleep(0.05)  # 保证取消落在评估在途期间（非竞态）
+        return recorder.source
+
+    service = LutThumbnailService(source_provider=slow_provider, max_pending=2)
+    service.thumbnail_ready.connect(recorder.on_ready)
+    service.thumbnail_failed.connect(recorder.on_failed)
     try:
         service.set_source_identity("s", "stack", 0, 1)
         accepted = [service.request(f"e{i}", str(p)) for i, p in enumerate(luts)]
         # 预算 2：超出的请求被拒（None）
         assert accepted[0] and accepted[1]
         assert accepted[2] is None and accepted[5] is None
-        service.cancel_all()
+        service.cancel_all()  # 在途（评估中）被取消——零投递
         assert not _wait(recorder, count=1, timeout=1.0)
         assert recorder.ready == []
     finally:
