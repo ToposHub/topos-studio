@@ -154,7 +154,7 @@
 
 **验证**：扩展 `test_color_graph_persistence.py`、stills/versions/compound_shared；在无原绝对路径的临时工程位置重开；共享跨2clip、子图粘贴、缺资源重定位、旧schema、新schema未知字段；redo快照相同、所有出口效果不丢失。
 
-### R10 — 清理旧 UI/backend 写入与用户库偏好　[ ]
+### R10 — 清理旧 UI/backend 写入与用户库偏好　[x]（2026-11-04，证据 docs/validation/color_resources/r10_routing/；A1–A5 图模式路由+库偏好持久化+D1 清除；D2 旧控件实例删除随 N03 typed handle 批次收口）
 
 1. 完成 R00 全表路由：旧顶栏 Effects 菜单、`add_plugin_to_current_layer`、`apply_lut_from_path`、脚本/preset、Tracker/Qualifier 编辑都通过正式目标入口，或明确只属旧模式并禁在图模式调用。
 2. 将隐藏旧 `plugin_panel`/`lut_panel` 的参数读取迁为 projection/provider，逐个撤掉后才删除旧控件实例；不要先删导致 controllers 访问空属性。

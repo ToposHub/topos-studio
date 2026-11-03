@@ -275,6 +275,31 @@ class ColorLutBrowser(QWidget):
         self._select_resource(selected)
         self._update_current_label()
 
+    def browser_state(self) -> dict:
+        """R10：用户库偏好（收藏/视图模式/缩略图缩放）——用户配置域。"""
+        return {"favorites": sorted(self._favorites),
+                "grid": bool(getattr(self, "_grid_mode", True)),
+                "zoom": int(getattr(self, "_zoom", 100))}
+
+    def set_browser_state(self, state: object) -> None:
+        if not isinstance(state, dict):
+            return
+        favorites = state.get("favorites")
+        if isinstance(favorites, list):
+            self._favorites = {str(f) for f in favorites if isinstance(f, str)}
+        zoom = state.get("zoom")
+        if isinstance(zoom, int) and hasattr(self, "zoom_slider"):
+            self.zoom_slider.setValue(max(self.zoom_slider.minimum(),
+                                          min(self.zoom_slider.maximum(), zoom)))
+        grid = state.get("grid")
+        if isinstance(grid, bool) and grid is not self._grid_mode:
+            self._set_view_mode(grid)
+        self._populate()
+
+    def missing_favorite_ids(self, known_ids: object) -> list[str]:
+        known = set(self._entries) if known_ids is None else set(known_ids)
+        return sorted(f for f in self._favorites if f not in known)
+
     def set_target(self, node_id: str, label: str, editable: bool, reason: str = '') -> None:
         self._target_id = str(node_id or '')
         self._editable = bool(editable and self._target_id)
