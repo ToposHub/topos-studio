@@ -1,0 +1,296 @@
+{
+  "4f4159ee-36c2-4015-962e-362fac6783bb": {
+    "schema_version": 4,
+    "stack_id": "4f4159ee-36c2-4015-962e-362fac6783bb",
+    "asset_id": "1c361368-8907-43cc-b6c8-25d16194648f",
+    "name": "Clip_39beb575",
+    "grading_params": {
+      "lift": [
+        0,
+        0,
+        0
+      ],
+      "gamma": [
+        0,
+        0,
+        0
+      ],
+      "gain": [
+        0,
+        0,
+        0
+      ],
+      "exposure": 0,
+      "temp": 0,
+      "tint": 0,
+      "contrast": 0,
+      "shadow": 0,
+      "highlights": 0,
+      "saturation": 0,
+      "vibrance": 0,
+      "mid_detail": 0,
+      "sharpness": 0,
+      "hue_shift": 0,
+      "lift_saturation": 0,
+      "gamma_saturation": 0,
+      "gain_saturation": 0
+    },
+    "curves_data": {},
+    "hsl_curve_data": {},
+    "mixer_params": {},
+    "soft_clip_params": {
+      "enabled": false,
+      "high": 1.0,
+      "white_point": 1.1,
+      "shoulder_strength": 1.0,
+      "low": 0.0,
+      "black_point": -0.1,
+      "toe_strength": 1.0,
+      "exposure": 0.0
+    },
+    "lut_path": null,
+    "lut_intensity": 1.0,
+    "created_at": 1793723154.3743649,
+    "modified_at": 1793723159.6531992,
+    "scope": "clip_local",
+    "source_kind": "timeline_clip",
+    "timeline_id": "1a43756f-89ee-4ba7-9a1a-a186c8448f27",
+    "clip_id": "39beb575-3ada-4dab-80d3-388dfbffac5d",
+    "trackings": {},
+    "layers": [
+      {
+        "id": "bf3a695e-03d0-4824-9f2c-aede41cb2eba",
+        "name": "Layer 1",
+        "visible": true,
+        "opacity": 1.0,
+        "blend_mode": "Normal",
+        "grading_params": {
+          "lift": [
+            0,
+            0,
+            0
+          ],
+          "gamma": [
+            0,
+            0,
+            0
+          ],
+          "gain": [
+            0,
+            0,
+            0
+          ],
+          "exposure": 0,
+          "temp": 0,
+          "tint": 0,
+          "contrast": 0,
+          "shadow": 0,
+          "highlights": 0,
+          "saturation": 0,
+          "vibrance": 0,
+          "mid_detail": 0,
+          "sharpness": 0,
+          "hue_shift": 0,
+          "lift_saturation": 0,
+          "gamma_saturation": 0,
+          "gain_saturation": 0
+        },
+        "mixer_params": {},
+        "effects_params": {
+          "enabled": false,
+          "mode": 0,
+          "sharpen": 0,
+          "texture": 0,
+          "halo": 0,
+          "radius": 0.0,
+          "iterations": 1
+        },
+        "active_lut_path": null,
+        "lut_intensity": 1.0,
+        "soft_clip_params": {
+          "enabled": false,
+          "high": 1.0,
+          "white_point": 1.1,
+          "shoulder_strength": 1.0,
+          "low": 0.0,
+          "black_point": -0.1,
+          "toe_strength": 1.0,
+          "exposure": 0.0
+        },
+        "qualifier_params": {
+          "enabled": false,
+          "hue_enabled": true,
+          "hue_center": 0.5,
+          "hue_width": 1.0,
+          "hue_soft": 0.1,
+          "sat_enabled": true,
+          "sat_low": 0.0,
+          "sat_high": 1.0,
+          "sat_soft_low": 0.0,
+          "sat_soft_high": 0.0,
+          "lum_enabled": true,
+          "lum_low": 0.0,
+          "lum_high": 1.0,
+          "lum_soft_low": 0.0,
+          "lum_soft_high": 0.0,
+          "blur": 0.0,
+          "clean_black": 0.0,
+          "clean_white": 0.0,
+          "denoise": 0.0,
+          "invert": false
+        },
+        "mask_shapes": [],
+        "ai_matte_operation": "add",
+        "ai_matte_enabled": true,
+        "curves_soft_clip": {
+          "linked": true,
+          "channels": {
+            "R": {
+              "low_clip": 0.0,
+              "low_soft": 0.0,
+              "high_clip": 1.0,
+              "high_soft": 0.0
+            },
+            "G": {
+              "low_clip": 0.0,
+              "low_soft": 0.0,
+              "high_clip": 1.0,
+              "high_soft": 0.0
+            },
+            "B": {
+              "low_clip": 0.0,
+              "low_soft": 0.0,
+              "high_clip": 1.0,
+              "high_soft": 0.0
+            }
+          }
+        },
+        "curves_edit": {
+          "linked": true,
+          "amounts": {
+            "Y": 100.0,
+            "R": 100.0,
+            "G": 100.0,
+            "B": 100.0
+          }
+        },
+        "plugins": []
+      }
+    ],
+    "active_layer_index": 0,
+    "color_graph": {
+      "schema_version": 1,
+      "graph_id": "fddad39a-a4e1-40b3-9b7b-a53010895010",
+      "nodes": [
+        {
+          "node_id": "ac1e1c04-b901-51f1-9bfc-f5949113bd0c",
+          "node_type": "source",
+          "type_version": 1,
+          "params": {
+            "key_source_mode": "legacy_raw"
+          },
+          "enabled": true,
+          "label": "Source"
+        },
+        {
+          "node_id": "ce858321-67ea-511e-931e-151e48dab04f",
+          "node_type": "output",
+          "type_version": 1,
+          "params": {},
+          "enabled": true,
+          "label": "Output"
+        },
+        {
+          "node_id": "f8244a23-e7d6-4a6f-baef-2454ed43d980",
+          "node_type": "corrector",
+          "type_version": 1,
+          "params": {
+            "key_source_mode": "node_input",
+            "grade": {
+              "exposure": 15.0
+            }
+          },
+          "enabled": true
+        },
+        {
+          "node_id": "8c3c9fbf-9ee3-4a26-a380-ed6b36e73485",
+          "node_type": "corrector",
+          "type_version": 1,
+          "params": {
+            "key_source_mode": "node_input"
+          },
+          "enabled": true
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "e6f03291-c140-51be-9df1-24d397922938",
+          "src_node": "ac1e1c04-b901-51f1-9bfc-f5949113bd0c",
+          "src_port": "image",
+          "dst_node": "f8244a23-e7d6-4a6f-baef-2454ed43d980",
+          "dst_port": "image"
+        },
+        {
+          "edge_id": "6c20ee9b-ea10-540d-9b98-0fe7f610667b",
+          "src_node": "f8244a23-e7d6-4a6f-baef-2454ed43d980",
+          "src_port": "image",
+          "dst_node": "8c3c9fbf-9ee3-4a26-a380-ed6b36e73485",
+          "dst_port": "image"
+        },
+        {
+          "edge_id": "9ce6b9a9-f003-5d94-95f3-eb442bab03cc",
+          "src_node": "8c3c9fbf-9ee3-4a26-a380-ed6b36e73485",
+          "src_port": "image",
+          "dst_node": "ce858321-67ea-511e-931e-151e48dab04f",
+          "dst_port": "image"
+        }
+      ],
+      "shared_definitions": [],
+      "source_node_id": "ac1e1c04-b901-51f1-9bfc-f5949113bd0c",
+      "output_node_id": "ce858321-67ea-511e-931e-151e48dab04f",
+      "working_color_context": {
+        "origin": "legacy_migration",
+        "stack_schema": "v1"
+      },
+      "graph_revision": 4,
+      "semantic_version": 1,
+      "ui_state": {
+        "positions": {},
+        "collapsed": false,
+        "zoom": 1.0,
+        "viewport_x": 0.0,
+        "viewport_y": 0.0,
+        "selected_ids": [],
+        "active_node_id": "",
+        "layout_revision": 0
+      },
+      "minimum_reader_version": 1
+    },
+    "raw_params": {
+      "enabled": false,
+      "decode_using": "Clip",
+      "wb_type": "camera",
+      "color_space": "sRGB",
+      "gamma": "sRGB",
+      "input_lut": null,
+      "temp": 6500.0,
+      "tint": 0.0,
+      "exposure": 0.0,
+      "sharpness": 0.0,
+      "shadows": 0.0,
+      "highlights": 0.0,
+      "color_boost": 0.0,
+      "saturation": 100.0,
+      "mid_detail": 0.0,
+      "lift": 0.0,
+      "gain": 1.0,
+      "contrast": 1.0,
+      "user_wb": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  }
+}

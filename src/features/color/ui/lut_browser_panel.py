@@ -284,6 +284,39 @@ class ColorLutBrowser(QWidget):
         self.status_label.setText(reason or tr('interaction_preview', 'Interaction preview · not applied to the image'))
         self._update_controls()
 
+    def visible_entry_ids(self) -> list[str]:
+        """当前过滤/文件夹下可见条目 id（R07 缩略图只处理可见资源）。"""
+        return [self.list_widget.item(i).data(Qt.ItemDataRole.UserRole)["id"]
+                for i in range(self.list_widget.count())]
+
+    def set_thumbnail(self, entry_id: str, image: Any) -> None:
+        """GUI 线程接收缩略图（QImage→QPixmap；刷新对应条目）。"""
+        from PyQt6.QtGui import QPixmap
+        entry = self._entries.get(entry_id)
+        if entry is None or image is None:
+            return
+        entry["thumbnail"] = QPixmap.fromImage(image)
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if data and data.get("id") == entry_id:
+                item.setIcon(entry["thumbnail"])
+                break
+
+    def set_thumbnail_failed(self, entry_id: str, code: str) -> None:
+        """预览失败：tooltip 标注（占位图标保持，不冒充结果）。"""
+        entry = self._entries.get(entry_id)
+        if entry is None:
+            return
+        entry["thumbnail_error"] = str(code)
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if data and data.get("id") == entry_id:
+                item.setToolTip(item.toolTip() + "\n" + _tr(
+                    "thumbnail_failed", "Preview failed") + f" ({code})")
+                break
+
     def set_current_lut(self, resource_id: str | None, strength: float = 1.0) -> None:
         """Projection hydration never sends edit signals."""
         self._current_lut = str(resource_id) if resource_id else None
