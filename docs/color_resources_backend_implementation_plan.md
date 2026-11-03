@@ -59,7 +59,7 @@
 
 **验证/出口**：每个写点归为“正式新命令/旧兼容/废弃待删”，待审计数为 0；纯 UI 会话不改项目/engine 的断言仍通过。失败时回退本步新增审计代码，不改用户工程。
 
-### R01 — 统一 Effects 资源目录与能力状态　[ ]
+### R01 — 统一 Effects 资源目录与能力状态　[x]（2026-11-03，证据 docs/validation/color_resources/r01_catalog/；EffectsResourceCatalog 只读投影 + 后台预热，GUI 冷路径 7ms）
 
 **位置**：`src/features/shared/effects/effect_catalog.py`、`effect_spec.py`、`plugin_identity.py`、`src/features/color/core/plugin_manager.py`；拟新增 app catalog presenter。
 
@@ -246,7 +246,8 @@
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
   tests/ui/test_effects_browser_panel.py tests/ui/test_lut_browser_panel.py \
-  tests/app/test_color_resource_preview.py tests/ui/test_color_resource_dock_layout.py \
+  tests/app/test_color_resource_preview.py tests/app/test_color_resource_catalog.py \
+  tests/ui/test_color_resource_dock_layout.py \
   tests/ui/test_color_node_editor_view.py tests/ui/test_color_node_editor_panel.py \
   tests/ui/test_factory_default_layout.py -q
 

@@ -184,7 +184,12 @@ def main() -> int:
                     effects = [entry for (kind, _), entry in presenter.catalog.items() if kind == 'effect']
                     if not effects:
                         raise AssertionError('application Effects catalog is empty')
-                    entry = next((e for e in effects if e.get('parameters')), effects[0])
+                    # R01：目录含能力受限条目（内建未接线/模型缺失），投放
+                    # 留样必须选 available 条目，否则拒绝是预期行为。
+                    entry = next((e for e in effects if e.get('parameters')
+                                  and e.get('available', True)), None)
+                    if entry is None:
+                        entry = next((e for e in effects if e.get('available', True)), effects[0])
                     presenter.drop(self.first, {'kind': 'effect', 'resource_id': entry['id']})
                     assert len(presenter._current_draft()['instances']) >= 1
                     host.dock_plugin.show()
@@ -334,7 +339,8 @@ def main() -> int:
                     compound_id = compound.node_id
                     (output / "baseline_graph.json").write_text(json.dumps(graph().to_dict(), ensure_ascii=False, indent=2) + "\n")
                     # 遗留写入口留样（R00 审计对象，非正式命令路径）。
-                    entries = [e for (kind, _), e in self.host.color_resource_preview.catalog.items() if kind == "effect"]
+                    entries = [e for (kind, _), e in self.host.color_resource_preview.catalog.items()
+                               if kind == "effect" and e.get("available", True)]
                     assert entries, "no effect entries for baseline plugin sample"
                     sample = entries[0]
                     layer = self.host.engine.get_active_layer()

@@ -808,6 +808,15 @@ class EffectCatalog:
         with self._lock:
             return sorted(self._by_category.keys())
 
+    def is_built(self) -> bool:
+        """R01: 目录是否已完成首次构建（供只读消费者避免触发磁盘扫描）。
+
+        False 时只读投影方应等待后台预热（EffectsResourceCatalog.
+        warm_background），而不是在 GUI 线程强制懒构建。
+        """
+        with self._lock:
+            return self._built
+
     def get_specs_by_category(self, category: str) -> List[EffectSpec]:
         """Return specs in a given category, sorted by display name."""
         self._ensure_built()

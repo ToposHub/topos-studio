@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
 
+from src.app.controllers.color_resource_catalog import EffectsResourceCatalog
 from src.features.color.ui.node_editor_state import NodeKind
 from src.shared.i18n.i18n import I18N
 
@@ -27,18 +28,27 @@ class ColorResourcePreview(QObject):
 
     resource_intent = pyqtSignal(object)
 
-    def __init__(self, host: Any, *, resources: list[dict[str, Any]] | None = None) -> None:
+    def __init__(self, host: Any, *, resources: list[dict[str, Any]] | None = None,
+                 catalog_provider: Any = None) -> None:
         super().__init__(host)
         self.host = host
         self.panel = host.color_node_panel
         self.effects = host.color_effects_browser
         self.luts = host.color_lut_browser
+        # R01: 效果条目来自正式 catalog presenter（只读权威投影）；LUT 条目
+        # 仍是会话级临时路径，待 R02 资源注册替换。
+        owns_provider = catalog_provider is None
+        self.catalog_provider = catalog_provider or EffectsResourceCatalog()
         self.catalog: dict[tuple[str, str], dict[str, Any]] = {}
         self._drafts: dict[tuple[Any, ...], dict[str, Any]] = {}
         self._active_key: tuple[Any, ...] | None = None
         self._target_id = ''
         self._editable = False
         self.set_catalog(resources if resources is not None else self._existing_catalog())
+        self.catalog_provider.catalog_changed.connect(self._on_catalog_changed)
+        if owns_provider and resources is None:
+            # 生产装配：后台预热冷目录（唯一磁盘扫描步骤），完成后重投影。
+            self.catalog_provider.warm_background()
         self.effects.resource_activated.connect(lambda entry: self.activate(entry))
         self.luts.resource_activated.connect(lambda entry: self.activate(entry))
         self.effects.draft_edit_requested.connect(self.edit)
@@ -53,14 +63,7 @@ class ColorResourcePreview(QObject):
 
     def _existing_catalog(self) -> list[dict[str, Any]]:
         """Read metadata already loaded by the app; never compile/decode here."""
-        from src.features.color.core.plugin_manager import get_plugin_manager
-        entries: list[dict[str, Any]] = []
-        for resource_id, metadata in get_plugin_manager().get_all_plugins().items():
-            entries.append({'id': resource_id, 'kind': 'effect',
-                            'name': metadata.get('name', resource_id),
-                            'category': metadata.get('category') or ('AI' if metadata.get('type') == 'ai' else 'Topos FX'),
-                            'description': metadata.get('description', ''),
-                            'parameters': deepcopy(metadata.get('params', []))})
+        entries: list[dict[str, Any]] = list(self.catalog_provider.entries())
         gallery = getattr(getattr(self.host, 'lut_panel', None), 'lut_gallery', None)
         if gallery is not None:
             for index in range(gallery.list_widget.count()):
@@ -72,6 +75,13 @@ class ColorResourcePreview(QObject):
                     # Do not pass them off as current-frame node previews.
                     entries.append(entry)
         return entries
+
+    def _on_catalog_changed(self) -> None:
+        """权威目录刷新（后台预热/手动刷新）：重建效果条目，保留会话 LUT。"""
+        combined = {(e['kind'], e['id']): e for e in self.catalog_provider.entries()}
+        combined.update({key: entry for key, entry in self.catalog.items()
+                         if key[0] == 'lut'})
+        self.set_catalog(list(combined.values()))
 
     @staticmethod
     def _lut_entry(raw_path: str) -> dict[str, Any]:
@@ -89,7 +99,9 @@ class ColorResourcePreview(QObject):
         self.luts.set_resources([entry for (kind, _), entry in self.catalog.items() if kind == 'lut'])
 
     def refresh_catalog(self) -> None:
-        # Keep imported session-only entries; this does not install resources.
+        # 用户显式刷新：重投影权威（内存读 + stat 级模型探测，无扫描），
+        # 会话导入的 LUT 条目保留；本调用不安装资源。
+        self.catalog_provider.refresh()
         combined = {(e['kind'], e['id']): e for e in self._existing_catalog()}
         combined.update(self.catalog)
         self.set_catalog(list(combined.values()))
