@@ -70,7 +70,7 @@
 
 **验证**：拟新增 `tests/app/test_color_resource_catalog.py`：重复名字、Unicode、热刷新、删除/更新插件、未知 schema、缺 AI pack；断言选择/收藏身份不漂移、search 不触发扫描、缺失条目不能发真实添加命令。冷/热目录加载分别计时。
 
-### R02 — LUT 资源注册、导入、迁移与重定位　[ ]
+### R02 — LUT 资源注册、导入、迁移与重定位　[x]（2026-11-03，证据 docs/validation/color_resources/r02_lut_registry/；19 项注册矩阵 + 包往返/重定位全过）
 
 **位置**：`src/shared/color/lut_loader.py`、`src/features/edit/core/edit_project_io.py`、`src/shared/project/color_stack.py`；复用项目现有资源容器，拟新增 LUT catalog adapter。
 

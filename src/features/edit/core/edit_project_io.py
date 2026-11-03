@@ -1238,6 +1238,25 @@ class EditProjectIO(QObject):
             else self._current_backing
         )
 
+        # R02：LUT 资源会话并入保存载荷。显式参数优先；未传且会话有条目
+        # （工程加载条目 + 会话导入）时合并索引，仅新导入文件需要写包。
+        # 会话为空 → (None, None)：保持"无资源协议"保存语义（payload
+        # Phase B 原样保留包内已有索引/资源）。失败受控：暂存缺失的源
+        # 文件由 IO 原子写入路径整体失败，不产生半包/半条目。
+        effective_resources_data = resources_data
+        effective_resource_files = resource_files
+        if effective_resources_data is None and effective_resource_files is None:
+            try:
+                from src.shared.color.lut_resource_registry import (
+                    get_lut_resource_session,
+                )
+                effective_resources_data, effective_resource_files = \
+                    get_lut_resource_session().save_payload()
+            except Exception:  # noqa: BLE001 — 资源载荷失败不阻断保存
+                logger.exception("lut resource save payload failed")
+                effective_resources_data = None
+                effective_resource_files = None
+
         # 使用 ToposProjectIO 保存
         topos_config = ToposProjectIOConfig(
             serialization_format="json",
@@ -1268,8 +1287,8 @@ class EditProjectIO(QObject):
             ai_trace_data=effective_ai_trace,
             ai_plugins_data=effective_ai_plugins,
             ai_workflows_data=effective_ai_workflows,
-            resources_data=resources_data,
-            resource_files=resource_files,
+            resources_data=effective_resources_data,
+            resource_files=effective_resource_files,
             backing_store=effective_backing,
         )
 
@@ -1682,6 +1701,15 @@ class EditProjectIO(QObject):
                 logger.exception(
                     "Project font registration failed; captions fall "
                     "back to system fonts")
+            # R02：LUT 资源会话绑定工程（合并包内索引，清上一工程导入）。
+            # 失败不阻断打开——浏览器目录回退到会话空集并保留诊断。
+            try:
+                from src.shared.color.lut_resource_registry import (
+                    get_lut_resource_session,
+                )
+                get_lut_resource_session().bind_project(resource_resolver_obj)
+            except Exception:  # noqa: BLE001
+                logger.exception("lut resource session bind failed")
             # DESK-04B：包内容能力分级（不阻断加载；导出门/UI 按报告限制）
             try:
                 from src.features.edit.core.package_capability import (

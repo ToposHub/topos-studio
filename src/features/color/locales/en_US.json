@@ -312,6 +312,9 @@
     "unsupported_parameter": "Parameter UI unavailable",
     "user_luts": "User LUTs",
     "writable_corrector": "Select an unlocked corrector node",
-    "missing_lut": "Missing LUT resource"
+    "missing_lut": "Missing LUT resource",
+    "import_started": "Importing {count} LUT(s)…",
+    "import_finished": "Imported {imported} · duplicate {duplicates} · failed {failed}",
+    "import_failed": "LUT import failed: {error}"
   }
 }

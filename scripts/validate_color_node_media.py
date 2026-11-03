@@ -224,9 +224,15 @@ def main() -> int:
                     assert len(presenter._current_draft()['instances']) >= 1
                     luts = [entry for (kind, _), entry in presenter.catalog.items() if kind == 'lut']
                     if not luts:
+                        # R02：无真实 LUT 时经正式会话导入 identity fixture
+                        # （验证/去重/暂存/注册，同步完成后重投影目录）。
+                        from src.shared.color.lut_resource_registry import get_lut_resource_session
                         fixture = config_dir / 'UI Identity.cube'
                         fixture.write_text('TITLE \"UI Identity\"\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n')
-                        presenter.import_preview([str(fixture)])
+                        results = get_lut_resource_session().import_files([str(fixture)])
+                        assert results and results[0].status == 'imported', \
+                            f"session LUT import failed: {results[0].error}"
+                        presenter._rebuild_catalog()
                         luts = [entry for (kind, _), entry in presenter.catalog.items() if kind == 'lut']
                         self.report['session_test_lut_generated'] = True
                     if luts:

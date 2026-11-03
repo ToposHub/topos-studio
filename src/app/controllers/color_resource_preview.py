@@ -3,6 +3,9 @@
 Replace this presenter with an acknowledged command adapter when implementing
 ``docs/color_resources_backend_implementation_plan.md``. Drafts are intentionally
 not saved in a .topos file and never advertise that pixels have changed.
+
+R02：LUT 导入经 ``LutResourceSession`` 真实注册（验证/去重/暂存/随包保存），
+反馈经 ``import_feedback``；但应用到画面仍属 R03+ 的命令路径。
 """
 from __future__ import annotations
 
@@ -27,6 +30,7 @@ class ColorResourcePreview(QObject):
     """Keep resource drafts isolated by session, scope, compound and target."""
 
     resource_intent = pyqtSignal(object)
+    import_feedback = pyqtSignal(object)
 
     def __init__(self, host: Any, *, resources: list[dict[str, Any]] | None = None,
                  catalog_provider: Any = None) -> None:
@@ -53,35 +57,59 @@ class ColorResourcePreview(QObject):
         self.luts.resource_activated.connect(lambda entry: self.activate(entry))
         self.effects.draft_edit_requested.connect(self.edit)
         self.luts.draft_edit_requested.connect(self.edit)
-        self.luts.import_requested.connect(self.import_preview)
+        self.luts.import_requested.connect(self.import_luts)
         self.luts.refresh_requested.connect(self.refresh_catalog)
+        self.import_feedback.connect(self._on_import_feedback)
         self.panel.active_node_changed.connect(self.refresh_target)
         self.panel.scope_changed.connect(self.refresh_target)
         self.panel.view.scene_refreshed.connect(self.refresh_target)
         self.panel.view.resource_drop_requested.connect(self.drop)
         self.refresh_target()
 
-    def _existing_catalog(self) -> list[dict[str, Any]]:
-        """Read metadata already loaded by the app; never compile/decode here."""
-        entries: list[dict[str, Any]] = list(self.catalog_provider.entries())
+    def _lut_session(self) -> Any:
+        """R02：LUT 资源会话（工程索引 + 导入；无 Qt，线程安全）。"""
+        from src.shared.color.lut_resource_registry import get_lut_resource_session
+        return get_lut_resource_session()
+
+    def _lut_gallery_entries(self) -> list[dict[str, Any]]:
+        """旧 LUT 面板画廊只读投影（库目录浏览；正式 id 见会话目录）。"""
+        entries: list[dict[str, Any]] = []
         gallery = getattr(getattr(self.host, 'lut_panel', None), 'lut_gallery', None)
         if gallery is not None:
             for index in range(gallery.list_widget.count()):
                 item = gallery.list_widget.item(index)
                 raw_path = item.data(Qt.ItemDataRole.UserRole)
                 if isinstance(raw_path, str):
-                    entry = self._lut_entry(raw_path)
-                    # Legacy icons are evaluated on a generic test image, not this clip.
-                    # Do not pass them off as current-frame node previews.
-                    entries.append(entry)
+                    entries.append(self._lut_entry(raw_path))
+        return entries
+
+    def _rebuild_catalog(self) -> None:
+        """合并目录：效果投影 + LUT 会话（工程+导入）+ 旧画廊只读条目。"""
+        combined: dict[tuple[str, str], dict[str, Any]] = {}
+        for entry in self.catalog_provider.entries():
+            combined[(entry['kind'], entry['id'])] = entry
+        try:
+            for entry in self._lut_session().catalog():
+                combined[(entry['kind'], entry['id'])] = entry
+        except Exception:  # noqa: BLE001 — 会话失败不清空效果目录
+            pass
+        for entry in self._lut_gallery_entries():
+            combined.setdefault((entry['kind'], entry['id']), entry)
+        self.set_catalog(list(combined.values()))
+
+    def _existing_catalog(self) -> list[dict[str, Any]]:
+        """Read metadata already loaded by the app; never compile/decode here."""
+        entries: list[dict[str, Any]] = list(self.catalog_provider.entries())
+        try:
+            entries.extend(self._lut_session().catalog())
+        except Exception:  # noqa: BLE001
+            pass
+        entries.extend(self._lut_gallery_entries())
         return entries
 
     def _on_catalog_changed(self) -> None:
-        """权威目录刷新（后台预热/手动刷新）：重建效果条目，保留会话 LUT。"""
-        combined = {(e['kind'], e['id']): e for e in self.catalog_provider.entries()}
-        combined.update({key: entry for key, entry in self.catalog.items()
-                         if key[0] == 'lut'})
-        self.set_catalog(list(combined.values()))
+        """权威目录刷新（后台预热/手动刷新）：重建全部条目。"""
+        self._rebuild_catalog()
 
     @staticmethod
     def _lut_entry(raw_path: str) -> dict[str, Any]:
@@ -100,19 +128,69 @@ class ColorResourcePreview(QObject):
 
     def refresh_catalog(self) -> None:
         # 用户显式刷新：重投影权威（内存读 + stat 级模型探测，无扫描），
-        # 会话导入的 LUT 条目保留；本调用不安装资源。
+        # LUT 会话与旧画廊条目一并重建；本调用不安装资源。
         self.catalog_provider.refresh()
-        combined = {(e['kind'], e['id']): e for e in self._existing_catalog()}
-        combined.update(self.catalog)
-        self.set_catalog(list(combined.values()))
+        self._rebuild_catalog()
 
-    def import_preview(self, paths: object) -> None:
+    def import_luts(self, paths: object) -> None:
+        """R02 正式导入入口：后台验证+注册，反馈经 import_feedback 回传。
+
+        取代旧 ``import_preview`` 的会话假导入；失败/取消不产生条目，
+        成功后经会话目录重投影（含工程加载条目）。
+        """
         if not isinstance(paths, list):
             return
-        additions = [self._lut_entry(path) for path in paths if isinstance(path, str)
-                     and Path(path).suffix.lower() in ('.cube', '.3dl', '.look') and Path(path).is_file()]
-        self.set_catalog(list(self.catalog.values()) + additions)
-        self.luts.status_label.setText(tr('import_preview', 'Added to session library · resource import is not connected'))
+        candidates = [path for path in paths if isinstance(path, str)
+                      and Path(path).suffix.lower() in ('.cube', '.3dl', '.look')
+                      and Path(path).is_file()]
+        rejected = len(paths) - len(candidates)
+        self.import_feedback.emit({'status': 'started', 'total': len(candidates),
+                                   'rejected': rejected})
+        import threading
+        threading.Thread(target=self._import_lut_worker, args=(candidates,),
+                         name='lut-resource-import', daemon=True).start()
+
+    def _import_lut_worker(self, paths: list[str]) -> None:
+        try:
+            results = self._lut_session().import_files(paths)
+        except Exception as exc:  # noqa: BLE001 — worker 内异常必须回传
+            self.import_feedback.emit({'status': 'failed', 'error': str(exc)})
+            return
+        self.import_feedback.emit({'status': 'finished', 'results': [
+            {'path': result.path, 'status': result.status,
+             'error_code': result.error.code.value if result.error else '',
+             'resource_uri': result.entry.uri if result.entry else ''}
+            for result in results]})
+
+    def _on_import_feedback(self, payload: object) -> None:
+        """导入反馈（GUI 线程，经排队信号回传）：更新状态与目录树。"""
+        if not isinstance(payload, dict):
+            return
+        status = payload.get('status')
+        if status == 'started':
+            total = int(payload.get('total', 0))
+            self.luts.status_label.setText(
+                tr('import_started', 'Importing {count} LUT(s)…').format(count=total))
+            return
+        if status == 'finished':
+            self._rebuild_catalog()
+            results = payload.get('results', [])
+            imported = sum(1 for r in results if r.get('status') == 'imported')
+            duplicates = sum(1 for r in results if r.get('status') == 'duplicate')
+            failed = sum(1 for r in results if r.get('status') == 'failed')
+            self.luts.status_label.setText(
+                tr('import_finished',
+                   'Imported {imported} · duplicate {duplicates} · failed {failed}')
+                .format(imported=imported, duplicates=duplicates, failed=failed))
+            for result in results:
+                if result.get('status') == 'failed' and result.get('error_code'):
+                    self._emit('import_rejected', {'error_code': result['error_code'],
+                                                   'path': result.get('path', '')})
+            return
+        if status == 'failed':
+            self.luts.status_label.setText(
+                tr('import_failed', 'LUT import failed: {error}').format(
+                    error=payload.get('error', '')))
 
     def _identity(self, node_id: str) -> tuple[Any, ...]:
         graph_host = getattr(self.host, 'color_graph_host', None)
