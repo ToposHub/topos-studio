@@ -197,8 +197,12 @@ class ColorGraphExecutor:
 
         ``matte_provider``：宿主委托的 matte 生成器 ``(layer, input_tex) →
         matte_tex``（生产 ``_generate_matte``：窗口/qualifier/bitmap mask）。
-        返回纹理归提供方所有（缓存），执行器不释放；缺省用白 matte
-        （qualifier GPU keyer 入图是登记债务）。
+        返回纹理归提供方所有（缓存），执行器不释放。N02：corrector 的
+        ``key_in`` 边消费外部 key（与 qualifier/window matte 相乘，
+        ``invert_key_in`` 取反），最终 matte 登记为本节点 ``key_out`` 产物
+        供 key_mixer/alpha_output/outside/parallel key 槽引用；key 引用
+        无产物/无边一律 fail-closed（白 matte 仅保留 blend 无 key 语义
+        与 parallel 未声明 key 槽两处 spec 依据场景）。
         """
         request_id = request_id or str(uuid.uuid4())
         width, height = (int(source_size[0]) or source_texture.size[0],
@@ -221,6 +225,10 @@ class ColorGraphExecutor:
 
         leases: list[_Lease] = []
         node_outputs: dict[str, Any] = {}
+        # N02：key 通道——corrector 家族的 matte 产物按 (node_id, port) 键控
+        # （与图像输出分离；key_mixer/alpha_output/outside/parallel key 槽
+        # 从此解析真实 matte，不再有常白/图像 R 通道替代）。
+        key_outputs: dict[tuple[str, str], Any] = {}
 
         def _release_lease(lease: _Lease) -> int:
             self._release_texture(lease.texture)
@@ -235,6 +243,7 @@ class ColorGraphExecutor:
                     pass
             leases.clear()
             node_outputs.clear()
+            key_outputs.clear()
             return released
 
         try:
@@ -247,7 +256,7 @@ class ColorGraphExecutor:
                 out_tex = self._execute_pass(
                     render_pass, source_texture, node_outputs,
                     layer_param_provider, render_quad, width, height,
-                    bind_aux, matte_provider)
+                    bind_aux, matte_provider, key_outputs, leases)
                 leases.append(_Lease(out_tex, render_pass.node_id,
                                      render_pass.release_after))
                 node_outputs[render_pass.node_id] = out_tex
@@ -308,7 +317,9 @@ class ColorGraphExecutor:
                       node_outputs: Mapping[str, Any],
                       layer_param_provider, render_quad,
                       width: int, height: int,
-                      bind_aux=None, matte_provider=None) -> Any:
+                      bind_aux=None, matte_provider=None,
+                      key_outputs: dict | None = None,
+                      leases: list | None = None) -> Any:
         if render_pass.op == "source":
             # source = 输入纹理直通（新租约纹理承载，源纹理归调用方）
             return self._copy_texture(source_texture, width, height)
@@ -344,17 +355,57 @@ class ColorGraphExecutor:
             for port, ref in render_pass.inputs:
                 if port == "image" and ref is not None:
                     input_tex = node_outputs.get(ref.node_id, source_texture)
+            # N02：key_in 边消费——上游 key_out matte（无产物显式拒绝，
+            # 不用图像 R 通道/常白替代）；invert_key_in 在此取反
+            external_key = self._key_input_for(render_pass, "key_in",
+                                               key_outputs or {})
             out_tex = self._alloc_texture(width, height)
             fbo = self.ctx.framebuffer(color_attachments=[out_tex])
             fbo.use()
+            key_scratch: list = []
             if matte_provider is not None:
                 # 生产 matte（窗口/qualifier/bitmap）：缓存归宿主，不释放
                 matte = matte_provider(layer, input_tex)
-                if matte is None:
-                    matte = self._white_matte(width, height)
             else:
+                matte = None
+            if external_key is not None:
+                key_tex = external_key
+                settings = (render_pass.params.get("key_settings")
+                            if isinstance(render_pass.params, Mapping)
+                            else None)
+                if isinstance(settings, Mapping) \
+                        and settings.get("invert_key_in"):
+                    key_tex = self._run_op_shader(
+                        "key_complement", {"u_key": (key_tex, 0)}, {},
+                        width, height, release_inputs=[])
+                    key_scratch.append(key_tex)
+                if matte is not None:
+                    combined = self._run_op_shader(
+                        "key_mix", {"u_a": (matte, 0), "u_b": (key_tex, 1)},
+                        {"u_mode": 2}, width, height, release_inputs=[])
+                    key_scratch.append(combined)
+                    matte = combined
+                else:
+                    matte = key_tex
+            qualifier_on = bool(
+                isinstance(layer, Mapping)
+                and (layer.get("qualifier_params") or {}).get("enabled"))
+            has_windows = bool(
+                isinstance(layer, Mapping) and layer.get("mask_shapes"))
+            if matte is None:
                 # 白 matte 常量缓存（随 release_pool 释放），不逐 pass 建毁
+                # ——spec：无 key 语义 = 全效果（blend matte 语义）
                 matte = self._white_matte(width, height)
+            elif qualifier_on or has_windows or external_key is not None:
+                # N02：key_out 产物（qualifier/window/外部 key 至少其一；
+                # 宿主 provider 纹理不 lease，执行器中间体入 lease）
+                key_outputs[(render_pass.node_id, "key_out")] = matte
+                if matte in key_scratch and leases is not None:
+                    leases.append(_Lease(matte, render_pass.node_id,
+                                         render_pass.release_after))
+                key_scratch = [t for t in key_scratch if t is not matte]
+                for scratch_tex in key_scratch:
+                    self._release_texture(scratch_tex)
             quad_fn = render_quad or (
                 lambda prog: self._default_quad(prog).render(_TRIANGLE_STRIP()))
             if bind_aux is not None:
@@ -373,18 +424,28 @@ class ColorGraphExecutor:
             return out_tex
 
         if render_pass.op == "parallel_mixer":
-            # spec §1：base 依序被分支按有效 key（缺省全 1）lerp
+            # spec §1：base 依序被分支按有效 key lerp。未声明 key 边的槽
+            # = 全权重（spec 语义，保留白）；**声明的** key 边必须解析到
+            # 真实 key_out 产物（缺失显式拒绝，不常白替代）。
             base = self._input_for(render_pass, "base", node_outputs,
                                    source_texture)
-            branches = [node_outputs[ref.node_id]
-                        for port, ref in render_pass.inputs
-                        if port == "branch" and ref is not None]
+            key_refs = {ref.slot_id: ref for port, ref in render_pass.inputs
+                        if port == "key" and ref is not None}
             current = base
-            for branch in branches:
+            for port, ref in render_pass.inputs:
+                if port != "branch" or ref is None:
+                    continue
+                branch = node_outputs.get(ref.node_id)
+                key_ref = key_refs.get(ref.slot_id) if ref.slot_id else None
+                if key_ref is not None:
+                    key_tex = self._resolve_key_output(
+                        key_ref, render_pass, key_outputs or {})
+                else:
+                    key_tex = self._white_matte(width, height)
                 current = self._run_op_shader(
                     "parallel_mix",
                     {"u_base": (current, 0), "u_branch": (branch, 1),
-                     "u_key": (self._white_matte(width, height), 2)},
+                     "u_key": (key_tex, 2)},
                     {}, width, height, release_inputs=[])
             return self._copy_texture(current, width, height)
 
@@ -412,13 +473,21 @@ class ColorGraphExecutor:
             return self._copy_texture(current, width, height)
 
         if render_pass.op == "key_mixer":
-            keys = [node_outputs[ref.node_id]
-                    for _port, ref in sorted(
+            # N02：key 边必须解析到真实 key_out 产物；无 key 输入显式拒绝
+            # （此前常白返回 = 无依据替代）
+            refs = [ref for _port, ref in sorted(
                         render_pass.inputs,
                         key=lambda pr: (pr[1].slot_id if pr[1] else ""))
                     if ref is not None]
-            if not keys:
-                return self._white_matte(width, height)
+            if not refs:
+                raise GraphExecutionFailure(
+                    "key_input_missing",
+                    f"pass {render_pass.index}: KeyMixer 无 key 输入"
+                    "（fail-closed，不产出常白 matte）",
+                    pass_index=render_pass.index)
+            keys = [self._resolve_key_output(ref, render_pass,
+                                             key_outputs or {})
+                    for ref in refs]
             mode_index = KEY_MODE_INDEX.get(
                 str(render_pass.params.get("mode", "add")), 0)
             current = keys[0]
@@ -427,7 +496,11 @@ class ColorGraphExecutor:
                     "key_mix",
                     {"u_a": (current, 0), "u_b": (other, 1)},
                     {"u_mode": mode_index}, width, height, release_inputs=[])
-            return self._copy_texture(current, width, height)
+            mixed = self._copy_texture(current, width, height)
+            # KeyMixer 的输出端口是 key：混合结果登记为 key 产物
+            if key_outputs is not None:
+                key_outputs[(render_pass.node_id, "key")] = mixed
+            return mixed
 
         if render_pass.op == "outside":
             # spec §4：key_in 补集作为 matte 的 Corrector（N06 数学）
@@ -445,12 +518,22 @@ class ColorGraphExecutor:
                     pass_index=render_pass.index)
             image_in = self._input_for(render_pass, "image", node_outputs,
                                        source_texture)
-            key_in = self._input_for(render_pass, "key_in", node_outputs,
-                                     None)
-            matte = (self._run_op_shader(
+            # N02：key_in 必须解析真实 key_out 产物；缺失/无边均显式拒绝
+            # （此前无边 → 常白 = 全效果，与 CPU/Metal 语义互相矛盾）
+            key_in = self._key_input_for(render_pass, "key_in",
+                                         key_outputs or {})
+            if key_in is None:
+                raise GraphExecutionFailure(
+                    "key_input_missing",
+                    f"pass {render_pass.index}: Outside 无 key 输入"
+                    "（fail-closed，不产出常白 matte）",
+                    pass_index=render_pass.index)
+            matte = self._run_op_shader(
                 "key_complement", {"u_key": (key_in, 0)}, {},
                 width, height, release_inputs=[])
-                if key_in is not None else self._white_matte(width, height))
+            # Outside 的 key_out = 补集 matte（供下游 key 消费者引用）
+            if key_outputs is not None:
+                key_outputs[(render_pass.node_id, "key_out")] = matte
             out_tex = self.ctx.texture((width, height), 4, dtype="f2")
             fbo = self.ctx.framebuffer(color_attachments=[out_tex])
             fbo.use()
@@ -490,9 +573,14 @@ class ColorGraphExecutor:
                 {}, width, height, release_inputs=[])
 
         if render_pass.op == "alpha_output":
-            key = self._input_for(render_pass, "key", node_outputs, None)
+            # N02：key 边必须解析真实 key_out 产物；缺失/无边显式拒绝
+            key = self._key_input_for(render_pass, "key", key_outputs or {})
             if key is None:
-                return self._white_matte(width, height)
+                raise GraphExecutionFailure(
+                    "key_input_missing",
+                    f"pass {render_pass.index}: Alpha Output 无 key 输入"
+                    "（fail-closed，不产出常白 matte）",
+                    pass_index=render_pass.index)
             return self._run_op_shader(
                 "key_passthrough", {"u_key": (key, 0)}, {},
                 width, height)
@@ -522,6 +610,32 @@ class ColorGraphExecutor:
                                    ("r", "g", "b") else "r")
                 return value
         return default
+
+    def _resolve_key_output(self, ref, render_pass: RenderPass,
+                            key_outputs: Mapping[tuple[str, str], Any]) -> Any:
+        """N02：key 端口引用 → 上游 (node_id, port) 的 matte 产物。
+
+        无产物（上游节点无 qualifier/窗口/外部 key）显式拒绝——不再用
+        图像纹理 R 通道或常白替代（白 matte 仅保留在两个有 spec 依据的
+        场景：blend matte 无 key 语义、parallel_mixer 未声明 key 的槽）。
+        """
+        tex = key_outputs.get((ref.node_id, ref.port or "key_out"))
+        if tex is None:
+            raise GraphExecutionFailure(
+                "key_output_missing",
+                f"pass {render_pass.index}: {ref.node_id}.{ref.port} "
+                "无 key 产物（上游节点未产生 qualifier/窗口/外部 key "
+                "matte——fail-closed）",
+                pass_index=render_pass.index)
+        return tex
+
+    def _key_input_for(self, render_pass: RenderPass, port: str,
+                       key_outputs: Mapping[tuple[str, str], Any]) -> Any:
+        """单 key 输入端口 → matte 产物；无边返回 None（调用方决定语义）。"""
+        for input_port, ref in render_pass.inputs:
+            if input_port == port and ref is not None:
+                return self._resolve_key_output(ref, render_pass, key_outputs)
+        return None
 
     def _run_op_shader(self, name: str, textures: dict, uniforms: dict,
                        width: int, height: int, *,

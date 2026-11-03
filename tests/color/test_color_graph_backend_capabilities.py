@@ -65,11 +65,17 @@ class TestMatrixCoverage:
         assert options, "UI 可选项不能为空"
         by_type = {o["node_type"]: o for o in options}
         # 结构算子三后端 exact → ui_enabled 且 exact_backends 齐全
-        for op in ("parallel_mixer", "layer_mixer", "key_mixer", "splitter",
-                   "combiner", "alpha_output", "source", "output"):
+        # （N02：Metal 的 key 通道算子 unsupported——key_mixer/alpha_output
+        # 不再要求 metal exact，ui_enabled 仍真：GL/CPU 可用）
+        for op in ("parallel_mixer", "layer_mixer", "splitter",
+                   "combiner", "source", "output"):
             opt = by_type[op]
             assert opt["ui_enabled"], op
             assert set(opt["exact_backends"]) == {"gl", "cpu", "metal"}, op
+        for op in ("key_mixer", "alpha_output"):
+            opt = by_type[op]
+            assert opt["ui_enabled"], op
+            assert opt["backends"]["metal"] == "unsupported", op
         # compound：无后端 exact/可执行 → UI 禁用（如实呈现）
         assert by_type["compound"]["exact_backends"] == []
         # 全 unsupported 的项必须 ui_enabled=False（本目录暂无此例，
