@@ -58,6 +58,7 @@ components, offset}`）驱动 GL 声明生成（文本与手写基线逐行一�
 | 效果 | 状态 | 日期 | PR/commit | 证据 |
 |---|---|---|---|---|
 | （待逐效果登记——Phase 6/7 重构触及 composite 时填充） | — | — | — | — |
+| LUT3D 强度混合（apply_3dlut） | golden 重归档 | 2026-11-03 | R05 节点 LUT 规格 v1 | `grading_extreme/checker` 像素变化为规格修正预期：base 保持完整输入（intensity=0 严格恒等，含 HDR/负值）、LUT 分支按最大值比例重建 HDR、负偏移按强度加权。旧实现在 HDR+部分强度下对混合结果整体比例缩放，非恒等缺陷见 `tests/color/test_color_node_lut_spec.py`（0/1/0.42 全锁定）；`TOPOS_UPDATE_SHADER_GOLDEN=1` 重归档 |
 
 ## 参考 compute/解码内核（已交付，非本台账推进范围，仅备忘）
 
