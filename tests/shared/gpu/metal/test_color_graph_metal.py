@@ -158,9 +158,12 @@ class TestStructural:
 
     def test_structural_ops_exact_and_corrector_fallback(self) -> None:
         for op in ("source", "output", "parallel_mixer", "layer_mixer",
-                   "key_mixer", "splitter", "combiner", "alpha_output"):
+                   "splitter", "combiner"):
             assert METAL_CAPABILITY_CATALOG[op] == "exact", op
         assert METAL_CAPABILITY_CATALOG["corrector"] == "fallback"
+        # N02：key 通道算子 Metal 未接线——显式 unsupported（N14 恢复）
+        for op in ("key_mixer", "outside", "alpha_output"):
+            assert METAL_CAPABILITY_CATALOG[op] == "unsupported", op
         assert METAL_CAPABILITY_CATALOG["compound"] == "unsupported"
 
 

@@ -489,7 +489,9 @@ def _fx_params_neutral(fx: Mapping[str, Any]) -> bool:
     return True
 
 
-def production_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
+def production_layer_domain_errors(layer: Mapping[str, Any], *,
+                                   spatial_mask_supplied: bool = False,
+                                   ) -> list[str]:
     """生产域 Corrector 的能力检查（CPU/Metal 共用，B12.1 矩阵依据）。
 
     返回 unsupported 原因列表（空 = 基础域可执行）。**fail-closed** 且
@@ -497,6 +499,10 @@ def production_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
     值（关闭 + 幅度零）时等价 no-op，不拒绝。插件、非中性 mixer/warper/
     LUT3D/fx/hsl 曲线/soft-clip 曲线、邻域参数、非 Normal 混合、
     curves_data 未预构建 LUT 都显式列出，不静默近似。
+
+    ``spatial_mask_supplied``：调用方已显式求值 qualifier/窗口空间域并
+    以 ``mask`` 传入（N02 的 ``run_plan_cpu`` 路径）时置 True——裸
+    oracle/能力矩阵/LUT 导出保持默认 False（空间变化域不在点态基础域）。
     """
     errors: list[str] = []
     grading = layer.get("grading_params")
@@ -539,6 +545,20 @@ def production_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
     blend = str(layer.get("blend_mode", "Normal"))
     if blend != "Normal":
         errors.append(f"blend_mode={blend} 未在 CPU/Metal 基础域冻结")
+    # N02：qualifier/窗口是空间变化域（逐像素 matte）——基础域（点态）
+    # 与 pointwise LUT 导出（N13）都不可表达，显式列出而非静默忽略。
+    if not spatial_mask_supplied:
+        qualifier = layer.get("qualifier_params")
+        if isinstance(qualifier, Mapping) and qualifier.get("enabled"):
+            from src.features.color.core.qualifier_cpu import (
+                qualifier_postprocess_active,
+            )
+            errors.append("qualifier 非中性（空间变化域，不在点态基础域）")
+            if qualifier_postprocess_active(qualifier):
+                errors.append(
+                    "qualifier 后处理（blur/clean/denoise）不支持")
+        if layer.get("mask_shapes"):
+            errors.append("mask_shapes 窗口（空间变化域，不在点态基础域）")
     return errors
 
 
@@ -551,9 +571,12 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
     参数提取复用 ``composition_uniform_values``（与 GL uniform 同源），
     数学逐条移植 GRADING/CURVES SNIPPET；epilogue 为 composition main
     的 ``mix(input, blend(input, graded), mask*opacity)``（Normal）。
-    基础域外参数经 :func:`production_layer_domain_errors` 显式拒绝。
+    基础域外参数经 :func:`production_layer_domain_errors` 显式拒绝
+    （qualifier/窗口空间域由调用方供 ``mask`` 时放行——N02 run_plan_cpu
+    已用 keyer/combine 的 CPU 移植显式求值）。
     """
-    errors = production_layer_domain_errors(layer)
+    errors = production_layer_domain_errors(
+        layer, spatial_mask_supplied=mask is not None)
     if errors:
         raise UnsupportedNode("; ".join(errors))
     from src.features.color.core.composition_uniforms import (
@@ -608,17 +631,88 @@ def _corrector_for_params(params: Mapping[str, Any]):
     return corrector_oracle
 
 
+def _cpu_node_matte(base: np.ndarray, params: Mapping[str, Any],
+                    render_pass: "RenderPass",
+                    external_key: np.ndarray | None) -> np.ndarray | None:
+    """N02：corrector 的本地 matte（与 GL 执行器同一组合顺序）。
+
+    qualifier（keyer numpy 移植）→ 窗口（combine_masks_cpu）→ 外部 key
+    （invert_key_in 先取反，再相乘）。任一存在即返回 (h, w, 1) matte；
+    全无返回 None（blend 全效果语义）。不可 CPU 求值的域显式
+    UnsupportedNode（不静默近似）。
+    """
+    matte: np.ndarray | None = None
+    qualifier = params.get("qualifier_params") or {}
+    if qualifier.get("enabled"):
+        from src.features.color.core.qualifier_cpu import (
+            compute_qualifier_matte,
+            qualifier_postprocess_active,
+        )
+        if qualifier_postprocess_active(qualifier):
+            raise UnsupportedNode(
+                "qualifier 后处理（blur/clean/denoise）在 CPU 图路径不支持")
+        matte = compute_qualifier_matte(base, qualifier)
+    windows = params.get("mask_shapes")
+    if windows:
+        from src.features.color.core.layer import MaskGroup, MaskShape
+        from src.features.color.core.mask_shapes_cpu import combine_masks_cpu
+        items = []
+        for shape in windows:
+            data = dict(shape) if isinstance(shape, Mapping) else None
+            if data is None:
+                continue
+            cls = MaskGroup if data.get("type") == "group" else MaskShape
+            items.append(cls.from_dict(data))
+        if items:
+            h, w = base.shape[:2]
+            window_mask, report = combine_masks_cpu(items, w, h)
+            if report.unsupported:
+                _sid, stype, reason = report.unsupported[0]
+                raise UnsupportedNode(
+                    f"窗口形状 {stype} 在 CPU 图路径不支持: {reason}")
+            window_mask = window_mask[:, :, np.newaxis].astype(np.float32)
+            matte = (window_mask if matte is None
+                     else matte * window_mask)
+    if external_key is not None:
+        key = np.clip(external_key, 0.0, 1.0)
+        settings = (render_pass.params.get("key_settings")
+                    if isinstance(render_pass.params, Mapping) else None)
+        if isinstance(settings, Mapping) and settings.get("invert_key_in"):
+            key = 1.0 - key
+        matte = (key.astype(np.float32) if matte is None
+                 else matte * key)
+    return matte
+
+
 def run_plan_cpu(plan: ColorGraphRenderPlan, source: np.ndarray,
                  params_of: Callable[[RenderPass], Mapping[str, Any]]
                  ) -> CpuExecution:
-    """按 plan 在 CPU 执行（生产形态 Corrector 走生产 oracle）。"""
+    """按 plan 在 CPU 执行（生产形态 Corrector 走生产 oracle）。
+
+    N02：key 边与 GL 执行器同语义——corrector 的 qualifier/窗口/外部
+    key 组合为本节点 key_out 产物；key_mixer/alpha_output/outside 与
+    parallel key 槽从这里解析；引用无产物/缺边显式 UnsupportedNode
+    （不再有「拿上游图像当 key」「缺省全 1」的无依据替代）。
+    """
     outputs: dict[str, np.ndarray] = {}
+    key_outputs: dict[tuple[str, str], np.ndarray] = {}
     alpha_result: np.ndarray | None = None
 
     def _first(port_name: str):
         for port, ref in render_pass.inputs:
             if port == port_name and ref is not None:
                 return outputs.get(ref.node_id)
+        return None
+
+    def _first_key(port_name: str):
+        for port, ref in render_pass.inputs:
+            if port == port_name and ref is not None:
+                key = key_outputs.get((ref.node_id, ref.port or "key_out"))
+                if key is None:
+                    raise UnsupportedNode(
+                        f"{ref.node_id}.{ref.port} 无 key 产物（上游节点"
+                        "未产生 qualifier/窗口/外部 key matte——fail-closed）")
+                return key
         return None
 
     for render_pass in plan.passes:
@@ -633,16 +727,35 @@ def run_plan_cpu(plan: ColorGraphRenderPlan, source: np.ndarray,
             base = _first("image")
             if base is None:
                 base = source
+            external_key = _first_key("key_in")
+            matte = _cpu_node_matte(base, params, render_pass, external_key)
+            if matte is not None:
+                key_outputs[(render_pass.node_id, "key_out")] = matte
             outputs[render_pass.node_id] = _corrector_for_params(params)(
-                base, params)
+                base, params, mask=matte)
         elif render_pass.op == "parallel_mixer":
             base = _first("base")
             if base is None:
                 base = source
-            branches = [outputs[ref.node_id]
-                        for port, ref in render_pass.inputs
-                        if port == "branch" and ref is not None]
-            keys = [None] * len(branches)
+            key_refs = {ref.slot_id: ref for port, ref in render_pass.inputs
+                        if port == "key" and ref is not None}
+            branches = []
+            keys = []
+            for port, ref in render_pass.inputs:
+                if port != "branch" or ref is None:
+                    continue
+                branches.append(outputs[ref.node_id])
+                key_ref = key_refs.get(ref.slot_id) if ref.slot_id else None
+                if key_ref is None:
+                    keys.append(None)  # spec §1：未声明 key 的槽 = 全权重
+                    continue
+                key = key_outputs.get(
+                    (key_ref.node_id, key_ref.port or "key_out"))
+                if key is None:
+                    raise UnsupportedNode(
+                        f"{key_ref.node_id}.{key_ref.port} 无 key 产物"
+                        "（fail-closed）")
+                keys.append(key)
             outputs[render_pass.node_id] = parallel_mix(base, branches, keys)
         elif render_pass.op == "layer_mixer":
             slots = [outputs[ref.node_id]
@@ -660,17 +773,32 @@ def run_plan_cpu(plan: ColorGraphRenderPlan, source: np.ndarray,
             modes = [blend_mode] * max(0, len(slots) - 1)
             outputs[render_pass.node_id] = layer_mix(slots, opacities, modes)
         elif render_pass.op == "key_mixer":
-            keys = [outputs[ref.node_id]
-                    for _port, ref in render_pass.inputs if ref is not None]
-            outputs[render_pass.node_id] = key_mix(
-                keys, str(render_pass.params.get("mode", "add")))
+            # N02：key 边解析真实 key_out 产物；无 key 输入显式拒绝
+            refs = [ref for _port, ref in render_pass.inputs
+                    if ref is not None]
+            if not refs:
+                raise UnsupportedNode("KeyMixer 无 key 输入（fail-closed）")
+            keys = []
+            for ref in refs:
+                key = key_outputs.get((ref.node_id, ref.port or "key_out"))
+                if key is None:
+                    raise UnsupportedNode(
+                        f"{ref.node_id}.{ref.port} 无 key 产物（fail-closed）")
+                keys.append(key)
+            mixed = key_mix(keys, str(render_pass.params.get("mode", "add")))
+            outputs[render_pass.node_id] = mixed
+            # KeyMixer 输出端口是 key：登记 key 产物（alpha_output 消费）
+            key_outputs[(render_pass.node_id, "key")] = mixed
         elif render_pass.op == "outside":
             base = _first("image")
             if base is None:
                 base = source
-            referenced = _first("key_in")
-            complement = (outside_key(referenced) if referenced is not None
-                          else np.zeros_like(source[..., :1]))
+            referenced = _first_key("key_in")
+            if referenced is None:
+                raise UnsupportedNode(
+                    "Outside 无 key 输入（fail-closed，与 GL 执行器同语义）")
+            complement = outside_key(referenced)
+            key_outputs[(render_pass.node_id, "key_out")] = complement
             outputs[render_pass.node_id] = _corrector_for_params(params)(
                 base, params, mask=complement)
         elif render_pass.op == "splitter":
@@ -696,11 +824,12 @@ def run_plan_cpu(plan: ColorGraphRenderPlan, source: np.ndarray,
                        source)
             outputs[render_pass.node_id] = np.array(ref, copy=True)
         elif render_pass.op == "alpha_output":
-            key = next((outputs[r.node_id]
-                        for _p, r in render_pass.inputs if r is not None),
-                       None)
-            alpha_result = (np.clip(key[..., :1], 0.0, 1.0)
-                            if key is not None else None)
+            key = _first_key("key")
+            if key is None:
+                raise UnsupportedNode(
+                    "Alpha Output 无 key 输入（fail-closed）")
+            matte = np.clip(np.asarray(key, dtype=np.float32), 0.0, 1.0)
+            alpha_result = matte.reshape(matte.shape[0], matte.shape[1], -1)[..., :1]
             outputs[render_pass.node_id] = source.copy()
         else:
             raise UnsupportedNode(f"CPU oracle 未实现算子 {render_pass.op}")

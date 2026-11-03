@@ -57,11 +57,13 @@ METAL_CAPABILITY_CATALOG: Mapping[str, str] = {
     "shared_corrector": "fallback",
     "parallel_mixer": "exact",
     "layer_mixer": "exact",
-    "key_mixer": "exact",
-    "outside": "fallback",
+    # N02：key 通道（key_out 产物/key_in 消费）Metal 未接线——按
+    # 「不支持的显式禁用」置 unsupported（N14 跨后端域扩展时恢复）。
+    "key_mixer": "unsupported",
+    "outside": "unsupported",
     "splitter": "exact",
     "combiner": "exact",
-    "alpha_output": "exact",
+    "alpha_output": "unsupported",
     "compound": "unsupported",
 }
 
@@ -331,6 +333,15 @@ class ColorGraphMetalExecutor:
                     pass_index=render_pass.index)
             input_buf = self._input_for(render_pass, "image", node_outputs,
                                         source_buffer)
+            # N02：key_in 边（外部 key 消费）Metal 未接线——显式拒绝，
+            # 不用白 matte 顶替（key 通道接线归 N14）
+            if any(port == "key_in" and ref is not None
+                   for port, ref in render_pass.inputs):
+                raise MetalGraphFailure(
+                    "capability_unsupported",
+                    f"pass {render_pass.index}: Corrector 的 key_in 消费"
+                    "Metal 未接线（N14）——fail-closed",
+                    pass_index=render_pass.index)
             if layer.get("visible") is False:
                 out = pool.acquire(width * height * 8)
                 self._dispatch("graph_copy",
@@ -346,6 +357,15 @@ class ColorGraphMetalExecutor:
         if render_pass.op == "parallel_mixer":
             base = self._input_for(render_pass, "base", node_outputs,
                                    source_buffer)
+            # N02：声明的 key 槽（multi key 边）Metal 未接线——显式拒绝
+            # （未声明槽的白 key 是 spec §1 语义，保留）
+            if any(port == "key" and ref is not None
+                   for port, ref in render_pass.inputs):
+                raise MetalGraphFailure(
+                    "capability_unsupported",
+                    f"pass {render_pass.index}: Parallel Mixer 声明的 "
+                    "key 槽 Metal 未接线（N14）——fail-closed",
+                    pass_index=render_pass.index)
             white = self._white_buffer(width, height)
             current = base
             folded = False
@@ -402,9 +422,12 @@ class ColorGraphMetalExecutor:
                         key=lambda pr: (pr[1].slot_id if pr[1] else ""))
                     if ref is not None]
             if not keys:
-                # 缺 key：白 matte（拷贝进新租约，不共享缓存 buffer）
-                return self._copy(self._white_buffer(width, height),
-                                  width, height)
+                # N02：key_mixer 无 key 输入显式拒绝（不再白 matte）
+                raise MetalGraphFailure(
+                    "key_input_missing",
+                    f"pass {render_pass.index}: KeyMixer 无 key 输入"
+                    "（fail-closed）",
+                    pass_index=render_pass.index)
             mode_index = KEY_MODE_INDEX.get(
                 str(render_pass.params.get("mode", "add")), 0)
             current = keys[0]
@@ -431,11 +454,13 @@ class ColorGraphMetalExecutor:
                                        source_buffer)
             key_in = self._input_for(render_pass, "key_in", node_outputs,
                                      None)
-            if key_in is None:
-                # 与 CPU oracle 同语义：无 key → 无选区（complement = 0）
-                return self._copy(image_in, width, height)
-            return self._grading_pass(render_pass, layer, image_in, key_in,
-                                      width, height)
+            # N02：outside 的 key 通道（key_out 产物消费 + 补集）Metal
+            # 未接线（N14）；能力目录已 unsupported——此处防御性同语义
+            raise MetalGraphFailure(
+                "capability_unsupported",
+                f"pass {render_pass.index}: Outside 的 key 通道 Metal "
+                "未接线（N14）——fail-closed",
+                pass_index=render_pass.index)
 
         if render_pass.op == "splitter":
             base = self._input_for(render_pass, "image", node_outputs,
@@ -469,8 +494,12 @@ class ColorGraphMetalExecutor:
         if render_pass.op == "alpha_output":
             key = self._input_for(render_pass, "key", node_outputs, None)
             if key is None:
-                return self._copy(self._white_buffer(width, height),
-                                  width, height)
+                # N02：无 key 边显式拒绝（不再白 matte）
+                raise MetalGraphFailure(
+                    "key_input_missing",
+                    f"pass {render_pass.index}: Alpha Output 无 key 输入"
+                    "（fail-closed）",
+                    pass_index=render_pass.index)
             out = pool.acquire(width * height * 8)
             self._dispatch("graph_key_passthrough",
                            {0: key, 1: out,
