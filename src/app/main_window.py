@@ -1309,6 +1309,18 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.color_node_panel = ColorNodePanel()
         from src.app.controllers.color_node_preview import ColorNodeSourcePreview
         self.color_node_source_preview = ColorNodeSourcePreview(self)
+        # R08：逐节点已处理缩略图（独立 worker + standalone GL；GUI 零 GL）。
+        from src.app.controllers.node_thumbnail_evaluator import (
+            ColorNodeOutputPreview,
+        )
+        self.color_node_output_preview = ColorNodeOutputPreview()
+        self.color_node_output_preview.node_thumbnail_ready.connect(
+            self._on_node_output_thumbnail_ready)
+        self._node_thumbnail_timer = QTimer(self)
+        self._node_thumbnail_timer.setInterval(600)
+        self._node_thumbnail_timer.timeout.connect(
+            self._refresh_node_output_thumbnails)
+        self._node_thumbnail_timer.start()
         self.grading_panel = GradingPanel()
         # Native Tangent Hub integration is optional and runs its socket worker
         # off the Qt thread. It reuses the grading controller below instead of
@@ -2144,6 +2156,68 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             self.color_resource_controller = ColorResourceController(
                 self, catalog_provider=self.color_resource_catalog_provider)
         self.color_resource_catalog_provider.warm_background()
+
+    def _on_node_output_thumbnail_ready(self, node_id: str, image) -> None:
+        """GUI 线程：投递已评估节点输出（晚于卡片删除则忽略）。"""
+        view = self.color_node_panel.view
+        if node_id in view.cards and not image.isNull():
+            from PyQt6.QtGui import QPixmap
+            view.set_thumbnail(node_id, QPixmap.fromImage(image))
+
+    def _refresh_node_output_thumbnails(self) -> None:
+        """R08 demand：面板可见 + 源缩略图就绪时请求可见节点输出。"""
+        preview = getattr(self, "color_node_output_preview", None)
+        if preview is None:
+            return
+        panel = self.color_node_panel
+        if not panel.isVisible():
+            return
+        source_pixmap = getattr(panel.view, "_source_thumbnail", None)
+        if source_pixmap is None or source_pixmap.isNull():
+            return
+        graph_host = getattr(self, "color_graph_host", None)
+        coordinator = getattr(graph_host, "_coordinator", None)
+        ack = coordinator.last_ack if coordinator else None
+        graph_payload = ack.graph if ack is not None else None
+        if not isinstance(graph_payload, dict):
+            return
+
+        def graph_provider():
+            coordinator2 = getattr(getattr(self, "color_graph_host", None),
+                                   "_coordinator", None)
+            ack2 = coordinator2.last_ack if coordinator2 else None
+            return ack2.graph if isinstance(getattr(ack2, "graph", None), dict) else None
+
+        def source_provider():
+            import numpy as np
+            from PyQt6.QtGui import QImage
+            pixmap = getattr(panel.view, "_source_thumbnail", None)
+            if pixmap is None or pixmap.isNull():
+                return None
+            image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
+            ptr = image.constBits()
+            ptr.setsize(image.sizeInBytes())
+            arr = np.frombuffer(ptr, dtype=np.uint8).reshape(
+                image.height(), image.bytesPerLine())
+            arr = arr[:, :image.width() * 3].reshape(
+                image.height(), image.width(), 3)
+            return arr.astype(np.float32) / 255.0
+
+        from src.features.color.ui.node_editor_state import NodeKind
+        # 只请求权威图中存在的节点（草稿本地 id/已删节点不进 demand；
+        # 水合后新 id 会在下一拍补上）。
+        authoritative_ids = {node.get("node_id")
+                             for node in graph_payload.get("nodes", ())
+                             if isinstance(node, dict)}
+        node_ids = [node_id for node_id, card in panel.view.cards.items()
+                    if node_id in authoritative_ids
+                    and getattr(card.node, "kind", None) in (
+                        NodeKind.CORRECTOR, NodeKind.COMPOUND)]
+        preview.set_identity(
+            coordinator.session_id if coordinator else "",
+            getattr(graph_host, "_bound_stack_id", "") or "",
+            ack.graph_revision if ack else 0)
+        preview.request(graph_provider, source_provider, node_ids)
 
     def on_engine_error(self, message):
         # Hide progress bar on any error to ensure UI state recovery

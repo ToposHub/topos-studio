@@ -1,0 +1,11 @@
+{
+  "921eef27-cd8a-4f75-9143-03baecc23374": {
+    "bin_id": "921eef27-cd8a-4f75-9143-03baecc23374",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "9c75e37d-8663-4d83-a4a8-c5ec41c1e272"
+    ],
+    "timeline_ids": []
+  }
+}
