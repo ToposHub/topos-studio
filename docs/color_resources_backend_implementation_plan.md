@@ -145,7 +145,7 @@
 
 **验证**：节点01加非 identity LUT、02加明显FX，两个缩略图和源均可区分；改01→02依赖结果更新，独立分支不无效重算；删节点/切clip/关闭面板期间无旧回调；测缓存和峰值内存。R08完成后才可替换“source_thumbnail_only”验收状态。
 
-### R09 — 保存、版本、still、共享与跨工程资源闭包　[ ]
+### R09 — 保存、版本、still、共享与跨工程资源闭包　[x]（2026-11-04，证据 docs/validation/color_resources/r09_closure/；闭包收集+保存期自动迁移+缺失可修复；引用计数回收归 N06/R12）
 
 1. 以 graph 为权威收集资源引用闭包，覆盖 Compound 子图/共享定义/效果实例/LUT；资源 manifest 有版本和迁移，保留未知字段。
 2. 保存、另存、autosave、版本切换、Gallery still、copy/paste、跨工程粘贴均携带完整定义与资源；缺资源条目保留可修复状态。

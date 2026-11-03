@@ -1248,10 +1248,23 @@ class EditProjectIO(QObject):
         if effective_resources_data is None and effective_resource_files is None:
             try:
                 from src.shared.color.lut_resource_registry import (
+                    ensure_graph_lut_closure,
                     get_lut_resource_session,
                 )
+                session = get_lut_resource_session()
+                # R09：先确保图引用闭包（旧绝对路径自动迁移为工程资源；
+                # 缺失引用记 missing——不静默移除、不阻断保存）。
+                graphs = [stack.color_graph for stack in
+                          project.color_stacks.values()
+                          if getattr(stack, "color_graph", None) is not None]
+                closure = ensure_graph_lut_closure(graphs, session)
+                for ref in closure["missing"]:
+                    logger.warning(
+                        "project save: LUT 引用缺失（保留可修复状态）: %s",
+                        ref)
+                self._last_resource_closure_report = closure
                 effective_resources_data, effective_resource_files = \
-                    get_lut_resource_session().save_payload()
+                    session.save_payload()
             except Exception:  # noqa: BLE001 — 资源载荷失败不阻断保存
                 logger.exception("lut resource save payload failed")
                 effective_resources_data = None
