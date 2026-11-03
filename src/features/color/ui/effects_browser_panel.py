@@ -203,6 +203,33 @@ class ColorEffectsBrowser(QWidget):
         self.category_combo.blockSignals(False)
         self._refresh_resources()
 
+    def browser_state(self) -> dict:
+        """R10：用户库偏好（收藏/分类折叠/视图模式）——存用户配置，
+        不进工程 undo。"""
+        return {"favorites": sorted(self._favorites),
+                "collapsed": sorted(self._collapsed),
+                "grid": bool(self._grid)}
+
+    def set_browser_state(self, state: object) -> None:
+        if not isinstance(state, dict):
+            return
+        favorites = state.get("favorites")
+        if isinstance(favorites, list):
+            self._favorites = {str(f) for f in favorites if isinstance(f, str)}
+        collapsed = state.get("collapsed")
+        if isinstance(collapsed, list):
+            self._collapsed = {str(c) for c in collapsed if isinstance(c, str)}
+        grid = state.get("grid")
+        if isinstance(grid, bool) and grid is not self._grid:
+            self.view_button.setChecked(grid)
+        self._refresh_resources()
+
+    def missing_favorite_ids(self, known_ids: object) -> list[str]:
+        """收藏的资源 ID 缺失时可诊断（重命名/卸载的条目）。"""
+        known = {e.get("id") for e in self._resources} if known_ids is None \
+            else set(known_ids)
+        return sorted(f for f in self._favorites if f not in known)
+
     def set_target(self, node_id: str, label: str, editable: bool, reason: str = '') -> None:
         self._target_id = node_id
         self._editable = bool(node_id and editable)

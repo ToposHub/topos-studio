@@ -1979,21 +1979,55 @@ class ColorControllerMixin:
     # LUT operations
     # ------------------------------------------------------------------
 
+    def _graph_resource_route(self):
+        """R10：图模式资源路由——图会话 READY 且有活动 Corrector 时返回
+        正式命令适配器，否则 None（旧模式保留 legacy 行为）。"""
+        controller = getattr(self, 'color_resource_controller', None)
+        host = getattr(self, 'color_graph_host', None)
+        coordinator = getattr(host, '_coordinator', None)
+        from src.app.controllers.color_graph_controller import GraphSessionState
+        if controller is None or coordinator is None or \
+                coordinator.state is not GraphSessionState.READY:
+            return None
+        return controller
+
     def apply_lut_from_path(self, lut_path) -> None:
         """对当前图层应用指定路径的 LUT，成功后请求重绘与自动保存。
+
+        R10：图模式经正式命令（注册为工程资源 → set_lut），legacy 引擎
+        不再双写。
 
         Args:
             lut_path: LUT 文件（.cube 等）的绝对路径。
         """
+        route = self._graph_resource_route()
+        if route is not None:
+            from src.shared.color.lut_resource_registry import (
+                get_lut_resource_session,
+            )
+            results = get_lut_resource_session().import_files([str(lut_path)])
+            if results and results[0].entry is not None:
+                route.activate_resource(
+                    {"id": results[0].entry.uri, "kind": "lut",
+                     "available": True,
+                     "resource_uri": results[0].entry.uri})
+            return
         if self.engine.apply_lut(lut_path):
             self.request_render(); self._trigger_autosave()
 
     def on_lut_intensity_changed(self, intensity) -> None:
         """LUT 强度滑条变化：播放中走防抖渲染，暂停态直接重绘。
 
+        R10：图模式经 set_lut_strength 命令（legacy 引擎不双写）。
+
         Args:
             intensity: 0.0-1.0 的 LUT 混合强度。
         """
+        route = self._graph_resource_route()
+        if route is not None:
+            route.edit('set_lut_strength', {'strength': float(intensity),
+                                            'phase': 'commit'})
+            return
         self.engine.set_lut_intensity(intensity)
         self._invalidate_video_render_params_if_playing()
         if self._is_video_playing():
@@ -2002,7 +2036,11 @@ class ColorControllerMixin:
             self.request_render()
 
     def on_lut_reset(self) -> None:
-        """重置当前图层的 LUT 并重绘。"""
+        """重置当前图层的 LUT 并重绘。R10：图模式经 remove_lut 命令。"""
+        route = self._graph_resource_route()
+        if route is not None:
+            route.edit('remove_lut', {})
+            return
         self.engine.reset_lut(); self.request_render(); self._trigger_autosave()
 
     def on_lut_removed(self, lut_path: str) -> None:
@@ -2621,6 +2659,17 @@ class ColorControllerMixin:
             plugin_id: The plugin identifier (filename without extension)
             plugin_name: Display name for the plugin
         """
+        # R10：图模式经正式资源命令（add_effect → typed target → 图命令；
+        # legacy Layer 不再双写）。旧模式保留 legacy 行为。
+        route = self._graph_resource_route()
+        if route is not None:
+            from src.features.color.core.plugin_manager import get_plugin_manager
+            metadata = get_plugin_manager().get_plugin(plugin_id) or {}
+            route.activate_effect(
+                {"id": plugin_id, "kind": "effect", "name": plugin_name,
+                 "available": True, "parameters": metadata.get("params", [])})
+            return
+
         # Check if an active layer exists
         if self.engine.active_layer_index < 0:
             self.status_bar.showMessage("No layer selected. Please select a layer first.", 3000)

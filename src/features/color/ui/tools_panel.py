@@ -166,7 +166,7 @@ class ToolsPanel(QWidget):
         # self.lut_panel.lut_selected.connect(self.lut_selected.emit)
         # self.lut_panel.interaction_started.connect(self.interaction_started.emit)
         # self.lut_panel.interaction_ended.connect(self.interaction_ended.emit)
-        # self.lut_panel.intensity_changed.connect(self.lut_intensity_changed.emit)
+
         # self.lut_panel.lut_reset.connect(self.lut_reset.emit)
 
         self.mask_panel.shape_added.connect(self.mask_shape_added.emit)
@@ -232,8 +232,7 @@ class ToolsPanel(QWidget):
         self.effects_panel.set_params_dict(layer.effects_params)
         
         # LUT（AUD-25708：lut_panel 停用，恢复时连同上方信号连接一并启用）
-        # self.lut_panel.set_selected_lut(layer.active_lut_path)
-        # self.lut_panel.set_intensity(layer.lut_intensity)
+
         
         # Warper
         self.warper_panel.set_params(layer.warper_params)

@@ -1383,6 +1383,11 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         from src.features.color.ui.lut_browser_panel import ColorLutBrowser
         self.color_effects_browser = ColorEffectsBrowser(self)
         self.color_lut_browser = ColorLutBrowser(self)
+        # R10：库偏好为用户配置域（不进工程 undo；缺失收藏可诊断）。
+        self.color_effects_browser.set_browser_state(
+            self.config_manager.get('color_effects_browser_state', {}))
+        self.color_lut_browser.set_browser_state(
+            self.config_manager.get('color_lut_browser_state', {}))
         self.plugin_panel = PluginPanel(self.engine, self._legacy_color_resource_controls)
         self.plugin_panel.add_effect_requested.connect(self.add_plugin_to_current_layer)
         self.plugin_panel.ai_process_requested.connect(self._on_ai_plugin_process_requested)
@@ -2245,6 +2250,16 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
     # ================================================================
 
     def closeEvent(self, event) -> None:
+        # R10：保存资源浏览器用户偏好（收藏/视图/缩放；无像素缓存）。
+        try:
+            self.config_manager.set(
+                'color_effects_browser_state',
+                self.color_effects_browser.browser_state(), auto_save=False)
+            self.config_manager.set(
+                'color_lut_browser_state',
+                self.color_lut_browser.browser_state(), auto_save=False)
+        except Exception:  # noqa: BLE001 — 偏好失败不阻断关闭
+            pass
         """窗口关闭时按序停止后台线程，避免 QThread 析构崩溃。
 
         macOS 上 QThread::~QThread() 在线程仍运行时会 abort 整个进程
