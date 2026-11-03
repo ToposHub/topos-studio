@@ -406,6 +406,30 @@ def main() -> int:
                 (t0, r0), (t1, r1) = steady[0], steady[-1]
                 span_min = max((t1 - t0) / 60.0, 1e-6)
                 rss_slope = (r1 - r0) / span_min * 10.0
+            # N09 债务定位：按行为窗口分段斜率（哪个行为在涨）
+            def _window_slope(t0: float, t1: float) -> float | None:
+                seg = [(t, r) for t, r in self.rss_samples
+                       if t0 + 5.0 <= t <= t1]  # 窗口头 5s 缓冲剔除
+                if len(seg) < 4 or t1 - t0 < 20.0:
+                    return None
+                span_min = max((seg[-1][0] - seg[0][0]) / 60.0, 1e-6)
+                return round((seg[-1][1] - seg[0][1]) / span_min * 10.0, 1)
+            per_behavior: dict[str, dict[str, Any]] = {}
+            for t0, t1, behavior in self._behavior_windows:
+                if t0 - self.started < 60.0:
+                    continue  # 预热段不计（相对时间）
+                slope = _window_slope(t0, t1)
+                if slope is None:
+                    continue
+                entry = per_behavior.setdefault(behavior, {
+                    "windows": 0, "slopes": []})
+                entry["windows"] += 1
+                entry["slopes"].append(slope)
+            for behavior, entry in per_behavior.items():
+                slopes = entry.pop("slopes")
+                entry["mean_slope_mb_per_10min"] = round(
+                    sum(slopes) / len(slopes), 1)
+                entry["max_slope_mb_per_10min"] = max(slopes)
             # p95 口径：稳态（>60s）+ 播放相位的渲染帧间隔
             playback_phase = [(b - a) * 1000.0
                               for a, b in zip(self._playback_intervals,
@@ -469,6 +493,7 @@ def main() -> int:
                         "peak": round(max((r for _, r in
                                            self.rss_samples), default=0.0), 1),
                         "growth_mb_per_10min": round(rss_slope, 1),
+                        "per_behavior": per_behavior,
                     },
                     "counts": {
                         "frames": len(self.frame_times),

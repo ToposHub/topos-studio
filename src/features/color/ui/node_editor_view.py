@@ -181,6 +181,16 @@ class ColorNodeView(QGraphicsView):
         if self.show_thumbnails and node_id in self.cards:
             self.cards[node_id].set_thumbnail(pixmap)
 
+    def set_cache_hits(self, node_ids: Any) -> None:
+        """N06：按实际命中事件点亮/熄灭卡片命中徽标。
+
+        ``node_ids``：本帧真实命中缓存（hit 事件）的节点 id 集合——
+        不在场的一律熄灭（「状态仅实际命中后显示」，不用策略蓝条冒充）。
+        """
+        hits = set(node_ids or ())
+        for node_id, card in self.cards.items():
+            card.set_cache_hit(node_id in hits)
+
     def set_source_thumbnail(self, pixmap: Any, description: str = "") -> None:
         """Display a clearly identified source preview until node output exists.
 
@@ -831,7 +841,13 @@ class ColorNodeView(QGraphicsView):
                                        ("gamma", "Gamma", ("Use Timeline", "Linear", "Gamma 2.2", "Gamma 2.4", "sRGB", "ST2084", "HLG", "DaVinci Intermediate"))):
                 options = menu.addMenu(tr(key, title))
                 options.setEnabled(False)
-                options.menuAction().setToolTip(unsupported)
+                # N05：Color Space/Gamma 后端消费未交付——菜单保持禁用
+                # （此前引用未定义变量 unsupported，右键 Corrector 必
+                # NameError——N06 批次修复）
+                options.menuAction().setToolTip(
+                    tr("backend_option_unavailable",
+                       "This node option is not yet supported by the "
+                       "render backend."))
                 for value in values:
                     self._action(options, key + "_" + value.lower().replace(" ", "_"), value,
                                  lambda k=key, v=value: self._set_grade_value(k, v), checked=active.node_options.get(key, "Use Timeline") == value)
@@ -847,8 +863,11 @@ class ColorNodeView(QGraphicsView):
                     self._action(blend, "blend_" + mode.lower().replace(" ", "_"), mode, lambda m=mode: self._set_grade_value("blend_mode", m),
                                  checked=active.node_options.get("blend_mode", "Normal") == mode)
         cache = menu.addMenu(tr("node_cache", "Node Cache"))
-        cache.setEnabled(False)
-        cache.menuAction().setToolTip(tr("backend_option_unavailable", "This node option is not yet supported by the render backend."))
+        # N06：执行器 per-node 输出缓存已交付（Auto=分叉复用/On=强制/
+        # Off=禁止；预算 LRU + 世代老化 + 命中事件）——菜单启用。
+        cache.setToolTip(tr("node_cache_hint",
+                            "Auto: cache forked outputs · On: always · "
+                            "Off: never (within the node-cache budget)"))
         for mode in ("auto", "on", "off"):
             self._action(cache, "cache_" + mode, mode.title(), lambda m=mode: self.apply_edit("node_cache", lambda: self.state.set_node_fields(selected, cache_mode=m)), enabled=has_node,
                          checked=active is not None and active.cache_mode == mode)

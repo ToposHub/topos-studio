@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
@@ -73,6 +74,10 @@ class GraphExecutionResult:
     released_textures: int = 0
     diagnostic_code: str | None = None
     diagnostic_message: str | None = None
+    # N06：per-node 缓存事件 [(node_id, kind, bytes, reason)]——
+    # kind ∈ hit/stored/evicted/oversize/off/skip_auto；「状态仅实际命中
+    # 后显示」的 UI 依据（蓝条只表示策略 on，不冒充命中）。
+    cache_events: tuple = ()
 
 
 class _SplitPlanes:
@@ -107,9 +112,11 @@ class ColorGraphExecutor:
     """
 
     _POOL_MAX_PER_SIZE = 8
+    _NODE_CACHE_IDLE_GENERATIONS = 8
 
     def __init__(self, ctx: Any, pipeline: ShaderPipeline | None = None,
-                 *, backend_catalog: Mapping[str, str] | None = None) -> None:
+                 *, backend_catalog: Mapping[str, str] | None = None,
+                 node_cache_budget_bytes: int = 256 * 1024 * 1024) -> None:
         self.ctx = ctx
         self.pipeline = pipeline or ShaderPipeline(ctx)
         self.backend_catalog = backend_catalog
@@ -122,6 +129,20 @@ class ColorGraphExecutor:
         # 本次 execute_plan 的中间纹理 dtype（单飞语义：宿主在租约释放
         # 前不并发提交；execute_plan 进入时设置、finally 恢复）
         self._run_dtype = "f2"
+        # N06：跨请求 per-node 输出缓存（LRU + 字节预算；纹理所有权从
+        # lease 转入缓存，evict 时归还池）。键含宿主 cache_context
+        # （源内容 revision 等——视频播放每帧失效，暂停调色时命中分叉）。
+        self._node_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
+        self._node_cache_bytes = 0
+        # 世代老化：条目 (tex, gen)；连续 _NODE_CACHE_IDLE_GENERATIONS
+        # 次 execute_plan 未命中即淘汰（删节点条目有界释放；换 viewer
+        # 目标不立即失效——命中会续命）
+        self._exec_generation = 0
+        self._node_cache_budget = int(node_cache_budget_bytes)
+        self.node_cache_stats: dict[str, int] = {
+            "hit": 0, "stored": 0, "oversize_rejected": 0,
+            "evicted_budget": 0, "swept_stale": 0, "policy_off": 0,
+            "auto_skipped": 0}
 
     # ── 纹理池 ──
 
@@ -155,7 +176,7 @@ class ColorGraphExecutor:
                 pass
 
     def release_pool(self) -> int:
-        """释放池内全部空闲纹理（宿主清理时调用）；返回释放数。"""
+        """释放池内全部空闲纹理 + 节点缓存（宿主清理时调用）；返回释放数。"""
         released = 0
         for free in self._pool.values():
             for tex in free:
@@ -165,6 +186,15 @@ class ColorGraphExecutor:
                 except Exception:  # noqa: BLE001
                     pass
         self._pool.clear()
+        # N06：节点缓存纹理真实释放（不是还池——池已被清空）
+        for _key, (tex, _gen) in self._node_cache.items():
+            try:
+                tex.release()
+                released += 1
+            except Exception:  # noqa: BLE001
+                pass
+        self._node_cache.clear()
+        self._node_cache_bytes = 0
         for tex in (getattr(self, "_white_mattes", None) or {}).values():
             try:
                 tex.release()
@@ -176,6 +206,120 @@ class ColorGraphExecutor:
 
     def pooled_texture_count(self) -> int:
         return sum(len(v) for v in self._pool.values())
+
+    # ── N06：per-node 输出缓存 ─────────────────────────────────────
+
+    @staticmethod
+    def _texture_bytes(width: int, height: int, dtype: str) -> int:
+        per_px = 8 if dtype == "f2" else 16
+        return int(width) * int(height) * per_px
+
+    def _node_cache_eligible(self, render_pass: RenderPass,
+                             cache_events: list) -> bool:
+        """Auto/On/Off 判定（可解释优先：v1 Auto = 分叉复用）。
+
+        - Off：永不缓存（纹理池照用——那是内存复用，不是结果复用）；
+        - On：预算内强制缓存；
+        - Auto（默认）：``consumers >= 2``（输出被 ≥2 个下游消费——编译
+          器现成信号；耗时阈值判定后续接 GlPassTimer 再议）。
+        source pass 恒不缓存（源内容随帧变，cone_key 不含帧身份）。
+        """
+        if render_pass.op == "source" or not render_pass.cone_key:
+            return False
+        mode = "auto"
+        if isinstance(render_pass.params, Mapping):
+            mode = str(render_pass.params.get("cache_mode", "auto"))
+        if mode == "off":
+            self.node_cache_stats["policy_off"] += 1
+            cache_events.append((render_pass.node_id, "off", 0, "policy_off"))
+            return False
+        if mode == "on":
+            return True
+        if render_pass.consumers >= 2:
+            return True
+        self.node_cache_stats["auto_skipped"] += 1
+        cache_events.append((render_pass.node_id, "skip_auto", 0,
+                             f"consumers={render_pass.consumers}"))
+        return False
+
+    def _node_cache_key(self, render_pass: RenderPass, width: int,
+                        height: int, cache_context: tuple) -> tuple:
+        return (tuple(cache_context), render_pass.node_id,
+                render_pass.cone_key, int(width), int(height),
+                self._run_dtype)
+
+    def _node_cache_lookup(self, render_pass: RenderPass, width: int,
+                           height: int, cache_context: tuple,
+                           cache_events: list) -> Any:
+        if not self._node_cache_eligible(render_pass, cache_events):
+            return None
+        key = self._node_cache_key(render_pass, width, height,
+                                   cache_context)
+        entry = self._node_cache.get(key)
+        if entry is None:
+            return None
+        self._node_cache.move_to_end(key)  # LRU 命中续命
+        self._node_cache[key] = (entry[0], self._exec_generation)
+        self.node_cache_stats["hit"] += 1
+        cache_events.append((render_pass.node_id, "hit",
+                             self._texture_bytes(width, height,
+                                                 self._run_dtype),
+                             "lru"))
+        return entry[0]
+
+    def _node_cache_store(self, render_pass: RenderPass, tex: Any,
+                          width: int, height: int, cache_context: tuple,
+                          cache_events: list) -> bool:
+        if not self._node_cache_eligible(render_pass, cache_events):
+            return False
+        size = self._texture_bytes(width, height, self._run_dtype)
+        if size > self._node_cache_budget:
+            self.node_cache_stats["oversize_rejected"] += 1
+            cache_events.append((render_pass.node_id, "oversize", size,
+                                 f"budget={self._node_cache_budget}"))
+            return False
+        key = self._node_cache_key(render_pass, width, height,
+                                   cache_context)
+        old = self._node_cache.pop(key, None)
+        if old is not None:
+            self._node_cache_bytes -= self._texture_bytes(
+                width, height, self._run_dtype)
+            self._release_texture(old[0])
+        self._node_cache[key] = (tex, self._exec_generation)
+        self._node_cache_bytes += size
+        # 预算淘汰：最旧条目归还池直至回到预算内（可解释：evicted 事件）
+        while self._node_cache_bytes > self._node_cache_budget:
+            evict_key, (evict_tex, _gen) = self._node_cache.popitem(
+                last=False)
+            evict_bytes = self._texture_bytes(evict_key[3], evict_key[4],
+                                              evict_key[5])
+            self._node_cache_bytes -= evict_bytes
+            self._release_texture(evict_tex)
+            self.node_cache_stats["evicted_budget"] += 1
+            cache_events.append((evict_key[1], "evicted", evict_bytes,
+                                 "budget"))
+        self.node_cache_stats["stored"] += 1
+        cache_events.append((render_pass.node_id, "stored", size, "policy"))
+        return True
+
+    def _node_cache_sweep(self, pass_ids: set,
+                          cache_events: list) -> None:
+        """世代老化清扫：连续 N 次 execute_plan 未命中的条目淘汰。
+
+        删除的节点不再被任何 pass 命中 → 有界代数后释放；换 viewer
+        目标（cone 变化）不立即失效——条目重新被命中即续命
+        （「下游选择不误失效」）。
+        """
+        idle = self._NODE_CACHE_IDLE_GENERATIONS
+        stale = [key for key, (_tex, gen) in self._node_cache.items()
+                 if self._exec_generation - gen > idle]
+        for key in stale:
+            tex, _gen = self._node_cache.pop(key)
+            self._node_cache_bytes -= self._texture_bytes(
+                key[3], key[4], key[5])
+            self._release_texture(tex)
+            self.node_cache_stats["swept_stale"] += 1
+            cache_events.append((key[1], "swept", 0, "idle"))
 
     # ── 主入口 ──
 
@@ -192,6 +336,7 @@ class ColorGraphExecutor:
         bind_aux: Callable[[Any, Mapping[str, Any]], None] | None = None,
         matte_provider: Callable[[Mapping[str, Any], Any], Any] | None = None,
         dtype: str = "f2",
+        cache_context: tuple = (),
     ) -> GraphExecutionResult:
         """执行 plan；source pass 消费 ``source_texture``（租借不持有）。
 
@@ -258,29 +403,63 @@ class ColorGraphExecutor:
             key_outputs.clear()
             return released
 
+        self._exec_generation += 1
+        # N06 v1 边界：key_out/key 产物被下游引用的节点不入缓存——
+        # key 通道（key_outputs）是请求内状态，缓存命中不会重建它
+        key_producer_ids = {
+            ref.node_id for p in plan.passes
+            for _port, ref in p.inputs
+            if ref is not None and ref.port in ("key_out", "key")}
         try:
             executed = 0
+            cache_events: list[tuple] = []
+            pass_ids = {p.node_id for p in plan.passes}
             for render_pass in plan.passes:
                 if cancel(request_id):
                     raise GraphExecutionCancelled(
                         request_id, render_pass.index)
 
+                # N06：查缓存（Off/不eligible 跳过；命中直接作为本 pass
+                # 输出——不执行、不 lease，纹理所有权在缓存）
+                cached = None
+                if render_pass.node_id not in key_producer_ids:
+                    cached = self._node_cache_lookup(
+                        render_pass, width, height, cache_context,
+                        cache_events)
+                if cached is not None:
+                    node_outputs[render_pass.node_id] = cached
+                    continue
+
                 out_tex = self._execute_pass(
                     render_pass, source_texture, node_outputs,
                     layer_param_provider, render_quad, width, height,
                     bind_aux, matte_provider, key_outputs, leases)
-                leases.append(_Lease(out_tex, render_pass.node_id,
-                                     render_pass.release_after))
+                lease = _Lease(out_tex, render_pass.node_id,
+                               render_pass.release_after)
+                leases.append(lease)
                 node_outputs[render_pass.node_id] = out_tex
                 executed += 1
+                # N06：成功后按策略入缓存（所有权从 lease 转入缓存——
+                # 从租约表移除，liveness/失败退栈不再触碰该纹理）。
+                # 最终 pass 的输出归发布租约持有（release_revision 释放）
+                # ——不入缓存。
+                if (render_pass.index != plan.passes[-1].index
+                        and render_pass.node_id not in key_producer_ids
+                        and self._node_cache_store(
+                            render_pass, out_tex, width, height,
+                            cache_context, cache_events)):
+                    leases.remove(lease)
 
                 # liveness：release_after == 当前 index 的中间纹理归还
                 due = [l for l in leases
                        if l.release_after == render_pass.index
                        and l.node_id != plan.passes[-1].node_id]
-                for lease in due:
-                    leases.remove(lease)
-                    _release_lease(lease)
+                for due_lease in due:
+                    leases.remove(due_lease)
+                    _release_lease(due_lease)
+
+            # N06：陈旧清扫——当前依赖锥之外的节点条目淘汰（删节点/改图）
+            self._node_cache_sweep(pass_ids, cache_events)
 
             final = plan.passes[-1]
             output_texture = node_outputs[final.node_id]
@@ -291,7 +470,8 @@ class ColorGraphExecutor:
                 output_size=(width, height),
                 graph_revision=0,
                 executed_passes=executed,
-                released_textures=len(plan.passes) - 1)
+                released_textures=len(plan.passes) - 1,
+                cache_events=tuple(cache_events))
             previous = self._published.get(request_id)
             if previous is not None and previous is not result:
                 # 同 id 覆盖发布：旧输出已无人释放——归还池防泄漏

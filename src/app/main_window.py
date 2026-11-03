@@ -1318,6 +1318,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self._node_thumbnail_timer.setInterval(600)
         self._node_thumbnail_timer.timeout.connect(
             self._refresh_node_output_thumbnails)
+        self._node_thumbnail_timer.timeout.connect(
+            self._refresh_node_cache_hits)
         self._node_thumbnail_timer.start()
         self.grading_panel = GradingPanel()
         # Native Tangent Hub integration is optional and runs its socket worker
@@ -2211,6 +2213,23 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         if node_id in view.cards and not image.isNull():
             from PyQt6.QtGui import QPixmap
             view.set_thumbnail(node_id, QPixmap.fromImage(image))
+
+    def _refresh_node_cache_hits(self) -> None:
+        """N06：按最近一次图执行的 hit 事件点亮卡片命中徽标。
+
+        「状态仅实际命中后显示」——事件来自渲染线程的
+        ``last_node_cache_events``（只读快照），无事件/非命中一律熄灭。
+        """
+        panel = getattr(self, "color_node_panel", None)
+        renderer = getattr(self.engine, "renderer", None)
+        events = getattr(renderer, "last_node_cache_events", None)
+        if panel is None or not events:
+            return
+        if not panel.isVisible():
+            return
+        hits = {node_id for node_id, kind, *_rest in events
+                if kind == "hit"}
+        panel.view.set_cache_hits(hits)
 
     def _refresh_node_output_thumbnails(self) -> None:
         """R08 demand：面板可见 + 源缩略图就绪时请求可见节点输出。"""
