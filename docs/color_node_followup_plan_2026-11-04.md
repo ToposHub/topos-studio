@@ -27,7 +27,7 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 
 | 顺序 | 编号 | 状态 | 交付目标 | 前置 |
 |---|---|---|---|---|
-| P0 | L01 | 最大高度已实现，完整回归待办 | Color 底部工具上限、保存布局与拖拽体验 | 无 |
+| P0 | L01 | 已完成（410px 上限 + 全量原生回归通过：旧布局启动钳制/拖拽极限/浮动解除/重停靠恢复/切页往返/保存重启保持） | Color 底部工具上限、保存布局与拖拽体验 | 无 |
 | P0 | V01 | 已完成（compound id 重映射根因修复；普通/resources 双路径 passed + 阻断负路径 exit 1） | 逐节点预览真实生成及脚本不能假绿 | 无 |
 | P0 | R12-A | 未通过 | 30 分钟资源与播放性能 | V01 |
 | P0 | R12-B | 未验收 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
@@ -70,6 +70,28 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 工具不得高于色轮达到 100px 半径所需高度；色轮下的所有数值可操作，
 Viewer/Nodes 获得释放的高度。保存→重启→切 Edit→切 Color→浮动/停靠→
 重启后仍受限；小屏与 4K 均无控件遮挡。记录几何断言和原生前后截图。
+
+**回归结果**（2026-11-05，证据 `docs/validation/color_resources/l01_layout_cap/`，
+驱动 `scripts/validate_color_layout_cap.py`，原生 macOS 进程）：
+- **seed**：解除上限后底部工具行拉至 497px（复现旧版半屏底栏），恢复
+  上限即钳到 410，释放高度实际落入 Viewer/Nodes（各 +87px）；
+- **restore**：旧版超高布局（497px blob）启动恢复被钳（最高 315）；
+  separator 拖至极限不超上限；浮动时解除上限（可调至 760px）、重停靠
+  底部恢复 410；Edit→Color 往返后仍受限；正常保存落盘；
+- **restart**：保存→重启后仍钳在 410；
+- **radius**：真实主题（DARK_THEME 13px 字体）下，900/1100/1260/1500px
+  宽 × 面板高 403px（= 410 dock 上限 − 7px 框架）时色轮半径恰为
+  100px，510px 无额外收益；QT_SCALE_FACTOR 1.0/1.5/2.0 三档一致。
+  注意：无主题的裸 Qt 探针（系统 13pt 字体）在同高度只测得 98px，
+  属探针伪影——pytest 环境为确定性 Fusion/Sans Serif 9，与真实主题
+  两个环境下 410 上限都恰好对应半径 100；
+- **最小可操作高度**（主题下 minimumSizeHint）：GradingPanel 293、
+  Blur/Sharpen 252、Qualifier 116；dock 内实测 Mask 306、Curves 291、
+  ColorMapping 293、Tracker 276——均高于已否决的 160px 全组滚动方案；
+- 左区仅 Gallery/LUT/Effects 三者 tabified，Gallery 下方无异常空 Dock；
+  底部释放高度由 dockViewport/dockLayers 获得（1400px 窗口下各 542px）；
+- 物理小屏/物理 4K 设备行：本机无对应设备，`NOT RUN`（逻辑像素等价性
+  已由三档 QT_SCALE_FACTOR 覆盖）。
 
 ### V01 — 逐节点缩略图与原生校验脚本（已完成 2026-11-05）
 

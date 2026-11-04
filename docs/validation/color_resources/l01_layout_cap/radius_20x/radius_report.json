@@ -1,0 +1,29 @@
+{
+  "phase": "radius",
+  "scale_factor": "2.0",
+  "wheel_radii": {
+    "900": {
+      "at_cap": 100.0,
+      "above_cap": 100.0
+    },
+    "1100": {
+      "at_cap": 100.0,
+      "above_cap": 100.0
+    },
+    "1260": {
+      "at_cap": 100.0,
+      "above_cap": 100.0
+    },
+    "1500": {
+      "at_cap": 100.0,
+      "above_cap": 100.0
+    }
+  },
+  "radius_reaches_100_at_cap": true,
+  "radius_capped_above_cap": true,
+  "minimum_size_hint_heights": {
+    "GradingPanel": 293,
+    "BlurSharpenPanel": 252,
+    "QualifierPanel": 116
+  }
+}
