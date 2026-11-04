@@ -378,7 +378,6 @@
     "masks": "マスク",
     "qualifier": "クオリファイアー",
     "lut": "3D LUT",
-    "soft_clip": "ソフトクリップ",
     "camera_raw": "Camera Raw",
     "analysis": "解析",
     "export": "書き出し",
@@ -562,21 +561,6 @@
     "gain": "ゲイン",
     "contrast": "コントラスト",
     "reset_tooltip": "すべての RAW パラメータをリセット"
-  },
-  "soft_clip": {
-    "title": "ソフトクリップ",
-    "high_shoulder": "ハイ / ショルダー",
-    "low_toe": "ロー / トー",
-    "global_tone": "グローバル / トーン",
-    "high_threshold": "ハイしきい値",
-    "white_point": "ホワイトポイント",
-    "shoulder": "ショルダー",
-    "low_threshold": "ローしきい値",
-    "black_point": "ブラックポイント",
-    "toe": "トー",
-    "exposure": "露出",
-    "contrast": "コントラスト",
-    "reset_tooltip": "すべてのパラメータをリセット"
   },
   "analysis": {
     "title": "RGB ウェーブフォーム",

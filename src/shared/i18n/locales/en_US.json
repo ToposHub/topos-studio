@@ -2867,5 +2867,29 @@
   },
   "fps_indicator": {
     "tooltip": "Realtime preview FPS"
+  },
+  "tracker": {
+    "stabilizer": {
+      "analyze": "Stabilize",
+      "bypass": "Bypass Stabilization",
+      "camera_lock": "Camera Lock",
+      "cropping_ratio": "Cropping Ratio",
+      "crop_limited": " · Compensation limited by crop",
+      "failed_frames": " · {count} frames uncompensated",
+      "insufficient_motion": "Not enough reliable camera motion; try Similarity or Translation",
+      "mode_changed": "Mode changed; click Stabilize to analyze again",
+      "mode_perspective": "Perspective",
+      "mode_similarity": "Similarity",
+      "mode_translation": "Translation",
+      "needs_video": "At least two video frames are required",
+      "progress": "Analyzing {done} / {total} · {percent}%",
+      "reset": "Reset Stabilization",
+      "result": "{done} / {total} frames · Zoom {zoom}×",
+      "smooth": "Smooth",
+      "stop": "Stop",
+      "strength": "Strength",
+      "title": "Tracker - Stabilizer",
+      "zoom": "Zoom"
+    }
   }
 }

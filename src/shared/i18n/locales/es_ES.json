@@ -378,7 +378,6 @@
     "masks": "Máscaras",
     "qualifier": "Calificador",
     "lut": "LUT 3D",
-    "soft_clip": "Recorte suave",
     "camera_raw": "Camera Raw",
     "analysis": "Análisis",
     "export": "Exportar",
@@ -562,21 +561,6 @@
     "gain": "Gain",
     "contrast": "Contraste",
     "reset_tooltip": "Restablecer todos los parámetros RAW"
-  },
-  "soft_clip": {
-    "title": "Recorte suave",
-    "high_shoulder": "Alto / Hombro",
-    "low_toe": "Bajo / Punta",
-    "global_tone": "Global / Tono",
-    "high_threshold": "Umbral alto",
-    "white_point": "Punto blanco",
-    "shoulder": "Hombro",
-    "low_threshold": "Umbral bajo",
-    "black_point": "Punto negro",
-    "toe": "Punta",
-    "exposure": "Exposición",
-    "contrast": "Contraste",
-    "reset_tooltip": "Restablecer todos los parámetros"
   },
   "analysis": {
     "title": "Forma de onda RGB",

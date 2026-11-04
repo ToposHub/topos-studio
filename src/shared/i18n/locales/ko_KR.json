@@ -378,7 +378,6 @@
     "masks": "마스크",
     "qualifier": "퀄리파이어",
     "lut": "3D LUT",
-    "soft_clip": "소프트 클립",
     "camera_raw": "Camera Raw",
     "analysis": "분석",
     "export": "내보내기",
@@ -562,21 +561,6 @@
     "gain": "게인",
     "contrast": "대비",
     "reset_tooltip": "모든 RAW 파라미터 재설정"
-  },
-  "soft_clip": {
-    "title": "소프트 클립",
-    "high_shoulder": "하이 / 숄더",
-    "low_toe": "로우 / 토",
-    "global_tone": "글로벌 / 톤",
-    "high_threshold": "하이 임계값",
-    "white_point": "화이트 포인트",
-    "shoulder": "숄더",
-    "low_threshold": "로우 임계값",
-    "black_point": "블랙 포인트",
-    "toe": "토",
-    "exposure": "노출",
-    "contrast": "대비",
-    "reset_tooltip": "모든 파라미터 재설정"
   },
   "analysis": {
     "title": "RGB 웨이브폼",
