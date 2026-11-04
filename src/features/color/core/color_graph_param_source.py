@@ -90,6 +90,17 @@ def node_layer_payload(node: Any, *,
         if lut_ref is not None:
             payload["active_lut_path"] = lut_ref
             payload["lut_intensity"] = lut_strength
+    # N10：节点关键帧域合并（params 逐 param 胜出 legacy 基底；命令与
+    # 播放评估/导出读取同域——evaluate_grade_keyframes 消费点不变）
+    node_keyframes = params.get("grade_keyframes")
+    if isinstance(node_keyframes, Mapping) and node_keyframes:
+        merged_kf = dict(payload.get("grade_keyframes") or {})
+        for track_name, track in node_keyframes.items():
+            if isinstance(track, Mapping) and track.get("keyframes"):
+                merged_kf[str(track_name)] = {
+                    "keyframes": unfreeze_params(
+                        list(track["keyframes"]))}
+        payload["grade_keyframes"] = merged_kf
     # 曲线 LUT 重建（save/load 语义：控制点持久化，LUT 是缓存）。
     # 输出为原生嵌套 list（与 Layer.to_dict 持久化形态一致；执行器/
     # oracle 侧 np.asarray 同样可用）
@@ -129,18 +140,63 @@ def _iter_corrector_nodes(graph: ColorGraphData):
 
 def graph_node_layer_provider(
     graph: ColorGraphData,
+    frame: int | None = None,
 ) -> Callable[[str], Mapping[str, Any] | None]:
     """``layer_param_provider`` 工厂：node_id → 合并后的 Layer DTO。
 
     与 ``ColorGraphExecutor.execute_plan(layer_param_provider=...)`` 直接
     对接；快照图（``ColorGraphSnapshot.graph``）与活动图同构可用。
     compound children 一并编入（plan 按 inline 成员 id 取参）。
+
+    N10：``frame`` 非 None 时对带 ``params.grade_keyframes`` 轨道的节点
+    按帧求值（``evaluate_grade_keyframes``——与 legacy 预览/导出同一求
+    值函数、同一源帧域）；轨道转换按 graph_revision 缓存避免每帧重建。
     """
     payloads: dict[str, dict[str, Any] | None] = {
         n.node_id: node_layer_payload(n) for n in _iter_corrector_nodes(graph)
     }
+    evaluated: dict[str, dict[str, Any] | None] | None = None
+    if frame is not None:
+        from src.features.color.core.grade_keyframes import (
+            GradeKeyframe, GradeKeyframeTrack, evaluate_grade_keyframes,
+        )
+        evaluated = {}
+        for n in _iter_corrector_nodes(graph):
+            payload = payloads.get(n.node_id)
+            if not payload:
+                continue
+            kf = payload.get("grade_keyframes")
+            if not kf:
+                continue
+            tracks: dict[str, GradeKeyframeTrack] = {}
+            for track_name, track_data in kf.items():
+                if not isinstance(track_data, Mapping):
+                    continue
+                points = []
+                for entry in (track_data.get("keyframes") or []):
+                    if not isinstance(entry, Mapping):
+                        continue
+                    try:
+                        points.append(GradeKeyframe(
+                            int(entry.get("frame", -1)),
+                            entry.get("value"),
+                            str(entry.get("interpolation", "linear"))))
+                    except (TypeError, ValueError):
+                        continue
+                if points:
+                    tracks[str(track_name)] = GradeKeyframeTrack(
+                        str(track_name), points)
+            if not tracks:
+                continue
+            patched = evaluate_grade_keyframes(
+                tracks, int(frame), dict(payload.get("grading_params") or {}))
+            merged = dict(payload)
+            merged["grading_params"] = patched
+            evaluated[n.node_id] = merged
 
     def provide(node_id: str) -> Mapping[str, Any] | None:
+        if evaluated is not None:
+            return evaluated.get(node_id)
         return payloads.get(node_id)
 
     return provide

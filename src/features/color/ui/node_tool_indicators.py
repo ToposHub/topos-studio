@@ -87,6 +87,12 @@ def detect_tool_indicators(layer_payload: Mapping[str, Any] | None,
         merged = dict(_mapping(payload.get(layer_key)))
         merged.update(_mapping(params.get(graph_key)))
         payload[layer_key] = merged
+    # N10：图命令域关键帧进徽标判据（此前只识别 legacy_payload 元数据）
+    params_kf = _mapping(params.get("grade_keyframes"))
+    if params_kf:
+        merged_kf = dict(_mapping(payload.get("grade_keyframes")))
+        merged_kf.update(params_kf)
+        payload["grade_keyframes"] = merged_kf
     for key in ("opacity", "blend_mode"):
         if key in params:
             payload[key] = params[key]
