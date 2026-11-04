@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QColor, QImage
 
 from src.features.color.ui.lut_browser_panel import ColorLutBrowser
 from src.features.color.ui.node_resource_mime import decode_resource_mime, resource_mime_data
@@ -21,24 +22,25 @@ def test_search_folders_and_favorites_filter_catalog(qtbot: Any) -> None:
     panel = ColorLutBrowser()
     qtbot.addWidget(panel)
     panel.set_resources(entries())
-    assert panel.list_widget.count() == 3
+    assert panel.list_widget.count() == 5  # Folders and LUTs share the root grid.
+    assert set(panel.visible_entry_ids()) == {'warm', 'cool', 'log'}
     panel.search_edit.setText('print')
     assert panel.list_widget.count() == 1
     assert panel.list_widget.item(0).text() == 'Warm Print'
     panel.search_edit.clear()
-    panel._folder = 'Film'
-    panel._populate()
+    panel._navigate('Film')
     assert panel.list_widget.count() == 2
     panel._toggle_favorite('cool')
     panel.favorite_button.setChecked(True)
     assert panel.list_widget.count() == 1
-    assert panel.list_widget.item(0).text() == '★ Cool Night'
+    assert panel.list_widget.item(0).text() == 'Cool Night'
 
 
 def test_activation_requires_explicit_editable_target(qtbot: Any) -> None:
     panel = ColorLutBrowser()
     qtbot.addWidget(panel)
     panel.set_resources(entries())
+    panel._navigate('Film/Print')
     requested = []
     panel.resource_activated.connect(requested.append)
     item = panel.list_widget.item(0)
@@ -85,6 +87,7 @@ def test_list_mode_and_thumbnail_zoom_preserve_selection(qtbot: Any) -> None:
     qtbot.addWidget(panel)
     panel.resize(360, 520)
     panel.set_resources(entries())
+    panel._navigate('Film/Print')
     panel._select_resource('warm')
     panel._set_view_mode(False)
     assert panel.selected_resource_id() == 'warm'
@@ -93,3 +96,53 @@ def test_list_mode_and_thumbnail_zoom_preserve_selection(qtbot: Any) -> None:
     panel.zoom_slider.setValue(140)
     assert panel.list_widget.iconSize().width() == 140
     assert panel.selected_resource_id() == 'warm'
+
+
+def test_resolve_navigation_search_and_folder_tiles(qtbot: Any) -> None:
+    panel = ColorLutBrowser()
+    qtbot.addWidget(panel)
+    panel.set_resources(entries())
+    assert not panel.search_row.isVisible()
+    panel.search_button.setChecked(True)
+    assert not panel.search_row.isHidden()
+    panel.search_edit.setText('night')
+    assert panel.visible_entry_ids() == ['cool']
+    panel.search_button.setChecked(False)
+    assert panel.search_edit.text() == ''
+
+    film = next(panel.list_widget.item(index) for index in range(panel.list_widget.count())
+                if panel.list_widget.item(index).text() == 'Film')
+    panel._activate(film)
+    assert panel.path_label.text() == 'Film'
+    assert {panel.list_widget.item(index).text() for index in range(panel.list_widget.count())} == {'Night', 'Print'}
+    panel._navigate_history(-1)
+    assert panel.path_label.text() == 'LUTs'
+    assert panel.back_button.isEnabled() is False
+    panel._navigate_history(1)
+    assert panel.path_label.text() == 'Film'
+
+
+def test_list_columns_and_node_inspector_are_available(qtbot: Any) -> None:
+    panel = ColorLutBrowser()
+    qtbot.addWidget(panel)
+    panel.set_resources(entries())
+    panel._set_view_mode(False)
+    assert not panel.list_header.isHidden()
+    assert panel._delegate.grid_mode is False
+    panel.set_target('n1', '01', True)
+    panel.set_current_lut('warm', 0.5)
+    assert panel.strength_slider.isEnabled()
+    assert panel.inspector.isHidden()
+
+
+def test_thumbnail_replaces_root_grid_placeholder(qtbot: Any) -> None:
+    panel = ColorLutBrowser()
+    qtbot.addWidget(panel)
+    panel.set_resources(entries())
+    image = QImage(96, 60, QImage.Format.Format_RGB32)
+    image.fill(QColor('#a03142'))
+    panel.set_thumbnail('warm', image)
+    item = next(panel.list_widget.item(index) for index in range(panel.list_widget.count())
+                if panel.list_widget.item(index).data(Qt.ItemDataRole.UserRole).get('id') == 'warm')
+    preview = item.icon().pixmap(QSize(96, 60)).toImage()
+    assert preview.pixelColor(48, 30) == QColor('#a03142')

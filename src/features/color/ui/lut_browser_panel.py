@@ -6,19 +6,21 @@ host responsibilities. This widget never reads a LUT file or renders pixels.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 import math
 
-from PyQt6.QtCore import QSize, Qt, QSignalBlocker, pyqtSignal
+from PyQt6.QtCore import QModelIndex, QPoint, QRect, QSize, Qt, QSignalBlocker, pyqtSignal
 from PyQt6.QtGui import QColor, QDrag, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QDoubleSpinBox, QFileDialog, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QSizePolicy,
-    QSlider, QSplitter, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QSlider, QSplitter, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
+    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
     QWidget,
 )
 
-from src.shared.assets.icon_manager import icon_folder, icon_grid, icon_list
+from src.shared.assets.icon_manager import icon_folder, icon_grid, icon_list, icon_search
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, TOOLBAR_FLAT_BTN_STYLE
 from .node_resource_mime import resource_mime_data
@@ -44,6 +46,100 @@ def _placeholder_icon() -> QIcon:
     return QIcon(pixmap)
 
 
+def _folder_tile_icon() -> QIcon:
+    pixmap = QPixmap(128, 80)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(C.TEXT_HINT), 1))
+    painter.setBrush(QColor(C.BG_BUTTON_HOVER))
+    painter.drawRoundedRect(17, 20, 94, 51, 3, 3)
+    painter.drawRoundedRect(17, 12, 42, 17, 2, 2)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _toolbar_icon(kind: str) -> QIcon:
+    pixmap = QPixmap(24, 24)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setPen(QPen(QColor(C.TEXT_LABEL), 1.4))
+    if kind == 'sidebar':
+        painter.drawRect(4, 5, 16, 14)
+        painter.drawLine(10, 5, 10, 19)
+    else:
+        for y, width in ((7, 9), (11, 7), (15, 5)):
+            painter.drawLine(5, y, 5 + width, y)
+        painter.drawLine(17, 6, 17, 17)
+        painter.drawLine(14, 14, 17, 17)
+        painter.drawLine(20, 14, 17, 17)
+    painter.end()
+    return QIcon(pixmap)
+
+
+class _LutDelegate(QStyledItemDelegate):
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.grid_mode = True
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem,
+              index: QModelIndex) -> None:
+        if self.grid_mode:
+            data = index.data(Qt.ItemDataRole.UserRole)
+            if not isinstance(data, dict):
+                return
+            rect = option.rect
+            painter.save()
+            if option.state & QStyle.StateFlag.State_Selected:
+                painter.fillRect(rect, QColor(C.BG_ACTIVE))
+            icon = index.data(Qt.ItemDataRole.DecorationRole)
+            width = max(1, min(rect.width() - 18, option.widget.iconSize().width())) if option.widget else 96
+            height = round(width * 0.625)
+            preview = QRect(rect.left() + (rect.width() - width) // 2,
+                            rect.top() + 4, width, height)
+            if isinstance(icon, QIcon):
+                icon.paint(painter, preview)
+            if data.get('kind') == 'lut':
+                painter.setPen(QPen(QColor(C.BORDER_MID), 1))
+                painter.drawRect(preview.adjusted(0, 0, -1, -1))
+            name = str(data.get('name') or '')
+            label = rect.adjusted(3, height + 9, -3, -2)
+            painter.setPen(QColor(C.TEXT_LABEL))
+            painter.drawText(label, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                             painter.fontMetrics().elidedText(name, Qt.TextElideMode.ElideMiddle, label.width()))
+            painter.restore()
+            return
+        data = index.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(data, dict):
+            return
+        rect = option.rect
+        painter.save()
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(rect, QColor(C.BG_ACTIVE))
+        painter.setPen(QColor(C.PANEL_DIVIDER))
+        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+        bounds = [0, 0.43, 0.56, 0.78, 1.0]
+        values = ([str(data.get('path', '')).rsplit('/', 1)[-1], 'Folder', '', '']
+                  if data.get('kind') == 'folder' else [
+                      str(data.get('name') or ''),
+                      str(data.get('type') or Path(str(data.get('path') or data.get('original_filename') or '')).suffix.lstrip('.').upper() or 'LUT'),
+                      str(data.get('category') or ''),
+                      str(data.get('path') or '')])
+        painter.setPen(QColor(C.TEXT_PRIMARY))
+        for col, value in enumerate(values):
+            left = rect.left() + round(rect.width() * bounds[col])
+            right = rect.left() + round(rect.width() * bounds[col + 1])
+            cell = QRect(left + 5, rect.top(), max(0, right - left - 8), rect.height())
+            if col == 0:
+                icon = index.data(Qt.ItemDataRole.DecorationRole)
+                if isinstance(icon, QIcon):
+                    icon.paint(painter, QRect(cell.left(), cell.top() + 2, 16, 16))
+                    cell.setLeft(cell.left() + 22)
+            painter.drawText(cell, Qt.AlignmentFlag.AlignVCenter,
+                             painter.fontMetrics().elidedText(value, Qt.TextElideMode.ElideRight, cell.width()))
+        painter.restore()
+
+
 class _LutList(QListWidget):
     """Only serialize resource identity, never paths or thumbnail pixels."""
 
@@ -52,7 +148,7 @@ class _LutList(QListWidget):
         if item is None:
             return
         entry = item.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or entry.get('kind') != 'lut':
             return
         drag = QDrag(self)
         drag.setMimeData(resource_mime_data(entry))
@@ -80,6 +176,9 @@ class ColorLutBrowser(QWidget):
         self._current_lut: str | None = None
         self._strength = 1.0
         self._folder = ''
+        self._history: list[str] = ['']
+        self._history_index = 0
+        self._sort_descending = False
         self._grid_mode = True
         self._placeholder = _placeholder_icon()
         self._setup_ui()
@@ -112,10 +211,27 @@ class ColorLutBrowser(QWidget):
         self.folders_button.setChecked(True)
         bar.addWidget(self.folders_button)
         self.folders_button.setText('')
-        self.folders_button.setIcon(icon_folder())
-        title = QLabel(tr('luts', 'LUTs'), toolbar)
-        bar.addWidget(title)
+        self.folders_button.setIcon(_toolbar_icon('sidebar'))
+        self.back_button = self._tool('‹', tr('back', 'Back'), 'LutBack')
+        self.forward_button = self._tool('›', tr('forward', 'Forward'), 'LutForward')
+        bar.addWidget(self.back_button)
+        bar.addWidget(self.forward_button)
+        self.path_label = QLabel(tr('luts', 'LUTs'), toolbar)
+        self.path_label.setMinimumWidth(35)
+        bar.addWidget(self.path_label)
         bar.addStretch(1)
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.zoom_slider.setObjectName('LutThumbnailZoom')
+        self.zoom_slider.setRange(70, 150)
+        self.zoom_slider.setValue(96)
+        self.zoom_slider.setFixedWidth(76)
+        self.zoom_slider.setToolTip(tr('thumbnail_size', 'Thumbnail size'))
+        self.zoom_slider.setAccessibleName(tr('thumbnail_size', 'Thumbnail size'))
+        bar.addWidget(self.zoom_slider)
+        self.sort_button = self._tool('⇅', tr('sort', 'Sort LUTs'), 'LutSort')
+        self.sort_button.setText('')
+        self.sort_button.setIcon(_toolbar_icon('sort'))
+        bar.addWidget(self.sort_button)
         self.grid_button = self._tool('▦', tr('grid_view', 'Thumbnail view'), 'LutGridView')
         self.list_button = self._tool('≡', tr('list_view', 'List view'), 'LutListView')
         self.grid_button.setText('')
@@ -128,6 +244,11 @@ class ColorLutBrowser(QWidget):
             self.view_group.addButton(button)
             bar.addWidget(button)
         self.grid_button.setChecked(True)
+        self.search_button = self._tool('⌕', tr('search_luts', 'Search LUTs'), 'LutSearchButton')
+        self.search_button.setText('')
+        self.search_button.setIcon(icon_search())
+        self.search_button.setCheckable(True)
+        bar.addWidget(self.search_button)
         self.more_button = self._tool('⋯', tr('lut_options', 'LUT options'), 'LutBrowserOptions')
         bar.addWidget(self.more_button)
         layout.addWidget(toolbar)
@@ -145,6 +266,8 @@ class ColorLutBrowser(QWidget):
         self.favorite_button = self._tool('☆', tr('favorites_only', 'Show favorites only'), 'LutFavorites')
         self.favorite_button.setCheckable(True)
         search.addWidget(self.favorite_button)
+        self.search_row = search_row
+        self.search_row.setVisible(False)
         layout.addWidget(search_row)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -154,7 +277,26 @@ class ColorLutBrowser(QWidget):
         self.folder_tree.setMinimumWidth(70)
         self.folder_tree.setIndentation(12)
         self.folder_tree.setUniformRowHeights(True)
-        self.list_widget = _LutList(self.splitter)
+        self.folder_tree.setStyleSheet(f'QTreeWidget {{background:{C.BG_PANEL}; border:0;}}')
+        right = QWidget(self.splitter)
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        self.list_header = QWidget(right)
+        header_layout = QHBoxLayout(self.list_header)
+        header_layout.setContentsMargins(4, 0, 4, 0)
+        header_layout.setSpacing(0)
+        for title, stretch in ((tr('file_name', 'File Name'), 43), (tr('type', 'Type'), 13),
+                               (tr('relative_path', 'Relative Path'), 22),
+                               (tr('file_path', 'File Path'), 22)):
+            label = QLabel(title, self.list_header)
+            label.setStyleSheet(f'color:{C.TEXT_LABEL};border-right:1px solid {C.PANEL_DIVIDER};')
+            header_layout.addWidget(label, stretch)
+        self.list_header.setFixedHeight(22)
+        self.list_header.hide()
+        right_layout.addWidget(self.list_header)
+        self.list_widget = _LutList(right)
+        right_layout.addWidget(self.list_widget, 1)
         self.list_widget.setObjectName('LutResourceList')
         self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.list_widget.setDragEnabled(True)
@@ -164,9 +306,14 @@ class ColorLutBrowser(QWidget):
         self.list_widget.setMovement(QListWidget.Movement.Static)
         self.list_widget.setWordWrap(True)
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._delegate = _LutDelegate(self.list_widget)
+        self.list_widget.setItemDelegate(self._delegate)
+        self.list_widget.setStyleSheet(
+            f'QListWidget {{background:{C.BG_PANEL}; border:0;}}'
+            f'QListWidget::item:selected {{background:{C.BG_ACTIVE}; color:{C.TEXT_PRIMARY};}}')
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([92, 268])
+        self.splitter.setSizes([145, 560])
         layout.addWidget(self.splitter, 1)
 
         self.empty_label = QLabel(tr('no_luts', 'No LUTs in this folder'), self)
@@ -175,22 +322,15 @@ class ColorLutBrowser(QWidget):
         self.empty_label.setStyleSheet(f'color: {C.TEXT_HINT}; padding: 6px;')
         layout.addWidget(self.empty_label)
 
-        zoom_row = QWidget(self)
-        zoom = QHBoxLayout(zoom_row)
-        zoom.setContentsMargins(8, 1, 8, 3)
-        zoom.setSpacing(5)
+        self.inspector = QWidget(self, Qt.WindowType.Popup)
+        self.inspector.setObjectName('LutNodeInspector')
+        inspector_layout = QVBoxLayout(self.inspector)
+        inspector_layout.setContentsMargins(8, 8, 8, 8)
+        inspector_layout.setSpacing(5)
+        self.inspector.setMinimumWidth(320)
         self.count_label = QLabel(self)
         self.count_label.setStyleSheet(f'color: {C.TEXT_HINT}; font-size: 10px;')
-        zoom.addWidget(self.count_label, 1)
-        self.zoom_slider = QSlider(Qt.Orientation.Horizontal, self)
-        self.zoom_slider.setObjectName('LutThumbnailZoom')
-        self.zoom_slider.setRange(70, 150)
-        self.zoom_slider.setValue(96)
-        self.zoom_slider.setFixedWidth(100)
-        self.zoom_slider.setToolTip(tr('thumbnail_size', 'Thumbnail size'))
-        self.zoom_slider.setAccessibleName(tr('thumbnail_size', 'Thumbnail size'))
-        zoom.addWidget(self.zoom_slider)
-        layout.addWidget(zoom_row)
+        self.count_label.hide()
 
         target_row = QWidget(self)
         target = QVBoxLayout(target_row)
@@ -205,7 +345,7 @@ class ColorLutBrowser(QWidget):
         self.current_label.setWordWrap(True)
         self.current_label.setStyleSheet(f'color: {C.TEXT_HINT}; font-size: 10px;')
         target.addWidget(self.current_label)
-        layout.addWidget(target_row)
+        inspector_layout.addWidget(target_row)
 
         strength_row = QWidget(self)
         strength = QHBoxLayout(strength_row)
@@ -228,18 +368,22 @@ class ColorLutBrowser(QWidget):
         self.remove_button = self._tool('×', tr('remove_lut', 'Remove LUT from node'), 'RemoveNodeLut')
         strength.addWidget(self.reset_button)
         strength.addWidget(self.remove_button)
-        layout.addWidget(strength_row)
+        inspector_layout.addWidget(strength_row)
         self.status_label = QLabel(tr('interaction_preview', 'Interaction preview · not applied to the image'), self)
         self._production_mode = False
         self.status_label.setObjectName('LutInteractionStatus')
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f'color: {C.TEXT_HINT}; font-size: 10px; padding: 3px 8px;')
-        layout.addWidget(self.status_label)
+        inspector_layout.addWidget(self.status_label)
 
         self.search_edit.textChanged.connect(self._populate)
         self.favorite_button.toggled.connect(self._populate)
         self.folder_tree.currentItemChanged.connect(self._folder_changed)
         self.folders_button.toggled.connect(self.folder_tree.setVisible)
+        self.back_button.clicked.connect(lambda: self._navigate_history(-1))
+        self.forward_button.clicked.connect(lambda: self._navigate_history(1))
+        self.search_button.toggled.connect(self._toggle_search)
+        self.sort_button.clicked.connect(self._toggle_sort)
         self.grid_button.clicked.connect(lambda: self._set_view_mode(True))
         self.list_button.clicked.connect(lambda: self._set_view_mode(False))
         self.zoom_slider.valueChanged.connect(self._update_item_sizes)
@@ -272,7 +416,7 @@ class ColorLutBrowser(QWidget):
             entry['category'] = str(entry.get('category') or tr('user_luts', 'User LUTs'))
             self._entries[entry['id']] = entry
         self._rebuild_folders()
-        self._populate()
+        self._navigate(self._folder, record=False)
         self._select_resource(selected)
         self._update_current_label()
 
@@ -286,7 +430,7 @@ class ColorLutBrowser(QWidget):
         """R10：用户库偏好（收藏/视图模式/缩略图缩放）——用户配置域。"""
         return {"favorites": sorted(self._favorites),
                 "grid": bool(getattr(self, "_grid_mode", True)),
-                "zoom": int(getattr(self, "_zoom", 100))}
+                "zoom": int(self.zoom_slider.value())}
 
     def set_browser_state(self, state: object) -> None:
         if not isinstance(state, dict):
@@ -318,8 +462,9 @@ class ColorLutBrowser(QWidget):
 
     def visible_entry_ids(self) -> list[str]:
         """当前过滤/文件夹下可见条目 id（R07 缩略图只处理可见资源）。"""
-        return [self.list_widget.item(i).data(Qt.ItemDataRole.UserRole)["id"]
-                for i in range(self.list_widget.count())]
+        return [data['id'] for i in range(self.list_widget.count())
+                if isinstance(data := self.list_widget.item(i).data(Qt.ItemDataRole.UserRole), dict)
+                and data.get('kind') == 'lut' and isinstance(data.get('id'), str)]
 
     def set_thumbnail(self, entry_id: str, image: Any) -> None:
         """GUI 线程接收缩略图（QImage→QPixmap；刷新对应条目）。"""
@@ -331,8 +476,8 @@ class ColorLutBrowser(QWidget):
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             data = item.data(Qt.ItemDataRole.UserRole)
-            if data and data.get("id") == entry_id:
-                item.setIcon(entry["thumbnail"])
+            if isinstance(data, dict) and data.get("id") == entry_id:
+                item.setIcon(QIcon(entry["thumbnail"]))
                 break
 
     def set_thumbnail_failed(self, entry_id: str, code: str) -> None:
@@ -344,7 +489,7 @@ class ColorLutBrowser(QWidget):
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             data = item.data(Qt.ItemDataRole.UserRole)
-            if data and data.get("id") == entry_id:
+            if isinstance(data, dict) and data.get("id") == entry_id:
                 item.setToolTip(item.toolTip() + "\n" + _tr(
                     "thumbnail_failed", "Preview failed") + f" ({code})")
                 break
@@ -364,12 +509,12 @@ class ColorLutBrowser(QWidget):
     def selected_resource_id(self) -> str | None:
         item = self.list_widget.currentItem()
         entry = item.data(Qt.ItemDataRole.UserRole) if item else None
-        return entry.get('id') if isinstance(entry, dict) else None
+        return entry.get('id') if isinstance(entry, dict) and entry.get('kind') == 'lut' else None
 
     def _rebuild_folders(self) -> None:
         blocker = QSignalBlocker(self.folder_tree)
         self.folder_tree.clear()
-        root = QTreeWidgetItem([tr('all_luts', 'All LUTs')])
+        root = QTreeWidgetItem([tr('luts', 'LUTs')])
         root.setData(0, Qt.ItemDataRole.UserRole, '')
         self.folder_tree.addTopLevelItem(root)
         by_path: dict[str, QTreeWidgetItem] = {}
@@ -385,36 +530,116 @@ class ColorLutBrowser(QWidget):
                     by_path[path] = item
                 parent = by_path[path]
         root.setExpanded(True)
-        current = by_path.get(self._folder, root)
+        favorites = QTreeWidgetItem(['☆ ' + tr('favorites', 'Favorites')])
+        favorites.setData(0, Qt.ItemDataRole.UserRole, '__favorites__')
+        self.folder_tree.addTopLevelItem(favorites)
+        current = favorites if self._folder == '__favorites__' else by_path.get(self._folder, root)
         self._folder = str(current.data(0, Qt.ItemDataRole.UserRole) or '')
         self.folder_tree.setCurrentItem(current)
         del blocker
 
     def _folder_changed(self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None) -> None:
-        self._folder = str(current.data(0, Qt.ItemDataRole.UserRole) or '') if current else ''
+        self._navigate(str(current.data(0, Qt.ItemDataRole.UserRole) or '') if current else '')
+
+    def _navigate(self, path: str, record: bool = True) -> None:
+        if path != self._folder:
+            self._folder = path
+            if record:
+                self._history = self._history[:self._history_index + 1] + [path]
+                self._history_index += 1
+        self.path_label.setText(tr('favorites', 'Favorites') if path == '__favorites__'
+                                else path.rsplit('/', 1)[-1] if path else tr('luts', 'LUTs'))
+        self.path_label.setToolTip(path or tr('luts', 'LUTs'))
+        self.back_button.setEnabled(self._history_index > 0)
+        self.forward_button.setEnabled(self._history_index < len(self._history) - 1)
+        self._populate()
+
+    def _navigate_history(self, direction: int) -> None:
+        index = self._history_index + direction
+        if 0 <= index < len(self._history):
+            self._history_index = index
+            path = self._history[index]
+            self._folder = path
+            self._select_folder(path)
+            self._navigate(path, record=False)
+
+    def _select_folder(self, path: str) -> None:
+        def walk(item: QTreeWidgetItem) -> QTreeWidgetItem | None:
+            if item.data(0, Qt.ItemDataRole.UserRole) == path:
+                return item
+            for child_index in range(item.childCount()):
+                found = walk(item.child(child_index))
+                if found is not None:
+                    return found
+            return None
+        for index in range(self.folder_tree.topLevelItemCount()):
+            found = walk(self.folder_tree.topLevelItem(index))
+            if found is not None:
+                blocker = QSignalBlocker(self.folder_tree)
+                self.folder_tree.setCurrentItem(found)
+                del blocker
+                break
+
+    def _toggle_search(self, visible: bool) -> None:
+        self.search_row.setVisible(visible)
+        if visible:
+            self.search_edit.setFocus()
+        else:
+            self.search_edit.clear()
+
+    def _toggle_sort(self) -> None:
+        self._sort_descending = not self._sort_descending
         self._populate()
 
     def _populate(self, *_args: Any) -> None:
         selected = self.selected_resource_id()
         query = self.search_edit.text().strip().casefold()
         self.list_widget.clear()
-        for entry in sorted(self._entries.values(), key=lambda value: value['name'].casefold()):
+        displayed: list[dict[str, Any]] = []
+        folder_paths: set[str] = set()
+        if not query and not self.favorite_button.isChecked() and self._folder != '__favorites__':
+            prefix = self._folder + '/' if self._folder else ''
+            for entry in self._entries.values():
+                category = entry['category']
+                if category.startswith(prefix):
+                    remainder = category[len(prefix):]
+                    if remainder:
+                        folder_paths.add(prefix + remainder.split('/', 1)[0])
+            displayed.extend({'kind': 'folder', 'path': path, 'name': path.rsplit('/', 1)[-1]}
+                             for path in folder_paths)
+        for entry in self._entries.values():
             category = entry['category']
-            if self._folder and category != self._folder and not category.startswith(self._folder + '/'):
+            if self._folder == '__favorites__':
+                if entry['id'] not in self._favorites:
+                    continue
+            elif not query and not self.favorite_button.isChecked():
+                if self._folder and category != self._folder:
+                    continue
+            elif self._folder and category != self._folder and not category.startswith(self._folder + '/'):
                 continue
             if self.favorite_button.isChecked() and entry['id'] not in self._favorites:
                 continue
             haystack = ' '.join((entry['name'], category, str(entry.get('description', '')))).casefold()
             if query and query not in haystack:
                 continue
+            displayed.append(entry)
+        for entry in sorted(displayed, key=lambda value: str(value['name']).casefold(),
+                            reverse=self._sort_descending):
+            if entry.get('kind') == 'folder':
+                item = QListWidgetItem(_folder_tile_icon() if self._grid_mode else icon_folder(), entry['name'])
+                item.setData(Qt.ItemDataRole.UserRole, entry)
+                item.setToolTip(entry['path'])
+                self.list_widget.addItem(item)
+                continue
+            category = entry['category']
             preview = entry.get('thumbnail')
             icon = QIcon(preview) if isinstance(preview, (QIcon, QPixmap)) else self._placeholder
-            item = QListWidgetItem(icon, ('★ ' if entry['id'] in self._favorites else '') + entry['name'])
+            item = QListWidgetItem(icon, entry['name'])
             item.setData(Qt.ItemDataRole.UserRole, entry)
             item.setToolTip(entry['name'] + '\n' + category + ('\n' + str(entry['description']) if entry.get('description') else ''))
             self.list_widget.addItem(item)
-        count = self.list_widget.count()
-        self.empty_label.setVisible(count == 0)
+        count = len(self.visible_entry_ids())
+        self.empty_label.setVisible(self.list_widget.count() == 0)
         self.count_label.setText(str(count) + ' ' + tr('luts', 'LUTs'))
         self._update_item_sizes()
         self._select_resource(selected)
@@ -424,28 +649,39 @@ class ColorLutBrowser(QWidget):
             return
         for index in range(self.list_widget.count()):
             item = self.list_widget.item(index)
-            if item.data(Qt.ItemDataRole.UserRole)['id'] == resource_id:
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get('id') == resource_id:
                 self.list_widget.setCurrentItem(item)
                 break
 
     def _set_view_mode(self, grid: bool) -> None:
         self._grid_mode = bool(grid)
+        self._delegate.grid_mode = bool(grid)
+        self.list_header.setVisible(not grid)
         self.grid_button.setChecked(grid)
         self.list_button.setChecked(not grid)
         self.list_widget.setViewMode(QListWidget.ViewMode.IconMode if grid else QListWidget.ViewMode.ListMode)
-        self.list_widget.setSpacing(5 if grid else 1)
+        self.list_widget.setSpacing(5 if grid else 0)
         self.zoom_slider.setEnabled(grid)
         self._update_item_sizes()
+        self._populate()
 
     def _update_item_sizes(self, *_args: Any) -> None:
-        width = self.zoom_slider.value() if self._grid_mode else 22
+        width = self.zoom_slider.value() if self._grid_mode else 18
         height = round(width * 0.625) if self._grid_mode else 18
         self.list_widget.setIconSize(QSize(width, height))
-        self.list_widget.setGridSize(QSize(width + 14, height + 34) if self._grid_mode else QSize())
+        self.list_widget.setGridSize(QSize(width + 18, height + 34) if self._grid_mode else QSize())
 
     def _activate(self, item: QListWidgetItem) -> None:
-        if self._editable:
-            self.resource_activated.emit(dict(item.data(Qt.ItemDataRole.UserRole)))
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(data, dict):
+            return
+        if data.get('kind') == 'folder':
+            path = str(data.get('path') or '')
+            self._select_folder(path)
+            self._navigate(path)
+        elif self._editable and data.get('kind') == 'lut':
+            self.resource_activated.emit(dict(data))
 
     def _show_context_menu(self, position: Any) -> None:
         item = self.list_widget.itemAt(position)
@@ -453,7 +689,13 @@ class ColorLutBrowser(QWidget):
             return
         self.list_widget.setCurrentItem(item)
         entry = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(entry, dict):
+            return
         menu = QMenu(self)
+        if entry.get('kind') == 'folder':
+            menu.addAction(tr('open_folder', 'Open Folder'), lambda: self._activate(item))
+            menu.exec(self.list_widget.mapToGlobal(position))
+            return
         apply_action = menu.addAction(tr('apply_to_node', 'Apply to selected node'))
         apply_action.setEnabled(self._editable)
         apply_action.triggered.connect(lambda: self._activate(item))
@@ -473,9 +715,19 @@ class ColorLutBrowser(QWidget):
         menu.addAction(tr('import_luts', 'Import LUTs…'), self._choose_import)
         menu.addAction(tr('refresh', 'Refresh'), self.refresh_requested.emit)
         menu.addSeparator()
+        menu.addAction(tr('favorites_only', 'Show favorites only'),
+                       lambda: self.favorite_button.setChecked(not self.favorite_button.isChecked()))
+        menu.addAction(tr('node_lut_settings', 'Current node LUT…'), self._show_inspector)
+        menu.addSeparator()
         menu.addAction(tr('grid_view', 'Thumbnail view'), lambda: self._set_view_mode(True))
         menu.addAction(tr('list_view', 'List view'), lambda: self._set_view_mode(False))
         menu.exec(self.more_button.mapToGlobal(self.more_button.rect().bottomLeft()))
+
+    def _show_inspector(self) -> None:
+        self.inspector.adjustSize()
+        anchor = self.more_button.mapToGlobal(QPoint(self.more_button.width(), self.more_button.height()))
+        self.inspector.move(anchor.x() - self.inspector.width(), anchor.y())
+        self.inspector.show()
 
     def _choose_import(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, tr('import_luts', 'Import LUTs'), '', 'LUT (*.cube *.3dl *.look);;All files (*)')

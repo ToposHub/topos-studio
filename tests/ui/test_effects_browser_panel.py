@@ -15,6 +15,7 @@ def test_search_favorite_and_collapsible_categories(qtbot: Any) -> None:
     panel = ColorEffectsBrowser()
     qtbot.addWidget(panel)
     panel.set_resources([resource()])
+    assert not panel.tabs.isTabEnabled(1)
     assert panel.resource_list.count() == 2
     panel._category_clicked(panel.resource_list.item(0))
     assert panel.resource_list.count() == 1
@@ -40,6 +41,7 @@ def test_add_requires_target_but_drag_does_not(qtbot: Any) -> None:
     panel.set_target('n', '01', True)
     qtbot.mouseClick(panel.add_button, Qt.MouseButton.LeftButton)
     assert requested[0]['id'] == 'fx'
+    assert panel.tabs.isTabEnabled(1)
     assert panel.tabs.currentIndex() == 1
     panel.set_target('n', '01', False)
     assert not panel.settings_scroll.widget().isEnabled()
@@ -62,3 +64,20 @@ def test_parameter_hydration_silent_then_user_intent(qtbot: Any) -> None:
     row.slider.setValue(round(0.6 * row.scale))
     assert changes[-1][0] == 'set_parameter'
     assert changes[-1][1]['value'] == 0.6
+
+
+def test_resolve_library_toolbar_and_legacy_list_migration(qtbot: Any) -> None:
+    panel = ColorEffectsBrowser()
+    qtbot.addWidget(panel)
+    panel.set_resources([resource()])
+    assert panel.search_row.isHidden()
+    assert panel.category_combo.isHidden()
+    assert panel.add_button.isHidden()
+    panel.search_button.setChecked(True)
+    assert not panel.search_row.isHidden()
+    panel.search_edit.setText('glow')
+    assert panel.resource_list.count() == 2
+    panel.search_button.setChecked(False)
+    assert panel.search_edit.text() == ''
+    panel.set_browser_state({'grid': True})
+    assert panel.browser_state()['grid'] is False
