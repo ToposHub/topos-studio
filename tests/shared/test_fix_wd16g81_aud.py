@@ -1018,7 +1018,9 @@ class TestAud31809AtomicDownload:
 
 class TestAud31816PatchMergingForward:
     def test_forward_reduces_resolution_without_name_error(self):
-        import torch
+        # torch 为 SwinIR 可选重依赖：未安装环境跳过而非误报失败
+        #（与 ai 模型类测试的 importorskip 口径一致）。
+        pytest.importorskip("torch", reason="SwinIR weights optional")
 
         from src.shared.ai_models.swinir import PatchMerging
 
