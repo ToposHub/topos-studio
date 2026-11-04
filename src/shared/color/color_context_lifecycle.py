@@ -21,6 +21,7 @@ Color/Edit/Composite 三页 ``descriptor_from_config`` 共读）：
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional
 
 from src.shared.color.color_space_descriptor import (
@@ -44,8 +45,29 @@ def on_project_loaded(
 
 
 def on_project_closed() -> Dict[str, Any]:
-    """工程关闭/新建空文档：清空工程级覆盖（回退用户全局偏好）。"""
+    """工程关闭/新建空文档：清空工程级覆盖（回退用户全局偏好）。
+
+    R06-B：同时收口离线 bake 生命周期——取消全部在途任务并释放结果
+    暂存文件（单一钩子覆盖 file/edit 两域的三处关工程调用点；失败不
+    阻断色彩上下文清理）。
+    """
     clear_project_color_overrides()
+    try:
+        from src.features.color.core.color_bake_result_registry import (
+            get_bake_result_session,
+        )
+        get_bake_result_session().reset()
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception(
+            "bake result session reset failed on project close")
+    try:
+        from src.features.color.core.color_bake_service import (
+            reset_all_bake_services,
+        )
+        reset_all_bake_services()
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception(
+            "bake services reset failed on project close")
     return get_project_color_overrides()
 
 

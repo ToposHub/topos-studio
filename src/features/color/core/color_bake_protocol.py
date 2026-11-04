@@ -38,6 +38,11 @@ class ColorBakeRequest:
     resource_id: str
     params: Mapping[str, Any] = field(default_factory=dict)
     spec_version: str = ""
+    # R06-B（2026-11-05）：执行闭环扩展——全部可选，既有构造/测试不破坏。
+    backend_id: str = ""             # 执行后端（注册表键；空 = 拒绝）
+    source_clip_id: str = ""         # 源 clip 绑定（过期/切 clip 诊断）
+    frame_range: tuple[int, int] | None = None  # 帧范围（含端点）
+    cancel_token: Any = None         # R04 async token（verify 回调闭包引用）
 
     @property
     def spec(self) -> dict[str, Any]:
@@ -51,13 +56,48 @@ def make_bake_request(*, target: Mapping[str, Any], stack_id: str,
                       graph_revision: int, source_content_revision: int,
                       resource_id: str,
                       params: Mapping[str, Any] | None = None,
-                      spec_version: str = "") -> ColorBakeRequest:
+                      spec_version: str = "",
+                      backend_id: str = "",
+                      source_clip_id: str = "",
+                      frame_range: tuple[int, int] | None = None,
+                      cancel_token: Any = None) -> ColorBakeRequest:
     return ColorBakeRequest(
         task_id=uuid4().hex, target=dict(target), stack_id=stack_id,
         graph_revision=int(graph_revision),
         source_content_revision=int(source_content_revision),
         resource_id=resource_id, params=dict(params or {}),
-        spec_version=spec_version)
+        spec_version=spec_version, backend_id=backend_id,
+        source_clip_id=source_clip_id,
+        frame_range=tuple(frame_range) if frame_range else None,
+        cancel_token=cancel_token)
+
+
+@dataclass(frozen=True)
+class ColorBakeStatus:
+    """UI 可见的一次 bake 任务状态（不含像素/路径数据）。"""
+
+    task_id: str
+    phase: str                       # queued/running/succeeded/failed/cancelled
+    percent: float = 0.0
+    error_code: str = ""
+    backend_id: str = ""
+    bake_uri: str = ""               # 接受后的结果引用（topos-res://）
+
+
+@dataclass(frozen=True)
+class ColorBakeCapability:
+    """后端能力声明：不可用必须显式（fail-closed），不得静默。"""
+
+    backend_id: str
+    categories: tuple[str, ...]
+    available: bool
+    disabled_reason: str = ""        # not_implemented / model_missing / ...
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"backend_id": self.backend_id,
+                "categories": list(self.categories),
+                "available": self.available,
+                "disabled_reason": self.disabled_reason}
 
 
 class ColorBakeBroker:
