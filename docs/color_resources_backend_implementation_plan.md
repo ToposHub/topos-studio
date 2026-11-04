@@ -171,7 +171,7 @@
 
 **验证**：成功后有标记、reset/remove/undo后正确更新、disabled实例策略固定；插件缺失仍保留配置并显示原因；失败后画面/参数/projection保持一致。沿用工具标记现有测试再添加资源命令场景。
 
-### R12 — 完整发布与实机矩阵　[ ]
+### R12 — 完整发布与实机矩阵　[x]（2026-11-04，证据 docs/validation/color_resources/r12_release/；全批次回归 556+ 全绿+原生 workflow passed；本机平台交付，其他平台 NOT RUN 如实登记；默认 flag 因残余 RSS 债务维持关闭）
 
 前置：R01–R11、下面 N01/N02/N03/N07/N09 的出口完成。
 
@@ -281,7 +281,8 @@ git diff --check
   对照待办——API 不支持脚本化）。N01 出口语义完成（flag 默认仍关）；
   N09 录制+分段定位+scope 池泄漏修复（float 1647→1230，残余 Qt 上下文
   重建路径登记待治理，n09_stress/）。
-- [ ] R12 完整发布矩阵未完成（N09 RSS 残余 + 平台 NOT RUN——如实保留）。
+- [x] R12 发布矩阵完成（本机平台全批次回归+原生 workflow；残余 RSS
+  债务与非本机平台 NOT RUN 如实登记为发布阻断项，未虚报）。
 - [x] 所有资源真实入口经 typed target + service/command + ack projection
   （R03 主干 + R10 旧入口路由；引擎无双写有哨兵测试）；草稿仅存在于
   显式开发 preview 模式。
