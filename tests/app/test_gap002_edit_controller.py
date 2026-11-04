@@ -46,19 +46,25 @@ from src.shared.media.metadata import Rational
 
 
 class _Signal:
-    """最小 pyqtSignal 替身（记录 emit 参数）。"""
+    """最小 pyqtSignal 替身（记录 emit 参数并分发到已连接槽）。"""
 
     def __init__(self) -> None:
         self.emitted: list[Any] = []
+        self._slots: list[Any] = []
 
     def emit(self, *args: Any) -> None:
         self.emitted.append(args)
+        for slot in list(self._slots):
+            slot(*args)
 
     def connect(self, slot: Any) -> None:
-        pass
+        self._slots.append(slot)
 
     def disconnect(self, slot: Any | None = None) -> None:
-        pass
+        if slot is None:
+            self._slots.clear()
+        elif slot in self._slots:
+            self._slots.remove(slot)
 
 
 class _StatusBar:
@@ -93,7 +99,13 @@ class _Renderer:
 
 
 class _TimelineView:
-    """覆盖 _execute_timeline_edit_command / 字幕命令提交路径的视图桩。"""
+    """覆盖 _execute_timeline_edit_command / 字幕命令提交路径的视图桩。
+
+    事务桥语义对齐真实 TimelineView：configure 后 execute_command 即
+    「撤销栈应用 + 发布到 sequences」（真实栈 redo 后经
+    project_timeline_transaction_committed 信号回写——桩直接写 dict，
+    对控制器等价）。
+    """
 
     def __init__(self, timeline: Any | None = None) -> None:
         self._timeline = timeline
@@ -104,11 +116,34 @@ class _TimelineView:
         self.loaded: list[Any] = []
         self.projects: list[Any] = []
         self.project_changed = _Signal()
+        self.project_timeline_transaction_committed = _Signal()
+        self._project_transaction_controller: Any = None
+        self._project_getter: Any = None
+        self._sequences_getter: Any = None
+
+    def configure_project_transaction_context(
+        self, project_getter: Any, sequences_getter: Any,
+    ) -> None:
+        self._project_getter = project_getter
+        self._sequences_getter = sequences_getter
 
     def execute_command(self, command: Any) -> Any:
         if self.raise_on_execute:
             raise ValueError("overlap rejected")
         self.executed.append(command)
+        if (self._timeline is not None and self._sequences_getter is not None
+                and self._project_getter is not None):
+            # 撤销栈应用（QUndoStack.push→redo 同语义）后经 committed
+            # 信号发布——控制器侧 _on_edit_project_timeline_transaction_
+            # committed 同步 sequences/ref/media pool（真实视图同链路）
+            result = command.apply(self._timeline)
+            new_timeline = (result if not isinstance(result, tuple)
+                            else result[0])
+            self._timeline = new_timeline
+            key = getattr(new_timeline, "timeline_id", None)
+            if key is not None:
+                self.project_timeline_transaction_committed.emit(
+                    self._project_getter(), new_timeline, {key: new_timeline})
         return self._timeline
 
     def load_timeline(self, timeline: Any) -> None:
@@ -133,6 +168,12 @@ class _TimelinePanel:
 
     def get_timeline_view(self) -> _TimelineView | None:
         return self.timeline_view
+
+    def refresh_committed_timeline(self, timeline: Any) -> None:
+        """真实面板事务提交后的 UI 刷新（桩：记录 + 视图重载）。"""
+        self.loaded.append(timeline)
+        if self.timeline_view is not None:
+            self.timeline_view.load_timeline(timeline)
 
     def load_timeline(self, timeline: Any) -> None:
         self.loaded.append(timeline)
@@ -565,9 +606,11 @@ def test_execute_timeline_edit_command_routes_through_view_stack() -> None:
 
     result = host._execute_timeline_edit_command(command, timeline)
 
-    # view 持有 timeline → 必须经 execute_command（可撤销入口）
+    # view 持有 timeline → 必须经 execute_command（可撤销入口）。
+    # 桥语义：view 栈应用一次（QUndoStack redo 同义）并经 committed
+    # 链发布；executed 即路由证明（fallback 不经 view）
     assert view.executed == [command]
-    assert command.applied == []  # 不走直连 apply
+    assert command.applied == [updated]
     assert result is updated
 
 
@@ -1601,7 +1644,7 @@ def test_timeline_settings_requested_updates_refs_and_sequences(monkeypatch) -> 
     project = replace(
         project, timelines={"t1": ref}, active_timeline_id="t1",
     )
-    view = _TimelineView()
+    view = _TimelineView(timeline)  # 真实 MainWindow 形态：视图已加载序列
     renderer = _Renderer()
     host = _controller(project, timeline, view=view, renderer=renderer)
     host._current_timeline_sequences["t1"] = timeline

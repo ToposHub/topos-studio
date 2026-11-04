@@ -1013,6 +1013,12 @@ def _routing_host(old_dialog: Any) -> Any:
     host._on_mixer_routing_committed = lambda track_id, payload: (
         ec.EditControllerMixin._on_mixer_routing_committed(
             host, track_id, payload))
+    host._on_mixer_routing_preview = lambda track_id, payload: (
+        ec.EditControllerMixin._on_mixer_routing_preview(
+            host, track_id, payload))
+    host._on_mixer_routing_dialog_finished = lambda *a, **k: (
+        ec.EditControllerMixin._on_mixer_routing_dialog_finished(
+            host, *a, **k))
     return host
 
 

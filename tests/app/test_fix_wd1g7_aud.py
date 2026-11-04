@@ -558,6 +558,9 @@ def _make_load_video_host(*, load_ok: bool) -> Any:
         _load_video_project=MagicMock(),
         _schedule_video_denoise_window=MagicMock(),
         _video_denoise_window_provider_obj=None,
+        # 加载成功路径会清稳定化状态（set_video_stabilization_state）
+        engine=MagicMock(),
+        stabilization_service=None,
     )
     return host
 

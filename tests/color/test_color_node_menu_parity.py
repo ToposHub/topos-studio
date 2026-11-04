@@ -105,16 +105,30 @@ def test_locked_node_rejects_grade_and_reset_until_unlocked(live):
     assert service.op_set_node_option(unlocked.graph, target, 'grade_patch', ('exposure', 30.0)).ok
 
 
-def test_unsupported_node_transform_and_cache_menus_are_explicitly_disabled(live):
+def test_node_transform_and_cache_menus_wired_with_real_commands(live):
+    """N05/N06 接线后的菜单 parity 契约：Color Space/Gamma/Node Cache
+    菜单启用且子项即真实命令值（GL/CPU 已消费；Metal/导出显式拒绝），
+    LUT 菜单保持 R02+R05 契约。"""
     harness, _ = live
     menu = harness.panel.view.build_context_menu()
-    # N04：LUT 菜单已启用（R02 资源注册 + R05 节点命令）；Color Space/
-    # Gamma/Node Cache 仍显式禁用（N05/N06 接线前）。
-    titles = {'Color Space', 'Gamma', 'Node Cache'}
-    disabled = {action.text() for action in menu.actions() if action.menu() is not None and not action.menu().isEnabled()}
-    assert titles <= disabled
-    lut_menu = next(action for action in menu.actions()
-                    if action.menu() is not None and action.text() == 'LUT')
-    assert lut_menu.menu().isEnabled()
-    texts = [action.text() for action in lut_menu.menu().actions()]
+
+    def submenu(title: str):
+        action = next(action for action in menu.actions()
+                      if action.menu() is not None and action.text() == title)
+        assert action.menu().isEnabled(), title
+        return action.menu()
+
+    color_space = submenu('Color Space')
+    gamma = submenu('Gamma')
+    cache = submenu('Node Cache')
+    cs_texts = {action.text() for action in color_space.actions()}
+    gamma_texts = {action.text() for action in gamma.actions()}
+    cache_texts = {action.text() for action in cache.actions()}
+    assert {'Use Timeline', 'Rec.709', 'Rec.2020', 'P3-D65', 'ACES AP0',
+            'ACES AP1', 'DaVinci Wide Gamut'} <= cs_texts
+    assert {'Use Timeline', 'Linear', 'Gamma 2.2', 'Gamma 2.4', 'sRGB',
+            'ST2084', 'HLG', 'DaVinci Intermediate'} <= gamma_texts
+    assert {'Auto', 'On', 'Off'} <= cache_texts
+    lut_menu = submenu('LUT')
+    texts = [action.text() for action in lut_menu.actions()]
     assert 'No LUT' in texts and 'Browse…' in texts

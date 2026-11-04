@@ -750,12 +750,10 @@ def test_apply_default_layout_arrangement_and_titlebars(
 
     layout_host.apply_default_layout()
 
-    # First run: every base dock visible except the Effects plugin panel.
+    # First run: every base dock visible（350a037 起 Effects 为左侧
+    # Gallery/LUT 标签组一等面板——不再默认隐藏）。
     for attr in _BASE_DOCKS:
-        if attr == "dock_plugin":
-            continue
         assert not _hidden(layout_host, attr), f"{attr} must be visible in the default layout"
-    assert _hidden(layout_host, "dock_plugin")
     assert not layout_host.dock_curves.isFloating(), "default layout re-docks floating docks"
 
     # Areas.
@@ -1167,7 +1165,8 @@ def test_reset_layout_to_default_falls_back_on_rejected_state(
 
     layout_host.reset_layout_to_default()
 
-    assert _hidden(layout_host, "dock_plugin"), "hardcoded default hides Effects on first run"
+    # 350a037 起 Effects 面板在硬编码默认布局中可见（左侧标签组）
+    assert not _hidden(layout_host, "dock_plugin"), "hardcoded default shows Effects panel"
     assert not _hidden(layout_host, "dock_grading")
     assert layout_host.status_bar.currentMessage() == I18N.tr(
         "status.layout_reset_hardcoded", "Layout reset to hardcoded default.")

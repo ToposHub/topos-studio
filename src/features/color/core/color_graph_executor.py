@@ -278,7 +278,10 @@ class ColorGraphExecutor:
 
     def _node_cache_store(self, render_pass: RenderPass, tex: Any,
                           width: int, height: int, cache_context: tuple,
-                          cache_events: list) -> bool:
+                          cache_events: list,
+                          deferred_releases: list | None = None,
+                          working_set: Mapping[str, Any] | None = None,
+                          ) -> bool:
         if not self._node_cache_eligible(render_pass, cache_events):
             return False
         size = self._texture_bytes(width, height, self._run_dtype)
@@ -296,17 +299,27 @@ class ColorGraphExecutor:
             self._release_texture(old[0])
         self._node_cache[key] = (tex, self._exec_generation)
         self._node_cache_bytes += size
-        # 预算淘汰：最旧条目归还池直至回到预算内（可解释：evicted 事件）
+        # 预算淘汰：最旧条目归还池直至回到预算内（可解释：evicted 事件）。
+        # 执行中淘汰若命中当前工作集（node_outputs 仍持有、下游 pass
+        # 还要采样）→ 延迟到执行末归还——立即还池会让后续 _alloc_texture
+        # 取走它当渲染目标，与下游采样同纹理 = GL 反馈环/串写。
         while self._node_cache_bytes > self._node_cache_budget:
             evict_key, (evict_tex, _gen) = self._node_cache.popitem(
                 last=False)
             evict_bytes = self._texture_bytes(evict_key[3], evict_key[4],
                                               evict_key[5])
             self._node_cache_bytes -= evict_bytes
-            self._release_texture(evict_tex)
+            in_use = working_set is not None and any(
+                t is evict_tex for t in working_set.values())
+            if in_use and deferred_releases is not None:
+                deferred_releases.append(evict_tex)
+                cache_events.append((evict_key[1], "evicted_deferred",
+                                     evict_bytes, "working_set"))
+            else:
+                self._release_texture(evict_tex)
+                cache_events.append((evict_key[1], "evicted", evict_bytes,
+                                     "budget"))
             self.node_cache_stats["evicted_budget"] += 1
-            cache_events.append((evict_key[1], "evicted", evict_bytes,
-                                 "budget"))
         self.node_cache_stats["stored"] += 1
         cache_events.append((render_pass.node_id, "stored", size, "policy"))
         return True
@@ -395,6 +408,10 @@ class ColorGraphExecutor:
         # （与图像输出分离；key_mixer/alpha_output/outside/parallel key 槽
         # 从此解析真实 matte，不再有常白/图像 R 通道替代）。
         key_outputs: dict[tuple[str, str], Any] = {}
+        # N06：执行中被预算淘汰、但工作集仍持有的纹理——延迟到执行末
+        # 归还池（见 _node_cache_store：立即还池会被后续分配取走当渲染
+        # 目标，与下游采样同纹理）
+        deferred_releases: list = []
 
         def _release_lease(lease: _Lease) -> int:
             self._release_texture(lease.texture)
@@ -408,6 +425,13 @@ class ColorGraphExecutor:
                 except Exception:  # noqa: BLE001 —— 释放路径不二次抛
                     pass
             leases.clear()
+            for tex in deferred_releases:
+                try:
+                    self._release_texture(tex)
+                    released += 1
+                except Exception:  # noqa: BLE001
+                    pass
+            deferred_releases.clear()
             node_outputs.clear()
             key_outputs.clear()
             return released
@@ -456,7 +480,9 @@ class ColorGraphExecutor:
                         and render_pass.node_id not in key_producer_ids
                         and self._node_cache_store(
                             render_pass, out_tex, width, height,
-                            cache_context, cache_events)):
+                            cache_context, cache_events,
+                            deferred_releases=deferred_releases,
+                            working_set=node_outputs)):
                     leases.remove(lease)
 
                 # liveness：release_after == 当前 index 的中间纹理归还
@@ -469,6 +495,10 @@ class ColorGraphExecutor:
 
             # N06：陈旧清扫——当前依赖锥之外的节点条目淘汰（删节点/改图）
             self._node_cache_sweep(pass_ids, cache_events)
+            # 执行末归还延迟淘汰的纹理（循环内不再有分配/采样）
+            for tex in deferred_releases:
+                self._release_texture(tex)
+            deferred_releases.clear()
 
             final = plan.passes[-1]
             output_texture = node_outputs[final.node_id]

@@ -714,8 +714,12 @@ class TestSharedGradeHandler:
         assert bound.color_stack_id == created.stack_id
         assert bound.color_shared is True
 
-        # 单步 undo：栈移除；redo：同 id + 盖章恢复。
-        undone = host.project_stack.undo(host._current_edit_project)
+        # M07 自动锁后为两条可撤销命令（绑定走时间线栈）：第一步 undo
+        # 撤自动锁（栈仍在），第二步撤建栈（栈移除）；redo 反向恢复
+        # （同 id + 盖章）。
+        undone_lock = host.project_stack.undo(host._current_edit_project)
+        assert created.stack_id in undone_lock.color_stacks  # 锁已撤、栈在
+        undone = host.project_stack.undo(undone_lock)
         assert created.stack_id not in undone.color_stacks
         redone = host.project_stack.redo(undone)
         assert redone.color_stacks[created.stack_id].scope == "asset_default"
