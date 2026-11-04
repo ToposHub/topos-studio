@@ -31,7 +31,7 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 | P0 | V01 | 已完成（compound id 重映射根因修复；普通/resources 双路径 passed + 阻断负路径 exit 1） | 逐节点预览真实生成及脚本不能假绿 | 无 |
 | P0 | R12-A | 已通过（2026-11-05 复测全预算过：RSS 167.9/250 MB/10min；分行为归因新增） | 30 分钟资源与播放性能 | V01 |
 | P0 | R12-B | 本机出口矩阵通过；跨平台 NOT RUN；UI 级同帧对拍边界已登记 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
-| P0 | N16 | 未完成 | 单进程全套件稳定性与资源所有权 | 无 |
+| P0 | N16 | 部分完成（shared 全绿清零、ui 4 既有修复杂4 污染、媒体并发收窄、全局 DeferredDelete 冲刷；edit 12 文件级既有+~7 顺序污染与合并跑 EXR SIGILL 崩溃点登记为残余债务） | 单进程全套件稳定性与资源所有权 | 无 |
 | P1 | R06-B | v1 已接线（onnx_tile 后端+结果会话+service+图命令+R09 闭包，17 测试；UI 触发面板登记为后续） | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
 | P1 | N02-B | v1 边界 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
 | P1 | N07-B | v1 复核 | Group/Timeline 全出口最终链序与身份 | N07/R09 |
@@ -197,21 +197,46 @@ headless GL 出口层）：
 容差对拍；每项保存原生截图、日志、fixture、命令与判定。不存在的设备写
 `NOT RUN`；未完成矩阵前默认 flag 保持关闭。
 
-### N16 — 单进程全套件与线程/定时器治理
+### N16 — 单进程全套件与线程/定时器治理（2026-11-05 部分完成）
 
 **现象/证据**：`tests/shared` AI provider 基线失败、单进程全套件原生崩溃，
 `tests/edit` 存在文件级通过但全套件顺序运行失败的污染。R12 README
 记录了具体组别；不能通过跳过断言或放宽 golden 容差遮掩。
 
-**实施方法**：固定随机种子和 Qt 平台，先用两两顺序定位污染前件，再查
-单例、ConfigManager、QApplication、后台 QThread/timer、GL lease 的创建
-与关闭路径；每个 owner 补明确 teardown/DeferredDelete 与等待上限。
-AI provider 失败要先在 clean HEAD 确认基线，再按当前契约更新 fixture 或
-实现，留下可复现失败样例。
+**本轮完成**：
+- **tests/shared 27 失败全清零**（2792 passed）：根因一为本机
+  `/usr/local/opt/openssl@3` 符号链接缺失致 `_ssl` 不可加载（26 例
+  环境性失败；重建链接修复）；根因二为三例真实测试债务（torch 缺失
+  改 importorskip、编码器 close 测试对齐 M21.1 发布事务契约、曲线
+  空白点击测试适配 margin 15→7 边界）。
+- **tests/ui 8 失败 → 4**：tool_feedback 两例接口更名
+  （`panel_layer_payload`）、media_pool 两例选择契约翻新（组保留/
+  收敛两分支）修复；余 4 例（ai_edit 滚动跟随、ef03×3）为顺序污染
+  （单独跑通过）。
+- **媒体并发收窄**（单进程崩溃的治理基础）：hwaccel/windows_hw 子类
+  覆写补 av 锁（硬解中不再提前关容器）、probe/extract_pts 容器关闭
+  走空闲窗口、_DEFERRED 驱逐移交常驻线程、close 锁超时不再本线程拆
+  PyAV 状态。
+- **全局 DeferredDelete 冲刷**（从 tests/color 提升到 tests/conftest）；
+  冲刷暴露并修复 zoom resume 悬垂定时器 use-after-delete。
+- **i18n 键集不变量恢复**：清除已删 SoftClipPanel 的 8 语言孤儿键、
+  en_US 补登 tracker.stabilizer 20 活键。
+- 分套件基线：tests/color 3570 全绿（workspace_presets ERROR 未复现）、
+  tests/app 1797 全绿、tests/shared 2792 全绿、tests/edit 11853 过
+  19 失败（12 文件级既有：ssl 修复后 wd12g52 依赖债/金属阈值/ef01
+  等与 R12 登记一致；~7 顺序污染：drag_inject/edit_mode_toggle/ui_aud3/
+  wd11g53/wd12g65×3/media_pool_batch_delete/round4×2 家族）。
 
-**验证方法**：全部 `tests/color`、`tests/app`、`tests/edit`、`tests/shared`
-同一进程连续运行两遍均无崩溃、无顺序失败；进程结束无活跃 QThread；
-golden 归档保留 ADR、GPU 指纹和逐像素差。
+**残余债务（如实登记，未虚报）**：
+- tests/edit ~7 顺序污染未 bisect 前件（DeferredDelete 冲刷不收敛——
+  机制更接近 QThreadPool 饱和/全局单例状态）；
+- 合并单进程跑（color+app+edit+shared，offscreen）在
+  `test_presets_gallery::test_exr_roundtrip_preserves_hdr_values` 的
+  `write_still_exr` 处 SIGILL——与 tests/color/conftest.py 历史记载的
+  EXR 写入×GC 时机崩溃同点，clean HEAD 复现（R12 README 登记的
+  「单进程原生崩溃」即此），需 OpenEXR 写入的 numpy 缓冲所有权专项；
+- 「进程结束无活跃 QThread」断言与逐 owner teardown 注册表未落地
+  （R12-A 收尾仍见 QThread destroyed 告警）。
 
 ### R06-B — AI / Bake 异步执行闭环
 

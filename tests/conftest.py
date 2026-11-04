@@ -65,6 +65,25 @@ def qapp():
         shutdown()
 
 
+@pytest.fixture(autouse=True)
+def _flush_qt_deferred_deletes_at_teardown():
+    """每个测试收尾投递 Qt 延迟删除（N16：从 tests/color 提升为全局）。
+
+    ``QCoreApplication.processEvents()`` 不投递 DeferredDelete 事件，
+    pytest-qt ``_close_widgets`` 的 deleteLater 在无真实事件循环的测试
+    进程里等于静默空操作——C++ 控件树连同 pending QTimer 泄漏存活到
+    后续测试的事件处理中发射（tests/edit 顺序污染家族的共同温床；详见
+    tests/color/conftest.py 的原始实证记录）。勿追加每测试
+    ``gc.collect()``：实测在 test_presets_gallery 的 EXR 写入处以 SIGILL
+    激化。
+    """
+    yield
+    from PyQt6.QtCore import QCoreApplication, QEvent
+    app = QCoreApplication.instance()
+    if app is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 @pytest.fixture
 def image_engine(qapp):
     """
