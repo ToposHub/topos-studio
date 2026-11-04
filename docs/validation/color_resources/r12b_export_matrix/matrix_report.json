@@ -1,0 +1,157 @@
+{
+  "validation": "r12b_export_parity_matrix",
+  "platform": {
+    "os": "Darwin 24.3.0 (x86_64)",
+    "python": "3.12.14",
+    "gl_renderer": "AMD Radeon RX 6800 OpenGL Engine",
+    "gl_version": "4.1 ATI-6.1.13",
+    "other_platforms": "NOT RUN（无设备）"
+  },
+  "cases": [
+    {
+      "case": "serial8_lut2plugins_hdr",
+      "size": [
+        1280,
+        720
+      ],
+      "timings_ms": {
+        "front_f2": 404.4,
+        "full_res_f4": 37.0,
+        "per_node_f2": 40.9
+      },
+      "parity": {
+        "max_abs_diff": 0.001912,
+        "tolerance_max": 0.017578,
+        "within_f2_quantization": true
+      },
+      "selection_invariance": true,
+      "hdr_preservation": {
+        "min": -0.2,
+        "max": 2.4003
+      },
+      "lut_domain_observed": {
+        "rgb_min": -0.15,
+        "rgb_max": 2.4003
+      },
+      "lut_stage_active": true,
+      "output_is_graded": true
+    },
+    {
+      "case": "serial32_hdr",
+      "size": [
+        1280,
+        720
+      ],
+      "timings_ms": {
+        "front_f2": 25.1,
+        "full_res_f4": 26.6,
+        "per_node_f2": 36.8
+      },
+      "parity": {
+        "max_abs_diff": 0.039646,
+        "tolerance_max": 0.065155,
+        "within_f2_quantization": true
+      },
+      "selection_invariance": true,
+      "hdr_preservation": {
+        "min": -0.2021,
+        "max": 4.0436
+      },
+      "output_is_graded": true
+    },
+    {
+      "case": "branch_mixer_real_sdr",
+      "size": [
+        1920,
+        1080
+      ],
+      "timings_ms": {
+        "front_f2": 67.7,
+        "full_res_f4": 108.9,
+        "per_node_f2": 74.3
+      },
+      "parity": {
+        "max_abs_diff": 0.000488,
+        "tolerance_max": 0.002441,
+        "within_f2_quantization": true
+      },
+      "selection_invariance": true,
+      "hdr_preservation": {
+        "min": 0.0,
+        "max": 0.937
+      },
+      "output_is_graded": true
+    },
+    {
+      "case": "compound_real_sdr",
+      "size": [
+        1920,
+        1080
+      ],
+      "timings_ms": {
+        "front_f2": 50.9,
+        "full_res_f4": 49.9,
+        "per_node_f2": 32.0
+      },
+      "parity": {
+        "max_abs_diff": 0.000489,
+        "tolerance_max": 0.002441,
+        "within_f2_quantization": true
+      },
+      "selection_invariance": true,
+      "hdr_preservation": {
+        "min": 0.0,
+        "max": 0.937
+      },
+      "output_is_graded": true
+    },
+    {
+      "case": "serial8_plain_real_sdr",
+      "size": [
+        1920,
+        1080
+      ],
+      "timings_ms": {
+        "front_f2": 38.3,
+        "full_res_f4": 32.6,
+        "per_node_f2": 51.7
+      },
+      "parity": {
+        "max_abs_diff": 0.000481,
+        "tolerance_max": 0.004395,
+        "within_f2_quantization": true
+      },
+      "selection_invariance": true,
+      "hdr_preservation": {
+        "min": 0.05,
+        "max": 0.5657
+      },
+      "output_is_graded": true
+    },
+    {
+      "case": "serial4_fullres_4k",
+      "size": [
+        3840,
+        2160
+      ],
+      "timings_ms": {
+        "front_f2": 304.5,
+        "full_res_f4": 422.1,
+        "per_node_f2": 263.6
+      },
+      "parity": {
+        "max_abs_diff": 0.000497,
+        "tolerance_max": 0.002441,
+        "within_f2_quantization": true
+      },
+      "selection_invariance": true,
+      "hdr_preservation": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "output_is_graded": true
+    }
+  ],
+  "failures": [],
+  "status": "passed"
+}
