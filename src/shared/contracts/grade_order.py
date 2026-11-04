@@ -102,8 +102,9 @@ COLOR_LAYER_PIPELINE: tuple[str, ...] = (
 )
 
 #: 时间线 clip 栈链顺序（edit/core/color_chain.py，F4.1 单点）。
+#: N07：追加 timeline 段（无登记 = 退化为 4 段，消费端按段名过滤）。
 CLIP_STACK_CHAIN: tuple[str, ...] = (
-    "pre_group", "clip_main", "clip_trim", "post_group",
+    "pre_group", "clip_main", "clip_trim", "post_group", "timeline",
 )
 
 #: 编辑页主 grade 消费的标量（color_chain._IDENTITY_SCALARS 冻结）。

@@ -1060,6 +1060,10 @@ class EditProject:
     # 处理栈 + 跨时间线成员引用；组表整体经 SetColorGroupsCommand
     # 受限事务写回（冲突拒绝不半写）。旧工程无此键 = 空组表。
     color_groups: dict[str, Any] = field(default_factory=dict)
+    # N07：Timeline 调色栈（{timeline_id: stack_id}——栈本体在
+    # color_stacks，保存/闭包/锁/undo 全部复用既有设施）。旧工程无
+    # 此键 = 无 timeline 段（链退化为 pre→main→trim→post）。
+    timeline_grade_stacks: dict[str, str] = field(default_factory=dict)
     # F4.2: 栈级命名版本与共享锁（{stack_id: {"active","locked",
     # "versions"}}；命令见 core/color_versions.py）。旧工程无键=空表。
     color_stack_versions: dict[str, Any] = field(default_factory=dict)
@@ -2318,6 +2322,16 @@ class EditProject:
         """F8.1：整体替换工程快照表。"""
         from dataclasses import replace as _replace
         return _replace(self, project_snapshots=dict(table))
+
+    def with_timeline_grade_stacks(
+            self, mapping: dict) -> "EditProject":
+        """N07：整体替换 timeline 栈映射（受限事务 after 形态）。"""
+        from dataclasses import replace as _dc_replace
+        return _dc_replace(self, timeline_grade_stacks=dict(mapping))
+
+    def timeline_grade_stack_id(self, timeline_id: str) -> str:
+        """timeline_id → 调色栈 id（无则空串；不创建）。"""
+        return str(self.timeline_grade_stacks.get(str(timeline_id), "") or "")
 
     def with_color_groups(self, groups: dict) -> "EditProject":
         """F4.1：整体替换调色组表（命令层保证事务性；纯模型替换）。"""

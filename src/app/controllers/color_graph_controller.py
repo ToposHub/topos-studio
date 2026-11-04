@@ -1315,6 +1315,8 @@ class ColorGraphAppHost:
             self._coordinator, project_stack, get_project,
             set_project=self._on_project_published)
         self._host = ColorGraphPanelHost(self._bridge, self._coordinator)
+        # N07：timeline 栈懒建回调（PanelHost scope 菜单 → AppHost 命令栈）
+        self._host._timeline_ensurer = self.ensure_timeline_grade_stack
         self._adapter = LegacyGradingAdapter(self._host, self._bridge)
         self._bound_stack_id = ""
         self._clip_stack_id = ""
@@ -1366,6 +1368,54 @@ class ColorGraphAppHost:
             graph=graph.to_dict(),
             graph_revision=graph.graph_revision)
         self._coordinator.hydrate_projection(projection)
+
+    def ensure_timeline_grade_stack(self, timeline_id: str) -> str:
+        """N07：timeline 调色栈懒建（登记映射+中性空栈，一命令一 undo）。
+
+        已登记→直接返回现有 stack_id；未登记→经 project 命令栈提交
+        ``SetTimelineGradeStackCommand``（中性空栈 scope="timeline"）。
+        命令失败（并发冲突）返回空串——调用方保持只读。
+        """
+        if not timeline_id:
+            return ""
+        from uuid import uuid4
+        project = self._get_project()
+        existing = (project.timeline_grade_stack_id(timeline_id)
+                    if project is not None else "")
+        if existing:
+            return existing
+        if project is None:
+            return ""
+        from src.features.edit.core.commands.color_commands import (
+            SetTimelineGradeStackCommand,
+        )
+        from src.shared.project.color_stack import ColorStackData
+        stack_id = f"timeline-{timeline_id}"
+        if stack_id in project.color_stacks:
+            stack_id = f"timeline-{timeline_id}-{uuid4().hex[:8]}"
+        stack = ColorStackData(
+            stack_id=stack_id, name=f"Timeline Grade {timeline_id[:8]}",
+            scope="timeline")
+        # N07：携带迁移初始图（source+output；与 clip 栈首编辑自动迁移
+        # 同语义——timeline scope 即刻可编辑）
+        try:
+            from src.features.color.core.color_graph_migration import (
+                migrate_legacy_stack,
+            )
+            stack = stack.with_color_graph(migrate_legacy_stack(stack))
+        except Exception:
+            pass
+        command = SetTimelineGradeStackCommand(
+            command_id=str(uuid4()),
+            label="Create Timeline Grade Stack",
+            timeline_id=str(timeline_id), stack_id=stack.stack_id,
+            stack=stack)
+        try:
+            new_project = self._project_stack.execute(command, project)
+        except Exception:
+            return ""
+        self._on_project_published(new_project)
+        return stack_id
 
     def on_clip_stack_loaded(self, stack_id: str, *,
                              scope: str = "clip",
@@ -1500,17 +1550,28 @@ class ColorGraphAppHost:
                 flush_pending=True)
             self._bind_and_hydrate(stack_id, scope, f"{group_id}:{stage}")
         elif scope == "timeline":
-            # timeline 图编辑属 E27：记录 owner 身份；当前无 timeline
-            # grade 栈模型，解绑使编辑显式拒绝（fail-visible，不误写
-            # clip/组栈）
+            # N07：timeline 栈真实 owner 模型——无登记则**懒建中性栈**
+            # （一命令一 undo，宿主 ensure），随后绑定；编辑落 timeline
+            # 栈，保存/闭包/锁/undo 全复用既有设施。懒建失败保持只读
+            # 解绑（fail-visible，不误写 clip/组栈）。
             timeline_id, _clip_id = self._color_context()
             if timeline_id:
                 self._coordinator.scope_owner_id = timeline_id
             self._host.on_clip_switch(
                 f"timeline-{timeline_id or 'x'}", timeline_id or None,
                 flush_pending=True)
-            self._bridge.bind_stack("")
-            self._bound_stack_id = ""
+            ensurer = getattr(self._host, "_timeline_ensurer", None)
+            stack_id = (ensurer(timeline_id)
+                        if callable(ensurer) and timeline_id else "")
+            project = self._bridge._get_project()
+            stack = (project.color_stacks.get(stack_id)
+                     if project is not None and stack_id else None)
+            if stack_id and stack is not None:
+                self._bridge.bind_stack(stack_id)
+                self._bound_stack_id = stack_id
+            else:
+                self._bridge.bind_stack("")
+                self._bound_stack_id = ""
 
     # ── 提交/undo/redo 后的引擎同步（set_project 回调） ──
 

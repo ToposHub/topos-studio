@@ -377,11 +377,16 @@ def convert_edit_project_to_topos_project(
     # 转换 color_stacks
     color_stacks: dict[str, ColorStackRef] = {}
     for stack_id, stack in edit_project.color_stacks.items():
+        # N07：ColorStackRef 合法域无 "timeline"——映射到既有
+        # timeline_adjustment（payload 侧 ColorStackData.scope 仍为 timeline）
+        _ref_scope = (stack.scope if hasattr(stack, 'scope')
+                      else "asset_default")
         color_stacks[stack_id] = ColorStackRef(
             stack_id=stack.stack_id,
             asset_id=stack.asset_id,
             name=stack.name,
-            scope=stack.scope if hasattr(stack, 'scope') else "asset_default",
+            scope=("timeline_adjustment" if _ref_scope == "timeline"
+                   else _ref_scope),
         )
 
     # 确定工程模式 (schema v2: edit_project or standalone_image)
@@ -456,6 +461,11 @@ def convert_edit_project_to_topos_project(
                 edit_project.source_patch_overrides),
             # F4.1: 场景/机位调色组表（识别键 group_id+members）
             "color_groups": _serialize_color_groups(edit_project.color_groups),
+            # N07：timeline 栈映射（栈本体在 color_stacks 全量里）
+            "timeline_grade_stacks": {
+                str(k): str(v) for k, v in
+                (getattr(edit_project, "timeline_grade_stacks", {}) or {}
+                 ).items() if v},
             # F4.2: 栈级命名版本与共享锁（识别键 active/locked/versions）
             "color_stack_versions": copy.deepcopy(
                 edit_project.color_stack_versions or {}),
@@ -754,6 +764,14 @@ def convert_topos_project_to_edit_project(
         project_settings.get("source_patch_overrides"))
     color_groups = _deserialize_color_groups(
         project_settings.get("color_groups"))
+    # N07：timeline 栈映射容错（非法形态→空表；栈 id 不在
+    # color_stacks 里的登记保留但运行时查询返回空串语义由查询方兜底）
+    raw_timeline = project_settings.get("timeline_grade_stacks")
+    timeline_grade_stacks = {}
+    if isinstance(raw_timeline, dict):
+        timeline_grade_stacks = {
+            str(k): str(v) for k, v in raw_timeline.items()
+            if isinstance(k, str) and isinstance(v, str) and v}
     color_stack_versions = dict(
         project_settings.get("color_stack_versions") or {})
     interpretation_overrides = _deserialize_interpretation_overrides(
@@ -782,6 +800,7 @@ def convert_topos_project_to_edit_project(
         proxy_policy=proxy_policy,
         source_patch_overrides=source_patch_overrides,
         color_groups=color_groups,
+        timeline_grade_stacks=timeline_grade_stacks,
         color_stack_versions=color_stack_versions,
         interpretation_overrides=interpretation_overrides,
         audio_sync_bindings=audio_sync_bindings,
