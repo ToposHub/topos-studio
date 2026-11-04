@@ -395,3 +395,12 @@ class WindowsHwPlanarSource(FFmpegMediaSource):
     def hw_output_format(self) -> Optional[str]:
         """硬解下载后的像素格式（nv12/p010le/p016le）。"""
         return self._hw_output_format
+
+
+# N16/Q01：覆写父类 open 而绕过 av_locked_operation 装饰——补锁（同
+# hwaccel.py 尾注）。硬解/读帧进行中 ffsrc-closer 不再提前关容器。
+from src.shared.media.av_concurrency import av_locked_operation as _av_op_dec  # noqa: E402
+
+if "open" in WindowsHwPlanarSource.__dict__:
+    setattr(WindowsHwPlanarSource, "open",
+            _av_op_dec(WindowsHwPlanarSource.__dict__["open"]))

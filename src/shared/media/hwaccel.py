@@ -1207,3 +1207,16 @@ def get_hwaccel_status() -> dict[str, Any]:
         'platform': platform.system(),
         'hwaccel_enabled': len(available) > 0,
     }
+
+
+# N16/Q01：本类覆写了父类的 open/read_next_frame，而 av_locked_operation
+# 只装饰 FFmpegMediaSource.__dict__ 里的版本——子类属性查找拿到未装饰
+# 实现，硬解路径既不进进程级 in-flight 计数也不取实例锁，ffsrc-closer
+# 的 wait_for_idle() 会在硬解进行中关容器（libav↔GIL 互锁）。照
+# macos_vt/source.py 的写法在模块尾统一补锁。
+from src.shared.media.av_concurrency import av_locked_operation as _av_op_dec  # noqa: E402
+
+for _name in ("open", "read_next_frame"):
+    if _name in FFmpegHwaccelSource.__dict__:
+        setattr(FFmpegHwaccelSource, _name,
+                _av_op_dec(FFmpegHwaccelSource.__dict__[_name]))
