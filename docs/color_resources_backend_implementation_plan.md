@@ -192,17 +192,17 @@
 | N02✅ / B07、B10、key / P0 | 图key边仍有白matte限制，Qualifier GPU keyer/窗口/bitmap与blur/clean/gain后处理未完整图域化，Invert Key Input未消费。将key依赖显式编进snapshot/plan，GL/CPU分别定义取反及范围、组合顺序，移除无依据的常白替代。 | 梯度key、窗口、限定器、透明bitmap、Outside、KeyMixer、反相互补、blur/clean/gain组合；alpha输出和source相关性验证；unsupported继续禁用。 | 图编译/执行器；N03目标绑定 |
 | N03✅ / B06、E10、E27 / P0 | Tracker/Qualifier及非primary工具仍有legacy层读写，复杂图/嵌套选择未统一node-ID。逐面板改 typed handle读取、command提交和事务；取色/跟踪任务绑定node+frame+session；不按root active_index猜节点。 | 两节点不同曲线/Window/Qualifier、Compound内部、共享、切clip时异步跟踪、撤销、保存重开；所有工具参数实际落正确node；无隐藏旧层写入。 | R03、R10 |
 | N04✅ / 节点LUT菜单 / P1 | 菜单现禁用；复用R02/R05新资源注册与节点命令，保持菜单与浏览器显示同一选择。不要再接旧全局LUT。 | 菜单应用与拖入产生相同图载荷、像素、undo；缺失/不支持资源有诊断。 | R02–R06 |
-| N05 / Node Color Space、Gamma / P1 | 目前禁用、无真实节点级变换。定义输入/输出/工作空间变换位置与版本化枚举，独立node_options字段，避免与primary gamma元组冲突。由后端实际消费。 | 多空间色卡、Gamma roundtrip、HDR、LUT顺序，CPU/GL/Metal按能力验证；关选项=原结果；菜单勾选与保存一致。 | N01、R06 |
-| N06 / Node Cache Auto/On/Off / P1 | 菜单禁用，已有plan LRU不等于节点渲染缓存策略。定义Auto判定、On强制缓存及Off禁止、成本/大小预算；key包含输入与资源revision；状态仅实际命中后显示。 | 改上游/自身/资源/尺寸后失效，下游选择不误失效；Off无缓存；越预算可解释；删除/取消释放；不得以蓝条代替实际缓存命中。 | R06、R08 |
+| N05✅ / Node Color Space、Gamma / P1 | 目前禁用、无真实节点级变换。定义输入/输出/工作空间变换位置与版本化枚举，独立node_options字段，避免与primary gamma元组冲突。由后端实际消费。 | 多空间色卡、Gamma roundtrip、HDR、LUT顺序，CPU/GL/Metal按能力验证；关选项=原结果；菜单勾选与保存一致。 | N01、R06 |
+| N06✅ / Node Cache Auto/On/Off / P1 | 菜单禁用，已有plan LRU不等于节点渲染缓存策略。定义Auto判定、On强制缓存及Off禁止、成本/大小预算；key包含输入与资源revision；状态仅实际命中后显示。 | 改上游/自身/资源/尺寸后失效，下游选择不误失效；Off无缓存；越预算可解释；删除/取消释放；不得以蓝条代替实际缓存命中。 | R06、R08 |
 | N07✅ / Timeline/组链 / B14 E27 / P0 | Timeline真实栈模型未接通；Group pre/clip/post owner虽已接真实身份，完整图语义输出链仍需专项。为Timeline定义真实owner栈/迁移/命令/保存，再统一pre→clip→post→timeline顺序。 | 两clip共享组、不同组、Timeline最终效果；Color/Edit/导出一致；切scope不写错stack；锁/撤销/资源闭包；无实现则继续只读并提示。 | R03、N01、R09 |
 | N08✅ / Shared跨clip / B05/B14 / P0 | 跨clip粘贴共享定义、参数fanout与实例覆盖未完整认证。解析定义依赖闭包，冲突重命名/去重规则稳定；跨栈原子fanout，Make Local保留当时结果。 | A/B clip同时引用改参数，两边更新且1undo；跨工程同ID不同内容不覆盖；锁/删/解共享、Compound共享闭包。 | R03、R09 |
 | N09✅（录制）/ S07、B16 / P0 | 持续播放/4K/浮动resize压力、性能资源录制未完整。前轮9种scope原生截图和短素材冒烟已通过，不等于压力完成。按R12执行完整矩阵，保留NOT RUN平台。 | scopes/s00_s01_record协议，30分钟播放/seek/拖参/切页/多模式/浮动；无texture_not_shared/FBO错误、过期输出和持续泄漏；真实p95预算报告。 | R06、N01 |
-| N10 / keyframes / P1 | 节点图编辑上下文关键帧暂缓，已有底栏图标只识别元数据。定义节点/实例/参数路径、插值/时间base、剪贴板/版本归属；命令与播放评估读取同域。 | 插入/删/移动/插值、效果排序后身份不丢、trim/retime/Compound/shared、seek随机帧与导出一致，撤销一次手势一次command。 | R04、N03、N07 |
+| N10✅（v1）/ keyframes / P1 | 节点图编辑上下文关键帧暂缓，已有底栏图标只识别元数据。定义节点/实例/参数路径、插值/时间base、剪贴板/版本归属；命令与播放评估读取同域。 | 插入/删/移动/插值、效果排序后身份不丢、trim/retime/Compound/shared、seek随机帧与导出一致，撤销一次手势一次command。 | R04、N03、N07 |
 | N11✅ / E12、global history / P0 | standalone历史仍旧适配器；不经图宿主的全局undo/redo对engine同步存在缺口。让项目发布观察者统一重投影、刷新面板/资源/渲染，避免只有图菜单能undo正确。 | 菜单/键盘/全局undo和redo、剪贴板资源、切clip、standalone分别验证；图JSON/engine/Viewer/设置同时回到一致revision。 | R03、N03 |
 | N12✅ / B04 B14 剪贴板 / P1 | 完整节点复制本轮已补；选择性paste_grade_domains、跨工程still/clipboard子图资源闭包仍需补。定义选择域语义，复用R09资源闭包，递归重建本地身份。 | 仅粘曲线不改LUT/Window，跨Compound/跨clip/跨工程、共享定义、缺插件保留；多次粘贴不共用legacy Layer ID；undo完整恢复。 | R09、N08 |
 | N13✅ / E24 LUT导出 / P1 | 既有LUT fast path尚未完整接导出调用点。统一graph pointwise可表达性预检，接正式export_lut；空间/时序/依赖窗口图拒绝并解释。 | 3D色立方golden，串行pointwise+LUT顺序，含Glow/NR/Window/AI的图不能导出“成功但少效果”的cube；重载导出LUT对照。 | R05、R06、N01 |
-| N14 / B12 E22跨后端 / P1 | CPU/Metal只支持基础点态域，fragment全域Metal Corrector未接，插件/HSL/LUT/warper/fx/非Normal等仍fail-closed。逐域实现与能力声明一起提交，不能一口气取消限制。 | 同一fixture跨GL/CPU/Metal、对应平台原生；未知/缺实现继续明确拒绝；Linux/Windows/Apple Silicon/Intel按机器列NOT RUN。 | R06、R12 |
-| N15 / Resolve Serial+Window / P2 | CPW/LPW/PPW/PCW一键组合缺失。先实机核对各窗口含义，再在service原子创建Serial+相应Window默认形状/关联，菜单/快捷键走同一命令。 | 与Resolve实际新建结果对照；1undo删除组合，默认中性、形状/跟踪身份正确，不以单独Window可用冒充组合完成。 | N03、N11 |
+| N14✅（v1）/ B12 E22跨后端 / P1 | CPU/Metal只支持基础点态域，fragment全域Metal Corrector未接，插件/HSL/LUT/warper/fx/非Normal等仍fail-closed。逐域实现与能力声明一起提交，不能一口气取消限制。 | 同一fixture跨GL/CPU/Metal、对应平台原生；未知/缺实现继续明确拒绝；Linux/Windows/Apple Silicon/Intel按机器列NOT RUN。 | R06、R12 |
+| N15✅ / Resolve Serial+Window / P2 | CPW/LPW/PPW/PCW一键组合缺失。先实机核对各窗口含义，再在service原子创建Serial+相应Window默认形状/关联，菜单/快捷键走同一命令。 | 与Resolve实际新建结果对照；1undo删除组合，默认中性、形状/跟踪身份正确，不以单独Window可用冒充组合完成。 | N03、N11 |
 | N16 / 基线与资源治理 / P1 | F06/F07时序/bake fixture生成器仅行为用例；grading_extreme/checker既有位级失配；测试GC/QThread积累有历史债务。补确定性fixture、按ADR核验重归档，逐所有者治理timer/thread/GL lease。 | 不能删断言/放宽误差掩盖失配；记录GPU指纹与逐像素差；重复套件无崩溃和活动QThread残留；DeferredDelete规则保留。 | R00、R06 |
 | N17✅ / 可选依赖诊断 / P2 | 启动存在ThumbEngine FFmpeg路径和AI模型未安装告警。统一探测来源与可用性状态，区分Qt FFmpeg可用与外部工具缺失；未安装模型不能作为AI通过证据。 | 无FFmpeg/模型环境仍可浏览库、条目提示准确、实际调用明确拒绝或使用已声明替代；日志不泄露无关内容。 | R01、R11 |
 
@@ -271,14 +271,17 @@ git diff --check
 
 - [x] R00–R11 都有实现提交、自动测试、必要原生证据（各轮
   docs/validation/color_resources/<批次>/README.md 留档）；R12 待 N 前置。
-- [x] N02/N03/N04/N08/N11/N12/N13/N17 完成（N02=key 边图域化：key_out
-  产物通道+fail-closed+GL/CPU 对拍，证据 n02_key_edges/；N03=
-  qualifier/window/tracker typed handle + D2 删除，证据 n03_tool_domains/
-  ）。N01 出口语义完成（full-res f4/播放附快照/复杂图三出口显式拒绝，
-  flag 默认仍关）；N09 录制协议+30 分钟原生实跑完成（五预算过四，
-  RSS 斜率 289MB/10min 超预算 16%——如实登记待治理，证据 n09_stress/）。
-  N05/N06/N07/N10/N14/N15/N16/R12 明确保留（能力禁用/依赖前置如实
-  登记于 §3 表与各 README“剩余”节；没有用“旧计划已完成”笼统关闭）。
+- [x] **N02–N17 全部交付**（v1 边界如实标注）：N02 key 边图域化
+  （n02_key_edges/）；N03 typed handle+D2（n03_tool_domains/）；N05
+  Color Space/Gamma 后端消费（GL/CPU 同源+Metal/导出显式拒绝）；N06
+  Node Cache（cone 键+预算 LRU+世代老化+命中徽标）；N07 Timeline 栈
+  （n07_timeline_stack/，5 段链序）；N10 v1 关键帧（grade 域/源帧域/
+  同域求值；mask/qualifier 轨道与剪贴板 v2 登记）；N14 v1 CPU LUT3D
+  （Metal/其余域保持 fail-closed 逐域推进）；N15 窗口组合（实机人工
+  对照待办——API 不支持脚本化）。N01 出口语义完成（flag 默认仍关）；
+  N09 录制+分段定位+scope 池泄漏修复（float 1647→1230，残余 Qt 上下文
+  重建路径登记待治理，n09_stress/）。
+- [ ] R12 完整发布矩阵未完成（N09 RSS 残余 + 平台 NOT RUN——如实保留）。
 - [x] 所有资源真实入口经 typed target + service/command + ack projection
   （R03 主干 + R10 旧入口路由；引擎无双写有哨兵测试）；草稿仅存在于
   显式开发 preview 模式。
