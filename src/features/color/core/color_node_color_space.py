@@ -196,7 +196,6 @@ def _tf_decode(x: np.ndarray, kind: int) -> np.ndarray:
                         kink * np.power(
                             2.0, (x - kink * 10.0) / slope))
     raise ValueError(f"未知传递函数 kind={kind}")
-    raise ValueError(f"未知传递函数 kind={kind}")
 
 
 def apply_node_color_space_cpu(rgb: np.ndarray, spec: Mapping[str, Any],

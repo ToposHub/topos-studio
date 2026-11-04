@@ -56,6 +56,10 @@ class _FakeHistory:
 class _FakeEngine:
     """记录型 ImageEngine 替身（可注入 set_video_denoise_state / 异常）。"""
 
+    def get_tracked_geometry(self, shape: Any) -> Optional[Dict[str, Any]]:
+        """AUD-2302 路径需要的引擎入口：None → 调用方回退 base geometry。"""
+        return None
+
     def __init__(self) -> None:
         self.layers: List[Layer] = [Layer("Main")]
         self.active_layer_index: int = 0
@@ -137,6 +141,10 @@ class _FixHost(QMainWindow, ColorControllerMixin):
         self.mask_panel = MagicMock()
         self.layer_panel = MagicMock()
         self.qualifier_panel = MagicMock()
+        # AUD-2302 提交路径的跟踪器上下文：非交互 params → overlay
+        # 走 hide_tracker_overlay 早退（产品合法分支，不依赖 dock 状态）
+        self._tracker_params: Dict[str, Any] = {}
+        self.tracker_panel = MagicMock()
         self.crop_panel = MagicMock()
         self.crop_panel.crop_active = False
         self.denoise_panel = MagicMock()

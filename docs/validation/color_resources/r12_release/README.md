@@ -66,3 +66,48 @@ R04 事务手势 / R05 节点 LUT 语义（含 HDR 恒等缺陷修正+golden 重
 计划表 R00–R12 + N01–N17 全部批次**均已交付**（v1 边界/降级/待办如实
 标注于各批次 README 与 §3 表）；发布阻断项 = 残余 RSS 债务 + 非本机
 平台实机核验，均为登记在案的后续工作，无未登记的能力缺口。
+
+## 复查补记（2026-11-04 第二轮整体复核）
+
+全量重跑 + 语义深扫发现并修复 **2 个真实缺陷**：
+
+1. **N06 预算淘汰纹理别名（真实渲染 bug）**：执行中预算淘汰把仍在
+   当前 `node_outputs` 工作集的纹理归还池，后续 `_alloc_texture` 会
+   取出当渲染目标——与下游采样同纹理 = GL 反馈环/串写（默认 256MB
+   预算下 4 个 4K f2 缓存节点即可触发）。修复：工作集内淘汰延迟到
+   执行末归还（`evicted_deferred` 事件可解释）；2 个回归测试（单元
+   不变式 + 端到端位级一致性，旧代码上均失败验证非空洞）。
+2. **菜单 parity 测试遗漏**：N05/N06 启用 Color Space/Gamma/Node
+   Cache 菜单后测试仍断言旧「显式禁用」契约——更新为「启用 + 子项
+   即真实命令值」新契约（color 全量由 3566+1 失败 → 3569 全绿）。
+
+另修复 **12 个基线既有 tests/app 失败**（经 R00 基线 worktree 定证
+全部先于本计划存在，与本批 48 提交无关）：8 个测试假宿主漂移
+（`_report_package_compatibility`/`_on_mixer_routing_preview`×2/
+`get_tracked_geometry`/`engine` 等产品新增入口未跟上）+ gap002 视图
+桩升级到事务桥语义（`_Signal` 分发 + committed 链，含 ref 回写）+
+wd1g6 撤销语义更新（M07 自动锁后为逐命令撤销）+ dock×2（350a037
+Effects 升为一等可见面板的过期断言）。
+
+复查无新问题区域：N05 TF 双向全路径输入防护（负值 clamp/log 下界）、
+N07 dangling 栈优雅退化 4 段、N02 fail-closed 一致性；顺手清理
+color_node_color_space.py 重复 raise 死代码。tests/app 由 12 failed
+→ **全绿**；color+edit 复跑全绿。
+
+### tests/edit 全量补扫（本轮一并定证）
+
+tests/edit 全量 9652+ 单跑：27 失败，三类定证（R00 基线 worktree
+逐文件对照）：
+
+- **8 个已修**：n03_grade_degrade_gate/n03_layers_mask_preflight
+  假宿主漂移（bd8b15f 稳定化重构后 `_apply_color_grade_unstabilized`
+  /`_clip_stabilization_state` 未跟上——委托真实方法后 15 全绿）。
+- **11 个基线文件级既有**（基线同样失败，与本批无关）：metal export
+  ×2（渲染均值阈值）、m06 qualifier ×1、wd12g52 ×3（含 soundfile/
+  qwen_asr 缺依赖——与本机 ssl 损坏同族环境债务）、transition/
+  ef01/properties_layout/drag_inject ×4。
+- **~8 个顺序依赖污染**（基线与当前 HEAD **文件级均通过**，全套件
+  单进程跑才失败——前置测试状态泄漏）：wd12g65×3、round4×2、
+  media_pool/wd11g53/ui_aud3/edit_mode_toggle×4。与已登记的「单进程
+  全量原生崩溃」债务同族（非崩溃变体），治理归 N16 后续批次
+  （逐所有者隔离污染源）。

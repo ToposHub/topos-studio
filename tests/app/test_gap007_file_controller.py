@@ -159,6 +159,7 @@ def make_host(**overrides: Any) -> SimpleNamespace:
     host._clear_all_dirty_states = lambda: FileOpsMixin._clear_all_dirty_states(host)
     host._has_unsaved_changes = lambda: FileOpsMixin._has_unsaved_changes(host)
     host._report_content_migrations = lambda: FileOpsMixin._report_content_migrations(host)
+    host._report_package_compatibility = lambda: FileOpsMixin._report_package_compatibility(host)
     host._restore_edit_ui_state = lambda state: FileOpsMixin._restore_edit_ui_state(host, state)
     # 默认委托真实实现：_open_project_path / _open_media_path 的路由测试
     # 依赖真实 manifest.zip 读取。

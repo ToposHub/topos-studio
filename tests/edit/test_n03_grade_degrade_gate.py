@@ -28,7 +28,7 @@ def _stub_exporter(allow_degraded: bool, qualifier_params: dict) -> NS:
     grade = {"grading_params": {"exposure": 0.0},
              "qualifier_params": qualifier_params,
              "grade_keyframes": {}}
-    return NS(
+    stub = NS(
         allow_degraded_grade=allow_degraded,
         _get_clip_color_grade=lambda layer: grade,
         # 后续主参数路径的辅助（stub 化：走最简 float 全量应用）
@@ -36,6 +36,14 @@ def _stub_exporter(allow_degraded: bool, qualifier_params: dict) -> NS:
             lambda *a, **k: None),
         _color_grade_lut_cache={},
     )
+    # bd8b15f 起 _apply_color_grade = unstabilized + 稳定化包裹（无
+    # _project/clip 状态 → clip_stabilization_state 空 → 直通）
+    stub._apply_color_grade_unstabilized = (
+        lambda frame, layer: TimelineExporter._apply_color_grade_unstabilized(
+            stub, frame, layer))
+    stub._clip_stabilization_state = (
+        lambda layer: TimelineExporter._clip_stabilization_state(stub, layer))
+    return stub
 
 
 def _layer():

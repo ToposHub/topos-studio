@@ -369,3 +369,112 @@ class TestExecutorNodeCache:
             executor.release_pool()
         finally:
             ctx.release()
+
+    def test_budget_eviction_defers_working_set_textures(self):
+        """执行中预算淘汰命中工作集 → 延迟归还（不变式：被下游持有的
+        纹理不进池——否则后续 _alloc_texture 取走当渲染目标，与下游
+        采样同纹理 = GL 反馈环/串写）。单元级直接钉住该不变式。"""
+        from collections import OrderedDict
+
+        class _FakeTex:
+            def __init__(self, name):
+                self.name = name
+                self.size = (32, 32)
+                self.dtype = "f2"
+                self.released = False
+
+            def release(self):
+                self.released = True
+
+        class _Pass:
+            def __init__(self, node_id, cone):
+                self.node_id = node_id
+                self.op = "corrector"
+                self.cone_key = cone
+                self.consumers = 1
+                self.params = {"cache_mode": "on"}
+
+        ex = ColorGraphExecutor.__new__(ColorGraphExecutor)
+        ex._pool = {}
+        ex._node_cache = OrderedDict()
+        ex._node_cache_bytes = 0
+        ex._node_cache_budget = 32 * 32 * 8  # 恰一条 f2
+        ex._run_dtype = "f2"
+        ex._exec_generation = 1
+        ex.node_cache_stats = {"hit": 0, "stored": 0,
+                               "oversize_rejected": 0, "evicted_budget": 0,
+                               "swept_stale": 0, "policy_off": 0,
+                               "auto_skipped": 0}
+        tex_a, tex_b = _FakeTex("a"), _FakeTex("b")
+        assert ex._node_cache_store(_Pass("a", "cone-a"), tex_a, 32, 32,
+                                    ("s",), [])
+        # B 入缓存淘汰 A——A 仍在工作集（node_outputs 持有）
+        deferred: list = []
+        working_set = {"a": tex_a}
+        events: list = []
+        assert ex._node_cache_store(_Pass("b", "cone-b"), tex_b, 32, 32,
+                                    ("s",), events,
+                                    deferred_releases=deferred,
+                                    working_set=working_set)
+        # A 延迟（未进池、未销毁）；B 在缓存
+        assert deferred == [tex_a]
+        assert not tex_a.released
+        assert all(tex_a not in free for free in ex._pool.values())
+        assert ex._node_cache_bytes <= ex._node_cache_budget
+        deferred_evictions = [e for e in events
+                              if e[1] == "evicted_deferred"]
+        assert deferred_evictions and deferred_evictions[0][0] == "a"
+        assert deferred_evictions[0][3] == "working_set"
+        # 工作集外的淘汰仍立即还池（可解释：budget 事件）
+        tex_c = _FakeTex("c")
+        events2: list = []
+        assert ex._node_cache_store(_Pass("c", "cone-c"), tex_c, 32, 32,
+                                    ("s",), events2,
+                                    deferred_releases=[],
+                                    working_set={"a": tex_a})
+        assert any(e[1] == "evicted" and e[3] == "budget"
+                   for e in events2)
+
+    def test_budget_eviction_working_set_output_consistency(self):
+        """端到端：预算恰一条、双缓存节点串行图——淘汰发生在执行中，
+        输出仍与无缓存运行位级一致（延迟归还不改变渲染结果）。"""
+        ctx = self._ctx()
+        try:
+            size = (32, 32)
+            # src → a → c → out；a/c 强制 On；预算恰一条 → 存 c 淘汰 a
+            nodes = [_node("src", NodeType.SOURCE),
+                     _corrector("a", 0.2, cache_mode="on"),
+                     _corrector("c", 0.1, cache_mode="on"),
+                     _node("out", NodeType.OUTPUT)]
+            edges = [ColorEdgeData("e1", "src", "image", "a", "image"),
+                     ColorEdgeData("e2", "a", "image", "c", "image"),
+                     ColorEdgeData("e3", "c", "image", "out", "image")]
+            graph = ColorGraphData(nodes=tuple(nodes), edges=tuple(edges),
+                                   source_node_id="src",
+                                   output_node_id="out")
+
+            def _pixels(executor, rid):
+                result = self._run(ctx, graph, executor, rid, size=size)
+                assert result.published
+                fbo = ctx.framebuffer(
+                    color_attachments=[result.output_texture])
+                fbo.use()
+                data = np.frombuffer(
+                    fbo.read(components=4, dtype="f2"),
+                    dtype=np.float16).reshape(size[1], size[0], 4)
+                executor.release_revision(rid)
+                return data, result
+
+            cached = ColorGraphExecutor(
+                ctx, node_cache_budget_bytes=32 * 32 * 8)
+            with_cache, result = _pixels(cached, "rc")
+            assert any(e[1] == "evicted_deferred" and e[0] == "a"
+                       for e in result.cache_events)
+            cached.release_pool()
+            fresh = ColorGraphExecutor(
+                ctx, node_cache_budget_bytes=0)  # 预算 0 = 全拒收
+            without_cache, _ = _pixels(fresh, "rf")
+            fresh.release_pool()
+            np.testing.assert_array_equal(with_cache, without_cache)
+        finally:
+            ctx.release()
