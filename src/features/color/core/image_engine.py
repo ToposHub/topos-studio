@@ -859,8 +859,9 @@ class ImageEngine(QObject):
         if snapshot is not None:
             render_params['color_graph_snapshot'] = snapshot
             # N10：当前源帧随参（图执行逐帧求值关键帧；帧不进 plan
-            # 编译身份——快照 source_frame 保持 0，plan 缓存命中不变）
-            frame = getattr(self, 'current_grade_frame', None)
+            # 编译身份——快照 source_frame 保持 0，plan 缓存命中不变）。
+            # __dict__ 直读：裸 __new__ 宿主（测试）上 Qt 属性机制会抛
+            frame = self.__dict__.get('current_grade_frame')
             if frame is not None:
                 render_params['color_graph_source_frame'] = int(frame)
             if execute:
