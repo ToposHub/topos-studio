@@ -360,18 +360,19 @@ def main() -> int:
                 self.page_switches += 1
                 time.sleep(0.2)
             elif self.behavior == "float":
+                # R12-A 2026-11-05 修复：此前读不存在的 `_floating_window`
+                # 属性——开/关/resize 分支全部死代码，float 窗口从未真正
+                # 循环。改为对 dockAnalysis 本体 setFloating 循环（含
+                # resize 压力），还原「浮动窗口开关」行为窗的本意。
                 try:
-                    panel = self.host.scope_panel
+                    dock = self.host.dock_analysis
                     if self.float_toggles % 2 == 0:
-                        panel.open_floating()
-                        window = getattr(panel, "_floating_window", None)
-                        if window is not None:
-                            window.resize(960 + (self.float_toggles % 3) * 120,
-                                          640)
+                        dock.setFloating(True)
+                        dock.resize(960 + (self.float_toggles % 3) * 120, 640)
                     else:
-                        close = getattr(panel, "_floating_window", None)
-                        if close is not None:
-                            close.close()
+                        dock.setFloating(False)
+                        self.host.addDockWidget(
+                            Qt.DockWidgetArea.BottomDockWidgetArea, dock)
                 except Exception as exc:  # noqa: BLE001
                     self.errors.append(f"float: {exc}")
                 self.float_toggles += 1
@@ -442,10 +443,16 @@ def main() -> int:
             clock = _percentiles(self._clock_samples())
             params = _percentiles(self.param_latencies)
             seeks = _percentiles(self.seek_latencies)
+            # R12-A 2026-11-05 修复：此前调用不存在的 engine.get_render_stats()
+            # （定义在 AsyncRenderer 上），AttributeError 被吞导致
+            # render_stats 恒空。取渲染器实例并保存**数值**而非键名。
             stats: dict[str, Any] = {}
             try:
-                stats = self.host.engine.get_render_stats() \
-                    if hasattr(self.host.engine, "get_render_stats") else {}
+                renderer = getattr(self.host.engine, "renderer", None)
+                getter = getattr(renderer, "get_render_stats", None)
+                if callable(getter):
+                    stats = {key: value for key, value in getter().items()
+                             if isinstance(value, (int, float, str, bool))}
             except Exception:  # noqa: BLE001
                 pass
             # 稳态播放相位的渲染新鲜度（fps）：停滞 = 过期输出风险。
@@ -514,7 +521,7 @@ def main() -> int:
                 "scope_diagnostics_events": {
                     key: value for key, value in events.items()
                     if isinstance(value, dict) and value.get("count")},
-                "render_stats_keys": sorted(stats)[:24] if stats else [],
+                "render_stats": stats,
                 "behavior_windows": [
                     [round(t0 - self.started, 1), round(t1 - self.started, 1),
                      behavior]
