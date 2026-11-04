@@ -643,12 +643,14 @@ class TestAud38211InteractionPairing:
         w.interaction_started.connect(lambda: counts.__setitem__("s", counts["s"] + 1))
         w.interaction_ended.connect(lambda: counts.__setitem__("e", counts["e"] + 1))
 
-        # (2,2) 在 draw rect（margin=15）之外且远离任何控制点
-        w.mousePressEvent(_mouse_event(QEvent.Type.MouseButtonPress, QPointF(2, 2)))
+        # (1.5,1.5) 在加点判定区之外：margin=7 + 5px 宽容边界 ⇒ 排除角
+        # 只有 <2px（曲线 UI 整合批次把 margin 从 15 收到 7，(2,2) 恰在
+        # 边界内会加点）；远离任何控制点。
+        w.mousePressEvent(_mouse_event(QEvent.Type.MouseButtonPress, QPointF(1.5, 1.5)))
         assert counts == {"s": 1, "e": 0}
         assert len(w.curves["M"]) == 2  # 未加点
 
-        w.mouseReleaseEvent(_mouse_event(QEvent.Type.MouseButtonRelease, QPointF(2, 2)))
+        w.mouseReleaseEvent(_mouse_event(QEvent.Type.MouseButtonRelease, QPointF(1.5, 1.5)))
         assert counts == {"s": 1, "e": 1}  # 配对补齐（旧行为：ended 永不发射）
 
     def test_click_on_point_still_pairs(self, qapp):

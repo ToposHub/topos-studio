@@ -109,8 +109,13 @@ class TestAud33506CloseExceptionPath:
         mock_container.add_stream.return_value = mock_stream
         mock_av.open.return_value = mock_container
 
-        # 磁盘上预置"半成品"
+        # 磁盘上预置旧成功成片（最终路径）与半成品（临时写路径）。
+        # M21.1（R04）发布事务：close 失败只清 .topos-partial 临时文件，
+        # 旧成功输出保持不动——发布以 close 成功为准。
         with open(out_path, "wb") as f:
+            f.write(b"previous-good-output")
+        partial_path = out_path + ".topos-partial"
+        with open(partial_path, "wb") as f:
             f.write(b"partial-mux-data")
 
         enc = FFmpegVideoEncoder(out_path, _tiny_config())
@@ -122,8 +127,10 @@ class TestAud33506CloseExceptionPath:
 
         # (1) 容器被显式 best-effort 关闭（try 内 close 未到达，异常路径补上）
         assert mock_container.close.call_count == 1
-        # (2) 半成品被删除
-        assert not os.path.exists(out_path)
+        # (2) 半成品（临时写路径）被删除；旧成功成片保持原样
+        assert not os.path.exists(partial_path)
+        with open(out_path, "rb") as f:
+            assert f.read() == b"previous-good-output"
         # (3) 状态复位：引用清空、可安全丢弃
         assert enc._container is None and enc._stream is None
         assert enc._audio_stream is None
