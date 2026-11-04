@@ -171,7 +171,7 @@
 
 **验证**：成功后有标记、reset/remove/undo后正确更新、disabled实例策略固定；插件缺失仍保留配置并显示原因；失败后画面/参数/projection保持一致。沿用工具标记现有测试再添加资源命令场景。
 
-### R12 — 完整发布与实机矩阵　[x]（2026-11-04，证据 docs/validation/color_resources/r12_release/；全批次回归 556+ 全绿+原生 workflow passed；本机平台交付，其他平台 NOT RUN 如实登记；默认 flag 因残余 RSS 债务维持关闭）
+### R12 — 完整发布与实机矩阵　[ ]（2026-11-04 复核：批次回归和本机原生 workflow 已通过，但 30 分钟 RSS 预算未过，跨平台及 §2 所列完整出口/素材矩阵缺验收证据；默认 flag 维持关闭。见 docs/validation/color_resources/r12_release/）
 
 前置：R01–R11、下面 N01/N02/N03/N07/N09 的出口完成。
 
@@ -271,18 +271,20 @@ git diff --check
 
 - [x] R00–R11 都有实现提交、自动测试、必要原生证据（各轮
   docs/validation/color_resources/<批次>/README.md 留档）；R12 待 N 前置。
-- [x] **N02–N17 全部交付**（v1 边界如实标注）：N02 key 边图域化
+- [x] **N02–N14 与 N17 的已声明版本已落地**（v1 边界如实标注）：N02 key 边图域化
   （n02_key_edges/）；N03 typed handle+D2（n03_tool_domains/）；N05
   Color Space/Gamma 后端消费（GL/CPU 同源+Metal/导出显式拒绝）；N06
   Node Cache（cone 键+预算 LRU+世代老化+命中徽标）；N07 Timeline 栈
   （n07_timeline_stack/，5 段链序）；N10 v1 关键帧（grade 域/源帧域/
   同域求值；mask/qualifier 轨道与剪贴板 v2 登记）；N14 v1 CPU LUT3D
-  （Metal/其余域保持 fail-closed 逐域推进）；N15 窗口组合（实机人工
-  对照待办——API 不支持脚本化）。N01 出口语义完成（flag 默认仍关）；
+  （Metal/其余域保持 fail-closed 逐域推进）。N01 出口语义完成（flag 默认仍关）；
   N09 录制+分段定位+scope 池泄漏修复（float 1647→1230，残余 Qt 上下文
   重建路径登记待治理，n09_stress/）。
-- [x] R12 发布矩阵完成（本机平台全批次回归+原生 workflow；残余 RSS
-  债务与非本机平台 NOT RUN 如实登记为发布阻断项，未虚报）。
+- [ ] R12 完整发布矩阵：本机批次回归和原生 workflow 通过；RSS
+  预算失败，其他平台 NOT RUN，4K/HDR/32 节点/多出口同帧对照等需逐项留证。
+- [ ] N15 Resolve 窗口组合的实机交互对照；N16 单进程全量套件的
+  崩溃、顺序污染及线程/定时器所有权债务；R06 离线 AI/bake 目前只有
+  身份、取消和接受协议，执行 worker 与结果资源生命周期尚未接入。
 - [x] 所有资源真实入口经 typed target + service/command + ack projection
   （R03 主干 + R10 旧入口路由；引擎无双写有哨兵测试）；草稿仅存在于
   显式开发 preview 模式。
@@ -296,3 +298,20 @@ git diff --check
 - [x] N09 压力录制完成（30 分钟原生实跑，报告+预算对照存档；RSS
   斜率超预算如实登记为待治理债务）；R12 平台矩阵未完成——默认 flag
   维持关闭，未虚报。
+
+### 2026-11-04 复核补记
+
+- `测试素材01.mov` 的 `--resources --workflow` 原生验证发现两处验收盲点：
+  脚本仍访问已删除的旧面板；修复后报告虽为 `passed`，scope 诊断却记录
+  `graph_execution_error: unhashable type: 'dict'`。根因是生产执行器的
+  节点缓存键把可变 `working_color_context` 字典直接放进 tuple。
+- 已把色彩上下文规范化为稳定、可哈希的 JSON 键，用于 plan/节点缓存，
+  并让原生脚本遇到任何 `execute/graph_*` 诊断即失败。修正过时的节点
+  缩略图说明；已处理节点图到达后，tooltip 显示真实状态。
+- 本轮复测：关键功能 102 项、计划表 UI/图回归 184 项、修复针对性
+  76 项、缩略图 UI 47 项均通过；原生素材 workflow `passed`、
+  `per_node_rendering=evaluated_node_thumbnails`、无图执行错误。
+  这些结果不替代 R12 的 30 分钟压力复测及完整平台/出口矩阵。
+- N09 已存 30 分钟报告还显示播放窗渲染新鲜度仅 1.09 fps、帧距
+  p95=282 ms（素材为 25 fps）。这满足该脚本自设的「不停滞」下限，
+  但不满足实时播放目标；需在 R12 中按实际播放帧率另设验收门槛。

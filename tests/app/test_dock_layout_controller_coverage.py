@@ -57,6 +57,7 @@ from src.app.controllers import dock_layout_controller as dlc
 from src.app.controllers.dock_layout_controller import (
     DockLayoutMixin,
     FloatingDockTitleBar,
+    _COLOR_TOOL_DOCK_MAX_HEIGHT,
     _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY,
     _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_VERSION,
     _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY,
@@ -64,6 +65,7 @@ from src.app.controllers.dock_layout_controller import (
     _EDIT_INFO_DOCK_LAYOUT_MIGRATION_KEY,
     _EDIT_INFO_DOCK_LAYOUT_MIGRATION_VERSION,
 )
+from src.features.color.ui.color_wheel import GradingPanel
 from src.shared.feature_flags import get_effective_layout_mode
 from src.shared.i18n.i18n import I18N
 from src.shared.layout.profile import LayoutProfile
@@ -330,6 +332,38 @@ def _registry_sets() -> Tuple[Set[str], Set[str], Set[str], Set[str]]:
     appended = set(re.findall(r"self\.all_docks\.append\(self\.(dock_\w+)\)", src))
     adapter = set(re.findall(r"self\.(dock_\w+)\s*=\s*docks\[", src))
     return created, base, appended, adapter
+
+
+def test_color_tool_height_cap_preserves_floating_resize(host: _DockHost, qapp) -> None:
+    host.resize(1200, 900)
+    host.dock_viewport.show()
+    dock = host.dock_grading
+    dock.show()
+    host._sync_color_tool_dock_max_height(dock, is_floating=False)
+    qapp.processEvents()
+    host.resizeDocks([dock], [700], Qt.Orientation.Vertical)
+    qapp.processEvents()
+    assert dock.maximumHeight() == _COLOR_TOOL_DOCK_MAX_HEIGHT
+    assert dock.height() <= _COLOR_TOOL_DOCK_MAX_HEIGHT
+
+    host._sync_color_tool_dock_max_height(dock, is_floating=True)
+    assert dock.maximumHeight() > _COLOR_TOOL_DOCK_MAX_HEIGHT
+    host._sync_color_tool_dock_max_height(dock, is_floating=False)
+    assert dock.maximumHeight() == _COLOR_TOOL_DOCK_MAX_HEIGHT
+
+
+def test_color_tool_height_cap_reaches_wheel_radius_limit(qapp) -> None:
+    panel = GradingPanel()
+    panel.resize(1260, _COLOR_TOOL_DOCK_MAX_HEIGHT - 7)
+    panel.show()
+    qapp.processEvents()
+    radius_at_cap = panel.lift_wheel._wheel_canvas._geometry()[1]
+    panel.resize(1260, _COLOR_TOOL_DOCK_MAX_HEIGHT + 100)
+    qapp.processEvents()
+    radius_above_cap = panel.lift_wheel._wheel_canvas._geometry()[1]
+    panel.close()
+    panel.deleteLater()
+    assert radius_at_cap == radius_above_cap == 100.0
 
 
 def test_created_docks_missing_from_all_docks_are_exactly_the_known_five() -> None:

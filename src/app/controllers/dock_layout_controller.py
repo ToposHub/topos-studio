@@ -59,7 +59,18 @@ _COLOR_TOOLS_DOCK_HEIGHT_RATIO = 0.32
 _COLOR_TOOLS_DOCK_HEIGHT_MIN_RATIO = 0.27
 _COLOR_TOOLS_DOCK_HEIGHT_MAX_RATIO = 0.37
 _COLOR_GRADING_DOCK_MIN_HEIGHT = 160
-_COLOR_GRADING_DOCK_MAX_HEIGHT = 480
+# The Color Wheel canvas stops growing at radius 100px. At a 1260px panel
+# width it reaches that radius with a ~403px GradingPanel height; the dock
+# frame/title spacer needs a few more pixels. Extra dock height is blank UI.
+_COLOR_TOOL_DOCK_MAX_HEIGHT = 410
+_COLOR_GRADING_DOCK_MAX_HEIGHT = _COLOR_TOOL_DOCK_MAX_HEIGHT
+_UNRESTRICTED_DOCK_HEIGHT = 16777215  # Qt's QWIDGETSIZE_MAX
+_COLOR_TOOL_DOCK_NAMES = frozenset({
+    "dockDenoise", "dockDeblur", "dockGrading", "dockCurves",
+    "dockColorMapping", "dockBlurSharpen", "dockGrain", "dockMasks",
+    "dockQualifier", "dockRaw", "dockAnalysis", "dockCrop",
+    "dockTracker",
+})
 _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY = "color_mapping_dock_layout_version"
 _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_VERSION = 1
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY = "composite_scopes_dock_layout_version"
@@ -198,6 +209,18 @@ class DockLayoutMixin:
         if (x, y) != (geom.x(), geom.y()):
             window.move(x, y)
 
+    def _sync_color_tool_dock_max_height(
+        self, dock: QDockWidget, *, is_floating: bool | None = None
+    ) -> None:
+        """Cap docked Color tools where the wheel reaches its maximum radius."""
+        floating = dock.isFloating() if is_floating is None else is_floating
+        is_bottom = self.dockWidgetArea(dock) == Qt.DockWidgetArea.BottomDockWidgetArea
+        dock.setMaximumHeight(
+            _COLOR_TOOL_DOCK_MAX_HEIGHT
+            if is_bottom and not floating
+            else _UNRESTRICTED_DOCK_HEIGHT
+        )
+
     # ------------------------------------------------------------------
     # setup_docks
     # ------------------------------------------------------------------
@@ -219,6 +242,8 @@ class DockLayoutMixin:
             dock = PanelDockWidget(title, self)
             dock.setObjectName(obj_name)
             dock.setWidget(widget)
+            if obj_name in _COLOR_TOOL_DOCK_NAMES:
+                dock.setMaximumHeight(_COLOR_TOOL_DOCK_MAX_HEIGHT)
             # Ensure dock has all features enabled for proper floating/docking
             dock.setFeatures(
                 QDockWidget.DockWidgetFeature.DockWidgetClosable |
@@ -240,6 +265,17 @@ class DockLayoutMixin:
 
             # More robust triggers for titlebar updates
             dock.dockLocationChanged.connect(self.update_all_dock_titlebars)
+            if obj_name in _COLOR_TOOL_DOCK_NAMES:
+                dock.dockLocationChanged.connect(
+                    lambda _area, d=dock: self._sync_color_tool_dock_max_height(d)
+                )
+            if obj_name in _COLOR_TOOL_DOCK_NAMES:
+                # Remove the docked cap before restoring a saved floating size.
+                dock.topLevelChanged.connect(
+                    lambda is_floating, d=dock: self._sync_color_tool_dock_max_height(
+                        d, is_floating=is_floating
+                    )
+                )
             # When floating changes, immediately handle titlebar for floating docks
             dock.topLevelChanged.connect(lambda is_floating, d=dock: self._on_dock_floating_changed(is_floating, d))
             dock.visibilityChanged.connect(self.update_all_dock_titlebars)
