@@ -40,6 +40,11 @@ class ColorGraphSnapshot:
     # 由本指纹驱动 plan/纹理缓存失效。
     resource_fingerprint: str = ""
 
+    def color_context_cache_key(self) -> str:
+        """Return a stable, hashable key for the JSON color context."""
+        return json.dumps(dict(self.working_color_context), sort_keys=True,
+                          ensure_ascii=False, separators=(",", ":"))
+
     def cache_key(self) -> tuple:
         """编译缓存键：拓扑/参数版本/帧/上下文/目标/资源指纹（§5.3 + R06）。"""
         return (
@@ -47,7 +52,7 @@ class ColorGraphSnapshot:
             self.graph_revision,
             self.source_frame,
             self.source_content_revision,
-            tuple(sorted(self.working_color_context.items())),
+            self.color_context_cache_key(),
             self.viewer_target,
             self.quality,
             self.roi,

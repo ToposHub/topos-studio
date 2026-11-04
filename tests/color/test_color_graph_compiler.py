@@ -63,6 +63,25 @@ class TestSnapshotFreeze:
         c = freeze_graph(graph, session_id="s", source_frame=4)
         assert a.cache_key() != c.cache_key()
 
+    def test_nested_color_context_is_hashable_for_plan_and_node_caches(self):
+        graph = _serial(1)
+        a = freeze_graph(graph, session_id="s", working_color_context={
+            "transform": {"input": "Log", "output": "Rec.709"},
+            "range": [0.0, 1.0],
+        })
+        b = freeze_graph(graph, session_id="s", working_color_context={
+            "range": [0.0, 1.0],
+            "transform": {"output": "Rec.709", "input": "Log"},
+        })
+        changed = freeze_graph(graph, session_id="s", working_color_context={
+            "transform": {"input": "Log", "output": "P3"},
+            "range": [0.0, 1.0],
+        })
+        assert a.cache_key() == b.cache_key()
+        assert a.cache_key() != changed.cache_key()
+        assert hash(a.cache_key())
+        assert hash((1, a.color_context_cache_key(), "front"))
+
 
 class TestDependencyCone:
     def test_only_target_cone_compiled(self):
