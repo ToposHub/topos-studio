@@ -103,6 +103,7 @@ def test_evaluated_node_picture_is_not_overwritten_by_source(qtbot: Any) -> None
     view.set_thumbnail(node_id, _image("#00ff00"))
     view.set_source_thumbnail(_image("#ff0000"), "Source preview")
     assert view.cards[node_id]._thumbnail.toImage().pixelColor(5, 5) == QColor("#00ff00")
+    assert "Evaluated node output" in view.cards[node_id].toolTip()
 
 
 def test_hidden_panel_does_not_request_or_decode(qtbot: Any) -> None:

@@ -51,6 +51,6 @@ class ColorNodeSourcePreview(QObject):
         self._ready = True
         description = I18N.tr(
             "color_nodes.source_preview_only",
-            "Source preview — evaluated node output will be available after backend integration.",
+            "Source preview — waiting for evaluated node output.",
         )
         self._host.color_node_panel.view.set_source_thumbnail(pixmap, description)

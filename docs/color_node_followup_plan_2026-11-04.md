@@ -1,0 +1,240 @@
+# 调色节点与 Color 页面后续实施计划（2026-11-04）
+
+## 0. 使用范围与判定口径
+
+本表承接 [资源与节点后端计划](color_resources_backend_implementation_plan.md) 和
+[R12 验收记录](validation/color_resources/r12_release/README.md)。已通过的 R00–R11 与各 N
+项已声明的 v1 行为不重做；下表只列未完成、未通过或本轮新发现的缺口。
+每个任务都要同时提交：实现、针对失败路径的测试、原生运行证据、文档状态。
+没有实机设备的项目标 `NOT RUN`，不能写成 `PASS`。
+
+### 本轮实机布局证据
+
+![用户截图：底部工具区过高](validation/color_resources/color_layout_oversized_20261104.jpg)
+
+用户 2026-11-04 23:32 的实机截图显示：底部 Color Wheel/Blur/Scopes 工具区
+约占窗口**一半**，色轮却早已达到可用最大半径，工具区留下大片空白。
+之前一次自动截图捕获到不同的保存布局，曾误判为中间 Gallery 过高；
+**以上述用户实机截图为本任务的基准**。真实面板中 Mask 的最小高度约
+306px、Grading 约 289px，整组 tabified Dock 受最大面板的最小尺寸限制。
+曾尝试 160px 最小高度，用户指出很多控件无法操作，已撤回。
+`_WheelCanvas._geometry()` 的半径最大 100 逻辑像素；独立 Qt 探针表明
+GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没有色轮收益。
+当前工作树将停靠 Color 工具 Dock 的最大高度设为 410px；浮动或移至侧边
+时解除上限。此修复需要按下述回归步骤完成验收。
+
+## 1. 优先级与依赖
+
+| 顺序 | 编号 | 状态 | 交付目标 | 前置 |
+|---|---|---|---|---|
+| P0 | L01 | 最大高度已实现，完整回归待办 | Color 底部工具上限、保存布局与拖拽体验 | 无 |
+| P0 | V01 | 已完成（compound id 重映射根因修复；普通/resources 双路径 passed + 阻断负路径 exit 1） | 逐节点预览真实生成及脚本不能假绿 | 无 |
+| P0 | R12-A | 未通过 | 30 分钟资源与播放性能 | V01 |
+| P0 | R12-B | 未验收 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
+| P0 | N16 | 未完成 | 单进程全套件稳定性与资源所有权 | 无 |
+| P1 | R06-B | 未接线 | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
+| P1 | N02-B | v1 边界 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
+| P1 | N07-B | v1 复核 | Group/Timeline 全出口最终链序与身份 | N07/R09 |
+| P1 | N10-B | v2 待办 | Mask/Qualifier 动画轨道与定义级扇出 | N10 v1 |
+| P1 | N12-B | v2 待办 | 选择性复制与跨工程资源闭包 | R09/N12 |
+| P1 | N14-B | v1 边界 | Metal/CPU 其余域能力逐项实现 | R06/R12 |
+| P2 | N15 | 人工对照待办 | 达芬奇四种 Window 组合的 UI/交互对拍 | N15 命令已存在 |
+
+## 2. 逐项施工与验证
+
+### L01 — Color 页面比例、空白区与拖拽
+
+**现象/证据**：用户截图中的底部工具区约半屏高、色轮周围大片空白。
+原 `src/app/controllers/dock_layout_controller.py::_migrate_color_grading_dock_height`
+只运行一次，虽有 480px 的迁移目标上限，迁移标记写入后拖拽或恢复布局仍可
+超过上限。底部工具行的低限由同组面板中最大的 `minimumSizeHint` 决定。
+`QMainWindow::separator` 有 8px 透明命中区。
+
+**实施方法**：
+
+1. 以色轮半径 100px 的现有绘制上限为基准，确认 410px 停靠 Dock 上限在
+   100%、150%、200% 缩放和不同面板宽度下都能显示完整的 Lift/Gamma/Gain、
+   下方数值及底排参数；如果字体/DPI 使半径尚未达到 100px，按实测值
+   调整上限，避免写死不适用的魔法数字。
+2. 遍历 Color 页所有可见 Dock，记录 `objectName`、区域、几何、最小/最大
+   尺寸、浮动/tab 状态。用用户截图同类布局确认底部三组工具同步受限，
+   多出来的高度实际分配给 Viewer/Nodes，而不是另一个空 Dock。
+3. 对 Color Wheel、Curves、Mask、Qualifier、Blur/Sharpen、Scopes 测可操作
+   最小高度；保留原有控件完整性，不能用 160px 全组滚动。浮动/侧边停靠
+   解除底部上限，重新停靠底部恢复上限。
+4. 若旧保存布局在启动时仍出现半屏底栏，做一次版本化越界修复，更新
+   `page_layouts["Color"]` 与 LayoutStore；无论迁移标记如何，最大高度
+   都应持续生效。检查 Gallery 下方是否存在另一个异常空 Dock。
+
+**验证方法**：用用户截图对应布局把底部 separator 向上拖至极限，停靠
+工具不得高于色轮达到 100px 半径所需高度；色轮下的所有数值可操作，
+Viewer/Nodes 获得释放的高度。保存→重启→切 Edit→切 Color→浮动/停靠→
+重启后仍受限；小屏与 4K 均无控件遮挡。记录几何断言和原生前后截图。
+
+### V01 — 逐节点缩略图与原生校验脚本（已完成 2026-11-05）
+
+**现象/证据**：`scripts/validate_color_node_media.py --workflow` 曾在
+`per_node_rendering="source_thumbnail_only (evaluated=0)"` 时仍报告 `passed`。
+本轮已加 `evaluated >= 2` 的硬断言。用同一素材实跑复现：
+[普通 `--workflow` 报告](validation/color_resources/v01_node_thumbnails/plain_workflow_fail.json)
+为 `failed`、`node_thumbnail_count=0`、退出码 1；
+[带 `--resources --workflow` 报告](validation/color_resources/v01_node_thumbnails/resources_workflow_pass.json)
+为 `passed`、`node_thumbnail_count=2`、退出码 0。两次均开启 graph flag。
+
+**根因**（2026-11-05 定位）：`ColorNodeOutputPreview._evaluate_job` 对
+compound 请求把 `node_list` 整体替换为 `_resolve_viewer_node` 解析出的
+内部链尾节点 id，投递与缓存都用内部 id——GUI 侧 `_on_node_output_thumbnail_ready`
+按 `view.cards`（compound 卡片 id）查收全部丢弃；缓存键同样用内部 id 存、
+按请求 id 查，永不命中 → 停留每 600ms 全量重评。`--resources` 路径只是
+因为资源阶段多耗约 10 秒，让两张 corrector 缩略图赶在 compound 包装前
+落地，属偶然通过；普通路径结构性 0 张。
+
+**修复**：评估/缓存/投递全程使用请求方（卡片）id，解析 id 只用作编译
+viewer 目标（`src/app/controllers/node_thumbnail_evaluator.py`）。校验脚本
+在 compound 包装前后各加一个确定性等待阶段并作像素断言（graded 链输出
+与源 mean abs diff≈78.5/255），新增 `--block-evaluated` 负路径标志。
+
+**验证结果**（证据目录 `docs/validation/color_resources/v01_node_thumbnails/`，
+均开启 `TOPOS_COLOR_GRAPH_RENDER=1`）：
+- `plain_workflow/`：passed、exit 0、`node_thumbnail_count=3`
+  （2 corrector + 1 compound）、像素断言通过；
+- `resources_workflow/`：passed、exit 0；
+- `blocked_negative/`：`--block-evaluated` 阻断 demand → failed、exit 1，
+  校验器不可能假绿；
+- 单元测试 `tests/app/test_node_thumbnail_evaluator.py`（新增 compound
+  重映射投递/缓存/内容断言）、`tests/ui/test_color_node_source_preview.py`。
+- 断线、重连、seek、改参数、撤销、切 clip 的世代守卫由既有
+  `test_generation_guard_drops_stale_results` 与视图层不覆盖断言覆盖。
+
+### R12-A — 资源增长与播放新鲜度
+
+**现象/证据**：原 30 分钟压力录制的 RSS 预算未过；已定位 float/page
+路径及 Qt GL 上下文重建残余债务。复核记录曾见约 289.2 MB/10min
+高于 250 MB/10min 目标，25fps 素材的实测新帧只有约 1.09fps，
+p95 渲染间隔约 282ms。详情按 R12/N09 原始报告复核，不把历史数值当新结果。
+
+**实施方法**：
+
+1. 固定设备、素材、窗口大小、graph flag、scope 模式与 GPU/驱动版本；
+   分离静置、持续播放、浮动/停靠、切页、seek、拖参数和 scope 切换窗口。
+2. 按资源所有者（renderer、节点缓存、scope 池、Qt GL context、临时纹理）
+   记录 RSS、GL 对象数、缓存字节、活动 QThread/timer、帧提交与显示时间戳。
+3. 针对仍增长的所有者修复 release/deferred garbage 与页面上下文重建；
+   对播放定位解码、图编译、节点缓存失效、GL 提交和 UI 展示哪一段最慢，
+   先保帧新鲜度，再优化吞吐。
+
+**验证方法**：同一 30 分钟脚本前后对照，按原 R12 预算逐项判 PASS/FAIL；
+记录平均/峰值 RSS 与 10 分钟斜率、真实新帧 fps、p95/p99 帧龄与 UI
+事件 p95；无黑 scope、旧帧覆盖、活动 QThread 残留。未达门槛不默认开启
+`TOPOS_COLOR_GRAPH_RENDER`。
+
+### R12-B — 完整出口、素材与平台矩阵
+
+**实施方法**：按原 R12 表列出 1080p/4K、SDR/HDR、1/32 节点、Serial/
+Parallel/Mixer/Window/OFX/LUT、静帧/播放/seek；同一帧从 Color Viewer、
+Edit、Composite、Scopes、thumbnail、headless/export 取结果，记录无法支持
+路径的明确拒绝诊断。补 macOS Intel/Apple Silicon、Windows、Linux 实机行，
+每行记 OS/GPU/驱动/Qt/GL/Metal 能力与 feature flag。
+
+**验证方法**：相同 color management 与输出格式下做像素对拍或有依据的
+容差对拍；每项保存原生截图、日志、fixture、命令与判定。不存在的设备写
+`NOT RUN`；未完成矩阵前默认 flag 保持关闭。
+
+### N16 — 单进程全套件与线程/定时器治理
+
+**现象/证据**：`tests/shared` AI provider 基线失败、单进程全套件原生崩溃，
+`tests/edit` 存在文件级通过但全套件顺序运行失败的污染。R12 README
+记录了具体组别；不能通过跳过断言或放宽 golden 容差遮掩。
+
+**实施方法**：固定随机种子和 Qt 平台，先用两两顺序定位污染前件，再查
+单例、ConfigManager、QApplication、后台 QThread/timer、GL lease 的创建
+与关闭路径；每个 owner 补明确 teardown/DeferredDelete 与等待上限。
+AI provider 失败要先在 clean HEAD 确认基线，再按当前契约更新 fixture 或
+实现，留下可复现失败样例。
+
+**验证方法**：全部 `tests/color`、`tests/app`、`tests/edit`、`tests/shared`
+同一进程连续运行两遍均无崩溃、无顺序失败；进程结束无活跃 QThread；
+golden 归档保留 ADR、GPU 指纹和逐像素差。
+
+### R06-B — AI / Bake 异步执行闭环
+
+**现象/证据**：`src/features/color/core/color_bake_protocol.py` 的
+`ColorBakeBroker` 有提交/取消/接受的协议壳，但当前生产代码无调用者，
+仅测试引用；离线 AI/bake 的 worker、结果资源和生命周期未完成。
+
+**实施方法**：用 typed request 绑定 source clip、revision、范围、能力与
+取消 token；从后台队列读取已固定快照，生成可版本化结果资源；UI 仅收
+状态信号，接受结果通过 command/service 一次提交到目标节点。取消、失败、
+过期 revision 和关工程必须释放结果文件、GPU/CPU 临时对象；保存/重开走
+R09 资源闭包。无实现的后端继续明确禁用。
+
+**验证方法**：成功、取消、失败、过期结果、关工程、保存重开、undo/redo
+均验证；重复 100 次后无孤儿资源或活动 worker；Viewer/导出结果一致。
+
+### N02-B — Key 后处理与 Window/bitmap 完整图域
+
+**实施方法**：在 snapshot/plan 中显式声明 Qualifier GPU keyer、Window
+几何/羽化、透明 bitmap、Outside、Invert Key Input、KeyMixer 和 blur/clean/
+gain 后处理的输入与顺序；GL/CPU 共用归一化参数语义，缺能力的后端
+fail-closed。不要用常白 matte 或 RGB 顶替 key。
+
+**验证方法**：梯度 key、边缘羽化、多个窗口组合、反相互补、透明图、
+tracker 动画、alpha 输出和 source 依赖逐帧对拍；跨 GL/CPU 能力边界
+明确记录，保存/撤销/导出一致。
+
+### N07-B — Group / Timeline 的最终链序
+
+**实施方法**：复核现有 timeline grade stack 的身份、迁移和五段链
+`pre→main→trim→post→timeline`；同一数据经 Color、Edit、Composite、
+headless/export 消费时不得重复应用或跳过；跨组 Composite 歧义保持
+可见告警，定义合法情况下的准确目标栈。
+
+**验证方法**：两 clip 同组/异组、不同 Timeline、Compound、切组、锁定、
+shared definition、保存重开、undo/redo 与 scopes 同帧对拍；无实现的
+路径保持只读/明确拒绝。
+
+### N10-B — Mask / Qualifier 动画与定义级扇出
+
+**实施方法**：在 N10 v1 grade 参数轨道外，给 Window/Qualifier 参数
+定义稳定 path、源帧时间基、插值、节点实例与 shared definition 所属；
+命令、播放求值、thumbnail、导出读同一轨道。复制/粘贴和 shared definition
+扇出不能共享旧 Layer ID；trim/retime/Compound 要有映射规则。
+
+**验证方法**：增删移动关键帧、插值、seek 随机帧、效果重排、跨 clip
+复制、共享定义修改、保存重开和 undo/redo；同一帧预览/导出一致。
+
+### N12-B — 选择性复制与跨工程闭包
+
+**实施方法**：为 `paste_grade_domains` 明确域集合、冲突与覆盖策略；
+跨工程 still/clipboard 递归收集 LUT/插件/bitmap/子图，按 R09 导入本地
+资源并重新分配实例身份；缺插件保留占位与诊断，不静默丢弃。
+
+**验证方法**：只粘曲线不更改 LUT/Window、跨 Compound/clip/工程、
+共享定义、缺资源、重复粘贴及 undo 完整恢复；保存重开无绝对机器路径。
+
+### N14-B — CPU / Metal 能力逐域推进
+
+**实施方法**：沿 R06 capability registry 逐项列 GL/CPU/Metal 的
+Corrector、LUT、HSL、Warper、FX、非 Normal 混合能力；按域提交实现、
+shader/CPU 对拍、资源释放和明确版本号。不能一次性取消 fail-closed。
+
+**验证方法**：同一 HDR fixture 在三后端跑色彩/alpha 对拍；不支持的域
+必须报明确拒绝。缺设备的平台列 `NOT RUN`，不把 GL 通过算作 Metal 通过。
+
+### N15 — 达芬奇 Window 组合人工对照
+
+**实施方法**：在打开的 DaVinci Resolve Color 页逐一执行 CPW、LPW、
+PPW、PCW：记录菜单/快捷键、新建节点、默认形状、连接、选中态、撤销
+边界与追踪器初态；与 Topos 的 `add_window_combo` 原子命令逐项比对，
+修 UI 文案、默认值或命令语义差异。
+
+**验证方法**：四种操作各录屏/截图并附版本号；每项一次 undo 删除整个
+组合，一次 redo 复原；默认图像中性，形状/跟踪身份正确。
+
+## 3. 收口顺序
+
+先完成 L01 与 V01，避免布局或校验器误判影响后续实测；再完成 R12-A、
+R12-B 和 N16，达到发布门槛后才考虑默认开启图后端。R06-B、N02-B、
+N07-B、N10-B、N12-B、N14-B 可按能力逐域交付，但必须保留版本边界；
+N15 需要实机 UI 对照记录。每项完成时回填本表状态、提交哈希、测试命令、
+原生证据目录和仍未支持的范围。

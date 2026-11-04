@@ -1,0 +1,106 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "native_graph_workflow",
+  "per_node_rendering": "evaluated_node_thumbnails",
+  "asset_id": "b98f7de9-9d38-43c4-9b48-aafd3bf94e32",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 124
+  },
+  "clip_id": "14d5b82b-454f-4381-ac0b-34643f8433cc",
+  "timeline_id": "447845a2-119d-4e84-8429-719ff1812734",
+  "current_file_matches_source": true,
+  "current_page": "Color",
+  "thumbnail_size": [
+    512,
+    288
+  ],
+  "thumbnail_rgb_std": 66.625,
+  "corrector_thumbnails_present": 2,
+  "source_tooltip": "Source preview — waiting for evaluated node output.",
+  "session_test_lut_generated": true,
+  "resources": {
+    "status": "passed",
+    "effects_catalog_count": 50,
+    "lut_catalog_count": 1,
+    "left_library_tabs": "passed",
+    "nodes_independently_visible": "passed",
+    "qt_resource_drop": "passed",
+    "per_node_draft": "passed",
+    "floating": "passed",
+    "project_and_engine_unchanged": "passed",
+    "render_integration": "preview_mode_only"
+  },
+  "workflow": {
+    "project_history": "passed",
+    "grade_commit": "passed",
+    "topos_save_reload": "passed",
+    "disconnect_reconnect": "passed",
+    "graph_render_enabled": true
+  },
+  "baseline_samples": {
+    "plugin_id": "Anamorphic_Streak",
+    "plugin_instance_order": [
+      "a4aa19bf-5ad8-414b-8e88-03ae400bac2e"
+    ],
+    "unknown_param": "__unknown_future_param",
+    "lut_applied": true,
+    "lut_path": "/var/folders/j2/m4dcthbx3h5086ywnnplqwmc0000gn/T/topos-node-media-zt1hulej/Baseline Identity.cube"
+  },
+  "baseline": {
+    "compound_node_id": "900844a3-bb15-4f21-91cf-0c3935dd84b8",
+    "stack_ids": [
+      "9e187cdc-9f84-4328-947e-d65648061aaa",
+      "8f0d0a8b-022d-40e6-ba47-45b4fd6e1fc0"
+    ],
+    "clips": 2,
+    "correctors": 2,
+    "project_saved": "baseline_project.topos"
+  },
+  "node_thumbnail_count": 2,
+  "scope_diagnostics": {
+    "enabled": true,
+    "events": {
+      "submit/curves_dedup_skip": {
+        "count": 1,
+        "last": {
+          "source_revision": 0
+        }
+      },
+      "queue/coalesced_replaced": {
+        "count": 10,
+        "last": {
+          "revision": 10,
+          "detail": "latest-wins 替换旧 demand"
+        }
+      },
+      "execute/no_front_texture": {
+        "count": 6,
+        "last": {
+          "mode": "waveform",
+          "revision": 2
+        }
+      },
+      "panel/stale_return": {
+        "count": 1,
+        "last": {
+          "revision": 2,
+          "source_revision": 1
+        }
+      },
+      "submit/rate_limited": {
+        "count": 17,
+        "last": {
+          "detail": "interval=0.050s"
+        }
+      }
+    },
+    "last_activity": null
+  },
+  "status": "passed",
+  "error": "",
+  "elapsed_seconds": 21.9
+}

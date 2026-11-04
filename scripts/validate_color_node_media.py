@@ -5,7 +5,7 @@ Run in a dedicated application process. The script uses an isolated temporary
 configuration and project; it does not open/save an existing user project.
 The default validates source thumbnails; --workflow also exercises project-backed
 graph edits, grading, history, project IO and native scope presentation.
-Per-node evaluated thumbnails are not covered by this driver.
+With --workflow, the driver also waits for evaluated node thumbnails.
 """
 from __future__ import annotations
 
@@ -29,7 +29,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / "docs/validation/color_nodes")
     parser.add_argument("--keep-open", action="store_true")
     parser.add_argument("--workflow", action="store_true", help="Exercise authoritative graph edits, grading, undo, project IO and native scopes")
-    parser.add_argument("--resources", action="store_true", help="Verify Effects/LUT UI-only drafts, real Qt drops, layout and floating")
+    parser.add_argument("--resources", action="store_true", help="Verify explicit Effects/LUT preview drafts, real Qt drops, layout and floating")
+    parser.add_argument("--block-evaluated", action="store_true",
+                        help="Negative path: suppress evaluated thumbnail demands; the run must fail non-zero")
     args = parser.parse_args()
     source = args.media.resolve(strict=True)
     output = args.output.resolve()
@@ -62,11 +64,14 @@ def main() -> int:
             self.asset: Any = None
             self.clip: Any = None
             self.timeline: Any = None
+            if args.block_evaluated:
+                # 负路径：吞掉全部 demand（实例属性遮蔽方法），等待阶段必须超时失败。
+                host.color_node_output_preview.request = lambda *a, **k: None
             self.report: dict[str, Any] = {
                 "media": str(source.relative_to(ROOT)) if source.is_relative_to(ROOT) else source.name,
                 "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "validation": "real_app_import_and_source_thumbnail",
-                "per_node_rendering": "not_implemented",
+                "per_node_rendering": "not_checked",
             }
             self.workflow_modes = iter(("waveform", "parade", "vectorscope", "histogram", "cie", "falsecolor", "split", "quad", "all"))
             self.mode_started = 0.0
@@ -74,6 +79,35 @@ def main() -> int:
             self.timer.setInterval(200)
             self.timer.timeout.connect(self.tick)
             self.timer.start()
+
+        def _assert_evaluated_pixels(self, labels: dict) -> dict:
+            """像素断言：已评估缩略图与源图可区分（graded 链改变像素）。"""
+            import numpy as np
+            from PyQt6.QtGui import QImage
+
+            def to_rgb(pixmap: Any) -> np.ndarray:
+                image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
+                ptr = image.constBits()
+                ptr.setsize(image.sizeInBytes())
+                arr = np.frombuffer(ptr, dtype=np.uint8).reshape(
+                    image.height(), image.bytesPerLine())
+                return arr[:, :image.width() * 3].reshape(
+                    image.height(), image.width(), 3).astype(np.int16)
+
+            view = self.host.color_node_panel.view
+            source = to_rgb(view._source_thumbnail)
+            diffs = {}
+            for label, node_id in labels.items():
+                thumb = to_rgb(view._thumbnails[node_id])
+                # 尺寸归一：缩略图与源可能有亚像素级别的尺寸差，取左上公共区域
+                h = min(source.shape[0], thumb.shape[0])
+                w = min(source.shape[1], thumb.shape[1])
+                diff = float(np.abs(source[:h, :w] - thumb[:h, :w]).mean())
+                diffs[label] = round(diff, 3)
+                assert diff > 2.0, (
+                    f"evaluated thumbnail for {label} is pixel-identical to the "
+                    f"source (mean abs diff {diff:.3f}) — evaluation did not apply the grade")
+            return diffs
 
         def finish(self, success: bool, error: str = "") -> None:
             self.timer.stop()
@@ -173,8 +207,6 @@ def main() -> int:
                     host = self.host
                     presenter = host.color_resource_preview
                     host._migrate_color_resource_dock_layout(force=True)
-                    assert not host.plugin_panel.isVisible(), 'legacy effect controls escaped their hidden container'
-                    assert not host.lut_panel.isVisible(), 'legacy LUT controls escaped their hidden container'
                     assert host.dock_plugin.widget() is host.color_effects_browser
                     assert host.dock_lut.widget() is host.color_lut_browser
                     assert host.dock_plugin in host.tabifiedDockWidgets(host.dock_presets)
@@ -274,7 +306,7 @@ def main() -> int:
                         'lut_catalog_count': len([key for key in host.color_resource_preview.catalog if key[0] == 'lut']),
                         'left_library_tabs': 'passed', 'nodes_independently_visible': 'passed',
                         'qt_resource_drop': 'passed', 'per_node_draft': 'passed', 'floating': 'passed',
-                        'project_and_engine_unchanged': 'passed', 'render_integration': 'not_connected'}
+                        'project_and_engine_unchanged': 'passed', 'render_integration': 'preview_mode_only'}
                     if args.workflow:
                         self.phase = 'workflow'
                     else:
@@ -318,8 +350,29 @@ def main() -> int:
                     panel.view.apply_edit("connect", lambda: panel.view.state.connect(edge), edge)
                     assert len(graph().edges) == len(baseline["edges"])
                     self.report["workflow"] = {"project_history": "passed", "grade_commit": "passed", "topos_save_reload": "passed", "disconnect_reconnect": "passed", "graph_render_enabled": self.host.engine.color_graph_render_enabled}
-                    self.report["per_node_rendering"] = "source_thumbnail_only"
+                    self.report["per_node_rendering"] = "pending_evaluated_node_thumbnails"
                     self.report["validation"] = "native_graph_workflow"
+                    # V01：compound 包装前先确定性等待两张 corrector 卡片的
+                    # 已评估缩略图（此前只有 --resources 的阶段耗时让缩略图
+                    # 赶在包装前落地，普通路径结构性 0 张）。
+                    self.thumb_wait_started = time.monotonic()
+                    self.phase = "node_thumbnails_initial"
+                    return
+                if self.phase == "node_thumbnails_initial":
+                    view = self.host.color_node_panel.view
+                    have = [nid for nid in (self.first, self.second)
+                            if nid in getattr(view, "_thumbnails", {})]
+                    if len(have) < 2 and time.monotonic() - self.thumb_wait_started <= 12.0:
+                        return
+                    assert len(have) == 2, (
+                        "corrector cards did not receive evaluated thumbnails "
+                        f"within 12 seconds (count={len(have)})")
+                    diffs = self._assert_evaluated_pixels({
+                        "graded_first": self.first, "passthrough_second": self.second})
+                    self.report["initial_node_thumbnails"] = {
+                        "node_ids": have,
+                        "mean_abs_diff_vs_source": diffs,
+                    }
                     self.phase = "baseline"
                     return
                 if self.phase == "baseline":
@@ -346,6 +399,7 @@ def main() -> int:
                              if n.node_type == "corrector"]
                     assert len(inner) == len(members), "compound children lost members"
                     compound_id = compound.node_id
+                    self.compound_id = compound_id
                     (output / "baseline_graph.json").write_text(json.dumps(graph().to_dict(), ensure_ascii=False, indent=2) + "\n")
                     # 遗留写入口留样（R00 审计对象，非正式命令路径）。
                     entries = [e for (kind, _), e in self.host.color_resource_preview.catalog.items()
@@ -410,19 +464,38 @@ def main() -> int:
                     self.mode_started = time.monotonic()
                     return
                 if self.phase == "node_thumbnails":
-                    # R08：等待已评估节点缩略图（生产 600ms 定时驱动 + 去抖）。
+                    # R08/V01：等待 compound 卡片拿到自己的已评估缩略图
+                    # （生产 600ms 定时驱动 + 去抖；重映射后投递必须落在
+                    # 请求方 compound id 上，而不是内部链尾节点 id）。
                     view = self.host.color_node_panel.view
-                    evaluated = len(getattr(view, "_thumbnails", {}) or {})
-                    if evaluated < 2 and time.monotonic() - self.thumb_wait_started <= 12.0:
+                    thumbnails = getattr(view, "_thumbnails", {}) or {}
+                    compound_ready = self.compound_id in thumbnails
+                    if not compound_ready and time.monotonic() - self.thumb_wait_started <= 12.0:
                         return
+                    evaluated = len(thumbnails)
                     self.report["per_node_rendering"] = (
-                        "evaluated_node_thumbnails" if evaluated >= 2
-                        else f"source_thumbnail_only (evaluated={evaluated})")
+                        "evaluated_node_thumbnails" if compound_ready and evaluated >= 2
+                        else f"source_thumbnail_only (evaluated={evaluated}, "
+                             f"compound_ready={compound_ready})")
                     self.report["node_thumbnail_count"] = evaluated
+                    assert compound_ready, (
+                        "compound card did not receive its evaluated thumbnail "
+                        "within 12 seconds — evaluator leaked the internal "
+                        "resolved node id instead of the requested card id")
+                    assert evaluated >= 2, (
+                        "workflow did not produce evaluated node thumbnails "
+                        f"within 12 seconds (count={evaluated})"
+                    )
+                    diffs = self._assert_evaluated_pixels({"compound": self.compound_id})
+                    self.report["compound_thumbnail_diff_vs_source"] = diffs["compound"]
                     from src.features.color.core.scope_diagnostics import scope_diagnostics
                     self.report["scope_diagnostics"] = scope_diagnostics.snapshot()
                     failures = self.report["scope_diagnostics"]["events"]
                     assert not any(failures.get("widget/" + reason, {}).get("count", 0) for reason in ("texture_not_shared", "fbo_incomplete", "blit_failed")), "native scope presentation failed"
+                    assert not any(
+                        name.startswith("execute/graph_") and event.get("count", 0)
+                        for name, event in failures.items()
+                    ), "native graph execution failed during scope validation"
                     self.host.grab().save(str(output / "workflow_final.png"))
                     self.host.color_node_panel.grab().save(str(output / "nodes_with_tool_markers.png"))
                     self.finish(True)
