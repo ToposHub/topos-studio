@@ -523,8 +523,7 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
         errors.append("mixer_params 不在基础域")
     if layer.get("warper_params") is not None:
         errors.append("warper_params 不在基础域")
-    if layer.get("active_lut_path"):
-        errors.append("LUT3D 不在基础域")
+    # N14 v1：LUT3D 已实现（trilinear + R05 强度混合；强度 0 = 恒等）
     hsl_data = layer.get("hsl_curve_data")
     if layer.get("hsl_curve_lut") is not None or (
             isinstance(hsl_data, Mapping) and hsl_data):
@@ -562,6 +561,35 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     return errors
 
 
+_LUT3D_CACHE: dict[str, tuple] = {}
+
+
+def _apply_lut3d_cpu(graded: np.ndarray, path: str,
+                     strength: float) -> np.ndarray:
+    """N14 v1：CPU LUT3D（trilinear + R05 强度混合，与 GL 同语义）。
+
+    LUT 解析/重采样按路径缓存（同路径同内容重复加载零开销；路径内容
+    变更由 R02 资源身份保证——内容寻址路径即缓存键）。
+    """
+    from src.shared.color.lut_loader import (
+        load_lut, resample_to_unit_domain, sample_lut_trilinear,
+    )
+    from src.features.color.core.color_node_lut_spec import (
+        blend_node_lut_strength,
+    )
+    cached = _LUT3D_CACHE.get(path)
+    if cached is None:
+        loaded = resample_to_unit_domain(load_lut(path))
+        _LUT3D_CACHE[path] = cached = (loaded,)
+        if len(_LUT3D_CACHE) > 32:
+            _LUT3D_CACHE.pop(next(iter(_LUT3D_CACHE)))
+    loaded = cached[0]
+    sdr = np.clip(graded, 0.0, 1.0)
+    sampled = sample_lut_trilinear(loaded, sdr.reshape(-1, 3))
+    sampled = sampled.reshape(graded.shape)
+    return blend_node_lut_strength(graded, sampled, strength).astype(_F32)
+
+
 def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
                                 mask: np.ndarray | None = None,
                                 *, width: int = 0, height: int = 0
@@ -590,6 +618,14 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
     lut = layer.get("curves_lut")
     if lut is not None:
         graded = apply_curves_cpu(graded, lut)
+    # N14 v1：LUT3D 域（R05 顺序在 curves 之后；GL 同序——trilinear
+    # 采样 + blend_node_lut_strength HDR/负值语义同源）
+    lut_path = layer.get("active_lut_path")
+    if lut_path:
+        raw_strength = layer.get("lut_intensity")
+        graded = _apply_lut3d_cpu(
+            graded, str(lut_path),
+            1.0 if raw_strength is None else float(raw_strength))
     opacity = _F32(values.get("u_opacity", 1.0))
     k = opacity if mask is None else (
         np.clip(mask[..., :1], _F32(0.0), _F32(1.0)).astype(_F32) * opacity)

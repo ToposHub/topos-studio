@@ -131,7 +131,8 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
         if loaded is None:
             loaded = resample_to_unit_domain(load_lut(lut_ref))
             lut_cache[lut_ref] = loaded
-        strength = float(layer.get("lut_intensity", 1.0) or 1.0)
+        raw_strength = layer.get("lut_intensity")
+        strength = 1.0 if raw_strength is None else float(raw_strength)
         sdr = np.clip(out, 0.0, 1.0)
         sampled = sample_lut_trilinear(loaded, sdr)
         out = blend_node_lut_strength(out, sampled, strength).astype(np.float64)
