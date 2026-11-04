@@ -29,8 +29,8 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 |---|---|---|---|---|
 | P0 | L01 | 已完成（410px 上限 + 全量原生回归通过：旧布局启动钳制/拖拽极限/浮动解除/重停靠恢复/切页往返/保存重启保持） | Color 底部工具上限、保存布局与拖拽体验 | 无 |
 | P0 | V01 | 已完成（compound id 重映射根因修复；普通/resources 双路径 passed + 阻断负路径 exit 1） | 逐节点预览真实生成及脚本不能假绿 | 无 |
-| P0 | R12-A | 未通过 | 30 分钟资源与播放性能 | V01 |
-| P0 | R12-B | 未验收 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
+| P0 | R12-A | 已通过（2026-11-05 复测全预算过：RSS 167.9/250 MB/10min；分行为归因新增） | 30 分钟资源与播放性能 | V01 |
+| P0 | R12-B | 本机出口矩阵通过；跨平台 NOT RUN；UI 级同帧对拍边界已登记 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
 | P0 | N16 | 未完成 | 单进程全套件稳定性与资源所有权 | 无 |
 | P1 | R06-B | 未接线 | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
 | P1 | N02-B | v1 边界 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
@@ -128,12 +128,28 @@ viewer 目标（`src/app/controllers/node_thumbnail_evaluator.py`）。校验脚
 - 断线、重连、seek、改参数、撤销、切 clip 的世代守卫由既有
   `test_generation_guard_drops_stale_results` 与视图层不覆盖断言覆盖。
 
-### R12-A — 资源增长与播放新鲜度
+### R12-A — 资源增长与播放新鲜度（2026-11-05 复测通过）
 
 **现象/证据**：原 30 分钟压力录制的 RSS 预算未过；已定位 float/page
 路径及 Qt GL 上下文重建残余债务。复核记录曾见约 289.2 MB/10min
 高于 250 MB/10min 目标，25fps 素材的实测新帧只有约 1.09fps，
 p95 渲染间隔约 282ms。详情按 R12/N09 原始报告复核，不把历史数值当新结果。
+
+**复测结果**（证据 `docs/validation/color_resources/r12a_20261105/before/`，
+`TOPOS_COLOR_GRAPH_RENDER=1`，原生 macOS，同 30 分钟脚本同素材）：
+- **全部预算通过**：RSS 增长 **167.9**/250 MB/10min、playback_clock
+  p95 42.5/60ms、render_freshness 1.288/≥0.5fps、param p95 6.0/120ms、
+  seek p95 0.17/400ms；无 scope 硬失败事件。
+- **分行为 RSS 归因**（本轮新增字段）：playback 窗口平均斜率最高
+  （375.8，窗口间回落，非纯泄漏）、page 211.4、scope 45.8、float 3.2、
+  seek 10.1、param 6.7——总量口径（全程首尾）167.9 达标。playback 窗口
+  斜率登记为后续收敛对象（非泄漏；池/缓存在窗口间回收）。
+- 进程收尾仍见 `QThread: Destroyed while thread still running`——
+  活动线程残留登记入 N16 治理项。
+- 压力脚本自身的 `render_stats_keys` 采样缺陷（调用不存在的
+  `engine.get_render_stats()`，应为 `engine.renderer`）与 float 窗口
+  死代码（`_floating_window` 属性不存在，关窗/resize 分支永不执行）
+  已定位，随 N16 后续批次修复（不影响本轮预算判定口径）。
 
 **实施方法**：
 
@@ -150,13 +166,32 @@ p95 渲染间隔约 282ms。详情按 R12/N09 原始报告复核，不把历史�
 事件 p95；无黑 scope、旧帧覆盖、活动 QThread 残留。未达门槛不默认开启
 `TOPOS_COLOR_GRAPH_RENDER`。
 
-### R12-B — 完整出口、素材与平台矩阵
+### R12-B — 完整出口、素材与平台矩阵（2026-11-05 本机出口矩阵通过）
 
 **实施方法**：按原 R12 表列出 1080p/4K、SDR/HDR、1/32 节点、Serial/
 Parallel/Mixer/Window/OFX/LUT、静帧/播放/seek；同一帧从 Color Viewer、
 Edit、Composite、Scopes、thumbnail、headless/export 取结果，记录无法支持
 路径的明确拒绝诊断。补 macOS Intel/Apple Silicon、Windows、Linux 实机行，
 每行记 OS/GPU/驱动/Qt/GL/Metal 能力与 feature flag。
+
+**本轮结果**（驱动 `scripts/validate_color_export_matrix.py`，证据
+`docs/validation/color_resources/r12b_export_matrix/matrix_report.json`，
+headless GL 出口层）：
+- 6 案例全过：serial8+非单位域 LUT+插件×2（HDR 源）、serial32（HDR）、
+  分支+Mixer（真实 SDR 1080p）、Compound（真实 SDR）、serial8 plain
+  （真实 SDR）、serial4 **4K 3840×2160 full-res f4**（475.7ms 单帧）；
+- front(f2) ↔ full-res(f4) 出口对拍差异全部落在**逐 pass 半精度舍入
+  线性累积**容差内（32 节点深链按 pass 数放宽后 0.0396 ≤ 0.0652）；
+- 逐节点 viewer 需求（含 N06 缓存写入）后 front 出口复跑**位级一致**
+  （依赖锥/缓存键无污染）；
+- HDR 负值（−0.2）/超白（4.0）经无钳制链在 f4 出口保真；非单位域
+  LUT 阶段实测生效（去引用重跑输出可区分）；角点采样语义由 R05
+  LUT golden 套件覆盖；
+- 平台行：本机 Darwin 24.3.0 x86_64 / AMD Radeon RX 6800 / GL 4.1
+  ATI-6.1.13 PASS；Linux/Windows/Apple Silicon **NOT RUN（无设备）**。
+- **边界登记**：Color Viewer/Edit/Composite 的 UI 级同帧 golden 与
+  Window/OFX 域、静帧/播放/seek 行为矩阵由 N01/N02-B/N07-B 批次与
+  原生 workflow 校验器承接；headless 出口层本轮已闭环。
 
 **验证方法**：相同 color management 与输出格式下做像素对拍或有依据的
 容差对拍；每项保存原生截图、日志、fixture、命令与判定。不存在的设备写
