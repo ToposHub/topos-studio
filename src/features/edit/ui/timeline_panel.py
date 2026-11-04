@@ -1620,7 +1620,15 @@ class TimelinePanel(QWidget):
                 return
             if self._scrubbing_playhead or self._playback_controller.is_playing:
                 return
-            self.timeline_view.set_playback_active_for_thumbnails(False)
+            # N16：DeferredDelete 冲刷后 view 的 C++ 对象可能已销毁而本
+            # 回调（独立 QTimer）仍触发——访问前防御，已销毁即放弃恢复。
+            view = self.timeline_view
+            try:
+                view.set_playback_active_for_thumbnails(False)
+            except RuntimeError:
+                logger.debug(
+                    "timeline_view destroyed before zoom resume; skipping")
+                return
             try:
                 from src.features.edit.core.audio_waveform import (
                     WaveformExtractor, ClipEffectWaveformRenderer,

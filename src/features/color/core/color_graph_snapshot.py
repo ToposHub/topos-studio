@@ -109,8 +109,11 @@ def compute_resource_fingerprint(
             if isinstance(resources, Mapping) else 1.0,
         } if isinstance(resources, Mapping) else {"lut_ref": "",
                                                   "lut_strength": 1.0}
+        bake_ref = str(resources.get("bake_ref") or "") \
+            if isinstance(resources, Mapping) else ""
         entries.append({"node_id": node.node_id,
-                        "instances": instances, "lut": lut})
+                        "instances": instances, "lut": lut,
+                        "bake_ref": bake_ref})
     blob = json.dumps(entries, sort_keys=True, ensure_ascii=True,
                       default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()

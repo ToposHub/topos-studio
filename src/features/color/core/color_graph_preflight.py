@@ -54,15 +54,25 @@ def _default_lut_probe(lut_ref: str) -> bool:
     return get_lut_resource_session().status_of(lut_ref) == "registered"
 
 
+def _default_bake_probe(bake_ref: str) -> bool:
+    """bake 结果引用可解析性（R06-B：结果会话 registered 才可用）。"""
+    from src.features.color.core.color_bake_result_registry import (
+        get_bake_result_session,
+    )
+    return get_bake_result_session().status_of(bake_ref) == "registered"
+
+
 def preflight_graph_resources(
         graph: ColorGraphData, *,
         effect_probe: Callable[[str], Mapping[str, Any] | None] | None = None,
         lut_probe: Callable[[str], bool] | None = None,
+        bake_probe: Callable[[str], bool] | None = None,
         ai_model_available: Callable[[str], bool] | None = None,
 ) -> list[ResourcePreflightIssue]:
     """逐 Corrector 预检资源可用性（compound children 一并遍历）。"""
     effect_probe = effect_probe or _default_effect_probe
     lut_probe = lut_probe or _default_lut_probe
+    bake_probe = bake_probe or _default_bake_probe
     issues: list[ResourcePreflightIssue] = []
     stack = list(graph.nodes)
     ordered: list[Any] = []
@@ -125,6 +135,13 @@ def preflight_graph_resources(
                     node.node_id, "lut_unresolvable",
                     resource_id=lut_ref,
                     detail="LUT 引用未注册或不可解析"))
+            bake_ref = resources.get("bake_ref")
+            if isinstance(bake_ref, str) and bake_ref \
+                    and not bake_probe(bake_ref):
+                issues.append(ResourcePreflightIssue(
+                    node.node_id, "bake_unresolvable",
+                    resource_id=bake_ref,
+                    detail="bake 结果未注册或不可解析"))
     return issues
 
 

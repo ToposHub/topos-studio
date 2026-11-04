@@ -1284,6 +1284,41 @@ class EditProjectIO(QObject):
                 self._last_resource_closure_report = closure
                 effective_resources_data, effective_resource_files = \
                     session.save_payload()
+                # R06-B：bake 结果会话并入同一资源载荷（R09 闭包同语义：
+                # 缺失保留可修复状态、不静默移除、不阻断保存）。
+                from src.features.color.core.color_bake_result_registry import (
+                    ensure_graph_bake_closure, get_bake_result_session,
+                )
+                bake_session = get_bake_result_session()
+                bake_closure = ensure_graph_bake_closure(graphs, bake_session)
+                for ref in bake_closure["missing"]:
+                    logger.warning(
+                        "project save: bake 引用缺失（保留可修复状态）: %s",
+                        ref)
+                self._last_bake_closure_report = bake_closure
+                bake_data, bake_files = bake_session.save_payload()
+                if bake_data or bake_files:
+                    # 索引形状 = ResourceIndex.to_dict（resources 为条目
+                    # 列表）：base 缺席直接采用 bake 索引；存在则按
+                    # resource_id 去重合并。
+                    if effective_resources_data is None:
+                        effective_resources_data = bake_data
+                    else:
+                        existing = {
+                            (item or {}).get("resource_id")
+                            for item in effective_resources_data.get(
+                                "resources", ()) or ()}
+                        merged = list(effective_resources_data.get(
+                            "resources", ()) or ())
+                        merged.extend(
+                            item for item in
+                            (bake_data or {}).get("resources", ()) or ()
+                            if (item or {}).get("resource_id") not in existing)
+                        effective_resources_data = {
+                            **effective_resources_data, "resources": merged}
+                    effective_resource_files = dict(
+                        effective_resource_files or {})
+                    effective_resource_files.update(bake_files or {})
             except Exception:  # noqa: BLE001 — 资源载荷失败不阻断保存
                 logger.exception("lut resource save payload failed")
                 effective_resources_data = None
@@ -1742,6 +1777,14 @@ class EditProjectIO(QObject):
                 get_lut_resource_session().bind_project(resource_resolver_obj)
             except Exception:  # noqa: BLE001
                 logger.exception("lut resource session bind failed")
+            # R06-B：bake 结果会话同语义绑定（合并包内 generated 条目）。
+            try:
+                from src.features.color.core.color_bake_result_registry import (
+                    get_bake_result_session,
+                )
+                get_bake_result_session().bind_project(resource_resolver_obj)
+            except Exception:  # noqa: BLE001
+                logger.exception("bake result session bind failed")
             # DESK-04B：包内容能力分级（不阻断加载；导出门/UI 按报告限制）
             try:
                 from src.features.edit.core.package_capability import (

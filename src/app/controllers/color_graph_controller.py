@@ -167,6 +167,10 @@ ACTION_CONTRACTS: dict[str, ActionContract] = {c.action: c for c in (
                    IntentCategory.PARAMETER, ("node_id", "strength"), ()),
     ActionContract("remove_lut", "remove_node_lut", IntentCategory.PARAMETER,
                    ("node_id",), ()),
+    ActionContract("set_bake", "set_node_bake", IntentCategory.PARAMETER,
+                   ("node_id", "bake_ref"), ()),
+    ActionContract("remove_bake", "remove_node_bake", IntentCategory.PARAMETER,
+                   ("node_id",), ()),
     # N03：非 primary 工具域（Qualifier / Window；typed handle 写入）
     ActionContract("set_qualifier", "set_node_qualifier", IntentCategory.PARAMETER,
                    ("node_id", "qualifier"), ()),

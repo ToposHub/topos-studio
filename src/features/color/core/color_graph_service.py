@@ -66,12 +66,14 @@ class ColorGraphService:
     def __init__(self,
                  id_factory: Callable[[], str] | None = None,
                  effect_schema_provider: Callable[[str], Any] | None = None,
-                 lut_reference_validator: Callable[[str], bool] | None = None) -> None:
+                 lut_reference_validator: Callable[[str], bool] | None = None,
+                 bake_reference_validator: Callable[[str], bool] | None = None) -> None:
         self._id_factory = id_factory or (lambda: str(uuid.uuid4()))
         # R03：资源权威注入（生产默认 PluginManager/LutResourceSession，
         # 测试注入 fake）。None 值 = 用懒默认；显式传入 False 禁用校验。
         self._effect_schema_provider = effect_schema_provider
         self._lut_reference_validator = lut_reference_validator
+        self._bake_reference_validator = bake_reference_validator
 
     # ── 统一 intent 入口（N08 → N02） ──
 
@@ -1399,6 +1401,12 @@ class ColorGraphService:
         from src.shared.color.lut_resource_registry import get_lut_resource_session
         return get_lut_resource_session().status_of(lut_ref) == "registered"
 
+    def _default_bake_reference_valid(self, bake_ref: str) -> bool:
+        from src.features.color.core.color_bake_result_registry import (
+            get_bake_result_session,
+        )
+        return get_bake_result_session().status_of(bake_ref) == "registered"
+
     def _effect_schema(self, resource_id: str):
         provider = self._effect_schema_provider
         if provider is None:
@@ -1410,6 +1418,12 @@ class ColorGraphService:
         if provider is None:
             provider = self._default_lut_reference_valid
         return bool(provider(lut_ref)) if provider else True
+
+    def _bake_reference_valid(self, bake_ref: str) -> bool:
+        provider = getattr(self, "_bake_reference_validator", None)
+        if provider is None:
+            provider = self._default_bake_reference_valid
+        return bool(provider(bake_ref)) if provider else True
 
     def _resource_target(self, graph: ColorGraphData,
                          node_id: str) -> ColorNodeData | GraphEditResult:
@@ -1739,6 +1753,32 @@ class ColorGraphService:
         resources = dict(target.params.get("resources") or {})
         resources.pop("lut_ref", None)
         resources.pop("lut_strength", None)
+        return self._replace_node_resources(graph, target, resources)
+
+    def op_set_node_bake(self, graph: ColorGraphData, node_id: str,
+                         bake_ref: str) -> GraphEditResult:
+        """R06-B：设置/替换节点 bake 结果引用（单槽；验证同 LUT 模式）。"""
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        if bake_ref and not self._bake_reference_valid(bake_ref):
+            return self._fail(graph, "resource_unknown",
+                              f"bake 结果未注册: {bake_ref}", node_id=node_id)
+        resources = dict(target.params.get("resources") or {})
+        if bake_ref:
+            resources["bake_ref"] = bake_ref
+        else:
+            resources.pop("bake_ref", None)
+        return self._replace_node_resources(graph, target, resources)
+
+    def op_remove_node_bake(self, graph: ColorGraphData,
+                            node_id: str) -> GraphEditResult:
+        """R06-B：移除节点 bake 引用（保留 resources 其他键）。"""
+        target = self._resource_target(graph, node_id)
+        if isinstance(target, GraphEditResult):
+            return target
+        resources = dict(target.params.get("resources") or {})
+        resources.pop("bake_ref", None)
         return self._replace_node_resources(graph, target, resources)
 
     # ════════════════════════════════════════════════════════════════

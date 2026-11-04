@@ -1307,6 +1307,20 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.color_node_panel = ColorNodePanel()
         from src.app.controllers.color_node_preview import ColorNodeSourcePreview
         self.color_node_source_preview = ColorNodeSourcePreview(self)
+        # R06-B：离线 bake 服务（能力 fail-closed；UI 经状态信号消费；
+        # 工程关闭经 on_project_closed → reset_all_bake_services 收口）。
+        try:
+            from src.features.color.core.color_bake_backend import (
+                install_default_backends,
+            )
+            from src.features.color.core.color_bake_service import (
+                ColorBakeService,
+            )
+            install_default_backends()
+            self.color_bake_service = ColorBakeService(parent=self)
+        except Exception:  # noqa: BLE001 — bake 为可选能力，不阻断启动
+            self.color_bake_service = None
+            logger.warning("color bake service unavailable", exc_info=True)
         # R08：逐节点已处理缩略图（独立 worker + standalone GL；GUI 零 GL）。
         from src.app.controllers.node_thumbnail_evaluator import (
             ColorNodeOutputPreview,
