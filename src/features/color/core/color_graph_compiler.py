@@ -128,6 +128,14 @@ class RenderPass:
     # 游 cone_key）。改上游/自身/资源→键变；改独立分支/换 viewer 目标
     # （下游选择）→键不变。执行器的 per-node 输出缓存以它为键。
     cone_key: str = ""
+    # N02-B 切片 1：key 管线声明（编译期从图数据派生，冻结顺序规格：
+    # qualifier → window → bitmap → invert_key_in/external_key → post:*）。
+    # 执行侧（宿主 matte_provider）的实际阶段与它的一致性由测试锚定；
+    # 空元组 = 本节点无 key 语义。
+    key_pipeline: tuple[str, ...] = ()
+    # keyer 输入源声明（key_settings.key_source_mode 消费化）：
+    # "node_input" / "legacy_raw"；无 qualifier 时为空串。
+    key_input_source: str = ""
 
 
 @dataclass(frozen=True)
@@ -234,6 +242,8 @@ class ColorGraphRenderPlan:
                     "release_after": p.release_after,
                     "estimated_bytes": p.estimated_bytes,
                     "expanded_from": p.expanded_from,
+                    "key_pipeline": list(p.key_pipeline),
+                    "key_input_source": p.key_input_source,
                 }
                 for p in self.passes],
             "warnings": list(self.warnings),
@@ -457,6 +467,67 @@ def compile_graph(snapshot: ColorGraphSnapshot,
     if len(order) != len(cone):
         raise GraphCompileError("cycle", "依赖锥内存在环")
 
+    def _float_gt(value: Any, threshold: float = 0.0) -> bool:
+        try:
+            return float(value) > threshold
+        except (TypeError, ValueError):
+            return False
+
+    def _derive_key_pipeline(node: Any,
+                             has_key_in: bool) -> tuple[tuple[str, ...], str]:
+        """N02-B：从节点图数据派生 key 管线阶段与 keyer 输入源。
+
+        数据源与执行侧同构：``params["qualifier"]`` 覆盖
+        ``legacy_payload.qualifier_params``（``_DICT_PARAM_OVERLAYS``）；
+        窗口形状在 ``legacy_payload.mask_shapes``；key 设置在
+        ``params["key_settings"]``（覆盖 legacy 同名）。后处理只声明
+        **层级** clean/blur/denoise（qualifier 域）——形状级链
+        （feather→blur→clean→opacity→invert）在 window 阶段内部。
+        """
+        params = node.params if isinstance(node.params, Mapping) else {}
+        legacy = node.legacy_payload if isinstance(
+                node.legacy_payload, Mapping) else {}
+        qp = dict(legacy.get("qualifier_params") or {})
+        overlay = params.get("qualifier")
+        if isinstance(overlay, Mapping) and overlay:
+            qp.update(overlay)
+        key_settings = dict(legacy.get("key_settings") or {})
+        ks = params.get("key_settings")
+        if isinstance(ks, Mapping) and ks:
+            key_settings.update(ks)
+        shapes = legacy.get("mask_shapes") or ()
+        stages: list[str] = []
+        qualifier_on = bool(qp.get("enabled"))
+        if qualifier_on:
+            stages.append("qualifier")
+        has_shapes = bool(shapes)
+        if has_shapes:
+            stages.append("window:shapes")
+            if any(isinstance(shape, Mapping)
+                   and str(shape.get("shape_type")
+                           or shape.get("type") or "").find("bitmap") >= 0
+                   or "bitmap_data" in (
+                       shape if isinstance(shape, Mapping) else {})
+                   for shape in shapes):
+                stages.append("bitmap")
+        if has_key_in:
+            stages.append("invert_key_in" if key_settings.get("invert_key_in")
+                          else "external_key")
+        if qualifier_on or has_shapes:
+            if _float_gt(qp.get("clean_black")):
+                stages.append("post:clean_black")
+            if _float_gt(qp.get("clean_white")):
+                stages.append("post:clean_white")
+            if _float_gt(qp.get("blur")):
+                stages.append("post:blur")
+            if _float_gt(qp.get("denoise")):
+                stages.append("post:denoise")
+        source = ""
+        if qualifier_on:
+            source = str(key_settings.get("key_source_mode")
+                         or "legacy_raw")
+        return tuple(stages), source
+
     # ── typed passes + liveness ──
     index_of = {nid: i for i, nid in enumerate(order)}
     width, height = int(size[0]), int(size[1])
@@ -486,6 +557,9 @@ def compile_graph(snapshot: ColorGraphSnapshot,
         outputs = tuple(p.port_id for p in node.ports()
                         if p.direction.value == "out") if known else ("image",)
         cone_keys[nid] = _pass_cone_key(node, inputs, cone_keys)
+        key_pipeline, key_input_source = _derive_key_pipeline(
+            node, has_key_in=any(port == "key" and ref is not None
+                                 for port, ref in inputs))
         passes.append(RenderPass(
             index=index,
             node_id=nid,
@@ -497,7 +571,9 @@ def compile_graph(snapshot: ColorGraphSnapshot,
             consumers=consumer_count[nid],
             estimated_bytes=bytes_per_output,
             shared_definition_id=node.shared_definition_id,
-            cone_key=cone_keys[nid]))
+            cone_key=cone_keys[nid],
+            key_pipeline=key_pipeline,
+            key_input_source=key_input_source))
 
     # release_after = max(消费者 index)；分叉输入保持到所有消费者完成
     last_use: dict[str, int] = {}
