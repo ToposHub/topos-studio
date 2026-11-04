@@ -79,7 +79,9 @@ def test_media_pool_exposes_virtual_motion_graphic_for_ai_targeting(qapp):
 
 
 def test_media_pool_context_menu_scopes_tree_selection_to_clicked_asset(qapp):
-    """Right-clicking a tree asset makes it the only selected pool item."""
+    """Right-click selection contract: an unselected target becomes the sole
+    selection; a target already inside an extended selection preserves the
+    whole group (batch-action contract, media_pool_panel._select_single_*)."""
     from src.features.edit.ui.media_pool_panel import MediaPoolPanel
 
     panel = MediaPoolPanel()
@@ -91,18 +93,28 @@ def test_media_pool_context_menu_scopes_tree_selection_to_clicked_asset(qapp):
             item.setData(0, Qt.ItemDataRole.UserRole + 1, "asset")
             panel.tree.addTopLevelItem(item)
 
+        # 分支 1：目标未选中 → 收敛为唯一选择
+        first.setSelected(True)
+        panel._select_single_context_tree_item(second)
+
+        assert panel.tree.selectedItems() == [second]
+        assert panel.tree.currentItem() is second
+
+        # 分支 2：目标已在多选组内 → 保留整组，仅移动 current
         first.setSelected(True)
         second.setSelected(True)
         panel._select_single_context_tree_item(second)
 
-        assert panel.tree.selectedItems() == [second]
+        assert {item.text(0) for item in panel.tree.selectedItems()} == {
+            "Scene 001", "Scene 002"}
         assert panel.tree.currentItem() is second
     finally:
         panel.deleteLater()
 
 
 def test_media_pool_context_menu_scopes_grid_selection_to_clicked_subclip(qapp):
-    """A scene-cut subclip context menu must not inherit another selection."""
+    """Grid selection contract mirrors the tree: unselected target collapses
+    to a single selection; a selected target keeps the intentional group."""
     from src.features.edit.core.project import MediaAsset
     from src.features.edit.ui.media_pool_panel import GridItem, MediaPoolPanel
 
@@ -127,19 +139,26 @@ def test_media_pool_context_menu_scopes_grid_selection_to_clicked_subclip(qapp):
         selection_model = panel.grid_view.selectionModel()
         first_index = panel.asset_model.index(0, 0)
         second_index = panel.asset_model.index(1, 0)
+
+        # 分支 1：目标未选中 → ClearAndSelect 目标
         selection_model.select(
             first_index,
             QItemSelectionModel.SelectionFlag.Select,
         )
-        selection_model.select(
-            second_index,
-            QItemSelectionModel.SelectionFlag.Select,
-        )
-
         panel._select_single_context_grid_item(second_index)
 
         selected_indexes = panel.grid_view.selectedIndexes()
         assert selected_indexes == [second_index]
+        assert panel.grid_view.currentIndex() == second_index
+
+        # 分支 2：目标已在多选组内 → 保留整组，仅移动 current
+        selection_model.select(
+            first_index,
+            QItemSelectionModel.SelectionFlag.Select,
+        )
+        panel._select_single_context_grid_item(second_index)
+
+        assert {index.row() for index in panel.grid_view.selectedIndexes()} == {0, 1}
         assert panel.grid_view.currentIndex() == second_index
     finally:
         panel.deleteLater()

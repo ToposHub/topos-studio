@@ -18,7 +18,7 @@ def test_live_primary_and_curve_markers_clear_when_reset(qapp, qtbot):
     host.color_node_panel = panel
     host.color_graph_host = SimpleNamespace(
         panel_host=SimpleNamespace(active_handle=SimpleNamespace(node_id=node_id, is_corrector=True)),
-        _node_payload=lambda _: {'id': layer.id},
+        panel_layer_payload=lambda _: {'id': layer.id},
     )
     feedback = ColorNodeToolFeedback(host)
     feedback.refresh()
@@ -47,7 +47,7 @@ def test_wrong_layer_cannot_mark_selected_node(qapp, qtbot):
     host.color_node_panel = panel
     host.color_graph_host = SimpleNamespace(
         panel_host=SimpleNamespace(active_handle=SimpleNamespace(node_id=node_id, is_corrector=True)),
-        _node_payload=lambda _: {'id': 'different'},
+        panel_layer_payload=lambda _: {'id': 'different'},
     )
     ColorNodeToolFeedback(host).refresh()
     assert not panel.view.cards[node_id].node.tool_indicators

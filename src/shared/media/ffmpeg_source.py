@@ -333,24 +333,32 @@ def extract_pts_index_seconds(path: str) -> "list[float] | None":
     """
     try:
         import av
+        from src.shared.media.av_concurrency import av_operation
 
-        with av.open(str(path)) as container:
-            stream = container.streams.video[0]
-            time_base = stream.time_base
-            if time_base is None:
-                return None
-            pts_values: "list[float]" = []
-            for packet in container.demux(stream):
-                if packet.pts is None:
-                    continue  # 无显示戳的包无法定位显示序
-                pts_values.append(float(packet.pts * time_base))
-            if not pts_values:
-                return None
-            pts_values.sort()
-            first = pts_values[0]
-            if first:
-                pts_values = [t - first for t in pts_values]
-            return pts_values
+        # demux 期间计入进程级 in-flight（常驻关闭线程据此让行）；
+        # 容器关闭同样只走空闲窗口——`with` 退出时的同步 close 会与
+        # 其他实例的解码互锁（Q01/F1.1）。
+        with av_operation():
+            container = av.open(str(path))
+            try:
+                stream = container.streams.video[0]
+                time_base = stream.time_base
+                if time_base is None:
+                    return None
+                pts_values: "list[float]" = []
+                for packet in container.demux(stream):
+                    if packet.pts is None:
+                        continue  # 无显示戳的包无法定位显示序
+                    pts_values.append(float(packet.pts * time_base))
+            finally:
+                _close_container_bounded(container, 2.0)
+        if not pts_values:
+            return None
+        pts_values.sort()
+        first = pts_values[0]
+        if first:
+            pts_values = [t - first for t in pts_values]
+        return pts_values
     except Exception:  # noqa: BLE001 — 抽取失败回退 CFR
         return None
 
@@ -516,14 +524,19 @@ def _ensure_closer_thread() -> "queue.Queue":
 
             def _closer_loop() -> None:
                 while True:
-                    container = _CLOSE_QUEUE.get()
+                    item = _CLOSE_QUEUE.get()
                     # Q01/F1.2 根治：只在全局解码空闲窗口关容器——打断
                     # libav↔GIL 锁序反转（close 持 GIL 等 libav 锁、解码持
                     # libav 锁等 GIL）。持续播放时容器停留队列等待。
                     from src.shared.media.av_concurrency import wait_for_idle
                     wait_for_idle()
                     try:
-                        container.close()
+                        # 队列也可携带 PyAV 迭代器/帧（close() 拿不到实例锁
+                        # 时的移交物）：无 close() 的条目在下一轮 get 覆盖
+                        # 引用时于本线程空闲窗口统一 dealloc。
+                        close = getattr(item, "close", None)
+                        if callable(close):
+                            close()
                     except Exception:  # noqa: BLE001 - 关闭失败仅丢弃
                         pass
 
@@ -548,7 +561,11 @@ def _close_container_bounded(container, timeout: float, *, wait: bool = True) ->
 def _defer_container(container) -> None:
     _DEFERRED_CONTAINERS.append(container)
     while len(_DEFERRED_CONTAINERS) > _DEFERRED_CONTAINERS_CAP:
-        _DEFERRED_CONTAINERS.pop(0)
+        # 超限驱逐不能裸丢引用：PyAV 容器的 dealloc 会发生在任意 GC 线程
+        # 的任意字节码边界——正是停靠机制要规避的互锁场景。移交常驻
+        # 关闭线程（空闲窗口关闭 + dealloc）。
+        evicted = _DEFERRED_CONTAINERS.pop(0)
+        _ensure_closer_thread().put(evicted)
 
 
 class FFmpegMediaSource:
@@ -863,8 +880,9 @@ class FFmpegMediaSource:
                 return self._metadata
 
             finally:
-                # 确保容器关闭
-                container.close()
+                # 容器关闭一律走常驻关闭线程的空闲窗口（同步 close 会与
+                # 其他实例的解码在 libav↔GIL 间互锁，见 Q01/F1.1）。
+                _close_container_bounded(container, 2.0)
 
         except av.error.FileNotFoundError:
             raise MediaSourceError(
@@ -1293,12 +1311,27 @@ class FFmpegMediaSource:
             gop_thread.join(timeout=2.0)
             self._gop_index_thread = None
 
-        # 清理迭代器和缓冲区
-        self._frame_iterator = None
-        self._decoder_buffer = []
-        self._pending_av_frame = None
-        self._gop_seek_iterator = None
-        self._main_resync_pts = None
+        if lock_acquired:
+            # 清理迭代器和缓冲区（持锁——解码已串行化，dealloc 安全）
+            self._frame_iterator = None
+            self._decoder_buffer = []
+            self._pending_av_frame = None
+            self._gop_seek_iterator = None
+            self._main_resync_pts = None
+        else:
+            # 实例锁超时：本实例解码仍在途。PyAV 迭代器/帧的 dealloc 会
+            # 在**当前线程**触碰 libav（正是 Q01 记录的互锁面）——移交
+            # 常驻关闭线程在全局空闲窗口统一释放，本线程只清纯 Python
+            # 状态（N16：全套件顺序关闭路径上的残余竞争窗口）。
+            _closer = _ensure_closer_thread()
+            for _attr in ("_frame_iterator", "_pending_av_frame",
+                          "_gop_seek_iterator"):
+                _obj = getattr(self, _attr, None)
+                if _obj is not None:
+                    setattr(self, _attr, None)
+                    _closer.put(_obj)
+            self._decoder_buffer = []  # 恒为空列表（遗留字段）
+            self._main_resync_pts = None
 
         if self._container is not None:
             container, self._container = self._container, None
