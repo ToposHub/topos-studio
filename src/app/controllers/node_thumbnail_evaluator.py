@@ -205,12 +205,19 @@ class ColorNodeOutputPreview(QObject):
             for node_id in node_list:
                 self._emit_failed(node_id, _generation, "no_input")
             return
-        graph = ColorGraphData.from_dict(dict(graph_payload))
+        graph = ColorGraphData.from_dict(graph_payload)
         # Compound 目标重映射：编译器把 compound 内联展开（成员直入平面图），
-        # 其输出等价于内部 output 节点的上游——请求落在内部链尾。
-        node_list = [_resolve_viewer_node(graph_payload, node_id)
-                     for node_id in node_list]
-        node_list = [n for n in node_list if n]
+        # 其输出等价于内部 output 节点的上游——编译目标落在内部链尾。
+        # 投递/缓存必须保持请求方（卡片）id：GUI 侧按 card.node.id 查收，
+        # 内部 id 外泄会让 compound 卡片永远收不到缩略图，且缓存键
+        # （dispatch 按请求 id 查）永不命中 → 每 600ms 全量重评（V01）。
+        targets: list[tuple[str, str]] = []
+        resolved_seen: set[str] = set()
+        for requested in node_list:
+            resolved = _resolve_viewer_node(graph_payload, requested)
+            if resolved and resolved not in resolved_seen:
+                resolved_seen.add(resolved)
+                targets.append((requested, resolved))
         width, height = self._size
         source = _resize_to(source, width, height)
         ctx = moderngl.create_standalone_context(require=330)
@@ -223,20 +230,20 @@ class ColorNodeOutputPreview(QObject):
 
             src_tex = ctx.texture((width, height), components=4, dtype="f2",
                                   data=_to_f16_rgba(source))
-            for node_id in node_list:
+            for requested, resolved in targets:
                 snapshot = freeze_graph(
                     graph, session_id=identity[0] or "node-thumb",
-                    viewer_target=f"viewer:{node_id}", output_size=self._size)
+                    viewer_target=f"viewer:{resolved}", output_size=self._size)
                 plan = compile_graph(snapshot, size=self._size)
                 result = executor.execute_plan(
-                    plan, src_tex, request_id=f"thumb-{node_id}",
+                    plan, src_tex, request_id=f"thumb-{requested}",
                     source_size=self._size,
                     layer_param_provider=_layer_provider(graph),
                     bind_aux=bind_aux)
                 if not result.published or result.output_texture is None:
-                    self._emit_failed(node_id, _generation,
+                    self._emit_failed(requested, _generation,
                                       result.diagnostic_code or "not_published")
-                    executor.release_revision(f"thumb-{node_id}")
+                    executor.release_revision(f"thumb-{requested}")
                     continue
                 fbo = ctx.framebuffer(color_attachments=[result.output_texture])
                 fbo.use()
@@ -244,10 +251,10 @@ class ColorNodeOutputPreview(QObject):
                                     dtype=np.uint8).reshape(height, width, 4)
                 image = _rgba8_to_qimage(raw)
                 fbo.release()
-                executor.release_revision(f"thumb-{node_id}")
-                self._cache_put((node_id, identity[2], self._size),
+                executor.release_revision(f"thumb-{requested}")
+                self._cache_put((requested, identity[2], self._size),
                                 QPixmap.fromImage(image))
-                self._emit_ready(node_id, _generation, image)
+                self._emit_ready(requested, _generation, image)
             src_tex.release()
             executor.release_pool()
         finally:

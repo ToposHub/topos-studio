@@ -1,0 +1,34 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "native_graph_workflow",
+  "per_node_rendering": "pending_evaluated_node_thumbnails",
+  "asset_id": "7849f79a-f2b5-4c97-ba85-f8f0fe49b80e",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 124
+  },
+  "clip_id": "43e47247-7852-400e-be38-b6f1893ff808",
+  "timeline_id": "c371dfe2-0893-46aa-a294-5b192b1baa9a",
+  "current_file_matches_source": true,
+  "current_page": "Color",
+  "thumbnail_size": [
+    512,
+    288
+  ],
+  "thumbnail_rgb_std": 66.625,
+  "corrector_thumbnails_present": 2,
+  "source_tooltip": "Source preview — waiting for evaluated node output.",
+  "workflow": {
+    "project_history": "passed",
+    "grade_commit": "passed",
+    "topos_save_reload": "passed",
+    "disconnect_reconnect": "passed",
+    "graph_render_enabled": true
+  },
+  "status": "failed",
+  "error": "AssertionError: corrector cards did not receive evaluated thumbnails within 12 seconds (count=0)",
+  "elapsed_seconds": 18.55
+}

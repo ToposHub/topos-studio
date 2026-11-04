@@ -159,6 +159,8 @@ class ColorNodeView(QGraphicsView):
                 card.opened.connect(self._open_node)
                 if self.show_thumbnails and node.id in self._thumbnails:
                     card.set_thumbnail(self._thumbnails[node.id])
+                    card.setToolTip((node.label + "\n" if node.label else "") +
+                                    tr("evaluated_node_preview", "Evaluated node output"))
                 elif self.show_thumbnails and self._source_thumbnail is not None and node.kind in (NodeKind.CORRECTOR, NodeKind.COMPOUND):
                     card.set_thumbnail(self._source_thumbnail)
                     card.setToolTip((node.label + "\n" if node.label else "") + self._source_preview_text)
@@ -179,7 +181,10 @@ class ColorNodeView(QGraphicsView):
         """Accept a host-supplied thumbnail on the GUI thread (no GPU readback)."""
         self._thumbnails[node_id] = pixmap
         if self.show_thumbnails and node_id in self.cards:
-            self.cards[node_id].set_thumbnail(pixmap)
+            card = self.cards[node_id]
+            card.set_thumbnail(pixmap)
+            card.setToolTip((card.node.label + "\n" if card.node.label else "") +
+                            tr("evaluated_node_preview", "Evaluated node output"))
 
     def set_cache_hits(self, node_ids: Any) -> None:
         """N06：按实际命中事件点亮/熄灭卡片命中徽标。

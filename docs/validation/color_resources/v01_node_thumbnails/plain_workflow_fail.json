@@ -1,0 +1,54 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "native_graph_workflow",
+  "per_node_rendering": "source_thumbnail_only (evaluated=0)",
+  "asset_id": "d2c24aea-d0a6-4763-9e6b-22469b3a81c4",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 124
+  },
+  "clip_id": "c5941d6b-3831-492e-a4a7-ab2e443bb022",
+  "timeline_id": "9556c4c2-fc28-4dbe-994b-3dc1bdc17db5",
+  "current_file_matches_source": true,
+  "current_page": "Color",
+  "thumbnail_size": [
+    512,
+    288
+  ],
+  "thumbnail_rgb_std": 66.625,
+  "corrector_thumbnails_present": 2,
+  "source_tooltip": "Source preview — waiting for evaluated node output.",
+  "workflow": {
+    "project_history": "passed",
+    "grade_commit": "passed",
+    "topos_save_reload": "passed",
+    "disconnect_reconnect": "passed",
+    "graph_render_enabled": true
+  },
+  "baseline_samples": {
+    "plugin_id": "Anamorphic_Streak",
+    "plugin_instance_order": [
+      "758c47fb-1482-4afc-8ed6-fe1d17e39eec"
+    ],
+    "unknown_param": "__unknown_future_param",
+    "lut_applied": true,
+    "lut_path": "/var/folders/j2/m4dcthbx3h5086ywnnplqwmc0000gn/T/topos-node-media-v5msxdaa/Baseline Identity.cube"
+  },
+  "baseline": {
+    "compound_node_id": "8b9d291c-c71c-422a-86fe-7af08f45d16b",
+    "stack_ids": [
+      "ac2d5a98-4f88-46f2-92b2-294b619c0ca4",
+      "695f6f00-0816-44bd-84a5-e63507820991"
+    ],
+    "clips": 2,
+    "correctors": 2,
+    "project_saved": "baseline_project.topos"
+  },
+  "node_thumbnail_count": 0,
+  "status": "failed",
+  "error": "AssertionError: workflow did not produce evaluated node thumbnails within 12 seconds (count=0)",
+  "elapsed_seconds": 29.93
+}

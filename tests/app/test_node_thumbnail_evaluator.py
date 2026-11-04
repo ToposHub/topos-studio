@@ -221,6 +221,53 @@ def test_missing_graph_reports_failure(qapp) -> None:
         preview.shutdown()
 
 
+def test_compound_request_delivers_and_caches_under_card_id(qapp) -> None:
+    """V01：compound 卡片请求 → 编译目标重映射到内部链尾，但投递与缓存
+    必须落在请求方 compound id（内部 id 外泄 = 卡片永远收不到 + 缓存
+    永不命中 → 每 600ms 全量重评）。"""
+    service = _service()
+    graph = _graph()
+    first, second = _correctors(graph)[:2]
+    fx_graph = service.apply_intent(graph, "set_node_option", {
+        "node_id": first.node_id, "name": "grade_patch",
+        "value": ("exposure", 60.0)})
+    assert fx_graph.ok, fx_graph.diagnostics
+    grouped = service.apply_intent(
+        fx_graph.graph, "group_subgraph",
+        {"member_ids": [first.node_id, second.node_id]})
+    assert grouped.ok, grouped.diagnostics
+    compound_id = next(n.node_id for n in grouped.graph.nodes
+                       if n.node_type == "compound")
+    payload = grouped.graph.to_dict()
+
+    source = _ramp()
+    sink = _Sink()
+    preview = ColorNodeOutputPreview(size=(64, 36), debounce_ms=10)
+    preview.node_thumbnail_ready.connect(sink.on_ready)
+    preview.evaluation_failed.connect(sink.on_failed)
+    try:
+        preview.set_identity("s", "stack", grouped.graph.graph_revision)
+        preview.request(lambda: payload, lambda: source, [compound_id])
+        assert _drive(preview, sink, count=1), \
+            f"compound 缩略图未投递: ready={list(sink.ready)} failed={sink.failed}"
+        assert list(sink.ready) == [compound_id], (
+            "投递必须使用请求方 compound id，而不是内部解析节点 id")
+        # 缓存命中：同 revision 再请求 → 即刻投递、零 worker 重算。
+        sink.ready.clear()
+        preview.request(lambda: payload, lambda: source, [compound_id])
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not sink.ready:
+            QApplication.instance().processEvents()
+            time.sleep(0.02)
+        assert sink.ready.keys() == {compound_id}, "compound 请求必须命中缓存"
+        # 内容断言：compound 输出包含上游曝光修改，与源可区分。
+        arr = _image_bytes(sink.ready[compound_id])
+        src_rgb = (source[..., :3] * 255).astype(np.uint8)
+        assert np.abs(arr.astype(int) - src_rgb.astype(int)).max() > 8
+    finally:
+        preview.shutdown()
+
+
 def _image_bytes(image) -> np.ndarray:
     w, h = image.width(), image.height()
     ptr = image.constBits()
