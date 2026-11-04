@@ -32,7 +32,7 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 | P0 | R12-A | 已通过（2026-11-05 复测全预算过：RSS 167.9/250 MB/10min；分行为归因新增） | 30 分钟资源与播放性能 | V01 |
 | P0 | R12-B | 本机出口矩阵通过；跨平台 NOT RUN；UI 级同帧对拍边界已登记 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
 | P0 | N16 | 未完成 | 单进程全套件稳定性与资源所有权 | 无 |
-| P1 | R06-B | 未接线 | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
+| P1 | R06-B | v1 已接线（onnx_tile 后端+结果会话+service+图命令+R09 闭包，17 测试；UI 触发面板登记为后续） | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
 | P1 | N02-B | v1 边界 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
 | P1 | N07-B | v1 复核 | Group/Timeline 全出口最终链序与身份 | N07/R09 |
 | P1 | N10-B | v2 待办 | Mask/Qualifier 动画轨道与定义级扇出 | N10 v1 |
