@@ -378,7 +378,6 @@
     "masks": "Masques",
     "qualifier": "Sélecteur",
     "lut": "LUT 3D",
-    "soft_clip": "Soft Clip",
     "camera_raw": "Camera Raw",
     "analysis": "Analyse",
     "export": "Export",
@@ -562,21 +561,6 @@
     "gain": "Gain",
     "contrast": "Contraste",
     "reset_tooltip": "Réinitialiser tous les paramètres RAW"
-  },
-  "soft_clip": {
-    "title": "Soft Clip",
-    "high_shoulder": "Haut / Épaule",
-    "low_toe": "Bas / Toe",
-    "global_tone": "Global / Tonalité",
-    "high_threshold": "Seuil haut",
-    "white_point": "Point blanc",
-    "shoulder": "Épaule",
-    "low_threshold": "Seuil bas",
-    "black_point": "Point noir",
-    "toe": "Toe",
-    "exposure": "Exposition",
-    "contrast": "Contraste",
-    "reset_tooltip": "Réinitialiser tous les paramètres"
   },
   "analysis": {
     "title": "Forme d'onde RVB",

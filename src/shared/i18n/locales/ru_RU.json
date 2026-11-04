@@ -378,7 +378,6 @@
     "masks": "Маски",
     "qualifier": "Квалификатор",
     "lut": "3D LUT",
-    "soft_clip": "Soft Clip",
     "camera_raw": "Camera Raw",
     "analysis": "Анализ",
     "export": "Экспорт",
@@ -562,21 +561,6 @@
     "gain": "Gain",
     "contrast": "Контраст",
     "reset_tooltip": "Сбросить все параметры RAW"
-  },
-  "soft_clip": {
-    "title": "Soft Clip",
-    "high_shoulder": "Верх / Плечо",
-    "low_toe": "Низ / Toe",
-    "global_tone": "Общий / Тон",
-    "high_threshold": "Верхний порог",
-    "white_point": "Точка белого",
-    "shoulder": "Плечо",
-    "low_threshold": "Нижний порог",
-    "black_point": "Точка чёрного",
-    "toe": "Toe",
-    "exposure": "Экспозиция",
-    "contrast": "Контраст",
-    "reset_tooltip": "Сбросить все параметры"
   },
   "analysis": {
     "title": "Осциллограмма RGB",
