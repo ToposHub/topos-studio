@@ -143,7 +143,7 @@ def test_browser_preferences_roundtrip(qtbot: Any) -> None:
     eff_out = effects.browser_state()
     assert eff_out["favorites"] == ["fx-a", "lut-b"]
     assert eff_out["collapsed"] == ["Texture"]
-    assert eff_out["grid"] is True
+    assert eff_out["grid"] is False  # Legacy tile preference migrates to Resolve-style list.
     assert lut.browser_state()["favorites"] == ["lut-b"]
     # 缺失收藏可诊断（重命名/卸载条目）
     assert effects.missing_favorite_ids({"fx-z"}) == ["fx-a", "lut-b"]
