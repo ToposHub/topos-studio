@@ -2028,7 +2028,7 @@ class AsyncRenderer(QThread):
                 # 色彩上下文 + 出口 target（f4/f2 已在键内）
                 cache_context=(
                     snapshot.source_content_revision,
-                    snapshot.working_color_context or (),
+                    snapshot.color_context_cache_key(),
                     str(params.get('color_output_target') or 'front')),
             )
         except Exception as exc:  # noqa: BLE001 —— 编译/执行异常 fail-closed
