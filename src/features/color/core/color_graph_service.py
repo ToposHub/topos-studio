@@ -206,6 +206,111 @@ class ColorGraphService:
         candidate = replace(graph, nodes=graph.nodes + (node,), edges=edges)
         return self._commit(graph, candidate, {new_id: new_id})
 
+    # ═══ N10：节点 grade 域关键帧（实例 params；CORRECTOR 专属）═══
+
+    @staticmethod
+    def _normalized_keyframe_track(track: Any) -> list:
+        """关键帧序列化形态校验/规范化（[{frame,value,interpolation}]）。"""
+        if not isinstance(track, Mapping):
+            return []
+        raw = track.get("keyframes")
+        if not isinstance(raw, (list, tuple)):
+            return []
+        normalized = []
+        for item in raw:
+            if not isinstance(item, Mapping):
+                continue
+            frame = int(item.get("frame", -1))
+            value = item.get("value")
+            if frame < 0 or value is None:
+                continue
+            entry = {"frame": frame, "value": value}
+            interp = str(item.get("interpolation", "linear"))
+            entry["interpolation"] = interp if interp in (
+                "linear", "ease", "hold") else "linear"
+            normalized.append(entry)
+        normalized.sort(key=lambda e: e["frame"])
+        return normalized
+
+    def _keyframe_target_or_fail(self, graph: ColorGraphData,
+                                 node_id: str) -> Any:
+        """N10 目标校验：CORRECTOR 实例专属（shared 定义级扇出/compound
+        成员 v1 fail-closed）。"""
+        node = self._node(graph, node_id)
+        if node is None or node.known_type() is not NodeType.CORRECTOR:
+            return self._fail(graph, "node_not_found",
+                              f"关键帧目标不是 Corrector 实例: {node_id}",
+                              node_id=node_id)
+        if node.params.get("locked"):
+            return self._fail(graph, "node_locked",
+                              "节点已锁定，先解锁再编辑关键帧",
+                              node_id=node_id)
+        return node
+
+    def _patch_node_keyframes(self, graph: ColorGraphData, node_id: str,
+                              mutate) -> GraphEditResult:
+        node = self._keyframe_target_or_fail(graph, node_id)
+        if not isinstance(node, ColorNodeData):
+            return node  # type: ignore[return-value]
+        tracks = {str(k): self._normalized_keyframe_track(v)
+                  for k, v in (node.params.get("grade_keyframes") or {}).items()
+                  if isinstance(v, Mapping)}
+        mutate(tracks)
+        params = dict(node.params)
+        params["grade_keyframes"] = {k: {"keyframes": v}
+                                     for k, v in tracks.items() if v}
+        try:
+            new_node = replace(node, params=params)
+        except GraphSchemaError as exc:
+            return self._fail(graph, exc.code, str(exc), node_id=node_id)
+        nodes = tuple(new_node if n.node_id == node_id else n
+                      for n in graph.nodes)
+        return self._commit(graph, replace(graph, nodes=nodes), {})
+
+    def op_set_node_keyframe(self, graph: ColorGraphData, node_id: str,
+                             param: str, frame: int, value: Any,
+                             interpolation: str = "linear",
+                             ) -> GraphEditResult:
+        """N10：插入/更新节点 grade 域关键帧（源帧域；一 op 一事务）。"""
+        def mutate(tracks: dict) -> None:
+            track = list(tracks.get(str(param)) or [])
+            entry = {"frame": int(frame), "value": value,
+                     "interpolation": str(interpolation)}
+            track = [k for k in track if k["frame"] != int(frame)]
+            track.append(entry)
+            track.sort(key=lambda e: e["frame"])
+            tracks[str(param)] = track
+        return self._patch_node_keyframes(graph, node_id, mutate)
+
+    def op_remove_node_keyframe(self, graph: ColorGraphData, node_id: str,
+                                param: str, frame: int,
+                                ) -> GraphEditResult:
+        def mutate(tracks: dict) -> None:
+            track = [k for k in (tracks.get(str(param)) or [])
+                     if k["frame"] != int(frame)]
+            if track:
+                tracks[str(param)] = track
+            else:
+                tracks.pop(str(param), None)
+        return self._patch_node_keyframes(graph, node_id, mutate)
+
+    def op_move_node_keyframe(self, graph: ColorGraphData, node_id: str,
+                              param: str, from_frame: int, to_frame: int,
+                              ) -> GraphEditResult:
+        def mutate(tracks: dict) -> None:
+            track = list(tracks.get(str(param)) or [])
+            moving = [k for k in track if k["frame"] == int(from_frame)]
+            if not moving:
+                return
+            track = [k for k in track if k["frame"] != int(from_frame)]
+            for k in moving:
+                k = dict(k)
+                k["frame"] = int(to_frame)
+                track.append(k)
+            track.sort(key=lambda e: e["frame"])
+            tracks[str(param)] = track
+        return self._patch_node_keyframes(graph, node_id, mutate)
+
     # ═══ N15：Resolve 窗口组合（CPW/LPW/PPW/PCW 一键 = Serial+Window）═══
 
     #: 组合名 → (MaskShape type, 默认形状参数)。语义对照 Resolve 20：
@@ -909,6 +1014,8 @@ class ColorGraphService:
     def op_reset_corrector_parameters(self, graph: ColorGraphData,
                                       node_ids: Sequence[str]) -> GraphEditResult:
         def reset(node: ColorNodeData) -> ColorNodeData:
+            # N10：重置清 params 关键帧轨道（防 seek 复活；与 legacy
+            # reset_params 清 grade_keyframes 同语义）
             params = {"key_source_mode": node.params.get(
                 "key_source_mode", "node_input")}
             if "outside_key_source" in node.params:
@@ -1917,6 +2024,12 @@ def can_export_lut(graph: ColorGraphData) -> tuple[bool, str]:
             return False, f"node_type_{node.node_type}"
         if node.node_type == NodeType.CORRECTOR.value:
             payload = dict(node.legacy_payload or {})
+            # N10：图命令域（params.grade_keyframes）同为时域数据——
+            # 同样阻断 pointwise LUT 导出
+            params_keyframes = node.params.get("grade_keyframes") \
+                if isinstance(node.params, Mapping) else None
+            if isinstance(params_keyframes, Mapping) and params_keyframes:
+                return False, "keyframes_temporal"
             for blocker, label in (
                     ("mask_shapes", "windows_masks"),
                     ("grade_keyframes", "keyframes_temporal"),

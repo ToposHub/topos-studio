@@ -178,6 +178,15 @@ ACTION_CONTRACTS: dict[str, ActionContract] = {c.action: c for c in (
     # N15：Resolve 窗口组合（一键 = Serial+默认形状窗口）
     ActionContract("add_window_combo", "add_window_combo",
                    IntentCategory.STRUCTURE, ("combo",), ("active_node_id",)),
+    # N10：节点 grade 域关键帧（实例 params；一 op 一事务）
+    ActionContract("set_keyframe", "set_node_keyframe",
+                   IntentCategory.PARAMETER,
+                   ("node_id", "param", "frame", "value"), ("interpolation",)),
+    ActionContract("remove_keyframe", "remove_node_keyframe",
+                   IntentCategory.PARAMETER, ("node_id", "param", "frame"), ()),
+    ActionContract("move_keyframe", "move_node_keyframe",
+                   IntentCategory.PARAMETER,
+                   ("node_id", "param", "from_frame", "to_frame"), ()),
     ActionContract("undo", "graph_undo", IntentCategory.HISTORY, ()),
     ActionContract("redo", "graph_redo", IntentCategory.HISTORY, ()),
     ActionContract("reset_grades", "reset_graph_parameters", IntentCategory.RESET, ()),

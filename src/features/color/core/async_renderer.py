@@ -2013,8 +2013,11 @@ class AsyncRenderer(QThread):
                 source_size=(w, h),
                 cancel_check=(lambda _rid: bool(is_cancelled()))
                 if is_cancelled is not None else None,
+                # N10：帧感知 provider（带轨道节点逐帧求值；无轨道
+                # 节点与帧无关）
                 layer_param_provider=graph_node_layer_provider(
-                    snapshot.graph),
+                    snapshot.graph,
+                    frame=params.get('color_graph_source_frame')),
                 render_quad=self._render_quad,
                 bind_aux=lambda prog, layer:
                     self._bind_aux_textures_single_layer(prog, layer),

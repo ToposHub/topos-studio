@@ -226,6 +226,15 @@ class ColorGraphExecutor:
         """
         if render_pass.op == "source" or not render_pass.cone_key:
             return False
+        # N10：带关键帧轨道的节点逐帧求值——缓存会跨帧命中旧纹理；
+        # 帧不进节点缓存键（逐帧失效=缓存无意义），直接绕过
+        node_kf = (render_pass.params.get("grade_keyframes")
+                   if isinstance(render_pass.params, Mapping) else None)
+        if isinstance(node_kf, Mapping) and node_kf:
+            self.node_cache_stats["auto_skipped"] += 1
+            cache_events.append((render_pass.node_id, "skip_auto", 0,
+                                 "animated"))
+            return False
         mode = "auto"
         if isinstance(render_pass.params, Mapping):
             mode = str(render_pass.params.get("cache_mode", "auto"))

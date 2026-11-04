@@ -858,6 +858,11 @@ class ImageEngine(QObject):
         snapshot = self.active_color_graph_snapshot()
         if snapshot is not None:
             render_params['color_graph_snapshot'] = snapshot
+            # N10：当前源帧随参（图执行逐帧求值关键帧；帧不进 plan
+            # 编译身份——快照 source_frame 保持 0，plan 缓存命中不变）
+            frame = getattr(self, 'current_grade_frame', None)
+            if frame is not None:
+                render_params['color_graph_source_frame'] = int(frame)
             if execute:
                 render_params['color_graph_execute'] = True
 
