@@ -1088,6 +1088,69 @@ class GraphTransactionBuffer:
 
 
 @dataclass(frozen=True)
+class SetTimelineGradeStackCommand:
+    """N07：Timeline 调色栈登记（{timeline_id: stack_id} 单键事务）。
+
+    ``stack`` 为 None 时移除登记；否则把栈本体写入 color_stacks 并登记
+    映射——timeline 栈享受既有保存/闭包/锁/undo 设施。before 不一致
+    冲突拒绝（不半写）。
+    """
+
+    command_id: str
+    label: str
+    timeline_id: str
+    stack_id: str
+    stack: Any = None            # ColorStackData | None（None=移除登记）
+    _before_mapping: dict | None = None
+    _before_stack: Any = None
+
+    def apply(self, project: EditProject) -> EditProject:
+        if self._before_mapping is None:
+            object.__setattr__(self, "_before_mapping",
+                               dict(project.timeline_grade_stacks))
+        current = dict(project.timeline_grade_stacks)
+        if current != self._before_mapping:
+            raise GraphCommandConflict(
+                "conflict", "Timeline 栈映射已被其他操作修改，请先撤销")
+        old_stack = project.color_stacks.get(self.stack_id)
+        object.__setattr__(self, "_before_stack", old_stack)
+        stacks = dict(project.color_stacks)
+        if self.stack is not None:
+            stacks[self.stack_id] = self.stack
+        elif old_stack is not None and old_stack.scope != "timeline":
+            # 移除登记不删栈（他处可能引用；scope==timeline 的孤儿栈随
+            # 工程保存保留，可重新登记）
+            pass
+        mapping = dict(current)
+        if self.stack is not None:
+            mapping[self.timeline_id] = self.stack_id
+        else:
+            mapping.pop(self.timeline_id, None)
+        from dataclasses import replace as _replace
+        return _replace(project, color_stacks=stacks,
+                        timeline_grade_stacks=mapping)
+
+    def undo(self, project: EditProject) -> EditProject:
+        if self._before_mapping is None:
+            return project
+        stacks = dict(project.color_stacks)
+        if self._before_stack is None and self.stack is not None:
+            stacks.pop(self.stack_id, None)
+        from dataclasses import replace as _replace
+        return _replace(project, color_stacks=stacks,
+                        timeline_grade_stacks=dict(self._before_mapping))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetTimelineGradeStackCommand",
+            "label": self.label,
+            "timeline_id": self.timeline_id,
+            "stack_id": self.stack_id,
+        }
+
+
+@dataclass(frozen=True)
 class SetColorGraphLockCommand:
     """栈锁元信息 command（B05.4）：锁定/解锁，可 undo，不改像素。"""
 

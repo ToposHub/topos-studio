@@ -345,16 +345,25 @@ class TestGroupScopeOwner:
         h.host._on_scope_menu("group_pre_clip")
         assert h.host.bridge._stack_id() == stack_id
 
-    def test_timeline_scope_records_owner_and_unbinds(self, qapp):
+    def test_timeline_scope_binds_registered_or_readonly(self, qapp):
         h, clip_stack, _p, _po, _g = self._harness_with_group(qapp)
         h.host.on_clip_stack_loaded(clip_stack)
+        # N07：timeline scope 懒建中性栈（真实 owner 栈模型）——绑定后
+        # 编辑落 timeline 栈；切回 clip 重绑不串写
         h.host._on_scope_menu("timeline")
         assert h.host._coordinator.scope_owner_id == "tl-1"
-        # timeline 无 grade 栈模型（E27）：解绑使编辑显式拒绝（fail-
-        # visible，不误写 clip/组栈）
-        assert h.host.bridge._stack_id() == ""
+        tl_stack_id = h.host._bound_stack_id
+        assert tl_stack_id
+        project = h.holder["project"]
+        assert project.timeline_grade_stack_id("tl-1") == tl_stack_id
+        assert project.color_stacks[tl_stack_id].scope == "timeline"
+        assert h.host.bridge._stack_id() == tl_stack_id
+        # 幂等：再次切换复用同栈
         h.host._on_scope_menu("clip")
         assert h.host.bridge._stack_id() == clip_stack
+        h.host._on_scope_menu("timeline")
+        assert h.host._bound_stack_id == tl_stack_id
+        # 无 timeline id 上下文 → 保持只读解绑（fail-visible）
 
 
 # ═══ 活动层对齐（§6.5 source_layer_id 唯一许可路径）══════════════════════

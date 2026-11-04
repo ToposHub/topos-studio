@@ -60,6 +60,9 @@ def resolve_color_chain(
     Returns:
         (pre_group_stack, trim_stack, post_group_stack)；无组/无微调时
         对应段为 None。组按 (timeline_id, clip_id) 成员唯一归属查找。
+
+    N07：timeline 段经 :func:`resolve_timeline_stack` 单独获取（返回
+    四元组之一由调用方按需取用——本函数签名保持三段兼容）。
     """
     clip = clip if clip is not None else None
     trim_id = getattr(clip, "color_trim_stack_id", None) if clip else None
@@ -79,6 +82,19 @@ def resolve_color_chain(
             if group.post_group_stack_id:
                 post_stack = stacks.get(group.post_group_stack_id)
     return pre_stack, trim_stack, post_stack
+
+
+def resolve_timeline_stack(project: Any, timeline_id: str) -> Any:
+    """N07：timeline 调色栈（无登记返回 None——链退化为 4 段）。"""
+    if project is None or not timeline_id:
+        return None
+    stack_id = getattr(project, "timeline_grade_stack_id", None)
+    if not callable(stack_id):
+        return None
+    sid = stack_id(str(timeline_id))
+    if not sid:
+        return None
+    return (getattr(project, "color_stacks", {}) or {}).get(sid)
 
 
 def chain_extra_params(
@@ -101,8 +117,10 @@ def chain_extra_params(
     """
     extras: List[dict] = []
     pre, trim, post = resolve_color_chain(project, timeline_id, clip)
+    timeline_stack = resolve_timeline_stack(project, timeline_id)
     for segment, stack in (
-            ("pre", pre), ("trim", trim), ("post", post)):
+            ("pre", pre), ("trim", trim), ("post", post),
+            ("timeline", timeline_stack)):
         if stack is None:
             continue
         entry = dict(getattr(stack, "grading_params", {}) or {})
@@ -145,9 +163,31 @@ def chain_for_stack(project: Any, stack_id: str) -> List[dict]:
         return []
     try:
         from src.features.edit.core.color_versions import _iter_clips
+        matches: list = []
         for timeline_id, clip in _iter_clips(project):
             if str(getattr(clip, "color_stack_id", "") or "") == str(stack_id):
-                return chain_extra_params(project, timeline_id, clip)
+                matches.append((timeline_id, clip))
+        if not matches:
+            return []
+        # N07-b：共享主栈但分属不同组/不同 timeline → 链归属歧义——
+        # fail-visible 告警并按首个 clip 解析（此前静默取首个；消费方
+        # 只有一个 Composite 上下文时告警即修复点）
+        if len(matches) > 1:
+            from src.features.edit.core.color_group import group_for_clip
+            keys = set()
+            for timeline_id, clip in matches:
+                group = group_for_clip(project, timeline_id,
+                                       getattr(clip, "clip_id", ""))
+                keys.add((timeline_id,
+                          group.group_id if group is not None else None))
+            if len(keys) > 1:
+                logger.warning(
+                    "chain_for_stack(%s): 主栈被 %d 个 clip 引用且组/"
+                    "timeline 归属不一致 %s——Composite 链段按首个 clip "
+                    "解析（结果随消费顺序歧义；建议拆分共享栈）",
+                    stack_id, len(matches), sorted(keys))
+        timeline_id, clip = matches[0]
+        return chain_extra_params(project, timeline_id, clip)
     except Exception:  # noqa: BLE001 — 解析失败按无链段（消费方显式 debug）
         logger.exception("chain_for_stack resolution failed for %s", stack_id)
     return []
