@@ -1,0 +1,369 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "n09_stress_session",
+  "minutes": 30.0,
+  "behavior_seconds": 45.0,
+  "platform": "native",
+  "seed": 20261104,
+  "status": "passed",
+  "error": "",
+  "hard_gate_widget_failures": {
+    "texture_not_shared": {},
+    "fbo_incomplete": {},
+    "blit_failed": {}
+  },
+  "budgets": {
+    "playback_clock_p95_ms": 60.0,
+    "render_freshness_fps_min": 0.5,
+    "param_command_p95_ms": 120.0,
+    "seek_to_frame_p95_ms": 400.0,
+    "rss_growth_mb_per_10min": 250.0
+  },
+  "budgets_hit": {
+    "playback_clock_p95_ms": true,
+    "render_freshness_fps_min": true,
+    "param_command_p95_ms": true,
+    "seek_to_frame_p95_ms": true,
+    "rss_growth_mb_per_10min": true
+  },
+  "metrics": {
+    "playback_interframe_ms_report_only": {
+      "count": 580,
+      "p50": 101.29,
+      "p95": 214.82,
+      "p99": 277.69,
+      "max": 1999.96
+    },
+    "render_freshness_fps": 1.288,
+    "steady_playback_window_seconds": 450.4,
+    "steady_playback_render_frames": 580,
+    "playback_clock_ms": {
+      "count": 245,
+      "p50": 39.92,
+      "p95": 42.54,
+      "p99": 65.84,
+      "max": 72.99
+    },
+    "param_command_ms": {
+      "count": 1509,
+      "p50": 3.4,
+      "p95": 6.0,
+      "p99": 32.78,
+      "max": 78.13
+    },
+    "seek_ms": {
+      "count": 317,
+      "p50": 0.05,
+      "p95": 0.17,
+      "p99": 0.27,
+      "max": 0.52
+    },
+    "rss_mb": {
+      "first": 736.9,
+      "peak": 2069.9,
+      "growth_mb_per_10min": 167.9,
+      "per_behavior": {
+        "param": {
+          "windows": 6,
+          "mean_slope_mb_per_10min": 6.7,
+          "max_slope_mb_per_10min": 14.8
+        },
+        "scope": {
+          "windows": 6,
+          "mean_slope_mb_per_10min": 45.8,
+          "max_slope_mb_per_10min": 89.2
+        },
+        "page": {
+          "windows": 6,
+          "mean_slope_mb_per_10min": 211.4,
+          "max_slope_mb_per_10min": 488.3
+        },
+        "float": {
+          "windows": 5,
+          "mean_slope_mb_per_10min": 3.2,
+          "max_slope_mb_per_10min": 109.9
+        },
+        "playback": {
+          "windows": 10,
+          "mean_slope_mb_per_10min": 375.8,
+          "max_slope_mb_per_10min": 1079.7
+        },
+        "seek": {
+          "windows": 5,
+          "mean_slope_mb_per_10min": 10.1,
+          "max_slope_mb_per_10min": 35.9
+        }
+      }
+    },
+    "counts": {
+      "frames": 2636,
+      "playback_clock_ticks": 249,
+      "is_playing_at_end": false,
+      "param_drags": 1509,
+      "seeks": 317,
+      "scope_mode_switches": 2699,
+      "page_switches": 465,
+      "float_toggles": 503
+    }
+  },
+  "scope_diagnostics_events": {
+    "submit/curves_dedup_skip": {
+      "count": 1,
+      "last": {
+        "source_revision": 0
+      }
+    },
+    "queue/coalesced_replaced": {
+      "count": 3012,
+      "last": {
+        "revision": 3057,
+        "detail": "latest-wins 替换旧 demand"
+      }
+    },
+    "execute/no_front_texture": {
+      "count": 9,
+      "last": {
+        "mode": "waveform",
+        "revision": 2
+      }
+    },
+    "panel/stale_return": {
+      "count": 763,
+      "last": {
+        "revision": 3057,
+        "source_revision": 2634
+      }
+    },
+    "submit/rate_limited": {
+      "count": 319,
+      "last": {
+        "detail": "interval=0.050s"
+      }
+    },
+    "panel/not_visible_on_return": {
+      "count": 541,
+      "last": {
+        "revision": 2155
+      }
+    },
+    "widget/mutex_busy": {
+      "count": 146,
+      "last": {
+        "tex_id": 36
+      }
+    },
+    "execute/stale_revision": {
+      "count": 1,
+      "last": {
+        "revision": 1060,
+        "demand_revision": 1061
+      }
+    }
+  },
+  "render_stats_keys": [],
+  "behavior_windows": [
+    [
+      3.5,
+      48.6,
+      "playback"
+    ],
+    [
+      48.6,
+      93.6,
+      "seek"
+    ],
+    [
+      93.6,
+      138.7,
+      "param"
+    ],
+    [
+      138.7,
+      183.8,
+      "scope"
+    ],
+    [
+      183.8,
+      229.0,
+      "page"
+    ],
+    [
+      229.0,
+      274.0,
+      "float"
+    ],
+    [
+      274.0,
+      319.1,
+      "playback"
+    ],
+    [
+      319.1,
+      364.1,
+      "playback"
+    ],
+    [
+      364.1,
+      409.1,
+      "seek"
+    ],
+    [
+      409.1,
+      454.2,
+      "param"
+    ],
+    [
+      454.2,
+      499.3,
+      "scope"
+    ],
+    [
+      499.3,
+      544.5,
+      "page"
+    ],
+    [
+      544.5,
+      589.6,
+      "float"
+    ],
+    [
+      589.6,
+      634.6,
+      "playback"
+    ],
+    [
+      634.6,
+      679.7,
+      "playback"
+    ],
+    [
+      679.7,
+      724.7,
+      "seek"
+    ],
+    [
+      724.7,
+      769.8,
+      "param"
+    ],
+    [
+      769.8,
+      814.8,
+      "scope"
+    ],
+    [
+      814.8,
+      859.9,
+      "page"
+    ],
+    [
+      859.9,
+      905.0,
+      "float"
+    ],
+    [
+      905.0,
+      950.0,
+      "playback"
+    ],
+    [
+      950.0,
+      995.0,
+      "playback"
+    ],
+    [
+      995.0,
+      1040.1,
+      "seek"
+    ],
+    [
+      1040.1,
+      1085.1,
+      "param"
+    ],
+    [
+      1085.1,
+      1130.2,
+      "scope"
+    ],
+    [
+      1130.2,
+      1175.7,
+      "page"
+    ],
+    [
+      1175.7,
+      1220.7,
+      "float"
+    ],
+    [
+      1220.7,
+      1265.7,
+      "playback"
+    ],
+    [
+      1265.7,
+      1310.7,
+      "playback"
+    ],
+    [
+      1310.7,
+      1355.7,
+      "seek"
+    ],
+    [
+      1355.7,
+      1400.8,
+      "param"
+    ],
+    [
+      1400.8,
+      1445.9,
+      "scope"
+    ],
+    [
+      1445.9,
+      1491.3,
+      "page"
+    ],
+    [
+      1491.3,
+      1536.5,
+      "float"
+    ],
+    [
+      1536.5,
+      1581.6,
+      "playback"
+    ],
+    [
+      1581.6,
+      1626.6,
+      "playback"
+    ],
+    [
+      1626.6,
+      1671.6,
+      "seek"
+    ],
+    [
+      1671.6,
+      1716.6,
+      "param"
+    ],
+    [
+      1716.6,
+      1761.6,
+      "scope"
+    ],
+    [
+      1761.6,
+      1800.2,
+      "page"
+    ]
+  ],
+  "errors": [],
+  "elapsed_seconds": 1800.2
+}
