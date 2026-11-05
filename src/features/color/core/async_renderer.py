@@ -1999,6 +1999,11 @@ class AsyncRenderer(QThread):
             return self._generate_matte(
                 layer, input_tex or raw_view_tex, w, h, visible_rect)
 
+        # N02-B 切片 3b：图执行期间 matte 管线 fail-closed——工具 shader
+        # 缺失不再降级为全白/跳过（外层 except 按图路径语义保留上一帧
+        # 并记录诊断）；legacy 循环不受影响。
+        self.__dict__['_graph_matte_strict'] = True
+        # cache_context/严格位的宿主属性均经 __dict__（裸 __new__ 兼容）
         try:
             executor = self._ensure_graph_executor()
             plan = compile_graph(snapshot, size=(w, h),
@@ -2029,7 +2034,16 @@ class AsyncRenderer(QThread):
                 cache_context=(
                     snapshot.source_content_revision,
                     snapshot.color_context_cache_key(),
-                    str(params.get('color_output_target') or 'front')),
+                    str(params.get('color_output_target') or 'front'),
+                    # N02-B 切片 3：mask/bitmap 内容代际进节点缓存键。
+                    # bitmap 像素不在图数据里（cone_key 只见 legacy 形状
+                    # 参数），引擎侧 _mask_epoch 是唯一内容身份；不并进
+                    # 则 bitmap 变更后 N06 命中陈旧输出（按 layer 聚合的
+                    # 粗粒度，正确优先；bitmap 完整资源化登记 v2）。
+                    # __dict__ 直取：裸 __new__ 宿主（测试）无该属性
+                    # （N10 帧随参同款防御）。
+                    tuple(sorted(
+                        (self.__dict__.get('_mask_epoch') or {}).items()))),
             )
         except Exception as exc:  # noqa: BLE001 —— 编译/执行异常 fail-closed
             scope_diagnostics.record(
@@ -2038,6 +2052,8 @@ class AsyncRenderer(QThread):
                 detail="{}: {}".format(type(exc).__name__, exc)[:160])
             logger.warning("graph frame execution failed: %r", exc)
             return None, False
+        finally:
+            self.__dict__['_graph_matte_strict'] = False
         if not result.published:
             scope_diagnostics.record(
                 "execute", "graph_{}".format(
@@ -3921,6 +3937,12 @@ class AsyncRenderer(QThread):
         if qp.get('enabled'):
             prog_keyer = self._get_utility_shader('keyer')
             if prog_keyer is None:
+                # N02-B 切片 3b：图执行路径 fail-closed——keyer 缺失时
+                # 全白 matte 会让"已声明 key 语义"的节点静默丢限定器
+                # （AUD-0206 的 legacy 循环降级不适用于图路径）。
+                if self.__dict__.get('_graph_matte_strict'):
+                    raise RuntimeError(
+                        "matte_capability_missing: keyer shader unavailable")
                 # AUD-0206: keyer 缺失 → 降级为"qualifier 关闭"（全白 matte）
                 self.ctx.clear(1.0, 1.0, 1.0, 1.0)
             else:
@@ -4021,6 +4043,12 @@ class AsyncRenderer(QThread):
         if qp.get('enabled'):
             prog_keyer = self._get_utility_shader('keyer')
             if prog_keyer is None:
+                # N02-B 切片 3b：图执行路径 fail-closed——keyer 缺失时
+                # 全白 matte 会让"已声明 key 语义"的节点静默丢限定器
+                # （AUD-0206 的 legacy 循环降级不适用于图路径）。
+                if self.__dict__.get('_graph_matte_strict'):
+                    raise RuntimeError(
+                        "matte_capability_missing: keyer shader unavailable")
                 # AUD-0206: keyer 缺失 → 降级为"qualifier 关闭"（全白 matte）
                 self.ctx.clear(1.0, 1.0, 1.0, 1.0)
             else:
@@ -4103,6 +4131,10 @@ class AsyncRenderer(QThread):
         """
         prog_morph = self._get_utility_shader('morphology')
         if prog_morph is None:
+            # N02-B 切片 3b：图路径 fail-closed（同 keyer 分支）
+            if self.__dict__.get('_graph_matte_strict'):
+                raise RuntimeError(
+                    'matte_capability_missing: morphology shader unavailable')
             # AUD-0206: 形态学 shader 缺失 → 跳过该 pass，原样返回输入
             # （不释放 src_tex，所有权随返回值交给调用方）
             return src_tex
@@ -4197,6 +4229,10 @@ class AsyncRenderer(QThread):
         if blur_radius > 0.01:
             prog_blur = self._get_utility_shader('blur')
             if prog_blur is None:
+                # N02-B 切片 3b：图路径 fail-closed（同 keyer 分支）
+                if self.__dict__.get('_graph_matte_strict'):
+                    raise RuntimeError(
+                        'matte_capability_missing: blur-post shader unavailable')
                 # AUD-0206: blur shader 缺失 → 跳过模糊 pass
                 logger.debug("Skip matte blur: blur shader unavailable")
             else:
@@ -4258,6 +4294,10 @@ class AsyncRenderer(QThread):
         """
         prog_blur = self._get_utility_shader('blur')
         if prog_blur is None:
+            # N02-B 切片 3b：图路径 fail-closed（同 keyer 分支）
+            if self.__dict__.get('_graph_matte_strict'):
+                raise RuntimeError(
+                    'matte_capability_missing: blur-sep shader unavailable')
             # AUD-0206: blur shader 缺失 → 跳过该 pass，原样返回输入
             return src_tex
         tex_h = self.fb_manager.get_temp_texture(w, h, components=1, dtype='f2')
