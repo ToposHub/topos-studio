@@ -95,11 +95,13 @@ def _cpu_matte_provider(cache: dict):
         from src.features.color.core.qualifier_cpu import (
             compute_qualifier_matte,
         )
-        matte = compute_qualifier_matte(
-            _GRADIENT, layer.get("qualifier_params") or {})
+        qualifier = layer.get("qualifier_params") or {}
+        matte = compute_qualifier_matte(_GRADIENT, qualifier)
         if matte is None:
             return None
-        key = id(layer)
+        # The parameter provider builds a fresh short-lived dict per call;
+        # CPython can reuse its id for a different node in the same graph.
+        key = tuple(sorted(qualifier.items()))
         tex = cache.get(key)
         return tex if tex is not None else _upload(matte, cache, key)
 

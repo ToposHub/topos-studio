@@ -30,6 +30,32 @@ def test_serial_insert_before_and_undo_is_a_single_gesture() -> None:
     assert second in state.graph.nodes
 
 
+@pytest.mark.parametrize("combo,kind,point_count", [
+    ("cpw", "circle", None),
+    ("lpw", "rect", None),
+    ("ppw", "curve", 4),
+    ("pcw", "curve", 0),
+])
+def test_window_combo_draft_matches_resolve_and_undoes_once(
+        combo: str, kind: str, point_count: int | None) -> None:
+    state = NodeEditorState()
+    before = set(state.graph.nodes)
+    node_id = state.add_window_combo(combo)
+    assert set(state.graph.nodes) - before == {node_id}
+    node = state.graph.nodes[node_id]
+    assert node.label == ""
+    shape = node.backend_payload["mask_shapes"][0]
+    assert shape["type"] == kind
+    if point_count is not None:
+        assert len(shape["points"]) == point_count
+    if combo == "lpw":
+        assert shape["edge_softness"] == [1.25] * 4
+    assert state.undo()
+    assert set(state.graph.nodes) == before
+    assert state.redo()
+    assert node_id in state.graph.nodes
+
+
 def test_parallel_branches_share_input_and_reuse_mixer() -> None:
     state = NodeEditorState()
     first = state.graph.active_id

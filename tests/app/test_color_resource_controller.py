@@ -13,6 +13,9 @@ import pytest
 
 pytest.importorskip("PyQt6")
 
+from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtGui import QColor, QImage, QPixmap
+
 from src.app.controllers.color_resource_controller import ColorResourceController
 from src.features.color.core.color_graph_service import ColorGraphService
 from src.features.edit.core.commands import ProjectCommandStack
@@ -31,6 +34,21 @@ SCHEMA = [
 ]
 
 LUT_URIS = {"topos-res://lut_good": True}
+
+
+class _Catalog(QObject):
+    catalog_changed = pyqtSignal()
+
+    def __init__(self, entries: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self._entries = entries
+
+    def entries(self) -> list[dict[str, Any]]:
+        return list(self._entries)
+
+
+class _SourceBridge(QObject):
+    source_thumbnail_changed = pyqtSignal(object)
 
 
 def _schema(resource_id: str):
@@ -72,7 +90,8 @@ class _ResourceHarness:
         self.ui.color_node_panel = self.graph.panel
         self.ui.color_effects_browser = ColorEffectsBrowser()
         self.ui.color_lut_browser = ColorLutBrowser()
-        self.catalog = SimpleNamespace(entries=lambda: [
+        self.ui.color_node_source_preview = _SourceBridge()
+        self.catalog = _Catalog([
             {"id": "grain", "kind": "effect", "name": "Grain",
              "category": "Texture", "available": True, "parameters": SCHEMA},
             {"id": "missing_fx", "kind": "effect", "name": "Missing FX",
@@ -597,3 +616,78 @@ def test_global_history_gating_helper(rig) -> None:
     rig.controller.activate_effect(
         {"id": "grain", "kind": "effect", "available": True})
     assert gating() is True
+
+
+def test_production_catalog_is_hydrated_and_reacts_to_change(rig, qapp) -> None:
+    assert {entry['id'] for entry in rig.ui.color_effects_browser._resources} == \
+        {'grain', 'missing_fx'}
+    rig.catalog._entries = [
+        {'id': 'replacement', 'kind': 'effect', 'name': 'Replacement',
+         'category': 'Test', 'available': True},
+    ]
+    rig.catalog.catalog_changed.emit()
+    qapp.processEvents()
+    assert [entry['id'] for entry in rig.ui.color_effects_browser._resources] == \
+        ['replacement']
+
+
+def test_lut_catalog_failure_is_visible(rig, monkeypatch) -> None:
+    class BrokenSession:
+        def catalog(self) -> list[dict[str, Any]]:
+            raise RuntimeError('catalog unavailable')
+
+    monkeypatch.setattr(rig.controller, '_lut_session', lambda: BrokenSession())
+    rig.controller.refresh_catalog()
+    assert rig.rejections[-1]['code'] == 'lut_catalog_failed'
+    assert 'catalog unavailable' in rig.ui.color_lut_browser.more_button.toolTip()
+
+
+def test_source_ready_requests_real_lut_tile_and_clears_on_switch(
+        rig, qtbot: Any, tmp_path: Any) -> None:
+    cube = tmp_path / 'identity.cube'
+    cube.write_text('LUT_3D_SIZE 2\n' + ''.join(
+        f'{r} {g} {b}\n' for b in (0, 1) for g in (0, 1) for r in (0, 1)))
+    rig.catalog._entries = [
+        {'id': 'local-lut', 'kind': 'lut', 'name': 'Local', 'category': 'LUT',
+         'available': True, 'resource_uri': str(cube)},
+    ]
+    rig.catalog.catalog_changed.emit()
+    pixmap = QPixmap(32, 18)
+    pixmap.fill(QColor('#a04020'))
+    rig.ui.color_node_source_preview.source_thumbnail_changed.emit(pixmap)
+    qtbot.waitUntil(
+        lambda: 'thumbnail' in rig.ui.color_lut_browser._entries['local-lut'],
+        timeout=5000)
+    source = rig.controller._lut_source_array
+    assert source.shape == (18, 32, 3) and not source.flags.writeable
+    assert rig.ui.color_lut_browser._entries['local-lut']['thumbnail'].width() == 32
+    service = rig.controller._thumbnails
+    old_generation = service.stats()['generation']
+    rig.ui.color_node_source_preview.source_thumbnail_changed.emit(None)
+    assert service.stats()['generation'] > old_generation
+    late = QImage(32, 18, QImage.Format.Format_RGB32)
+    late.fill(QColor('#ff0000'))
+    rig.controller._on_lut_thumbnail_ready('local-lut', late, old_generation)
+    assert 'thumbnail' not in rig.ui.color_lut_browser._entries['local-lut']
+    rig.controller.shutdown()
+
+
+def test_visible_lut_tiles_continue_after_pending_budget(
+        rig, qtbot: Any, tmp_path: Any) -> None:
+    cube = tmp_path / 'identity.cube'
+    cube.write_text('LUT_3D_SIZE 2\n' + ''.join(
+        f'{r} {g} {b}\n' for b in (0, 1) for g in (0, 1) for r in (0, 1)))
+    rig.catalog._entries = [
+        {'id': f'lut-{index}', 'kind': 'lut', 'name': f'LUT {index}',
+         'category': 'LUT', 'available': True, 'resource_uri': str(cube)}
+        for index in range(12)
+    ]
+    rig.catalog.catalog_changed.emit()
+    pixmap = QPixmap(32, 18)
+    pixmap.fill(QColor('#a04020'))
+    rig.ui.color_node_source_preview.source_thumbnail_changed.emit(pixmap)
+    qtbot.waitUntil(
+        lambda: all('thumbnail' in rig.ui.color_lut_browser._entries[f'lut-{i}']
+                    for i in range(12)), timeout=10000)
+    assert rig.controller._thumbnails.stats()['cached'] >= 1
+    rig.controller.shutdown()

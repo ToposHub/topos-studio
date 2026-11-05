@@ -336,24 +336,23 @@ class ColorGraphService:
 
     # ═══ N15：Resolve 窗口组合（CPW/LPW/PPW/PCW 一键 = Serial+Window）═══
 
-    #: 组合名 → (MaskShape type, 默认形状参数)。语义对照 Resolve 20：
-    #: CPW=Circular Power Window（圆）、LPW=Linear Power Window（线性
-    #: 渐变）、PPW=Polygon Power Window（多边形）、PCW=Power Curve
-    #: Window（平滑曲线）。API 不支持窗口脚本化创建——实机人工对照
-    #: 如实登记为待办（见 n15 README）。
+    #: Resolve 20.2.1 Color 页实机默认值：CPW 圆，LPW 矩形，PPW
+    #: 四角多边形，PCW 空曲线（等待用户落点）。曲线点必须使用
+    #: MaskShape 的 pos/c1/c2 字典格式，不能保存裸坐标列表。
     _WINDOW_COMBO_DEFAULTS = {
-        "cpw": {"type": "circle", "size": [0.25, 0.25], "feather": 0.0,
+        "cpw": {"type": "circle", "size": [0.25, 0.25], "feather": 4.13,
                 "name": "Circular Power Window"},
-        "lpw": {"type": "gradient", "size": [0.9, 0.9],
-                "grad_points": [[0.4, 0.3], [0.6, 0.7]],
+        "lpw": {"type": "rect", "size": [0.4, 0.4],
+                "edge_softness": [1.25, 1.25, 1.25, 1.25],
                 "name": "Linear Power Window"},
-        "ppw": {"type": "curve", "points": [[0.4, 0.4], [0.6, 0.4],
-                                            [0.6, 0.6], [0.4, 0.6]],
-                "name": "Polygon Power Window"},
-        "pcw": {"type": "curve",
-                "points": [[0.42, 0.30], [0.58, 0.30], [0.70, 0.42],
-                           [0.70, 0.58], [0.58, 0.70], [0.42, 0.70],
-                           [0.30, 0.58], [0.30, 0.42]],
+        "ppw": {"type": "curve", "size": [0.4, 0.4], "feather": 0.0,
+                "points": [
+                    {"pos": [x, y], "c1": [x, y], "c2": [x, y],
+                     "type": "corner"}
+                    for x, y in ((0.3, 0.3), (0.7, 0.3),
+                                 (0.7, 0.7), (0.3, 0.7))
+                ], "name": "Polygon"},
+        "pcw": {"type": "curve", "points": [], "feather": 0.0,
                 "name": "Power Curve Window"},
     }
 
@@ -367,7 +366,9 @@ class ColorGraphService:
           身份独立、可跟踪绑定）；
         - 默认中性（grading 空、opacity 1、形状居中占画面约 1/4）。
         """
-        shape = dict(self._WINDOW_COMBO_DEFAULTS.get(str(combo).lower()) or {})
+        from copy import deepcopy
+
+        shape = deepcopy(self._WINDOW_COMBO_DEFAULTS.get(str(combo).lower()) or {})
         if not shape:
             return self._fail(graph, "illegal_param_key",
                               f"未知窗口组合: {combo}（cpw/lpw/ppw/pcw）")
@@ -394,10 +395,15 @@ class ColorGraphService:
             window["points"] = shape["points"]
         if "grad_points" in shape:
             window["grad_points"] = shape["grad_points"]
+        if "edge_softness" in shape:
+            window["edge_softness"] = shape["edge_softness"]
         legacy = dict(node.legacy_payload or {})
+        # 串行图可投影为 engine.layers 时，活动层只允许按 layer id 对齐。
+        # 新 Corrector 没有迁移载荷；给它稳定身份，否则 Layer.from_dict
+        # 每次水合都会造新 UUID，Window/Tracker 仍指向上一个图层。
+        legacy["id"] = new_id
         legacy["mask_shapes"] = [window]
-        new_node = replace(node, legacy_payload=legacy,
-                           label=shape.get("name", combo))
+        new_node = replace(node, legacy_payload=legacy)
         nodes = tuple(new_node if n.node_id == new_id else n
                       for n in inserted.graph.nodes)
         candidate = replace(inserted.graph, nodes=nodes)

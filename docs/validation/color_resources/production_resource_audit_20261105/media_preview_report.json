@@ -1,0 +1,113 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "native_graph_workflow",
+  "per_node_rendering": "evaluated_node_thumbnails",
+  "asset_id": "7adbc3b7-fba1-4141-a9c5-5e9bcd3a0961",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 124
+  },
+  "clip_id": "bb41ea75-259b-4323-8219-c9be42cf9ea6",
+  "timeline_id": "0d5044b1-5cce-428e-ad80-6c8e915b2d4c",
+  "current_file_matches_source": true,
+  "current_page": "Color",
+  "thumbnail_size": [
+    512,
+    288
+  ],
+  "thumbnail_rgb_std": 66.625,
+  "corrector_thumbnails_present": 2,
+  "source_tooltip": "Source preview — waiting for evaluated node output.",
+  "production_resources": {
+    "status": "passed",
+    "effects_catalog_count": 50,
+    "lut_preview_mean_abs_diff": 0.0337,
+    "lut_preview_size": [
+      128,
+      72
+    ]
+  },
+  "workflow": {
+    "project_history": "passed",
+    "grade_commit": "passed",
+    "topos_save_reload": "passed",
+    "disconnect_reconnect": "passed",
+    "graph_render_enabled": true
+  },
+  "initial_node_thumbnails": {
+    "node_ids": [
+      "90d58934-e7cf-413c-bc5e-d19c6b1f8574",
+      "73887562-efbc-4216-b2c9-0945f711f747"
+    ],
+    "mean_abs_diff_vs_source": {
+      "graded_first": 78.515,
+      "passthrough_second": 78.516
+    }
+  },
+  "baseline_samples": {
+    "plugin_id": "Anamorphic_Streak",
+    "plugin_instance_order": [
+      "1454b011-f6de-448d-a995-57391a68b6ce"
+    ],
+    "unknown_param": "__unknown_future_param",
+    "lut_applied": true,
+    "lut_path": "/var/folders/j2/m4dcthbx3h5086ywnnplqwmc0000gn/T/topos-node-media-46k84elt/Baseline Identity.cube"
+  },
+  "baseline": {
+    "compound_node_id": "a7bd807c-fecf-4012-8b35-a3f67751deab",
+    "stack_ids": [
+      "0a172b53-2bde-45a4-8ffb-10896e01466f",
+      "35696c9d-ea8d-427f-b760-3143e2bc8c14"
+    ],
+    "clips": 2,
+    "correctors": 2,
+    "project_saved": "baseline_project.topos"
+  },
+  "node_thumbnail_count": 3,
+  "compound_thumbnail_diff_vs_source": 78.516,
+  "scope_diagnostics": {
+    "enabled": true,
+    "events": {
+      "submit/curves_dedup_skip": {
+        "count": 1,
+        "last": {
+          "source_revision": 0
+        }
+      },
+      "queue/coalesced_replaced": {
+        "count": 10,
+        "last": {
+          "revision": 10,
+          "detail": "latest-wins 替换旧 demand"
+        }
+      },
+      "execute/no_front_texture": {
+        "count": 6,
+        "last": {
+          "mode": "waveform",
+          "revision": 2
+        }
+      },
+      "panel/stale_return": {
+        "count": 1,
+        "last": {
+          "revision": 2,
+          "source_revision": 1
+        }
+      },
+      "submit/rate_limited": {
+        "count": 19,
+        "last": {
+          "detail": "interval=0.050s"
+        }
+      }
+    },
+    "last_activity": null
+  },
+  "status": "passed",
+  "error": "",
+  "elapsed_seconds": 18.85
+}

@@ -519,6 +519,7 @@ class ColorNodeView(QGraphicsView):
             self._duplicate_drag = False
 
     def _cancel_wire(self) -> None:
+        had_wire = self._wire is not None
         if self._rewire is not None:
             for link in self.links:
                 if link.connection == self._rewire:
@@ -529,7 +530,8 @@ class ColorNodeView(QGraphicsView):
         self._wire = None
         self._wire_origin = None
         self._rewire = None
-        self.viewport().setCursor(Qt.CursorShape.OpenHandCursor if self._hand_mode else Qt.CursorShape.ArrowCursor)
+        if had_wire:
+            self.viewport().setCursor(Qt.CursorShape.OpenHandCursor if self._hand_mode else Qt.CursorShape.ArrowCursor)
 
     def _open_node(self, node_id: str) -> None:
         node = self.state.graph.nodes.get(node_id)

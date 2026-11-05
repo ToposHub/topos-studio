@@ -388,3 +388,21 @@ class TestActiveLayerAlignment:
         h, stack_id, _graph = harness
         h.host.on_clip_stack_loaded(stack_id)
         assert not h.host.align_engine_active_layer("no-such-node")
+
+    def test_window_combo_new_node_aligns_and_notifies_after_commit(self, harness):
+        h, stack_id, graph = harness
+        h.host.on_clip_stack_loaded(stack_id)
+        events = []
+        h.host.panel_host.on_window_combo(
+            lambda combo, node_id: events.append((combo, node_id)))
+        view = h.panel.view
+        view.apply_edit("add_window_combo",
+                        lambda: view.state.add_window_combo("pcw"),
+                        payload={"combo": "pcw"})
+        assert len(events) == 1
+        assert events[0][0] == "pcw"
+        new_id = events[0][1]
+        assert new_id not in {n.node_id for n in graph.nodes}
+        assert h.host.align_engine_active_layer(new_id)
+        assert h.engine.layers[h.engine.active_layer_index].id == new_id
+        assert len(h.engine.layers[h.engine.active_layer_index].mask_shapes) == 1

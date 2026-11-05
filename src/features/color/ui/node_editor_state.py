@@ -367,7 +367,7 @@ class NodeEditorState:
         from src.features.color.core.color_graph_service import (
             ColorGraphService,
         )
-        defaults = dict(ColorGraphService._WINDOW_COMBO_DEFAULTS.get(
+        defaults = copy.deepcopy(ColorGraphService._WINDOW_COMBO_DEFAULTS.get(
             str(combo).lower()) or {})
         if not defaults:
             return ""
@@ -384,10 +384,12 @@ class NodeEditorState:
             window["points"] = defaults["points"]
         if "grad_points" in defaults:
             window["grad_points"] = defaults["grad_points"]
+        if "edge_softness" in defaults:
+            window["edge_softness"] = defaults["edge_softness"]
         payload = dict(node.backend_payload or {})
+        payload["id"] = node.id
         payload["mask_shapes"] = [window]
         node.backend_payload = payload
-        node.label = defaults.get("name", combo)
         self._commit(graph)
         graph.active_id = node.id
         return node.id

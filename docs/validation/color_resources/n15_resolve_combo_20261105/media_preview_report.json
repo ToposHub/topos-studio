@@ -1,0 +1,53 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "native_window_combo_workflow",
+  "per_node_rendering": "not_checked",
+  "asset_id": "f0251fe9-a14b-4172-be71-3173059f7465",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 124
+  },
+  "clip_id": "037f097f-58d7-4d13-acbf-3771d86a17c9",
+  "timeline_id": "bf50828d-f466-41a2-831a-09c012d2a804",
+  "current_file_matches_source": true,
+  "current_page": "Color",
+  "thumbnail_size": [
+    512,
+    288
+  ],
+  "thumbnail_rgb_std": 66.625,
+  "corrector_thumbnails_present": 2,
+  "source_tooltip": "Source preview — waiting for evaluated node output.",
+  "window_combos": {
+    "cpw": {
+      "type": "circle",
+      "node_id": "1267243d-9ea5-4943-b7b5-6b2fbb8a4198",
+      "window_id": "75312add-fe07-4ee0-ac23-b284f292c25c",
+      "undo_redo": "passed"
+    },
+    "lpw": {
+      "type": "rect",
+      "node_id": "c9523de7-53a8-4aea-ae4b-de21aa56ebec",
+      "window_id": "d52196be-a699-43ac-9679-d57f60444d31",
+      "undo_redo": "passed"
+    },
+    "ppw": {
+      "type": "curve",
+      "node_id": "c53e021b-06ca-46b5-8c67-d14ee48393e1",
+      "window_id": "bc25d63e-b067-4e55-a357-7c609016870b",
+      "undo_redo": "passed"
+    },
+    "pcw": {
+      "type": "curve",
+      "node_id": "e6a0b105-eb08-4724-a542-4ccd4c9014c7",
+      "window_id": "dad0b78d-51f1-4bf9-acb1-b8ba90748c7a",
+      "undo_redo": "passed"
+    }
+  },
+  "status": "passed",
+  "error": "",
+  "elapsed_seconds": 9.74
+}

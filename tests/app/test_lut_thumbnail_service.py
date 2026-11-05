@@ -49,10 +49,10 @@ class _Recorder:
         self.provider_calls += 1
         return self.source
 
-    def on_ready(self, entry_id: str, image: QImage) -> None:
+    def on_ready(self, entry_id: str, image: QImage, _generation: int) -> None:
         self.ready.append((entry_id, image))
 
-    def on_failed(self, entry_id: str, code: str) -> None:
+    def on_failed(self, entry_id: str, code: str, _generation: int) -> None:
         self.failed.append((entry_id, code))
 
 
@@ -196,4 +196,67 @@ def test_delivered_image_matches_swap_lut(qtbot: Any, tmp_path: Path) -> None:
         color = image.pixelColor(8, 4)
         assert color.red() < color.blue()
     finally:
+        service.shutdown()
+
+
+def test_same_identity_does_not_cancel_inflight_request(qtbot: Any, tmp_path: Path) -> None:
+    import threading
+    lut = tmp_path / 'identity.cube'
+    lut.write_text(_identity_cube())
+    entered = threading.Event()
+    release = threading.Event()
+    recorder = _Recorder()
+
+    def slow_provider() -> np.ndarray:
+        entered.set()
+        assert release.wait(2.0)
+        return recorder.source
+
+    service = LutThumbnailService(source_provider=slow_provider)
+    service.thumbnail_ready.connect(recorder.on_ready)
+    try:
+        service.set_source_identity('session', 'stack', 0, 1)
+        service.request('lut', str(lut))
+        assert entered.wait(2.0)
+        before = service.stats()['generation']
+        service.set_source_identity('session', 'stack', 0, 1)
+        assert service.stats()['generation'] == before
+        release.set()
+        assert _wait(recorder, count=1)
+        assert recorder.ready[0][0] == 'lut'
+    finally:
+        release.set()
+        service.shutdown()
+
+
+def test_generation_change_during_evaluation_drops_old_image(qtbot: Any,
+                                                               tmp_path: Path) -> None:
+    import threading
+    lut = tmp_path / 'identity.cube'
+    lut.write_text(_identity_cube())
+    entered = threading.Event()
+    release = threading.Event()
+    recorder = _Recorder()
+
+    def slow_provider() -> np.ndarray:
+        entered.set()
+        assert release.wait(2.0)
+        return recorder.source
+
+    service = LutThumbnailService(source_provider=slow_provider)
+    service.thumbnail_ready.connect(recorder.on_ready)
+    service.thumbnail_failed.connect(recorder.on_failed)
+    try:
+        service.set_source_identity('session', 'stack', 0, 1, 1)
+        service.request('old', str(lut))
+        assert entered.wait(2.0)
+        service.set_source_identity('session', 'stack', 0, 1, 2)
+        release.set()
+        assert not _wait(recorder, count=1, timeout=0.3)
+        assert recorder.ready == [] and recorder.failed == []
+        service.request('new', str(lut))
+        assert _wait(recorder, count=1)
+        assert recorder.ready[0][0] == 'new'
+    finally:
+        release.set()
         service.shutdown()

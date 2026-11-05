@@ -1583,6 +1583,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 color_context_provider=_color_context,
             )
             self.color_graph_host.panel_host.on_handle(self._on_color_graph_handle)
+            self.color_graph_host.panel_host.on_window_combo(
+                self._on_color_window_combo)
             self.color_graph_host.panel_host.on_read_only(
                 lambda _node_id, _node_type: self._set_color_graph_panels_enabled(False))
             self.color_graph_host.attach_panel(self.color_node_panel)
@@ -1613,12 +1615,43 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         payload = graph_host.panel_layer_payload(handle.node_id) or {}
         layer = Layer.from_dict(payload)
         layer.grading_params.update(handle.grade_params())
-        graph_host.align_engine_active_layer(handle.node_id)
+        aligned = graph_host.align_engine_active_layer(handle.node_id)
         self._set_color_stack_hydration_guard(True)
         try:
             self.update_from_layer(layer)
+            if aligned:
+                engine = getattr(self, "engine", None)
+                active_layer = (engine.get_active_layer()
+                                if engine is not None else None)
+                if active_layer is not None:
+                    self.mask_panel.update_shapes_list(active_layer.mask_shapes)
+                    self.canvas.update_mask_overlay(active_layer)
         finally:
             self._set_color_stack_hydration_guard(False)
+
+    def _on_color_window_combo(self, combo: str, node_id: str) -> None:
+        """成功的组合命令选中 Window，曲线组合进入绘制状态。"""
+        graph_host = getattr(self, "color_graph_host", None)
+        engine = getattr(self, "engine", None)
+        if (graph_host is None or engine is None
+                or not graph_host.align_engine_active_layer(node_id)):
+            return
+        layer = engine.get_active_layer()
+        if layer is None or not layer.mask_shapes:
+            return
+        shape = layer.mask_shapes[-1]
+        if combo not in {"ppw", "pcw"}:
+            self.canvas.set_drawing_mode(False)
+        self.mask_panel.update_shapes_list(layer.mask_shapes)
+        self.canvas.update_mask_overlay(layer)
+        self.mask_panel.select_shape(shape.id)
+        self.canvas.set_active_shape(shape.id)
+        dock = getattr(self, "dock_masks", None)
+        if dock is not None:
+            dock.raise_()
+        if combo in {"ppw", "pcw"}:
+            self.canvas.set_mask_creation_mode(
+                "polygon" if combo == "ppw" else "curve")
 
     def _set_color_stack_hydration_guard(self, on: bool) -> None:
         """图宿主投影同步期间的面板回流抑制（与既有水合守卫同一标志）。"""
@@ -2394,6 +2427,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                     tracking_service.shutdown()
             except Exception:
                 logger.exception("MainWindow: tracking service shutdown failed")
+            try:
+                resource_controller = getattr(self, "color_resource_controller", None)
+                if resource_controller is not None:
+                    resource_controller.shutdown()
+            except Exception:
+                logger.exception("MainWindow: Color resource thumbnail shutdown failed")
             try:
                 benchmark_service = getattr(self, "_edit_benchmark_host_service", None)
                 if benchmark_service is not None:

@@ -1,0 +1,467 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 10485 items
+
+tests/color/test_ab_reference_wipe.py ..............                     [  0%]
+tests/color/test_ai_plugin_pixel_contract.py ...                         [  0%]
+tests/color/test_alpha_system.py ......................                  [  0%]
+tests/color/test_async_renderer_coverage.py ............................ [  0%]
+........................................................................ [  1%]
+...........................................................              [  1%]
+tests/color/test_async_renderer_lane_merge.py .......................... [  2%]
+.....................................                                    [  2%]
+tests/color/test_async_renderer_pass_count.py ................ss         [  2%]
+tests/color/test_auto_color.py .......................                   [  2%]
+tests/color/test_bake_prefix_semantics.py ......                         [  2%]
+tests/color/test_builtin_plugin_compile.py ............................. [  3%]
+.............                                                            [  3%]
+tests/color/test_cache_fix.py ..                                         [  3%]
+tests/color/test_cache_manager.py ....................                   [  3%]
+tests/color/test_canvas_clip_switch_preview.py ....                      [  3%]
+tests/color/test_cie_scope_widget.py ............                        [  3%]
+tests/color/test_clip_navigation.py OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+..OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.OpenCV: Couldn't read video stream from file "/x.mov"
+.                     [  3%]
+tests/color/test_clip_strip_presentation.py .........................    [  4%]
+tests/color/test_clip_version_ui.py ...............................      [  4%]
+tests/color/test_color_bake_execution.py .................               [  4%]
+tests/color/test_color_e2e_consistency_matrix.py ..............          [  4%]
+tests/color/test_color_engine_triple_golden.py .........                 [  4%]
+tests/color/test_color_graph_backend_capabilities.py ........            [  4%]
+tests/color/test_color_graph_baseline_fixtures.py ...........            [  4%]
+tests/color/test_color_graph_cancel_resources.py ........                [  5%]
+tests/color/test_color_graph_commands.py ................                [  5%]
+tests/color/test_color_graph_compiler.py ..................              [  5%]
+tests/color/test_color_graph_compound_shared.py .........                [  5%]
+tests/color/test_color_graph_cpu_parity.py ...........                   [  5%]
+tests/color/test_color_graph_gl_execution.py ...                         [  5%]
+tests/color/test_color_graph_key_bitmap_identity.py ...                  [  5%]
+tests/color/test_color_graph_key_channel.py ......                       [  5%]
+tests/color/test_color_graph_key_pipeline_decl.py .......                [  5%]
+tests/color/test_color_graph_key_postprocess.py .........                [  5%]
+tests/color/test_color_graph_keyframes.py .........                      [  5%]
+tests/color/test_color_graph_keys.py .........                           [  5%]
+tests/color/test_color_graph_live_ui.py ...............                  [  6%]
+tests/color/test_color_graph_migration.py .............................. [  6%]
+..                                                                       [  6%]
+tests/color/test_color_graph_mixers.py ..............                    [  6%]
+tests/color/test_color_graph_node_cache.py ...............               [  6%]
+tests/color/test_color_graph_panel_binding.py .........                  [  6%]
+tests/color/test_color_graph_persistence.py .............                [  6%]
+tests/color/test_color_graph_plan_cache.py .......                       [  6%]
+tests/color/test_color_graph_qualifier_tracks.py ........                [  7%]
+tests/color/test_color_graph_resource_execution.py .............         [  7%]
+tests/color/test_color_graph_schema.py ................................. [  7%]
+                                                                         [  7%]
+tests/color/test_color_graph_scope_lifecycle.py .......................  [  7%]
+tests/color/test_color_graph_scope_output.py ........................... [  7%]
+.....                                                                    [  8%]
+tests/color/test_color_graph_scripting_api.py ...........                [  8%]
+tests/color/test_color_graph_service.py ................................ [  8%]
+............                                                             [  8%]
+tests/color/test_color_graph_splitter.py .....                           [  8%]
+tests/color/test_color_graph_tool_domains.py .......                     [  8%]
+tests/color/test_color_graph_ui_contract.py ......................       [  8%]
+tests/color/test_color_graph_validation.py ................              [  9%]
+tests/color/test_color_mapping_panel.py ..                               [  9%]
+tests/color/test_color_monitor_status_bar.py ...............             [  9%]
+tests/color/test_color_node_color_space.py ......................        [  9%]
+tests/color/test_color_node_lut_spec.py .............                    [  9%]
+tests/color/test_color_node_menu_parity.py ..........                    [  9%]
+tests/color/test_color_session.py ...................................... [  9%]
+...                                                                      [ 10%]
+tests/color/test_color_space_descriptor.py .........................     [ 10%]
+tests/color/test_color_stack_hydrator.py ....................            [ 10%]
+tests/color/test_color_state_roundtrip.py ........                       [ 10%]
+tests/color/test_color_tools_lut_exporter.py .............               [ 10%]
+tests/color/test_color_tools_scripting_api.py ................ss         [ 10%]
+tests/color/test_color_transform_provider_parity.py ..........           [ 10%]
+tests/color/test_composition_uniform_manifest.py ...................     [ 11%]
+tests/color/test_corrector_operator_parity.py ............               [ 11%]
+tests/color/test_cp_review_color_tools_fixes.py ..................       [ 11%]
+tests/color/test_cpu_advanced_domains.py ......                          [ 11%]
+tests/color/test_cpu_lut3d_domain.py ......                              [ 11%]
+tests/color/test_crop_shortcut_scope.py ....                             [ 11%]
+tests/color/test_curve_feather_oracle.py ...                             [ 11%]
+tests/color/test_curves_histogram_gpu.py ...............                 [ 11%]
+tests/color/test_curves_panel_ui.py .........                            [ 11%]
+tests/color/test_curves_panel_wiring.py .............................    [ 12%]
+tests/color/test_curves_soft_clip_model.py ............................. [ 12%]
+..............                                                           [ 12%]
+tests/color/test_curves_widget_edit_amounts.py ..............            [ 12%]
+tests/color/test_delivery_matrix.py .................................... [ 12%]
+....                                                                     [ 12%]
+tests/color/test_dirty_propagation.py ......................             [ 13%]
+tests/color/test_ef07_aud.py ........................................... [ 13%]
+....                                                                     [ 13%]
+tests/color/test_effect_preview_quality.py ...........................   [ 13%]
+tests/color/test_export_denoise_bridge.py ...........                    [ 14%]
+tests/color/test_f46_hdr_zones.py ......                                 [ 14%]
+tests/color/test_f51_display_encode_contract.py ...............          [ 14%]
+tests/color/test_fix_aud02xx.py .............                            [ 14%]
+tests/color/test_fix_conventions_aud5.py ................                [ 14%]
+tests/color/test_fix_layer_qualifier_panels_aud.py ...............       [ 14%]
+tests/color/test_fix_shaders_tracking_aud.py ...............             [ 14%]
+tests/color/test_fix_w6g1_aud6.py ...................                    [ 14%]
+tests/color/test_fix_wd3g17_aud.py ..................................... [ 15%]
+.......                                                                  [ 15%]
+tests/color/test_fix_wd3g18_aud.py ..................................... [ 15%]
+.......                                                                  [ 15%]
+tests/color/test_fix_wd3g19_aud.py ..................................... [ 16%]
+.........                                                                [ 16%]
+tests/color/test_fix_wd3g20_aud.py ..................................... [ 16%]
+....................                                                     [ 16%]
+tests/color/test_fix_wd3g21_aud.py ..................................... [ 17%]
+..........                                                               [ 17%]
+tests/color/test_fix_wd3g22_aud.py ...........................           [ 17%]
+tests/color/test_fix_wd4g23_aud.py ..................................... [ 17%]
+..........................................                               [ 18%]
+tests/color/test_gpu_scope_multiview.py ....                             [ 18%]
+tests/color/test_gpu_scope_pipeline.py ................................. [ 18%]
+.........................................                                [ 18%]
+tests/color/test_gpu_scope_presenter_native.py .s.                       [ 18%]
+tests/color/test_gpu_scope_targets.py .....                              [ 19%]
+tests/color/test_grade_clipboard.py .........................            [ 19%]
+tests/color/test_grade_keyframes.py .................................... [ 19%]
+.......                                                                  [ 19%]
+tests/color/test_graph_lut_export.py ....                                [ 19%]
+tests/color/test_hdr_transfer.py .......................                 [ 19%]
+tests/color/test_history.py ................                             [ 20%]
+tests/color/test_hsl_curves_palette.py ...........                       [ 20%]
+tests/color/test_image_engine_coverage.py .............................. [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 21%]
+.............................................                            [ 22%]
+tests/color/test_image_engine_history.py ...........                     [ 22%]
+tests/color/test_image_engine_layers.py ................................ [ 22%]
+.                                                                        [ 22%]
+tests/color/test_image_engine_params.py .......................          [ 22%]
+tests/color/test_image_engine_render_data.py .                           [ 22%]
+tests/color/test_image_engine_state.py ................................. [ 23%]
+...............                                                          [ 23%]
+tests/color/test_image_engine_transforms.py ................             [ 23%]
+tests/color/test_layer.py .............................................. [ 23%]
+.......                                                                  [ 24%]
+tests/color/test_legacy_baseline_behaviors.py .................          [ 24%]
+tests/color/test_lut_loader.py ....................                      [ 24%]
+tests/color/test_lut_resource_closure.py .....                           [ 24%]
+tests/color/test_lut_resource_registry.py ....................           [ 24%]
+tests/color/test_m05_advanced_cpu.py ..........                          [ 24%]
+tests/color/test_m06_keyer_gpu_parity.py ....                            [ 24%]
+tests/color/test_m06_mask_shapes_cpu.py ..........                       [ 24%]
+tests/color/test_m06_qualifier_cpu.py ........                           [ 24%]
+tests/color/test_m09_lightbox_alpha.py ........                          [ 25%]
+tests/color/test_m13_keyframe_curves.py ........                         [ 25%]
+tests/color/test_m19_color_context.py ........                           [ 25%]
+tests/color/test_m19_hdr_vectors.py ......                               [ 25%]
+tests/color/test_m19_three_page_vectors.py ....                          [ 25%]
+tests/color/test_m19_transform_typed.py ...........                      [ 25%]
+tests/color/test_m22_grade_diff.py ....                                  [ 25%]
+tests/color/test_m22_shot_match_panel.py ..........                      [ 25%]
+tests/color/test_mask_group.py .............                             [ 25%]
+tests/color/test_mask_rotation_budget.py ............                    [ 25%]
+tests/color/test_mask_shape.py .....................                     [ 25%]
+tests/color/test_metal_composition_blend_modes.py ...................... [ 26%]
+......                                                                   [ 26%]
+tests/color/test_metal_composition_blur_sharpen.py .................     [ 26%]
+tests/color/test_metal_composition_curves_lut.py ................        [ 26%]
+tests/color/test_metal_composition_grading.py .......................    [ 26%]
+tests/color/test_metal_composition_grain_softclip.py ................... [ 26%]
+                                                                         [ 26%]
+tests/color/test_metal_composition_mixer_warper.py .............         [ 27%]
+tests/color/test_ocio_config_load.py ......                              [ 27%]
+tests/color/test_opengl_render_backend.py ........                       [ 27%]
+tests/color/test_orchestrator_boundary.py .....                          [ 27%]
+tests/color/test_plugin_manifest_binding.py ................             [ 27%]
+tests/color/test_plugin_params.py ..........                             [ 27%]
+tests/color/test_power_window_palette.py ..............                  [ 27%]
+tests/color/test_power_windows.py ............                           [ 27%]
+tests/color/test_presets_gallery.py ..................................   [ 28%]
+tests/color/test_primary_highlights_integration.py .......               [ 28%]
+tests/color/test_primary_wheel_ui.py ...............                     [ 28%]
+tests/color/test_professional_scopes.py ................................ [ 28%]
+.....                                                                    [ 28%]
+tests/color/test_project_dependencies.py ..............                  [ 28%]
+tests/color/test_qualifier_keyframes.py ...........                      [ 28%]
+tests/color/test_qualifier_matte.py ....................                 [ 29%]
+tests/color/test_qualifier_palette_ui.py .........................       [ 29%]
+tests/color/test_quality_control.py ...........                          [ 29%]
+tests/color/test_reformat_crop_transform.py ............................ [ 29%]
+...........                                                              [ 29%]
+tests/color/test_scope_diagnostics.py ......................             [ 29%]
+tests/color/test_scope_input_source.py .............                     [ 30%]
+tests/color/test_scope_live_refresh.py ............................      [ 30%]
+tests/color/test_scope_multiview_ui.py ..........                        [ 30%]
+tests/color/test_selective_paste_domains.py .......                      [ 30%]
+tests/color/test_shader_golden_corpus.py ..                              [ 30%]
+tests/color/test_shader_pipeline_lifecycle.py .                          [ 30%]
+tests/color/test_shot_match.py ...............                           [ 30%]
+tests/color/test_stabilization_plan_service.py ..                        [ 30%]
+tests/color/test_stabilizer_controller.py ..........                     [ 30%]
+tests/color/test_stabilizer_panel.py .........                           [ 30%]
+tests/color/test_timeline_clip_strip_lazy_thumbnails.py ...........OpenCV: Couldn't read video stream from file "/tmp/clip_0000.mov"
+..... [ 31%]
+........                                                                 [ 31%]
+tests/color/test_timeline_clip_strip_signal_dedup.py .............       [ 31%]
+tests/color/test_timeline_clip_strip_sync.py ............                [ 31%]
+tests/color/test_timeline_grade_stack.py .....                           [ 31%]
+tests/color/test_tracker_graph_scrubbing.py .....                        [ 31%]
+tests/color/test_tracker_homography_overlay.py ...                       [ 31%]
+tests/color/test_tracker_mask_binding_flow.py ......................     [ 31%]
+tests/color/test_tracker_overlay_geometry.py ........................... [ 31%]
+                                                                         [ 31%]
+tests/color/test_tracker_panel_states.py ............................... [ 32%]
+...........                                                              [ 32%]
+tests/color/test_tracker_point_editing.py ......                         [ 32%]
+tests/color/test_tracking_curve_transform.py ......                      [ 32%]
+tests/color/test_tracking_data.py ......................                 [ 32%]
+tests/color/test_tracking_keyframe_bake.py .......                       [ 32%]
+tests/color/test_tracking_manual_correction.py .....                     [ 32%]
+tests/color/test_tracking_mask_binding.py ...........                    [ 32%]
+tests/color/test_tracking_render_apply.py ................               [ 33%]
+tests/color/test_tracking_schema_migration.py ..........                 [ 33%]
+tests/color/test_tracking_serialization.py ..........                    [ 33%]
+tests/color/test_tracking_service.py ................                    [ 33%]
+tests/color/test_tracking_source_timeline_frame_sync.py .....            [ 33%]
+tests/color/test_tracking_stale_result_guard.py .......                  [ 33%]
+tests/color/test_tracking_worker_lifecycle.py .....                      [ 33%]
+tests/color/test_video_control_bar_scrub.py ..                           [ 33%]
+tests/color/test_video_front_texture_sync.py ............                [ 33%]
+tests/color/test_video_window_handles.py ............                    [ 33%]
+tests/color/test_window_combos.py .........                              [ 33%]
+tests/color/test_window_controller_flow.py ......................        [ 34%]
+tests/color/test_window_edge_softness.py .............                   [ 34%]
+tests/color/test_window_geometry_roundtrip.py .........                  [ 34%]
+tests/color/test_window_selection_lifecycle.py ....                      [ 34%]
+tests/color/test_window_tracking_edits.py ........                       [ 34%]
+tests/color/test_window_tracking_integration.py ......                   [ 34%]
+tests/color/test_worker_cancellation.py ...                              [ 34%]
+tests/color/test_workspace_presets.py .............                      [ 34%]
+tests/app/test_ai_action_policy_boundary.py ........                     [ 34%]
+tests/app/test_ai_command_stack_commit.py ......                         [ 34%]
+tests/app/test_ai_controller_agent_runtime_v2.py ....................... [ 35%]
+...............                                                          [ 35%]
+tests/app/test_ai_e2e_deterministic.py ..........                        [ 35%]
+tests/app/test_ai_edit_controller.py ....................                [ 35%]
+tests/app/test_ai_edit_host_bridge_semantic_index.py ......              [ 35%]
+tests/app/test_ai_edit_host_bridge_subtitle_geometry.py ......           [ 35%]
+tests/app/test_ai_editing_composition_root_r1.py ....................    [ 35%]
+tests/app/test_ai_persistence_wiring.py .........                        [ 35%]
+tests/app/test_clip_version_host.py ..OpenCV: Couldn't read video stream from file "/m/a1.mov"
+OpenCV: Couldn't read video stream from file "/m/a1.mov"
+..OpenCV: Couldn't read video stream from file "/m/a2.mov"
+..OpenCV: Couldn't read video stream from file "/m/a1.mov"
+....OpenCV: Couldn't read video stream from file "/m/a1.mov"
+.....OpenCV: Couldn't read video stream from file "/m/a2.mov"
+...OpenCV: Couldn't read video stream from file "/m/a2.mov"
+....OpenCV: Couldn't read video stream from file "/m/a1.mov"
+.OpenCV: Couldn't read video stream from file "/m/a1.mov"
+..OpenCV: Couldn't read video stream from file "/m/a1.mov"
+OpenCV: Couldn't read video stream from file "/m/a2.mov"
+..OpenCV: Couldn't read video stream from file "/m/a1.mov"
+.....OpenCV: Couldn't read video stream from file "/m/a1.mov"
+..OpenCV: Couldn't read video stream from file "/m/a1.mov"
+.OpenCV: Couldn't read video stream from file "/m/a2.mov"
+. [ 36%]
+OpenCV: Couldn't read video stream from file "/m/a2.mov"
+.                                                                        [ 36%]
+tests/app/test_clip_version_project_sync.py ...........                  [ 36%]
+tests/app/test_clip_version_renderer_sync.py ....                        [ 36%]
+tests/app/test_clip_version_scale.py ....                                [ 36%]
+tests/app/test_color_clip_strip_idle_refresh.py ...                      [ 36%]
+tests/app/test_color_clip_strip_preview_ownership.py ........            [ 36%]
+tests/app/test_color_controller_coverage.py ............................ [ 36%]
+........................................................................ [ 37%]
+...........                                                              [ 37%]
+tests/app/test_color_entry_playback_and_timeline_refresh.py ......       [ 37%]
+tests/app/test_color_graph_app_host.py ...............                   [ 37%]
+tests/app/test_color_graph_clip_switch.py ..........                     [ 37%]
+tests/app/test_color_graph_export_preview.py ...                         [ 37%]
+tests/app/test_color_graph_full_outlets.py .........                     [ 37%]
+tests/app/test_color_graph_parameter_feedback.py ...F.                   [ 37%]
+tests/app/test_color_graph_production_switch.py ...........              [ 38%]
+tests/app/test_color_graph_save_reconcile.py ................            [ 38%]
+tests/app/test_color_page_audio_bridge.py ..................             [ 38%]
+tests/app/test_color_resource_catalog.py ..............                  [ 38%]
+tests/app/test_color_resource_controller.py ...........................  [ 38%]
+tests/app/test_color_resource_gestures.py .......                        [ 38%]
+tests/app/test_color_resource_preview.py .....                           [ 38%]
+tests/app/test_color_resource_routing.py .....                           [ 38%]
+tests/app/test_color_scrub_settle_nonblocking.py ............            [ 39%]
+tests/app/test_color_stack_switch_persistence.py ......                  [ 39%]
+tests/app/test_color_timeline_clip_playback_mapping.py ................. [ 39%]
+..........................                                               [ 39%]
+tests/app/test_composite_entry_source_selection.py ..................    [ 39%]
+tests/app/test_composite_graph_open_context.py ........                  [ 39%]
+tests/app/test_composite_leave_flush.py ...                              [ 39%]
+tests/app/test_composite_per_image_isolation.py .....                    [ 39%]
+tests/app/test_deliver_batch_cancellation.py ..                          [ 39%]
+tests/app/test_deliver_composite_frame.py ................               [ 40%]
+tests/app/test_deliver_controller_coverage.py .......................... [ 40%]
+........................................................................ [ 40%]
+........................................................                 [ 41%]
+tests/app/test_dock_layout_controller_coverage.py ...................... [ 41%]
+.............................................                            [ 42%]
+tests/app/test_edit_controller_speech_progress.py ..                     [ 42%]
+tests/app/test_edit_controller_speech_subtitles.py ...                   [ 42%]
+tests/app/test_edit_controller_timeline_management.py .....              [ 42%]
+tests/app/test_edit_controller_timeline_metadata.py ...                  [ 42%]
+tests/app/test_edit_to_color_playhead_sync.py ..............             [ 42%]
+tests/app/test_ef08_aud.py ............................................. [ 42%]
+.............                                                            [ 42%]
+tests/app/test_ef19_aud.py ............................................. [ 43%]
+..................                                                       [ 43%]
+tests/app/test_fix_controllers_aud.py ..........                         [ 43%]
+tests/app/test_fix_layer_ai_library_aud.py ...........                   [ 43%]
+tests/app/test_fix_prefs_docks_aud.py .........                          [ 43%]
+tests/app/test_fix_w5g4_aud5.py ........                                 [ 43%]
+tests/app/test_fix_w6g2_aud6.py ...........                              [ 44%]
+tests/app/test_fix_w6g4_aud6.py ..........                               [ 44%]
+tests/app/test_fix_wd17w2_aud.py .........                               [ 44%]
+tests/app/test_fix_wd17w4_aud.py ......................                  [ 44%]
+tests/app/test_fix_wd1g2_aud.py ..............................           [ 44%]
+tests/app/test_fix_wd1g3_aud.py ......................                   [ 44%]
+tests/app/test_fix_wd1g4_aud.py ..........................               [ 45%]
+tests/app/test_fix_wd1g5_aud.py .......................                  [ 45%]
+tests/app/test_fix_wd1g6_aud.py ....................                     [ 45%]
+tests/app/test_fix_wd1g7_aud.py ........................................ [ 45%]
+.                                                                        [ 45%]
+tests/app/test_fix_wd1g8_aud.py .................................        [ 46%]
+tests/app/test_fix_wd2g10_aud.py ...........................             [ 46%]
+tests/app/test_fix_wd2g9_aud.py ........................................ [ 46%]
+......                                                                   [ 46%]
+tests/app/test_gap002_edit_controller.py ............................... [ 47%]
+...................................                                      [ 47%]
+tests/app/test_gap007_file_controller.py ............................... [ 47%]
+.....................................                                    [ 48%]
+tests/app/test_gap010_ai_edit_controller.py ............................ [ 48%]
+................                                                         [ 48%]
+tests/app/test_gap027_main_window.py ................................... [ 49%]
+                                                                         [ 49%]
+tests/app/test_handoff_ui_entry.py ....                                  [ 49%]
+tests/app/test_lut_thumbnail_service.py ........                         [ 49%]
+tests/app/test_main_startup.py ............                              [ 49%]
+tests/app/test_media_analysis_controller.py ................             [ 49%]
+tests/app/test_no_pending_comp_clip_context_in_page_switch.py .......... [ 49%]
+......                                                                   [ 49%]
+tests/app/test_node_thumbnail_evaluator.py .....                         [ 49%]
+tests/app/test_page_controller_coverage.py ............................. [ 49%]
+........................................................................ [ 50%]
+........................................                                 [ 50%]
+tests/app/test_panel_export_composite_setting.py .....                   [ 50%]
+tests/app/test_path_a_evidence_flow.py ...                               [ 51%]
+tests/app/test_preferences_dialog_coverage.py .......................... [ 51%]
+................................                                         [ 51%]
+tests/app/test_project_manager_startup.py ..                             [ 51%]
+tests/app/test_project_save_routing.py .....                             [ 51%]
+tests/app/test_script_panel_project_root_aud40014.py ...                 [ 51%]
+tests/app/test_shared_fanout.py ...                                      [ 51%]
+tests/app/test_speech_to_text_dialog.py ..                               [ 51%]
+tests/app/test_tool_domain_routing.py .....                              [ 51%]
+tests/app/test_tool_domain_routing_tracker.py ...                        [ 51%]
+tests/app/test_tool_domain_routing_windows.py .....                      [ 51%]
+tests/app/test_update_checker_version.py ..                              [ 51%]
+tests/app/test_window_geometry_clamp.py ....                             [ 51%]
+tests/ui/test_ai_assistant_composer.py ................................. [ 52%]
+...                                                                      [ 52%]
+tests/ui/test_ai_assistant_panel_p0_integration.py ..................... [ 52%]
+........                                                                 [ 52%]
+tests/ui/test_ai_edit_assistant_dock.py ...........................      [ 52%]
+tests/ui/test_ai_edit_assistant_m5_ui.py ........................        [ 52%]
+tests/ui/test_ai_help_answer.py ........                                 [ 53%]
+tests/ui/test_ai_job_decision_prefs.py ......................            [ 53%]
+tests/ui/test_ai_result_card.py ..................                       [ 53%]
+tests/ui/test_ai_skill_card.py ...................                       [ 53%]
+tests/ui/test_ai_subpanels.py ............                               [ 53%]
+tests/ui/test_ai_timeline_diff.py ........                               [ 53%]
+tests/ui/test_ai_workflow_dialog_trigger.py .............                [ 53%]
+tests/ui/test_ai_workflow_dock_wiring.py .....                           [ 53%]
+tests/ui/test_ai_workflow_module.py ........                             [ 54%]
+tests/ui/test_align.py .............                                     [ 54%]
+tests/ui/test_animation_inspector_summary.py ..                          [ 54%]
+tests/ui/test_color_node_editor_panel.py ................                [ 54%]
+tests/ui/test_color_node_editor_state.py ............................... [ 54%]
+......                                                                   [ 54%]
+tests/ui/test_color_node_editor_view.py ........................         [ 54%]
+tests/ui/test_color_node_host_menu.py ................Fatal Python error: Segmentation fault
+
+Thread 0x000070001254c000 (most recent call first):
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 355 in wait
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/queue.py", line 171 in get
+  File "/Users/heng/Documents/vscode/topos-studio/src/features/composite/evaluators/cache_evaluator.py", line 48 in _disk_store_worker_loop
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1012 in run
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x000070001056c000 (most recent call first):
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 355 in wait
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/queue.py", line 171 in get
+  File "/Users/heng/Documents/vscode/topos-studio/src/shared/media/ffmpeg_source.py", line 527 in _closer_loop
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1012 in run
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/usr/local/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Current thread 0x00007ff844252b00 (most recent call first):
+  File "/Users/heng/Documents/vscode/topos-studio/src/features/color/ui/node_editor_view.py", line 532 in _cancel_wire
+  File "/Users/heng/Documents/vscode/topos-studio/src/features/color/ui/node_editor_view.py", line 143 in rebuild
+  File "/Users/heng/Documents/vscode/topos-studio/src/features/color/ui/node_editor_view.py", line 129 in __init__
+  File "/Users/heng/Documents/vscode/topos-studio/src/features/color/ui/node_editor_panel.py", line 212 in __init__
+  File "/Users/heng/Documents/vscode/topos-studio/tests/ui/test_color_node_host_menu.py", line 45 in __init__
+  File "/Users/heng/Documents/vscode/topos-studio/tests/ui/test_color_node_host_menu.py", line 80 in host
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 998 in call_fixture_func
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 1328 in pytest_fixture_setup
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 1232 in execute
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 726 in _get_active_fixturedef
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 630 in getfixturevalue
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/fixtures.py", line 806 in _fillfixtures
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/python.py", line 1710 in setup
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 536 in setup
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 170 in pytest_runtest_setup
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 250 in <lambda>
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 361 in from_call
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 249 in call_and_report
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 132 in runtestprotocol
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 118 in pytest_runtest_protocol
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/main.py", line 408 in pytest_runtestloop
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/main.py", line 384 in _main
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/main.py", line 330 in wrap_session
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/main.py", line 377 in pytest_cmdline_main
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 229 in _main
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 253 in _console_main
+  File "/Users/heng/Documents/vscode/topos-studio/.venv/lib/python3.12/site-packages/pytest/__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Extension modules: numpy._core._multiarray_umath, numpy.linalg._umath_linalg, av._core, av.logging, av.buffer, av.audio.format, av.error, av.dictionary, av.container.pyio, av.format, av.index, av.utils, av.stream, av.container.streams, av.sidedata.encparams, av.sidedata.motionvectors, av.sidedata.sidedata, av.opaque, av.rational, av.packet, av.container.input, av.bitstream, av.container.output, av.container.core, av.codec.context, av.video.format, av.video.reformatter, av.plane, av.video.plane, av.video.frame, av.video.stream, av.codec.hwaccel, av.codec.codec, av.frame, av.audio.layout, av.audio.plane, av.audio.frame, av.audio.stream, av.filter.link, av.filter.context, av.filter.graph, av.filter.filter, av.filter.loudnorm, av.audio.resampler, av.audio.codeccontext, av.audio.fifo, av.device, av.video.codeccontext, PyQt6.QtCore, PyQt6.QtNetwork, PyQt6.QtGui, PyQt6.QtWidgets, PyQt6.QtPrintSupport, PyQt6.QtWebChannel, PyQt6.QtWebEngineCore, PyQt6.QtWebEngineWidgets, PyQt6.QtTest, _cyutility, scipy._cyutility, scipy._lib._ccallback_c, scipy.special._ufuncs_cxx, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg._batched_linalg, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._pcg64, numpy.random._generator, numpy.random._mt19937, numpy.random._philox, numpy.random._sfc64, numpy.random.mtrand, charset_normalizer.md, charset_normalizer.cd, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._internal_matfuncs, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg.cython_lapack, scipy.linalg._decomp_update, scipy.special._ellip_harm_2, scipy.special._special_ufuncs, scipy.special._gufuncs, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.interpolate._fitpack, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpacklib, scipy.sparse.linalg._propack, scipy.optimize._group_columns, scipy._lib.messagestream, scipy.optimize._trlib._trlib, scipy.optimize._lbfgsb, _moduleTNC, scipy.optimize._moduleTNC, scipy.optimize._slsqplib, scipy.optimize._minpack, scipy.optimize._lsq.givens_elimination, scipy.optimize._zeros, scipy._lib._uarray._uarray, scipy.linalg._decomp_interpolative, scipy.optimize._bglu_dense, scipy.optimize._lsap, scipy.spatial._ckdtree, scipy.spatial._hausdorff, scipy.spatial._distance_wrap, scipy.spatial._qhull, scipy.spatial._voronoi, scipy.spatial.transform._rotation_cy, scipy.spatial.transform._rigid_transform_cy, scipy.optimize._direct, scipy.interpolate._dierckx, scipy.interpolate._ppoly, scipy.interpolate._interpnd, scipy.interpolate._rbfinterp_pythran, scipy.interpolate._rgi_cython, moderngl.mgl, PyQt6.QtSvg, PyQt6.QtOpenGL, PyQt6.QtOpenGLWidgets, _pillow_heif, PIL._imaging, rawpy._rawpy, objc._objc, glcontext.darwin, PIL._imagingcms, CoreFoundation._CoreFoundation, CoreFoundation._inlines, Foundation._Foundation, Foundation._inlines, AppKit._AppKit, AppKit._inlines, Metal._Metal, Metal._inlines, PyQt6.QtMultimedia, markupsafe._speedups, Quartz.CoreGraphics._callbacks, Quartz.CoreGraphics._doubleindirect, Quartz.CoreGraphics._sortandmap, Quartz.CoreGraphics._coregraphics, Quartz.CoreGraphics._inlines, Quartz.ImageKit._imagekit, Quartz.CoreVideo._CVPixelBuffer, Quartz.QuartzCore._quartzcore, Quartz.PDFKit._PDFKit, Quartz.QuickLookUI._QuickLookUI, CoreMedia._CoreMedia, CoreMedia._inlines, VideoToolbox._VideoToolbox, PIL._imagingft, av.subtitles.stream, scipy.ndimage._nd_image, scipy.ndimage._rank_filter_1d, _ni_label, scipy.ndimage._ni_label, scipy.signal._sigtools, scipy.signal._max_len_seq_inner, scipy.signal._upfirdn_apply, scipy.signal._spline, scipy.signal._sosfilt, scipy.integrate._odepack, scipy.integrate._quadpack, scipy.integrate._vode, scipy.integrate._dop, scipy.special.cython_special, scipy.stats._stats, scipy.stats._biasedurn, scipy.stats._levy_stable.levyst, scipy.stats._stats_pythran, scipy.stats._ansari_swilk_statistics, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.stats._sobol, scipy.stats._qmc_cy, scipy.stats._rcont.rcont, scipy.stats._qmvnt_cy, scipy.signal._peak_finding_utils (total: 188)

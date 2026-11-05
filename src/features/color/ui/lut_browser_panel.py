@@ -163,6 +163,7 @@ class ColorLutBrowser(QWidget):
     draft_edit_requested = pyqtSignal(str, object)
     import_requested = pyqtSignal(object)
     refresh_requested = pyqtSignal()
+    visible_entries_changed = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -480,6 +481,17 @@ class ColorLutBrowser(QWidget):
                 item.setIcon(QIcon(entry["thumbnail"]))
                 break
 
+    def clear_thumbnails(self) -> None:
+        """Discard previews from the previous source before a new source arrives."""
+        changed = False
+        for entry in self._entries.values():
+            if entry.pop('thumbnail', None) is not None:
+                changed = True
+            if entry.pop('thumbnail_error', None) is not None:
+                changed = True
+        if changed:
+            self._populate()
+
     def set_thumbnail_failed(self, entry_id: str, code: str) -> None:
         """预览失败：tooltip 标注（占位图标保持，不冒充结果）。"""
         entry = self._entries.get(entry_id)
@@ -490,7 +502,7 @@ class ColorLutBrowser(QWidget):
             item = self.list_widget.item(i)
             data = item.data(Qt.ItemDataRole.UserRole)
             if isinstance(data, dict) and data.get("id") == entry_id:
-                item.setToolTip(item.toolTip() + "\n" + _tr(
+                item.setToolTip(item.toolTip() + "\n" + tr(
                     "thumbnail_failed", "Preview failed") + f" ({code})")
                 break
 
@@ -643,6 +655,7 @@ class ColorLutBrowser(QWidget):
         self.count_label.setText(str(count) + ' ' + tr('luts', 'LUTs'))
         self._update_item_sizes()
         self._select_resource(selected)
+        self.visible_entries_changed.emit()
 
     def _select_resource(self, resource_id: str | None) -> None:
         if not resource_id:

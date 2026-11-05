@@ -8,6 +8,62 @@
 每个任务都要同时提交：实现、针对失败路径的测试、原生运行证据、文档状态。
 没有实机设备的项目标 `NOT RUN`，不能写成 `PASS`。
 
+### 2026-11-05 完成后复核：正式 Effects/LUT 资源路径
+
+用户报告计划表任务已实施后，以正式资源适配器（关闭 preview mode）和
+`tests/test_videos/测试素材01.mov` 做原生工作流复核。发现并修复：
+
+1. 正式 Effects 目录首次打开未水合、目录更新信号未接入；现已初始化并订阅更新。
+2. LUT 缩略图后台线程读取 GUI `QPixmap`、创建 `QPixmap`，且目录刷新会取消
+   在途任务；现改为 GUI 线程复制缩小后的 RGB 数组，后台只用 `QImage`，
+   源身份不变时保留任务，切素材/改世代拒收旧结果。
+3. 新导入 LUT 尚未保存到工程包时，`topos-res://` 无法经工程解析器读取，
+   浏览器虽显示条目却只给出预览失败；现允许加载已验证的会话暂存副本。
+4. 进入 LUT 子文件夹不会产生新的缩略图需求、预览失败 tooltip 调用未定义
+   `_tr` 导致异常；可见条目超过 8 个时也不会在任务完成后补充请求；
+   现均修复。关闭主窗口时停止 LUT 缩略图工作线程。
+
+原生验证：`TOPOS_COLOR_GRAPH_RENDER=1 QT_QPA_PLATFORM=cocoa
+.venv/bin/python scripts/validate_color_node_media.py
+tests/test_videos/测试素材01.mov --production-resources --workflow
+--output /tmp/topos-production-resource-audit` 通过。效果目录 50 项，
+LUT 候选图 128×72，交换通道后的像素平均差 0.0337；图命令、撤销、保存重载、
+断线重连、3 张逐节点预览和 scope 硬失败断言均通过。
+证据见 [原生运行报告](validation/color_resources/production_resource_audit_20261105/media_preview_report.json)
+、[LUT 面板截图](validation/color_resources/production_resource_audit_20261105/lut_production_preview.png)
+及 [Waveform 截图](validation/color_resources/production_resource_audit_20261105/scope_waveform.png)。
+相关 261 条 LUT/目录/预览/Key 通道/语言环境测试通过。单进程合并测试
+曾有 10,452 通过、20 跳过、1 条 Key 通道测试失败；根因为测试假数据
+按短命字典的 `id()` 缓存，在地址复用时跨节点串 matte，已改按参数内容缓存。
+两条 UI/一条颜色拾取测试的固定中文断言也已改按当前语言核验。
+
+**N16 复核状态：本机四套件连续两遍通过，整体仍未收口**：`tests/color tests/app` 单进程合并
+5,428 passed / 5 skipped；`tests/app` 单独 1,803 passed，
+`tests/app/test_clip_version_host.py` 单独 37 passed。
+完整 `tests/color tests/app tests/ui tests/shared` 首轮跑至尾部为
+10,452 passed / 20 skipped / 1 条上述假缓存失败；修复后第二轮在约
+35% 的 `test_clip_version_host` fixture 中发生 macOS 原生段错误，
+Python 栈落在 `TimelineClipStrip._build_ui` 的
+`QScrollArea.viewport().installEventFilter(self)`，没有 Python 异常。
+Color+剪辑版本 3,662 passed / 5 skipped，Color+App 5,428 passed，
+因此目前只证实其为间歇性、长序列 Qt/媒体资源生命周期问题，未确认根因。
+2026-11-05 第三轮完整单进程运行通过：10,460 passed / 20 skipped，
+耗时 476 秒，命令 `QT_QPA_PLATFORM=offscreen PYTHONFAULTHANDLER=1
+.venv/bin/python -m pytest tests/color tests/app tests/ui tests/shared -q`。
+此轮包含 N15 默认值修复，但早于 N15 稳定 ID/UI 回调的最终修复。
+最终版本第一次复跑在约 54% 的 `test_color_node_host_menu.py` fixture
+发生原生段错误，Python 栈落在 `ColorNodeView._cancel_wire()`
+初始化时无连线仍调用 `viewport().setCursor(...)`；现仅在实际连线取消时
+恢复光标。随后同一工作树、同一命令连续两轮通过：
+**10,465 passed / 20 skipped / 7 warnings**（471.05s、462.87s），
+日志与原始崩溃栈见 [N16 本机单进程证据](validation/color_resources/n16_single_process_20261105/README.md)。
+这满足本机 `color+app+ui+shared` 两遍门槛；先前段错误也曾落在其他 Qt
+调用，仍不能仅凭栈落点断言根因完全消除。`tests/edit`、跨平台与线程
+所有权终验未包含，N16/R12-B 不标为全验收。
+
+本次验证不改变上表的跨平台 `NOT RUN`；N16 本机四套件状态按两轮
+通过证据更新，但含 Edit 的完整矩阵仍未验收。N15 实机对照结果见后文。
+
 ### 本轮实机布局证据
 
 ![用户截图：底部工具区过高](validation/color_resources/color_layout_oversized_20261104.jpg)
@@ -31,14 +87,14 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 | P0 | V01 | 已完成（compound id 重映射根因修复；普通/resources 双路径 passed + 阻断负路径 exit 1） | 逐节点预览真实生成及脚本不能假绿 | 无 |
 | P0 | R12-A | 已通过（2026-11-05 复测全预算过：RSS 167.9/250 MB/10min；分行为归因新增） | 30 分钟资源与播放性能 | V01 |
 | P0 | R12-B | 本机出口矩阵通过；跨平台 NOT RUN；UI 级同帧对拍边界已登记 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
-| P0 | N16 | 大部分完成（工作流清偿 12 例污染中 10 例修复终验通过 + EXR SIGILL 根因实证修复 + 第三处悬垂定时器；三套件全绿 color 3621/app 1797/ui 2233；残余如实登记：4 例容量外污染、speech 间歇、合并跑仍崩待定位、连续两遍口径未跑） | 单进程全套件稳定性与资源所有权 | 无 |
+| P0 | N16 | 本机 color+app+ui+shared 单进程连续两遍 10,465 passed / 20 skipped；Edit、跨平台和线程所有权终验待做，历史间歇段错误根因尚未证明彻底消除 | 单进程全套件稳定性与资源所有权 | 无 |
 | P1 | R06-B | v1 已接线（onnx_tile 后端+结果会话+service+图命令+R09 闭包，17 测试；UI 触发面板登记为后续） | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
 | P1 | N02-B | 切片 1-4 已交付（声明/换算表/CPU 后处理/bitmap 内容身份进缓存键+图路径 matte fail-closed+key_frame_animated；19 测试）；bitmap 完整资源化与 tracker 帧域登记 v2 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
 | P1 | N07-B | 复核完成+三缺陷修复（预览 timeline 段跳过/缓存指纹漏栈/调整剪辑双重应用；4 新回归）| Group/Timeline 全出口最终链序与身份 | N07/R09 |
 | P1 | N10-B | v1 已交付：qualifier 域 HSL 三带 11 字段轨道（hue 最短弧）+ shared 实例级 + provider 逐帧求值 + 轨道名白名单；mask/window 轨道与定义级扇出登记 v2（导出端窗口 matte 无消费端+provider 定义合并前置缺口） | Mask/Qualifier 动画轨道与定义级扇出 | N10 v1 |
 | P1 | N12-B | 切片 A 已交付：域表扩至 12 域（对齐 GradeClipboard 粒度）+ lut/bake 粘贴前资源校验 fail-visible + 缺插件 missing 占位 + paste_domains 权威提交三重失败修复（归一化分支缺失/本地直达 AttributeError/参数不透传）；跨工程 localize（切片 B）登记 v2 | 选择性复制与跨工程资源闭包 | R09/N12 |
 | P1 | N14-B | CPU 五域已接线（LUT3D v1 + qualifier 后处理 + HSL/soft_clip/curves_soft_clip/非 Normal blend——数学复用生产实现，中性恒等有回归锚；Metal/pointwise 经 backend 参数维持 fail-closed）；Metal key 通道接线（kernel 已有）与 mixer/warper 登记 v2 | Metal/CPU 其余域能力逐项实现 | R06/R12 |
-| P2 | N15 | NOT RUN（需实机 Resolve 20 人工逐项对照；本机已装 Resolve 20.2.1 但窗口创建不可脚本化——API 不覆盖，必须人工执行 CPW/LPW/PPW/PCW 并录屏留证） | 达芬奇四种 Window 组合的 UI/交互对拍 | N15 命令已存在 |
+| P2 | N15 | 四组合 Resolve 20.2.1 实机对照、逐项撤销/重做 + Topos 真素材原生工作流通过；Resolve 独立截图归档尚未完成 | 达芬奇四种 Window 组合的 UI/交互对拍 | N15 命令已存在 |
 
 ## 2. 逐项施工与验证
 
@@ -248,13 +304,16 @@ color_resources/n16_pollution_clearance/ 由工作流报告 artifact 留档）**
   侦探附带发现 dock_layout one_shot 文件内污染（本轮已顺手修复）。
 
 **残余债务（如实登记，未虚报）**：
+- 2026-11-05 本机四套件连续两遍通过，但 Edit 套件未合入此次矩阵；
+  早前 `TimelineClipStrip` 与本轮 `ColorNodeView` 的间歇 Qt 原生崩溃
+  不能据两遍通过断言彻底修复，崩溃栈和通过日志见 N16 证据目录；
 - tests/edit ~7 顺序污染未 bisect 前件（DeferredDelete 冲刷不收敛——
   机制更接近 QThreadPool 饱和/全局单例状态）；
-- 合并单进程跑（color+app+edit+shared，offscreen）在
+- 历史合并单进程跑（color+app+edit+shared，offscreen）曾在
   `test_presets_gallery::test_exr_roundtrip_preserves_hdr_values` 的
-  `write_still_exr` 处 SIGILL——与 tests/color/conftest.py 历史记载的
-  EXR 写入×GC 时机崩溃同点，clean HEAD 复现（R12 README 登记的
-  「单进程原生崩溃」即此），需 OpenEXR 写入的 numpy 缓冲所有权专项；
+  `write_still_exr` 处 SIGILL；后续已将该路径归因于 wheel 内的
+  libdeflate ZIP 分支并实施 PIZ/进程隔离修复（见上文工作流清偿轮）。
+  修复后的含 Edit 四套件合并矩阵尚未重跑，不沿用历史失败判定当前状态；
 - 「进程结束无活跃 QThread」断言与逐 owner teardown 注册表未落地
   （R12-A 收尾仍见 QThread destroyed 告警）。
 
@@ -345,6 +404,41 @@ shader/CPU 对拍、资源释放和明确版本号。不能一次性取消 fail-
 必须报明确拒绝。缺设备的平台列 `NOT RUN`，不把 GL 通过算作 Metal 通过。
 
 ### N15 — 达芬奇 Window 组合人工对照
+
+**2026-11-05 实机结果**：在本机已打开的 DaVinci Resolve Studio 20.2.1
+Color 页，逐项从 Color 菜单执行四个 `Add Serial Node + ...` 命令；每次
+均在现有 Corrector 后插入编号 02 的节点、自动连入主链并选中，节点底部
+显示 Window 图标。CPW 创建居中圆形窗口（Soft 1 为 4.13）；LPW
+创建居中矩形（四边 Soft 为 1.25），并非梯度；PPW 默认有四角矩形
+多边形；PCW 进入空曲线绘制状态，不预置任何控制点。四次均用一次
+`Command+Z` 恢复原单节点图；随后四种组合均逐项复核：
+`Command+Shift+Z` 一次恢复节点、连线与窗口，重新 `Command+Z`
+恢复原单节点图。对照操作在本次会话的 UI 画面中观察，
+没有另存为项目内的独立截图文件。
+
+**已修差异**：原命令将 LPW 误建为 gradient、PPW 点写成渲染器不接受的
+裸坐标、PCW 误设 8 个点，四组合都给节点写入长标签；此外 UI envelope
+的 `combo` 字段被漏读，点击 LPW/PPW/PCW 实际总会执行 CPW。现统一
+修成实机默认几何与无标签节点；PPW 点为 `pos/c1/c2/type=corner`
+格式；PCW 空点；窗口载荷固定使用新节点 ID 作为 legacy layer ID，
+否则图→引擎投影时 ID 每次变化，活动 Window 编辑落在旧图层。
+成功提交后回调打开 Window 面板、选中新窗口，PPW/PCW 进入相应画笔
+模式；失败提交不激活工具。原生验证还发现：空 Serial 缺 legacy 载荷
+使整条可投影串行图被旧判定误拒，且默认 Layer DTO 每次物化都会产生
+新 ID。现将所有纯串行 Corrector 用 `node_layer_payload` 物化，空载荷
+节点以 `node_id` 固定图层身份；复杂 DAG 的拒绝条件保留。
+
+**Topos 原生验证**：使用 `tests/test_videos/测试素材01.mov` 执行
+`TOPOS_COLOR_GRAPH_RENDER=1 QT_QPA_PLATFORM=cocoa .venv/bin/python
+scripts/validate_color_node_media.py tests/test_videos/测试素材01.mov
+--window-combos --output docs/validation/color_resources/n15_resolve_combo_20261105`
+通过，报告与四张应用截图保存在
+[N15 原生证据](validation/color_resources/n15_resolve_combo_20261105/media_preview_report.json)。
+每个组合均检查：权威图新增恰一个节点、正确类型和默认点、引擎活动层
+ID 与新节点一致、Window 控件与画布覆盖层选中且可见、PPW/PCW
+进入对应画笔模式、项目级 undo/redo 字节等价。49 条相关 UI/宿主
+回归复跑通过；达芬奇侧四种组合的 redo 均已验证，独立截图归档
+仍待补充。
 
 **实施方法**：在打开的 DaVinci Resolve Color 页逐一执行 CPW、LPW、
 PPW、PCW：记录菜单/快捷键、新建节点、默认形状、连接、选中态、撤销

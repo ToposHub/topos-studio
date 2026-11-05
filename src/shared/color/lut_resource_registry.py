@@ -385,6 +385,19 @@ class LutResourceSession:
                 return "registered" if body in self._entries else "missing"
         return "registered" if os.path.isfile(reference) else "missing"
 
+    def staged_path(self, reference: str) -> str | None:
+        """Resolve a newly imported LUT before it has been saved into a project."""
+        if not isinstance(reference, str) or not reference.startswith('topos-res://'):
+            return None
+        with self._lock:
+            body = reference[len('topos-res://'):]
+            entry = (self._by_sha(body[len('sha256-'):])
+                     if body.startswith('sha256-') else self._entries.get(body))
+            if entry is None or entry.kind != 'lut':
+                return None
+            path = self._staged_sources.get(entry.archive_path)
+            return path if path and os.path.isfile(path) else None
+
     def diagnostics(self) -> tuple[str, ...]:
         with self._lock:
             return tuple(self._diagnostics)

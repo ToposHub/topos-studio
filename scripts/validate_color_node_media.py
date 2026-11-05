@@ -30,9 +30,15 @@ def main() -> int:
     parser.add_argument("--keep-open", action="store_true")
     parser.add_argument("--workflow", action="store_true", help="Exercise authoritative graph edits, grading, undo, project IO and native scopes")
     parser.add_argument("--resources", action="store_true", help="Verify explicit Effects/LUT preview drafts, real Qt drops, layout and floating")
+    parser.add_argument("--production-resources", action="store_true",
+                        help="Verify production catalog and evaluated LUT tile on imported media")
+    parser.add_argument("--window-combos", action="store_true",
+                        help="Exercise Resolve-style CPW/LPW/PPW/PCW through the native node UI")
     parser.add_argument("--block-evaluated", action="store_true",
                         help="Negative path: suppress evaluated thumbnail demands; the run must fail non-zero")
     args = parser.parse_args()
+    if args.resources and args.production_resources:
+        parser.error("--resources and --production-resources use different adapters")
     source = args.media.resolve(strict=True)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -41,9 +47,8 @@ def main() -> int:
     config_path.write_text(json.dumps({"locale": "en_US", "work_mode": "video", "current_page": "Color",
                                        "show_welcome_on_startup": False, "auto_load_last_project": False,
                                        "check_updates_on_startup": False, "auto_save_interval": 0,
-                                       # R03：验证脚本固定走显式开发 preview 模式（草稿契约断言）；
-                                       # 正式命令适配器由 pytest 宿主矩阵覆盖（R03 验证清单）。
-                                       "color_resource_ui_preview_mode": True}))
+                                       # 开发草稿与正式资源适配器互斥。
+                                       "color_resource_ui_preview_mode": not args.production_resources}))
     os.environ["TOPOS_CONFIG_PATH"] = str(config_path)
     os.environ["TOPOS_PRODUCT_MODE"] = "studio"
     os.environ["TOPOS_TEST_MODE"] = "1"
@@ -193,10 +198,148 @@ def main() -> int:
                         corrector_thumbnails_present=2,
                         source_tooltip=panel.view.cards[first].toolTip(),
                     )
-                    if args.resources:
+                    if args.window_combos:
+                        self.phase = "window_combos"
+                    elif args.production_resources:
+                        self.phase = "production_resources"
+                    elif args.resources:
                         self.phase = "resources"
                     elif args.workflow:
                         self.phase = "workflow"
+                    else:
+                        self.finish(True)
+                    return
+                if self.phase == "window_combos":
+                    from src.features.color.core.color_graph_migration import (
+                        project_legacy_layers,
+                    )
+
+                    host = self.host
+                    panel = host.color_node_panel
+                    sid = host.color_graph_host._bound_stack_id
+
+                    def graph():
+                        return host._current_edit_project.color_stacks[sid].color_graph
+
+                    # preview 阶段为缩略图检查插入了第二个空 Serial。
+                    # 先以项目级 undo 移除它，再逐项验证组合的活动层绑定。
+                    panel.view.apply_edit("undo", panel.view.state.undo)
+                    assert self.second not in {n.node_id for n in graph().nodes}
+                    results = {}
+                    for combo, expected in (("cpw", "circle"), ("lpw", "rect"),
+                                            ("ppw", "curve"), ("pcw", "curve")):
+                        before = graph().to_dict()
+                        old_ids = {n.node_id for n in graph().nodes}
+                        panel.view.apply_edit(
+                            "add_window_combo",
+                            lambda c=combo: panel.view.state.add_window_combo(c),
+                            payload={"combo": combo})
+                        added = [n for n in graph().nodes
+                                 if n.node_id not in old_ids]
+                        assert len(added) == 1, f"{combo}: no authoritative node"
+                        node = added[0]
+                        shape = node.legacy_payload["mask_shapes"][0]
+                        assert shape["type"] == expected, (
+                            f"{combo}: expected {expected}, got {shape['type']}")
+                        assert any(p["id"] == node.node_id for p in
+                                   project_legacy_layers(graph()))
+                        layer = host.engine.get_active_layer()
+                        assert layer.id == node.node_id, (
+                            f"{combo}: active engine layer is {layer.id}")
+                        assert host.canvas.active_shape_id == shape["id"]
+                        assert host.mask_panel.video_panel._selected_id == shape["id"]
+                        overlay = host.canvas.mask_items.get(shape["id"])
+                        assert overlay is not None and overlay.isVisible(), (
+                            f"{combo}: Window overlay not visible; "
+                            f"canvas_size={host.canvas.logical_size}, "
+                            f"overlay_ids={list(host.canvas.mask_items)}")
+                        if combo == "lpw":
+                            assert tuple(shape["edge_softness"]) == (1.25,) * 4
+                        elif combo == "ppw":
+                            assert len(shape["points"]) == 4
+                        elif combo == "pcw":
+                            assert not shape["points"]
+                        if combo in ("ppw", "pcw"):
+                            assert host.canvas.is_drawing
+                            assert host.canvas._mask_creation_mode == (
+                                "polygon" if combo == "ppw" else "curve")
+                        else:
+                            assert not host.canvas.is_drawing
+                        host.grab().save(str(output / f"window_combo_{combo}.png"))
+                        after = graph().to_dict()
+                        panel.view.apply_edit("undo", panel.view.state.undo)
+                        assert graph().to_dict() == before, f"{combo}: undo mismatch"
+                        panel.view.apply_edit("redo", panel.view.state.redo)
+                        assert graph().to_dict() == after, f"{combo}: redo mismatch"
+                        panel.view.apply_edit("undo", panel.view.state.undo)
+                        results[combo] = {"type": expected, "node_id": node.node_id,
+                                          "window_id": shape["id"],
+                                          "undo_redo": "passed"}
+                    self.report["window_combos"] = results
+                    self.report["validation"] = "native_window_combo_workflow"
+                    self.finish(True)
+                    return
+                if self.phase == "production_resources":
+                    from src.shared.color.lut_resource_registry import get_lut_resource_session
+                    fixture = config_dir / 'Production Swap.cube'
+                    fixture.write_text('TITLE "Production Swap"\nLUT_3D_SIZE 2\n'
+                                       + ''.join(f'{b} {g} {r}\n' for b in (0, 1)
+                                                 for g in (0, 1) for r in (0, 1)))
+                    results = get_lut_resource_session().import_files([str(fixture)])
+                    assert results and results[0].status == 'imported', \
+                        f"production LUT import failed: {results[0].error}"
+                    self.production_lut_id = results[0].entry.uri
+                    controller = self.host.color_resource_controller
+                    assert controller is not None
+                    assert controller._lut_source_array is not None, \
+                        'source preview did not reach production LUT controller'
+                    controller.refresh_catalog()
+                    # Open the imported LUT folder through the browser's normal
+                    # navigation path. Only visible tiles are evaluated.
+                    self.host.color_lut_browser._navigate('LUT')
+                    self.production_started = time.monotonic()
+                    self.phase = 'production_lut_wait'
+                    return
+                if self.phase == 'production_lut_wait':
+                    import numpy as np
+                    host = self.host
+                    controller = host.color_resource_controller
+                    if not controller.effects._resources:
+                        return
+                    entry = host.color_lut_browser._entries.get(self.production_lut_id)
+                    if entry is None or 'thumbnail' not in entry:
+                        if time.monotonic() - self.production_started > 20.0:
+                            service = controller._thumbnails
+                            diagnostics = {
+                                'visible': host.color_lut_browser.visible_entry_ids(),
+                                'entry': entry,
+                                'service': service.stats() if service else None,
+                            }
+                            raise AssertionError('production LUT tile did not receive evaluated thumbnail: '
+                                                 + repr(diagnostics))
+                        return
+                    thumb = entry['thumbnail'].toImage().convertToFormat(
+                        entry['thumbnail'].toImage().Format.Format_RGB888)
+                    source_pixels = controller._lut_source_array
+                    ptr = thumb.constBits()
+                    ptr.setsize(thumb.sizeInBytes())
+                    rows = np.frombuffer(ptr, dtype=np.uint8).reshape(
+                        thumb.height(), thumb.bytesPerLine())
+                    pixels = rows[:, :thumb.width() * 3].reshape(
+                        thumb.height(), thumb.width(), 3).astype(np.float32) / 255.0
+                    difference = float(np.abs(pixels - source_pixels).mean())
+                    assert difference > 0.02, f'LUT tile did not apply swap LUT ({difference:.4f})'
+                    host.dock_lut.show()
+                    host.dock_lut.raise_()
+                    host.color_lut_browser.grab().save(str(output / 'lut_production_preview.png'))
+                    self.report['production_resources'] = {
+                        'status': 'passed',
+                        'effects_catalog_count': len(controller.effects._resources),
+                        'lut_preview_mean_abs_diff': round(difference, 4),
+                        'lut_preview_size': [thumb.width(), thumb.height()],
+                    }
+                    if args.workflow:
+                        self.phase = 'workflow'
                     else:
                         self.finish(True)
                     return
@@ -402,8 +545,12 @@ def main() -> int:
                     self.compound_id = compound_id
                     (output / "baseline_graph.json").write_text(json.dumps(graph().to_dict(), ensure_ascii=False, indent=2) + "\n")
                     # 遗留写入口留样（R00 审计对象，非正式命令路径）。
-                    entries = [e for (kind, _), e in self.host.color_resource_preview.catalog.items()
-                               if kind == "effect" and e.get("available", True)]
+                    if args.production_resources:
+                        entries = [e for e in self.host.color_resource_catalog_provider.entries()
+                                   if e.get('kind') == 'effect' and e.get('available', True)]
+                    else:
+                        entries = [e for (kind, _), e in self.host.color_resource_preview.catalog.items()
+                                   if kind == "effect" and e.get("available", True)]
                     assert entries, "no effect entries for baseline plugin sample"
                     sample = entries[0]
                     layer = self.host.engine.get_active_layer()

@@ -63,13 +63,17 @@ def test_cached_source_thumbnail_reaches_card_without_edit(qtbot: Any) -> None:
 
 def test_late_result_from_departed_source_is_ignored(qtbot: Any) -> None:
     host, provider, bridge = _host(qtbot)
+    changes: list[QPixmap | None] = []
+    bridge.source_thumbnail_changed.connect(changes.append)
     bridge.refresh()
     host.current_file_path = "clip_b.mov"
     bridge.refresh()
     provider.thumbnail_ready.emit("clip_a.mov", _image())
     assert host.color_node_panel.view._source_thumbnail is None
+    assert changes == [None, None]
     provider.thumbnail_ready.emit("clip_b.mov", _image())
     assert host.color_node_panel.view._source_thumbnail is not None
+    assert isinstance(changes[-1], QPixmap)
 
 
 def test_clearing_media_clears_card_picture(qtbot: Any) -> None:
