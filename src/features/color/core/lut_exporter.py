@@ -423,7 +423,8 @@ class LutExportWorker(QObject):
         min_c = np.min(rgb, axis=-1)
         diff = max_c - min_c
         v = max_c
-        s = np.where(max_c > 1e-10, diff / max_c, 0)
+        s = np.zeros_like(max_c, dtype=np.result_type(diff, np.float32))
+        np.divide(diff, max_c, out=s, where=max_c > 1e-10)
         h = np.zeros_like(max_c)
         mask_r = (max_c == rgb[..., 0]) & (diff > 1e-10)
         h[mask_r] = (60 * ((rgb[..., 1][mask_r] - rgb[..., 2][mask_r]) / diff[mask_r]) + 360) % 360

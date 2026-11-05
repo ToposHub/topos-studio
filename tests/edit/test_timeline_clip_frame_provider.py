@@ -1087,6 +1087,9 @@ class TestAsyncJumpDecode:
         # Ownership stays with the successful importer, which fences the
         # source surface instead of releasing it in the caller.
         assert not deferred.release.is_released
+        # The importer is mocked here; finish its ownership in the test.
+        deferred.release.release()
+        assert deferred.release.is_released
 
     def test_deferred_gpu_frame_import_failure_releases_and_falls_back(self):
         """Failed external import releases the frame and uses CPU fallback."""
@@ -1185,6 +1188,9 @@ class TestAsyncJumpDecode:
         assert 9010 in provider._owned_textures
         assert not deferred.release.is_released
         bridge_release.release.assert_not_called()
+        # The mocked release queue does not consume its frame.
+        deferred.release.release()
+        assert deferred.release.is_released
 
     def test_release_video_sessions_stops_worker(self):
         provider, service, frame = self._make_provider_with_service(lambda: None)
