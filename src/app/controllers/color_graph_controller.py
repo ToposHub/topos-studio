@@ -1144,6 +1144,13 @@ class ColorGraphPanelHost:
             args = {"enabled": changed[0].enabled if changed else True}
         elif action in {"reset_grade", "unlink_shared"}:
             args = {"node_ids": targets}
+        elif action == "paste_domains":
+            # N12-B：view 手势透传完整三参（node_ids/payload/domains），
+            # 归一化采用之；缺参（非本视图来源）按目标集合兜底并报错。
+            if not (isinstance(args.get("payload"), Mapping)
+                    and args.get("domains")):
+                raise EnvelopeError("paste_domains 需要 payload 与 domains")
+            args.setdefault("node_ids", targets)
         elif action == "paste_grade":
             changed = [key for key in targets if key in after_nodes
                        and after_nodes[key].grade != authoritative.nodes[key].grade]

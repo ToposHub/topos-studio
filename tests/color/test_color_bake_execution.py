@@ -456,6 +456,14 @@ def test_bake_closure_survives_project_save_and_reopen(tmp_path):
         assert entry.resource_id in rids
     finally:
         bound.reset()
+        # load_project 会 set_project_color_overrides（工程级色彩覆盖
+        # 优先于 config_manager）——不清理会遮蔽后续测试的偏好读取
+        # （套内顺序污染：color_space_descriptor 的 stub cfg 被全局
+        # 覆盖抢先，smart-default 回落 BT709）。对齐 on_project_closed。
+        from src.shared.color.color_space_descriptor import (
+            clear_project_color_overrides,
+        )
+        clear_project_color_overrides()
 
 
 def test_repeated_bakes_leave_no_orphan_resources(qapp, tmp_path):

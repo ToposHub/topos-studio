@@ -187,9 +187,16 @@ class TestCpuDomainFailClosed:
                    production_layer_domain_errors(layer))
 
     def test_non_normal_blend_rejected(self):
+        """N14-B 契约翻新：非 Normal blend 在 CPU 图路径已接线
+        （_apply_blend_mode_cpu 同式）；Metal/pointwise 仍 fail-closed。"""
         layer = {"grading_params": {}, "blend_mode": "Screen"}
+        assert not any("blend_mode" in e for e in
+                       production_layer_domain_errors(layer))
         assert any("blend_mode" in e for e in
-                   production_layer_domain_errors(layer))
+                   production_layer_domain_errors(layer, backend="metal"))
+        assert any("blend_mode" in e for e in
+                   production_layer_domain_errors(layer,
+                                                  backend="pointwise"))
 
     def test_curves_data_without_lut_rejected(self):
         layer = {"grading_params": {}, "curves_data": {"M": [(0, 255)]}}
