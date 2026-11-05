@@ -4173,19 +4173,25 @@ class AsyncRenderer(QThread):
         if clean_black > 0.01 or clean_white > 0.01 or blur_radius > 0.01:
             logger.debug(f"Debug] blur={blur_radius:.2f}, clean_black={clean_black:.2f}, clean_white={clean_white:.2f}")
 
+        # N02-B：换算引用 key_pipeline_params 权威表（GL/CPU 共用口径；
+        # 数值与旧内联式一致——blur_radius/clean_radius 为同式抽取）。
+        from src.features.color.core.key_pipeline_params import (
+            blur_radius as _kp_blur_radius,
+            clean_radius as _kp_clean_radius,
+            denoise_radius as _kp_denoise_radius,
+            denoise_strength as _kp_denoise_strength,
+        )
         # Apply clean_black (erosion / black level cleanup)
-        if clean_black > 0.01:
-            # Convert 0-20 slider to radius (scale by image size for visible effect)
-            radius = max(1.0, clean_black * 3.0)
-            matte_tex_A = self._morphology_pass(matte_tex_A, w, h, radius, 0)  # Erode (min)
-            logger.debug(f"Debug] Applied clean_black (erode) with radius={radius:.1f}")
+        r_clean_black = _kp_clean_radius(clean_black)
+        if r_clean_black > 0:
+            matte_tex_A = self._morphology_pass(
+                matte_tex_A, w, h, float(r_clean_black), 0)  # Erode (min)
 
         # Apply clean_white (dilation / white level cleanup)
-        if clean_white > 0.01:
-            # Convert 0-20 slider to radius (scale by image size for visible effect)
-            radius = max(1.0, clean_white * 3.0)
-            matte_tex_A = self._morphology_pass(matte_tex_A, w, h, radius, 1)  # Dilate (max)
-            logger.debug(f"Debug] Applied clean_white (dilate) with radius={radius:.1f}")
+        r_clean_white = _kp_clean_radius(clean_white)
+        if r_clean_white > 0:
+            matte_tex_A = self._morphology_pass(
+                matte_tex_A, w, h, float(r_clean_white), 1)  # Dilate (max)
 
         # Apply blur (Gaussian blur for smooth edges)
         if blur_radius > 0.01:
@@ -4197,9 +4203,7 @@ class AsyncRenderer(QThread):
                 matte_tex_B = self.fb_manager.get_temp_texture(w, h, components=1, dtype='f2')
                 fbo_B = self.fb_manager.get_fbo(matte_tex_B)
 
-                # Convert 0-100 slider to blur radius
-                # Increased scale factor for more visible blur effect
-                radius = max(1.0, blur_radius * 1.0)
+                radius = float(_kp_blur_radius(blur_radius))
 
                 fbo_B.use()
                 self.ctx.viewport = (0, 0, w, h)
@@ -4230,7 +4234,7 @@ class AsyncRenderer(QThread):
         denoise = qp.get('denoise', 0.0)
         prog_dn = self._get_utility_shader('matte_denoise') if denoise > 0.5 else None
         if denoise > 0.5 and prog_dn is not None:
-            dn_radius = max(1.0, denoise * 0.04)
+            dn_radius = float(_kp_denoise_radius(denoise))
             matte_tex_A = self._blur_matte_separable(matte_tex_A, w, h, dn_radius)
             matte_tex_B = self.fb_manager.get_temp_texture(w, h, components=1, dtype='f2')
             fbo_B = self.fb_manager.get_fbo(matte_tex_B)
@@ -4239,7 +4243,7 @@ class AsyncRenderer(QThread):
             self.ctx.clear(0.0, 0.0, 0.0, 0.0)
             matte_tex_A.use(0)
             prog_dn['u_tex'].value = 0
-            prog_dn['u_strength'].value = float(min(denoise / 100.0, 1.0))
+            prog_dn['u_strength'].value = _kp_denoise_strength(denoise)
             self._render_quad(prog_dn)
             self.fb_manager.release_temp_texture(matte_tex_A)
             matte_tex_A = matte_tex_B

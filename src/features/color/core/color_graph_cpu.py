@@ -680,14 +680,15 @@ def _cpu_node_matte(base: np.ndarray, params: Mapping[str, Any],
     matte: np.ndarray | None = None
     qualifier = params.get("qualifier_params") or {}
     if qualifier.get("enabled"):
+        # N02-B 切片 2：后处理不再拒绝——numpy 等价实现（key_pipeline_
+        # params 权威换算，GL/CPU 共用口径），消除「GL 应用/CPU 拒绝」
+        # 的跨后端分歧。
         from src.features.color.core.qualifier_cpu import (
+            apply_qualifier_postprocess_cpu,
             compute_qualifier_matte,
-            qualifier_postprocess_active,
         )
-        if qualifier_postprocess_active(qualifier):
-            raise UnsupportedNode(
-                "qualifier 后处理（blur/clean/denoise）在 CPU 图路径不支持")
         matte = compute_qualifier_matte(base, qualifier)
+        matte = apply_qualifier_postprocess_cpu(matte, qualifier)
     windows = params.get("mask_shapes")
     if windows:
         from src.features.color.core.layer import MaskGroup, MaskShape
