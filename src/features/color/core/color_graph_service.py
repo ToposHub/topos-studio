@@ -234,14 +234,32 @@ class ColorGraphService:
         normalized.sort(key=lambda e: e["frame"])
         return normalized
 
+    #: N10-B：关键帧可动画轨道名白名单（grade 域 ∪ qualifier 域）。
+    def _keyframe_track_whitelist(self) -> frozenset:
+        from src.features.color.core.grade_keyframes import (
+            GRADE_KEYFRAME_PARAMS, qualifier_track_name,
+        )
+        return frozenset(GRADE_KEYFRAME_PARAMS) | frozenset(
+            qualifier_track_name(field)
+            for field in ("hue_center", "hue_width", "hue_soft",
+                          "sat_low", "sat_high", "sat_soft_low",
+                          "sat_soft_high", "lum_low", "lum_high",
+                          "lum_soft_low", "lum_soft_high"))
+
     def _keyframe_target_or_fail(self, graph: ColorGraphData,
-                                 node_id: str) -> Any:
-        """N10 目标校验：CORRECTOR 实例专属（shared 定义级扇出/compound
-        成员 v1 fail-closed）。"""
+                                 node_id: str,
+                                 param: str | None = None) -> Any:
+        """N10 目标校验：Corrector/SharedCorrector 实例（N10-B 扩 shared
+        实例级；定义级扇出/compound 成员仍 fail-closed）。"""
         node = self._node(graph, node_id)
-        if node is None or node.known_type() is not NodeType.CORRECTOR:
+        if node is None or node.known_type() not in (
+                NodeType.CORRECTOR, NodeType.SHARED_CORRECTOR):
             return self._fail(graph, "node_not_found",
                               f"关键帧目标不是 Corrector 实例: {node_id}",
+                              node_id=node_id)
+        if param is not None and param not in self._keyframe_track_whitelist():
+            return self._fail(graph, "illegal_param_key",
+                              f"关键帧轨道名不在白名单: {param}",
                               node_id=node_id)
         if node.params.get("locked"):
             return self._fail(graph, "node_locked",
@@ -250,8 +268,8 @@ class ColorGraphService:
         return node
 
     def _patch_node_keyframes(self, graph: ColorGraphData, node_id: str,
-                              mutate) -> GraphEditResult:
-        node = self._keyframe_target_or_fail(graph, node_id)
+                              mutate, *, param: str | None = None) -> GraphEditResult:
+        node = self._keyframe_target_or_fail(graph, node_id, param)
         if not isinstance(node, ColorNodeData):
             return node  # type: ignore[return-value]
         tracks = {str(k): self._normalized_keyframe_track(v)
@@ -282,7 +300,8 @@ class ColorGraphService:
             track.append(entry)
             track.sort(key=lambda e: e["frame"])
             tracks[str(param)] = track
-        return self._patch_node_keyframes(graph, node_id, mutate)
+        return self._patch_node_keyframes(graph, node_id, mutate,
+                                          param=str(param))
 
     def op_remove_node_keyframe(self, graph: ColorGraphData, node_id: str,
                                 param: str, frame: int,
@@ -294,7 +313,8 @@ class ColorGraphService:
                 tracks[str(param)] = track
             else:
                 tracks.pop(str(param), None)
-        return self._patch_node_keyframes(graph, node_id, mutate)
+        return self._patch_node_keyframes(graph, node_id, mutate,
+                                          param=str(param))
 
     def op_move_node_keyframe(self, graph: ColorGraphData, node_id: str,
                               param: str, from_frame: int, to_frame: int,
@@ -311,7 +331,8 @@ class ColorGraphService:
                 track.append(k)
             track.sort(key=lambda e: e["frame"])
             tracks[str(param)] = track
-        return self._patch_node_keyframes(graph, node_id, mutate)
+        return self._patch_node_keyframes(graph, node_id, mutate,
+                                          param=str(param))
 
     # ═══ N15：Resolve 窗口组合（CPW/LPW/PPW/PCW 一键 = Serial+Window）═══
 
@@ -1056,13 +1077,26 @@ class ColorGraphService:
     # ═══ N12：选择性域粘贴 ══════════════════════════════════════════
 
     #: 可粘贴域 → (params 键, legacy_payload 键)；None = 域不在该载体。
+    # N12-B：域表对齐 GradeClipboard 类别粒度（grade/curves(三捆)/hsl/
+    # mixer/soft_clip/qualifier/keyframes/bake）；warper（ndarray 载体）
+    # 与栈级 tracking/raw 登记后续批次。
     _PASTE_DOMAIN_TARGETS = {
         "grade": ("grade", None),
         "curves": (None, "curves_data"),
+        "curves_edit": (None, "curves_edit"),
+        "curves_soft_clip": (None, "curves_soft_clip"),
+        "hsl": (None, "hsl_curve_data"),
+        "mixer": (None, "mixer_params"),
+        "soft_clip": (None, "soft_clip_params"),
+        "qualifier": ("qualifier", None),
+        "keyframes": ("grade_keyframes", None),
         "lut": ("resources", None),
+        "bake": ("resources", None),
         "window": (None, "mask_shapes"),
         "effects": (None, "plugins"),
     }
+    #: 域粘贴时的资源引用校验域（fail-visible：缺资源拒绝而非植悬空引用）
+    _RESOURCE_VALIDATED_DOMAINS = ("lut", "bake")
 
     def op_paste_selected_domains(self, graph: ColorGraphData,
                                   node_ids: Sequence[str],
@@ -1083,6 +1117,33 @@ class ColorGraphService:
         if not isinstance(payload, Mapping):
             return self._fail(graph, "illegal_param_key",
                               "payload 必须是 Mapping")
+        # N12-B：资源引用域粘贴前校验——跨工程/缺资源 fail-visible 拒绝
+        # （此前 lut 域直接写入可植入未注册 topos-res:// 引用，保存期
+        # 闭包才标 missing）。
+        for domain in self._RESOURCE_VALIDATED_DOMAINS:
+            if domain not in domains:
+                continue
+            data = payload.get(domain)
+            if not isinstance(data, Mapping):
+                continue
+            ref = str(data.get(f"{domain}_ref") or "")
+            if not ref:
+                continue
+            valid = (self._lut_reference_valid(ref) if domain == "lut"
+                     else self._bake_reference_valid(ref))
+            if not valid:
+                return self._fail(graph, "resource_unknown",
+                                  f"粘贴的 {domain} 资源未注册: {ref}")
+        # N12-B：缺插件占位诊断（保留实例 + 标记，不静默丢弃/不阻断）
+        plugin_placeholders: list[str] = []
+        if "effects" in domains:
+            for plugin in (payload.get("effects")
+                           if isinstance(payload.get("effects"),
+                                         (list, tuple)) else ()):
+                if isinstance(plugin, Mapping):
+                    pid = str(plugin.get("plugin_id") or "")
+                    if pid and self._effect_schema(pid) is None:
+                        plugin_placeholders.append(pid)
         targets = list(node_ids)
         if not targets:
             return self._fail(graph, "illegal_param_key", "粘贴目标为空")
@@ -1107,12 +1168,17 @@ class ColorGraphService:
                     continue
                 param_key, legacy_key = self._PASTE_DOMAIN_TARGETS[domain]
                 if domain == "effects":
-                    # 重建本地身份（新 instance_id；不共享来源身份）
+                    # 重建本地身份（新 instance_id；不共享来源身份）。
+                    # N12-B：缺插件实例保留 + missing 占位标记（执行期
+                    # shader_missing 既有 fail-closed；UI/预检可见）。
                     rebuilt = []
                     for plugin in data if isinstance(data, (list, tuple)) else ():
                         if isinstance(plugin, Mapping):
                             plugin = dict(plugin)
                             plugin["instance_id"] = self._id_factory()
+                            pid = str(plugin.get("plugin_id") or "")
+                            if pid and self._effect_schema(pid) is None:
+                                plugin["missing"] = True
                             rebuilt.append(plugin)
                     legacy["plugins"] = rebuilt
                 elif domain == "lut":
@@ -1123,6 +1189,14 @@ class ColorGraphService:
                     else:
                         resources.pop("lut_ref", None)
                         resources.pop("lut_strength", None)
+                    params["resources"] = resources
+                elif domain == "bake":
+                    # bake 结果引用单槽粘贴（R06-B 资源域；校验已在前置）
+                    resources = dict(params.get("resources") or {})
+                    if isinstance(data, Mapping) and data.get("bake_ref"):
+                        resources["bake_ref"] = data["bake_ref"]
+                    else:
+                        resources.pop("bake_ref", None)
                     params["resources"] = resources
                 elif domain == "window":
                     shapes = []

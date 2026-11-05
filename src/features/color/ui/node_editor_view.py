@@ -634,19 +634,78 @@ class ColorNodeView(QGraphicsView):
         ids = self._editable_ids()
         if not ids:
             return
+        # N12-B：完整 arguments 随手势透传——权威重放需要
+        # node_ids/payload/domains 三参，此前缺省导致归一化空参被拒。
         self.apply_edit(
             "paste_domains",
-            lambda: self._paste_domains_via_service(ids, selected, domains))
-
-    def _paste_domains_via_service(self, ids, selected, domains) -> None:
-        """本地状态直达 service 语义（编辑经 apply_edit 提交权威）。"""
-        from src.features.color.core.color_graph_service import ColorGraphService
-        result = ColorGraphService().apply_intent(
-            self.state.graph, "paste_selected_domains",
+            lambda: self._paste_domains_via_service(ids, selected, domains),
             {"node_ids": sorted(ids), "payload": selected,
              "domains": list(domains)})
-        if result.ok:
-            self.state._commit(result.graph)
+
+    def _paste_domains_via_service(self, ids, selected, domains) -> None:
+        """本地 draft 等价写入（即时反馈）；权威提交走透传参数的
+        envelope 重放（N12-B 修复：此前把 GraphDraft 直传 service 的
+        ColorGraphData op 抛 AttributeError，本地与权威双失败）。"""
+        from copy import deepcopy
+        from uuid import uuid4
+        from src.features.color.core.color_graph_service import ColorGraphService
+        targets = ColorGraphService._PASTE_DOMAIN_TARGETS
+        draft = self.state.snapshot()
+        changed = False
+        for node_id in ids:
+            node = draft.nodes[node_id]
+            payload = dict(node.backend_payload or {})
+            params = dict(payload.get("params") or {})
+            legacy = dict(payload.get("legacy_payload") or {})
+            for domain in domains:
+                data = selected.get(domain)
+                if data is None:
+                    continue
+                changed = True
+                if domain == "effects":
+                    rebuilt = []
+                    for plugin in (data if isinstance(data, (list, tuple))
+                                   else ()):
+                        if isinstance(plugin, dict):
+                            plugin = dict(plugin)
+                            plugin["instance_id"] = str(uuid4())
+                            rebuilt.append(plugin)
+                    legacy["plugins"] = rebuilt
+                elif domain in ("lut", "bake"):
+                    resources = dict(params.get("resources") or {})
+                    ref_key = f"{domain}_ref"
+                    if isinstance(data, dict) and data.get(ref_key):
+                        resources[ref_key] = data[ref_key]
+                        if domain == "lut":
+                            resources["lut_strength"] = data.get(
+                                "lut_strength", 1.0)
+                    else:
+                        resources.pop(ref_key, None)
+                        if domain == "lut":
+                            resources.pop("lut_strength", None)
+                    params["resources"] = resources
+                elif domain == "window":
+                    shapes = []
+                    for shape in (data if isinstance(data, (list, tuple))
+                                  else ()):
+                        if isinstance(shape, dict):
+                            shape = dict(shape)
+                            if isinstance(shape.get("id"), str):
+                                shape["id"] = str(uuid4())
+                            shapes.append(shape)
+                    legacy["mask_shapes"] = shapes
+                else:
+                    param_key, legacy_key = targets.get(
+                        domain, (None, None))
+                    if param_key is not None:
+                        params[param_key] = deepcopy(data)
+                    elif legacy_key is not None:
+                        legacy[legacy_key] = deepcopy(data)
+            if changed:
+                node.backend_payload = {"params": params,
+                                        "legacy_payload": legacy}
+        if changed:
+            self.state._commit(draft)
 
     def select_adjacent(self, offset: int) -> None:
         ids = [node.id for node in sorted(self.state.graph.nodes.values(), key=lambda n: n.number)

@@ -363,3 +363,24 @@ def test_append_inserts_at_output_even_when_earlier_node_selected(view: ColorNod
     view.append_node()
     appended = view.state.graph.active_id
     assert any(edge.src_node == second and edge.dst_node == appended for edge in view.state.graph.connections)
+
+
+def test_paste_domains_carries_full_arguments(qtbot) -> None:
+    """N12-B：paste_domains 手势透传完整三参——权威重放缺参会被归一化
+    拒绝并回滚（此前 UI 手势实际提交失败）。"""
+    view = ColorNodeView()
+    qtbot.addWidget(view)
+    view.apply_edit("add_serial", view.state.add_serial)
+    node_id = view.state.graph.active_id
+    view.state.select({node_id}, node_id)
+    view._copied_domains = {"grade": {"exposure": 3.0},
+                            "curves": {"points": [[0, 0], [1, 1]]}}
+    captured: list[dict] = []
+    view.edit_requested.connect(
+        lambda action, payload: captured.append(payload))
+    view.paste_domains(("grade",))
+    assert captured, "paste_domains 未发出 edit_requested"
+    args = captured[-1].get("arguments")
+    assert isinstance(args, dict) and args.get("node_ids") == [node_id]
+    assert args.get("domains") == ["grade"]
+    assert isinstance(args.get("payload"), dict) and "grade" in args["payload"]
