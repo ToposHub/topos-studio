@@ -246,11 +246,13 @@ class ColorBakeService(QObject):
         request_active_cancel(task_id)
         return self.broker.cancel(task_id)
 
-    def reset(self) -> None:
+    def reset(self, *, join_worker_timeout: float = 2.0) -> None:
         """关工程/换会话：全取消 + 清队 + 释放全部结果文件。
 
         在途任务由协作取消让出（tile 边界；不 terminate 原生推理）；
-        队列唤醒哨兵让空闲工作线程退出，后续 submit 重建。
+        队列唤醒哨兵让空闲工作线程退出并 join（有界等待——测试收尾
+        的确定性线程回收；超时仅记录，不阻塞关工程），后续 submit
+        重建线程。
         """
         with self._thread_lock:
             pending = list(self._pinned)
@@ -258,6 +260,12 @@ class ColorBakeService(QObject):
         for task_id in pending:
             self.cancel(task_id)
         self._queue_sem.release()
+        worker = self._worker_thread
+        if worker is not None and worker is not QThread.currentThread():
+            if not worker.wait(int(join_worker_timeout * 1000)):
+                _LOGGER.warning(
+                    "bake worker did not exit within %.1fs on reset",
+                    join_worker_timeout)
         self._session.reset()
 
     def active_task_ids(self) -> list[str]:

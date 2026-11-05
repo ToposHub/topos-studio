@@ -3082,8 +3082,15 @@ class DockLayoutMixin:
         # saved sizes came from a different monitor setup or DPI scale.
         # Re-clamp once those steps have settled so the window always ends
         # up fully on-screen; the helper no-ops when it already fits.
-        QTimer.singleShot(150, lambda: self._ensure_window_on_screen(self))
-        QTimer.singleShot(400, lambda: self._ensure_window_on_screen(self))
+        # N16：测试收尾的 DeferredDelete 冲刷可能先于延迟回调销毁宿主
+        # （以及真实关窗场景）——回调内防御已删对象。
+        def _clamp_safely():
+            try:
+                self._ensure_window_on_screen(self)
+            except RuntimeError:
+                pass
+        QTimer.singleShot(150, _clamp_safely)
+        QTimer.singleShot(400, _clamp_safely)
 
     # ------------------------------------------------------------------
     # _enforce_page_dock_visibility
