@@ -2680,7 +2680,14 @@ class DockLayoutMixin:
             # ``resizeDocks`` in _restore_docked_sizes can grow the window
             # past the screen for layouts saved on another monitor/DPI
             # setup; re-clamp once its 60ms timer has settled.
-            QTimer.singleShot(300, lambda: self._ensure_window_on_screen(self))
+            # N16：DeferredDelete 冲刷可能先于延迟回调销毁宿主——回调内
+            # 防御已删对象（与 apply_layout 路径的 _clamp_safely 同款）。
+            def _clamp_after_restore():
+                try:
+                    self._ensure_window_on_screen(self)
+                except RuntimeError:
+                    pass
+            QTimer.singleShot(300, _clamp_after_restore)
             self.status_bar.showMessage(f"Layout '{name}' loaded.", 3000)
 
     # ------------------------------------------------------------------
