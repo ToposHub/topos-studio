@@ -50,10 +50,9 @@ class _Recorder:
 class TestAud19622VariantDuration:
     def _duration_label(self, list_widget) -> str:
         card = list_widget._container_layout.itemAt(0).widget()
-        for lbl in card.findChildren(QLabel):
-            if "时长" in lbl.text():
-                return lbl.text()
-        return ""
+        label = card.findChild(QLabel, "variantDurationLabel")
+        assert label is not None
+        return label.text()
 
     def test_seconds_use_project_fps(self, qapp):
         from src.features.edit.ai_editing.assistant_events import VariantCard

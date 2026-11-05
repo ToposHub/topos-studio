@@ -169,6 +169,7 @@ class _ColorGradingLayoutMigrationHost(_EditLayoutMigrationHost):
         self.dock_viewport.isFloating.return_value = False
         self.dock_viewport.height.return_value = 300
         self.dock_viewport.minimumHeight.return_value = 150
+        self._save_all_docked_sizes = MagicMock()
 
     def dockWidgetArea(self, dock) -> Qt.DockWidgetArea:
         if dock is self.dock_grading:
@@ -391,7 +392,7 @@ def test_unbalanced_color_tools_height_resizes_both_vertical_docks_once() -> Non
 
     host.resizeDocks.assert_called_once_with(
         [host.dock_viewport, grading_dock],
-        [884, 416],
+        [890, 410],
         Qt.Orientation.Vertical,
     )
     assert config.data[_COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY] == \

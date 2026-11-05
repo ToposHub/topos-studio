@@ -163,9 +163,12 @@ def _dimmed_svg_icon(path: Path, opacity: float = 0.62) -> QIcon:
     return QIcon(pixmap)
 
 
+@lru_cache(maxsize=128)
 def _transition_preview_icon(transition_type: str) -> QIcon:
     path = _TRANSITION_ICON_DIR / f"{transition_type}.svg"
-    return _dimmed_svg_icon(path) if path.is_file() else QIcon()
+    if not path.is_file():
+        path = _TRANSITION_ICON_DIR / "generic_transition.svg"
+    return _dimmed_svg_icon(path)
 
 
 class _EffectPreviewButton(QToolButton):

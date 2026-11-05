@@ -266,13 +266,14 @@ class Qwen3TTSProvider:
         - ``first_frame`` 取第一条 cue 的 start_frame（保持时间线偏移语义）。
         """
         import numpy as np
-        import soundfile as sf
-        from scipy.signal import resample_poly
 
         # AUD-14913：失败的 cue 以 0 时长空波形占位（保持索引对位），全部失败
         # 仍然视为未产出任何音频。
         if not waves or not any(len(w[1]) > 0 for w in waves):
             raise RuntimeError("合成未产生任何音频波形")
+
+        import soundfile as sf
+        from scipy.signal import resample_poly
 
         out_sr = self._OUTPUT_SAMPLE_RATE
         first_frame = min(w[0] for w in waves)

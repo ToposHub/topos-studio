@@ -939,7 +939,7 @@ float sample_packed_edge_channel_linear(
 
 kernel void timeline_edge_preblur(
     device const uchar* source [[buffer(0)]],
-    device uchar* output [[buffer(1)]],
+    device float* output [[buffer(1)]],
     constant TimelineParams& p [[buffer(2)]],
     uint2 gid [[thread_position_in_grid]]) {
     uint width = p.source_output_dims.x;
@@ -964,8 +964,66 @@ kernel void timeline_edge_preblur(
         center + float2(radius, -radius), source, p);
     value += sample_packed_edge_channel_linear(
         center + float2(-radius, radius), source, p);
-    uchar code = to_u8((value / 16.0f) * 255.0f);
+    output[gid.y * width + gid.x] = value / 16.0f;
+}
+
+float sample_preblurred_edge(
+    int2 position, device const float* scalar, constant TimelineParams& p) {
+    uint width = p.source_output_dims.x;
+    int x = effect_edge_coord(position.x, int(width), p);
+    int y = effect_edge_coord(position.y, int(p.source_output_dims.y), p);
+    return scalar[uint(y) * width + uint(x)];
+}
+
+kernel void timeline_edge_detect_preblurred(
+    device const float* scalar [[buffer(0)]],
+    device uchar* output [[buffer(1)]],
+    constant TimelineParams& p [[buffer(2)]],
+    uint2 gid [[thread_position_in_grid]]) {
+    uint width = p.source_output_dims.x;
+    if (gid.x >= width || gid.y >= p.source_output_dims.y) return;
+    int2 center_position = int2(gid);
+    uint method = uint(p.effect_extra.z + 0.5f);
+    int kernel_size = int(p.effect.y + 0.5f);
+    float gx = 0.0f, gy = 0.0f;
+    if (kernel_size == 5 && (method == 0u || method == 1u)) {
+        for (int dy = -2; dy <= 2; ++dy) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                float value = sample_preblurred_edge(
+                    center_position + int2(dx, dy), scalar, p);
+                float coefficient = edge_sobel_smoothing_weight(dy)
+                    * float(dx);
+                gx += value * coefficient;
+                gy += value * coefficient;
+            }
+        }
+        gx /= 12.0f;
+        gy /= 12.0f;
+    }
+    float tl = sample_preblurred_edge(center_position + int2(-1, -1), scalar, p);
+    float tm = sample_preblurred_edge(center_position + int2(0, -1), scalar, p);
+    float tr = sample_preblurred_edge(center_position + int2(1, -1), scalar, p);
+    float ml = sample_preblurred_edge(center_position + int2(-1, 0), scalar, p);
+    float center = sample_preblurred_edge(center_position, scalar, p);
+    float mr = sample_preblurred_edge(center_position + int2(1, 0), scalar, p);
+    float bl = sample_preblurred_edge(center_position + int2(-1, 1), scalar, p);
+    float bm = sample_preblurred_edge(center_position + int2(0, 1), scalar, p);
+    float br = sample_preblurred_edge(center_position + int2(1, 1), scalar, p);
+    if (kernel_size != 5 || (method != 0u && method != 1u)) {
+        bool use_prewitt = method == 2u && kernel_size != 5;
+        gx = use_prewitt
+            ? -tl + tr - ml + mr - bl + br
+            : -tl + tr - 2.0f * ml + 2.0f * mr - bl + br;
+        gy = use_prewitt
+            ? -tl - tm - tr + bl + bm + br
+            : -tl - 2.0f * tm - tr + bl + 2.0f * bm + br;
+    }
+    float laplacian = (kernel_size == 5 && method == 3u)
+        ? tm + bm + ml + mr + 0.5f * (tl + tr + bl + br) - 8.0f * center
+        : tm + bm + ml + mr - 4.0f * center;
+    float3 rgb = finish_edge_detect(gx, gy, laplacian, p);
     uint index = (gid.y * width + gid.x) * 3u;
+    uchar code = to_u8(rgb.r);
     output[index] = code;
     output[index + 1u] = code;
     output[index + 2u] = code;
@@ -3692,20 +3750,29 @@ class TimelineMetalExportRenderer:
                     )
                     source_mip_offset = dest_offset
             if effect_kind == 6 and float(effect.get("preblur", 0.0)) > 0.0:
-                preblur_output = self._upload_array(
+                preblur_params = self._upload_array(
                     f"{prefix}chain_effect_{effect_index}_preblur_params",
                     params,
                 )
+                preblur_scalar = self._private_buffer(
+                    "stack_effect_chain_preblur_scalar",
+                    int(source_width) * int(source_height) * 4,
+                )
                 ctx.dispatch(
                     self._kernel("timeline_edge_preblur"),
-                    buffers={0: current, 1: alternate, 2: preblur_output},
+                    buffers={0: current, 1: preblur_scalar, 2: preblur_params},
+                    threads=(source_width, source_height, 1),
+                )
+                ctx.dispatch(
+                    self._kernel("timeline_edge_detect_preblurred"),
+                    buffers={0: preblur_scalar, 1: alternate,
+                             2: preblur_params},
                     threads=(source_width, source_height, 1),
                 )
                 current, alternate = alternate, current
-                # The separate Metal preblur dispatch already applied the
-                # CPU export's 3x3 fractional Gaussian, so Sobel samples the
-                # resulting scalar plane directly.
-                params["effect_extra"][0, 3] = 0.0
+                # Keep the intermediate scalar at float32 precision, matching
+                # CPU export before the final frame quantization.
+                continue
             effect_params_buffer = self._upload_array(
                 f"{prefix}chain_effect_{effect_index}_params", params)
             if effect_kind == 11:

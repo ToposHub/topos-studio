@@ -120,6 +120,11 @@ include = ["src*", "apps*"]
 "src.features.edit.insights" = [
     "locales/*.json",
 ]
+"src.features.edit.ui" = [
+    "effect_icons/*.svg",
+    "transition_icons/*.svg",
+    "transition_previews/generated/*.gif",
+]
 
 # pytest 配置只保留根目录 pytest.ini 一处（R4-4：双份维护易漂移，
 # 且 pytest.ini 优先级更高，[tool.pytest.ini_options] 实际被忽略）。
