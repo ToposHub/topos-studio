@@ -491,6 +491,7 @@ def _fx_params_neutral(fx: Mapping[str, Any]) -> bool:
 
 def production_layer_domain_errors(layer: Mapping[str, Any], *,
                                    spatial_mask_supplied: bool = False,
+                                   backend: str = "cpu",
                                    ) -> list[str]:
     """生产域 Corrector 的能力检查（CPU/Metal 共用，B12.1 矩阵依据）。
 
@@ -503,6 +504,12 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     ``spatial_mask_supplied``：调用方已显式求值 qualifier/窗口空间域并
     以 ``mask`` 传入（N02 的 ``run_plan_cpu`` 路径）时置 True——裸
     oracle/能力矩阵/LUT 导出保持默认 False（空间变化域不在点态基础域）。
+
+    ``backend``（N14-B）：``"cpu"`` 放行已接线域（HSL 曲线 /
+    soft_clip / curves_soft_clip / 非 Normal blend——advanced_grade_cpu
+    与 _apply_blend_mode_cpu 同式实现）；``"metal"``/``"pointwise"`` 维持
+    拒绝（Metal kernel 参数位未扩、LUT 导出为点态 bake 语义），逐域
+    恢复不一次性取消 fail-closed。
     """
     errors: list[str] = []
     grading = layer.get("grading_params")
@@ -524,16 +531,21 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     if layer.get("warper_params") is not None:
         errors.append("warper_params 不在基础域")
     # N14 v1：LUT3D 已实现（trilinear + R05 强度混合；强度 0 = 恒等）
+    # N14-B：HSL 曲线 / curves_soft_clip 在 CPU 后端已接线
+    # （advanced_grade_cpu 同式）；Metal/pointwise 维持拒绝。
+    _cpu_backend = backend == "cpu"
     hsl_data = layer.get("hsl_curve_data")
-    if layer.get("hsl_curve_lut") is not None or (
-            isinstance(hsl_data, Mapping) and hsl_data):
+    hsl_active = layer.get("hsl_curve_lut") is not None or (
+        isinstance(hsl_data, Mapping) and bool(hsl_data))
+    if hsl_active and not _cpu_backend:
         errors.append("HSL 曲线不在基础域")
     soft_clip = layer.get("curves_soft_clip")
     if isinstance(soft_clip, Mapping) and soft_clip:
         from src.features.color.core.curves_soft_clip import (
             default_curves_soft_clip,
         )
-        if dict(soft_clip) != default_curves_soft_clip():
+        if dict(soft_clip) != default_curves_soft_clip() \
+                and not _cpu_backend:
             errors.append("curves_soft_clip 非默认（不在基础域）")
     fx = layer.get("effects_params")
     if isinstance(fx, Mapping) and fx and not _fx_params_neutral(fx):
@@ -542,8 +554,15 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
         errors.append("curves_data 未预构建 curves_lut（GL 侧在 "
                       "prepare_corrector 构建；CPU/Metal 要求显式 LUT）")
     blend = str(layer.get("blend_mode", "Normal"))
-    if blend != "Normal":
-        errors.append(f"blend_mode={blend} 未在 CPU/Metal 基础域冻结")
+    if blend != "Normal" and not _cpu_backend:
+        errors.append(f"blend_mode={blend} 未在 Metal/pointwise 基础域冻结")
+    # N14-B：legacy 8 参数 soft_clip（soft_clip_params）CPU 已接线
+    # （apply_soft_clip_image 与 shader SOFT_CLIP_SNIPPET 同式）。
+    # 中性（enabled=False）与 GL 编译期门控同义：不拒绝。
+    _sc_params = layer.get("soft_clip_params")
+    if not _cpu_backend and isinstance(_sc_params, Mapping) \
+            and _sc_params and _sc_params.get("enabled"):
+        errors.append("soft_clip_params 不在 Metal/pointwise 基础域")
     # N02：qualifier/窗口是空间变化域（逐像素 matte）——基础域（点态）
     # 与 pointwise LUT 导出（N13）都不可表达，显式列出而非静默忽略。
     if not spatial_mask_supplied:
@@ -604,7 +623,7 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
     已用 keyer/combine 的 CPU 移植显式求值）。
     """
     errors = production_layer_domain_errors(
-        layer, spatial_mask_supplied=mask is not None)
+        layer, spatial_mask_supplied=mask is not None, backend="cpu")
     if errors:
         raise UnsupportedNode("; ".join(errors))
     from src.features.color.core.composition_uniforms import (
@@ -618,6 +637,37 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
     lut = layer.get("curves_lut")
     if lut is not None:
         graded = apply_curves_cpu(graded, lut)
+    # N14-B：HSL 曲线（GL 段序在 curves 之后；LUT 预构建或从数据重建，
+    # 索引序与 lut_exporter/GPU 同源）
+    hsl_lut = layer.get("hsl_curve_lut")
+    if hsl_lut is None:
+        hsl_data = layer.get("hsl_curve_data")
+        if isinstance(hsl_data, Mapping) and hsl_data:
+            from src.features.color.core.layer import (
+                build_hsl_curve_lut_from_data,
+            )
+            try:
+                hsl_lut = build_hsl_curve_lut_from_data(dict(hsl_data))
+            except (TypeError, ValueError):
+                hsl_lut = None
+    if hsl_lut is not None:
+        from src.features.color.core.advanced_grade_cpu import (
+            apply_hsl_curves_image,
+        )
+        graded = apply_hsl_curves_image(graded, hsl_lut).astype(_F32)
+    # N14-B：soft_clip（legacy 8 参数）→ curves_soft_clip（GL 段序：
+    # sc 在 curves_soft_clip 之前；默认参数恒等直通）
+    from src.features.color.core.advanced_grade_cpu import (
+        apply_curves_soft_clip_image, apply_soft_clip_image,
+    )
+    sc = layer.get("soft_clip_params")
+    if isinstance(sc, Mapping) and sc and sc.get("enabled"):
+        # GL 编译期门控 u_sc_enabled 同语义：未启用不进管线（默认
+        # 8 参数 dict 恒存在于 payload，不判 enabled 会破坏中性层）
+        graded = apply_soft_clip_image(graded, dict(sc)).astype(_F32)
+    csc = layer.get("curves_soft_clip")
+    if isinstance(csc, Mapping) and csc:
+        graded = apply_curves_soft_clip_image(graded, dict(csc)).astype(_F32)
     # N14 v1：LUT3D 域（R05 顺序在 curves 之后；GL 同序——trilinear
     # 采样 + blend_node_lut_strength HDR/负值语义同源）
     lut_path = layer.get("active_lut_path")
@@ -629,8 +679,19 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
     opacity = _F32(values.get("u_opacity", 1.0))
     k = opacity if mask is None else (
         np.clip(mask[..., :1], _F32(0.0), _F32(1.0)).astype(_F32) * opacity)
+    blend = str(layer.get("blend_mode", "Normal"))
     out = src.copy()
-    out[..., :3] = (src[..., :3] * (_F32(1.0) - k) + graded * k).astype(_F32)
+    if blend != "Normal":
+        # N14-B：非 Normal 混合 epilogue（_apply_blend_mode_cpu 与
+        # BLEND_MODES_SNIPPET 逐条同式；blended = blend(src, graded)）
+        blended = _apply_blend_mode_cpu(
+            graded.astype(np.float64), src[..., :3].astype(np.float64),
+            blend).astype(_F32)
+        out[..., :3] = (src[..., :3] * (_F32(1.0) - k)
+                        + blended * k).astype(_F32)
+    else:
+        out[..., :3] = (src[..., :3] * (_F32(1.0) - k)
+                        + graded * k).astype(_F32)
     return out
 
 

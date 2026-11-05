@@ -87,7 +87,11 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
         payload = dict(payload)
         lut_ref = payload.pop("active_lut_path", None)
         payload.pop("lut_intensity", None)
-        domain_errors = production_layer_domain_errors(payload)
+        # N14-B：LUT 导出为点态 bake 语义——HSL/soft_clip/blend 等
+        # 逐像素域不在 pointwise 表达域（backend 显式声明，不随 CPU
+        # 图路径接线放开）
+        domain_errors = production_layer_domain_errors(
+            payload, backend="pointwise")
         # LUT 由烘焙路径处理（点态）——其余域错误全部保留
         for domain_error in domain_errors:
             errors.append(f"{candidate.node_id}: {domain_error}")

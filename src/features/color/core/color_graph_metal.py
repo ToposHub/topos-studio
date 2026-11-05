@@ -542,7 +542,9 @@ class ColorGraphMetalExecutor:
 
     def _grading_pass(self, render_pass: RenderPass, layer: Mapping,
                       input_buf, key_buf, width: int, height: int):
-        errors = production_layer_domain_errors(layer)
+        # N14-B：显式 metal 后端口径（HSL/soft_clip/blend CPU 已接线，
+        # Metal kernel 参数位未扩——维持逐域 fail-closed）
+        errors = production_layer_domain_errors(layer, backend="metal")
         if errors:
             raise MetalGraphFailure(
                 "param_domain_unsupported",

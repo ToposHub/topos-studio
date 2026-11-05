@@ -10,6 +10,14 @@ from src.features.edit.core.project import EditProject
 from tests.color.fixtures.color_graph import f03_layer_stack
 
 
+@pytest.fixture
+def n12b_graph():
+    """单 corrector 图 + 目标节点（N12-B 用例）。"""
+    graph = _graph()
+    target = next(n for n in graph.nodes if n.node_type == "corrector")
+    return graph, target
+
+
 def _graph():
     project, sid = EditProject.create(name="n12").create_color_stack(
         asset_id="a1", name="s")
@@ -92,3 +100,92 @@ def test_locked_target_rejected_and_unknown_domain_rejected() -> None:
         "node_ids": [target.node_id], "payload": {"grade": {"exposure": 1}},
         "domains": ["grade"]})
     assert not rejected.ok and rejected.primary_code == "node_locked"
+
+
+# ═══ N12-B：域表扩全 + 资源校验 + 缺插件占位 ═════════════════════
+
+def _n12b_service(tmp_path=None):
+    """lut/bake 校验接 fake 会话（registered 白名单）。"""
+    return ColorGraphService(
+        effect_schema_provider=lambda rid: (
+            [{"var_name": "amount", "type": "slider", "default": 0.2,
+              "min": 0.0, "max": 1.0}] if rid == "known_fx" else None),
+        lut_reference_validator=lambda ref: ref == "topos-res://lut_ok",
+        bake_reference_validator=lambda ref: ref == "topos-res://bake_ok")
+
+
+def test_new_domains_paste_and_leave_others(n12b_graph):
+    """扩表域（qualifier/soft_clip/mixer/hsl/keyframes）只写选定域。"""
+    service = _n12b_service()
+    graph, target = n12b_graph
+    payload = {
+        "grade": {"exposure": 9.0},
+        "qualifier": {"enabled": True, "lum_low": 0.2},
+        "soft_clip": {"enabled": True, "knee": 0.5},
+        "mixer": {"red": 1.1},
+        "hsl": {"sat_sat": [[0, 0], [1, 1]]},
+        "keyframes": {"exposure": {"keyframes": [
+            {"frame": 0, "value": 1.0, "interpolation": "linear"}]}},
+    }
+    result = service.apply_intent(graph, "paste_selected_domains", {
+        "node_ids": [target.node_id], "payload": payload,
+        "domains": ["qualifier", "soft_clip", "mixer", "hsl", "keyframes"]})
+    assert result.ok, result.diagnostics
+    node = next(n for n in result.graph.nodes if n.node_id == target.node_id)
+    assert node.params["qualifier"] == {"enabled": True, "lum_low": 0.2}
+    assert (node.legacy_payload.get("soft_clip_params") or {}).get("knee") == 0.5
+    assert (node.legacy_payload.get("mixer_params") or {}).get("red") == 1.1
+    assert node.params.get("grade_keyframes")
+    # 未选 grade 域 → 原样
+    assert (node.params.get("grade") or {}) != {"exposure": 9.0}
+
+
+def test_unregistered_lut_ref_rejected_fail_visible(n12b_graph):
+    """跨工程/缺资源：未注册 LUT 引用粘贴即拒（resource_unknown）。"""
+    service = _n12b_service()
+    graph, target = n12b_graph
+    result = service.apply_intent(graph, "paste_selected_domains", {
+        "node_ids": [target.node_id],
+        "payload": {"lut": {"lut_ref": "topos-res://lut_missing"}},
+        "domains": ["lut"]})
+    assert not result.ok
+    assert result.diagnostics[0].code == "resource_unknown"
+
+
+def test_bake_ref_domain_pastes_and_validates(n12b_graph):
+    """bake 域：注册引用粘贴成功；未注册拒绝。"""
+    service = _n12b_service()
+    graph, target = n12b_graph
+    ok = service.apply_intent(graph, "paste_selected_domains", {
+        "node_ids": [target.node_id],
+        "payload": {"bake": {"bake_ref": "topos-res://bake_ok"}},
+        "domains": ["bake"]})
+    assert ok.ok, ok.diagnostics
+    node = next(n for n in ok.graph.nodes if n.node_id == target.node_id)
+    assert node.params["resources"]["bake_ref"] == "topos-res://bake_ok"
+    rejected = service.apply_intent(graph, "paste_selected_domains", {
+        "node_ids": [target.node_id],
+        "payload": {"bake": {"bake_ref": "topos-res://bake_missing"}},
+        "domains": ["bake"]})
+    assert not rejected.ok
+    assert rejected.diagnostics[0].code == "resource_unknown"
+
+
+def test_missing_plugin_kept_with_placeholder(n12b_graph):
+    """缺插件：实例保留 + missing 占位（不静默丢弃）。"""
+    service = _n12b_service()
+    graph, target = n12b_graph
+    result = service.apply_intent(graph, "paste_selected_domains", {
+        "node_ids": [target.node_id],
+        "payload": {"effects": [
+            {"plugin_id": "known_fx", "params": {"amount": 0.3},
+             "enabled": True},
+            {"plugin_id": "not_installed", "params": {}, "enabled": True}]},
+        "domains": ["effects"]})
+    assert result.ok, result.diagnostics
+    node = next(n for n in result.graph.nodes if n.node_id == target.node_id)
+    plugins = node.legacy_payload["plugins"]
+    by_id = {p["plugin_id"]: p for p in plugins}
+    assert "missing" not in by_id["known_fx"]
+    assert by_id["not_installed"].get("missing") is True
+    assert by_id["not_installed"]["plugin_id"] == "not_installed"  # 保留

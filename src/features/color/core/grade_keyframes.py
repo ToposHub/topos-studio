@@ -239,10 +239,12 @@ class GradeKeyframeTrack:
     # 求值
     # ------------------------------------------------------------------
 
-    def value_at(self, frame: int, default: Any) -> Any:
+    def value_at(self, frame: int, default: Any,
+                 *, circular: bool = False) -> Any:
         """帧求值：端点保持外推，相邻关键帧间按插值模式混合。
 
         vector 值分量独立插值；default 与关键帧值形态不一致时按标量处理。
+        ``circular``（标量专用，N10-B）：0-1 环形量按最短弧插值。
         """
         frame = int(frame)
         # AUD-0522: 锁内取快照——UI 线程 append→sort 的两步之间，导出线程
@@ -275,7 +277,13 @@ class GradeKeyframeTrack:
                         _lerp(float(a), float(b), t)
                         for a, b in zip(left.value, right.value)
                     )
-                return _lerp(float(left.value), float(right.value), t)
+                a = float(left.value)
+                b = float(right.value)
+                if circular:
+                    # 最短弧：b 相对 a 的环差 ∈ (-0.5, 0.5]
+                    delta = (b - a + 0.5) % 1.0 - 0.5
+                    return (a + delta * t) % 1.0
+                return _lerp(a, b, t)
 
         # 不可达（上面已覆盖端点与区间），防御返回末值
         value = keyframes[-1].value
@@ -491,9 +499,26 @@ def evaluate_mask_keyframes(layer: Any, frame: int) -> bool:
 #: 可动画的 Qualifier 数值字段 → 值形态（亮度区间 = 本期选定的真实
 #: 必要参数；其余字段显式标静态——扩展须按证据逐个登记）。
 QUALIFIER_KEYFRAME_FIELDS: Dict[str, str] = {
+    # N10-B：对齐 Resolve HSL Qualifier 动画核心域（全部标量）。离散
+    # 开关（enabled/invert/…*_enabled）与 key 后处理强度
+    # （blur/clean_*/denoise——涉 N02-B key_pipeline 逐帧声明）不收录，
+    # 登记 v2（invert 如需动画应为强制 hold 的离散轨道）。
+    "hue_center": "scalar",
+    "hue_width": "scalar",
+    "hue_soft": "scalar",
+    "sat_low": "scalar",
+    "sat_high": "scalar",
+    "sat_soft_low": "scalar",
+    "sat_soft_high": "scalar",
     "lum_low": "scalar",
     "lum_high": "scalar",
+    "lum_soft_low": "scalar",
+    "lum_soft_high": "scalar",
 }
+
+#: hue 是 0-1 环形量：这些字段的标量插值走最短弧（0.9→0.1 中点为
+#: 0.0/1.0 而非 0.5），与 Resolve 的 Hue 轨道语义一致。
+CIRCULAR_QUALIFIER_FIELDS: frozenset = frozenset({"hue_center"})
 
 QUALIFIER_TRACK_PREFIX = "qualifier."
 
@@ -569,6 +594,32 @@ def evaluate_qualifier_keyframes(layer: Any, frame: int) -> bool:
             params[field] = value
             changed = True
     return changed
+
+
+def evaluate_qualifier_params_tracks(
+    tracks: Dict[str, Any], frame: int, base_qp: Dict[str, Any],
+) -> Dict[str, Any]:
+    """N10-B：qualifier.* 轨道的 dict 纯函数求值（图执行 provider 用）。
+
+    与 layer 级 ``evaluate_qualifier_keyframes``（就地写回 layer 对象）
+    同域同插值（含 hue_center 最短弧）；返回浅拷贝 patch 后的
+    qualifier_params（原 dict 不动）。空轨道/空基底原样返回。
+    """
+    if not tracks or not base_qp:
+        return dict(base_qp or {})
+    patched = dict(base_qp)
+    frame = int(frame)
+    for name, track in tracks.items():
+        field = parse_qualifier_track_name(str(name))
+        if field is None:
+            continue
+        keyframes = getattr(track, "keyframes", None)
+        if not keyframes:
+            continue
+        patched[field] = track.value_at(
+            frame, patched.get(field, 0.0),
+            circular=field in CIRCULAR_QUALIFIER_FIELDS)
+    return patched
 
 
 def copy_named_tracks(

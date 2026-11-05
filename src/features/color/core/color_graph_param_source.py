@@ -159,6 +159,7 @@ def graph_node_layer_provider(
     if frame is not None:
         from src.features.color.core.grade_keyframes import (
             GradeKeyframe, GradeKeyframeTrack, evaluate_grade_keyframes,
+            evaluate_qualifier_params_tracks,
         )
         evaluated = {}
         for n in _iter_corrector_nodes(graph):
@@ -192,6 +193,14 @@ def graph_node_layer_provider(
                 tracks, int(frame), dict(payload.get("grading_params") or {}))
             merged = dict(payload)
             merged["grading_params"] = patched
+            # N10-B：qualifier.* 轨道同帧求值 patch qualifier_params
+            # （evaluate_grade_keyframes 白名单只吃 grade 域，互不干扰）。
+            if any(str(name).startswith("qualifier.") for name in tracks):
+                # 与 layer 级语义一致：字段恒求值（图 payload 基底恒有
+                # 默认限定器字段；是否消费由 enabled 决定）
+                merged["qualifier_params"] = evaluate_qualifier_params_tracks(
+                    tracks, int(frame),
+                    dict(payload.get("qualifier_params") or {}))
             evaluated[n.node_id] = merged
 
     def provide(node_id: str) -> Mapping[str, Any] | None:
