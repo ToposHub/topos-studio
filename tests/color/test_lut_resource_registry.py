@@ -153,6 +153,27 @@ def test_same_content_multiple_paths_deduplicated(tmp_path: Path,
     assert len(session.lut_entries()) == 1
 
 
+def test_newly_imported_uri_loads_from_verified_staging_until_reset(
+        tmp_path: Path, session: LutResourceSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.shared.color import lut_resource_registry
+    from src.shared.color.lut_loader import load_lut
+
+    source = _write(tmp_path, 'swap.cube', _channel_swap_cube())
+    entry = session.import_files([source])[0].entry
+    assert entry is not None
+    monkeypatch.setattr(lut_resource_registry, 'get_lut_resource_session',
+                        lambda: session)
+    Path(source).unlink()  # Preview must use the validated staged copy.
+    assert session.staged_path(entry.uri) is not None
+    assert session.staged_path(entry.content_uri) is not None
+    lut = load_lut(entry.uri)
+    assert lut.size == 2
+    session.reset()
+    assert session.staged_path(entry.uri) is None
+    with pytest.raises(FileNotFoundError):
+        load_lut(entry.uri)
+
+
 def test_same_name_different_content_coexist(tmp_path: Path,
                                              session: LutResourceSession) -> None:
     first = _write(tmp_path, "grain.cube", _identity_cube())

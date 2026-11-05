@@ -845,6 +845,7 @@ class ColorGraphPanelHost:
         self._active_handle: CorrectorHandle | None = None
         self._read_only_handlers: list[Callable[[str, str], None]] = []
         self._handle_handlers: list[Callable[[CorrectorHandle], None]] = []
+        self._window_combo_handlers: list[Callable[[str, str], None]] = []
 
     # ── 装配 ──
 
@@ -868,6 +869,10 @@ class ColorGraphPanelHost:
     def on_handle(self, handler: Callable[[CorrectorHandle], None]) -> None:
         """注册活动句柄回调（参数面板读取入口，B06.2 读路径）。"""
         self._handle_handlers.append(handler)
+
+    def on_window_combo(self, handler: Callable[[str, str], None]) -> None:
+        """注册成功创建 Window 组合后的 UI 激活回调。"""
+        self._window_combo_handlers.append(handler)
 
     # ── 投影（service → UI） ──
 
@@ -964,9 +969,16 @@ class ColorGraphPanelHost:
             if self._coordinator.last_ack is not None:
                 self.on_projection(self._coordinator.last_ack)
             return
-        self._bridge.submit(intent)
+        accepted = self._bridge.submit(intent)
         if self._coordinator.last_ack is not None:
             self.on_projection(self._coordinator.last_ack)
+        if accepted and action == "add_window_combo":
+            combo = str(intent.arguments.get("combo", "")).lower()
+            for handler in self._window_combo_handlers:
+                try:
+                    handler(combo, self._active_node_id)
+                except Exception:  # noqa: BLE001 — UI 激活失败不回滚已提交图命令
+                    logger.warning("Window combo UI activation failed", exc_info=True)
 
     def _complete_ui_arguments(self, action: str, envelope: Any) -> Mapping[str, Any]:
         """Translate presentation deltas to explicit service arguments.
@@ -1015,9 +1027,8 @@ class ColorGraphPanelHost:
         elif action == "add_window_combo":
             # N15：一键 = Serial + 默认形状窗口（combo 从 UI envelope 透传；
             # active_node_id 同 add_serial 锚点规则）
-            args = {"active_node_id": anchor, "combo": str(
-                (payload.get("combo") if isinstance(payload, Mapping) else "")
-                or "cpw")}
+            args = {"active_node_id": anchor,
+                    "combo": str(args.get("combo") or "cpw")}
         elif action == "add_parallel":
             args = {"branch_origin_id": anchor}
         elif action == "add_layer":
@@ -1794,15 +1805,18 @@ class ColorGraphAppHost:
         return find(graph)
 
     def align_engine_active_layer(self, node_id: str) -> bool:
-        """图节点 → 引擎活动层对齐（§6.5 source_layer_id 唯一许可路径）。"""
+        """图节点 → 引擎活动层对齐（迁移层 ID 或新节点稳定 ID）。"""
         graph = self._stack_graph(self._bound_stack_id)
         engine = self._engine_provider() if self._engine_provider else None
         if graph is None or engine is None:
             return False
+        from src.features.color.core.color_graph_param_source import (
+            node_layer_payload,
+        )
         payload = None
         for node in graph.nodes:
             if node.node_id == node_id:
-                payload = dict(node.legacy_payload or {})
+                payload = node_layer_payload(node)
                 break
         layer_id = payload.get("id") if payload else None
         if not layer_id:

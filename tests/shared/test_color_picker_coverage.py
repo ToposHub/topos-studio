@@ -556,12 +556,13 @@ class TestContrastChecker:
         assert cp.get_contrast_ratio(fixed[0], QColor(255, 255, 255)) >= 4.5
 
     def test_toggle_background_flips(self, qapp) -> None:
+        from src.shared.i18n.i18n import I18N
         checker = cp.ContrastChecker()
-        assert checker.btn_toggle_bg.text() == "白底"
+        assert checker.btn_toggle_bg.text() == I18N.tr("color_picker.white_bg", "白底")
         checker._toggle_background()
-        assert checker.btn_toggle_bg.text() == "黑底"
+        assert checker.btn_toggle_bg.text() == I18N.tr("color_picker.black_bg", "黑底")
         checker._toggle_background()
-        assert checker.btn_toggle_bg.text() == "白底"
+        assert checker.btn_toggle_bg.text() == I18N.tr("color_picker.white_bg", "白底")
 
 
 class TestCodeExportPanel:

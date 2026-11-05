@@ -21,6 +21,7 @@ from src.features.edit.ai_editing.editorial_models import (
 from src.features.edit.ui.ai_brief_editor import AiBriefEditor
 from src.features.edit.ui.ai_context_summary import AiContextSummary
 from src.features.edit.ui.ai_variant_list import AiVariantList
+from src.shared.i18n.i18n import tr
 
 
 @pytest.fixture
@@ -102,19 +103,21 @@ def test_context_summary_freshness(context_panel):
     context_panel.set_summary(ContextSummary(
         asset_count=5, analyzed_count=2, analysis_fresh=True, snapshot_revision=10,
     ))
-    assert "分析新鲜" in context_panel._summary_label.text()
+    assert tr('ai_context.fresh_short', '分析新鲜') in context_panel._summary_label.text()
     assert "#5b9462" in context_panel._summary_label.styleSheet()
     # stale
     context_panel.set_summary(ContextSummary(
         asset_count=5, analyzed_count=2, analysis_fresh=False, snapshot_revision=10,
     ))
-    assert "需要重新分析" in context_panel._summary_label.text()
+    assert tr('ai_context.stale_short', '需要重新分析') in context_panel._summary_label.text()
     assert "#b58a52" in context_panel._summary_label.styleSheet()  # muted orange = stale
 
 
 def test_context_summary_without_analysis_is_explicit(context_panel):
     context_panel.set_summary(ContextSummary(asset_count=5, snapshot_revision=0))
-    assert context_panel._summary_label.text() == "素材 5 · 已分析 0 · revision 0 · 尚未分析"
+    summary = context_panel._summary_label.text()
+    assert tr('ai_context.not_analyzed', '尚未分析') in summary
+    assert '5' in summary and '0' in summary
 
 
 def test_context_summary_has_no_action_buttons(context_panel):

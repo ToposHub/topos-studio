@@ -72,6 +72,9 @@ class ColorResourceController(QObject):
         # R04：参数手势事务（一次连续拖动 = 一次 undo；取消 = 零命令）。
         self._gesture: dict[str, Any] | None = None
         self._thumbnails: Any = None
+        self._lut_source_array: Any = None
+        self._lut_source_generation = 0
+        self._refreshing_thumbnails = False
         # 浏览器信号（与 preview 适配器互斥——main_window 只装一个）。
         self.effects.resource_activated.connect(self.activate_effect)
         self.luts.resource_activated.connect(self.activate_resource)
@@ -79,12 +82,23 @@ class ColorResourceController(QObject):
         self.luts.draft_edit_requested.connect(self.edit)
         self.luts.import_requested.connect(self.import_luts)
         self.luts.refresh_requested.connect(self.refresh_catalog)
+        self.luts.visible_entries_changed.connect(self._refresh_lut_thumbnails)
         self.panel.active_node_changed.connect(lambda _id: self.refresh_target())
         self.panel.scope_changed.connect(lambda _s: self.refresh_target())
         self.panel.view.scene_refreshed.connect(lambda: self.refresh_target())
         self.panel.view.resource_drop_requested.connect(self.drop)
         self.import_feedback.connect(self._on_import_feedback)
-        self.refresh_target()
+        source_preview = getattr(host, 'color_node_source_preview', None)
+        source_signal = getattr(source_preview, 'source_thumbnail_changed', None)
+        if source_signal is not None:
+            source_signal.connect(self._on_source_thumbnail_changed)
+        source_pixmap = getattr(self.panel.view, '_source_thumbnail', None)
+        if source_pixmap is not None:
+            self._on_source_thumbnail_changed(source_pixmap)
+        catalog_signal = getattr(self.catalog_provider, 'catalog_changed', None)
+        if catalog_signal is not None:
+            catalog_signal.connect(self.refresh_catalog)
+        self.refresh_catalog()
 
     # ── typed target（意图瞬间捕获） ───────────────────────────────
     def _coordinator(self) -> Any:
@@ -544,51 +558,97 @@ class ColorResourceController(QObject):
         return None
 
     # ── R07：LUT 候选缩略图（后台评估 + GUI 投递） ──────────────────
+    def _on_source_thumbnail_changed(self, pixmap: Any) -> None:
+        """Snapshot Qt pixels on the GUI thread before a LUT worker reads them."""
+        import numpy as np
+        from PyQt6.QtGui import QImage, QPixmap
+
+        self._lut_source_generation += 1
+        self._lut_source_array = None
+        self.luts.clear_thumbnails()
+        if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+            image = pixmap.toImage()
+            if image.width() > 128 or image.height() > 72:
+                image = image.scaled(
+                    128, 72, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            image = image.convertToFormat(QImage.Format.Format_RGB888)
+            ptr = image.constBits()
+            ptr.setsize(image.sizeInBytes())
+            rows = np.frombuffer(ptr, dtype=np.uint8).reshape(
+                image.height(), image.bytesPerLine())
+            rgb = rows[:, :image.width() * 3].reshape(
+                image.height(), image.width(), 3)
+            source = rgb.astype(np.float32) / 255.0
+            source.setflags(write=False)
+            self._lut_source_array = source
+        self._refresh_lut_thumbnails()
+
     def _ensure_thumbnail_service(self) -> Any:
         if self._thumbnails is not None:
             return self._thumbnails
-        import numpy as np
-        from PyQt6.QtGui import QImage
         from src.app.controllers.lut_thumbnail_service import LutThumbnailService
-
-        def source_provider():
-            pixmap = getattr(self.panel.view, "_source_thumbnail", None)
-            if pixmap is None or pixmap.isNull():
-                return None
-            image = pixmap.toImage().convertToFormat(
-                QImage.Format.Format_RGB888)
-            ptr = image.constBits()
-            ptr.setsize(image.sizeInBytes())
-            arr = np.frombuffer(ptr, dtype=np.uint8).reshape(
-                image.height(), image.bytesPerLine())
-            arr = arr[:, :image.width() * 3].reshape(
-                image.height(), image.width(), 3)
-            return arr.astype(np.float32) / 255.0
-
-        service = LutThumbnailService(source_provider=source_provider)
-        service.thumbnail_ready.connect(self.luts.set_thumbnail)
-        service.thumbnail_failed.connect(self.luts.set_thumbnail_failed)
+        service = LutThumbnailService(
+            source_provider=lambda: self._lut_source_array)
+        service.thumbnail_ready.connect(self._on_lut_thumbnail_ready)
+        service.thumbnail_failed.connect(self._on_lut_thumbnail_failed)
         self._thumbnails = service
         return service
 
+    def _on_lut_thumbnail_ready(self, entry_id: str, image: Any,
+                                generation: int) -> None:
+        service = self._thumbnails
+        if (service is not None and self._lut_source_array is not None
+                and generation == service.stats()['generation']):
+            self.luts.set_thumbnail(entry_id, image)
+            self._refresh_lut_thumbnails()
+
+    def _on_lut_thumbnail_failed(self, entry_id: str, code: str,
+                                 generation: int) -> None:
+        service = self._thumbnails
+        if (service is not None and self._lut_source_array is not None
+                and generation == service.stats()['generation']):
+            self.luts.set_thumbnail_failed(entry_id, code)
+            self._refresh_lut_thumbnails()
+
     def _refresh_lut_thumbnails(self) -> None:
         """按当前会话世代请求可见 LUT 条目的缩略图（只处理可见资源）。"""
+        if self._refreshing_thumbnails:
+            return
+        self._refreshing_thumbnails = True
+        try:
+            self._request_visible_lut_thumbnails()
+        finally:
+            self._refreshing_thumbnails = False
+
+    def _request_visible_lut_thumbnails(self) -> None:
         coordinator = self._coordinator()
+        if self._lut_source_array is None and self._thumbnails is None:
+            return
         service = self._ensure_thumbnail_service()
         revision = (coordinator.last_ack.graph_revision
                     if coordinator and coordinator.last_ack else 0)
         service.set_source_identity(
             coordinator.session_id if coordinator else "",
             getattr(self.graph_host, "_bound_stack_id", "") or "",
-            0, revision)
+            0, revision, self._lut_source_generation)
+        if self._lut_source_array is None:
+            return
         for entry_id in self.luts.visible_entry_ids():
             entry = next((e for k, e in self.luts._entries.items()
                           if e.get("id") == entry_id), None)
-            if entry is None:
+            if entry is None or 'thumbnail' in entry or 'thumbnail_error' in entry:
                 continue
             lut_ref = entry.get("resource_uri") or entry.get("source_path")
             if isinstance(lut_ref, str) and lut_ref:
                 service.request(entry_id, lut_ref)
+
+    def shutdown(self) -> None:
+        service = self._thumbnails
+        self._thumbnails = None
+        if service is not None:
+            service.shutdown()
 
     # ── 目录/导入（与 preview 同源；导入是工程资源域，不经图命令） ──
     def _lut_session(self) -> Any:
@@ -650,8 +710,17 @@ class ColorResourceController(QObject):
         try:
             for entry in self._lut_session().catalog():
                 combined[(entry['kind'], entry['id'])] = entry
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001 — 目录失败需明确呈现
+            _LOGGER.exception('LUT resource catalog refresh failed')
+            self.resource_rejected.emit({
+                'action': 'refresh_catalog', 'code': 'lut_catalog_failed',
+                'message': str(exc), 'target': None,
+            })
+            self.luts.more_button.setToolTip(
+                _tr('lut_catalog_failed', 'LUT catalog unavailable') + ': ' + str(exc))
+        else:
+            self.luts.more_button.setToolTip(
+                _tr('lut_options', 'LUT options'))
         self.effects.set_resources([e for (kind, _), e in combined.items()
                                     if kind == 'effect'])
         self.luts.set_resources([e for (kind, _), e in combined.items()

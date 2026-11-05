@@ -228,6 +228,22 @@ class TestV1FlatMigration:
 # ── 严格反向投影 ────────────────────────────────────────────────────────
 
 class TestStrictBackProjection:
+    def test_new_serial_without_legacy_payload_has_stable_layer_identity(self):
+        from src.features.color.core.color_graph_service import ColorGraphService
+
+        base = migrate_legacy_stack(_stack_with_layers(f03_layer_stack()))
+        first = next(n.node_id for n in base.nodes
+                     if n.node_type == NodeType.CORRECTOR.value)
+        result = ColorGraphService(id_factory=lambda: "new-serial").op_insert_corrector(
+            base, first)
+        assert result.ok
+        assert can_project_to_legacy_layers(result.graph)
+        first_view = project_legacy_layers(result.graph)
+        second_view = project_legacy_layers(result.graph)
+        assert [layer["id"] for layer in first_view] == [
+            layer["id"] for layer in second_view]
+        assert "new-serial" in [layer["id"] for layer in first_view]
+
     def _graph_with_extra(self, node: ColorNodeData, edge: ColorEdgeData | None = None):
         base = migrate_legacy_stack(_stack_with_layers(f03_layer_stack()))
         nodes = tuple(base.nodes) + (node,)

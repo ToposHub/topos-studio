@@ -306,8 +306,10 @@ def can_project_to_legacy_layers(graph: ColorGraphData) -> bool:
     - 存在 key 边、mixer/splitter/combiner/compound/outside/alpha/
       shared/未知类型节点；
     - 存在 shared_definitions；
-    - 非 Source→C…→Output 单链（分叉/旁路/乱序）；
-    - Corrector 缺 legacy_payload。
+    - 非 Source→C…→Output 单链（分叉/旁路/乱序）。
+
+    Corrector 可由 ``node_layer_payload`` 物化为默认 Layer DTO；空载荷
+    节点也有与 node_id 相同的稳定图层身份。
     """
     if not isinstance(graph, ColorGraphData) or graph.validate():
         return False
@@ -317,8 +319,6 @@ def can_project_to_legacy_layers(graph: ColorGraphData) -> bool:
         return False
     for node in graph.nodes:
         if node.node_type not in _PROJECTABLE_TYPES:
-            return False
-        if node.node_type == NodeType.CORRECTOR.value and not node.legacy_payload:
             return False
 
     # 单链校验：从 source 出发沿唯一 image 边走到 output，节点数 = 边数 + 1

@@ -146,3 +146,18 @@ def test_thumbnail_replaces_root_grid_placeholder(qtbot: Any) -> None:
                 if panel.list_widget.item(index).data(Qt.ItemDataRole.UserRole).get('id') == 'warm')
     preview = item.icon().pixmap(QSize(96, 60)).toImage()
     assert preview.pixelColor(48, 30) == QColor('#a03142')
+
+
+def test_visible_tiles_signal_and_failed_preview_tooltip(qtbot: Any) -> None:
+    panel = ColorLutBrowser()
+    qtbot.addWidget(panel)
+    changes: list[list[str]] = []
+    panel.visible_entries_changed.connect(
+        lambda: changes.append(panel.visible_entry_ids()))
+    panel.set_resources(entries())
+    panel._navigate('Film/Print')
+    assert changes[-1] == ['warm']
+    panel.set_thumbnail_failed('warm', 'bad_lut')
+    assert 'Preview failed (bad_lut)' in panel.list_widget.item(0).toolTip()
+    panel.clear_thumbnails()
+    assert 'bad_lut' not in panel.list_widget.item(0).toolTip()

@@ -60,10 +60,13 @@ def node_layer_payload(node: Any, *,
         return None
     if node.legacy_payload:
         base = unfreeze_params(dict(node.legacy_payload))
+        base.setdefault("id", node.node_id)
     else:
         from src.features.color.core.layer import Layer
-        base = Layer(str(getattr(node, "label", None)
-                         or node.node_id)).to_dict(None)
+        default_layer = Layer(str(getattr(node, "label", None)
+                                  or node.node_id))
+        default_layer.id = node.node_id
+        base = default_layer.to_dict(None)
     payload = dict(base)
     params = node.params if isinstance(node.params, Mapping) else {}
     # 结构化 dict 域：基底 + 图命令域覆盖（浅合并；图域键是完整语义键）

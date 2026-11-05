@@ -285,6 +285,7 @@ class TestPanelRunDrawerInjection:
 
     def test_message_body_uses_markdown_and_cancel_preserves_stream(self, panel):
         from src.features.edit.ai_editing.assistant_events import AssistantMessage
+        from src.shared.i18n.i18n import tr
         from PyQt6.QtWidgets import QTextBrowser
 
         panel.refresh_state(AssistantStateSnapshot(messages=(AssistantMessage(
@@ -301,7 +302,7 @@ class TestPanelRunDrawerInjection:
 
         panel.preserve_cancelled_streaming_reply("部分回复")
         assert "部分回复" in panel._streaming_label.text()
-        assert "已停止生成" in panel._streaming_label.text()
+        assert tr("ai_assistant.stopped_generation", "已停止生成") in panel._streaming_label.text()
 
     def test_retry_propagates(self, panel):
         retried = []
