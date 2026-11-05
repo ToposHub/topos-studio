@@ -59,12 +59,12 @@ def test_actual_cpu_timeline_preview_and_export_use_source_frame():
     layer=SimpleNamespace(clip=SimpleNamespace(color_stack_id=stack.stack_id),source_frame=10)
     image=np.zeros((48,64,3),np.float32);image[12:18,20:25]=2.
     exporter=TimelineExporter.__new__(TimelineExporter);exporter._project=project
-    exporter._apply_color_grade_unstabilized=lambda frame,layer:frame
+    exporter._apply_color_grade_unstabilized=lambda frame,layer,**_kw:frame
     expected=apply_stabilization_cpu(image,state(),10)
     np.testing.assert_array_equal(exporter._apply_color_grade(image,layer),expected)
     worker=PreviewRenderWorker.__new__(PreviewRenderWorker)
     worker._asset_resolver=SimpleNamespace(_project=project)
-    worker._apply_preview_color_grade_unstabilized=lambda frame,layer:frame
+    worker._apply_preview_color_grade_unstabilized=lambda frame,layer,**_kw:frame
     np.testing.assert_array_equal(worker._apply_preview_color_grade(image,layer),expected)
     layer.source_frame=11
     np.testing.assert_array_equal(exporter._apply_color_grade(image,layer),image)

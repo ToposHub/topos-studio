@@ -7289,7 +7289,11 @@ class TimelineExporter:
                     if composite is not None:
                         # T-P1-22：非空 ColorStack 必须影响下方轨道——
                         # 此前 adjustment 层的 grade 被静默丢弃。
-                        adjusted = self._apply_color_grade(composite, layer)
+                        # N07-B：调整剪辑叠加在"下方 clip 已各自应用过
+                        # timeline 段"的合成结果上——链解析豁免 timeline
+                        # 段，防 timeline look 双重应用。
+                        adjusted = self._apply_color_grade(
+                            composite, layer, exclude_timeline=True)
                         adjusted = self._apply_clip_effects_cpu(
                             adjusted, layer, frame_idx)
                         from src.features.edit.core.adjustment_composite import (
@@ -9232,6 +9236,8 @@ class TimelineExporter:
     def _get_clip_color_grade(
         self,
         layer: "ClipLayerInfo",
+        *,
+        exclude_timeline: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         返回该层 clip 的 ColorStack 调色参数；若无需调色则返回 None。
@@ -9274,12 +9280,16 @@ class TimelineExporter:
                 stack.with_layers(
                     project_legacy_layers(color_graph),
                     active_layer_index=stack.active_layer_index,
-                ).with_color_graph(None), layer)
+                ).with_color_graph(None), layer,
+                exclude_timeline=exclude_timeline)
 
-        return TimelineExporter._grade_from_stack(self, stack, layer)
+        return TimelineExporter._grade_from_stack(
+            self, stack, layer, exclude_timeline=exclude_timeline)
 
     def _grade_from_stack(self, stack,
-                          layer: Optional["ClipLayerInfo"] = None
+                          layer: Optional["ClipLayerInfo"] = None,
+                          *,
+                          exclude_timeline: bool = False,
                           ) -> Optional[Dict[str, Any]]:
         """从栈载荷构建 grade dict（layers/平铺路径；图门在外层）。"""
         clip = getattr(layer, "clip", None) if layer is not None else None
@@ -9382,7 +9392,8 @@ class TimelineExporter:
         timeline_id = str(
             getattr(getattr(self, "_sequence", None),
                     "timeline_id", "") or "")
-        extras = chain_extra_params(project, timeline_id, clip)
+        extras = chain_extra_params(project, timeline_id, clip,
+                                    exclude_timeline=exclude_timeline)
         extras_on = extras_active(extras)
 
         if not basic_active and not advanced_active and not grade_keyframes \
@@ -9689,9 +9700,11 @@ class TimelineExporter:
         from src.features.shared.effects.video_stabilization import clip_stabilization_state
         return clip_stabilization_state(getattr(self, '_project', None), getattr(layer, 'clip', None))
 
-    def _apply_color_grade(self, frame_data: "np.ndarray", layer: "ClipLayerInfo") -> "np.ndarray":
+    def _apply_color_grade(self, frame_data: "np.ndarray", layer: "ClipLayerInfo",
+                           *, exclude_timeline: bool = False) -> "np.ndarray":
         from src.features.shared.effects.video_stabilization import apply_stabilization_cpu
-        graded = self._apply_color_grade_unstabilized(frame_data, layer)
+        graded = self._apply_color_grade_unstabilized(
+            frame_data, layer, exclude_timeline=exclude_timeline)
         return apply_stabilization_cpu(graded, self._clip_stabilization_state(layer),
                                        int(getattr(layer, 'source_frame', 0)))
 
@@ -9699,6 +9712,8 @@ class TimelineExporter:
         self,
         frame_data: "np.ndarray",
         layer: "ClipLayerInfo",
+        *,
+        exclude_timeline: bool = False,
     ) -> "np.ndarray":
         """
         对 BGR uint8 帧应用 clip 的 ColorStack primary grade（CPU 纯 numpy）。
@@ -9707,7 +9722,8 @@ class TimelineExporter:
         只跑 primary grade（lift/gamma/gain/exposure/temp/.../hue_shift），
         不处理 curves/hsl_curve/mixer/soft_clip/lut（与预览 CPU fallback 同等降级）。
         """
-        grade = self._get_clip_color_grade(layer)
+        grade = self._get_clip_color_grade(
+            layer, exclude_timeline=exclude_timeline)
         if grade is None:
             return frame_data
 

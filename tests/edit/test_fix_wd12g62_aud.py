@@ -528,7 +528,7 @@ def test_aud_18409_color_grade_failure_fails_fast(monkeypatch):
 
     exporter = TimelineExporter.__new__(TimelineExporter)
     # 强制走通用 float 路径（绕过 u8 LUT 快路径）。
-    exporter._get_clip_color_grade = lambda layer: {
+    exporter._get_clip_color_grade = lambda layer, **_kw: {
         "grading_params": {"saturation": 0.5},
         "grade_keyframes": None,
     }

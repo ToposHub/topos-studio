@@ -83,7 +83,8 @@ class TestExportChainOrder:
     def _exporter(self, grade):
         from src.features.edit.core.timeline_export import TimelineExporter
         exporter = TimelineExporter.__new__(TimelineExporter)
-        exporter._get_clip_color_grade = lambda _: grade
+        # 测试替身需接受 N07-B 的 exclude_timeline 关键字（调整剪辑豁免）
+        exporter._get_clip_color_grade = lambda _layer, **_kw: grade
         return exporter
 
     def test_pre_before_main_exact_match(self):
@@ -166,7 +167,7 @@ class TestGpuExportPassOrder:
                 {"saturation": 15.0, "_chain_segment": "post"},
             ],
         }
-        exporter._get_clip_color_grade = lambda _: grade
+        exporter._get_clip_color_grade = lambda _layer, **_kw: grade
         uniforms = exporter._gpu_grade_uniforms(
             NS(clip_id="c1", source_frame=0))
         # pass 序列 = [pre, main, trim, post]；uniform dict 无序但
@@ -180,7 +181,7 @@ class TestGpuExportPassOrder:
     def test_no_extras_returns_single_main(self):
         from src.features.edit.core.timeline_export import TimelineExporter
         exporter = TimelineExporter.__new__(TimelineExporter)
-        exporter._get_clip_color_grade = lambda _: {
+        exporter._get_clip_color_grade = lambda _layer, **_kw: {
             "grading_params": {"exposure": 20.0}}
         uniforms = exporter._gpu_grade_uniforms(
             NS(clip_id="c1", source_frame=0))
@@ -198,7 +199,7 @@ class TestCurvesExport:
         exporter = TimelineExporter.__new__(TimelineExporter)
         # M 曲线：输入 128 → 输出 230（控制点 UI 倒置坐标）
         curves = {"M": [(0, 255), (128, 25), (255, 0)]}
-        exporter._get_clip_color_grade = lambda _: {
+        exporter._get_clip_color_grade = lambda _layer, **_kw: {
             "grading_params": {},
             "grade_keyframes": None,
             "chain_extra_params": [],
@@ -214,7 +215,7 @@ class TestCurvesExport:
     def test_no_curves_unchanged_path(self):
         from src.features.edit.core.timeline_export import TimelineExporter
         exporter = TimelineExporter.__new__(TimelineExporter)
-        exporter._get_clip_color_grade = lambda _: {
+        exporter._get_clip_color_grade = lambda _layer, **_kw: {
             "grading_params": {"exposure": 20.0},
             "grade_keyframes": None,
             "chain_extra_params": [],

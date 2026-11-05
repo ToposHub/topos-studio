@@ -89,14 +89,15 @@ def _mask_grade(shapes, allow=False, qp=None):
         grade["qualifier_params"] = qp
     stub = NS(
         allow_degraded_grade=allow,
-        _get_clip_color_grade=lambda layer: grade,
+        _get_clip_color_grade=lambda layer, **_kw: grade,
         _get_decomposed_grade_fastpath=lambda *a, **k: None,
         _color_grade_lut_cache={})
     # bd8b15f 起 _apply_color_grade = unstabilized + 稳定化包裹（无
     # _project/clip 状态 → 空态直通）
     stub._apply_color_grade_unstabilized = (
-        lambda frame, layer: TimelineExporter._apply_color_grade_unstabilized(
-            stub, frame, layer))
+        lambda frame, layer, **_kw:
+            TimelineExporter._apply_color_grade_unstabilized(
+                stub, frame, layer, **_kw))
     stub._clip_stabilization_state = (
         lambda layer: TimelineExporter._clip_stabilization_state(stub, layer))
     return stub
