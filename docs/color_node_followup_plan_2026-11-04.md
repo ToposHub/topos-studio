@@ -33,7 +33,7 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 | P0 | R12-B | 本机出口矩阵通过；跨平台 NOT RUN；UI 级同帧对拍边界已登记 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
 | P0 | N16 | 部分完成（shared 全绿清零、ui 4 既有修复杂4 污染、媒体并发收窄、全局 DeferredDelete 冲刷；edit 12 文件级既有+~7 顺序污染与合并跑 EXR SIGILL 崩溃点登记为残余债务） | 单进程全套件稳定性与资源所有权 | 无 |
 | P1 | R06-B | v1 已接线（onnx_tile 后端+结果会话+service+图命令+R09 闭包，17 测试；UI 触发面板登记为后续） | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
-| P1 | N02-B | v1 边界 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
+| P1 | N02-B | 切片 1+2 已交付（key 管线声明进 plan+权威换算表+CPU 后处理实现消除跨后端分歧，16 测试）；bitmap 资源身份/GL fail-closed 收紧/tracker 帧域登记为切片 3-4 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
 | P1 | N07-B | v1 复核 | Group/Timeline 全出口最终链序与身份 | N07/R09 |
 | P1 | N10-B | v2 待办 | Mask/Qualifier 动画轨道与定义级扇出 | N10 v1 |
 | P1 | N12-B | v2 待办 | 选择性复制与跨工程资源闭包 | R09/N12 |
