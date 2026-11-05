@@ -140,10 +140,17 @@ class TestPerParamCopyAndStaticSwitch:
 
 class TestRegistryGate:
     def test_diamond_marker_gate(self):
-        """白名单外字段不得被 ◆ 暗示支持（唯一判据）。"""
-        assert is_qualifier_animatable("lum_low")
-        assert is_qualifier_animatable("lum_high")
-        for field in ("lum_soft_low", "sat_low", "invert", "blur", "points"):
+        """白名单外字段不得被 ◆ 暗示支持（唯一判据）。
+
+        N10-B：白名单从 lum 双字段扩到 HSL 三带 11 个数值字段——
+        离散开关（enabled/invert/…）与 key 后处理强度（blur/clean_*/
+        denoise，涉 N02-B key_pipeline 逐帧声明）仍不可动画。
+        """
+        for field in ("lum_low", "lum_high", "lum_soft_low", "sat_low",
+                      "hue_center"):
+            assert is_qualifier_animatable(field), field
+        for field in ("invert", "enabled", "blur", "clean_black", "denoise",
+                      "points"):
             assert not is_qualifier_animatable(field)
         assert parse_qualifier_track_name("qualifier.invert") is None
         assert parse_qualifier_track_name("mask.s1.center") is None

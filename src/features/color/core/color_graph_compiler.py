@@ -136,6 +136,9 @@ class RenderPass:
     # keyer 输入源声明（key_settings.key_source_mode 消费化）：
     # "node_input" / "legacy_raw"；无 qualifier 时为空串。
     key_input_source: str = ""
+    # N02-B 切片 4 / N10-B：key 管线是否随帧动画（qualifier.* 轨道存在
+    # 即真——与执行器 N06 缓存绕过（grade_keyframes 非空）同判据域）。
+    key_frame_animated: bool = False
 
 
 @dataclass(frozen=True)
@@ -244,6 +247,7 @@ class ColorGraphRenderPlan:
                     "expanded_from": p.expanded_from,
                     "key_pipeline": list(p.key_pipeline),
                     "key_input_source": p.key_input_source,
+                    "key_frame_animated": p.key_frame_animated,
                 }
                 for p in self.passes],
             "warnings": list(self.warnings),
@@ -560,6 +564,11 @@ def compile_graph(snapshot: ColorGraphSnapshot,
         key_pipeline, key_input_source = _derive_key_pipeline(
             node, has_key_in=any(port == "key" and ref is not None
                                  for port, ref in inputs))
+        animated = bool(
+            isinstance(params_for_node := (
+                node.params if isinstance(node.params, Mapping) else {}),
+                Mapping)
+            and params_for_node.get("grade_keyframes"))
         passes.append(RenderPass(
             index=index,
             node_id=nid,
@@ -573,7 +582,8 @@ def compile_graph(snapshot: ColorGraphSnapshot,
             shared_definition_id=node.shared_definition_id,
             cone_key=cone_keys[nid],
             key_pipeline=key_pipeline,
-            key_input_source=key_input_source))
+            key_input_source=key_input_source,
+            key_frame_animated=animated))
 
     # release_after = max(消费者 index)；分叉输入保持到所有消费者完成
     last_use: dict[str, int] = {}
