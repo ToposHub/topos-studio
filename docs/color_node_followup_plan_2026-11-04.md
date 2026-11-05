@@ -34,11 +34,11 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 | P0 | N16 | 部分完成（shared 全绿清零、ui 4 既有修复杂4 污染、媒体并发收窄、全局 DeferredDelete 冲刷；edit 12 文件级既有+~7 顺序污染与合并跑 EXR SIGILL 崩溃点登记为残余债务） | 单进程全套件稳定性与资源所有权 | 无 |
 | P1 | R06-B | v1 已接线（onnx_tile 后端+结果会话+service+图命令+R09 闭包，17 测试；UI 触发面板登记为后续） | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
 | P1 | N02-B | 切片 1+2 已交付（key 管线声明进 plan+权威换算表+CPU 后处理实现消除跨后端分歧，16 测试）；bitmap 资源身份/GL fail-closed 收紧/tracker 帧域登记为切片 3-4 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
-| P1 | N07-B | v1 复核 | Group/Timeline 全出口最终链序与身份 | N07/R09 |
-| P1 | N10-B | v2 待办 | Mask/Qualifier 动画轨道与定义级扇出 | N10 v1 |
-| P1 | N12-B | v2 待办 | 选择性复制与跨工程资源闭包 | R09/N12 |
-| P1 | N14-B | v1 边界 | Metal/CPU 其余域能力逐项实现 | R06/R12 |
-| P2 | N15 | 人工对照待办 | 达芬奇四种 Window 组合的 UI/交互对拍 | N15 命令已存在 |
+| P1 | N07-B | 复核完成+三缺陷修复（预览 timeline 段跳过/缓存指纹漏栈/调整剪辑双重应用；4 新回归）| Group/Timeline 全出口最终链序与身份 | N07/R09 |
+| P1 | N10-B | 未开工（调研结论已入 N02-B 切片 1 的 key_pipeline 声明结构——key_frame_animated 字段位已预留；轨道/扇出本体待 v2 批次） | Mask/Qualifier 动画轨道与定义级扇出 | N10 v1 |
+| P1 | N12-B | 未开工（paste_grade_domains 域集合/冲突策略与跨工程闭包待 v2 批次；R09 闭包基建与 N02-B 的 bake 会话已为 bitmap/LUT 递归收集铺路） | 选择性复制与跨工程资源闭包 | R09/N12 |
+| P1 | N14-B | 部分：CPU qualifier 后处理已实现（N02-B 切片 2，权威换算表共用）；Metal key 通道/Corrector 域仍 fail-closed 逐域待推进 | Metal/CPU 其余域能力逐项实现 | R06/R12 |
+| P2 | N15 | NOT RUN（需实机 Resolve 20 人工逐项对照；本机已装 Resolve 20.2.1 但窗口创建不可脚本化——API 不覆盖，必须人工执行 CPW/LPW/PPW/PCW 并录屏留证） | 达芬奇四种 Window 组合的 UI/交互对拍 | N15 命令已存在 |
 
 ## 2. 逐项施工与验证
 
@@ -264,12 +264,33 @@ fail-closed。不要用常白 matte 或 RGB 顶替 key。
 tracker 动画、alpha 输出和 source 依赖逐帧对拍；跨 GL/CPU 能力边界
 明确记录，保存/撤销/导出一致。
 
-### N07-B — Group / Timeline 的最终链序
+### N07-B — Group / Timeline 的最终链序（2026-11-05 复核+修复完成）
 
 **实施方法**：复核现有 timeline grade stack 的身份、迁移和五段链
 `pre→main→trim→post→timeline`；同一数据经 Color、Edit、Composite、
 headless/export 消费时不得重复应用或跳过；跨组 Composite 歧义保持
 可见告警，定义合法情况下的准确目标栈。
+
+**复核结论与修复**（2026-11-05，全出口逐一核对）：
+- 链组装单点（color_chain）与五段身份、保存/重开、undo/redo 稳定性
+  均过；跨组 Composite 歧义告警在位、单一归属目标栈已定义；
+- **缺陷 1（P0）已修**：Edit 预览/调整剪辑/磁盘缓存的 grade 快照读
+  `asset_resolver._current_timeline`（全仓无写入方，恒 ""）→ timeline
+  段在这些出口被跳过而导出应用（预览≠成片）。修复：worker 自持
+  `_timeline_sequence` 兜底；
+- **缺陷 2（P1）已修**：`chain_stack_ids` 指纹漏收 timeline 栈 →
+  timeline 调色后复合/MG 磁盘缓存命中陈旧帧（"绿缓存"）。修复：
+  指纹纳入 timeline 栈 id；
+- **缺陷 3（边界，修 1 后成立）已修**：调整剪辑叠加在"下方 clip 已
+  各自应用过 timeline 段"的合成结果上，其链解析必须豁免 timeline
+  段防双重应用——三出口（导出 `_apply_color_grade(exclude_timeline)`、
+  CPU 预览、GPU grade 快照 lambda）全部豁免；
+- 4 条新回归（tests/edit/test_n07b_timeline_chain_outlets.py）+
+  既有 m05/timeline_grade_stack/round4 全绿；
+- **登记边界**：无主栈 clip 在所有出口都收不到 timeline look（各出口
+  一致，需产品裁决）；跨组歧义键不含 trim 栈、告警仅日志无 UI；
+  `grade_order_v1.json` 契约数据文件与合同测试不存在（docstring 自引
+  悬空）；栈删除后登记悬挂且运行时静默退化 4 段。
 
 **验证方法**：两 clip 同组/异组、不同 Timeline、Compound、切组、锁定、
 shared definition、保存重开、undo/redo 与 scopes 同帧对拍；无实现的
