@@ -18,9 +18,11 @@
 ——matte 与 layer opacity 相乘后作为 mix 权重，限定的是**整条 layer
 调色**（非独立二级修正）。
 
-**已支持**：hue/sat/lum 三带 + invert（基础 keyer）。
-**未支持（调用方显式告知用户）**：matte 后处理（clean_black/white、
-blur、denoise）、mask_shapes 组合、ai_matte——GPU 管线专属。
+**已支持**：hue/sat/lum 三带 + invert（基础 keyer）+ matte 后处理
+（N02-B 切片 2：clean_black/white、blur、denoise 的 numpy 等价，
+换算走 ``key_pipeline_params`` 权威表——GL/CPU 共用口径）。
+**未支持（调用方显式告知用户）**：mask_shapes 组合（mask_shapes_cpu
+另域处理）、ai_matte——GPU 管线专属。
 """
 
 from __future__ import annotations
@@ -157,9 +159,79 @@ def apply_qualifier_masked_grade(src_rgb: np.ndarray, graded_rgb: np.ndarray,
     return (src_rgb * (1.0 - w) + graded_rgb * w).astype(np.float32)
 
 
+def _box_min_max(matte: np.ndarray, radius: int, *,
+                  maximum: bool) -> np.ndarray:
+    """可分 box min/max（morphology.glsl 的 numpy 等价）。
+
+    H/V 两趟 = 方形窗；边界 clamp（GL 纹理默认 CLAMP_TO_EDGE 对齐
+    ndimage 的 'nearest'）。radius=0 原样返回。
+    """
+    if radius <= 0:
+        return matte
+    from scipy import ndimage
+    size = 2 * int(radius) + 1
+    fn = ndimage.grey_dilation if maximum else ndimage.grey_erosion
+    return fn(matte, size=(size, size), mode="nearest")
+
+
+def _gaussian_tap_weights(radius: int, sigma: float) -> np.ndarray:
+    """截断高斯核权重（blur.glsl 同式：w=gauss(i,σ)，±r，权重归一）。"""
+    xs = np.arange(-int(radius), int(radius) + 1, dtype=np.float64)
+    weights = np.exp(-(xs * xs) / (2.0 * sigma * sigma))
+    return (weights / weights.sum()).astype(np.float32)
+
+
+def _separable_gaussian(matte: np.ndarray, radius: int, sigma: float) -> np.ndarray:
+    """截断高斯可分模糊（H+V；blur.glsl 的 numpy 等价）。"""
+    from scipy import ndimage
+    if radius <= 0:
+        return matte
+    kernel = _gaussian_tap_weights(radius, sigma)
+    out = ndimage.convolve1d(matte, kernel, axis=1, mode="nearest")
+    return ndimage.convolve1d(out, kernel, axis=0, mode="nearest")
+
+
+def apply_qualifier_postprocess_cpu(matte: np.ndarray,
+                                    qp: Dict[str, Any]) -> np.ndarray:
+    """层级 matte 后处理（``_apply_matte_postprocess`` 的 numpy 等价）。
+
+    顺序与 GL 冻结一致：clean_black(erode) → clean_white(dilate) →
+    blur → denoise（小模糊 + smoothstep 对比恢复）；换算全部走
+    ``key_pipeline_params``（GL/CPU 共用权威表）。
+    """
+    from src.features.color.core.key_pipeline_params import (
+        blur_radius, blur_sigma, clean_radius, denoise_edge_halfwidth,
+        denoise_radius, denoise_strength,
+    )
+    out = np.asarray(matte, dtype=np.float32)
+    # 兼容 (h, w, 1) 通道维（图执行路径的 matte 形状）
+    squeezed = out.ndim == 3 and out.shape[-1] == 1
+    if squeezed:
+        out = out[:, :, 0]
+    out = out.copy()
+    r_cb = clean_radius(qp.get("clean_black"))
+    if r_cb > 0:
+        out = _box_min_max(out, r_cb, maximum=False)
+    r_cw = clean_radius(qp.get("clean_white"))
+    if r_cw > 0:
+        out = _box_min_max(out, r_cw, maximum=True)
+    r_blur = blur_radius(qp.get("blur"))
+    if r_blur > 0:
+        out = _separable_gaussian(out, r_blur, blur_sigma(r_blur))
+    r_dn = denoise_radius(qp.get("denoise"))
+    if r_dn > 0:
+        out = _separable_gaussian(out, r_dn, blur_sigma(r_dn))
+        strength = denoise_strength(qp.get("denoise"))
+        k = denoise_edge_halfwidth(strength)
+        out = _smoothstep_np(np.float32(0.5 - k), np.float32(0.5 + k), out)
+    out = np.clip(out, 0.0, 1.0)
+    return out[:, :, np.newaxis] if squeezed else out
+
+
 __all__ = [
     "compute_qualifier_matte",
     "apply_qualifier_masked_grade",
+    "apply_qualifier_postprocess_cpu",
     "qualifier_postprocess_active",
     "rgb_to_hsl_np",
 ]
