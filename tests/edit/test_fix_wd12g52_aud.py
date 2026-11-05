@@ -320,7 +320,7 @@ class TestAud14901EngineLazyInitLock:
 
     def test_patch_registration_is_idempotent_under_lock(self, fake_nemo, monkeypatch):
         """模块级 monkeypatch 幂等标志的 check-then-set 原子（并发注册只 patch 一次）。"""
-        import qwen_asr  # noqa: F401 — 真实安装（无则跳过）
+        pytest.importorskip("qwen_asr")
         from src.features.edit.ai_editing import transcript_provider as tp
 
         calls = {"processor": 0, "rope": 0}
@@ -503,6 +503,9 @@ class TestAud14913TtsCueIndexAlignment:
         from src.features.edit.ai_editing.tts_settings import TtsSettings
 
         provider = Qwen3TTSProvider()
+        monkeypatch.setitem(sys.modules, "soundfile", types.SimpleNamespace(
+            write=lambda *_args, **_kwargs: None,
+        ))
         engine = _FlakyTTSEngine()
         monkeypatch.setattr(provider, "_get_engine", lambda kind: engine)
         cues = (

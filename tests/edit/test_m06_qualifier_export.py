@@ -123,6 +123,7 @@ class TestQualifierFrameEvaluation:
         import logging
         from src.features.edit.core.timeline_export import TimelineExporter
         exporter = TimelineExporter.__new__(TimelineExporter)
+        exporter.allow_degraded_grade = True
         exporter._get_clip_color_grade = lambda _, **_kw: {
             "grading_params": {"exposure": 50.0},
             "grade_keyframes": None,

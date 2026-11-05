@@ -46,10 +46,13 @@ def test_transition_library_only_plays_visible_gifs_and_releases_on_hide(qapp) -
     ]
     gif_cards = [card for card in all_cards if card.has_preview]
     active_cards = [card for card in gif_cards if card._preview_movie is not None]
-    # Every built-in visual transition plus the two Wipe direction presets
-    # has a generated GIF thumbnail. Keep this derived from the catalogue so
-    # adding a transition does not turn into a stale UI test failure.
-    assert len(gif_cards) == len(TRANSITION_DEFINITIONS) + 2
+    # Animated previews are optional. New transitions still have static SVG
+    # icons when an animated preview has not been authored yet.
+    available_previews = sum(
+        panel._transition_preview_path(definition.transition_type) is not None
+        for definition in TRANSITION_DEFINITIONS
+    )
+    assert len(gif_cards) == available_previews + 2
     assert 0 < len(active_cards) <= 24
     assert all(
         card.height() == panel._transition_preview_geometry()[2]

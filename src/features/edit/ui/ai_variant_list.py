@@ -67,14 +67,16 @@ class _VariantCardWidget(QFrame):
         # （Rational，如 24000/1001）。fps 已知时按其换算秒数；未知时退回
         # 显示帧数，绝不用硬编码 24.0 换算出失真的秒数。
         if not card.duration_frames:
-            layout.addWidget(QLabel(tr("ai_variant.duration", "时长: {s}s", s=0)))
+            duration_label = QLabel(tr("ai_variant.duration", "时长: {s}s", s=0))
         elif fps is not None and fps > 0:
             dur_s = round(card.duration_frames / float(fps), 1)
-            layout.addWidget(QLabel(tr("ai_variant.duration", "时长: {s}s", s=dur_s)))
+            duration_label = QLabel(tr("ai_variant.duration", "时长: {s}s", s=dur_s))
         else:
-            layout.addWidget(QLabel(
+            duration_label = QLabel(
                 tr("ai_variant.duration_frames", "时长: {n}帧", n=card.duration_frames)
-            ))
+            )
+        duration_label.setObjectName("variantDurationLabel")
+        layout.addWidget(duration_label)
 
         # beat coverage / pace
         layout.addWidget(QLabel(

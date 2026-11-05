@@ -58,11 +58,23 @@ Color+剪辑版本 3,662 passed / 5 skipped，Color+App 5,428 passed，
 **10,465 passed / 20 skipped / 7 warnings**（471.05s、462.87s），
 日志与原始崩溃栈见 [N16 本机单进程证据](validation/color_resources/n16_single_process_20261105/README.md)。
 这满足本机 `color+app+ui+shared` 两遍门槛；先前段错误也曾落在其他 Qt
-调用，仍不能仅凭栈落点断言根因完全消除。`tests/edit`、跨平台与线程
-所有权终验未包含，N16/R12-B 不标为全验收。
+调用，仍不能仅凭栈落点断言根因完全消除。2026-11-06 的 `tests/edit`
+单进程基线为 10 failed / 11,866 passed / 42 skipped；逐项修复资源、
+规格隔离、可选依赖与 Metal 预模糊后复跑为 **11,875 passed / 43 skipped**，
+耗时 1,079.94 秒。完整失败/通过日志及 wheel 资源核对见
+[N16 Edit 证据](validation/color_resources/n16_edit_suite_20261106/README.md)。
+五套件同进程首轮为 4 failed / 22,336 passed / 63 skipped / 1 teardown
+error：两项 AI 回放测试继承全局诊断，非空诊断码是 `{value, trust, source}`
+传输对象而旧测试按字符串处理；两项变体时长测试依赖中文文案，前序 UI
+测试切到英文后无法定位标签。现分别隔离回放诊断 sink、给时长标签稳定
+`objectName` 并按身份测试；跨套件前序 48 项聚焦回归已通过。teardown
+error 是运行期间编辑本计划表触发 Color 工作区洁净门禁，下一轮运行期间
+保持工作区不变。完整首轮日志见 N16 Edit 证据目录。跨平台与线程所有权
+终验尚未包含，N16/R12-B 不标为全验收。
 
-本次验证不改变上表的跨平台 `NOT RUN`；N16 本机四套件状态按两轮
-通过证据更新，但含 Edit 的完整矩阵仍未验收。N15 实机对照结果见后文。
+本次验证不改变上表的跨平台 `NOT RUN`；N16 本机四套件连续两轮及
+Edit 单独一轮已通过，五套件同进程首轮暴露的 4 项跨套件测试脆弱点已修；
+全量复测待完成。N15 实机对照结果见后文。
 
 ### 本轮实机布局证据
 
@@ -87,7 +99,7 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 | P0 | V01 | 已完成（compound id 重映射根因修复；普通/resources 双路径 passed + 阻断负路径 exit 1） | 逐节点预览真实生成及脚本不能假绿 | 无 |
 | P0 | R12-A | 已通过（2026-11-05 复测全预算过：RSS 167.9/250 MB/10min；分行为归因新增） | 30 分钟资源与播放性能 | V01 |
 | P0 | R12-B | 本机出口矩阵通过；跨平台 NOT RUN；UI 级同帧对拍边界已登记 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
-| P0 | N16 | 本机 color+app+ui+shared 单进程连续两遍 10,465 passed / 20 skipped；Edit、跨平台和线程所有权终验待做，历史间歇段错误根因尚未证明彻底消除 | 单进程全套件稳定性与资源所有权 | 无 |
+| P0 | N16 | 本机 color+app+ui+shared 单进程连续两遍 10,465 passed / 20 skipped；Edit 单独 11,875 passed / 43 skipped；五套件首轮 4 项跨套件测试脆弱点已修，复测待完成；跨平台和线程所有权终验待做，历史间歇段错误根因尚未证明彻底消除 | 单进程全套件稳定性与资源所有权 | 无 |
 | P1 | R06-B | v1 已接线（onnx_tile 后端+结果会话+service+图命令+R09 闭包，17 测试；UI 触发面板登记为后续） | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
 | P1 | N02-B | 切片 1-4 已交付（声明/换算表/CPU 后处理/bitmap 内容身份进缓存键+图路径 matte fail-closed+key_frame_animated；19 测试）；bitmap 完整资源化与 tracker 帧域登记 v2 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
 | P1 | N07-B | 复核完成+三缺陷修复（预览 timeline 段跳过/缓存指纹漏栈/调整剪辑双重应用；4 新回归）| Group/Timeline 全出口最终链序与身份 | N07/R09 |
