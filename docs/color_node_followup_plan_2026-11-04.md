@@ -31,13 +31,13 @@ GradingPanel 在宽 1260px、高约 403px 时已达该上限，继续加高没�
 | P0 | V01 | 已完成（compound id 重映射根因修复；普通/resources 双路径 passed + 阻断负路径 exit 1） | 逐节点预览真实生成及脚本不能假绿 | 无 |
 | P0 | R12-A | 已通过（2026-11-05 复测全预算过：RSS 167.9/250 MB/10min；分行为归因新增） | 30 分钟资源与播放性能 | V01 |
 | P0 | R12-B | 本机出口矩阵通过；跨平台 NOT RUN；UI 级同帧对拍边界已登记 | 多出口、4K/HDR/32 节点与平台矩阵 | R12-A，可分批运行 |
-| P0 | N16 | 部分完成（shared 全绿清零、ui 4 既有修复杂4 污染、媒体并发收窄、全局 DeferredDelete 冲刷；edit 12 文件级既有+~7 顺序污染与合并跑 EXR SIGILL 崩溃点登记为残余债务） | 单进程全套件稳定性与资源所有权 | 无 |
+| P0 | N16 | 大部分完成（工作流清偿 12 例污染中 10 例修复终验通过 + EXR SIGILL 根因实证修复 + 第三处悬垂定时器；三套件全绿 color 3621/app 1797/ui 2233；残余如实登记：4 例容量外污染、speech 间歇、合并跑仍崩待定位、连续两遍口径未跑） | 单进程全套件稳定性与资源所有权 | 无 |
 | P1 | R06-B | v1 已接线（onnx_tile 后端+结果会话+service+图命令+R09 闭包，17 测试；UI 触发面板登记为后续） | 离线 AI/bake worker、结果和取消生命周期 | R06 现有协议 |
-| P1 | N02-B | 切片 1+2 已交付（key 管线声明进 plan+权威换算表+CPU 后处理实现消除跨后端分歧，16 测试）；bitmap 资源身份/GL fail-closed 收紧/tracker 帧域登记为切片 3-4 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
+| P1 | N02-B | 切片 1-4 已交付（声明/换算表/CPU 后处理/bitmap 内容身份进缓存键+图路径 matte fail-closed+key_frame_animated；19 测试）；bitmap 完整资源化与 tracker 帧域登记 v2 | Qualifier/Window/bitmap 的完整 key 后处理 | N02/N03 |
 | P1 | N07-B | 复核完成+三缺陷修复（预览 timeline 段跳过/缓存指纹漏栈/调整剪辑双重应用；4 新回归）| Group/Timeline 全出口最终链序与身份 | N07/R09 |
-| P1 | N10-B | 未开工（调研结论已入 N02-B 切片 1 的 key_pipeline 声明结构——key_frame_animated 字段位已预留；轨道/扇出本体待 v2 批次） | Mask/Qualifier 动画轨道与定义级扇出 | N10 v1 |
-| P1 | N12-B | 未开工（paste_grade_domains 域集合/冲突策略与跨工程闭包待 v2 批次；R09 闭包基建与 N02-B 的 bake 会话已为 bitmap/LUT 递归收集铺路） | 选择性复制与跨工程资源闭包 | R09/N12 |
-| P1 | N14-B | 部分：CPU qualifier 后处理已实现（N02-B 切片 2，权威换算表共用）；Metal key 通道/Corrector 域仍 fail-closed 逐域待推进 | Metal/CPU 其余域能力逐项实现 | R06/R12 |
+| P1 | N10-B | v1 已交付：qualifier 域 HSL 三带 11 字段轨道（hue 最短弧）+ shared 实例级 + provider 逐帧求值 + 轨道名白名单；mask/window 轨道与定义级扇出登记 v2（导出端窗口 matte 无消费端+provider 定义合并前置缺口） | Mask/Qualifier 动画轨道与定义级扇出 | N10 v1 |
+| P1 | N12-B | 切片 A 已交付：域表扩至 12 域（对齐 GradeClipboard 粒度）+ lut/bake 粘贴前资源校验 fail-visible + 缺插件 missing 占位 + paste_domains 权威提交三重失败修复（归一化分支缺失/本地直达 AttributeError/参数不透传）；跨工程 localize（切片 B）登记 v2 | 选择性复制与跨工程资源闭包 | R09/N12 |
+| P1 | N14-B | CPU 五域已接线（LUT3D v1 + qualifier 后处理 + HSL/soft_clip/curves_soft_clip/非 Normal blend——数学复用生产实现，中性恒等有回归锚；Metal/pointwise 经 backend 参数维持 fail-closed）；Metal key 通道接线（kernel 已有）与 mixer/warper 登记 v2 | Metal/CPU 其余域能力逐项实现 | R06/R12 |
 | P2 | N15 | NOT RUN（需实机 Resolve 20 人工逐项对照；本机已装 Resolve 20.2.1 但窗口创建不可脚本化——API 不覆盖，必须人工执行 CPW/LPW/PPW/PCW 并录屏留证） | 达芬奇四种 Window 组合的 UI/交互对拍 | N15 命令已存在 |
 
 ## 2. 逐项施工与验证
@@ -226,6 +226,26 @@ headless GL 出口层）：
   19 失败（12 文件级既有：ssl 修复后 wd12g52 依赖债/金属阈值/ef01
   等与 R12 登记一致；~7 顺序污染：drag_inject/edit_mode_toggle/ui_aud3/
   wd11g53/wd12g65×3/media_pool_batch_delete/round4×2 家族）。
+
+**工作流清偿轮（2026-11-05，dwfrun-c17b0e3e，证据 docs/validation/
+color_resources/n16_pollution_clearance/ 由工作流报告 artifact 留档）**：
+- 基线 26 失败 → 16 例顺序污染（10 既有）；12 例诊断+独立确认+修复：
+  i18n 缺键分支补 default 插值（生产修复——insights 词典残留使 `{s}`
+  字面量直达 UI）、ef03 i18n 状态自持、color_space 覆盖层隔离（根因
+  与 worktree 独立定位互证：R06-B bake 测试的 load_project 色彩覆盖
+  泄漏）、lut 会话 bind 合并全部 kind 的残留、edit_mode_toggle 激活
+  窗口隔离、wd11g53 音频缓存 reset；
+- **EXR SIGILL 根因实证**（非缓冲所有权）：opencv-python 5.0.0.93
+  wheel 捆绑 libdeflate 的 ZIP 压缩路径在 CPUID 探测跨进程不一致的
+  本机上函数指针被写坏 → SIGILL（12 进程×200 循环：ZIP 7/12、
+  PIZ/RLE/NONE 0/12；反汇编确认 PIZ 路径零 libdeflate 调用）；修复
+  =无损 PIZ + ZIP 族读取进程隔离（崩溃仅损失本侧回退 JPEG）；
+- 第三处悬垂 singleShot（dock 恢复路径 300ms 再钳位）修复后
+  tests/app 1797 全绿；
+- **残余（未虚报）**：4 例容量外污染（board 留档）、speech 例未复现
+  （间歇性）、四套件合并单进程终验仍崩溃（工作流未记录崩溃点是否
+  仍为 EXR，需下轮定位崩溃栈）、「同一进程连续两遍」完整验收未跑、
+  侦探附带发现 dock_layout one_shot 文件内污染（本轮已顺手修复）。
 
 **残余债务（如实登记，未虚报）**：
 - tests/edit ~7 顺序污染未 bisect 前件（DeferredDelete 冲刷不收敛——
