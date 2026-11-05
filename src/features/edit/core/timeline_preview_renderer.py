@@ -2174,7 +2174,10 @@ class PreviewRenderWorker(QThread):
                 ),
                 self._asset_resolver,
                 effects_snapshot=self._get_clip_effects_snapshot,
-                grade_snapshot=self._get_preview_color_grade,
+                # N07-B：调整剪辑 grade 快照豁免 timeline 段（下方 clip
+                # 已各自应用过，防 timeline look 双重应用）。
+                grade_snapshot=lambda lyr: self._get_preview_color_grade(
+                    lyr, exclude_timeline=True),
             )
             if layers
             else ()
@@ -3084,9 +3087,11 @@ class PreviewRenderWorker(QThread):
                     _atype = self._asset_resolver.get_asset_type(layer.asset_id)
                     if _atype == 'adjustment':
                         if composite_buffer is not None:
-                            # T-P1-22：ColorStack 先于效果链（与导出路径一致）
+                            # T-P1-22：ColorStack 先于效果链（与导出路径一致）。
+                            # N07-B：调整剪辑豁免 timeline 段（下方 clip 已
+                            # 各自应用过，防 timeline look 双重应用）。
                             adjusted_buffer = self._apply_preview_color_grade(
-                                composite_buffer, layer
+                                composite_buffer, layer, exclude_timeline=True
                             )
                             adjusted_buffer = self._apply_clip_effects_cpu(
                                 adjusted_buffer, layer, frame
@@ -4858,6 +4863,8 @@ class PreviewRenderWorker(QThread):
     def _get_preview_color_grade(
         self,
         layer: ClipLayerInfo,
+        *,
+        exclude_timeline: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Return the active clip ColorStack in a renderer-safe form.
 
@@ -4953,14 +4960,23 @@ class PreviewRenderWorker(QThread):
                 advanced_active = True
                 break
 
-        # F4.1: 调色链段（组前/微调/组后）——解析单点 core/color_chain
+        # F4.1: 调色链段（组前/微调/组后/timeline）——解析单点 core/color_chain。
+        # N07-B：此前只读 `asset_resolver._current_timeline`（全仓无写入方，
+        # 恒为 ""）→ timeline 段在 Edit 预览/调整剪辑/磁盘缓存全部出口被
+        # 跳过而导出应用——预览≠成片。以 worker 自持的 `_timeline_sequence`
+        # 兜底（resolver 属性保留为优先源，防既有注入方依赖）。
         from src.features.edit.core.color_chain import (
             chain_extra_params, extras_active,
         )
-        timeline_id = getattr(
-            getattr(self._asset_resolver, "_current_timeline", None),
-            "timeline_id", "") if self._asset_resolver is not None else ""
-        extras = chain_extra_params(project, str(timeline_id), clip)
+        current_timeline = getattr(
+            self._asset_resolver, "_current_timeline", None) \
+            if self._asset_resolver is not None else None
+        if current_timeline is None:
+            current_timeline = getattr(self, "_timeline_sequence", None)
+        timeline_id = str(
+            getattr(current_timeline, "timeline_id", "") or "")
+        extras = chain_extra_params(project, timeline_id, clip,
+                                    exclude_timeline=exclude_timeline)
         extras_on = extras_active(extras)
 
         if not basic_active and not advanced_active and not grade_keyframes \
@@ -5221,10 +5237,12 @@ class PreviewRenderWorker(QThread):
             sharp = np.dstack([sharp, src[:, :, 3]])
         return sharp
 
-    def _apply_preview_color_grade(self, frame_data: np.ndarray, layer: ClipLayerInfo) -> np.ndarray:
+    def _apply_preview_color_grade(self, frame_data: np.ndarray, layer: ClipLayerInfo,
+                                   *, exclude_timeline: bool = False) -> np.ndarray:
         from src.features.shared.effects.video_stabilization import (
             clip_stabilization_state, apply_stabilization_cpu)
-        graded = self._apply_preview_color_grade_unstabilized(frame_data, layer)
+        graded = self._apply_preview_color_grade_unstabilized(
+            frame_data, layer, exclude_timeline=exclude_timeline)
         state = clip_stabilization_state(getattr(self._asset_resolver, '_project', None),
                                          getattr(layer, 'clip', None))
         return apply_stabilization_cpu(graded, state, int(getattr(layer, "source_frame", 0)))
@@ -5233,9 +5251,12 @@ class PreviewRenderWorker(QThread):
         self,
         frame_data: np.ndarray,
         layer: ClipLayerInfo,
+        *,
+        exclude_timeline: bool = False,
     ) -> np.ndarray:
         """Apply the realtime ColorStack primary grade for a CPU fallback."""
-        grade = self._get_preview_color_grade(layer)
+        grade = self._get_preview_color_grade(
+            layer, exclude_timeline=exclude_timeline)
         if grade is None:
             return frame_data
 

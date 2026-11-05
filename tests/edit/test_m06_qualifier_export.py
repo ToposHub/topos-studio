@@ -89,7 +89,7 @@ class TestQualifierFrameEvaluation:
             "grade_keyframes": {"qualifier.lum_high": track.to_dict()},
             "qualifier_params": dict(stack.layers[0]["qualifier_params"]),
         }
-        exporter._get_clip_color_grade = lambda _: grade
+        exporter._get_clip_color_grade = lambda _, **_kw: grade
         # 两像素：亮像素（l≈0.71，帧48时带内）与暗像素（l≈0.1，带外）
         frame = np.array([[[180, 180, 180], [25, 25, 25]]], dtype=np.uint8)
         out = exporter._apply_color_grade(
@@ -102,7 +102,7 @@ class TestQualifierFrameEvaluation:
         """M06.2：静态 qualifier——grade 只作用于亮度带内像素。"""
         from src.features.edit.core.timeline_export import TimelineExporter
         exporter = TimelineExporter.__new__(TimelineExporter)
-        exporter._get_clip_color_grade = lambda _: {
+        exporter._get_clip_color_grade = lambda _, **_kw: {
             "grading_params": {"exposure": 50.0},
             "grade_keyframes": None,
             "qualifier_params": {"enabled": True, "lum_low": 0.4,
@@ -123,7 +123,7 @@ class TestQualifierFrameEvaluation:
         import logging
         from src.features.edit.core.timeline_export import TimelineExporter
         exporter = TimelineExporter.__new__(TimelineExporter)
-        exporter._get_clip_color_grade = lambda _: {
+        exporter._get_clip_color_grade = lambda _, **_kw: {
             "grading_params": {"exposure": 50.0},
             "grade_keyframes": None,
             "qualifier_params": {"enabled": True, "lum_low": 0.4,
@@ -175,7 +175,7 @@ class TestFrameChainPixelParity:
         track.set_keyframe(0, 0.5, "linear")
         track.set_keyframe(96, 1.0, "linear")
         exporter = TimelineExporter.__new__(TimelineExporter)
-        exporter._get_clip_color_grade = lambda _: {
+        exporter._get_clip_color_grade = lambda _, **_kw: {
             "grading_params": {"exposure": 50.0},
             "grade_keyframes": {"qualifier.lum_high": track.to_dict()},
             "qualifier_params": {"enabled": True, "lum_low": 0.2,

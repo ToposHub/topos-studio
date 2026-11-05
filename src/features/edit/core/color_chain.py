@@ -101,6 +101,8 @@ def chain_extra_params(
     project: Any,
     timeline_id: str,
     clip: Any,
+    *,
+    exclude_timeline: bool = False,
 ) -> List[dict]:
     """主栈之外的链段参数（pre → trim → post 顺序，只含有效段）。
 
@@ -110,6 +112,10 @@ def chain_extra_params(
     非交换，顺序错误即像素错误）。消费方按标签把 pre 段放主栈之前、
     trim/post 段放主栈之后。
 
+    N07-B：``exclude_timeline=True`` 供调整剪辑（adjustment clip）语境
+    使用——调整剪辑叠加在"下方各 clip 已各自应用过 timeline 段"的合成
+    结果上，其链解析必须豁免 timeline 段（否则 timeline look 双重应用）。
+
     只透传**基础调色参数**（与 GPU primary grade 快照同域）；链段栈若
     含 curves/LUT 等高级操作，属未支持组合——调用方不静默丢弃，本
     函数在返回列表对应位置放入带 ``_unsupported_advanced`` 标记的项，
@@ -117,7 +123,8 @@ def chain_extra_params(
     """
     extras: List[dict] = []
     pre, trim, post = resolve_color_chain(project, timeline_id, clip)
-    timeline_stack = resolve_timeline_stack(project, timeline_id)
+    timeline_stack = (None if exclude_timeline
+                      else resolve_timeline_stack(project, timeline_id))
     for segment, stack in (
             ("pre", pre), ("trim", trim), ("post", post),
             ("timeline", timeline_stack)):
@@ -208,6 +215,11 @@ def chain_stack_ids(
     for stack in (pre, trim, post):
         if stack is not None:
             ids.append(str(getattr(stack, "stack_id", "")))
+    # N07-B：timeline 段栈同样进指纹——漏收会在 timeline 调色后命中
+    # 陈旧磁盘缓存（复合/MG 整帧 blit 旧像素，"绿缓存"）。
+    timeline_stack = resolve_timeline_stack(project, timeline_id)
+    if timeline_stack is not None:
+        ids.append(str(getattr(timeline_stack, "stack_id", "")))
     return tuple(i for i in ids if i)
 
 
