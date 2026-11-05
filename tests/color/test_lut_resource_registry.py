@@ -261,7 +261,13 @@ def test_empty_session_keeps_none_save_semantics(tmp_path: Path) -> None:
     from src.features.edit.core.project import EditProject
     session = LutResourceSession(staging_root=str(tmp_path / "empty"))
     assert session.save_payload() == (None, None)
-    # 无资源协议保存：包内不写 resources 模块
+    # 无资源协议保存的前提是**全部**资源会话为空（R06-B 起 bake 结果
+    # 会话同语义并入保存载荷——任一会话有条目即写资源索引）；显式
+    # reset 全局 bake 会话，防同进程早前用例注册的条目改变前提。
+    from src.features.color.core.color_bake_result_registry import (
+        get_bake_result_session,
+    )
+    get_bake_result_session().reset()
     target = tmp_path / "plain.topos"
     project = EditProject.create(name="plain")
     assert EditProjectIO().save_project(
