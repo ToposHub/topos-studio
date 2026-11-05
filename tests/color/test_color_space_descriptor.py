@@ -90,6 +90,26 @@ class _StubConfig:
         return self.d.get(key, default)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_project_color_overrides():
+    """快照并清空进程级工程色彩覆盖层，测试后还原（同 test_fix_wd15g83_aud）。
+
+    本文件用 _StubConfig 直传键测 descriptor_from_config；工程加载类测试
+    （如 test_color_bake_execution 的 save→reopen 往返）会经 edit_project_io
+    把 ConfigManager 默认值写入 _PROJECT_COLOR_OVERRIDES 且不清理，若不隔离
+    会按键遮蔽 _StubConfig（_cfg 先查覆盖层），导致顺序依赖的假失败。
+    """
+    from src.shared.color.color_space_descriptor import (
+        clear_project_color_overrides,
+        get_project_color_overrides,
+        set_project_color_overrides,
+    )
+    saved = get_project_color_overrides()
+    clear_project_color_overrides()
+    yield
+    set_project_color_overrides(saved)
+
+
 class TestDescriptorFromConfig:
     def test_explicit_prefs_win(self):
         cfg = _StubConfig({"color.preview.image_transfer": "iec61966_2_1"})
@@ -174,6 +194,18 @@ class TestRangeHandling:
 
 class TestPreferenceUiRuntimeAlignment:
     """P0-COLOR-04：偏好页暴露的键与 descriptor_from_config 读取的键对齐。"""
+
+    def setup_method(self):
+        # 工程级覆盖层是进程级全局（_PROJECT_COLOR_OVERRIDES），且在
+        # descriptor_from_config 的 _cfg 中优先于传入 config。先前的
+        # load_project/convert 往返测试会把本机用户全局配置注入该层，
+        # 掩盖这里的 _StubConfig。测试前后清空，恢复全局偏好语义。
+        from src.shared.color import color_space_descriptor as csd
+        csd.clear_project_color_overrides()
+        self._csd = csd
+
+    def teardown_method(self):
+        self._csd.clear_project_color_overrides()
 
     def test_primaries_and_range_keys_resolve(self):
         """primaries/_range 键（偏好页新增入口）能被运行时正确解析。"""

@@ -33,6 +33,23 @@ except Exception:  # noqa: BLE001
 pytestmark = pytest.mark.skipif(not HAS_QT, reason="PyQt6 unavailable")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_active_window(qapp) -> None:
+    """顺序污染隔离：把 QApplication 激活窗口重置为中性态。
+
+    前件测试（如 test_edit_effects_panel_drag_inject.py）构造无父顶层面板
+    并 show() 后不收尾；tests/edit/conftest.py 的会话级 autouse fixture
+    _freeze_cyclic_gc_for_qt_widgets 冻结循环 GC 使该面板跨测试存活，
+    QApplication.activeWindow() 长期指向外来窗口。TimelinePanel 的
+    Shift+B 守卫（shortcut_owner_window_active，activeWindow 非空且非
+    自身 window 时 False）会把程序化调用的 toggle_edit_mode 静默
+    no-op。每个用例开始前清空激活窗口，使本文件的 toggle 断言只依赖
+    被测面板自身（active is None 时守卫放行）。
+    """
+    QApplication.setActiveWindow(None)
+    yield
+
+
 @pytest.fixture
 def fake_config(monkeypatch) -> dict[str, Any]:
     """ConfigManager get/set → 进程内字典。"""

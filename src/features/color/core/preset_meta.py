@@ -240,11 +240,21 @@ def write_still_exr(topos_path: str, float_img: np.ndarray,
         if img.ndim != 3 or img.shape[2] not in (3, 4):
             return None
         path = still_exr_path_for(topos_path)
+        # 压缩方式必须是 PIZ（不可 ZIP/ZIPS/PXR24/DWAA/DWAB）：opencv-python
+        # 5.0.0.93 wheel 携带的 OpenEXRCore 对 ZIP 族压缩块走捆绑 libdeflate
+        # （exr_(un)compress_buffer → libdeflate_zlib_(de)compress_ex → 经
+        # 可写函数指针 _adler32_impl 分派），在本机（Alder Lake 黑苹果，
+        # libdeflate 的 CPUID 探测跨进程不一致）上该指针被写坏后 `jmp *`
+        # 落到映像外 → EXC_BAD_INSTRUCTION(SIGILL)，编码/解码两侧均复现
+        # （200 次循环 12 进程：ZIP 7/12 与 3/12 崩溃；PIZ/RLE/NONE 0/12）。
+        # 反汇编确认 undo/apply_piz、undo/apply_rle 完全不触碰 libdeflate；
+        # PIZ 压缩率与 ZIP 相当（1080p f32 实测 12.8MB vs 原始 24.9MB），
+        # 且无损——HDR 值/负值/渐变语义不变。
         ok, encoded = cv2.imencode(
             ".exr", img,
             [int(cv2.IMWRITE_EXR_TYPE), int(cv2.IMWRITE_EXR_TYPE_FLOAT),
              int(cv2.IMWRITE_EXR_COMPRESSION), int(
-                 cv2.IMWRITE_EXR_COMPRESSION_ZIP)])
+                 cv2.IMWRITE_EXR_COMPRESSION_PIZ)])
         if not ok:
             return None
         encoded.tofile(path)
@@ -299,12 +309,107 @@ def write_still_images(topos_path: str, rendered_img: np.ndarray,
     return (thumb_path if thumb_ok else None), still_path
 
 
+def _exr_compression_code(path: str) -> Optional[int]:
+    """解析 EXR 头部的 compression 属性字节（0=NO 1=RLE 2=ZIPS 3=ZIP
+    4=PIZ 5=PXR24 8/9=DWAA/DWAB）；非 EXR / 头损坏 / 未找到返回 None。"""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(4096)
+    except OSError:
+        return None
+    if len(head) < 8 or head[:4] != b"\x76\x2f\x31\x01":
+        return None
+    pos = 8
+    while pos < len(head):
+        z = head.find(b"\x00", pos)
+        if z < 0:
+            return None
+        name = head[pos:z].decode("latin-1", "replace")
+        pos = z + 1
+        if name == "":  # 头结束仍未见 compression → 异常头
+            return None
+        z = head.find(b"\x00", pos)
+        if z < 0:
+            return None
+        typ = head[pos:z]
+        pos = z + 1
+        if pos + 4 > len(head):
+            return None
+        size = int.from_bytes(head[pos:pos + 4], "little")
+        pos += 4
+        if name == "compression" and typ == b"compression" and size >= 1:
+            return head[pos]
+        pos += size
+    return None
+
+
+#: ZIP 族压缩：OpenEXRCore 经捆绑 libdeflate 解压（undo_zip/undo_pxr24
+#: 调 exr_uncompress_buffer），编码解码皆可能触发 wheel 捆绑 libdeflate 的
+#: _adler32_impl 分派 SIGILL（见 write_still_exr 注释）——读取侧对这类
+#: 文件必须进程隔离解码，崩溃只损失本侧车（返回 None 走 JPEG 回退），
+#: 不再击落宿主进程。PIZ/RLE/NONE 为 OpenEXRCore 自带实现，进程内安全。
+_EXR_DEFLATE_COMPRESSION = frozenset({2, 3, 5, 8, 9})
+
+_EXR_CHILD_DECODE_SRC = (
+    "import os, sys\n"
+    "os.environ.setdefault('OPENCV_IO_ENABLE_OPENEXR', '1')\n"
+    "import cv2, numpy as np\n"
+    "arr = cv2.imread(sys.argv[1], cv2.IMREAD_UNCHANGED)\n"
+    "if arr is None:\n"
+    "    sys.stdout.buffer.write(b'FAIL\\n')\n"
+    "    sys.exit(0)\n"
+    "buf = np.ascontiguousarray(arr, dtype=np.float32)\n"
+    "shape = ' '.join(str(d) for d in buf.shape)\n"
+    "sys.stdout.buffer.write(\n"
+    "    ('OK ' + shape + '\\n').encode() + buf.tobytes())\n"
+)
+
+
+def _decode_exr_isolated(path: str) -> Optional[np.ndarray]:
+    """在子进程中解码 EXR（崩溃隔离）：子进程 SIGILL/超时返回 None。
+
+    子进程经管道回传 ``OK <shape>\\n<raw float32 bytes>``；不能用
+    ``np.save(sys.stdout.buffer, ...)``——numpy 的 tofile 需可 seek 的
+    fd，管道不支持（OSError: obtaining file position failed）。
+    """
+    import subprocess
+    import sys
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", _EXR_CHILD_DECODE_SRC, path],
+            capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    nl = proc.stdout.find(b"\n")
+    head = proc.stdout[:nl].split() if nl >= 0 else []
+    if not head or head[0] != b"OK" or len(head) < 2:
+        return None
+    try:
+        shape = tuple(int(d) for d in head[1:])
+        arr = np.frombuffer(proc.stdout[nl + 1:], dtype=np.float32)
+        if arr.size != int(np.prod(shape)) or arr.size == 0:
+            return None
+        return arr.reshape(shape).copy()
+    except (ValueError, TypeError):
+        return None
+
+
 def load_still_exr(topos_path: str) -> Optional[np.ndarray]:
-    """读高精度参考帧（float32；缺文件/损坏返回 None）。"""
+    """读高精度参考帧（float32；缺文件/损坏返回 None）。
+
+    本函数写入的侧车为 PIZ 压缩（进程内解码安全）；旧版本写的 ZIP 侧车
+    或外来 EXR 若属 ZIP 族压缩，经子进程隔离解码（见 _EXR_DEFLATE_
+    COMPRESSION 注释），解码失败按缺文件处理（调用方回退 JPEG）。
+    """
     path = still_exr_path_for(topos_path)
     if not os.path.isfile(path):
         return None
     try:
+        comp = _exr_compression_code(path)
+        if comp is None or comp in _EXR_DEFLATE_COMPRESSION:
+            return _decode_exr_isolated(path)
         img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
         if img is None:
             return None
