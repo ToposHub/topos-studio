@@ -169,6 +169,35 @@ class TestAud19407PluginRescanGate:
 # ────────────────────────────────────────────────────────────────────────
 
 class TestAud19412DecisionButtonGating:
+    @pytest.fixture(autouse=True)
+    def _reset_i18n_translations(self):
+        """顺序污染隔离：本测试用按钮中文文本（"锁定"/"拒绝"/"替换"）做键，
+        而按钮文本来自 tr(key, 中文默认)。此前文件的 locale 测试经
+        load_locale() 后无法回到"空词典"状态，en_US 词典会永久驻留
+        I18N 类属性，使 tr('ai_decision.lock', '锁定') 解析为 'Lock'，
+        按钮文本变英文导致 KeyError。进入前清空词典（tr 回落中文
+        default），退出时恢复进入前的原状，不向进程注入新状态。"""
+        from src.shared.i18n.i18n import I18N
+
+        saved = (
+            I18N._translations,
+            I18N._fallback_translations,
+            I18N._current_locale,
+            list(I18N._module_locales_dirs),
+        )
+        I18N._translations = {}
+        I18N._fallback_translations = {}
+        I18N._module_locales_dirs = []
+        try:
+            yield
+        finally:
+            (
+                I18N._translations,
+                I18N._fallback_translations,
+                I18N._current_locale,
+                I18N._module_locales_dirs,
+            ) = saved
+
     def _buttons_by_text(self, row_widget):
         return {
             btn.text(): btn for btn in row_widget.findChildren(QPushButton)

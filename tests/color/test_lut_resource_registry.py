@@ -259,6 +259,16 @@ def test_imported_luts_survive_save_and_relocate(tmp_path: Path) -> None:
 def test_empty_session_keeps_none_save_semantics(tmp_path: Path) -> None:
     from src.features.edit.core.edit_project_io import EditProjectIO
     from src.features.edit.core.project import EditProject
+    from src.shared.color.lut_resource_registry import get_lut_resource_session
+    # 顺序污染防御：save_project 取全局 LUT/bake 会话的 save_payload 决定
+    # 是否写 resources 模块（edit_project_io.py:1273-1299）；先前的
+    # load_project 测试会把包索引（含 bake 包 generated 条目）合并进全局
+    # LUT 会话且未必清理，先复位全局会话再验证"空会话"语义。
+    from src.features.color.core.color_bake_result_registry import (
+        get_bake_result_session,
+    )
+    get_lut_resource_session().reset()
+    get_bake_result_session().reset()
     session = LutResourceSession(staging_root=str(tmp_path / "empty"))
     assert session.save_payload() == (None, None)
     # 无资源协议保存：包内不写 resources 模块

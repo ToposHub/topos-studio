@@ -225,6 +225,13 @@ class I18N:
             
             # Neither current locale nor fallback has the key
             if default is not None:
+                # 与上方空词典早退分支同规则：default 可能携带占位符
+                # （如 "{name}: ..."），不插值会把字面花括号送到 UI。
+                if kwargs:
+                    try:
+                        return str(default).format(**kwargs)
+                    except (KeyError, IndexError, ValueError):
+                        return str(default)
                 return default
             # Return the key as last resort
             return key

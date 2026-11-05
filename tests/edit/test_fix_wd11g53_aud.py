@@ -510,6 +510,11 @@ class TestAud15421OutputDeviceCacheBypass:
         """
         from src.features.edit.core import audio_capabilities as caps_mod
 
+        # 顺序污染隔离：同进程前序测试（如裸调 build_audio_health_report 者）可能
+        # 已用真实探测填充模块级 _cached，惰性缓存分支会直接复用残留快照、跳过
+        # 本测试的假探测。先清缓存，保证下方"种子缓存"步骤真正执行假探测。
+        caps_mod.reset_audio_capabilities_cache()
+
         # 1) 模拟 DSP 热路径先用默认 False 填充缓存（"跳过探测"→unknown 占位）
         monkeypatch.setattr(caps_mod, "_probe_output_device",
                             lambda: caps_mod.CapabilityResult(False, "simulated: no device"))
