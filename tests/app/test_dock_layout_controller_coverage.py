@@ -150,6 +150,7 @@ _BASE_DOCKS: dict = {
     "dock_lut": ("dockLut", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_raw": ("dockRaw", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_analysis": ("dockAnalysis", Qt.DockWidgetArea.BottomDockWidgetArea),
+    "dock_color_keyframes": ("dockColorKeyframes", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_export": ("dockExport", Qt.DockWidgetArea.RightDockWidgetArea),
     "dock_crop": ("dockCrop", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_plugin": ("dockEffects", Qt.DockWidgetArea.RightDockWidgetArea),
@@ -787,7 +788,7 @@ def test_apply_default_layout_arrangement_and_titlebars(
     # First run: every base dock visible（350a037 起 Effects 为左侧
     # Gallery/LUT 标签组一等面板——不再默认隐藏）。
     for attr in _BASE_DOCKS:
-        assert not _hidden(layout_host, attr), f"{attr} must be visible in the default layout"
+        assert _hidden(layout_host, attr) == (attr == "dock_color_keyframes"), attr
     assert not layout_host.dock_curves.isFloating(), "default layout re-docks floating docks"
 
     # Areas.
@@ -822,6 +823,24 @@ def test_apply_default_layout_video_mode_hides_image_panels(
     assert _hidden(layout_host, "dock_deblur")
     assert _hidden(layout_host, "dock_crop")
     assert _hidden(layout_host, "dock_info")
+
+
+def test_color_keyframes_menu_opens_in_old_layout_and_stays_on_color_page(
+        layout_host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_work_mode(layout_host, "video", monkeypatch)
+    dock = layout_host.dock_color_keyframes
+    _, _, panels = layout_host._load_factory_layout("video")
+    assert layout_host.restoreState(_from_hex(panels["Color"]))
+    # Startup can immediately save a new Qt blob before the user opens the panel.
+    layout_host.page_layouts["Color"] = layout_host.saveState()
+    dock.toggleViewAction().triggered.connect(layout_host._raise_color_keyframes)
+    dock.toggleViewAction().trigger()
+    assert not dock.isHidden()
+    assert dock in layout_host.tabifiedDockWidgets(layout_host.dock_analysis)
+    layout_host.current_page = "Edit"
+    layout_host._enforce_page_dock_visibility()
+    assert dock.isHidden()
+    assert not dock.toggleViewAction().isEnabled()
 
 
 def test_apply_default_layout_image_mode_hides_video_panels(
