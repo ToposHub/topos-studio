@@ -160,6 +160,8 @@ def graph_node_layer_provider(
     N10：``frame`` 非 None 时对带 ``params.grade_keyframes`` 轨道的节点
     按帧求值（``evaluate_grade_keyframes``——与 legacy 预览/导出同一求
     值函数、同一源帧域）；轨道转换按 graph_revision 缓存避免每帧重建。
+    KF-06：未参与求值的节点（恒定/无轨道）仍返回完整合并 base 参数
+    （此前返回 None，执行器回退 plan 内嵌 params 会丢 legacy 域）。
     """
     payloads: dict[str, dict[str, Any] | None] = {
         n.node_id: node_layer_payload(n) for n in _iter_corrector_nodes(graph)
@@ -170,7 +172,7 @@ def graph_node_layer_provider(
             GradeKeyframe, GradeKeyframeTrack, evaluate_grade_keyframes,
             evaluate_qualifier_params_tracks,
         )
-        evaluated = {}
+        evaluated = dict(payloads)
         for n in _iter_corrector_nodes(graph):
             payload = payloads.get(n.node_id)
             if not payload:

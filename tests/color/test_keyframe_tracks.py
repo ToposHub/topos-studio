@@ -291,7 +291,7 @@ def test_coverage_manifest_covers_all_registered_fields():
     for domain in ("Sizing", "Open FX"):
         assert domain in content
     assert "PENDING-KF00" in content
-    assert "TimelineExporter" in content  # window deliver 缺口如实登记
+    assert "mask.*" in content  # window write 缺口如实登记（KF-03 域命令）
 
 
 def test_coverage_manifest_file_in_sync():
@@ -312,9 +312,8 @@ def test_capability_rows_shapes():
     for domain in ("grade", "qualifier"):
         summary = by_domain[domain][0]
         assert all(summary[column] for column in kt.CAPABILITY_COLUMNS)
-    # window 的 write/deliver 缺口带原因
+    # window 的 write 缺口带原因（deliver 已由 KF-06 导出求值补齐）
     window_summary = by_domain["window"][0]
     assert window_summary["write"] is False
-    assert window_summary["deliver"] is False
+    assert window_summary["deliver"] is True
     assert "KF-03" in window_summary["reasons"]["write"]
-    assert "KF-06" in window_summary["reasons"]["deliver"]
