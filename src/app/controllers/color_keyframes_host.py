@@ -25,7 +25,10 @@ from src.features.color.core.color_graph_param_source import (
     node_layer_payload,
 )
 from src.features.color.core.keyframe_tracks import (
+    WINDOW_TRACK_FIELDS,
     decode_keyframe,
+    expected_value_size,
+    mask_track_name,
     parse_track_name,
 )
 from src.features.color.ui.color_keyframes_view_state import (
@@ -60,12 +63,17 @@ def _session_context_key(session: Any, stack_id: str) -> str:
     return "|".join(parts)
 
 
-def _leaf_label(domain: str, field: str, shapes: Any) -> str:
+def _leaf_label(domain: str, field: str, shapes: Any,
+                owner_id: str = "") -> str:
     """叶轨显示名（display-only，不参与轨道身份）。"""
     if domain == "window":
         for shape in shapes or ():
-            if isinstance(shape, dict) and shape.get("name"):
-                return f"{shape['name']} · {field}"
+            if (isinstance(shape, dict)
+                    and owner_id and str(shape.get("id")) == owner_id):
+                name = shape.get("name")
+                if name:
+                    return f"{name} · {field}"
+                break
         return f"{tr('window', 'Window')} · {field}"
     return field
 
@@ -125,16 +133,16 @@ def build_keyframes_snapshot(
             existing[str(name)] = (address, markers)
 
         def _leaf(domain: str, track_name: str, field: str,
-                  markers: list[Marker]) -> Track:
+                  markers: list[Marker], owner_id: str = "") -> Track:
             return Track(id=f"node:{node_id}|{track_name}",
-                         label=_leaf_label(domain, field, shapes),
+                         label=_leaf_label(domain, field, shapes, owner_id),
                          scope="color", markers=tuple(markers),
                          auto=node_id in auto_nodes)  # Corrector 开关作用后代
 
         leaves: list[Track] = []
         # grade/qualifier：登记字段全量常驻（空轨道无标记）——否则首个
-        # 关键帧无处可加（面板只对树内叶轨发请求）。窗口域仍按既有
-        # 轨道投影（写入走 Layer 域，KF-05/KF-07 开放）。
+        # 关键帧无处可加（面板只对树内叶轨发请求）。窗口域同策略：
+        # 每个实际形状 × 登记字段常驻（形状删除 → 叶行随载荷消失）。
         for spec in GRADE_TRACK_FIELDS:
             _, markers = existing.get(spec.name, (None, []))
             if not markers and spec.name in existing:
@@ -146,9 +154,16 @@ def build_keyframes_snapshot(
             if not markers and name in existing:
                 continue
             leaves.append(_leaf("qualifier", name, spec.name, markers))
-        for name, (address, markers) in existing.items():
-            if address.domain == "window" and markers:
-                leaves.append(_leaf("window", name, address.field, markers))
+        shape_ids = [str(s.get("id")) for s in (shapes or ())
+                     if isinstance(s, dict) and s.get("id")]
+        for shape_id in shape_ids:
+            for spec in WINDOW_TRACK_FIELDS:
+                name = mask_track_name(shape_id, spec.name)
+                _, markers = existing.get(name, (None, []))
+                if not markers and name in existing:
+                    continue
+                leaves.append(_leaf("window", name, spec.name, markers,
+                                    shape_id))
         row_id = f"node:{node_id}"
         label = str(getattr(node, "label", "") or payload.get("label")
                     or f"{tr('corrector', 'Corrector')} {len(rows) + 1}")
@@ -210,6 +225,11 @@ class ColorKeyframesHost:
         self._last_seek_frame = 0
         self._scrubbing = False
         self._scrub_lane_started = False
+        # 正式剪贴板（计划 §edit_requested）：复制时捕获不可变载荷
+        # （值/动态属性/能力签名），粘贴不读已删改的源；跨 context 粘贴
+        # 必须有捕获。
+        self._clipboard_entries: dict[tuple[str, int], dict] = {}
+        self._clipboard_source_context = ""
         panel.seek_requested.connect(self._on_seek_requested)
         panel.scrub_started.connect(self._on_scrub_started)
         panel.scrub_finished.connect(self._on_scrub_finished)
@@ -316,12 +336,20 @@ class ColorKeyframesHost:
             logger.debug("keyframes edit dropped: stale context %r",
                          request.context)
             return
-        if request.action == "paste" and (
-                not request.sources
-                or request.source_context != self._context):
-            # 跨片段剪贴板载荷捕获未接线（KF-05/KF-07）：同 context 之外
-            # 的粘贴一律拒绝，不读可能已失效的源。
-            logger.info("keyframes paste dropped: source context %r != %r",
+        if request.action == "copy":
+            # 复制时捕获不可变载荷（正式跨片段剪贴板）
+            self._capture_clipboard(request)
+            return
+        if request.action == "paste" and not request.sources:
+            logger.info("keyframes paste dropped: no sources")
+            return
+        if (request.action == "paste"
+                and request.source_context != self._context
+                and not self._clipboard_entries):
+            # 跨 context 粘贴必须有复制时捕获的载荷——不读已离开片段
+            # 的源（同 context 且无捕获时回退实时读源）。
+            logger.info("keyframes paste dropped: no captured payload for "
+                        "cross-context paste (%r != %r)",
                         request.source_context, self._context)
             return
         translated = self._translate_request(request)
@@ -381,7 +409,7 @@ class ColorKeyframesHost:
             if parsed is None:
                 skipped.append(track_id)
                 continue
-            node_id, domain, param = parsed
+            node_id, address = parsed
             if request.action in ("lock", "enable"):
                 # 面板行按钮：node 行直发，叶行映射回父节点
                 if request.action == "lock":
@@ -394,15 +422,15 @@ class ColorKeyframesHost:
                 # 本次手势改动的参数）；会话域状态，非工程命令
                 auto_toggles.append((node_id, request.enabled))
                 continue
-            if domain == "window":
-                skipped.append(track_id)  # KF-05/KF-07 域命令
+            if address is None or address.domain not in (
+                    "grade", "qualifier", "window"):
+                skipped.append(track_id)  # Sizing/FX/节点行等不可写目标
                 continue
-            if domain not in ("grade", "qualifier"):
-                skipped.append(track_id)
-                continue
+            # 命令域一律用 canonical 轨道名（qualifier.*/mask.<id>.<f>）——
+            # 裸字段名不在批命令白名单内（会被 illegal_param_key 整批拒）
+            param = address.track_name
             if request.action == "add":
-                value = self._current_value(nodes.get(node_id), domain,
-                                            param)
+                value = self._current_value(nodes.get(node_id), address)
                 if value is _UNRESOLVED:
                     skipped.append(track_id)
                     continue
@@ -445,58 +473,120 @@ class ColorKeyframesHost:
 
     def _translate_paste(self, request: EditRequest, nodes: dict,
                          edits: list[dict]) -> bool:
-        """粘贴：从源轨道取键载荷（深拷贝语义），按序对齐目标。
+        """粘贴：按序对齐目标写入捕获/实时的源键载荷（深拷贝语义）。
 
-        源键缺失（复制后被删）→ 整批拒绝（不读失效源）。
+        优先用复制时捕获的不可变载荷（源删改/源片段离开不失效）；
+        无捕获且同 context 时回退实时读源；跨 context 无捕获 → 整批
+        拒绝。能力签名（值分量数）与目标轨不匹配 → 清晰拒绝（计划
+        §剪贴板规则 8）。
         """
-        from src.features.color.core.keyframe_tracks import decode_keyframe
         for (src_track, src_frame), (dst_track, dst_frame) in zip(
                 request.sources, request.targets):
             src = self._parse_track_id(src_track)
             dst = self._parse_track_id(dst_track)
-            if src is None or dst is None:
+            if (src is None or dst is None
+                    or src[1] is None or dst[1] is None):
                 logger.info("keyframes paste dropped: unparsable ref")
                 return False
-            src_node, src_domain, src_param = src
-            dst_node_id, _dst_domain, dst_param = dst
-            if src_domain not in ("grade", "qualifier"):
+            src_node, src_address = src
+            dst_node, dst_address = dst
+            if src_address.domain not in ("grade", "qualifier", "window"):
                 logger.info("keyframes paste dropped: source domain %s",
-                            src_domain)
+                            src_address.domain)
                 return False
-            source_node = nodes.get(src_node)
-            payload = (self._payload_of(source_node) or {})
-            track = (payload.get("grade_keyframes") or {}).get(
-                f"{src_param}" if src_domain == "grade"
-                else f"qualifier.{src_param}")
-            keyframes = (track or {}).get("keyframes") or ()
-            entry = next((k for k in keyframes
-                          if int(k.get("frame", -1)) == int(src_frame)), None)
+            entry = self._clipboard_entries.get(
+                (src_track, int(src_frame)))
             if entry is None:
-                logger.info("keyframes paste dropped: source key %s@%s gone",
-                            src_track, src_frame)
-                return False
-            try:
-                decoded = decode_keyframe(dict(entry))
-            except ValueError:
-                logger.info("keyframes paste dropped: corrupt source key")
+                if request.source_context != self._context:
+                    logger.info(
+                        "keyframes paste dropped: source key %s@%s not "
+                        "captured (cross-context)", src_track, src_frame)
+                    return False
+                entry = self._resolve_live_source(
+                    nodes, src_node, src_address, int(src_frame))
+                if entry is None:
+                    logger.info(
+                        "keyframes paste dropped: source key %s@%s gone",
+                        src_track, src_frame)
+                    return False
+            if (expected_value_size(dst_address.track_name)
+                    != entry["size"]):
+                logger.info(
+                    "keyframes paste dropped: value arity mismatch "
+                    "%s → %s", src_address.track_name,
+                    dst_address.track_name)
                 return False
             edits.append({
-                "action": "set", "node_id": dst_node_id, "param": dst_param,
-                "frame": int(dst_frame), "value": decoded.value,
-                "interpolation": decoded.interpolation,
-                "kind": decoded.kind, "start": decoded.start,
-                "end": decoded.end,
+                "action": "set", "node_id": dst_node,
+                "param": dst_address.track_name,
+                "frame": int(dst_frame), "value": entry["value"],
+                "interpolation": entry["interpolation"],
+                "kind": entry["kind"], "start": entry["start"],
+                "end": entry["end"],
             })
         return True
+
+    def _capture_clipboard(self, request: EditRequest) -> None:
+        """复制时捕获不可变载荷（值/动态属性/能力签名，计划 §8）。
+
+        任一源解析失败 → 放弃本次捕获（保留旧捕获；粘贴时按缺捕获
+        规则回退或拒绝），不产生半份剪贴板。
+        """
+        graph = self._graph_provider()
+        if graph is None:
+            return
+        nodes = {node.node_id: node for node in getattr(graph, "nodes", ())}
+        entries: dict[tuple[str, int], dict] = {}
+        for track_id, frame in request.targets:
+            parsed = self._parse_track_id(track_id)
+            if parsed is None or parsed[1] is None:
+                continue
+            node_id, address = parsed
+            resolved = self._resolve_live_source(
+                nodes, node_id, address, int(frame))
+            if resolved is None:
+                logger.info("keyframes copy capture incomplete: %s@%s",
+                            track_id, frame)
+                return
+            entries[(track_id, int(frame))] = resolved
+        if entries:
+            self._clipboard_entries = entries
+            self._clipboard_source_context = (
+                request.source_context or request.context)
+
+    def _resolve_live_source(self, nodes: dict, node_id: str,
+                             address: Any, frame: int) -> Optional[dict]:
+        """从当前权威图解析一个源键 → 不可变载荷条目（无则 None）。"""
+        payload = self._payload_of(nodes.get(node_id)) or {}
+        track = (payload.get("grade_keyframes") or {}).get(
+            address.track_name)
+        keyframes = (track or {}).get("keyframes") or ()
+        entry = next((k for k in keyframes
+                      if isinstance(k, Mapping)
+                      and int(k.get("frame", -1)) == int(frame)), None)
+        if entry is None:
+            return None
+        try:
+            decoded = decode_keyframe(dict(entry))
+        except ValueError:
+            return None
+        return {
+            "value": decoded.value,
+            "kind": decoded.kind, "start": decoded.start,
+            "end": decoded.end, "interpolation": decoded.interpolation,
+            "size": expected_value_size(address.track_name),
+            "src_node": node_id, "src_track": address.track_name,
+        }
 
     # ── 解析辅助 ──
 
     @staticmethod
     def _parse_track_id(track_id: str):
-        """面板轨道 id → (node_id, domain, field)；不可写/不可解析为 None。
+        """面板轨道 id → (node_id, TrackAddress|None)；不可解析为 None。
 
-        id 形态：``node:{node_id}|{track_name}``（叶）与
-        ``node:{node_id}``（节点行，lock/enable 用）。
+        id 形态：``node:{node_id}|{track_name}``（叶，携带完整轨道
+        地址——窗口域含 shape_id）与 ``node:{node_id}``（节点行，
+        lock/enable 用，address=None）。
         """
         if not isinstance(track_id, str) or not track_id.startswith("node:"):
             return None
@@ -505,11 +595,11 @@ class ColorKeyframesHost:
         if not node_id:
             return None
         if not sep:
-            return (node_id, "node", "")
+            return (node_id, None)
         address = parse_track_name(track_name)
         if address is None:
             return None
-        return (node_id, address.domain, address.field)
+        return (node_id, address)
 
     def _payload_of(self, node: Any):
         if node is None:
@@ -519,18 +609,33 @@ class ColorKeyframesHost:
         except Exception:  # noqa: BLE001 — 载荷不可读按未解析处理
             return None
 
-    def _current_value(self, node: Any, domain: str, field: str):
-        """从节点当前载荷采样参数现值（添加键=当前值，计划 §录制规则 7）。"""
+    def _current_value(self, node: Any, address: Any):
+        """从节点当前载荷采样参数现值（添加键=当前值，计划 §录制规则 7）。
+
+        grade → grading_params[field]；qualifier → qualifier_params[field]；
+        window → 形状 dict 的字段现值（owner_id 定位形状）。
+        """
         payload = self._payload_of(node)
         if payload is None:
             return _UNRESOLVED
-        if domain == "grade":
+        if address.domain == "grade":
             params = payload.get("grading_params") or {}
-        else:
+            if address.field not in params:
+                return _UNRESOLVED
+            return params[address.field]
+        if address.domain == "qualifier":
             params = payload.get("qualifier_params") or {}
-        if field not in params:
-            return _UNRESOLVED
-        return params[field]
+            if address.field not in params:
+                return _UNRESOLVED
+            return params[address.field]
+        # window：形状字段现值
+        for shape in payload.get("mask_shapes") or ():
+            if (isinstance(shape, Mapping)
+                    and str(shape.get("id")) == address.owner_id):
+                if address.field not in shape:
+                    return _UNRESOLVED
+                return shape[address.field]
+        return _UNRESOLVED
 
     # ── 内部 ──
 

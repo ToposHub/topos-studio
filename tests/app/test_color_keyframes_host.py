@@ -38,8 +38,14 @@ def _graph_with_keyframes():
     project, sid = EditProject.create(name="kf02").create_color_stack(
         asset_id="a1", name="s")
     layers = f03_layer_stack()
-    # 注入窗口轨道（Layer 域：mask.<shape_id>.<field>，随 legacy 载荷合并）
+    # 注入窗口形状 + 轨道（Layer 域：mask.<shape_id>.<field>，随 legacy
+    # 载荷合并；形状与轨道同在——悬空轨道不投影不可写行）
     shape_id = "11111111-2222-3333-4444-555555555555"
+    from src.features.color.core.layer import MaskShape
+    shape = MaskShape(MaskShape.CIRCLE)
+    shape.id = shape_id
+    shape.name = "跟踪窗口"
+    layers[0].mask_shapes = [shape]
     layers[0].grade_keyframes[mask_track_name(shape_id, "center")] = (
         GradeKeyframeTrack(mask_track_name(shape_id, "center"), [
             GradeKeyframe(0, (0.5, 0.5)),
@@ -308,7 +314,7 @@ def test_panel_scrub_signals_exist(qtbot):
 class TestRealWriteEntry:
     """验收：一次用户动作一个历史条目；拒绝无部分写入；Undo/Redo 对称。"""
 
-    def _wired(self, qtbot):
+    def _wired(self, qtbot, *, with_window: bool = False):
         from unittest.mock import Mock
 
         from src.app.controllers.color_graph_controller import (
@@ -323,11 +329,19 @@ class TestRealWriteEntry:
 
         project, sid = EditProject.create(name="kf03w").create_color_stack(
             asset_id="a1", name="s")
+        layers = f03_layer_stack()
+        window_shape_id = ""
+        if with_window:
+            from src.features.color.core.layer import MaskShape
+            shape = MaskShape(MaskShape.CIRCLE)
+            window_shape_id = shape.id
+            shape.name = "圆窗"
+            layers[0].mask_shapes = [shape]
         stack = project.color_stacks[sid].with_layers(
-            [layer.to_dict(None) for layer in f03_layer_stack()])
+            [layer.to_dict(None) for layer in layers])
         graph = migrate_legacy_stack(stack)
         project = project.update_color_stack(sid, color_graph=graph)
-        holder = {"project": project}
+        holder = {"project": project, "session": _session()}
         engine = Mock()
         engine.layers = []
         app_host = ColorGraphAppHost(
@@ -343,7 +357,7 @@ class TestRealWriteEntry:
             panel,
             graph_provider=lambda: app_host.bound_graph(),
             active_node_provider=lambda: "",
-            session_provider=lambda: _session(),
+            session_provider=lambda: holder["session"],
             playback=_FakePlayback(),
             submit_batch=app_host.submit_keyframe_batch,
             submit_action=app_host.submit_panel_action,
@@ -351,6 +365,8 @@ class TestRealWriteEntry:
         assert kf_host.refresh() is True
         correctors = [n.node_id for n in app_host.bound_graph().nodes
                       if n.node_type == "corrector"]
+        if with_window:
+            return panel, kf_host, app_host, holder, correctors, window_shape_id
         return panel, kf_host, app_host, holder, correctors
 
     def _undo(self, app_host, holder):
@@ -452,3 +468,150 @@ class TestRealWriteEntry:
             context="stale|ctx", action="add",
             targets=((f"node:{nodes[0]}|exposure", 12),)))
         assert app_host.bound_graph().graph_revision == revision
+
+    # ── KF-07 复检批次：qualifier canonical 名 / 正式剪贴板 / 窗口写入 ──
+
+    def test_qualifier_add_writes_canonical_track_name(self, qtbot):
+        """回归：宿主曾发裸字段名被批命令白名单拒（qualifier 写入口
+        从未生效）——必须落 canonical 全名 ``qualifier.<field>``。"""
+        panel, _host, app_host, _holder, nodes = self._wired(qtbot)
+        revision0 = app_host.bound_graph().graph_revision
+        panel.request("add", ((f"node:{nodes[0]}|qualifier.lum_low", 12),))
+        graph = app_host.bound_graph()
+        assert graph.graph_revision == revision0 + 1
+        node = next(n for n in graph.nodes if n.node_id == nodes[0])
+        track = node.params["grade_keyframes"]["qualifier.lum_low"]
+        assert any(int(k["frame"]) == 12 for k in track["keyframes"])
+
+    def test_paste_uses_captured_payload_after_source_delete(self, qtbot):
+        """正式剪贴板：复制时捕获不可变载荷——源键删除后粘贴仍写入
+        复制时的值（不读已失效源）。"""
+        panel, host, app_host, _holder, nodes = self._wired(qtbot)
+        leaf = f"node:{nodes[0]}|exposure"
+        panel.request("add", ((leaf, 10),))
+        assert host.refresh(force=True) is True  # 面板标记回填
+        graph = app_host.bound_graph()
+        node = next(n for n in graph.nodes if n.node_id == nodes[0])
+        value = next(k["value"] for k in
+                     node.params["grade_keyframes"]["exposure"]["keyframes"]
+                     if int(k["frame"]) == 10)
+        panel.selected = {(leaf, 10)}
+        panel.copy()
+        assert host._clipboard_entries  # 复制即捕获
+        panel.request("delete", ((leaf, 10),))
+        assert host.refresh(force=True) is True
+        panel.paste(40, leaf)
+        graph = app_host.bound_graph()
+        node = next(n for n in graph.nodes if n.node_id == nodes[0])
+        track = node.params["grade_keyframes"]["exposure"]
+        pasted = next(k for k in track["keyframes"]
+                      if int(k["frame"]) == 40)
+        assert pasted["value"] == value
+
+    def test_cross_context_paste_uses_captured_payload(self, qtbot):
+        """跨片段粘贴：源片段离开（context 已切换）后按捕获载荷写入
+        当前活动 Corrector 的同名叶轨。"""
+        panel, host, app_host, holder, nodes = self._wired(qtbot)
+        leaf = f"node:{nodes[0]}|exposure"
+        panel.request("add", ((leaf, 10),))
+        assert host.refresh(force=True) is True
+        panel.selected = {(leaf, 10)}
+        panel.copy()
+        # 切片段：session clip_id 变化 → context 变化，投影重建
+        holder["session"] = _session(clip_id="c2")
+        assert host.refresh(force=True) is True
+        assert panel.snapshot.context != panel._clipboard_context
+        revision = app_host.bound_graph().graph_revision
+        panel.paste(60, "")
+        graph = app_host.bound_graph()
+        assert graph.graph_revision == revision + 1
+        node = next(n for n in graph.nodes if n.node_id == nodes[0])
+        track = node.params["grade_keyframes"]["exposure"]
+        assert any(int(k["frame"]) == 60 for k in track["keyframes"])
+
+    def test_paste_arity_mismatch_rejects_whole_batch(self, qtbot):
+        """能力签名：vec3 源粘到标量轨 → 整批拒绝，无部分写入。"""
+        panel, host, app_host, _holder, nodes = self._wired(qtbot)
+        lift_leaf = f"node:{nodes[0]}|lift"
+        exposure_leaf = f"node:{nodes[0]}|exposure"
+        panel.request("add", ((lift_leaf, 12),))
+        assert host.refresh(force=True) is True
+        panel.selected = {(lift_leaf, 12)}
+        panel.copy()
+        revision = app_host.bound_graph().graph_revision
+        panel.paste(30, exposure_leaf)  # 单源重映射到标量轨
+        assert app_host.bound_graph().graph_revision == revision
+        node = next(n for n in app_host.bound_graph().nodes
+                    if n.node_id == nodes[0])
+        track = (node.params.get("grade_keyframes") or {}).get("exposure")
+        assert not track  # 无部分写入
+
+    def test_window_add_samples_shape_and_writes_mask_track(self, qtbot):
+        """窗口轨道图域写入：面板加键采样形状现值，落 canonical
+        ``mask.<shape_id>.<field>`` 轨道。"""
+        panel, _host, app_host, _holder, nodes, shape_id = self._wired(
+            qtbot, with_window=True)
+        leaf = f"node:{nodes[0]}|mask.{shape_id}.center"
+        assert any(child.id == leaf
+                   for row in panel.snapshot.tracks
+                   for child in row.children)  # 形状叶轨常驻投影
+        revision0 = app_host.bound_graph().graph_revision
+        panel.request("add", ((leaf, 8),))
+        graph = app_host.bound_graph()
+        assert graph.graph_revision == revision0 + 1
+        node = next(n for n in graph.nodes if n.node_id == nodes[0])
+        track = node.params["grade_keyframes"][f"mask.{shape_id}.center"]
+        key = next(k for k in track["keyframes"] if int(k["frame"]) == 8)
+        assert len(tuple(key["value"])) == 2  # vec2（内存态 tuple/list 均可）
+
+    def test_window_missing_shape_rejected_fail_closed(self, qtbot):
+        """形状存在性 fail-closed：不存在的 shape_id 不复活轨道。"""
+        _panel, _h, app_host, _holder, nodes, _sid = self._wired(
+            qtbot, with_window=True)
+        revision = app_host.bound_graph().graph_revision
+        accepted = app_host.submit_keyframe_batch([{
+            "action": "set", "node_id": nodes[0],
+            "param": "mask.00000000-0000-0000-0000-000000000000.center",
+            "frame": 4, "value": [0.5, 0.5],
+        }])
+        assert accepted is False
+        assert app_host.bound_graph().graph_revision == revision
+
+    def test_window_provider_evaluates_shapes_per_frame(self, qtbot):
+        """预览同源：provider 帧模式逐帧补写形状（与导出同函数、基底
+        求值不累积），帧盲模式保持 base。"""
+        from src.features.color.core.color_graph_param_source import (
+            graph_node_layer_provider,
+        )
+        panel, _host, app_host, _holder, nodes, shape_id = self._wired(
+            qtbot, with_window=True)
+
+        def _center(shapes):
+            return tuple(next(s for s in shapes
+                              if s.get("id") == shape_id)["center"])
+
+        # base 形状先定格（帧盲对照用）
+        base_center = _center(
+            graph_node_layer_provider(app_host.bound_graph())(
+                nodes[0])["mask_shapes"])
+        assert app_host.submit_keyframe_batch([
+            {"action": "set", "node_id": nodes[0],
+             "param": f"mask.{shape_id}.center", "frame": 0,
+             "value": [0.5, 0.5]},
+            {"action": "set", "node_id": nodes[0],
+             "param": f"mask.{shape_id}.center", "frame": 24,
+             "value": [0.9, 0.1]},
+        ])
+        graph = app_host.bound_graph()
+
+        def center_at(frame):
+            provider = graph_node_layer_provider(graph, frame=frame)
+            payload = provider(nodes[0])
+            return _center(payload["mask_shapes"])
+
+        assert center_at(0) == (0.5, 0.5)
+        assert center_at(12) == (0.7, 0.3)  # 线性中点
+        assert center_at(24) == (0.9, 0.1)
+        # 帧盲 provider 不补写（base 形状原样）
+        blind = graph_node_layer_provider(graph)(nodes[0])
+        assert _center(blind["mask_shapes"]) == base_center

@@ -8,7 +8,8 @@ from src.shared.i18n.i18n import I18N
 
 KeyKind = Literal["static", "dynamic"]
 Scope = Literal["all", "color", "sizing", "matte"]
-EditKind = Literal["add", "convert", "delete", "move", "dynamics", "lock", "auto", "enable", "paste"]
+EditKind = Literal["add", "convert", "delete", "move", "dynamics", "lock",
+                   "auto", "enable", "paste", "copy"]
 KeyRef = tuple[str, int]
 
 

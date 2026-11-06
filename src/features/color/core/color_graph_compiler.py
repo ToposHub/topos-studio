@@ -97,6 +97,16 @@ def _pass_cone_key(node: "ColorNodeData",
     return digest.hexdigest()[:32]
 
 
+def _has_keyframe_tracks(payload: Mapping) -> bool:
+    """载荷是否携带非空 ``grade_keyframes`` 轨道（时域输入判定）。
+
+    墓碑-only（显式空轨道压制 legacy）非空 Mapping 亦算时域——保守
+    绕过缓存只会少命中，不会出错。
+    """
+    kf = payload.get("grade_keyframes")
+    return isinstance(kf, Mapping) and bool(kf)
+
+
 @dataclass(frozen=True)
 class PlanPortRef:
     """一个 pass 输入对上游输出的引用。"""
@@ -136,8 +146,10 @@ class RenderPass:
     # keyer 输入源声明（key_settings.key_source_mode 消费化）：
     # "node_input" / "legacy_raw"；无 qualifier 时为空串。
     key_input_source: str = ""
-    # N02-B 切片 4 / N10-B：key 管线是否随帧动画（qualifier.* 轨道存在
-    # 即真——与执行器 N06 缓存绕过（grade_keyframes 非空）同判据域）。
+    # N02-B 切片 4 / N10-B / KF-06：本 pass 是否时域（自身带关键帧轨道
+    # ——params 或 legacy 载荷，或依赖时域上游）。执行器 N06 节点缓存
+    # 以它绕过：帧不进缓存键，时域 pass 逐帧重算（静像 seek 不命中
+    # 陈旧纹理）。
     key_frame_animated: bool = False
 
 
@@ -544,6 +556,11 @@ def compile_graph(snapshot: ColorGraphSnapshot,
 
     # N06：拓扑序递推 per-node 依赖锥键（cone_key）
     cone_keys: dict[str, str] = {}
+    # N10/KF-06：时域节点集合（自身带关键帧轨道——params 或 legacy 载荷
+    # 任一非空即真；legacy 起源轨道在 node.params 不可见，漏判会让静像
+    # 场景（source revision 不变）暂停 seek 命中节点缓存的陈旧纹理）。
+    # 依赖时域输入的下游节点沿拓扑一并标记（计划 §帧快照与缓存）。
+    animated_ids: set[str] = set()
     for index, nid in enumerate(order):
         node = by_id[nid]
         known = node.known_type()
@@ -564,11 +581,18 @@ def compile_graph(snapshot: ColorGraphSnapshot,
         key_pipeline, key_input_source = _derive_key_pipeline(
             node, has_key_in=any(port == "key" and ref is not None
                                  for port, ref in inputs))
+        params_for_node = (node.params
+                           if isinstance(node.params, Mapping) else {})
+        legacy_for_node = (node.legacy_payload
+                           if isinstance(node.legacy_payload, Mapping)
+                           else {})
         animated = bool(
-            isinstance(params_for_node := (
-                node.params if isinstance(node.params, Mapping) else {}),
-                Mapping)
-            and params_for_node.get("grade_keyframes"))
+            _has_keyframe_tracks(params_for_node)
+            or _has_keyframe_tracks(legacy_for_node)
+            or any(ref is not None and ref.node_id in animated_ids
+                   for _port, ref in inputs))
+        if animated:
+            animated_ids.add(nid)
         passes.append(RenderPass(
             index=index,
             node_id=nid,

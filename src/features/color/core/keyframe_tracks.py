@@ -499,11 +499,25 @@ def validate_value_shape(track_name: str, value: Any) -> Optional[str]:
 def node_command_track_whitelist() -> frozenset:
     """图命令（op_set/remove/move_node_keyframe）可写轨道名全集。
 
-    当前 = grade ∪ qualifier（窗口轨道写入走 Layer 域 shape 事务，
-    KF-03 统一命令化时随非节点轨道一起扩展）。
+    grade ∪ qualifier（可枚举字段集）。窗口轨道名含 per-shape UUID
+    不可枚举，经 ``track_name_is_writable`` 的解析谓词准入（形状存在
+    性由命令目标校验补查）。
     """
     return frozenset(GRADE_KEYFRAME_PARAMS) | frozenset(
         qualifier_track_name(spec.name) for spec in QUALIFIER_TRACK_FIELDS)
+
+
+def track_name_is_writable(name: str) -> bool:
+    """图命令可写轨道判定：白名单 ∪ 窗口实例轨（解析谓词）。
+
+    窗口轨 ``mask.<shape_id>.<field>`` 的字段集已登记（解析即校验）；
+    shape_id 存在性在命令目标校验里 fail-closed（删除的形状不复活
+    轨道）。Sizing/FX 未登记 → 解析为 None → 不可写。
+    """
+    if name in node_command_track_whitelist():
+        return True
+    address = parse_track_name(name)
+    return address is not None and address.domain == "window"
 
 
 # ---------------------------------------------------------------------------
@@ -523,12 +537,9 @@ DOMAIN_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "reasons": {},
     },
     "window": {
-        "write_domain": "layer",
+        "write_domain": "graph+layer",
         "deliver": True,
-        "reasons": {
-            "write": "图命令白名单暂不含 mask.*；写入走 Layer 域 shape 事务"
-                     "（KF-03 非节点轨道统一命令化）",
-        },
+        "reasons": {},
     },
     "qualifier": {
         "write_domain": "graph+layer",
