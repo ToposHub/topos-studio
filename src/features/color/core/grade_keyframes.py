@@ -25,31 +25,28 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
+
+# KF-01：轨道注册表与编解码的单一权威在 keyframe_tracks——本模块保留
+# Layer 域轨道类与求值行为，白名单/轨道名助手从此再导出（既有导入方
+# 不受影响）。
+from src.features.color.core.keyframe_tracks import (  # noqa: F401
+    CIRCULAR_QUALIFIER_FIELDS,
+    GRADE_KEYFRAME_PARAMS,
+    INTERPOLATION_MODES,
+    MASK_KEYFRAME_FIELDS,
+    MASK_TRACK_PREFIX,
+    QUALIFIER_KEYFRAME_FIELDS,
+    QUALIFIER_TRACK_PREFIX,
+    expected_value_size,
+    is_qualifier_animatable,
+    mask_track_name,
+    parse_mask_track_name,
+    parse_qualifier_track_name,
+    qualifier_track_name,
+)
 
 logger = logging.getLogger(__name__)
-
-# 可动画参数白名单：grading_params 键 → 值形态
-# vec3 参数是 (r/g/b 对称) 三元组，scalar 是单个 float。
-GRADE_KEYFRAME_PARAMS: Dict[str, str] = {
-    "lift": "vec3",
-    "gamma": "vec3",
-    "gain": "vec3",
-    "exposure": "scalar",
-    "temp": "scalar",
-    "temperature": "scalar",
-    "tint": "scalar",
-    "contrast": "scalar",
-    "shadow": "scalar",
-    "highlights": "scalar",
-    "saturation": "scalar",
-    "vibrance": "scalar",
-    "mid_detail": "scalar",
-    "sharpness": "scalar",
-    "hue_shift": "scalar",
-}
-
-INTERPOLATION_MODES = ("linear", "ease", "hold")
 
 
 def _lerp(a: float, b: float, t: float) -> float:
@@ -141,20 +138,9 @@ def _expected_value_size(param_name: str) -> int | None:
     """AUD-0520：轨道参数的期望分量数（1=scalar/2=vec2/3=vec3）。
 
     参数不在 grade 白名单也不是合法 mask 轨道名时返回 None（未注册
-    参数不校验分量数，保持向前兼容）。
+    参数不校验分量数，保持向前兼容）。KF-01 起委托共享注册表。
     """
-    shape = GRADE_KEYFRAME_PARAMS.get(param_name)
-    if shape is None:
-        parsed = parse_mask_track_name(param_name)
-        if parsed is not None:
-            shape = MASK_KEYFRAME_FIELDS.get(parsed[1])
-    if shape is None:
-        return None
-    if shape == "scalar":
-        return 1
-    if shape == "vec3":
-        return 3
-    return 2
+    return expected_value_size(param_name)
 
 
 @dataclass
@@ -368,39 +354,10 @@ def all_keyframe_frames(tracks: Dict[str, GradeKeyframeTrack]) -> List[int]:
 # （remove_grade_keyframe 遍历全部轨道）随既有基础设施自动覆盖；
 # ``evaluate_grade_keyframes`` 按 GRADE_KEYFRAME_PARAMS 白名单跳过
 # mask.* 轨道，两套求值互不干扰。
+#
+# KF-01：窗口字段白名单与轨道名助手移至 keyframe_tracks（单一权威），
+# 本模块经顶部 import 再导出供既有消费方使用。
 # ---------------------------------------------------------------------------
-
-#: 可动画的 MaskShape 数值字段 → 值形态（vec2 = 2 分量，其余标量）。
-#: points/grad_points（点集）与离散字段（visible/invert/operation）不动画。
-MASK_KEYFRAME_FIELDS: Dict[str, str] = {
-    "center": "vec2",
-    "size": "vec2",
-    "rotation": "scalar",
-    "feather": "scalar",
-    "opacity": "scalar",
-    "blur": "scalar",
-    "clean_black": "scalar",
-    "clean_white": "scalar",
-    "softness": "scalar",
-}
-
-MASK_TRACK_PREFIX = "mask."
-
-
-def mask_track_name(shape_id: str, field: str) -> str:
-    """mask 轨道名：mask.<shape_id>.<field>。"""
-    return f"{MASK_TRACK_PREFIX}{shape_id}.{field}"
-
-
-def parse_mask_track_name(name: str) -> Tuple[str, str] | None:
-    """解析 mask 轨道名 → (shape_id, field)；非 mask 轨道返回 None。"""
-    if not name.startswith(MASK_TRACK_PREFIX):
-        return None
-    rest = name[len(MASK_TRACK_PREFIX):]
-    shape_id, sep, field = rest.rpartition(".")
-    if not shape_id or not sep or field not in MASK_KEYFRAME_FIELDS:
-        return None
-    return shape_id, field
 
 
 def shape_has_mask_tracks(layer_tracks: Dict[str, Any], shape_id: str) -> bool:
@@ -494,51 +451,10 @@ def evaluate_mask_keyframes(layer: Any, frame: int) -> bool:
 # 逐参数复制（copy_named_tracks 按名过滤）→ 静态切换（清除全部
 # qualifier.* 轨道即回静态值；求值对无轨道参数恒等）。
 # 白名单外字段（sat/hue 区间等）不经本注册表不得被 ◆ 暗示可动画。
+#
+# KF-01：qualifier 字段白名单、环形量集合与轨道名助手移至
+# keyframe_tracks（单一权威），本模块经顶部 import 再导出。
 # ---------------------------------------------------------------------------
-
-#: 可动画的 Qualifier 数值字段 → 值形态（亮度区间 = 本期选定的真实
-#: 必要参数；其余字段显式标静态——扩展须按证据逐个登记）。
-QUALIFIER_KEYFRAME_FIELDS: Dict[str, str] = {
-    # N10-B：对齐 Resolve HSL Qualifier 动画核心域（全部标量）。离散
-    # 开关（enabled/invert/…*_enabled）与 key 后处理强度
-    # （blur/clean_*/denoise——涉 N02-B key_pipeline 逐帧声明）不收录，
-    # 登记 v2（invert 如需动画应为强制 hold 的离散轨道）。
-    "hue_center": "scalar",
-    "hue_width": "scalar",
-    "hue_soft": "scalar",
-    "sat_low": "scalar",
-    "sat_high": "scalar",
-    "sat_soft_low": "scalar",
-    "sat_soft_high": "scalar",
-    "lum_low": "scalar",
-    "lum_high": "scalar",
-    "lum_soft_low": "scalar",
-    "lum_soft_high": "scalar",
-}
-
-#: hue 是 0-1 环形量：这些字段的标量插值走最短弧（0.9→0.1 中点为
-#: 0.0/1.0 而非 0.5），与 Resolve 的 Hue 轨道语义一致。
-CIRCULAR_QUALIFIER_FIELDS: frozenset = frozenset({"hue_center"})
-
-QUALIFIER_TRACK_PREFIX = "qualifier."
-
-
-def qualifier_track_name(field: str) -> str:
-    """qualifier 轨道名：qualifier.<field>（每层单限定器）。"""
-    return f"{QUALIFIER_TRACK_PREFIX}{field}"
-
-
-def parse_qualifier_track_name(name: str) -> str | None:
-    """解析 qualifier 轨道名 → field；非 qualifier 轨道/白名单外返回 None。"""
-    if not name.startswith(QUALIFIER_TRACK_PREFIX):
-        return None
-    field = name[len(QUALIFIER_TRACK_PREFIX):]
-    return field if field in QUALIFIER_KEYFRAME_FIELDS else None
-
-
-def is_qualifier_animatable(field: str) -> bool:
-    """◆ 标记的唯一判据：字段在白名单内才可显示"可动画"暗示。"""
-    return field in QUALIFIER_KEYFRAME_FIELDS
 
 
 def record_qualifier_keyframe(layer: Any, frame: int, fields: List[str],
