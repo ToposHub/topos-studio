@@ -259,15 +259,10 @@ class ColorGraphService:
 
     #: N10-B：关键帧可动画轨道名白名单（grade 域 ∪ qualifier 域）。
     def _keyframe_track_whitelist(self) -> frozenset:
-        from src.features.color.core.grade_keyframes import (
-            GRADE_KEYFRAME_PARAMS, qualifier_track_name,
+        from src.features.color.core.keyframe_tracks import (
+            node_command_track_whitelist,
         )
-        return frozenset(GRADE_KEYFRAME_PARAMS) | frozenset(
-            qualifier_track_name(field)
-            for field in ("hue_center", "hue_width", "hue_soft",
-                          "sat_low", "sat_high", "sat_soft_low",
-                          "sat_soft_high", "lum_low", "lum_high",
-                          "lum_soft_low", "lum_soft_high"))
+        return node_command_track_whitelist()
 
     def _keyframe_target_or_fail(self, graph: ColorGraphData,
                                  node_id: str,
