@@ -352,6 +352,246 @@ class ColorGraphService:
         return self._patch_node_keyframes(graph, node_id, mutate,
                                           param=str(param))
 
+    # ═══ KF-03：关键帧批处理领域命令（一次校验、一个候选、一次 commit）═══
+
+    #: 批处理条目动作全集（面板 EditRequest → 宿主翻译后的领域形态）。
+    BATCH_KEYFRAME_ACTIONS = ("set", "remove", "move", "dynamics")
+
+    @staticmethod
+    def _normalized_keyframe_track_dynamic(track: Any) -> list:
+        """与 ``_normalized_keyframe_track`` 同校验容错，但保留显式键型
+        （kind/start/end 走 KF-01 编解码：等价档位不落盘，非等价档位
+        显式持久化）。畸形条目逐条跳过（与既有容错一致）。"""
+        from src.features.color.core.keyframe_tracks import (
+            decode_keyframe, encode_keyframe,
+        )
+        if not isinstance(track, Mapping):
+            return []
+        raw = track.get("keyframes")
+        if not isinstance(raw, (list, tuple)):
+            return []
+        normalized = []
+        for item in raw:
+            if not isinstance(item, Mapping):
+                continue
+            try:
+                normalized.append(encode_keyframe(decode_keyframe(dict(item))))
+            except (ValueError, TypeError):
+                continue
+        normalized.sort(key=lambda e: e["frame"])
+        return normalized
+
+    def op_batch_edit_keyframes(self, graph: ColorGraphData,
+                                edits: Sequence[Mapping[str, Any]],
+                                ) -> GraphEditResult:
+        """关键帧批处理命令：多节点/多轨道/多帧一次事务。
+
+        条目形态（宿主翻译 EditRequest 后的领域语言；窗口/Sizing/FX
+        轨道走各自域命令，不在此白名单内）::
+
+            {"action": "set",     "node_id", "param", "frame",
+             "value", "interpolation"?, "kind"?, "start"?, "end"?}
+            {"action": "remove",  "node_id", "param", "frame"}
+            {"action": "move",    "node_id", "param", "frame", "to_frame"}
+            {"action": "dynamics","node_id", "param", "frame",
+             "kind", "start"?, "end"?}
+
+        语义（计划 §轨道规则 5）：
+        - 一次校验 fail-closed：任一条目非法（锁定节点/白名单外/值形态/
+          权重越界/移动目标冲突）整批拒绝，无部分写入；
+        - 批量 move 先移除全部源帧再插入目标帧（相邻帧交换不自覆盖）；
+        - 空批 / 全部条目为重复置值或原位（候选与现状逐字节一致）不推
+          revision、不入史。
+        """
+        from src.features.color.core.keyframe_tracks import (
+            KEY_KINDS, decode_keyframe, encode_keyframe, make_keyframe,
+            validate_dynamic_weights, validate_value_shape,
+        )
+        if not isinstance(edits, (list, tuple)) or not edits:
+            return GraphEditResult(True, graph, ())  # 空动作不入史
+        grouped: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
+        for index, edit in enumerate(edits):
+            if not isinstance(edit, Mapping):
+                return self._fail(graph, "illegal_arguments",
+                                  f"edits[{index}] 不是 Mapping")
+            action = str(edit.get("action", ""))
+            if action not in self.BATCH_KEYFRAME_ACTIONS:
+                return self._fail(graph, "illegal_arguments",
+                                  f"edits[{index}] action 非法: {action!r}")
+            node_id = str(edit.get("node_id", ""))
+            param = str(edit.get("param", ""))
+            frame = int(edit.get("frame", -1))
+            node = self._keyframe_target_or_fail(graph, node_id, param)
+            if not isinstance(node, ColorNodeData):
+                return node  # type: ignore[return-value]
+            if frame < 0:
+                return self._fail(graph, "illegal_frame",
+                                  f"edits[{index}] 帧号非法: {frame}",
+                                  node_id=node_id)
+            if action == "move":
+                to_frame = int(edit.get("to_frame", -1))
+                if to_frame < 0:
+                    return self._fail(graph, "illegal_frame",
+                                      f"edits[{index}] 目标帧非法: {to_frame}",
+                                      node_id=node_id)
+            elif action == "set":
+                reason = validate_value_shape(param, edit.get("value"))
+                if reason is not None:
+                    return self._fail(graph, reason,
+                                      f"edits[{index}] 值形态非法: {reason}",
+                                      node_id=node_id)
+            if action in ("set", "dynamics"):
+                kind = edit.get("kind")
+                if kind is not None and str(kind) not in KEY_KINDS:
+                    return self._fail(graph, "bad_key_kind",
+                                      f"edits[{index}] 键型非法: {kind!r}",
+                                      node_id=node_id)
+                weights = validate_dynamic_weights(
+                    edit.get("start", 1.0), edit.get("end", 1.0))
+                if weights is not None:
+                    return self._fail(graph, weights,
+                                      f"edits[{index}] 动态权重非法",
+                                      node_id=node_id)
+            grouped.setdefault(node_id, []).append((param, edit))
+
+        # ── 逐节点构造候选（深拷贝 params；事务无部分写入）──
+        moves_by_key: dict[tuple[str, str],
+                           list[tuple[int, int]]] = {}
+        for node_id, entries in grouped.items():
+            for param, edit in entries:
+                if str(edit.get("action")) == "move":
+                    moves_by_key.setdefault((node_id, param), []).append(
+                        (int(edit["frame"]), int(edit["to_frame"])))
+
+        updated: dict[str, dict[str, Any]] = {}
+        changed_any = False
+        applied_moves: set[tuple[str, str]] = set()
+        for node_id, entries in grouped.items():
+            node = self._node(graph, node_id)
+            assert node is not None  # 校验阶段已确认
+            source = node.params.get("grade_keyframes") or {}
+            # 规范化基线（与候选同形态）——no-op 判定（拖回原位/重复置值）
+            # 用内容比较，不能用冻结后的 mappingproxy/tuple 直接比
+            baseline = {str(name): {"keyframes": value}
+                        for name, value in
+                        ((str(name),
+                          self._normalized_keyframe_track_dynamic(item))
+                         for name, item in source.items()
+                         if isinstance(item, Mapping))
+                        if value}
+            tracks = {name: list(entry["keyframes"])
+                      for name, entry in baseline.items()}
+            for values in tracks.values():
+                values[:] = [dict(k) for k in values]
+            for param, edit in entries:
+                action = str(edit["action"])
+                frame = int(edit["frame"])
+                track = list(tracks.get(param) or [])
+                if action == "set":
+                    try:
+                        entry = encode_keyframe(make_keyframe(
+                            frame, edit.get("value"),
+                            interpolation=str(edit.get("interpolation",
+                                                     "linear")),
+                            kind=(str(edit["kind"])
+                                  if edit.get("kind") is not None else None),
+                            start=float(edit.get("start", 1.0)),
+                            end=float(edit.get("end", 1.0))))
+                    except ValueError as exc:
+                        return self._fail(graph, str(exc),
+                                          f"edits[{param}@{frame}] 非法: {exc}",
+                                          node_id=node_id)
+                    existing = next((k for k in track
+                                     if k["frame"] == frame), None)
+                    if existing is not None and existing == entry:
+                        continue  # 重复置值：不推进历史
+                    track = [k for k in track if k["frame"] != frame]
+                    track.append(entry)
+                    track.sort(key=lambda e: e["frame"])
+                    tracks[param] = track
+                elif action == "remove":
+                    kept = [k for k in track if k["frame"] != frame]
+                    if len(kept) != len(track):
+                        tracks[param] = kept
+                elif action == "move":
+                    if (node_id, param) in applied_moves:
+                        continue  # 组级操作：整组一次，防重复重放换回
+                    applied_moves.add((node_id, param))
+                    pairs = moves_by_key[(node_id, param)]
+                    moving_frames = {f for f, _ in pairs}
+                    target_frames = [t for _, t in pairs]
+                    if len(set(target_frames)) != len(target_frames):
+                        return self._fail(
+                            graph, "frame_conflict",
+                            f"move 目标帧冲突（同轨道多键落同帧）: "
+                            f"{param}@{node_id}", node_id=node_id)
+                    others = {k["frame"] for k in track
+                              if k["frame"] not in moving_frames}
+                    clash = sorted(set(target_frames) & others)
+                    if clash:
+                        return self._fail(
+                            graph, "frame_conflict",
+                            f"move 目标与既有键冲突: {param} 帧 {clash}",
+                            node_id=node_id)
+                    moving = [k for k in track
+                              if k["frame"] in moving_frames]
+                    # 先移除全部源帧再插入目标（相邻帧交换不自覆盖）
+                    track = [k for k in track
+                             if k["frame"] not in moving_frames]
+                    for keyframe in moving:
+                        target = next(t for f, t in pairs
+                                      if f == keyframe["frame"])
+                        track.append({**keyframe, "frame": target})
+                    track.sort(key=lambda e: e["frame"])
+                    tracks[param] = track
+                else:  # dynamics
+                    existing = next((k for k in track
+                                     if k["frame"] == frame), None)
+                    if existing is None:
+                        return self._fail(
+                            graph, "keyframe_not_found",
+                            f"dynamics 目标键不存在: {param}@{frame}",
+                            node_id=node_id)
+                    try:
+                        decoded = decode_keyframe(existing)
+                        requested_kind = str(edit.get("kind", decoded.kind))
+                        if requested_kind != decoded.kind:
+                            # 转换键型：保留原值与帧号，取消旧动态属性
+                            # （默认权重随新键型；实测默认待 KF-00 核对）
+                            start_value, end_value = 1.0, 1.0
+                        else:
+                            start_value = float(edit.get("start",
+                                                         decoded.start))
+                            end_value = float(edit.get("end",
+                                                       decoded.end))
+                        replacement = make_keyframe(
+                            frame, decoded.value, kind=requested_kind,
+                            start=start_value, end=end_value)
+                    except ValueError as exc:
+                        return self._fail(graph, str(exc),
+                                          f"dynamics 非法: {exc}",
+                                          node_id=node_id)
+                    entry = encode_keyframe(replacement)
+                    if existing == entry:
+                        continue
+                    track = [k for k in track if k["frame"] != frame]
+                    track.append(entry)
+                    track.sort(key=lambda e: e["frame"])
+                    tracks[param] = track
+            candidate_params = {k: {"keyframes": v}
+                                for k, v in tracks.items() if v}
+            if candidate_params != baseline:
+                changed_any = True
+            updated[node_id] = candidate_params
+        if not changed_any:
+            return GraphEditResult(True, graph, ())  # 拖回原位/空动作
+        nodes = tuple(
+            replace(node, params={**node.params, "grade_keyframes":
+                                  updated[node.node_id]})
+            if node.node_id in updated else node
+            for node in graph.nodes)
+        return self._commit(graph, replace(graph, nodes=nodes), {})
+
     # ═══ N15：Resolve 窗口组合（CPW/LPW/PPW/PCW 一键 = Serial+Window）═══
 
     #: Resolve 20.2.1 Color 页实机默认值：CPW 圆，LPW 矩形，PPW

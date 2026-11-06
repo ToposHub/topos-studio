@@ -298,3 +298,139 @@ def test_panel_scrub_signals_exist(qtbot):
     qtbot.addWidget(panel)
     assert hasattr(panel, "scrub_started")
     assert hasattr(panel, "scrub_finished")
+
+
+# ---------------------------------------------------------------------------
+# KF-03：真实写入口（真实 AppHost + ProjectCommandStack 全链路）
+# ---------------------------------------------------------------------------
+
+
+class TestRealWriteEntry:
+    """验收：一次用户动作一个历史条目；拒绝无部分写入；Undo/Redo 对称。"""
+
+    def _wired(self, qtbot):
+        from unittest.mock import Mock
+
+        from src.app.controllers.color_graph_controller import (
+            ColorGraphAppHost,
+        )
+        from src.features.color.core.color_graph_migration import (
+            migrate_legacy_stack,
+        )
+        from src.features.edit.core.commands import ProjectCommandStack
+        from src.features.edit.core.project import EditProject
+        from tests.color.fixtures.color_graph import f03_layer_stack
+
+        project, sid = EditProject.create(name="kf03w").create_color_stack(
+            asset_id="a1", name="s")
+        stack = project.color_stacks[sid].with_layers(
+            [layer.to_dict(None) for layer in f03_layer_stack()])
+        graph = migrate_legacy_stack(stack)
+        project = project.update_color_stack(sid, color_graph=graph)
+        holder = {"project": project}
+        engine = Mock()
+        engine.layers = []
+        app_host = ColorGraphAppHost(
+            get_project=lambda: holder["project"],
+            set_project=lambda p: holder.__setitem__("project", p),
+            project_stack=ProjectCommandStack(),
+            engine_provider=lambda: engine,
+            request_render=lambda: None, panels_provider=lambda: {})
+        app_host.on_clip_stack_loaded(sid)
+        panel = ColorKeyframesPanel(demo=False)
+        qtbot.addWidget(panel)
+        kf_host = ColorKeyframesHost(
+            panel,
+            graph_provider=lambda: app_host.bound_graph(),
+            active_node_provider=lambda: "",
+            session_provider=lambda: _session(),
+            playback=_FakePlayback(),
+            submit_batch=app_host.submit_keyframe_batch,
+            submit_action=app_host.submit_panel_action,
+        )
+        assert kf_host.refresh() is True
+        correctors = [n.node_id for n in app_host.bound_graph().nodes
+                      if n.node_type == "corrector"]
+        return panel, kf_host, app_host, holder, correctors
+
+    def _undo(self, app_host, holder):
+        return app_host.bridge._project_stack.undo(holder["project"])
+
+    def _depth(self, app_host) -> int:
+        # undo() 会弹栈，深度探查只能读栈长（undo 栈 = 已提交命令数）
+        return len(app_host.bridge._project_stack._undo_stack)
+
+    def test_add_is_one_history_entry_with_symmetric_undo(self, qtbot):
+        panel, _host, app_host, holder, nodes = self._wired(qtbot)
+        revision0 = app_host.bound_graph().graph_revision
+        panel.request("add", ((f"node:{nodes[0]}|exposure", 12),))
+        graph = app_host.bound_graph()
+        assert graph.graph_revision == revision0 + 1
+        node = next(n for n in graph.nodes if n.node_id == nodes[0])
+        track = node.params["grade_keyframes"]["exposure"]
+        assert any(int(k["frame"]) == 12 for k in track["keyframes"])
+        assert self._depth(app_host) == 1  # 恰好一条历史
+        undone = self._undo(app_host, holder)
+        assert undone is not None
+        undone_node = next(n for n in
+                           undone.color_stacks[
+                               next(iter(undone.color_stacks))]
+                           .color_graph.nodes if n.node_id == nodes[0])
+        assert not (undone_node.params.get("grade_keyframes") or {})
+        assert self._depth(app_host) == 0
+
+    def test_two_node_move_is_single_history_entry(self, qtbot):
+        panel, _host, app_host, holder, nodes = self._wired(qtbot)
+        leaf_a, leaf_b = (f"node:{nodes[0]}|exposure",
+                          f"node:{nodes[1]}|contrast")
+        panel.request("add", ((leaf_a, 12),))
+        panel.request("add", ((leaf_b, 24),))
+        assert self._depth(app_host) == 2
+        panel.request("move", ((leaf_a, 12), (leaf_b, 24)), delta=4)
+        graph = app_host.bound_graph()
+
+        def frames(node_id, param):
+            node = next(n for n in graph.nodes if n.node_id == node_id)
+            track = (node.params.get("grade_keyframes") or {}).get(param) or {}
+            return sorted(int(k["frame"]) for k in track["keyframes"])
+
+        assert frames(nodes[0], "exposure") == [16]
+        assert frames(nodes[1], "contrast") == [28]
+        assert self._depth(app_host) == 3  # 批量 move 只加一条
+        undone = self._undo(app_host, holder)
+        assert undone is not None  # 一次 undo 恢复两节点
+        undone_graph = undone.color_stacks[
+            next(iter(undone.color_stacks))].color_graph
+
+        def undone_frames(node_id, param):
+            node = next(n for n in undone_graph.nodes
+                        if n.node_id == node_id)
+            track = (node.params.get("grade_keyframes") or {}).get(param) or {}
+            return sorted(int(k["frame"]) for k in track["keyframes"])
+
+        assert undone_frames(nodes[0], "exposure") == [12]
+        assert undone_frames(nodes[1], "contrast") == [24]
+
+    def test_locked_node_rejection_leaves_no_partial_write(self, qtbot):
+        panel, _host, app_host, holder, nodes = self._wired(qtbot)
+        leaf_a, leaf_b = (f"node:{nodes[0]}|exposure",
+                          f"node:{nodes[1]}|contrast")
+        panel.request("add", ((leaf_a, 12),))
+        panel.request("add", ((leaf_b, 24),))
+        panel.request("lock", ((f"node:{nodes[1]}", 0),), enabled=True)
+        assert self._depth(app_host) == 3
+        revision = app_host.bound_graph().graph_revision
+        # 两节点批量 move：目标节点已锁 → 整批拒绝
+        panel.request("move", ((leaf_a, 12), (leaf_b, 24)), delta=4)
+        graph = app_host.bound_graph()
+        assert graph.graph_revision == revision  # 无部分写入
+        assert self._depth(app_host) == 3  # 无新历史条目
+
+    def test_stale_context_request_is_dropped(self, qtbot):
+        panel, host, app_host, holder, nodes = self._wired(qtbot)
+        revision = app_host.bound_graph().graph_revision
+        from src.features.color.ui.color_keyframes_view_state import EditRequest
+        host._on_edit_requested(EditRequest(
+            context="stale|ctx", action="add",
+            targets=((f"node:{nodes[0]}|exposure", 12),)))
+        assert app_host.bound_graph().graph_revision == revision
