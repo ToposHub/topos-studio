@@ -1524,6 +1524,79 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         # 失败不阻断启动（color_graph_host=None → 原工作流不变）。
         self._wire_color_graph_host()
 
+        # KF-02：关键帧面板只读宿主（权威投影 + 播放头双向同步）。
+        self._wire_color_keyframes_host()
+
+    def _wire_color_keyframes_host(self) -> None:
+        """装配 ColorKeyframesHost（关键帧面板只读接线，KF-02）。
+
+        - 下行：clip 水合（page_controller）/ 会话切换（observer）/
+          工程发布（_set_project 闭包）三类触发点重建只读投影；
+        - 播放头：video 帧钩子按 clip-local 域回填（file_controller
+          _on_color_video_source_frame_changed 转发）；
+        - 上行：seek 复用既有协议，ruler 拖拽走视口 scrub 车道；
+        - 写入口保持关闭：edit_requested 核对会话后丢弃（KF-03 开放）。
+
+        失败不阻断启动（宿主缺席时面板保持演示数据）。
+        """
+        self._color_keyframes_host = None
+        self._color_keyframes_frame_hook = None
+        panel = getattr(self, "color_keyframes_panel", None)
+        if panel is None or getattr(self, "color_graph_host", None) is None:
+            return
+        try:
+            from src.app.controllers.color_keyframes_host import (
+                ColorKeyframesHost,
+            )
+
+            def _graph_provider():
+                host = getattr(self, "color_graph_host", None)
+                return host.bound_graph() if host is not None else None
+
+            def _active_node_provider():
+                host = getattr(self, "color_graph_host", None)
+                return host.active_grade_node_id() if host is not None else ""
+
+            def _session_provider():
+                manager = getattr(self, "_color_session_manager", None)
+                return (manager.get_current_session()
+                        if manager is not None else None)
+
+            host = ColorKeyframesHost(
+                panel,
+                graph_provider=_graph_provider,
+                active_node_provider=_active_node_provider,
+                session_provider=_session_provider,
+                playback=self,
+            )
+            self._color_keyframes_host = host
+            self._color_keyframes_frame_hook = host.on_local_frame_changed
+
+            def _on_session_changed(_session) -> None:
+                try:
+                    host.refresh()
+                except Exception:  # noqa: BLE001 — 投影失败不阻断会话切换
+                    logger.debug("keyframes panel refresh failed",
+                                 exc_info=True)
+
+            manager = getattr(self, "_color_session_manager", None)
+            if manager is not None:
+                manager.add_session_observer(_on_session_changed)
+            host.refresh()
+            logger.debug("color keyframes host wired (read-only projection)")
+        except Exception:
+            logger.warning("color keyframes host wiring failed",
+                           exc_info=True)
+            self._color_keyframes_host = None
+            self._color_keyframes_frame_hook = None
+
+    def _color_keyframes_host_refresh(self, *, force: bool = False) -> bool:
+        """关键帧面板只读投影刷新（宿主未接线时空操作）。"""
+        host = getattr(self, "_color_keyframes_host", None)
+        if host is None:
+            return False
+        return host.refresh(force=force)
+
     def _wire_color_graph_host(self) -> None:
         """装配 ColorGraphAppHost（节点面板/调色手势接权威图）。
 
@@ -1556,6 +1629,11 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 try:
                     self.color_graph_host.on_external_project_change()
                 except Exception:  # noqa: BLE001 — 重投影失败不阻断发布
+                    pass
+                # KF-02：图 revision 变化后刷新关键帧面板只读投影（幂等）
+                try:
+                    self._color_keyframes_host_refresh()
+                except Exception:  # noqa: BLE001 — 面板投影失败不阻断发布
                     pass
 
             def _request_render():

@@ -1514,6 +1514,13 @@ class ColorGraphAppHost:
         stack = project.color_stacks.get(stack_id)
         return getattr(stack, "color_graph", None) if stack else None
 
+    def bound_graph(self):
+        """KF-02：当前绑定栈的权威图对象（关键帧面板只读投影用）。
+
+        与求值/命令同源；无绑定栈返回 None。
+        """
+        return self._stack_graph(self._bound_stack_id)
+
     def _hydrate(self, graph, scope: str, scope_owner_id) -> None:
         if self._coordinator.state != GraphSessionState.HYDRATING:
             # switch_session 已置 HYDRATING（on_clip_switch 先行）；仅在
