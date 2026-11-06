@@ -611,6 +611,41 @@ class Layer:
 
         # P1-COLOR-03: 调色参数关键帧轨道 {param_name: GradeKeyframeTrack}
         self.grade_keyframes: Dict[str, Any] = {}
+        # KF-05：动画求值基线（首次按帧求值前的原值快照）。帧求值会
+        # 回写 grading_params/qualifier_params——保存与"删空轨道恢复"
+        # 都以基线为准，防止播放中保存把插值临时值固化成 base。
+        self._grade_params_base: Dict[str, Any] | None = None
+        self._qualifier_params_base: Dict[str, Any] | None = None
+
+    def ensure_grade_base_snapshot(self) -> None:
+        """KF-05：首次动画求值前固化参数基线（幂等；求值每帧从基线起）。"""
+        if self._grade_params_base is None:
+            self._grade_params_base = dict(self.grading_params)
+        if self._qualifier_params_base is None:
+            self._qualifier_params_base = dict(self.qualifier_params or {})
+
+    def restore_grade_base(self, param: str | None = None) -> None:
+        """KF-05：把被动画回写的参数恢复为基线值。
+
+        ``param`` 指定单参数（该参数轨道删空时）；``None`` 恢复全部并
+        清基线（轨道全删/重置——无动画后 grading_params 即真值）。
+        """
+        if param is not None:
+            if self._grade_params_base and param in self._grade_params_base:
+                self.grading_params[param] = self._grade_params_base[param]
+            if (self._qualifier_params_base
+                    and self.qualifier_params
+                    and param in self._qualifier_params_base):
+                self.qualifier_params[param] = (
+                    self._qualifier_params_base[param])
+            return
+        if self._grade_params_base is not None:
+            self.grading_params = dict(self._grade_params_base)
+        if (self._qualifier_params_base is not None
+                and self.qualifier_params):
+            self.qualifier_params = dict(self._qualifier_params_base)
+        self._grade_params_base = None
+        self._qualifier_params_base = None
 
     def reset_params(self) -> None:
         """把图层整体重置回 ``__init__`` 的默认状态。
@@ -646,6 +681,9 @@ class Layer:
         # P1-COLOR-03: 重置连关键帧轨道一起清空，否则下一次 seek 会经
         # apply_grade_keyframes 把已重置的调色值"复活"。
         self.grade_keyframes = {}
+        # KF-05：重置即回到默认真值，动画基线一并作废
+        self._grade_params_base = None
+        self._qualifier_params_base = None
         self.curves_lut = None
         self.curves_data = {}
         # 曲线面板侧栏状态按默认重建（同 qualifier：残留会让重置后的
@@ -832,6 +870,16 @@ class Layer:
         
         # 复制抠像参数
         self.qualifier_params = copy.deepcopy(source_layer.qualifier_params)
+
+        # KF-05：动画求值基线随层复制（副本的删空恢复/保存同源）
+        self._grade_params_base = (
+            copy.deepcopy(source_layer._grade_params_base)
+            if getattr(source_layer, '_grade_params_base', None) is not None
+            else None)
+        self._qualifier_params_base = (
+            copy.deepcopy(source_layer._qualifier_params_base)
+            if getattr(source_layer, '_qualifier_params_base', None) is not None
+            else None)
 
         # 复制插件效果栈
         if hasattr(source_layer, 'plugins') and source_layer.plugins:
@@ -1186,6 +1234,14 @@ class Layer:
                 name: track.to_dict()
                 for name, track in self.grade_keyframes.items()
             }
+            # KF-05：带轨道的层序列化求值基线而非当前帧回写值——
+            # "播放中保存"不得把插值临时值固化成 base（重载后轨道重
+            # 求值同帧同值；删轨道后回到动画前真值）。
+            if self._grade_params_base is not None:
+                data["grading_params"] = dict(self._grade_params_base)
+            if (self._qualifier_params_base is not None
+                    and self.qualifier_params):
+                data["qualifier_params"] = dict(self._qualifier_params_base)
 
         # AI Matte: save to file if assets_dir is provided
         if self.ai_matte is not None and assets_dir and os.path.isdir(assets_dir):

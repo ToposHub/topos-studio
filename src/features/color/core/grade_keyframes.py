@@ -499,6 +499,14 @@ def evaluate_qualifier_keyframes(layer: Any, frame: int) -> bool:
     params = getattr(layer, "qualifier_params", None)
     if not params:
         return False
+    # KF-05：有基线快照（引擎预览层）时先回基线再求值——回写不累积，
+    # 播放中保存不会把插值临时值固化成 qualifier base。导出路径的
+    # 临时层对象无快照，保持既有就地语义。
+    base = getattr(layer, "_qualifier_params_base", None)
+    if base:
+        for key, value in base.items():
+            if key in params:
+                params[key] = value
     changed = False
     frame = int(frame)
     for name, track in list(tracks.items()):

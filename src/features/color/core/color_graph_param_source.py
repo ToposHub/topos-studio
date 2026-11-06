@@ -94,15 +94,21 @@ def node_layer_payload(node: Any, *,
             payload["active_lut_path"] = lut_ref
             payload["lut_intensity"] = lut_strength
     # N10：节点关键帧域合并（params 逐 param 胜出 legacy 基底；命令与
-    # 播放评估/导出读取同域——evaluate_grade_keyframes 消费点不变）
+    # 播放评估/导出读取同域——evaluate_grade_keyframes 消费点不变）。
+    # KF-05：显式墓碑（空轨道 + tombstone）同样胜出——图域删除最后
+    # 一键后压制 legacy 同名轨道复活（删除语义，不随保存/重开翻转）。
     node_keyframes = params.get("grade_keyframes")
     if isinstance(node_keyframes, Mapping) and node_keyframes:
         merged_kf = dict(payload.get("grade_keyframes") or {})
         for track_name, track in node_keyframes.items():
-            if isinstance(track, Mapping) and track.get("keyframes"):
+            if not isinstance(track, Mapping):
+                continue
+            if track.get("keyframes"):
                 merged_kf[str(track_name)] = {
                     "keyframes": unfreeze_params(
                         list(track["keyframes"]))}
+            elif track.get("tombstone"):
+                merged_kf[str(track_name)] = {"keyframes": []}
         payload["grade_keyframes"] = merged_kf
     # 曲线 LUT 重建（save/load 语义：控制点持久化，LUT 是缓存）。
     # 输出为原生嵌套 list（与 Layer.to_dict 持久化形态一致；执行器/
