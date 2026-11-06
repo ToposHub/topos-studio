@@ -3188,6 +3188,15 @@ class PageManagementMixin:
             except Exception:
                 logger.debug("graph host clip rebind failed", exc_info=True)
 
+        # KF-02：关键帧面板只读投影随 clip 水合重建（同点接线，plan §UI
+        # 契约"切片段…后同步更新树、锁、标记、帧范围和播放头"）
+        keyframes_refresh = getattr(self, '_color_keyframes_host_refresh', None)
+        if callable(keyframes_refresh):
+            try:
+                keyframes_refresh(force=True)
+            except Exception:
+                logger.debug("keyframes panel refresh failed", exc_info=True)
+
         logger.debug(f"Loaded color stack {stack_id} to all panels via hydrator")
 
     def _sync_active_color_version_stack(self, stack_id: str) -> None:

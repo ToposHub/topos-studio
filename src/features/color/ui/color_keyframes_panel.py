@@ -97,6 +97,10 @@ class ColorKeyframesPanel(QWidget):
 
     edit_requested = pyqtSignal(object)  # EditRequest
     seek_requested = pyqtSignal(int)  # clip-local displayed frame
+    # KF-02: ruler drag boundaries. The host maps presses/moves onto the
+    # viewport's nonblocking scrub lane and settles the exact release frame.
+    scrub_started = pyqtSignal()
+    scrub_finished = pyqtSignal()
     expand_requested = pyqtSignal(bool)
 
     def __init__(self, parent: QWidget | None = None, *, demo: bool = False) -> None:
@@ -797,6 +801,7 @@ class _Timeline(QWidget):
         elif event.button() == _LEFT:
             if y < _RULER and x >= self.divider:
                 self._gesture, self._origin = "seek", point
+                self.panel.scrub_started.emit()
                 self.panel.seek(self.x_frame(x))
             elif row is not None and x < self.divider:
                 self.panel.activate_row(row)
@@ -872,12 +877,17 @@ class _Timeline(QWidget):
         event.accept()
 
     def cancel_gesture(self) -> None:
+        was_seek = self._gesture == "seek"
         self._origin = None
         self._gesture = ""
         self._delta = 0
         self._move_refs.clear()
         self.unsetCursor()
         self.invalidate()
+        if was_seek:
+            # 单一收口：release / Hide / WindowDeactivate / 换快照都会走
+            # 这里，宿主据此结算 scrub 车道的精确帧。
+            self.panel.scrub_finished.emit()
 
     def wheelEvent(self, event: QWheelEvent | None) -> None:
         if event is None:
