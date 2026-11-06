@@ -1307,6 +1307,11 @@ class LegacyGradingAdapter:
         self._host = host
         self._bridge = bridge
         self._gesture_open = False
+        # KF-04：自动录制路由（AppHost.attach_keyframe_recorder 注入；
+        # 缺席 = 不录制，手势行为与既有完全一致）
+        self._recorder = None
+        self._frame_provider = None
+        self._transaction_id = ""
 
     def params_for_panel(self) -> dict[str, Any]:
         handle = self._host.active_handle
@@ -1315,6 +1320,7 @@ class LegacyGradingAdapter:
     def begin_gesture(self, transaction_id: str) -> None:
         self._bridge.begin_transaction(transaction_id)
         self._gesture_open = True
+        self._transaction_id = transaction_id
 
     def submit_param_change(self, node_id: str, param_name: str, value: Any,
                             transaction_id: str) -> bool:
@@ -1357,13 +1363,52 @@ class LegacyGradingAdapter:
             return False
         self._bridge.add_to_transaction(result, transaction_id,
                                         "set_node_option")
+        # KF-04：自动录制路由——手势内的真实改动交录制器收集（auto 开启
+        # 且参数已登记时），flush 时与 base 参数进同一事务（一个历史条目）
+        if self._recorder is not None:
+            self._recorder.observe(
+                node_id, param_name, value,
+                self._frame_provider() if self._frame_provider else None)
         return True
 
     def end_gesture(self) -> bool:
         if not self._gesture_open:
             return False
         self._gesture_open = False
+        self._flush_recorder_edits()
         return self._bridge.flush_transaction()
+
+    def _flush_recorder_edits(self) -> None:
+        """KF-04：手势收尾——自动录制的关键帧写入并入当前事务缓冲。"""
+        recorder = self._recorder
+        if recorder is None:
+            return
+        edits = recorder.take_pending_edits()
+        if not edits:
+            return
+        from src.features.color.core.color_graph_service import (
+            ColorGraphService,
+        )
+        project = self._bridge._get_project()
+        stack_id = self._bridge._stack_id()
+        stack = project.color_stacks.get(stack_id) if stack_id else None
+        graph = stack.color_graph if stack else None
+        if graph is None:
+            return
+        pending = self._bridge._buffer._last_graph
+        if pending is not None:
+            from src.shared.project.color_graph import ColorGraphData
+            graph = ColorGraphData.from_dict(pending)
+        result = ColorGraphService().apply_intent(
+            graph, "batch_edit_keyframes", {"edits": edits})
+        if not result.ok:
+            logger.warning("auto-record keyframes rejected: %s",
+                           result.diagnostics)
+            return
+        if result.graph.graph_revision == graph.graph_revision:
+            return  # 无差值（重复置值）：批处理不追加历史
+        self._bridge.add_to_transaction(result, self._transaction_id,
+                                        "batch_edit_keyframes")
 
 
 # ── B06.5：真实 app 装配（MainWindow 持有）────────────────────────────────
@@ -1906,6 +1951,23 @@ class ColorGraphAppHost:
     def submit_panel_action(self, action: str, arguments: dict) -> bool:
         """KF-03：关键帧面板节点级命令（lock/enable 等既有命令复用）。"""
         return self._host.submit_action(action, arguments)
+
+    def attach_keyframe_recorder(self, recorder, frame_provider=None) -> None:
+        """KF-04：注入自动录制器与有效帧提供者（源帧域）。
+
+        frame_provider 返回当前播放头源帧（int）或 None（无播放上下文，
+        录制整批放弃）。
+        """
+        self._adapter._recorder = recorder
+        self._adapter._frame_provider = frame_provider
+
+    def detach_keyframe_recorder(self) -> None:
+        """会话/切片段更换时摘除录制状态（半开手势一并丢弃）。"""
+        recorder = self._adapter._recorder
+        if recorder is not None:
+            recorder.reset()
+        self._adapter._recorder = None
+        self._adapter._frame_provider = None
 
     def grade_gesture_open(self) -> bool:
         return bool(getattr(self._adapter, "_gesture_open", False))

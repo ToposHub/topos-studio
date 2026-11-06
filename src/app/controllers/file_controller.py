@@ -5911,6 +5911,8 @@ class FileOpsMixin:
         keyframes_hook = getattr(self, "_color_keyframes_frame_hook", None)
         if callable(keyframes_hook):
             keyframes_hook(display_frame)
+        # KF-04: 自动录制路由的有效帧来源（源帧域；seek/播放/scrub 都经此）
+        self._color_last_source_frame = source_frame
         # P1-COLOR-03: 记录当前源帧号；图层带调色关键帧轨道时按帧插值求值
         # （预览与导出共用同一求值函数，帧值一致）。无轨道时零开销。
         try:

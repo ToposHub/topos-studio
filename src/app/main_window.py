@@ -1545,9 +1545,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         if panel is None or getattr(self, "color_graph_host", None) is None:
             return
         try:
+            from src.app.controllers.color_keyframe_recorder import (
+                KeyframeAutoRecorder,
+            )
             from src.app.controllers.color_keyframes_host import (
                 ColorKeyframesHost,
             )
+            self._color_keyframe_auto_recorder = KeyframeAutoRecorder()
 
             def _graph_provider():
                 host = getattr(self, "color_graph_host", None)
@@ -1572,7 +1576,14 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 # lock/enable 复用既有节点级命令）
                 submit_batch=self.color_graph_host.submit_keyframe_batch,
                 submit_action=self.color_graph_host.submit_panel_action,
+                # KF-04：自动录制注册表（手势 flush 与 base 参数同事务）
+                auto_recorder=self._color_keyframe_auto_recorder,
             )
+            # KF-04：录制器接调色手势路径（有效帧 = 当前播放头源帧）
+            self.color_graph_host.attach_keyframe_recorder(
+                self._color_keyframe_auto_recorder,
+                frame_provider=lambda: getattr(
+                    self, "_color_last_source_frame", None))
             self._color_keyframes_host = host
             self._color_keyframes_frame_hook = host.on_local_frame_changed
 

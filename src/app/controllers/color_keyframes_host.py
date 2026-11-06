@@ -78,6 +78,7 @@ def build_keyframes_snapshot(
     playhead: int,
     corrector: str,
     graph: Any,
+    auto_nodes: frozenset = frozenset(),
 ) -> Snapshot:
     """从权威图对象构建只读快照（纯函数，宿主与测试共用）。
 
@@ -127,7 +128,8 @@ def build_keyframes_snapshot(
                   markers: list[Marker]) -> Track:
             return Track(id=f"node:{node_id}|{track_name}",
                          label=_leaf_label(domain, field, shapes),
-                         scope="color", markers=tuple(markers))
+                         scope="color", markers=tuple(markers),
+                         auto=node_id in auto_nodes)  # Corrector 开关作用后代
 
         leaves: list[Track] = []
         # grade/qualifier：登记字段全量常驻（空轨道无标记）——否则首个
@@ -157,6 +159,7 @@ def build_keyframes_snapshot(
             children=tuple(leaves),
             locked=bool((getattr(node, "params", {}) or {}).get("locked")),
             enabled=bool(getattr(node, "enabled", True)),
+            auto=node_id in auto_nodes,
         ))
         if not first_row:
             first_row = row_id
@@ -190,6 +193,7 @@ class ColorKeyframesHost:
         playback: Any,
         submit_batch: Optional[Callable[[list[dict]], bool]] = None,
         submit_action: Optional[Callable[[str, dict], bool]] = None,
+        auto_recorder: Any = None,
     ) -> None:
         self._panel = panel
         self._graph_provider = graph_provider
@@ -198,6 +202,7 @@ class ColorKeyframesHost:
         self._playback = playback
         self._submit_batch = submit_batch
         self._submit_action = submit_action
+        self._recorder = auto_recorder  # KF-04：自动录制注册表（可缺席）
         self._context = ""
         self._revision = -1
         self._frame_count = 0
@@ -236,6 +241,10 @@ class ColorKeyframesHost:
         context = _session_context_key(
             session, getattr(session, "color_stack_id", "") or "")
         revision = int(getattr(graph, "graph_revision", -1) or -1)
+        if context != self._context:
+            # 切片段/版本/页面：丢弃旧会话的录制开关与半开手势
+            if self._recorder is not None:
+                self._recorder.reset()
         if not force and context == self._context and revision == self._revision:
             return False
         playhead = max(0, min(self._last_frame, int(total) - 1))
@@ -246,6 +255,8 @@ class ColorKeyframesHost:
             playhead=playhead,
             corrector=self._active_node_row_id(),
             graph=graph,
+            auto_nodes=(self._recorder.auto_nodes()
+                        if self._recorder is not None else frozenset()),
         )
         self._panel.set_snapshot(snapshot)
         self._context = context
@@ -316,7 +327,12 @@ class ColorKeyframesHost:
         translated = self._translate_request(request)
         if translated is None:
             return
-        edits, node_actions, skipped = translated
+        edits, node_actions, skipped, auto_toggles = translated
+        for node_id, enabled in auto_toggles:
+            if self._recorder is not None:
+                self._recorder.set_auto(node_id, enabled)
+                # 会话域开关：不推 revision，强制重建投影刷新 auto 列
+                self.refresh(force=True)
         if skipped:
             logger.info(
                 "keyframes edit skipped targets (not writable yet): %s",
@@ -352,13 +368,14 @@ class ColorKeyframesHost:
         nodes = {node.node_id: node for node in getattr(graph, "nodes", ())}
         edits: list[dict] = []
         node_actions: list[tuple[str, dict]] = []
+        auto_toggles: list[tuple[str, bool]] = []
         skipped: list[str] = []
         locked_state: dict[str, bool] = {}
         enabled_state: dict[str, bool] = {}
         if request.action == "paste":
             if not self._translate_paste(request, nodes, edits):
                 return None
-            return (edits, node_actions, skipped)
+            return (edits, node_actions, skipped, auto_toggles)
         for track_id, frame in request.targets:
             parsed = self._parse_track_id(track_id)
             if parsed is None:
@@ -373,7 +390,9 @@ class ColorKeyframesHost:
                     enabled_state[node_id] = request.enabled
                 continue
             if request.action == "auto":
-                skipped.append(track_id)  # KF-04 自动录制路由
+                # KF-04：Corrector 级开关（作用于全部子轨，写入只落在
+                # 本次手势改动的参数）；会话域状态，非工程命令
+                auto_toggles.append((node_id, request.enabled))
                 continue
             if domain == "window":
                 skipped.append(track_id)  # KF-05/KF-07 域命令
@@ -422,7 +441,7 @@ class ColorKeyframesHost:
                 "node_ids": sorted(enabled_state),
                 "enabled": next(iter(enabled_state.values())),
             }))
-        return (edits, node_actions, skipped)
+        return (edits, node_actions, skipped, auto_toggles)
 
     def _translate_paste(self, request: EditRequest, nodes: dict,
                          edits: list[dict]) -> bool:

@@ -426,6 +426,24 @@ class TestRealWriteEntry:
         assert graph.graph_revision == revision  # 无部分写入
         assert self._depth(app_host) == 3  # 无新历史条目
 
+    def test_auto_toggle_routes_to_recorder_and_snapshot(self, qtbot):
+        from src.app.controllers.color_keyframe_recorder import (
+            KeyframeAutoRecorder,
+        )
+        panel, host, app_host, _holder, nodes = self._wired(qtbot)
+        recorder = KeyframeAutoRecorder()
+        host._recorder = recorder
+        row_id = f"node:{nodes[0]}"
+        panel.request("auto", ((row_id, 0),), enabled=True)
+        assert recorder.auto_nodes() == frozenset({nodes[0]})
+        assert host.refresh(force=True) is True
+        node_row = next(track for track in panel.snapshot.tracks
+                        if track.id == row_id)
+        assert node_row.auto is True
+        assert all(child.auto for child in node_row.children)  # 开关作用后代
+        panel.request("auto", ((row_id, 0),), enabled=False)
+        assert recorder.auto_nodes() == frozenset()
+
     def test_stale_context_request_is_dropped(self, qtbot):
         panel, host, app_host, holder, nodes = self._wired(qtbot)
         revision = app_host.bound_graph().graph_revision
