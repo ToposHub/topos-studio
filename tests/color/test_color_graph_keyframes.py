@@ -255,3 +255,31 @@ class TestGates:
                                 ("move_keyframe", "move_node_keyframe")):
             contract = ACTION_CONTRACTS.get(action)
             assert contract is not None and contract.command == command
+
+
+def test_two_animated_nodes_both_evaluate_per_frame():
+    """KF-06：多节点完整消费——两个动画节点同帧各自求值（无"只吃
+    首个动画节点"/错误取全局帧/沿用上一帧缓存）。"""
+    graph = _graph()
+    nodes = [n for n in graph.nodes if n.node_type == "corrector"]
+    service = ColorGraphService()
+    result = None
+    for node, param, values in ((nodes[0], "exposure", (0.0, 1.0)),
+                                (nodes[1], "contrast", (-0.5, 0.5))):
+        for frame, value in zip((10, 30), values):
+            result = service.apply_intent(graph, "set_node_keyframe", {
+                "node_id": node.node_id, "param": param,
+                "frame": frame, "value": value})
+            assert result.ok, result.diagnostics
+            graph = result.graph
+    assert result is not None
+    provider = graph_node_layer_provider(graph, frame=20)
+    first = provider(nodes[0].node_id)
+    second = provider(nodes[1].node_id)
+    # 各节点按自己的轨道中点插值（0.5 / 0.0），互不串值
+    assert first["grading_params"]["exposure"] == pytest.approx(0.5)
+    assert second["grading_params"]["contrast"] == pytest.approx(
+        0.0, abs=1e-6)
+    # 未动画节点保持完整 base 参数
+    third = provider(nodes[2].node_id)
+    assert third["grading_params"]["saturation"] == pytest.approx(1.15)

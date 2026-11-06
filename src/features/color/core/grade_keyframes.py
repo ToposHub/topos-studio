@@ -442,6 +442,57 @@ def evaluate_mask_keyframes(layer: Any, frame: int) -> bool:
     return changed
 
 
+def evaluate_mask_tracks_payload(
+    tracks: Dict[str, Any], shapes: Any, frame: int,
+) -> List[Dict[str, Any]] | None:
+    """KF-06：mask.* 轨道的 dict 纯函数求值（导出路径专用）。
+
+    与 ``evaluate_mask_keyframes``（Layer 对象就地写回）同语义，但消费
+    序列化形态：``tracks`` 值可以是 GradeKeyframeTrack 或
+    ``{"keyframes": [...]}`` dict；``shapes`` 是 MaskShape dict 列表
+    （非 dict 条目原样保留）。返回补写后的**新列表**；无轨道/无修改
+    返回 None（调用方沿用原 shapes）。失效 shape_id 跳过。
+    """
+    if not tracks:
+        return None
+    normalized: Dict[str, GradeKeyframeTrack] = {}
+    for name, track in tracks.items():
+        if isinstance(track, GradeKeyframeTrack):
+            normalized[str(name)] = track
+        elif isinstance(track, dict) and track.get("keyframes"):
+            try:
+                normalized[str(name)] = GradeKeyframeTrack.from_dict(
+                    {**track, "param_name": str(name)})
+            except (TypeError, ValueError):
+                continue
+    if not normalized:
+        return None
+    frame = int(frame)
+    changed = False
+    out: List[Dict[str, Any]] = []
+    for shape in shapes or ():
+        if not isinstance(shape, dict):
+            out.append(shape)
+            continue
+        shape_id = str(shape.get("id", ""))
+        patched = dict(shape)
+        for name, track in normalized.items():
+            parsed = parse_mask_track_name(name)
+            if parsed is None or parsed[0] != shape_id:
+                continue
+            if not track.keyframes:
+                continue
+            field = parsed[1]
+            value = track.value_at(frame, shape.get(field))
+            if value is None:
+                continue
+            patched[field] = (list(value) if isinstance(value, tuple)
+                              else value)
+            changed = True
+        out.append(patched)
+    return out if changed else None
+
+
 # ---------------------------------------------------------------------------
 # F4.5 · Qualifier 亮度区间动画（计划选定参数：lum_low / lum_high）
 #

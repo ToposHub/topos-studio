@@ -9836,6 +9836,23 @@ class TimelineExporter:
             shapes_raw = entry.get("mask_shapes")
             if not shapes_raw:
                 break
+            # KF-06：窗口动画轨道按导出帧求值（与 Color 预览
+            # evaluate_mask_keyframes 同语义的 dict 纯函数版）——此前
+            # 导出侧窗口恒为静态 base 形状（轨道被静默忽略）。
+            try:
+                from src.features.color.core.grade_keyframes import (
+                    evaluate_mask_tracks_payload,
+                )
+                evaluated = evaluate_mask_tracks_payload(
+                    grade.get("grade_keyframes"), shapes_raw,
+                    int(layer.source_frame))
+                if evaluated is not None:
+                    shapes_raw = evaluated
+            except Exception as error:  # noqa: BLE001 — 求值失败不静默改窗
+                logger.warning(
+                    f"Export mask keyframe eval failed for clip "
+                    f"{layer.clip_id}: {error}"
+                )
             from src.features.color.core.layer import MaskGroup, MaskShape
             from src.features.color.core.mask_shapes_cpu import (
                 combine_masks_cpu,
@@ -9891,6 +9908,9 @@ class TimelineExporter:
                     # M06.2: qualifier matte 需要全 float 路径（fast-path
                     # 只覆盖主参数，会静默跳过限定器）
                     and not grade.get("qualifier_params")
+                    # KF-06: 窗口 matte 同样需要全 float 路径——静态窗口
+                    # （无关键帧）此前经 fast-path 被静默丢弃（整帧调色）
+                    and qualifier_matte is None
                     # M05.2b: 曲线同样在 fast-path 覆盖域外
                     and not grade.get("curves_data")
                     # M05.2c: HSL 曲线/soft-clip 同理；曲线面板四参数

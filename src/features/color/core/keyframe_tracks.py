@@ -524,12 +524,10 @@ DOMAIN_CAPABILITIES: Dict[str, Dict[str, Any]] = {
     },
     "window": {
         "write_domain": "layer",
-        "deliver": False,
+        "deliver": True,
         "reasons": {
             "write": "图命令白名单暂不含 mask.*；写入走 Layer 域 shape 事务"
                      "（KF-03 非节点轨道统一命令化）",
-            "deliver": "TimelineExporter 逐帧只求值 grade+qualifier；窗口"
-                       "动画导出待 KF-06 多节点完整消费",
         },
     },
     "qualifier": {
