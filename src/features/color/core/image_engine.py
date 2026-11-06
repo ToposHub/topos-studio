@@ -1859,8 +1859,15 @@ class ImageEngine(QObject):
             tracks = getattr(layer, 'grade_keyframes', None)
             if not tracks:
                 continue
+            # KF-05：首次求值前固化基线；每帧从基线重求值（回写不累积，
+            # 播放中保存不会把插值临时值固化成 base）
+            if hasattr(layer, 'ensure_grade_base_snapshot'):
+                layer.ensure_grade_base_snapshot()
+                eval_base = layer._grade_params_base
+            else:
+                eval_base = layer.grading_params
             layer.grading_params = evaluate_grade_keyframes(
-                tracks, int(frame), layer.grading_params)
+                tracks, int(frame), eval_base)
             layer.is_dirty = True
             changed = True
             # P1-COLOR-09: mask.<shape_id>.<field> 轨道求值——照
@@ -1914,14 +1921,23 @@ class ImageEngine(QObject):
         if layer is None:
             return False
         removed = False
-        for track in list(layer.grade_keyframes.values()):
+        emptied = []
+        for name, track in list(layer.grade_keyframes.items()):
             if track.remove_keyframe(int(frame)):
                 removed = True
+                if not track.keyframes:
+                    emptied.append(name)
         # 清掉空轨道
         layer.grade_keyframes = {
             name: track for name, track in layer.grade_keyframes.items()
             if track.keyframes
         }
+        # KF-05：删空轨道的参数恢复动画前基线（插值回写值不作真值）
+        if emptied and hasattr(layer, 'restore_grade_base'):
+            for name in emptied:
+                layer.restore_grade_base(name)
+            if not layer.grade_keyframes:
+                layer.restore_grade_base(None)
         if removed and self.current_grade_frame == int(frame):
             self.apply_grade_keyframes(int(frame))
         return removed

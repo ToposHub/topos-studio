@@ -290,13 +290,28 @@ class ColorGraphService:
         node = self._keyframe_target_or_fail(graph, node_id, param)
         if not isinstance(node, ColorNodeData):
             return node  # type: ignore[return-value]
+        source = node.params.get("grade_keyframes") or {}
         tracks = {str(k): self._normalized_keyframe_track(v)
-                  for k, v in (node.params.get("grade_keyframes") or {}).items()
-                  if isinstance(v, Mapping)}
+                  for k, v in source.items() if isinstance(v, Mapping)}
         mutate(tracks)
+        # KF-05：删空轨道的墓碑语义（与批处理命令一致）——legacy 基底
+        # 存在同名轨道或原为墓碑时写显式空覆盖，其余图域私有轨道删空
+        # 即消失。
+        legacy_kf = getattr(node, "legacy_payload", None) or {}
+        raw_legacy = (legacy_kf.get("grade_keyframes")
+                      if isinstance(legacy_kf, Mapping) else None)
+        legacy_names = {str(k) for k, v in (raw_legacy or {}).items()
+                        if isinstance(v, Mapping) and v.get("keyframes")}
+        new_kf: dict[str, Any] = {}
+        for name, keyframes in tracks.items():
+            if keyframes:
+                new_kf[name] = {"keyframes": keyframes}
+            elif name in legacy_names or (
+                    isinstance(source.get(name), Mapping)
+                    and source[name].get("tombstone")):
+                new_kf[name] = {"keyframes": [], "tombstone": True}
         params = dict(node.params)
-        params["grade_keyframes"] = {k: {"keyframes": v}
-                                     for k, v in tracks.items() if v}
+        params["grade_keyframes"] = new_kf
         try:
             new_node = replace(node, params=params)
         except GraphSchemaError as exc:
@@ -470,19 +485,58 @@ class ColorGraphService:
             node = self._node(graph, node_id)
             assert node is not None  # 校验阶段已确认
             source = node.params.get("grade_keyframes") or {}
-            # 规范化基线（与候选同形态）——no-op 判定（拖回原位/重复置值）
-            # 用内容比较，不能用冻结后的 mappingproxy/tuple 直接比
-            baseline = {str(name): {"keyframes": value}
-                        for name, value in
-                        ((str(name),
-                          self._normalized_keyframe_track_dynamic(item))
-                         for name, item in source.items()
-                         if isinstance(item, Mapping))
-                        if value}
-            tracks = {name: list(entry["keyframes"])
-                      for name, entry in baseline.items()}
-            for values in tracks.values():
-                values[:] = [dict(k) for k in values]
+            legacy_kf = getattr(node, "legacy_payload", None) or {}
+            raw_legacy = (legacy_kf.get("grade_keyframes")
+                          if isinstance(legacy_kf, Mapping) else None)
+            legacy_raw = raw_legacy if isinstance(raw_legacy, Mapping) else {}
+            legacy_names = {
+                str(k) for k, v in legacy_raw.items()
+                if isinstance(v, Mapping) and v.get("keyframes")}
+            touch_names = {str(param) for param, _ in entries}
+
+            # ── 工作集（params 现状 + 被触及轨道的 legacy 懒导入）──
+            # KF-05：legacy 起源轨道经合并视图对外可见，编辑必须落在
+            # 合并视图上再写回 params（写回即完成一次性导入）。未被
+            # 本批触及的 legacy 轨道保持原域，不随编辑扩散。
+            tracks: dict[str, list] = {}
+            tombstones: set[str] = set()
+            for name, item in source.items():
+                if not isinstance(item, Mapping):
+                    continue
+                normalized = self._normalized_keyframe_track_dynamic(item)
+                if normalized:
+                    tracks[str(name)] = normalized
+                elif item.get("tombstone"):
+                    tombstones.add(str(name))
+                    tracks[str(name)] = []
+            for param in sorted(touch_names):
+                if tracks.get(param):
+                    continue  # params 已是权威（非空）
+                legacy_item = legacy_raw.get(param)
+                legacy_norm = (
+                    self._normalized_keyframe_track_dynamic(legacy_item)
+                    if isinstance(legacy_item, Mapping) else [])
+                if legacy_norm and param not in tombstones:
+                    tracks[param] = legacy_norm  # 懒导入
+                elif param not in tracks:
+                    tracks[param] = []  # set 等动作将写入的新轨道
+
+            # ── 基线（"本批无任何效果时 params 应有的形态"）──
+            baseline: dict[str, dict[str, Any]] = {}
+            for name, item in source.items():
+                if not isinstance(item, Mapping):
+                    continue
+                normalized = self._normalized_keyframe_track_dynamic(item)
+                if normalized:
+                    baseline[str(name)] = {"keyframes": normalized}
+                elif item.get("tombstone"):
+                    baseline[str(name)] = {"keyframes": [], "tombstone": True}
+            for param in sorted(touch_names):
+                merged = tracks.get(param) or []
+                if merged:
+                    baseline[param] = {"keyframes": [dict(k) for k in merged]}
+                elif param in tombstones or param in legacy_names:
+                    baseline[param] = {"keyframes": [], "tombstone": True}
             for param, edit in entries:
                 action = str(edit["action"])
                 frame = int(edit["frame"])
@@ -578,8 +632,16 @@ class ColorGraphService:
                     track.append(entry)
                     track.sort(key=lambda e: e["frame"])
                     tracks[param] = track
-            candidate_params = {k: {"keyframes": v}
-                                for k, v in tracks.items() if v}
+            candidate_params: dict[str, Any] = {}
+            # KF-05：删空轨道的删除语义——legacy 基底存在同名轨道（或
+            # 原为墓碑）时写显式空覆盖，防止保存/重开后旧轨道复活；
+            # 图域私有轨道删空即消失（既有语义）。
+            for name, kfs in tracks.items():
+                if kfs:
+                    candidate_params[name] = {"keyframes": kfs}
+                elif name in legacy_names or name in tombstones:
+                    candidate_params[name] = {"keyframes": [],
+                                              "tombstone": True}
             if candidate_params != baseline:
                 changed_any = True
             updated[node_id] = candidate_params
@@ -2450,7 +2512,11 @@ def can_export_lut(graph: ColorGraphData) -> tuple[bool, str]:
             # 同样阻断 pointwise LUT 导出
             params_keyframes = node.params.get("grade_keyframes") \
                 if isinstance(node.params, Mapping) else None
-            if isinstance(params_keyframes, Mapping) and params_keyframes:
+            # KF-05：仅含墓碑（显式空覆盖）不算时域数据——删除后的
+            # 轨道不再阻断 pointwise LUT 导出
+            if isinstance(params_keyframes, Mapping) and any(
+                    isinstance(t, Mapping) and t.get("keyframes")
+                    for t in params_keyframes.values()):
                 return False, "keyframes_temporal"
             for blocker, label in (
                     ("mask_shapes", "windows_masks"),
