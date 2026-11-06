@@ -700,8 +700,7 @@ def test_transition_drag_preview_tracks_timeline_zoom(qapp) -> None:
     preview = view._drag_preview_item
     assert isinstance(preview, DragPreviewItem)
 
-    preview.set_assets(["Cross Dissolve"], ["transition"], 12)
-    preview.set_position(0, 40)
+    preview.show_preview(40, 50.0, 80.0, ["Cross Dissolve"], ["transition"], 12)
 
     view.set_zoom(2.0)
 

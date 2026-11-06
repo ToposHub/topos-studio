@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+from PyQt6.QtCore import QMimeData, QPointF, QUrl, Qt
+from PyQt6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent
+from PyQt6.QtWidgets import QApplication
+
 from src.features.edit.core.commands import MacroCommand
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.scene_cut.models import SceneCutKind, SceneSubclipSpec
 from src.features.edit.core.scene_cut.subclips import create_subclip_asset
 from src.features.edit.ui.timeline_items import ClipItem, DragPreviewItem
-from src.features.edit.ui.timeline_view import TimelineView
+from src.features.edit.ui.timeline_view import MIME_TYPE_MEDIA_POOL_ASSETS, TimelineView
 
 
 def test_drag_preview_uses_each_asset_duration(qapp) -> None:
@@ -140,3 +148,102 @@ def test_scene_cut_batch_drop_is_one_timeline_transaction(qapp) -> None:
     assert not view._timeline.video_tracks[0].clips
     assert not view._timeline.audio_tracks[0].clips
     view.deleteLater()
+
+
+@pytest.mark.parametrize("commit", [False, True])
+def test_media_pool_drag_previews_on_new_video_lane_and_clears(
+    qapp, qtbot, commit: bool
+) -> None:
+    asset = MediaAsset("drag-video", "/tmp/drag-video.mov", "video", "Video", {
+        "fps": 25.0, "duration_seconds": 0, "total_frames": 50,
+    })
+    project = EditProject.create("drag-preview")
+    project.assets[asset.asset_id] = asset
+    view = TimelineView()
+    qtbot.addWidget(view)
+    view.resize(1200, 650)
+    view.set_project(project)
+    timeline = view._create_default_timeline(asset)
+    view.load_timeline(timeline)
+    view.show()
+    qapp.processEvents()
+    view.set_zoom(2.0)
+
+    mime = QMimeData()
+    mime.setData(MIME_TYPE_MEDIA_POOL_ASSETS, json.dumps([asset.asset_id]).encode())
+    action = Qt.DropAction.CopyAction
+    button = Qt.MouseButton.LeftButton
+    modifiers = Qt.KeyboardModifier.NoModifier
+    v1 = view._layout_engine.track_rect(timeline.video_tracks[0].track_id)
+    x = view._layout_engine.frame_to_x(40)
+    point = view.mapFromScene(QPointF(x, v1.top() - 35))
+    enter = QDragEnterEvent(point, action, mime, button, modifiers)
+    QApplication.sendEvent(view.viewport(), enter)
+
+    preview = view._drag_preview_item
+    assert enter.isAccepted()
+    assert preview.isVisible()
+    assert preview.y() + preview.boundingRect().height() < v1.top()
+    assert preview.boundingRect().width() == 100.0
+    assert view.get_timeline() is timeline
+
+    view.set_playhead(80)
+    destination = view.mapFromScene(QPointF(x + 82, v1.center().y()))
+    move = QDragMoveEvent(destination, action, mime, button, modifiers)
+    QApplication.sendEvent(view.viewport(), move)
+    assert move.isAccepted()
+    assert preview.x() == x + 80
+    assert preview.y() == v1.top()
+    assert preview.boundingRect().height() == v1.height() - 2
+
+    if commit:
+        drop = QDropEvent(QPointF(destination), action, mime, button, modifiers)
+        QApplication.sendEvent(view.viewport(), drop)
+        assert drop.isAccepted()
+        clip, = view.get_timeline().video_tracks[0].clips
+        assert clip.timeline_start == 80
+        assert clip.timeline_duration == 50
+    else:
+        QApplication.sendEvent(view.viewport(), QDragLeaveEvent())
+        assert view.get_timeline() is timeline
+    assert not preview.isVisible()
+    assert not view._snap_indicator.is_visible()
+
+
+def test_short_media_preview_stays_visible_at_minimum_zoom(qapp) -> None:
+    preview = DragPreviewItem(pixels_per_frame=0.01)
+    preview.show_preview(0, 100.0, 54.0, ["One frame"], ["video"], 1)
+    assert preview.boundingRect().width() == preview.MIN_WIDTH
+    assert preview.boundingRect().height() == 52.0
+
+
+def test_external_file_drag_shows_placeholder_before_import(qapp, qtbot, tmp_path: Path) -> None:
+    file = tmp_path / "unimported.mov"
+    file.touch()
+    project = EditProject.create("external-preview")
+    view = TimelineView()
+    qtbot.addWidget(view)
+    view.resize(1000, 600)
+    view.set_project(project)
+    timeline = view.show_provisional_timeline()
+    view.show()
+    qapp.processEvents()
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(file))])
+    track = view._layout_engine.track_rect(timeline.video_tracks[0].track_id)
+    x = view._layout_engine.frame_to_x(30)
+    point = view.mapFromScene(QPointF(x, track.center().y()))
+    event = QDragEnterEvent(
+        point, Qt.DropAction.CopyAction, mime,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(view.viewport(), event)
+    assert event.isAccepted()
+    assert view._drag_preview_item.isVisible()
+    assert view._drag_preview_item.y() == track.top()
+    assert view._drag_preview_item.boundingRect().width() >= 64.0
+    assert not project.assets
+    assert view.has_provisional_timeline()
+    QApplication.sendEvent(view.viewport(), QDragLeaveEvent())
+    assert not view._drag_preview_item.isVisible()

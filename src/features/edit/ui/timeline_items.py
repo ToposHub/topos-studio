@@ -33,6 +33,9 @@ from typing import Optional, Any
 from enum import Enum
 from pathlib import Path
 
+from src.shared.media.metadata import Rational
+from src.shared.media.timecode import Timecode
+
 from PyQt6.QtWidgets import (
     QGraphicsItem,
     QGraphicsObject,
@@ -8437,7 +8440,7 @@ class TimecodeRulerItem(QGraphicsObject):
 
     Features (reference: kdenlive timeline2/view/qml/Ruler.qml):
     - Dynamic tick spacing based on zoom level
-    - Multi-level ticks: major (timecode), medium (frames), minor (tick lines only)
+    - Full timecode labels on major ticks, with unlabeled subdivisions
     - SMPTE timecode format support
     - Efficient rendering (only visible area)
 
@@ -8465,10 +8468,7 @@ class TimecodeRulerItem(QGraphicsObject):
     mark_out_requested = pyqtSignal(int)  # frame
     clear_range_requested = pyqtSignal()
 
-    # Tick level constants
-    TICK_MAJOR = 0  # Major tick with timecode label
-    TICK_MEDIUM = 1  # Medium tick with frame number
-    TICK_MINOR = 2  # Minor tick (line only, no label)
+    LABEL_GUTTER = 110  # Logical pixels reserved for a full timecode and its gap.
 
     def __init__(
         self,
@@ -8483,6 +8483,8 @@ class TimecodeRulerItem(QGraphicsObject):
 
         self._pixels_per_frame = pixels_per_frame
         self._fps = fps
+        self._fps_rational = Rational.from_float(fps)
+        self._timecode_type = Timecode.auto_detect_type(self._fps_rational)
         self._sample_rate = sample_rate
         self._duration_frames = duration_frames
         self._display_mode = display_mode
@@ -8547,7 +8549,7 @@ class TimecodeRulerItem(QGraphicsObject):
         Returns:
             Tick interval in frames
         """
-        fps_int = max(1, int(fps))
+        fps_int = max(1, round(fps))
         target_minor_min_px = EDIT_SIZES["ruler_target_minor_min_px"]  # 10
 
         # Build candidate minor steps: frame-level, seconds, and long overview
@@ -8578,7 +8580,7 @@ class TimecodeRulerItem(QGraphicsObject):
         # values below the supported minimum.
         return candidate_minor[-1] if candidate_minor else fps_int
 
-    def _calculate_major_tick_interval(self, tick_interval: int, fps: float) -> int:
+    def _calculate_major_tick_interval(self, fps: float) -> int:
         """Calculate major tick interval for timecode labels.
 
         Uses DaVinci-like LOD targets:
@@ -8586,35 +8588,32 @@ class TimecodeRulerItem(QGraphicsObject):
         - Candidate steps are meaningful time intervals (1s, 2s, 5s, 10s, ...)
 
         Args:
-            tick_interval: Current minor tick interval in frames
             fps: Frames per second
 
         Returns:
             Major tick interval in frames
         """
-        fps_int = max(1, int(fps))
-        target_major_min_px = EDIT_SIZES["ruler_target_major_min_px"]  # 90
+        fps_int = max(1, round(fps))
+        target_major_min_px = self.LABEL_GUTTER
         ppf = self._pixels_per_frame
 
-        # Build candidate major steps: meaningful time intervals
-        candidate_major_steps = sorted(set([
-            1, 2, 5, 10,
-            fps_int // 2 if fps_int > 1 else 1,
-            fps_int,
-            fps_int * 2, fps_int * 5, fps_int * 10,
-            fps_int * 30, fps_int * 60,
-            fps_int * 300, fps_int * 600,
-        ]))
+        # Keep major ticks on whole seconds until the ruler is zoomed in
+        # enough to show useful sub-second labels.
+        candidate_major_steps = [
+            fps_int * seconds for seconds in (1, 2, 5, 10, 30, 60, 300, 600, 1800, 3600)
+        ]
+        if fps_int * ppf >= 3 * target_major_min_px:
+            subdivisions = {fps_int // divisor for divisor in (2, 5) if fps_int % divisor == 0}
+            candidate_major_steps = sorted(subdivisions) + candidate_major_steps
 
         for step in candidate_major_steps:
             px = step * ppf
             if px >= target_major_min_px:
                 return step
 
-        # Fallback: largest candidate
-        return candidate_major_steps[-1] if candidate_major_steps else fps_int
+        return math.ceil(target_major_min_px / (fps_int * ppf)) * fps_int
 
-    def _calculate_medium_tick_interval(self, tick_interval: int, major_tick_interval: int, fps: float) -> int:
+    def _calculate_medium_tick_interval(self, tick_interval: int, major_tick_interval: int) -> int:
         """Calculate medium tick interval between major ticks.
 
         Finds a sub-step of major_tick_interval that yields 10-24px spacing,
@@ -8662,106 +8661,25 @@ class TimecodeRulerItem(QGraphicsObject):
     def _recalculate_ticks(self) -> None:
         """Recalculate all tick intervals based on current zoom."""
         self._tick_interval = self._calculate_tick_interval(self._pixels_per_frame, self._fps)
-        self._major_tick_interval = self._calculate_major_tick_interval(self._tick_interval, self._fps)
+        self._major_tick_interval = self._calculate_major_tick_interval(self._fps)
         self._medium_tick_interval = self._calculate_medium_tick_interval(
-            self._tick_interval, self._major_tick_interval, self._fps
+            self._tick_interval, self._major_tick_interval
         )
 
-    def _get_tick_level(self, frame: int) -> int:
-        """Determine tick level for a given frame.
+    @property
+    def major_tick_interval(self) -> int:
+        """Frame interval shared by the ruler and its track grid."""
+        return self._major_tick_interval
 
-        Args:
-            frame: Frame number
-
-        Returns:
-            Tick level: TICK_MAJOR, TICK_MEDIUM, or TICK_MINOR
-        """
-        if frame % self._major_tick_interval == 0:
-            return self.TICK_MAJOR
-        elif frame % self._medium_tick_interval == 0:
-            return self.TICK_MEDIUM
-        else:
-            return self.TICK_MINOR
-
-    # ==================== Timecode Formatting ====================
-
-    def _format_timecode(self, frame: int, fps: float) -> str:
-        """Format frame as SMPTE timecode (HH:MM:SS:FF).
-
-        SMPTE timecode format: HH:MM:SS:FF where FF is frame number within second.
-
-        Args:
-            frame: Frame number
-            fps: Frames per second
-
-        Returns:
-            SMPTE timecode string
-        """
-        fps_int = int(fps)
-        total_frames = frame
-
-        hours = total_frames // (3600 * fps_int)
-        remaining = total_frames % (3600 * fps_int)
-        minutes = remaining // (60 * fps_int)
-        remaining = remaining % (60 * fps_int)
-        seconds = remaining // fps_int
-        frames = remaining % fps_int
-
+    def _format_timecode(self, frame: int) -> str:
+        """Use the same SMPTE convention as the transport timecode."""
+        nominal_fps = round(self._fps)
+        if nominal_fps > 0 and frame < nominal_fps * 86400:
+            return Timecode.from_frame_number(frame, self._fps_rational, self._timecode_type).to_string()
+        seconds, frames = divmod(frame, max(1, nominal_fps))
+        minutes, seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{frames:02d}"
-
-    def _format_timecode_compact(self, frame: int, fps: float, start_timecode_frame: int = 0) -> str:
-        """Format frame as compact timecode with LOD-aware formatting.
-
-        At low zoom: HH:MM:SS or MM:SS
-        At medium/high zoom: HH:MM:SS:FF (standard SMPTE)
-        At very high zoom: SS:FF or FF
-
-        Args:
-            frame: Frame number
-            fps: Frames per second
-            start_timecode_frame: Offset frame for sequence start timecode (default 0)
-
-        Returns:
-            Compact timecode string
-        """
-        fps_int = max(1, int(fps))
-        total_frames = frame + start_timecode_frame
-
-        hours = total_frames // (3600 * fps_int)
-        remaining = total_frames % (3600 * fps_int)
-        minutes = remaining // (60 * fps_int)
-        remaining = remaining % (60 * fps_int)
-        seconds = remaining // fps_int
-        frames = remaining % fps_int
-
-        # Determine zoom level LOD for formatting
-        ppf = self._pixels_per_frame
-        major_px = self._major_tick_interval * ppf
-
-        if major_px >= 400:
-            # Very high zoom: show SS:FF or just FF
-            if hours > 0:
-                return f"{hours}:{minutes:02d}:{seconds:02d}:{frames:02d}"
-            elif minutes > 0:
-                return f"{minutes}:{seconds:02d}:{frames:02d}"
-            else:
-                return f"{seconds:02d}:{frames:02d}"
-        elif major_px >= 150:
-            # Medium/high zoom: standard SMPTE HH:MM:SS:FF
-            if hours > 0:
-                return f"{hours}:{minutes:02d}:{seconds:02d}:{frames:02d}"
-            elif minutes > 0:
-                return f"{minutes}:{seconds:02d}:{frames:02d}"
-            else:
-                return f"{seconds:02d}:{frames:02d}"
-        else:
-            # Low zoom: HH:MM:SS or MM:SS
-            if hours > 0:
-                return f"{hours}:{minutes:02d}:{seconds:02d}"
-            elif minutes > 0:
-                return f"{minutes}:{seconds:02d}"
-            else:
-                return f"00:{seconds:02d}"
 
     # ==================== Frame Calculation ====================
 
@@ -8852,14 +8770,14 @@ class TimecodeRulerItem(QGraphicsObject):
         )
 
         # Get visible rect for efficient rendering
-        exposed_rect = option.exposedRect
+        exposed_rect = option.exposedRect.intersected(self.boundingRect())
         visible_left = max(0.0, exposed_rect.left() - TRACK_HEADER_WIDTH)
         visible_right = exposed_rect.right() - TRACK_HEADER_WIDTH
 
-        # Calculate visible frame range with 2 major tick buffer
-        buffer_frames = self._major_tick_interval * 2
-        start_frame = max(0, int(visible_left / self._pixels_per_frame) - buffer_frames)
-        end_frame = int(visible_right / self._pixels_per_frame) + buffer_frames
+        # Include labels that start left of the damage region. Their anchor
+        # and visibility must be identical for a full or partial repaint.
+        start_frame = max(0, math.floor((visible_left - self.LABEL_GUTTER) / self._pixels_per_frame))
+        end_frame = math.ceil(visible_right / self._pixels_per_frame)
 
         if self._display_mode == "samples":
             # Audio sample rate display
@@ -8883,108 +8801,33 @@ class TimecodeRulerItem(QGraphicsObject):
             painter.fillRect(QRectF(x, indicator_y, width, indicator_h), color)
 
     def _paint_dynamic_ticks(self, painter: QPainter, start_frame: int, end_frame: int) -> None:
-        """Paint top-aligned ticks with DaVinci-like visual hierarchy.
+        """Paint ticks and timecodes at fixed positions anchored to frame zero."""
+        major = self._major_tick_interval
+        medium = self._medium_tick_interval
+        for step, token, height_token in (
+            (self._tick_interval, "ruler_minor_tick", "ruler_minor_tick_h"),
+            (medium, "ruler_medium_tick", "ruler_medium_tick_h"),
+            (major, "ruler_major_tick", "ruler_major_tick_h"),
+        ):
+            painter.setPen(QPen(QColor(get_color(token)), 1))
+            height = EDIT_SIZES[height_token]
+            for frame in range((start_frame // step) * step, end_frame + 1, step):
+                if step != major and frame % major == 0:
+                    continue
+                x = int(TRACK_HEADER_WIDTH + frame * self._pixels_per_frame)
+                painter.drawLine(x, 2, x, 2 + height)
 
-        Labels share one stable baseline at the top of the ruler; ticks grow
-        downward from the lower edge of that label band:
-        - Major tick: #555A64, 12px height (from bottom), with timecode label
-        - Medium tick: #3E424B, 7px height (from bottom)
-        - Minor tick: #30343B, 4px height (from bottom)
-        Labels: #AEB3BD, 10px monospace font
-        """
-        # Monospace font for timecodes, 10px
-        font = QFont("SF Mono, Menlo, Consolas, Courier New, monospace", 9)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        font.setWeight(QFont.Weight.Medium)
+        font = QFont("Arial")
+        font.setPixelSize(10)
         painter.setFont(font)
-
-        # Ticks originate at the ruler's top edge.  Timecode sits on the lower
-        # baseline, matching Resolve's instrument-like ruler alignment.
-        tick_top = 2
-        label_top = 18
-        major_tick_h = EDIT_SIZES["ruler_major_tick_h"]   # 12px
-        medium_tick_h = EDIT_SIZES["ruler_medium_tick_h"]  # 7px
-        minor_tick_h = EDIT_SIZES["ruler_minor_tick_h"]    # 4px
-
-        # Tick colors from design tokens
-        major_tick_color = QColor(get_color("ruler_major_tick"))    # #555A64
-        medium_tick_color = QColor(get_color("ruler_medium_tick"))  # #3E424B
-        minor_tick_color = QColor(get_color("ruler_minor_tick"))    # #30343B
-        label_color = QColor(get_color("ruler_text"))               # #AEB3BD
-
-        # Calculate starting frame aligned to tick interval
-        aligned_start = (start_frame // self._tick_interval) * self._tick_interval
-
-        # Minimum label spacing to prevent overlap (72px)
-        min_label_spacing_px = 76
-        last_label_right = float("-inf")
-
-        # Iterate through frames
-        frame = aligned_start
-        while frame <= end_frame:
-            if frame < 0:
-                frame += self._tick_interval
-                continue
-
+        painter.setPen(QColor(get_color("ruler_text")))
+        for frame in range((start_frame // major) * major, end_frame + 1, major):
             x = TRACK_HEADER_WIDTH + frame * self._pixels_per_frame
-            tick_level = self._get_tick_level(frame)
-
-            if tick_level == self.TICK_MAJOR:
-                # Major tick: drawn down from the top-aligned label band.
-                painter.setPen(QPen(major_tick_color, 1))
-                painter.drawLine(int(x), tick_top, int(x), tick_top + major_tick_h)
-
-                # Draw timecode label
-                timecode = self._format_timecode_compact(frame, self._fps)
-                fm = painter.fontMetrics()
-                text_width = fm.horizontalAdvance(timecode) + 4
-                text_x = x + 4
-                if text_x > last_label_right + min_label_spacing_px:
-                    painter.setPen(QPen(label_color))
-                    painter.drawText(
-                        QRectF(text_x, label_top, text_width + 20, 14),
-                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                        timecode,
-                    )
-                    last_label_right = text_x + text_width
-
-            elif tick_level == self.TICK_MEDIUM:
-                # Medium tick: drawn down from the top-aligned label band.
-                painter.setPen(QPen(medium_tick_color, 1))
-                painter.drawLine(int(x), tick_top, int(x), tick_top + medium_tick_h)
-
-                # Draw frame number label at high zoom only
-                if self._pixels_per_frame >= 10:
-                    frame_text = str(frame)
-                    fm = painter.fontMetrics()
-                    text_width = fm.horizontalAdvance(frame_text) + 4
-                    text_x = x + 3
-                    if text_x > last_label_right + min_label_spacing_px:
-                        painter.setPen(QPen(label_color))
-                        painter.drawText(
-                            QRectF(text_x, label_top, text_width + 10, 14),
-                            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                            frame_text,
-                        )
-                        last_label_right = text_x + text_width
-
-            else:
-                # Minor tick: drawn down from the top-aligned label band.
-                painter.setPen(QPen(minor_tick_color, 1))
-                painter.drawLine(int(x), tick_top, int(x), tick_top + minor_tick_h)
-
-            frame += self._tick_interval
+            painter.drawText(QPointF(x + 4, 23), self._format_timecode(frame))
 
     def _paint_samples_mode(self, painter: QPainter, start_frame: int, end_frame: int) -> None:
-        """Paint audio samples display mode with DaVinci-like colors."""
-        font = QFont("Menlo, Consolas, Courier New, monospace", 10)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        painter.setFont(font)
-
-        # Calculate samples per frame
+        """Draw sample labels at a fixed stride, independent of repaint bounds."""
         samples_per_frame = self._sample_rate / self._fps
-
-        # Adjust interval based on zoom
         if self._pixels_per_frame < 5:
             sample_interval = self._sample_rate
         elif self._pixels_per_frame < 20:
@@ -8992,61 +8835,22 @@ class TimecodeRulerItem(QGraphicsObject):
         else:
             sample_interval = 1000
 
-        # Frame interval for iteration
-        frame_interval = int(sample_interval / samples_per_frame)
-        frame_interval = max(1, frame_interval)
+        step = max(self._tick_interval, int(sample_interval / samples_per_frame))
+        label_step = step * max(1, math.ceil(self.LABEL_GUTTER / (step * self._pixels_per_frame)))
+        painter.setPen(QPen(QColor(get_color("ruler_medium_tick")), 1))
+        for frame in range((start_frame // step) * step, end_frame + 1, step):
+            x = int(TRACK_HEADER_WIDTH + frame * self._pixels_per_frame)
+            painter.drawLine(x, 2, x, 2 + EDIT_SIZES["ruler_medium_tick_h"])
 
-        # Keep sample labels aligned with normal timecode labels.
-        tick_top = 2
-        label_top = 18
-        major_tick_h = EDIT_SIZES["ruler_major_tick_h"]   # 12px
-        medium_tick_h = EDIT_SIZES["ruler_medium_tick_h"]  # 7px
-
-        # Tick colors from design tokens
-        major_tick_color = QColor(get_color("ruler_major_tick"))
-        medium_tick_color = QColor(get_color("ruler_medium_tick"))
-        label_color = QColor(get_color("ruler_text"))
-
-        # Align to interval
-        aligned_start = (start_frame // frame_interval) * frame_interval
-
-        last_label_right = float("-inf")
-        min_label_spacing_px = 72
-
-        for frame in range(aligned_start, end_frame + 1, frame_interval):
-            if frame < 0:
-                continue
-
+        font = QFont("Arial")
+        font.setPixelSize(10)
+        painter.setFont(font)
+        painter.setPen(QColor(get_color("ruler_text")))
+        for frame in range((start_frame // label_step) * label_step, end_frame + 1, label_step):
             samples = self._frame_to_samples(frame)
+            text = f"{samples // 1000}k" if samples >= 1000 else str(samples)
             x = TRACK_HEADER_WIDTH + frame * self._pixels_per_frame
-
-            # Determine if this is a major tick (every second/minute)
-            is_major = samples % self._sample_rate == 0
-
-            if is_major:
-                painter.setPen(QPen(major_tick_color, 1))
-                painter.drawLine(int(x), tick_top, int(x), tick_top + major_tick_h)
-            else:
-                painter.setPen(QPen(medium_tick_color, 1))
-                painter.drawLine(int(x), tick_top, int(x), tick_top + medium_tick_h)
-
-            # Sample count label (with overlap prevention)
-            if samples >= 1000:
-                text = f"{samples // 1000}k"
-            else:
-                text = str(samples)
-
-            fm = painter.fontMetrics()
-            text_width = fm.horizontalAdvance(text) + 4
-            text_x = x + 3
-            if text_x > last_label_right + min_label_spacing_px:
-                painter.setPen(QPen(label_color))
-                painter.drawText(
-                    QRectF(text_x, label_top, text_width + 10, 14),
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                    text,
-                )
-                last_label_right = text_x + text_width
+            painter.drawText(QPointF(x + 4, 23), text)
 
     # ==================== Interaction ====================
 
@@ -9160,9 +8964,14 @@ class TimecodeRulerItem(QGraphicsObject):
         self._duration_frames = duration_frames
         self.update()
 
-    def update_fps(self, fps: float) -> None:
+    def update_fps(self, fps: float | Rational) -> None:
         """Update frames per second and recalculate tick intervals."""
-        self._fps = fps
+        rational = fps if isinstance(fps, Rational) else Rational.from_float(fps)
+        if rational == self._fps_rational:
+            return
+        self._fps_rational = rational
+        self._fps = float(rational)
+        self._timecode_type = Timecode.auto_detect_type(rational)
         self._recalculate_ticks()
         self.update()
 
@@ -9726,62 +9535,28 @@ class RollHandleItem(QGraphicsObject):
 # ================================================================
 
 class DragPreviewItem(QGraphicsObject):
-    """
-    Enhanced drag preview item with thumbnail, label, and snap indicator.
-    参考 kdenlive timeline2/view/qml/Timeline.qml dragProxy 设计。
+    """Translucent media or transition footprint on the destination lane."""
 
-    Features:
-    - 显示拖拽素材的缩略图（如果可用）
-    - 显示素材名称
-    - 半透明效果
-    - 多素材序列预览（每个素材按真实时长单独显示）
-    - 插入位置指示线（黄色垂直线）
-    - 拖拽状态反馈（有效/无效/吸附点）
-
-    Attributes:
-        _assets: 被拖拽的素材列表
-        _thumbnails: 缓存的缩略图 pixmap
-        _track_index: 目标轨道索引
-        _frame: 插入位置帧
-        _pixels_per_frame: 缩放比例
-        _is_valid: 目标位置是否有效
-        _is_snapping: 是否处于吸附状态
-        _snap_frame: 吸附位置帧
-        _num_tracks: 轨道数量（用于指示线高度）
-    """
-
-    # 状态颜色
-    VALID_COLOR = QColor(100, 180, 255, 150)  # 正常蓝色
-    INVALID_COLOR = QColor(200, 80, 80, 150)  # 红色警告
-    SNAP_LINE_COLOR = QColor(255, 220, 50, 200)  # 黄色吸附指示线
-    SNAP_LINE_WIDTH = 2
+    MIN_WIDTH = 8.0
+    INVALID_COLOR = QColor(150, 62, 62, 190)
+    INVALID_BORDER = QColor(222, 112, 105)
 
     # 缩略图尺寸
     THUMBNAIL_WIDTH = 60
-    THUMBNAIL_HEIGHT = 40
     LABEL_HEIGHT = 16
     ITEM_MARGIN = 4
 
     def __init__(
         self,
         pixels_per_frame: float = 5.0,
-        num_tracks: int = 1,
         parent: Optional[QGraphicsItem] = None
     ) -> None:
         super().__init__(parent)
 
         self._pixels_per_frame = pixels_per_frame
-        self._num_tracks = num_tracks
-
-        # Actual layout values (set by TimelineView)
-        self._track_area_height: Optional[float] = None
-
-        # 状态
-        self._track_index: int = 0
-        self._frame: int = 0
-        self._is_valid: bool = True
-        self._is_snapping: bool = False
-        self._snap_frame: Optional[int] = None
+        self._clip_height = float(TRACK_HEIGHT) - 2.0
+        self._frame = 0
+        self._is_valid = True
 
         # 素材数据
         self._asset_names: list[str] = []
@@ -9792,39 +9567,30 @@ class DragPreviewItem(QGraphicsObject):
 
         # Z-value above clips
         self.setZValue(700)
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
 
         # Initially hidden
         self.hide()
 
     # ==================== Geometry ====================
 
-    def _effective_track_area_height(self) -> float:
-        """Return the actual track area height if set, else estimate."""
-        if self._track_area_height is not None:
-            return self._track_area_height
-        return (self._num_tracks + 1) * (TRACK_HEIGHT + TRACK_GAP)
-
     def boundingRect(self) -> QRectF:
-        """Return bounding rectangle including all preview items."""
         if not self._asset_names:
             return QRectF()
-
-        # 计算总宽度（基于总时长）
-        width = self._total_duration * self._pixels_per_frame
-
-        # Use actual cumulative track area height when available
-        height = self._effective_track_area_height()
-
-        return QRectF(0, 0, width, height)
+        width = max(self.MIN_WIDTH, self._total_duration * self._pixels_per_frame)
+        return QRectF(0, 0, width, self._clip_height)
 
     def shape(self) -> QPainterPath:
-        """Return shape for collision detection."""
         path = QPainterPath()
-        if self._asset_names:
-            width = self._total_duration * self._pixels_per_frame
-            height = TRACK_HEIGHT
-            path.addRect(0, 0, width, height)
+        path.addRect(self.boundingRect())
         return path
+
+    def set_track_height(self, height: float) -> None:
+        clip_height = max(1.0, height - 2.0)
+        if self._clip_height != clip_height:
+            self.prepareGeometryChange()
+            self._clip_height = clip_height
+            self.update()
 
     # ==================== State Updates ====================
 
@@ -9846,41 +9612,29 @@ class DragPreviewItem(QGraphicsObject):
             thumbnails: Optional dict of cached thumbnails (asset_name -> QPixmap)
             durations: Each asset's duration in frames, matching asset_names.
         """
-        self.prepareGeometryChange()
+        if durations and len(durations) == len(asset_names):
+            asset_durations = [max(1, int(duration)) for duration in durations]
+        elif asset_names:
+            fallback = max(1, total_duration // len(asset_names))
+            asset_durations = [fallback] * len(asset_names)
+        else:
+            asset_durations = []
+        thumbnails = thumbnails or {}
+        if (
+            asset_names == self._asset_names
+            and asset_types == self._asset_types
+            and total_duration == self._total_duration
+            and asset_durations == self._asset_durations
+            and thumbnails == self._thumbnails
+        ):
+            return
+        if bool(asset_names) != bool(self._asset_names) or total_duration != self._total_duration:
+            self.prepareGeometryChange()
         self._asset_names = asset_names
         self._asset_types = asset_types
-        if durations and len(durations) == len(asset_names):
-            self._asset_durations = [max(1, int(duration)) for duration in durations]
-        elif asset_names:
-            fallback = max(1, int(total_duration / len(asset_names)))
-            self._asset_durations = [fallback] * len(asset_names)
-        else:
-            self._asset_durations = []
+        self._asset_durations = asset_durations
         self._total_duration = total_duration
-
-        if thumbnails:
-            self._thumbnails = thumbnails
-        else:
-            self._thumbnails = {}
-
-        self.update()
-
-    def set_position(self, track_index: int, frame: int) -> None:
-        """Set the preview position."""
-        self._track_index = track_index
-        self._frame = frame
-        self._update_geometry()
-        self.update()
-
-    def set_valid(self, is_valid: bool) -> None:
-        """Set whether the target position is valid."""
-        self._is_valid = is_valid
-        self.update()
-
-    def set_snapping(self, is_snapping: bool, snap_frame: Optional[int] = None) -> None:
-        """Set snap state and snap position."""
-        self._is_snapping = is_snapping
-        self._snap_frame = snap_frame
+        self._thumbnails = thumbnails
         self.update()
 
     def update_zoom(self, pixels_per_frame: float) -> None:
@@ -9899,26 +9653,6 @@ class DragPreviewItem(QGraphicsObject):
         """Set the frame-to-pixel scale used by the drag proxy."""
         self.update_zoom(float(pixels_per_frame))
 
-    def update_num_tracks(self, num_tracks: int) -> None:
-        """Update number of tracks."""
-        if num_tracks == self._num_tracks:
-            return
-        self.prepareGeometryChange()
-        self._num_tracks = num_tracks
-        self.update()
-
-    def update_track_area_height(self, height: float) -> None:
-        """Update the actual cumulative track area height from the layout."""
-        if self._track_area_height != height:
-            self.prepareGeometryChange()
-            self._track_area_height = height
-            self.update()
-
-    def set_thumbnail(self, asset_name: str, pixmap: QPixmap) -> None:
-        """Set thumbnail for a specific asset."""
-        self._thumbnails[asset_name] = pixmap
-        self.update()
-
     def _update_geometry(self) -> None:
         """Update position based on track and frame.
 
@@ -9934,8 +9668,9 @@ class DragPreviewItem(QGraphicsObject):
 
     def show_preview(
         self,
-        track_index: int,
         frame: int,
+        track_top: float,
+        track_height: float,
         asset_names: list[str],
         asset_types: list[str],
         total_duration: int,
@@ -9945,20 +9680,25 @@ class DragPreviewItem(QGraphicsObject):
     ) -> None:
         """Show preview with all parameters."""
         self.set_assets(asset_names, asset_types, total_duration, thumbnails, durations)
-        self.set_position(track_index, frame)
-        self.set_valid(is_valid)
+        self._frame = frame
+        if self._is_valid != is_valid:
+            self._is_valid = is_valid
+            self.update()
+        self.set_track_height(track_height)
+        self.setY(track_top)
+        self._update_geometry()
         self.show()
 
     def hide_preview(self) -> None:
-        """Hide the preview."""
+        """Hide the preview and invalidate its former footprint."""
+        if not self._asset_names:
+            return
         self.prepareGeometryChange()
         self._asset_names = []
         self._asset_types = []
         self._asset_durations = []
         self._total_duration = 0
         self._thumbnails = {}
-        self._is_snapping = False
-        self._snap_frame = None
         self.hide()
 
     # ==================== Painting ====================
@@ -9973,68 +9713,32 @@ class DragPreviewItem(QGraphicsObject):
         if not self._asset_names:
             return
 
+        bounds = self.boundingRect()
+        painter.save()
+        painter.setClipRect(bounds, Qt.ClipOperation.IntersectClip)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        # Transitions need a range card, not the generic clip preview.  The
-        # generic path is intentionally optimized for assets and used to show
-        # only the snap marker/plus at a transition drop target.
         if self._asset_types and self._asset_types[0] == "transition":
             self._draw_transition_preview(painter)
-            return
-
-        # 计算基本几何
-        total_width = self._total_duration * self._pixels_per_frame
-        clip_height = TRACK_HEIGHT
-
-        # 选择颜色（基于有效状态）
-        if self._is_valid:
-            base_color = self.VALID_COLOR
-            border_color = QColor(100, 180, 255)
         else:
-            base_color = self.INVALID_COLOR
-            border_color = QColor(200, 80, 80)
+            pixels_per_frame = bounds.width() / max(1, self._total_duration)
+            x = 0.0
+            for i, (name, duration) in enumerate(zip(self._asset_names, self._asset_durations)):
+                media_type = self._asset_types[i] if i < len(self._asset_types) else "video"
+                width = duration * pixels_per_frame
+                self._draw_single_preview(
+                    painter, x, 0.0, width, bounds.height(), name, media_type, i == 0
+                )
+                x += width
 
-        # Draw each asset at its real width in sequence.  Drawing every asset
-        # at the full batch width with a small offset made a multi-select drag
-        # look like a stack of blue ghost clips.
-        num_assets = len(self._asset_names)
-        cursor_x = 0.0
-        for i in range(num_assets):
-            duration = (
-                self._asset_durations[i]
-                if i < len(self._asset_durations)
-                else max(1, int(self._total_duration / max(1, num_assets)))
-            )
-            asset_width = max(3.0, duration * self._pixels_per_frame)
-            asset_width = min(asset_width, max(3.0, total_width - cursor_x))
-
-            self._draw_single_preview(
-                painter,
-                cursor_x,
-                0.0,
-                asset_width,
-                clip_height,
-                self._asset_names[i],
-                self._asset_types[i] if i < len(self._asset_types) else 'video',
-                base_color,
-                border_color,
-                i == 0  # 只有第一个显示完整内容
-            )
-            cursor_x += asset_width
-
-        # 绘制吸附指示线
-        if self._is_snapping and self._snap_frame is not None:
-            self._draw_snap_indicator(painter, self._snap_frame)
-
-        # 绘制素材数量徽章（如果多素材）
-        if num_assets > 1:
-            self._draw_count_badge(painter, total_width, clip_height, num_assets)
+            if len(self._asset_names) > 1 and bounds.width() >= 80 and bounds.height() >= 28:
+                self._draw_count_badge(painter, bounds.width(), bounds.height(), len(self._asset_names))
+        painter.restore()
 
     def _draw_transition_preview(self, painter: QPainter) -> None:
         """Draw the translucent transition range shown while dragging."""
-        width = max(2.0, self._total_duration * self._pixels_per_frame)
-        height = max(16.0, float(TRACK_HEIGHT) - 1.0)
-        rect = QRectF(0, 0, width, height)
+        rect = self.boundingRect()
+        width = rect.width()
+        height = rect.height()
         top = QColor(231, 181, 84, 170)
         bottom = QColor(122, 82, 31, 125)
 
@@ -10080,26 +9784,27 @@ class DragPreviewItem(QGraphicsObject):
         height: float,
         name: str,
         media_type: str,
-        base_color: QColor,
-        border_color: QColor,
         show_content: bool
     ) -> None:
         """Draw a single preview item with thumbnail and label."""
-        # 绘制背景（半透明）
-        painter.setBrush(QBrush(base_color))
-        painter.setPen(QPen(border_color, 1))
-        painter.drawRoundedRect(QRectF(x, y, width, height), 3, 3)
+        rect = QRectF(x, y, width, height)
+        color = QColor(CLIP_AUDIO_COLOR if media_type == "audio" else CLIP_VIDEO_COLOR)
+        border = color.lighter(180)
+        color.setAlpha(215)
+        if not self._is_valid:
+            color, border = self.INVALID_COLOR, self.INVALID_BORDER
 
-        # 只有第一个素材显示完整内容
-        if show_content and width > 30:
-            # 绘制缩略图（如果有）
+        painter.fillRect(rect, color)
+        if width > 1.0 and height > 1.0:
+            painter.setPen(QPen(border, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+
+        if show_content and width > 30 and height >= self.LABEL_HEIGHT + self.ITEM_MARGIN * 2:
             thumb = self._thumbnails.get(name)
-            if thumb and width > self.THUMBNAIL_WIDTH + self.ITEM_MARGIN:
+            if thumb and width > self.THUMBNAIL_WIDTH + self.ITEM_MARGIN * 2:
                 self._draw_thumbnail(painter, x, y, height, thumb)
-
-            # 绘制名称标签
-            if width > self.ITEM_MARGIN * 2:
-                self._draw_label(painter, x, y, width, height, name, media_type)
+            self._draw_label(painter, x, y, width, height, name, media_type)
 
     def _draw_thumbnail(
         self,
@@ -10173,57 +9878,11 @@ class DragPreviewItem(QGraphicsObject):
         font.setWeight(QFont.Weight.Bold)
         painter.setFont(font)
 
-        # 截断名称以适应宽度
-        display_name = self._truncate_name(name, label_width - 4)
-        painter.drawText(label_rect, Qt.TextFlag.TextSingleLine, display_name)
-
-    def _truncate_name(self, name: str, max_width: float) -> str:
-        """Truncate name to fit in given width."""
-        if len(name) <= 12:
-            return name
-        return name[:10] + ".."
-
-    def _draw_snap_indicator(
-        self,
-        painter: QPainter,
-        snap_frame: int
-    ) -> None:
-        """Draw snap indicator line (yellow vertical line at snap position)."""
-        # 计算吸附线位置（相对于当前预览位置）
-        snap_offset = (snap_frame - self._frame) * self._pixels_per_frame
-
-        if snap_offset < 0 or snap_offset > self._total_duration * self._pixels_per_frame:
-            return
-
-        # 绘制吸附线
-        line_height = (self._num_tracks + 1) * (TRACK_HEIGHT + TRACK_GAP)
-        painter.setPen(QPen(self.SNAP_LINE_COLOR, self.SNAP_LINE_WIDTH))
-
-        # 从预览项顶部到轨道底部
-        painter.drawLine(int(snap_offset), -self._track_index * (TRACK_HEIGHT + TRACK_GAP),
-                        int(snap_offset), int(line_height))
-
-        # 绘制吸附点标记（三角形）
-        self._draw_snap_marker(painter, snap_offset)
-
-    def _draw_snap_marker(
-        self,
-        painter: QPainter,
-        x: float
-    ) -> None:
-        """Draw snap marker (triangle indicator at snap point)."""
-        marker_size = 8
-
-        # 三角形顶点
-        triangle = QPolygonF([
-            QPointF(x - marker_size / 2, -5),
-            QPointF(x + marker_size / 2, -5),
-            QPointF(x, -5 - marker_size)
-        ])
-
-        painter.setBrush(QBrush(self.SNAP_LINE_COLOR))
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.drawPolygon(triangle)
+        text_rect = label_rect.adjusted(3, 0, -3, 0)
+        text = painter.fontMetrics().elidedText(
+            name, Qt.TextElideMode.ElideRight, int(text_rect.width())
+        )
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, text)
 
     def _draw_count_badge(
         self,
@@ -10911,16 +10570,10 @@ class MarkerItem(QGraphicsObject):
 # ================================================================
 
 class TimelineRangeMaskItem(QGraphicsObject):
-    """Non-interactive overlay that darkens frames outside the In/Out range.
-
-    The vertical bounds deliberately follow the complete track-panel layout,
-    rather than the combined height of the individual clip lanes.  Video and
-    audio panels can contain empty space, but that space is still part of the
-    timeline and must receive the same outside-range treatment.
-    """
+    """Non-interactive highlight over the selected In/Out span."""
 
     Z_VALUE = 150  # Above clips, below the ruler, range handles, and playhead.
-    MASK_COLOR = QColor(0, 0, 0, 82)
+    HIGHLIGHT_COLOR = QColor(210, 214, 226, 16)
 
     def __init__(
         self,
@@ -10948,7 +10601,7 @@ class TimelineRangeMaskItem(QGraphicsObject):
         track_area_top: float,
         track_area_height: float,
     ) -> None:
-        """Update the selection and the area covered by the outside mask."""
+        """Update the selection and its vertical span across the track area."""
         self.prepareGeometryChange()
         self._range_start = start
         self._range_end = end
@@ -10973,13 +10626,14 @@ class TimelineRangeMaskItem(QGraphicsObject):
         self.update()
 
     def boundingRect(self) -> QRectF:
-        if not self.isVisible():
+        if self._range_start is None or self._range_end is None:
             return QRectF()
-        width = self._duration_frames * self._pixels_per_frame
+        start = max(0, self._range_start)
+        end = min(self._duration_frames, self._range_end + 1)
         return QRectF(
-            TRACK_HEADER_WIDTH,
+            TRACK_HEADER_WIDTH + start * self._pixels_per_frame,
             self._track_area_top,
-            width,
+            max(0, end - start) * self._pixels_per_frame,
             self._track_area_height,
         )
 
@@ -10989,34 +10643,7 @@ class TimelineRangeMaskItem(QGraphicsObject):
         option: Any,
         widget: Optional[Any] = None,
     ) -> None:
-        if self._range_start is None or self._range_end is None:
-            return
-        timeline_left = float(TRACK_HEADER_WIDTH)
-        timeline_right = timeline_left + self._duration_frames * self._pixels_per_frame
-        selection_left = timeline_left + self._range_start * self._pixels_per_frame
-        selection_right = timeline_left + (self._range_end + 1) * self._pixels_per_frame
-        selection_left = max(timeline_left, min(selection_left, timeline_right))
-        selection_right = max(selection_left, min(selection_right, timeline_right))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(self.MASK_COLOR))
-        if selection_left > timeline_left:
-            painter.drawRect(
-                QRectF(
-                    timeline_left,
-                    self._track_area_top,
-                    selection_left - timeline_left,
-                    self._track_area_height,
-                )
-            )
-        if selection_right < timeline_right:
-            painter.drawRect(
-                QRectF(
-                    selection_right,
-                    self._track_area_top,
-                    timeline_right - selection_right,
-                    self._track_area_height,
-                )
-            )
+        painter.fillRect(self.boundingRect(), self.HIGHLIGHT_COLOR)
 
 
 # ================================================================
@@ -11037,7 +10664,8 @@ class TimelineRangeItem(QGraphicsObject):
     range_handle_dragged = pyqtSignal(str, int)  # edge ('in'/'out'), frame
     range_change_finished = pyqtSignal(int, int)  # new_start, new_end
 
-    BAR_HEIGHT = 5
+    BAR_HEIGHT = 4
+    HANDLE_RADIUS = 3.5
     HANDLE_WIDTH = 9
     HANDLE_HEIGHT = 16
     Z_VALUE = 1001  # Above ruler and playhead so handles always win the hit test.
@@ -11097,59 +10725,29 @@ class TimelineRangeItem(QGraphicsObject):
         x_start = TRACK_HEADER_WIDTH + self._range_start * self._pixels_per_frame
         x_end = TRACK_HEADER_WIDTH + (self._range_end + 1) * self._pixels_per_frame
 
-        # A restrained amber treatment keeps the selected output range clear
-        # without competing with clips, markers, or the red playhead.
         bar_rect = QRectF(x_start, self._bar_y, x_end - x_start, self.BAR_HEIGHT)
-        gradient = QLinearGradient(bar_rect.topLeft(), bar_rect.bottomLeft())
-        gradient.setColorAt(0.0, QColor(255, 194, 82, 225))
-        gradient.setColorAt(0.45, QColor(231, 147, 29, 205))
-        gradient.setColorAt(1.0, QColor(165, 89, 12, 210))
-        painter.setBrush(QBrush(gradient))
-        painter.setPen(QPen(QColor(255, 213, 128, 220), 1.0))
-        painter.drawRoundedRect(bar_rect, 2.0, 2.0)
+        painter.fillRect(bar_rect, QColor("#82848B"))
 
-        # A fine highlight makes the bar readable at small zoom levels.
-        painter.setPen(QPen(QColor(255, 240, 204, 165), 1.0))
-        painter.drawLine(bar_rect.topLeft(), bar_rect.topRight())
-
-        handle_top = self._bar_y - (self.HANDLE_HEIGHT - self.BAR_HEIGHT) / 2
-        for x, direction in ((x_start, 1.0), (x_end, -1.0)):
-            handle = QRectF(
-                x - self.HANDLE_WIDTH / 2,
-                handle_top,
-                self.HANDLE_WIDTH,
-                self.HANDLE_HEIGHT,
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        for x, edge in ((x_start, "in"), (x_end, "out")):
+            color = QColor("#D0D1D5" if edge == self._dragging_edge else "#A4A6AC")
+            painter.setBrush(color)
+            painter.setPen(QPen(QColor("#313237"), 1))
+            painter.drawEllipse(
+                QPointF(x, bar_rect.center().y()), self.HANDLE_RADIUS, self.HANDLE_RADIUS
             )
-            handle_gradient = QLinearGradient(handle.topLeft(), handle.bottomLeft())
-            handle_gradient.setColorAt(0.0, QColor(255, 212, 128, 255))
-            handle_gradient.setColorAt(0.5, QColor(244, 163, 43, 255))
-            handle_gradient.setColorAt(1.0, QColor(190, 102, 14, 255))
-            painter.setBrush(QBrush(handle_gradient))
-            painter.setPen(QPen(QColor(255, 231, 179, 240), 1.0))
-            painter.drawRoundedRect(handle, 2.5, 2.5)
-
-            # The small inward-facing chevron explains the drag direction
-            # without adding labels that would collide in short ranges.
-            mid_y = handle.center().y()
-            chevron = QPolygonF([
-                QPointF(x - direction * 1.7, mid_y - 2.5),
-                QPointF(x + direction * 1.7, mid_y),
-                QPointF(x - direction * 1.7, mid_y + 2.5),
-            ])
-            painter.setPen(QPen(QColor(94, 49, 8, 190), 1.15))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPolyline(chevron)
+        painter.restore()
 
     def _hit_edge(self, pos: QPointF) -> Optional[str]:
         if self._range_start is None or self._range_end is None:
             return None
         x_start = TRACK_HEADER_WIDTH + self._range_start * self._pixels_per_frame
         x_end = TRACK_HEADER_WIDTH + (self._range_end + 1) * self._pixels_per_frame
-        margin = 6
-        if abs(pos.x() - x_start) < margin + self.HANDLE_WIDTH / 2:
-            return 'in'
-        if abs(pos.x() - x_end) < margin + self.HANDLE_WIDTH / 2:
-            return 'out'
+        in_distance = abs(pos.x() - x_start)
+        out_distance = abs(pos.x() - x_end)
+        if min(in_distance, out_distance) < self.HANDLE_WIDTH:
+            return "in" if in_distance <= out_distance else "out"
         return None
 
     def mousePressEvent(self, event: Any) -> None:
@@ -11157,37 +10755,35 @@ class TimelineRangeItem(QGraphicsObject):
             edge = self._hit_edge(event.pos())
             if edge:
                 self._dragging_edge = edge
+                self.update()
                 event.accept()
                 return
         super().mousePressEvent(event)
 
+    def _dragged_frame_at(self, x: float) -> int:
+        frame = max(0, int((x - TRACK_HEADER_WIDTH) / self._pixels_per_frame))
+        if self._dragging_edge == "out" and self._range_start is not None:
+            return max(self._range_start, frame - 1)
+        if self._range_end is not None:
+            return min(self._range_end, frame)
+        return frame
+
     def mouseMoveEvent(self, event: Any) -> None:
         if self._dragging_edge and self._pixels_per_frame > 0:
-            frame = int((event.pos().x() - TRACK_HEADER_WIDTH) / self._pixels_per_frame)
-            frame = max(0, frame)
-            if self._dragging_edge == "out":
-                frame = max(0, frame - 1)
-            self.range_handle_dragged.emit(self._dragging_edge, frame)
+            self.range_handle_dragged.emit(self._dragging_edge, self._dragged_frame_at(event.pos().x()))
             event.accept()
             return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: Any) -> None:
         if self._dragging_edge and event.button() == Qt.MouseButton.LeftButton:
-            frame = int((event.pos().x() - TRACK_HEADER_WIDTH) / self._pixels_per_frame)
-            frame = max(0, frame)
-            if self._dragging_edge == "out":
-                frame = max(0, frame - 1)
-            if self._dragging_edge == 'in':
-                new_start = frame
-                new_end = self._range_end if self._range_end is not None else frame
-            else:
-                new_start = self._range_start if self._range_start is not None else frame
-                new_end = frame
-            if new_start > new_end:
-                new_start, new_end = new_end, new_start
-            self.range_change_finished.emit(new_start, new_end)
+            frame = self._dragged_frame_at(event.pos().x())
+            new_start = frame if self._dragging_edge == "in" else self._range_start
+            new_end = frame if self._dragging_edge == "out" else self._range_end
             self._dragging_edge = None
+            self.update()
+            if new_start is not None and new_end is not None:
+                self.range_change_finished.emit(new_start, new_end)
             event.accept()
             return
         super().mouseReleaseEvent(event)

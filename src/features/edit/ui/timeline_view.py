@@ -75,6 +75,7 @@ from PyQt6.QtGui import (
     QMouseEvent,
     QDragMoveEvent,
     QDragEnterEvent,
+    QDragLeaveEvent,
     QDropEvent,
     QPaintEvent,
 )
@@ -94,7 +95,7 @@ from src.features.edit.core.timeline_v2 import (
     MEDIA_POOL_PREVIEW_FRAME_KEY,
 )
 from src.features.edit.core.playback_debug import playback_trace
-from src.features.edit.core.project import MediaAsset
+from src.features.edit.core.project import MediaAsset, get_media_type
 from src.features.edit.core.clip_params import SpeedParams
 from src.features.edit.core.render_cache_status import build_cache_indicator_segments
 from src.features.edit.core.transition_catalog import TRANSITION_LABELS
@@ -435,6 +436,17 @@ class _TimelineTimecodeLabel(QLabel):
         painter.drawText(self.rect(), self.alignment(), self.text())
         painter.setPen(QPen(QColor(get_color("timecode_panel_bottom_line")), 1))
         painter.drawLine(0, self.height() - 1, self.width() - 1, self.height() - 1)
+        painter.end()
+
+
+class _TimelineRubberBand(QRubberBand):
+    """Neutral marquee drawn in the same coordinate space as mouse events."""
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(200, 208, 220, 24))
+        painter.setPen(QColor(184, 189, 198, 200))
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
         painter.end()
 
 
@@ -928,8 +940,6 @@ class TimelineView(QGraphicsView):
         self._alt_copy_ghosts: dict[str, ClipItem] = {}
         self._drag_asset_ids: list[str] = []
         self._drag_assets: list[MediaAsset] = []
-        self._drag_preview_track_index: int = 0
-        self._drag_preview_frame: int = 0
         self._drag_render_mode_active: bool = False
         self._drag_transition_type: Optional[str] = None  # For transition drag
         self._drag_effect_type: Optional[str] = None  # For effect drag (NEW)
@@ -937,7 +947,7 @@ class TimelineView(QGraphicsView):
         self._drag_motion_graphic_generator_params: dict[str, Any] = {}
         self._drag_motion_graphic_generator_id: Optional[str] = None
         self._drag_file_paths: List[str] = []  # For external file drag (fallback)
-        self._drag_thumbnails: Dict[str, Any] = {}  # asset_name -> QPixmap (cached thumbnails)
+        self._drag_file_previews: list[tuple[str, str, int | None]] = []
         # During a multi-asset drop, collect the already-built clip commands
         # and publish them as one MacroCommand. This prevents one timeline
         # reload/waveform refresh per clip from monopolising the UI thread.
@@ -1174,10 +1184,7 @@ class TimelineView(QGraphicsView):
         self._scene.addItem(self._snap_indicator)
 
         # Add enhanced drag preview item (参考 kdenlive dragProxy)
-        self._drag_preview_item = DragPreviewItem(
-            self._pixels_per_frame,
-            1,  # At least 1 track
-        )
+        self._drag_preview_item = DragPreviewItem(self._pixels_per_frame)
         self._scene.addItem(self._drag_preview_item)
 
         # P4: Add range bar item
@@ -1337,13 +1344,8 @@ class TimelineView(QGraphicsView):
 
     def _configure_layout_engine(self) -> None:
         """Sync layout engine with current timeline data and viewport size."""
-        if self._timeline is None:
-            self._layout_config_signature = None
-            return
         tracks = []
-        for t in (self._timeline.video_tracks
-                  + self._timeline.audio_tracks
-                  + self._timeline.subtitle_tracks):
+        for t in self._timeline.all_tracks if self._timeline is not None else ():
             tracks.append(TrackInfo(
                 track_id=t.track_id,
                 track_type=t.track_type,
@@ -1632,9 +1634,6 @@ class TimelineView(QGraphicsView):
         if self._snap_indicator:
             self._snap_indicator.update_num_tracks(all_tracks_count)
             self._snap_indicator.update_track_area_height(total_height)
-        if self._drag_preview_item:
-            self._drag_preview_item.update_num_tracks(all_tracks_count)
-            self._drag_preview_item.update_track_area_height(total_height)
 
         # Keep clip-scoped markers attached to their track when the timeline
         # is resized, split, or its track heights change. Timeline-scoped
@@ -2382,8 +2381,8 @@ class TimelineView(QGraphicsView):
 
             # Update ruler
             if self._ruler_item:
-                fps = float(timeline.fps) if timeline.fps else EMPTY_TIMELINE_FPS
-                self._ruler_item._fps = fps
+                self._ruler_item.update_fps(timeline.fps or EMPTY_TIMELINE_FPS)
+                self._ruler_item.update_sample_rate(timeline.sample_rate)
                 self._ruler_item.update_duration(self._effective_timeline_duration(timeline))
                 self._update_ruler_viewport()
                 self._update_cache_indicator()
@@ -2558,7 +2557,7 @@ class TimelineView(QGraphicsView):
         self._apply_scene_rect(0.0, 0.0, width, height)
 
     def _update_range_visuals(self, timeline: TimelineSequence) -> None:
-        """Refresh In/Out handles and the non-interactive outside-range mask."""
+        """Refresh In/Out handles and the non-interactive track highlight."""
         duration = self._effective_timeline_duration(timeline)
         if self._deliver_range_visibility is False:
             if self._range_item is not None:
@@ -2706,16 +2705,9 @@ class TimelineView(QGraphicsView):
                 ghost.update_zoom(pixels_per_frame)
                 ghost.setX(self._layout_engine.frame_to_x(ghost._start_frame))
 
-            # The drag proxy is a persistent scene item, so keep its scale and
-            # scene anchor aligned with the layout engine when the timeline is
-            # zoomed or fit to the window.
+            # Zoom the persistent drop footprint around its current frame.
             if self._drag_preview_item is not None:
-                preview = self._drag_preview_item
-                preview.set_pixels_per_frame(pixels_per_frame)
-                preview.setPos(
-                    self._layout_engine.frame_to_x(preview._frame),
-                    self._track_top_for_index(preview._track_index),
-                )
+                self._drag_preview_item.set_pixels_per_frame(pixels_per_frame)
 
             # Update roll handles (P4.3)
             for handle in self._roll_handles.values():
@@ -5296,7 +5288,7 @@ class TimelineView(QGraphicsView):
         """Start rubber band selection in empty area."""
         # Create rubber band if not exists
         if self._rubber_band is None:
-            self._rubber_band = QRubberBand(QRubberBand.Shape.Rectangle, self)
+            self._rubber_band = _TimelineRubberBand(QRubberBand.Shape.Rectangle, self.viewport())
 
         # Store origin point (widget coordinates)
         self._rubber_band_origin = event.pos()
@@ -11152,8 +11144,6 @@ class TimelineView(QGraphicsView):
         end = frame if edge == "out" else self._range_item._range_end
         if start is None or end is None:
             return
-        if start > end:
-            start, end = end, start
         self._range_item.set_range(start, end)
         if self._range_mask_item is not None:
             self._configure_layout_engine()
@@ -13203,24 +13193,9 @@ class TimelineView(QGraphicsView):
         painter.setPen(divider_pen)
         painter.drawLine(QPointF(content_left, split_y), QPointF(content_right, split_y))
 
-        # Keep the empty canvas lightly gridded so it reads as a usable
-        # timeline rather than an uninitialized black rectangle.
-        fps = EMPTY_TIMELINE_FPS
-        major_interval = max(1, int(fps))
-        visible_start = max(
-            0,
-            int((rect.left() - TRACK_HEADER_WIDTH) / self._pixels_per_frame),
+        self._draw_vertical_time_markers(
+            painter, QRectF(content_left, track_top, content_right - content_left, track_bottom - track_top)
         )
-        visible_end = max(
-            visible_start,
-            int((rect.right() - TRACK_HEADER_WIDTH) / self._pixels_per_frame) + 1,
-        )
-        grid_pen = QPen(QColor(90, 95, 105, 32), 1)
-        painter.setPen(grid_pen)
-        first_grid = (visible_start // major_interval) * major_interval
-        for frame in range(first_grid, visible_end + 1, major_interval):
-            x = TRACK_HEADER_WIDTH + frame * self._pixels_per_frame
-            painter.drawLine(QPointF(x, track_top), QPointF(x, track_bottom))
 
         visible_rect = self.mapToScene(self.viewport().rect()).boundingRect()
         center_x = min(max(visible_rect.center().x(), content_left + 220.0), content_right - 220.0)
@@ -13247,64 +13222,16 @@ class TimelineView(QGraphicsView):
         )
 
     def _draw_vertical_time_markers(self, painter: QPainter, rect: QRectF) -> None:
-        """
-        Draw vertical grid lines (DaVinci-style major/minor ticks).
-
-        P1-2: Background grid optimization with DaVinci-like transparency.
-        Major lines span full panel height with low contrast.
-        Minor lines only visible at higher zoom levels.
-        """
-        if self._pixels_per_frame < 0.2:
+        """Align the track grid with the ruler's labeled timecode ticks."""
+        if self._ruler_item is None:
             return
-
-        fps = float(self._timeline.fps) if self._timeline.fps else EMPTY_TIMELINE_FPS
-        grid_top = int(rect.top())
-        grid_bottom = int(rect.bottom())
-
-        pixels_per_second = self._pixels_per_frame * fps
-
-        # Determine intervals based on zoom — fewer lines than before
-        if pixels_per_second > 80:
-            major_interval = int(fps)          # Every second
-            minor_interval = max(1, int(fps))  # No sub-second minor
-        elif pixels_per_second > 30:
-            major_interval = int(5 * fps)      # Every 5 seconds
-            minor_interval = int(fps)          # Every second as minor
-        elif pixels_per_second > 10:
-            major_interval = int(10 * fps)     # Every 10 seconds
-            minor_interval = int(5 * fps)      # Every 5 seconds
-        else:
-            major_interval = int(30 * fps)     # Every 30 seconds
-            minor_interval = int(10 * fps)     # Every 10 seconds
-
-        major_interval = max(1, major_interval)
-        minor_interval = max(1, minor_interval)
-
-        visible_start = int(max(0.0, rect.left() - TRACK_HEADER_WIDTH) / self._pixels_per_frame)
-        visible_end = int(max(0.0, rect.right() - TRACK_HEADER_WIDTH) / self._pixels_per_frame)
-
-        # P1-2: DaVinci-like grid colors from design tokens
-        # Minor grid: very subtle, only visible at medium+ zoom
-        minor_color = QColor(70, 74, 82, 22)  # quiet supporting grid
-        # Major grid: slightly more visible but still low contrast
-        major_color = QColor(90, 95, 105, 42)  # low-contrast primary grid
-
-        # Draw minor grid lines (only at medium+ zoom)
-        if pixels_per_second > 8:
-            painter.setPen(QPen(minor_color, 1))
-            start_minor = (visible_start // minor_interval) * minor_interval
-            for frame in range(start_minor, visible_end + 1, minor_interval):
-                if frame % major_interval == 0:
-                    continue  # Skip major positions
-                x = TRACK_HEADER_WIDTH + frame * self._pixels_per_frame
-                painter.drawLine(int(x), grid_top, int(x), grid_bottom)
-
-        # Draw major grid lines
-        painter.setPen(QPen(major_color, 1))
-        start_major = (visible_start // major_interval) * major_interval
-        for frame in range(start_major, visible_end + 1, major_interval):
-            x = TRACK_HEADER_WIDTH + frame * self._pixels_per_frame
-            painter.drawLine(int(x), grid_top, int(x), grid_bottom)
+        interval = self._ruler_item.major_tick_interval
+        first = max(0, int((rect.left() - TRACK_HEADER_WIDTH) / self._pixels_per_frame))
+        last = math.ceil((rect.right() - TRACK_HEADER_WIDTH) / self._pixels_per_frame)
+        painter.setPen(QPen(QColor(90, 95, 105, 42), 1))
+        for frame in range((first // interval) * interval, last + 1, interval):
+            x = int(TRACK_HEADER_WIDTH + frame * self._pixels_per_frame)
+            painter.drawLine(x, int(rect.top()), x, int(rect.bottom()))
 
     # ==================== Clear ====================
 
@@ -14618,6 +14545,7 @@ class TimelineView(QGraphicsView):
         - Effect type from the effects panel
         - File URLs from external sources (fallback)
         """
+        self._clear_drop_drag()
         mime_data = event.mimeData()
 
         # ── Application-specific MIME types MUST be checked before the
@@ -14773,6 +14701,7 @@ class TimelineView(QGraphicsView):
             self._drag_assets = valid_assets
             self._drag_transition_type: Optional[str] = None
 
+            self.dragMoveEvent(event)
             event.acceptProposedAction()
             logger.info(f"Drag enter accepted: {len(valid_assets)} assets, timeline={self._timeline is not None}")
 
@@ -14814,8 +14743,16 @@ class TimelineView(QGraphicsView):
             self._drag_asset_ids = []  # Empty - will be filled during drop
             self._drag_assets = []  # Empty - will be filled during drop
             self._drag_file_paths = file_paths  # Store paths for later import
+            for path in file_paths:
+                asset = self._project.get_asset_by_path(path)
+                self._drag_file_previews.append((
+                    asset.display_name if asset else Path(path).name,
+                    asset.media_type if asset else get_media_type(path),
+                    self._get_asset_duration_frames(asset) if asset else None,
+                ))
             self._drag_transition_type = None
 
+            self.dragMoveEvent(event)
             event.acceptProposedAction()
             logger.info(f"Drag enter accepted: {len(file_paths)} external files")
 
@@ -14850,63 +14787,132 @@ class TimelineView(QGraphicsView):
             self._handle_effect_drag_move(event)
             return
 
-        # Handle asset drag
-        if self._drag_assets and any(
-            self._is_subtitle_asset(asset) for asset in self._drag_assets
-        ):
-            self._handle_subtitle_drag_move(event)
+        if self._drag_file_paths:
+            self._handle_external_drag_move(event)
             return
         if not self._drag_assets:
-            logger.debug("Drag move: no assets in drag state")
             event.ignore()
             return
+        if any(self._is_subtitle_asset(asset) for asset in self._drag_assets):
+            self._handle_subtitle_drag_move(event)
+            return
 
-        # Get scene position (convert from viewport to scene coordinates)
-        scene_pos = self.mapToScene(event.position().toPoint())
+        first = self._drag_assets[0]
+        fps = None
+        if self._timeline is None or self._timeline_is_empty(self._timeline):
+            fps = float(self._timeline_fps_for_first_asset(first))
+        self._show_media_drop_preview(
+            event,
+            [asset.display_name for asset in self._drag_assets],
+            [asset.media_type for asset in self._drag_assets],
+            [self._get_asset_duration_frames(asset, fps=fps) for asset in self._drag_assets],
+            thumbnail_path=first.path if not first.is_virtual else None,
+            allow_overlap=self._edit_mode == "insert",
+        )
 
-        # Use unified drop-target resolution from layout engine
-        first_asset = self._drag_assets[0]
-        media_type = first_asset.media_type  # "video", "audio", or "image"
-        locked_ids = self._get_locked_track_ids()
+    def _handle_external_drag_move(self, event: QDragMoveEvent) -> None:
+        """Preview a Finder drop without probing or importing its files."""
+        names, types, durations = zip(*self._drag_file_previews)
+        if "subtitle" in types:
+            if all(media_type == "subtitle" for media_type in types):
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+            return
 
+        # Unknown file lengths get a visible placeholder until the drop
+        # imports their metadata. The hover path never probes media.
+        placeholder = max(1, math.ceil(64.0 / self._pixels_per_frame))
+        self._show_media_drop_preview(
+            event, list(names), list(types),
+            [duration if duration is not None else placeholder for duration in durations],
+        )
+
+    def _resolve_media_drop_target(
+        self, position: QPointF, media_type: str, timeline_was_missing: bool
+    ) -> TimelineDropTarget:
+        """Resolve the same viewport location during hover and commit."""
+        if position.x() < TRACK_HEADER_WIDTH * self.transform().m11():
+            return TimelineDropTarget(0, is_valid=False, reason="Track header")
+
+        scene_pos = self.mapToScene(position.toPoint())
         self._configure_layout_engine()
         drop = self._layout_engine.resolve_drop_target(
-            scene_pos.x(), scene_pos.y(), media_type, locked_ids
+            scene_pos.x(), scene_pos.y(), media_type, self._get_locked_track_ids()
         )
-        drop = self._prefer_lazy_default_track(
-            drop,
-            media_type,
-            self._timeline is None or self._provisional_timeline,
-        )
+        return self._prefer_lazy_default_track(drop, media_type, timeline_was_missing)
 
+    def _show_media_drop_preview(
+        self,
+        event: QDragMoveEvent,
+        names: list[str],
+        media_types: list[str],
+        durations: list[int],
+        *,
+        thumbnail_path: str | None = None,
+        allow_overlap: bool = False,
+    ) -> None:
+        """Place the footprint on the track resolved by the normal drop path."""
+        preview = self._drag_preview_item
+        if preview is None:
+            event.ignore()
+            return
+        drop = self._resolve_media_drop_target(
+            event.position(), media_types[0], self._timeline is None or self._provisional_timeline
+        )
         if not drop.is_valid and not drop.create_track:
-            # Invalid target (ruler, splitter, locked, wrong area) — hide preview
             self._hide_drag_preview()
             event.ignore()
             return
 
-        # Determine visual track index for preview positioning
-        if drop.track_id:
-            target_track = self._timeline.get_track_by_id(drop.track_id) if self._timeline else None
-            track_index = self._visual_index_for_track_id(drop.track_id)
-        else:
-            target_track = None
-            # create_track path — show preview at new track position
-            target_track_type = "video" if media_type in ("video", "image", "comp_clip", "motion_graphic") else "audio"
-            track_index = self._get_new_track_index(target_track_type)
+        frame = self._calculate_insert_frame(drop.frame, show_indicator=True)
+        track_top, track_height = self._drop_preview_lane(drop)
+        if track_height <= 0:
+            self._hide_drag_preview()
+            event.acceptProposedAction()
+            return
 
-        # Calculate insert position (apply snap)
-        insert_frame = self._calculate_insert_frame(drop.frame, target_track)
-
-        logger.debug(
-            f"Drag move: drop valid={drop.is_valid}, track_id={drop.track_id}, "
-            f"frame={drop.frame}, create_track={drop.create_track}, reason={drop.reason}"
+        track = self._timeline.get_track_by_id(drop.track_id) if self._timeline and drop.track_id else None
+        total_duration = sum(durations)
+        valid = track is None or allow_overlap or not any(
+            frame < clip.timeline_end and frame + total_duration > clip.timeline_start
+            for clip in track.clips
         )
-
-        # Update preview
-        self._update_drag_preview(track_index, insert_frame)
-
+        thumbnail = (
+            self._thumb_provider.get_cached_thumbnail(thumbnail_path, 80)
+            if thumbnail_path else None
+        )
+        preview.show_preview(
+            frame, track_top, track_height, names, media_types, total_duration,
+            thumbnails={names[0]: thumbnail} if thumbnail else None,
+            durations=durations,
+            is_valid=valid,
+        )
         event.acceptProposedAction()
+
+    def _drop_preview_lane(self, drop: TimelineDropTarget) -> tuple[float, float]:
+        """Return the visible destination lane, including a prospective new track."""
+        engine = self._layout_engine
+        area = engine.area_layout()
+        is_video = drop.track_type == "video"
+        panel = area.video_area if is_video else area.audio_area
+        if drop.track_id:
+            lane = engine.track_rect(drop.track_id)
+            top, height = lane.top(), lane.height()
+        elif is_video:
+            height = float(EDIT_SIZES["track_h_video"])
+            top = area.splitter_rect.top() - height
+            if self._timeline and self._timeline.video_tracks:
+                top = self._compute_new_track_preview_y("__new_video_track_above__", "video")
+        else:
+            height = float(EDIT_SIZES["track_h_audio"])
+            top = panel.top()
+            if self._timeline and self._timeline.audio_tracks:
+                top = self._compute_new_track_preview_y("__new_audio_track_below__", "audio")
+
+        visible_top = max(panel.top(), top)
+        visible_bottom = min(panel.bottom(), top + height)
+        return visible_top, max(0.0, visible_bottom - visible_top)
 
     def _select_transition_target_track(self, track_index: int) -> Optional[object]:
         """Pick the track a transition drop should land on.
@@ -14951,6 +14957,7 @@ class TimelineView(QGraphicsView):
         target_track = self._select_transition_target_track(track_index)
 
         if target_track is None:
+            self._hide_drag_preview()
             event.ignore()
             return
 
@@ -14970,7 +14977,7 @@ class TimelineView(QGraphicsView):
             self._update_transition_drag_preview(visual_idx, nearest_cut)
             event.acceptProposedAction()
         else:
-            # No valid cut point nearby
+            self._hide_drag_preview()
             event.ignore()
 
     def _handle_effect_drag_move(self, event: QDragMoveEvent) -> None:
@@ -15076,32 +15083,27 @@ class TimelineView(QGraphicsView):
 
         # 设置过渡预览样式（使用 'transition' 类型）
         self._drag_preview_item.show_preview(
-            track_index=track_index,
             frame=start_frame,
+            track_top=self._track_top_for_index(track_index),
+            track_height=self._track_height_for(target_track) if target_track else TRACK_HEIGHT,
             asset_names=[transition_label],
             asset_types=['transition'],
             total_duration=default_duration,
             thumbnails=None,
             is_valid=True
         )
-        # Keep the preview's scene position explicit.  Transition drops use
-        # the same frame/track mapping as the real drop handler, and must not
-        # retain an anchor from an earlier asset drag or zoom level.
-        self._drag_preview_item.setPos(
-            self._layout_engine.frame_to_x(start_frame),
-            self._track_top_for_index(track_index),
-        )
-        self._drag_preview_track_index = track_index
-        self._drag_preview_frame = start_frame
 
-    def dragLeaveEvent(self, event: Any) -> None:
-        """
-        Handle drag leave event to hide preview.
-        """
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        """Clear preview state when the drag leaves the timeline."""
+        self._clear_drop_drag()
+
+    def _clear_drop_drag(self) -> None:
+        """Reset the MIME payload and all transient drop visuals."""
         self._hide_drag_preview()
         self._drag_asset_ids = []
         self._drag_assets = []
-        self._drag_file_paths = []  # Clear file paths
+        self._drag_file_paths = []
+        self._drag_file_previews = []
         self._drag_transition_type = None
         self._drag_effect_type = None
         self._drag_generator_type = None
@@ -15117,6 +15119,14 @@ class TimelineView(QGraphicsView):
         For effects: Finds clip at drop position and executes AddEffectCommand.
         For external files: Imports files as assets and adds to timeline.
         """
+        try:
+            self._commit_drop(event)
+        finally:
+            self._clear_drop_drag()
+
+    def _commit_drop(self, event: QDropEvent) -> None:
+        # Clear feedback before a drop opens dialogs or runs the import path.
+        self._hide_drag_preview()
         logger.debug(f"DropEvent: drag_assets={len(self._drag_assets)}, drag_file_paths={len(self._drag_file_paths)}, timeline={self._timeline is not None}")
 
         # Handle generator drop (Adjustment Clip / Solid Color) — creates a clip
@@ -15156,21 +15166,8 @@ class TimelineView(QGraphicsView):
             event.ignore()
             return
 
-        # Get scene position (convert from viewport to scene coordinates)
-        scene_pos = self.mapToScene(event.position().toPoint())
-
-        # Use unified drop-target resolution from layout engine
-        first_asset = self._drag_assets[0]
-        media_type = first_asset.media_type
-        locked_ids = self._get_locked_track_ids()
-
-        self._configure_layout_engine()
-        drop = self._layout_engine.resolve_drop_target(
-            scene_pos.x(), scene_pos.y(), media_type, locked_ids
-        )
-        drop = self._prefer_lazy_default_track(
-            drop, media_type, timeline_was_missing
-        )
+        media_type = self._drag_assets[0].media_type
+        drop = self._resolve_media_drop_target(event.position(), media_type, timeline_was_missing)
 
         if not drop.is_valid and not drop.create_track:
             logger.debug(f"DropEvent: invalid drop target, reason={drop.reason}")
@@ -15217,7 +15214,7 @@ class TimelineView(QGraphicsView):
         logger.debug(f"DropEvent: target_track={target_track.name}, frame={drop.frame}")
 
         # Calculate insert position
-        insert_frame = self._calculate_insert_frame(drop.frame, target_track)
+        insert_frame = self._calculate_insert_frame(drop.frame)
         logger.debug(f"DropEvent: insert_frame={insert_frame}")
 
         # Add clips for all assets
@@ -15438,7 +15435,6 @@ class TimelineView(QGraphicsView):
             else:
                 # Import new asset
                 try:
-                    from src.features.edit.core.project import get_media_type
                     metadata = probe_results.get(path)
                     if metadata is None:
                         # AUD-21412 fallback: probe failed off-thread —
@@ -15502,19 +15498,8 @@ class TimelineView(QGraphicsView):
             event.ignore()
             return
 
-        # Use unified drop-target resolution (same pipeline as media pool drop)
-        scene_pos = self.mapToScene(event.position().toPoint())
-        first_asset = imported_assets[0]
-        media_type = first_asset.media_type
-        locked_ids = self._get_locked_track_ids()
-
-        self._configure_layout_engine()
-        drop = self._layout_engine.resolve_drop_target(
-            scene_pos.x(), scene_pos.y(), media_type, locked_ids
-        )
-        drop = self._prefer_lazy_default_track(
-            drop, media_type, timeline_was_missing
-        )
+        media_type = imported_assets[0].media_type
+        drop = self._resolve_media_drop_target(event.position(), media_type, timeline_was_missing)
 
         if not drop.is_valid and not drop.create_track:
             logger.debug(f"External file drop: invalid drop target, reason={drop.reason}")
@@ -15548,7 +15533,7 @@ class TimelineView(QGraphicsView):
             return
 
         # Calculate insert position
-        insert_frame = self._calculate_insert_frame(drop.frame, target_track)
+        insert_frame = self._calculate_insert_frame(drop.frame)
 
         # Add clips for all imported assets
         current_frame = insert_frame
@@ -15736,11 +15721,7 @@ class TimelineView(QGraphicsView):
             event.ignore()
             return
 
-        scene_pos = self.mapToScene(event.position().toPoint())
-        self._configure_layout_engine()
-        drop = self._layout_engine.resolve_drop_target(
-            scene_pos.x(), scene_pos.y(), "video", self._get_locked_track_ids()
-        )
+        drop = self._resolve_media_drop_target(event.position(), "video", False)
         if not drop.is_valid and not drop.create_track:
             self._hide_drag_preview()
             event.ignore()
@@ -15760,7 +15741,7 @@ class TimelineView(QGraphicsView):
             event.ignore()
             return
 
-        insert_frame = self._calculate_insert_frame(drop.frame, target_track)
+        insert_frame = self._calculate_insert_frame(drop.frame)
         try:
             resolved_params = dict(params or template.default_params())
             validation_errors = template.validate_params(resolved_params)
@@ -15829,38 +15810,16 @@ class TimelineView(QGraphicsView):
             event.ignore()
 
     def _handle_generator_drag_move(self, event: QDragMoveEvent) -> None:
-        """Show an insert preview while dragging a generator template.
-
-        Generators behave like video assets for drop targeting, so this
-        reuses the asset-drag preview path with ``media_type="video"``.
-        """
+        """Accept generator drops on valid video targets."""
         if self._timeline is None:
             event.ignore()
             return
 
-        scene_pos = self.mapToScene(event.position().toPoint())
-        locked_ids = self._get_locked_track_ids()
-
-        self._configure_layout_engine()
-        drop = self._layout_engine.resolve_drop_target(
-            scene_pos.x(), scene_pos.y(), "video", locked_ids
-        )
-
-        if not drop.is_valid and not drop.create_track:
-            self._hide_drag_preview()
-            event.ignore()
-            return
-
-        if drop.track_id:
-            target_track = self._timeline.get_track_by_id(drop.track_id)
-            track_index = self._visual_index_for_track_id(drop.track_id)
+        drop = self._resolve_media_drop_target(event.position(), "video", False)
+        if drop.is_valid or drop.create_track:
+            event.acceptProposedAction()
         else:
-            target_track = None
-            track_index = self._get_new_track_index("video")
-
-        insert_frame = self._calculate_insert_frame(drop.frame, target_track)
-        self._update_drag_preview(track_index, insert_frame)
-        event.acceptProposedAction()
+            event.ignore()
 
     def _handle_generator_drop(self, event: QDropEvent) -> None:
         """Handle drop of a generator template (Adjustment Clip / Solid Color).
@@ -15930,7 +15889,7 @@ class TimelineView(QGraphicsView):
             event.ignore()
             return
 
-        insert_frame = self._calculate_insert_frame(drop.frame, target_track)
+        insert_frame = self._calculate_insert_frame(drop.frame)
 
         # Default generator duration: 5 seconds at timeline fps (clamped to ≥1).
         tl_fps = float(self._timeline.fps) if self._timeline.fps else EMPTY_TIMELINE_FPS
@@ -16181,24 +16140,6 @@ class TimelineView(QGraphicsView):
 
         return None
 
-    def _get_new_track_index(self, track_type: str) -> int:
-        """
-        Get index for new track.
-
-        Args:
-            track_type: 'video' or 'audio'
-
-        Returns:
-            Track index for new track
-        """
-        if self._timeline is None:
-            return 0
-
-        if track_type == "video":
-            return len(self._timeline.video_tracks)
-        else:
-            return len(self._timeline.video_tracks) + len(self._timeline.audio_tracks)
-
     def _find_free_frame_on_track(
         self, track: EditTrack, preferred_frame: int, duration: int,
     ) -> int:
@@ -16397,7 +16338,7 @@ class TimelineView(QGraphicsView):
             fps_value = float(raw_fps)
         except (TypeError, ValueError):
             return Rational(25, 1)
-        if fps_value <= 0.0:
+        if not math.isfinite(fps_value) or fps_value <= 0.0:
             return Rational(25, 1)
 
         # Floats such as 23.976/29.97/59.94 often originated from an exact
@@ -16460,52 +16401,30 @@ class TimelineView(QGraphicsView):
         )
         return True
 
-    def _calculate_insert_frame(self, frame: int, track: Optional[EditTrack]) -> int:
-        """
-        Calculate actual insert frame, considering snap and existing clips.
-
-        Args:
-            frame: Requested frame position
-            track: Target track (may be None)
-
-        Returns:
-            Actual insert frame
-        """
-        # Apply snap if enabled
-        if self._snap_enabled and track:
-            snap_points = self._get_snap_points()
-            frame, _ = self._snap_frame(frame, snap_points)
-
-        # Ensure frame is not negative
+    def _calculate_insert_frame(self, frame: int, *, show_indicator: bool = False) -> int:
+        """Use the same snap calculation for a drop and its preview."""
+        if self._timeline is not None:
+            snap_points = () if self._snap_manager else self._get_snap_points()
+            frame, _ = self._snap_frame(frame, snap_points, show_indicator=show_indicator)
         return max(0, frame)
 
-    def _get_asset_duration_frames(self, asset: MediaAsset) -> int:
-        """
-        Get asset duration in timeline frames.
+    def _get_asset_duration_frames(self, asset: MediaAsset, *, fps: float | None = None) -> int:
+        """Get the asset's duration at the current or prospective timeline rate."""
+        if fps is None:
+            fps = float(self._timeline.fps) if self._timeline else EMPTY_TIMELINE_FPS
+        duration = asset.duration_seconds
+        if isinstance(duration, (int, float)) and math.isfinite(duration) and duration > 0 and fps > 0:
+            return max(1, round(duration * fps))
 
-        Args:
-            asset: MediaAsset
+        frame_count = asset.total_frames
+        if isinstance(frame_count, int) and frame_count > 0:
+            source_rate = asset.fps
+            source_fps = float(source_rate) if isinstance(source_rate, (int, float, Rational)) else fps
+            if math.isfinite(source_fps) and source_fps > 0 and fps > 0:
+                return max(1, round(frame_count * fps / source_fps))
+            return frame_count
 
-        Returns:
-            Duration in timeline frames (default 100 if not available)
-        """
-        if self._timeline is None:
-            return 100
-
-        fps = float(self._timeline.fps) if hasattr(self._timeline.fps, 'num') else self._timeline.fps
-
-        if asset.duration_seconds is not None and fps > 0:
-            return max(1, int(round(asset.duration_seconds * fps)))
-
-        asset_fps = asset.fps or fps
-        if asset.total_frames is not None and asset_fps and asset_fps > 0 and fps > 0:
-            return max(1, int(round(asset.total_frames * fps / asset_fps)))
-
-        if asset.total_frames is not None:
-            return max(1, asset.total_frames)
-
-        # Default duration for images or unknown
-        return int(fps * 5) if fps > 0 else 100  # 5 seconds for images
+        return max(1, int(fps * 5)) if fps > 0 else 100
 
     def _get_asset_source_duration_frames(self, asset: MediaAsset) -> int:
         """
@@ -16765,167 +16684,12 @@ class TimelineView(QGraphicsView):
         logger.info(f"_add_asset_as_clip: successfully added clip {video_clip_id} to track {track.name}")
         return True
 
-    def _update_drag_preview(self, track_index: int, frame: int) -> None:
-        """
-        Update the enhanced drag preview with thumbnail, label, and snap indicator.
-        参考 kdenlive timeline2/view/qml/Timeline.qml dragProxy 设计。
-
-        Args:
-            track_index: Track visual index
-            frame: Insert frame position
-        """
-        if self._drag_preview_item is None or not self._drag_assets:
-            return
-
-        # 收集素材名称和类型
-        asset_names = [asset.display_name[:12] for asset in self._drag_assets]
-        asset_types = [asset.media_type for asset in self._drag_assets]
-
-        # 计算总时长，并把每个素材的真实宽度传给拖拽预览。
-        asset_durations = [
-            self._get_asset_duration_frames(asset)
-            for asset in self._drag_assets
-        ]
-        total_duration = sum(asset_durations)
-
-        # 收集缩略图（异步获取）
-        thumbnails: Dict[str, Any] = {}
-        for asset in self._drag_assets:
-            name = asset.display_name[:12]
-            if getattr(asset, "is_motion_graphic", False):
-                continue
-            # 尝试从缓存获取缩略图
-            cached_thumb = self._thumb_provider.get_cached_thumbnail(asset.path, 80)
-            if cached_thumb:
-                thumbnails[name] = cached_thumb
-            else:
-                # 异步请求缩略图（下次拖拽时可能可用）
-                self._thumb_provider.get_thumbnail(asset.path, 80)
-
-        # 检查是否启用吸附，并计算吸附位置
-        snap_frame: Optional[int] = None
-
-        if self._snap_enabled and self._timeline:
-            # 获取吸附点
-            snap_points = self._get_all_snap_points()
-            snapped_frame, did_snap = self._snap_frame(frame, snap_points, show_indicator=True)
-            if did_snap:
-                snap_frame = snapped_frame
-                frame = snapped_frame  # 使用吸附后的位置
-
-        # 检查目标位置是否有效
-        is_valid = self._validate_drag_position(track_index, frame, total_duration)
-
-        # 批量拖拽时只显示第一个片段作为落点预览。实际松手后仍会
-        # 一次性插入全部素材；预览阶段不再把整批片段绘制成蓝色叠层。
-        preview_name = asset_names[:1]
-        preview_type = asset_types[:1]
-        preview_duration = asset_durations[:1]
-        preview_thumbnails = {
-            name: thumbnails[name]
-            for name in preview_name
-            if name in thumbnails
-        }
-
-        # 更新 DragPreviewItem
-        self._drag_preview_item.show_preview(
-            track_index=track_index,
-            frame=frame,
-            asset_names=preview_name,
-            asset_types=preview_type,
-            total_duration=preview_duration[0] if preview_duration else 1,
-            thumbnails=preview_thumbnails,
-            durations=preview_duration,
-            is_valid=is_valid
-        )
-        self._drag_preview_item.setPos(
-            TRACK_HEADER_WIDTH + frame * self._pixels_per_frame,
-            self._track_top_for_index(track_index),
-        )
-
-        # 设置吸附状态
-        if snap_frame is not None:
-            self._drag_preview_item.set_snapping(True, snap_frame)
-        else:
-            self._drag_preview_item.set_snapping(False)
-
-        # Store state for potential use
-        self._drag_preview_track_index = track_index
-        self._drag_preview_frame = frame
-
-    def _validate_drag_position(self, track_index: int, frame: int, duration: int) -> bool:
-        """
-        Validate if the drag position is valid (no overlap with existing clips).
-
-        Args:
-            track_index: Target track index
-            frame: Insert start frame
-            duration: Total duration
-
-        Returns:
-            True if position is valid, False otherwise
-        """
-        if self._timeline is None:
-            return True  # Empty timeline, always valid
-
-        # Get target track using visual index (not model index)
-        target_track = self._track_at_visual_index(track_index)
-        if target_track is None:
-            return True  # No track at this visual index (new track area or beyond)
-
-        # Check for overlap with existing clips
-        insert_end = frame + duration
-        for clip in target_track.clips:
-            clip_end = clip.timeline_start + clip.timeline_duration
-            # Check if ranges overlap
-            if not (insert_end <= clip.timeline_start or frame >= clip_end):
-                return False  # Overlap detected
-
-        return True
-
-    def _get_all_snap_points(self) -> tuple[int, ...]:
-        """
-        Get all available snap points from the timeline.
-
-        Returns:
-            Tuple of frame positions for snap points
-        """
-        if self._timeline is None:
-            return tuple()
-
-        snap_points: list[int] = []
-
-        # Add clip boundaries
-        for track in self._timeline.all_tracks:
-            for clip in track.clips:
-                snap_points.append(clip.timeline_start)
-                snap_points.append(clip.timeline_start + clip.timeline_duration)
-
-        # Add playhead position
-        snap_points.append(self._playhead_frame)
-
-        # Add marker positions
-        for marker in self._timeline.markers:
-            snap_points.append(marker.frame)
-
-        # Remove duplicates and sort
-        return tuple(sorted(set(snap_points)))
-
     def _hide_drag_preview(self) -> None:
-        """
-        Hide and clear all transient drag/snap visuals.
-
-        The snap indicator is shown by ``_snap_frame`` while the drag proxy is
-        being updated.  It is a separate scene item, so hiding only the proxy
-        leaves the yellow alignment line behind after a drop or drag cancel.
-        """
+        """Clear both parts of the drop feedback."""
         if self._drag_preview_item is not None:
             self._drag_preview_item.hide_preview()
         if self._snap_indicator is not None:
             self._snap_indicator.hide_indicator()
-
-        # 清理缩略图缓存
-        self._drag_thumbnails.clear()
 
     # ==================== P3.2: Insert/Overwrite/Append Operations ====================
 

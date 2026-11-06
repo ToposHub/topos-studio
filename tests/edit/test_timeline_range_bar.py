@@ -15,9 +15,10 @@ import pytest
 import time
 from unittest.mock import MagicMock, patch
 
-from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QPointF, QRect, QRectF, Qt
+from PyQt6.QtGui import QColor, QImage, QPainter
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QStyleOptionGraphicsItem
 
 pytestmark = pytest.mark.edit_core
 
@@ -38,7 +39,9 @@ from src.features.edit.core.timeline_export import (
     ExportRangeType,
     estimate_export_duration,
 )
-from src.features.edit.ui.timeline_items import TimecodeRulerItem, TRACK_HEADER_WIDTH
+from src.features.edit.ui.timeline_items import (
+    RULER_HEIGHT, TRACK_HEADER_WIDTH, TimecodeRulerItem, TimelineRangeItem,
+)
 from src.features.edit.ui.timeline_view import TimelineView
 from src.features.edit.ui.edit_style import get_color
 
@@ -313,7 +316,10 @@ def test_single_in_or_out_resolves_to_the_other_timeline_edge() -> None:
     assert resolve_timeline_in_out(None, 144, 240) == (0, 144)
 
 
-def test_range_handles_drag_and_update_outside_mask(qapp) -> None:
+@pytest.mark.parametrize("target_frame, expected_start", [(64, 64), (156, 144)])
+def test_range_handles_drag_and_update_track_highlight(
+    qapp, target_frame: int, expected_start: int
+) -> None:
     """The range handle gets ruler clicks and commits its drag through commands."""
     timeline = TimelineSequence(timeline_id="tl-drag", name="Drag", fps=24.0)
     track = _make_track("video", "V1")
@@ -335,6 +341,8 @@ def test_range_handles_drag_and_update_outside_mask(qapp) -> None:
     track_area = view._layout_engine.area_layout().total_track_area
     assert mask_item.boundingRect().top() == track_area.top()
     assert mask_item.boundingRect().height() == track_area.height()
+    assert mask_item.boundingRect().left() == TRACK_HEADER_WIDTH + 48 * view._pixels_per_frame
+    assert mask_item.boundingRect().right() == TRACK_HEADER_WIDTH + 145 * view._pixels_per_frame
     out_handle_scene = QPointF(
         TRACK_HEADER_WIDTH + (144 + 1) * view._pixels_per_frame,
         range_item._bar_y,
@@ -346,7 +354,7 @@ def test_range_handles_drag_and_update_outside_mask(qapp) -> None:
         range_item._bar_y,
     )
     drag_target_scene = QPointF(
-        TRACK_HEADER_WIDTH + 64 * view._pixels_per_frame,
+        TRACK_HEADER_WIDTH + target_frame * view._pixels_per_frame,
         range_item._bar_y,
     )
     QTest.mousePress(
@@ -364,7 +372,7 @@ def test_range_handles_drag_and_update_outside_mask(qapp) -> None:
     )
     qapp.processEvents()
 
-    assert view._timeline.range_start == 64
+    assert view._timeline.range_start == expected_start
     assert view._timeline.range_end == 144
     assert mask_item.isVisible()
     view.close()
@@ -522,3 +530,35 @@ def test_set_corner_timecode_repaints_viewport_when_visible() -> None:
     view._corner_timecode_widget.setText.assert_called_once_with(
         "00:00:05:00")
     view.viewport().update.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["frames", "samples"])
+@pytest.mark.parametrize("pixels_per_frame", [2.2, 14.8])
+def test_ruler_repaints_the_same_labels_in_playhead_strips(
+    qapp, mode: str, pixels_per_frame: float
+) -> None:
+    ruler = TimecodeRulerItem(pixels_per_frame, fps=25.0, duration_frames=2000, display_mode=mode)
+    image = QImage(1100, RULER_HEIGHT, QImage.Format.Format_RGB32)
+    image.fill(Qt.GlobalColor.black)
+
+    def paint_region(image: QImage, region: QRect) -> None:
+        painter = QPainter(image)
+        painter.setClipRect(region)
+        option = QStyleOptionGraphicsItem()
+        option.exposedRect = QRectF(region)
+        ruler.paint(painter, option)
+        painter.end()
+
+    paint_region(image, image.rect())
+    repainted = image.copy()
+    for x in range(TRACK_HEADER_WIDTH, image.width(), 13):
+        paint_region(repainted, QRect(x, 0, 32, RULER_HEIGHT))
+
+    assert repainted == image
+
+
+def test_short_range_can_hit_either_endpoint(qapp) -> None:
+    item = TimelineRangeItem(pixels_per_frame=2.0)
+    item.set_range(10, 10)
+    assert item._hit_edge(QPointF(TRACK_HEADER_WIDTH + 20, item._bar_y)) == "in"
+    assert item._hit_edge(QPointF(TRACK_HEADER_WIDTH + 22, item._bar_y)) == "out"

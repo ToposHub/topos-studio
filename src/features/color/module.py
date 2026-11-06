@@ -454,6 +454,18 @@ class ColorModule:
             default_visible=False,
         ))
         panel_registry.register(PanelDescriptor(
+            panel_id="color.keyframes",
+            title_key="color_keyframes.title",
+            fallback_title="Keyframes",
+            feature_id="color",
+            category="Color",
+            page_ids=("Color",),
+            dock_attr="dock_color_keyframes",
+            order=935,
+            default_visible=False,
+            work_mode="video",
+        ))
+        panel_registry.register(PanelDescriptor(
             panel_id="color.plugin",
             title_key="panel.plugin",
             fallback_title="Plugins",

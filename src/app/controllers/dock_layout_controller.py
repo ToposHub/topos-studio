@@ -69,10 +69,11 @@ _COLOR_TOOL_DOCK_NAMES = frozenset({
     "dockDenoise", "dockDeblur", "dockGrading", "dockCurves",
     "dockColorMapping", "dockBlurSharpen", "dockGrain", "dockMasks",
     "dockQualifier", "dockRaw", "dockAnalysis", "dockCrop",
-    "dockTracker",
+    "dockTracker", "dockColorKeyframes",
 })
 _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY = "color_mapping_dock_layout_version"
 _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_VERSION = 1
+_COLOR_KEYFRAMES_DOCK_PLACEMENT_KEY = "color_keyframes_dock_placed"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY = "composite_scopes_dock_layout_version"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_VERSION = 1
 
@@ -392,6 +393,19 @@ class DockLayoutMixin:
         # also triggers an immediate demand for the current front texture.
         self.dock_analysis.visibilityChanged.connect(self._on_analysis_scope_visibility_changed)
         self.canvas.scopes_requested.connect(self.scope_panel.open_floating)
+
+        from src.features.color.ui.color_keyframes_panel import ColorKeyframesPanel
+        from src.features.color.ui.color_keyframes_view_state import tr as keyframes_tr
+
+        self.color_keyframes_panel = ColorKeyframesPanel(demo=True)
+        self.dock_color_keyframes = create_custom_dock(
+            keyframes_tr("title", "Keyframes"), self.color_keyframes_panel, "dockColorKeyframes"
+        )
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_color_keyframes)
+        self.dock_color_keyframes.hide()
+        self._color_keyframes_compact_width = 0
+        self.dock_color_keyframes.toggleViewAction().triggered.connect(self._raise_color_keyframes)
+        self.color_keyframes_panel.expand_requested.connect(self._resize_color_keyframes)
 
         # The image batch-export panel. Renamed for clarity so a future
         # video batch-export panel can coexist without confusing users.
@@ -1090,7 +1104,7 @@ class DockLayoutMixin:
             self.dock_masks, self.dock_qualifier, self.dock_lut,
             self.dock_raw, self.dock_analysis, self.dock_export,
             self.dock_crop, self.dock_plugin, self.dock_script, self.dock_presets,
-            self.dock_color_timeline_clips, self.dock_tracker,
+            self.dock_color_timeline_clips, self.dock_tracker, self.dock_color_keyframes,
         ]
         # Add Edit docks if available
         if self.dock_edit_media_pool:
@@ -2451,6 +2465,37 @@ class DockLayoutMixin:
 
         self._style_dock_tab_bars()
 
+    def _raise_color_keyframes(self, checked: bool) -> None:
+        if not checked:
+            return
+        dock = self.dock_color_keyframes
+        if (
+            (getattr(self, "_color_keyframes_reseat", False)
+             or not self.config_manager.get(_COLOR_KEYFRAMES_DOCK_PLACEMENT_KEY))
+            and not self.dock_analysis.isFloating()
+        ):
+            # Old layouts have no slot for the new dock. Place it once when
+            # opened, keeping the arrangement of the other Color tools.
+            self.tabifyDockWidget(self.dock_analysis, dock)
+            dock.raise_()
+            self.page_layouts["Color"] = self.saveState()
+            self._color_keyframes_reseat = False
+            self.config_manager.set(_COLOR_KEYFRAMES_DOCK_PLACEMENT_KEY, True)
+        dock.raise_()
+
+    def _resize_color_keyframes(self, expanded: bool) -> None:
+        dock = self.dock_color_keyframes
+        if expanded:
+            self._color_keyframes_compact_width = dock.width()
+            screen_width = dock.screen().availableGeometry().width()
+            target = max(dock.width(), round((screen_width if dock.isFloating() else self.width()) * 0.62))
+        else:
+            target = self._color_keyframes_compact_width or 360
+        if dock.isFloating():
+            dock.resize(target, dock.height())
+        else:
+            self.resizeDocks([dock], [target], Qt.Orientation.Horizontal)
+
     # ------------------------------------------------------------------
     # apply_default_layout
     # ------------------------------------------------------------------
@@ -2537,6 +2582,8 @@ class DockLayoutMixin:
 
         # Split UI sections
         self.splitDockWidget(self.dock_analysis, self.dock_denoise, Qt.Orientation.Horizontal)
+        self.tabifyDockWidget(self.dock_analysis, self.dock_color_keyframes)
+        self.dock_color_keyframes.hide()
 
         # Attempt to set proportions
         self.resizeDocks([self.dock_analysis, self.dock_denoise], [400, 800], Qt.Orientation.Horizontal)
@@ -2937,6 +2984,10 @@ class DockLayoutMixin:
             # 恢复所有页面的布局状态
             if panel_states:
                 self._apply_all_page_layouts(panel_states)
+            keyframes = getattr(self, "dock_color_keyframes", None)
+            if keyframes is not None:
+                keyframes.hide()
+                self._color_keyframes_reseat = True
             # 出厂文件可能采集自另一种工作模式，修正越界的 dock 可见性
             self._enforce_page_dock_visibility()
             self._sync_floating_docks()
@@ -3187,6 +3238,12 @@ class DockLayoutMixin:
                 self.dock_composite_scope.setVisible(False)
 
         # Color page docks — only visible on Color page
+        keyframes = getattr(self, "dock_color_keyframes", None)
+        if keyframes is not None:
+            allowed = self.current_page == "Color" and work_mode != "image"
+            keyframes.toggleViewAction().setEnabled(allowed)
+            if not allowed:
+                keyframes.hide()
         if self.current_page != "Color":
             if self.dock_color_timeline_clips:
                 self.dock_color_timeline_clips.setVisible(False)
