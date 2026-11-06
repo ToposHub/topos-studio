@@ -120,6 +120,10 @@ include = ["src*", "apps*"]
 "src.features.edit.insights" = [
     "locales/*.json",
 ]
+"src.features.color.ui" = [
+    "effect_icons/*.svg",
+    "node_badges/*.svg",
+]
 "src.features.edit.ui" = [
     "effect_icons/*.svg",
     "transition_icons/*.svg",

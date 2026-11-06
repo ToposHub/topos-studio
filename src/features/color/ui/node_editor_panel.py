@@ -176,8 +176,8 @@ class ColorNodePanel(QWidget):
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal, self)
         self.zoom_slider.setObjectName("NodeZoom")
         self.zoom_slider.setAccessibleName(tr("node_size", "Node Editor Zoom"))
-        self.zoom_slider.setRange(25, 300)
-        self.zoom_slider.setValue(100)
+        self.zoom_slider.setRange(round(ColorNodeView.MIN_ZOOM * 100), round(ColorNodeView.MAX_ZOOM * 100))
+        self.zoom_slider.setValue(round(ColorNodeView.ORIGINAL_ZOOM * 100))
         self.zoom_slider.setFixedSize(118, 28)
         self.zoom_slider.setStyleSheet(f"""
             QSlider {{ background: transparent; margin: 0 8px 0 0; }}
@@ -186,7 +186,7 @@ class ColorNodePanel(QWidget):
             QSlider::sub-page:horizontal, QSlider::add-page:horizontal {{
                 background: {C.BG_DARK}; border: none; height: 2px; border-radius: 0; }}
             QSlider::handle:horizontal {{ width: 9px; height: 9px;
-                margin: -4px 0; border: none; border-radius: 4px; background: {C.ORANGE}; }}
+                margin: -4px 0; border: none; border-radius: 4px; background: {C.TEXT_SECONDARY}; }}
         """)
         self.zoom_slider.setToolTip(tr("node_size", "Node Editor Zoom"))
         right_bar.addWidget(self.zoom_slider)
@@ -214,6 +214,8 @@ class ColorNodePanel(QWidget):
         self._scope_states[self._scope] = self.view.state
         self.pointer_button.clicked.connect(lambda: self.view.set_hand_mode(False))
         self.hand_button.clicked.connect(lambda: self.view.set_hand_mode(True))
+        self.view.hand_mode_changed.connect(
+            lambda hand: (self.hand_button if hand else self.pointer_button).setChecked(True))
         self.clip_radio.toggled.connect(lambda checked: self._scope_toggled("clip", checked))
         self.timeline_radio.toggled.connect(lambda checked: self._scope_toggled("timeline", checked))
         self.zoom_slider.valueChanged.connect(lambda value: self.view.set_zoom(value / 100.0))
@@ -299,8 +301,8 @@ class ColorNodePanel(QWidget):
         self.scope_changed.emit(scope)
         self.active_node_changed.emit(self.view.state.graph.active_id)
 
-    def load_graph(self, graph: GraphDraft, *, scope: str = "clip") -> None:
-        """Future host hydration entry, separate from all user edit intents."""
+    def load_graph(self, graph: GraphDraft, *, scope: str = "clip", fit: bool = True) -> None:
+        """Hydrate a scope without emitting edits or disturbing an ongoing view."""
         if scope not in self.SCOPES:
             raise ValueError("unknown node scope")
         state = NodeEditorState(graph)
@@ -310,7 +312,8 @@ class ColorNodePanel(QWidget):
             self.breadcrumb.hide()
             self.view.state = state
             self.view.rebuild()
-            self.view.fit_graph()
+            if fit:
+                self.view.fit_graph()
 
     def snapshot(self, scope: str | None = None) -> GraphDraft:
         state = self.view.state if scope is None else self._scope_states[scope]
@@ -328,7 +331,7 @@ class ColorNodePanel(QWidget):
                                           "compound_path": [node_id for _, node_id in self._parents],
                                           "payload": payload})
 
-    def open_compound(self, node_id: str) -> None:
+    def open_compound(self, node_id: str, *, fit: bool = True) -> None:
         self.view.commit_label()
         node = self.view.state.graph.nodes.get(node_id)
         if node is None or node.kind != NodeKind.COMPOUND or node.children is None:
@@ -336,7 +339,8 @@ class ColorNodePanel(QWidget):
         self._parents.append((self.view.state, node_id))
         self.view.state = NodeEditorState(node.children)
         self.view.rebuild()
-        self.view.fit_graph()
+        if fit:
+            self.view.fit_graph()
         self.breadcrumb_label.setText(" / ".join(parent.graph.nodes[nid].label or tr("compound_node", "Compound Node")
                                                  for parent, nid in self._parents))
         self.breadcrumb.show()
@@ -370,9 +374,9 @@ class ColorNodePanel(QWidget):
         menu = QMenu(self)
         menu.setObjectName("ColorNodeOptionsMenu")
         add = self.view._action
-        add(menu, "cleanup", "Cleanup Node Graph", lambda: self.view.apply_edit("auto_layout", self.view.state.auto_layout))
-        add(menu, "fit", "Zoom to Fit", self.view.fit_graph)
-        add(menu, "zoom_reset", "Reset Zoom", lambda: self.view.set_zoom(1.0))
+        add(menu, "cleanup", "Cleanup Node Graph", self.view.cleanup_graph)
+        add(menu, "fit", "Zoom to Window", self.view.fit_graph)
+        add(menu, "zoom_reset", "Original Size", lambda: self.view.set_zoom(self.view.ORIGINAL_ZOOM))
         menu.addSeparator()
         add(menu, "show_grid", "Show Grid", self._toggle_grid, checked=self.view.show_grid)
         add(menu, "show_thumbnails", "Show Thumbnails", self._toggle_thumbnails, checked=self.view.show_thumbnails)
@@ -381,7 +385,7 @@ class ColorNodePanel(QWidget):
         add(menu, "redo", "Redo", lambda: self.view.apply_edit("redo", self.view.state.redo), enabled=(self.view.project_history_available(True) if self.view.project_history_available else self.view.state.can_redo))
         menu.addSeparator()
         add(menu, "reset_keep_nodes", "Reset Grades and Keep Nodes", lambda: self.view.apply_edit("reset_grades", lambda: self.view.state.reset_grades(set(self.view.state.graph.nodes))))
-        add(menu, "reset_all", "Reset All Grades and Nodes", lambda: self.view.apply_edit("reset_all", self.view.state.reset_all))
+        add(menu, "reset_all", "Reset All Grades and Nodes", self.view.reset_graph)
         return menu
 
     def _toggle_grid(self) -> None:

@@ -232,8 +232,8 @@
 |---|---|---|
 | 左侧标签组 | Gallery/LUT/Effects切换不隐藏Nodes | 三种标签全窗截图；Nodes可见 |
 | 浮动 | Effects/LUT拖浮、缩为360px、改尺寸、关闭重开仍可操作 | 浮动截图和录制；设置可滚动、无横向截断 |
-| 添加 | drag具体node、双击/右键选中node，目标底栏准确 | 操作前后target/命令日志；非目标节点不改 |
-| 拒绝 | Source/Output/Mixer/Compound外壳/锁/无目标不应用 | 禁用原因；graph revision不变 |
+| Effects 拖放 | 拖到 Corrector 应用到落点并替换首个滤镜。拖到图像连线插入带滤镜的新 Corrector。成功后选中落点节点并打开 Settings，每次拖放可一次撤销。已有多实例节点的其他实例保留。 | 操作前后 target/命令日志、节点连接和实际画面 |
+| 拒绝 | 空白、Key 连线、Source/Output/Mixer/Compound 外壳及锁定节点不接收滤镜。Effects Library 仅列出已接入 Color 后端的效果。 | 无命令，graph revision 不变 |
 | 资源/参数 | 同FX重复2次、启用、重排、重置、删、undo/redo；LUT替换/强度/移除 | 实例ID、顺序、图JSON、实际画面 |
 | 会话 | 拖动/AI/预览未完时切clip/scope/Compound/版本 | 旧ack不改新目标；取消日志 |
 | 真实显示 | LUT预览、逐节点缩略图、最终Viewer、scope均同revision | 原图/候选/节点/最终图及像素对照 |

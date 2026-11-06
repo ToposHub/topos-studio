@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction
 
 from tests.app.test_color_graph_app_host import _Harness, _project_with_graph_stack
 from src.app.controllers.color_graph_controller import ColorGraphIntentNormalizer, EnvelopeError
 from src.features.color.ui.node_editor_state import ConnectionDraft, NodeKind
+from src.shared.project.color_graph import ColorGraphData
 import pytest
 
 
@@ -26,6 +28,38 @@ def test_hydration_selects_a_real_corrector(live):
     assert harness.host.panel_host.active_handle.node_id == active
 
 
+def test_project_acknowledgment_keeps_zoom_and_canvas_position(live):
+    harness, stack_id = live
+    view = harness.panel.view
+    harness.panel.zoom_slider.setValue(75)
+    before = view.viewportTransform()
+    node_id = view.state.graph.active_id
+    view.apply_edit("label_node", lambda: view.state.set_node_fields({node_id}, label="Balance"),
+                    {"node_id": node_id, "label": "Balance"})
+    assert view.viewportTransform() == before
+    assert harness.panel.zoom_slider.value() == 75
+    graph = harness.holder["project"].color_stacks[stack_id].color_graph
+    assert next(node.label for node in graph.nodes if node.node_id == node_id) == "Balance"
+
+
+def test_alpha_connection_roundtrips_through_project_history(live):
+    harness, stack_id = live
+    view = harness.panel.view
+    corrector = view.state.graph.active_id
+    view.apply_edit("add_alpha_output", view.state.add_alpha_output)
+    alpha = next(node.id for node in view.state.graph.nodes.values() if node.kind == NodeKind.ALPHA_OUTPUT)
+    edge = ConnectionDraft(corrector, "key_out", alpha, "key_in")
+    view.apply_edit("connect", lambda: view.state.connect(edge), edge)
+    graph = harness.holder["project"].color_stacks[stack_id].color_graph
+    assert any(connection.dst_node == alpha and connection.dst_port == "key" for connection in graph.edges)
+    assert edge in view.state.graph.connections
+    assert any(link.connection == edge for link in view.links)
+    view.apply_edit("undo", view.state.undo)
+    assert edge not in view.state.graph.connections
+    view.apply_edit("redo", view.state.redo)
+    assert edge in view.state.graph.connections
+
+
 def test_serial_inserts_after_selected_corrector_and_keyboard_undo(live, qtbot):
     harness, stack_id = live
     view = harness.panel.view
@@ -33,7 +67,7 @@ def test_serial_inserts_after_selected_corrector_and_keyboard_undo(live, qtbot):
     anchor = next(node.node_id for node in graph.nodes if node.node_type == 'corrector')
     view.state.select({anchor}, anchor)
     view.active_node_changed.emit(anchor)
-    view.apply_edit('add_serial', view.state.add_serial)
+    qtbot.keyClick(view, Qt.Key.Key_S, modifier=Qt.KeyboardModifier.AltModifier)
     updated = harness.holder['project'].color_stacks[stack_id].color_graph
     new_ids = {node.node_id for node in updated.nodes} - {node.node_id for node in graph.nodes}
     assert len(new_ids) == 1
@@ -45,6 +79,59 @@ def test_serial_inserts_after_selected_corrector_and_keyboard_undo(live, qtbot):
     assert restored.to_dict() == graph.to_dict()
     assert not view.project_history_available(False)
     assert view.project_history_available(True)
+
+
+def test_repeated_serial_shortcut_persists_a_single_row(live, qtbot) -> None:
+    harness, stack_id = live
+    view = harness.panel.view
+    correctors = [node for node in view.state.graph.nodes.values() if node.kind == NodeKind.CORRECTOR]
+    first, last = correctors[0], correctors[-1]
+    assert not harness.holder["project"].color_stacks[stack_id].color_graph.ui_state.positions
+    view.state.select(set())
+    view.active_node_changed.emit("")
+    for _ in range(3):
+        qtbot.keyClick(view, Qt.Key.Key_S, modifier=Qt.KeyboardModifier.AltModifier)
+    graph = harness.holder["project"].color_stacks[stack_id].color_graph
+    saved = ColorGraphData.from_dict(graph.to_dict())
+    positions = saved.ui_state.positions
+    node_id = first.id
+    chain = []
+    while node_id != saved.output_node_id:
+        chain.append(positions[node_id])
+        node_id = next(edge.dst_node for edge in saved.edges if edge.src_node == node_id)
+    assert len(chain) == len(correctors) + 3
+    assert len({y for _, y in chain}) == 1
+    assert chain[0] == (first.x, first.y)
+    assert chain[-1] == positions[last.id]
+    assert all(right[0] - left[0] >= 96 for left, right in zip(chain, chain[1:]))
+    assert all(positions[node.id] == (node.x, node.y) for node in view.state.graph.nodes.values())
+    assert len(harness.cmd_stack._undo_stack) == 3
+
+
+def test_canvas_reset_keeps_one_neutral_corrector_and_undoes_as_one_edit(live) -> None:
+    from PyQt6.QtCore import QPoint
+
+    harness, stack_id = live
+    view = harness.panel.view
+    original = harness.holder["project"].color_stacks[stack_id].color_graph
+    menu = view.build_context_menu(QPoint(10, 10))
+    menu.findChild(QAction, "node_action_reset_all").trigger()
+    reset = harness.holder["project"].color_stacks[stack_id].color_graph
+    [node] = [node for node in reset.nodes if node.node_type == "corrector"]
+    assert reset.source_node_id == original.source_node_id
+    assert reset.output_node_id == original.output_node_id
+    assert {(edge.src_node, edge.dst_node) for edge in reset.edges} == {
+        (reset.source_node_id, node.node_id), (node.node_id, reset.output_node_id),
+    }
+    assert node.enabled and not node.legacy_payload and "grade" not in node.params
+    assert view.state.graph.active_id == node.node_id
+    assert view.cards[node.node_id].node.number == 1
+    assert not view.cards[node.node_id].node.tool_indicators
+    assert len(harness.cmd_stack._undo_stack) == 1
+    view.apply_edit("undo", view.state.undo)
+    assert harness.holder["project"].color_stacks[stack_id].color_graph.to_dict() == original.to_dict()
+    view.apply_edit("redo", view.state.redo)
+    assert harness.holder["project"].color_stacks[stack_id].color_graph.to_dict() == reset.to_dict()
 
 
 def test_real_connection_payload_disconnects_and_reconnects(live):

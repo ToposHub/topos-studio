@@ -193,6 +193,10 @@ def test_hand_mode_changes_navigation_only(panel: ColorNodePanel, qtbot: Any) ->
     assert panel.view._hand_mode
     qtbot.mouseClick(panel.pointer_button, Qt.MouseButton.LeftButton)
     assert not panel.view._hand_mode
+    qtbot.keyClick(panel.view, Qt.Key.Key_H)
+    assert panel.view._hand_mode and panel.hand_button.isChecked()
+    qtbot.keyClick(panel.view, Qt.Key.Key_H)
+    assert not panel.view._hand_mode and panel.pointer_button.isChecked()
     assert panel.snapshot() == before
 
 

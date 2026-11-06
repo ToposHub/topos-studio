@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import replace
 
 import pytest
 
@@ -58,6 +59,39 @@ class TestInsertAndConnect:
         assert result.ok
         ins = [e for e in result.graph.edges if e.dst_node == "new-0"]
         assert ins and ins[0].src_node != c1.node_id  # 插在 c1 上游
+
+    def test_serial_insertion_rejects_invalid_layout_atomically(self) -> None:
+        graph = _serial(1)
+        result = _service().op_insert_corrector(graph, position=(float("nan"), 0.0))
+        assert not result.ok
+        assert result.graph is graph
+
+    def test_insert_preserves_legacy_mixer_input_order(self) -> None:
+        service = _service()
+        graph = _serial(1)
+        base = _correctors(graph)[0].node_id
+        mixed = service.op_add_layer_branch(graph, base).graph
+        mixer, branch = "new-0", "new-1"
+        mixed = replace(mixed, edges=tuple(
+            replace(edge, slot_id="", edge_id="legacy-top" if edge.src_node == branch else "legacy-base")
+            if edge.dst_node == mixer else edge for edge in mixed.edges
+        ))
+        inserted = service.op_insert_corrector(mixed, branch)
+        assert inserted.ok
+        inputs = sorted((edge for edge in inserted.graph.edges if edge.dst_node == mixer),
+                        key=lambda edge: (edge.slot_id, edge.edge_id))
+        assert [(edge.edge_id, edge.src_node) for edge in inputs] == [
+            ("legacy-base", base), ("legacy-top", "new-2"),
+        ]
+
+    def test_reset_repairs_an_old_pass_through_graph(self) -> None:
+        graph = ColorGraphData.create_serial()
+        result = _service().op_reset_graph(graph)
+        assert result.ok and result.graph.is_valid()
+        assert [node.node_id for node in result.graph.nodes] == [
+            graph.source_node_id, "new-0", graph.output_node_id,
+        ]
+        assert result.graph.ui_state.active_node_id == "new-0"
 
     def test_insert_on_output_anchor_uses_upstream(self):
         graph = _serial(1)

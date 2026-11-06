@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
-from PyQt6.QtGui import QAction, QMouseEvent
+from PyQt6.QtGui import QAction, QContextMenuEvent, QMouseEvent
 from PyQt6.QtWidgets import QApplication, QMenu
 
 from src.features.color.ui.node_editor_items import ConnectionItem
@@ -109,6 +109,120 @@ def test_drag_key_ports_creates_key_link(view: ColorNodeView) -> None:
     _drag(view, _point(view, first, "key_out"), _point(view, second, "key_in"))
     assert connection in view.state.graph.connections
     assert any(link.connection == connection and link.data_type == "key" for link in view.links)
+
+
+def test_terminals_use_viewport_edges_and_fixed_size_at_every_zoom(view: ColorNodeView, qapp: QApplication) -> None:
+    graph = view.state.snapshot()
+    active = graph.active_id
+    alpha = view.state.add_alpha_output()
+    graph = view.state.snapshot()
+    graph.nodes[alpha].x = graph.nodes["source"].x  # Saved by an older layout.
+    view.load_graph(graph, fit=True)
+    terminal_ports = (("source", "image_out"), ("output", "image_in"), (alpha, "key_in"))
+    baseline = [_point(view, node_id, port) for node_id, port in terminal_ports]
+    assert baseline[0].x() == 18
+    assert baseline[1].x() == baseline[2].x() == view.viewport().width() - 18
+    assert baseline[2].y() - baseline[1].y() == 37
+    card = view.cards[active]
+    view.set_zoom(0.6)
+    small = card.deviceTransform(view.viewportTransform()).mapRect(card.body_rect())
+    view.set_zoom(2.1)
+    large = card.deviceTransform(view.viewportTransform()).mapRect(card.body_rect())
+    assert large.width() > small.width()
+    assert [_point(view, node_id, port) for node_id, port in terminal_ports] == baseline
+    for node_id, port_name in (*terminal_ports, (active, "key_out")):
+        port = view.cards[node_id].ports[port_name]
+        size = port.deviceTransform(view.viewportTransform()).mapRect(port.boundingRect()).size()
+        assert size.width() == pytest.approx(port.boundingRect().width())
+        assert view._port_at(_point(view, node_id, port_name)) is port
+
+    view.resize(620, 360)
+    qapp.processEvents()
+    assert _point(view, "source", "image_out").x() == 18
+    assert _point(view, alpha, "key_in").x() == view.viewport().width() - 18
+    view.set_zoom(1.0)
+    _drag(view, _point(view, active, "key_out"), _point(view, alpha, "key_in"))
+    link = next(link for link in view.links if link.connection.dst_node == alpha)
+    assert view.mapFromScene(link.path().pointAtPercent(1.0)) == _point(view, alpha, "key_in")
+    assert view.state.graph.nodes[alpha].x == graph.nodes[alpha].x
+
+
+def test_hand_pan_moves_terminals_and_zoom_preserves_their_panned_positions(view: ColorNodeView) -> None:
+    baseline = _point(view, "source", "image_out")
+    active = view.state.graph.active_id
+    before = view.state.snapshot()
+    card_center = _point(view, active)
+    start, delta = QPoint(480, 200), QPoint(35, 48)
+    view.set_hand_mode(True)
+    _drag(view, start, start + delta)
+    assert _point(view, "source", "image_out") == baseline + delta
+    assert _point(view, active) == card_center + delta
+    view.set_zoom(0.7)
+    assert _point(view, "source", "image_out") == baseline + delta
+    assert view.state.snapshot() == before
+    view.fit_graph()
+    assert _point(view, "source", "image_out") == baseline
+
+
+def test_right_click_dispatches_canvas_node_wire_and_alpha_menus(
+    view: ColorNodeView, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blank = QPoint(30, 30)
+    before = set(view.state.graph.nodes)
+    menu = view.build_context_menu(blank)
+    assert menu.actions()[0] is _action(menu, "reset_all")
+    assert menu.findChild(QAction, "node_action_label") is None
+    assert menu.findChild(QAction, "node_action_add_serial") is None
+    _action(menu, "corrector").trigger()
+    detached = view.state.graph.active_id
+    assert detached not in before
+    assert not any(detached in (edge.src_node, edge.dst_node) for edge in view.state.graph.connections)
+    assert view.mapFromScene(view.cards[detached].pos()) == blank
+
+    menu = view.build_context_menu(blank + QPoint(150, 0))
+    _action(menu, "alpha_output").trigger()
+    alpha = next(node.id for node in view.state.graph.nodes.values() if node.kind == NodeKind.ALPHA_OUTPUT)
+    alpha_menu = view.build_context_menu(_point(view, alpha, "key_in"))
+    assert alpha_menu.actions() == [_action(alpha_menu, "remove_alpha_output")]
+    _action(alpha_menu, "remove_alpha_output").trigger()
+    assert alpha not in view.state.graph.nodes
+
+    link = view.links[0]
+    wire_menu = view.build_context_menu(view.mapFromScene(link.path().pointAtPercent(0.5)))
+    assert wire_menu.actions() == [_action(wire_menu, "delete_connection")]
+    edge = link.connection
+    _action(wire_menu, "delete_connection").trigger()
+    assert edge not in view.state.graph.connections
+
+    def exec_node_menu(node_menu: QMenu, _global_pos: QPoint) -> None:
+        assert node_menu.actions()[0] is _action(node_menu, "reset")
+        assert node_menu.findChild(QAction, "node_action_alpha_output") is None
+        assert view.state.graph.active_id == detached
+
+    monkeypatch.setattr(QMenu, "exec", exec_node_menu)
+    pos = _point(view, detached)
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, pos, view.viewport().mapToGlobal(pos))
+    QApplication.sendEvent(view.viewport(), event)
+    assert event.isAccepted()
+
+
+def test_number_click_and_label_double_click_use_node_actions(view: ColorNodeView, qtbot: Any) -> None:
+    node_id = view.state.graph.active_id
+    view.state.set_node_fields({node_id}, label="Balance")
+    view.rebuild()
+    card = view.cards[node_id]
+    number = view.mapFromScene(card.mapToScene(card.number_rect().center()))
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=number)
+    assert not view.state.graph.nodes[node_id].enabled
+
+    card = view.cards[node_id]
+    label = view.mapFromScene(card.mapToScene(card.label_hit_rect().center()))
+    qtbot.mouseDClick(view.viewport(), Qt.MouseButton.LeftButton, pos=label)
+    assert view._label is not None
+    qtbot.keyClicks(view, "Skin")
+    qtbot.keyClick(view, Qt.Key.Key_Return)
+    qtbot.waitUntil(lambda: view._label is None)
+    assert view.state.graph.nodes[node_id].label == "Skin"
 
 
 def test_drag_incompatible_port_preserves_existing_image_input(view: ColorNodeView) -> None:
@@ -247,6 +361,7 @@ def test_alt_drag_moves_the_duplicate_and_preserves_original(view: ColorNodeView
     original_ids = set(view.state.graph.nodes)
     start = _point(view, original_id)
     end = start + QPoint(45, 100)
+    offset = view.mapToScene(end) - view.mapToScene(start)
     _mouse(view, QEvent.Type.MouseButtonPress, start,
            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.AltModifier)
     _mouse(view, QEvent.Type.MouseMove, end,
@@ -258,7 +373,7 @@ def test_alt_drag_moves_the_duplicate_and_preserves_original(view: ColorNodeView
     duplicate_id = duplicate_ids.pop()
     assert (view.state.graph.nodes[original_id].x, view.state.graph.nodes[original_id].y) == original
     duplicate = view.state.graph.nodes[duplicate_id]
-    assert (duplicate.x, duplicate.y) == pytest.approx((original[0] + 45.0, original[1] + 100.0), abs=1.0)
+    assert (duplicate.x, duplicate.y) == pytest.approx((original[0] + offset.x(), original[1] + offset.y()))
     assert view.state.graph.selected_ids == {duplicate_id}
     qtbot.keyClick(view, Qt.Key.Key_Z, modifier=Qt.KeyboardModifier.ControlModifier)
     assert set(view.state.graph.nodes) == original_ids

@@ -13,8 +13,9 @@ import pytest
 
 pytest.importorskip("PyQt6")
 
-from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtGui import QColor, QImage, QPixmap
+from PyQt6.QtCore import QObject, QPoint, QPointF, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QImage, QPixmap
+from PyQt6.QtWidgets import QApplication
 
 from src.app.controllers.color_resource_controller import ColorResourceController
 from src.features.color.core.color_graph_service import ColorGraphService
@@ -301,6 +302,19 @@ def test_service_compound_path_targets_child() -> None:
     assert final_inner.legacy_payload["plugins"]
 
 
+def test_effect_insert_with_unknown_resource_leaves_graph_intact() -> None:
+    _, _, graph = _project_with_graph()
+    edge = next(edge for edge in graph.edges if edge.src_node == graph.source_node_id)
+    service = ColorGraphService(effect_schema_provider=_schema)
+    result = service.apply_intent(graph, "insert_effect_on_edge", {
+        "edge_id": edge.edge_id, "resource_id": "missing_fx",
+        "label": "Missing FX", "position": (100.0, 100.0),
+    })
+    assert result.primary_code == "resource_unknown"
+    assert result.graph is graph
+    assert not result.id_mapping
+
+
 # ═══ 宿主/命令层（真实项目栈） ═══════════════════════════════════════
 
 def test_controller_add_one_command_one_undo(rig) -> None:
@@ -451,9 +465,82 @@ def test_controller_drop_uses_dropped_node_not_active(rig) -> None:
     rig.controller.refresh_target()
     rig.controller.drop(second, {"kind": "effect", "resource_id": "grain"})
     assert _instances(rig, node_id=second), "drop 落点未成为目标"
+    assert view.state.graph.active_id == second
+    assert rig.ui.color_effects_browser.tabs.currentIndex() == 1
     first_instances = _instances(rig, node_id=correctors[0])
     assert not first_instances or all(
         p["plugin_id"] != "grain" for p in first_instances)
+
+
+def _drop_grain_from_library(rig: _ResourceHarness, point: QPoint) -> None:
+    library = rig.ui.color_effects_browser.resource_list
+    item = next(library.item(i) for i in range(library.count())
+                if (library.item(i).data(Qt.ItemDataRole.UserRole) or {}).get('id') == 'grain')
+    mime = library.mimeData([item])
+    args = (Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier)
+    viewport = rig.graph.panel.view.viewport()
+    for event in (QDragEnterEvent(point, *args), QDragMoveEvent(point, *args),
+                  QDropEvent(QPointF(point), *args)):
+        QApplication.sendEvent(viewport, event)
+        assert event.isAccepted()
+
+
+def test_drop_on_compound_corrector_replaces_effect_and_opens_settings(rig) -> None:
+    panel = rig.graph.panel
+    view = panel.view
+    view.apply_edit("make_compound", lambda: view.state.make_compound({rig.corrector}))
+    compound = next(n for n in panel.snapshot().nodes.values() if n.kind.value == "compound")
+    panel.open_compound(compound.id)
+    inner = next(n.id for n in panel.snapshot().nodes.values() if n.kind.value == "corrector")
+    token = {"kind": "effect", "resource_id": "grain"}
+    rig.controller.drop(inner, token)
+    rig.controller.activate_effect({"kind": "effect", "id": "grain"})
+    before = _graph(rig)
+    browser = rig.ui.color_effects_browser
+    first, second = [instance["instance_id"] for instance in browser._instances]
+    browser.tabs.setCurrentIndex(0)
+
+    card = view.cards[inner]
+    _drop_grain_from_library(rig, view.mapFromScene(card.mapToScene(card.body_rect().center())))
+
+    assert view.state.graph.active_id == inner
+    assert browser.tabs.currentIndex() == 1
+    replacement, preserved = [instance["instance_id"] for instance in browser._instances]
+    assert replacement != first
+    assert preserved == second
+    assert _graph(rig).graph_revision == before.graph_revision + 1
+    assert rig.graph.host.bridge._undo_once()
+    assert _graph(rig).to_dict() == before.to_dict()
+
+
+def test_effect_library_drop_on_image_wire_is_one_undoable_insert(rig) -> None:
+    panel = rig.graph.panel
+    view = panel.view
+    view.resize(900, 400)
+    view.viewport().resize(view.size())
+    view.fit_graph()
+    before = _graph(rig)
+    link = next(link for link in view.links if link.connection.src_node == before.source_node_id)
+    edge_id = link.connection.edge_id
+    point = view.mapFromScene(link.path().pointAtPercent(0.5))
+    assert view._effect_wire_target_at(point) is link
+    _drop_grain_from_library(rig, point)
+
+    after = _graph(rig)
+    inserted = next(node for node in after.nodes if node.node_id not in {n.node_id for n in before.nodes})
+    edge = next(edge for edge in before.edges if edge.edge_id == edge_id)
+    assert inserted.label == "Grain"
+    assert _instances(rig, node_id=inserted.node_id)[0]["plugin_id"] == "grain"
+    assert not any(e.edge_id == edge_id for e in after.edges)
+    assert any(e.src_node == edge.src_node and e.dst_node == inserted.node_id for e in after.edges)
+    assert any(e.src_node == inserted.node_id and e.dst_node == edge.dst_node for e in after.edges)
+    assert after.graph_revision == before.graph_revision + 1
+    assert view.state.graph.active_id == inserted.node_id
+    assert rig.ui.color_effects_browser.tabs.currentIndex() == 1
+    assert len(rig.graph.cmd_stack._undo_stack) == 1
+    assert rig.graph.host.bridge._undo_once()
+    assert _graph(rig).to_dict() == before.to_dict()
 
 
 def test_controller_edit_signals_route_through_commands(rig) -> None:

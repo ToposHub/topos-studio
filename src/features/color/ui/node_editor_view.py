@@ -6,12 +6,14 @@ The host can consume ``edit_requested`` when the ColorGraph backend is ready.
 from __future__ import annotations
 
 from collections.abc import Callable
+from math import ceil, floor
 from typing import Any
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, QSignalBlocker, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
-    QColor, QContextMenuEvent, QKeyEvent, QMouseEvent, QPainter, QPainterPath,
-    QKeySequence, QPen, QWheelEvent,
+    QColor, QContextMenuEvent, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent,
+    QDropEvent, QKeyEvent, QMouseEvent, QPainter, QPainterPath, QKeySequence,
+    QPen, QWheelEvent,
 )
 from PyQt6.QtWidgets import (
     QApplication, QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView,
@@ -19,9 +21,8 @@ from PyQt6.QtWidgets import (
 )
 
 from src.shared.i18n.i18n import I18N
-from src.shared.ui.style_sheet import C
 from .node_resource_mime import decode_resource_mime
-from .node_editor_items import ConnectionItem, NodeCardItem, NodePortItem
+from .node_editor_items import COLORS, ConnectionItem, NodeCardItem, NodePortItem
 from .node_editor_state import ConnectionDraft, GraphDraft, NodeEditorState, NodeKind
 
 
@@ -63,14 +64,21 @@ class _LabelEditor(QGraphicsTextItem):
 class ColorNodeView(QGraphicsView):
     """Native Qt canvas with independent selection, navigation and graph edits."""
 
+    ORIGINAL_ZOOM = 1.3
+    MIN_ZOOM = 0.25
+    MAX_ZOOM = 3.0
+    ZOOM_STEP = 1.12
+
     edit_requested = pyqtSignal(str, object)
     active_node_changed = pyqtSignal(str)
     graph_changed = pyqtSignal(object)
     zoom_changed = pyqtSignal(float)
+    hand_mode_changed = pyqtSignal(bool)
     compound_open_requested = pyqtSignal(str)
     parent_requested = pyqtSignal()
     preview_requested = pyqtSignal(str)
     resource_drop_requested = pyqtSignal(str, object)
+    effect_wire_drop_requested = pyqtSignal(str, object, object)
     node_lut_apply_requested = pyqtSignal(str, str)   # node_id, lut_ref（''=移除）
     node_lut_browse_requested = pyqtSignal(str)        # node_id（文件选择经 R02 导入）
     scene_refreshed = pyqtSignal()
@@ -84,15 +92,20 @@ class ColorNodeView(QGraphicsView):
         self.links: list[ConnectionItem] = []
         self._syncing = False
         self._resource_hover_id = ""
+        self._resource_hover_link: ConnectionItem | None = None
         self.resource_drop_enabled = True
+        self.effect_wire_drop_enabled = False
         self.setAcceptDrops(True)
         self.project_history_enabled = False
         self.project_history_available: Callable[[bool], bool] | None = None
+        self.toggle_display_mode: Callable[[], None] | None = None
         self._hand_mode = False
         self._space_down = False
         self._panning = False
         self._pan_start = QPoint()
+        self._terminal_pan = QPoint()
         self._move_start: dict[str, tuple[float, float]] = {}
+        self._number_pressed = ""
         self._duplicate_drag = False
         self._wire_origin: NodePortItem | None = None
         self._wire: QGraphicsPathItem | None = None
@@ -116,7 +129,7 @@ class ColorNodeView(QGraphicsView):
         self.scene().setSceneRect(-3000.0, -2000.0, 6000.0, 4000.0)
         self.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
-        self.setBackgroundBrush(QColor(C.BG_PANEL))
+        self.setBackgroundBrush(QColor(COLORS["background"]))
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
@@ -143,6 +156,7 @@ class ColorNodeView(QGraphicsView):
             self._cancel_wire()
             self._insert_target = None
             self._move_start = {}
+            self._number_pressed = ""
             self._label_generation += 1
             if self._label is not None:
                 self._label._finished = True
@@ -164,6 +178,7 @@ class ColorNodeView(QGraphicsView):
                 elif self.show_thumbnails and self._source_thumbnail is not None and node.kind in (NodeKind.CORRECTOR, NodeKind.COMPOUND):
                     card.set_thumbnail(self._source_thumbnail)
                     card.setToolTip((node.label + "\n" if node.label else "") + self._source_preview_text)
+            self._layout_connectors()
             for connection in self.state.graph.connections:
                 start = self._port(connection.src_node, connection.src_port)
                 end = self._port(connection.dst_node, connection.dst_port)
@@ -226,11 +241,28 @@ class ColorNodeView(QGraphicsView):
         if not self.resource_drop_enabled:
             return ""
         card = self._card_at(position)
-        if card is not None and card.node.kind == NodeKind.CORRECTOR and not card.node.locked:
+        if (card is not None and card.node.kind == NodeKind.CORRECTOR and not card.node.locked
+                and card.node.backend_payload.get("node_type", "corrector")
+                in ("corrector", "shared_corrector")):
             return card.node.id
         return ""
 
-    def _set_resource_hover(self, node_id: str) -> None:
+    def _effect_wire_target_at(self, position: QPoint) -> ConnectionItem | None:
+        if (not self.resource_drop_enabled or not self.effect_wire_drop_enabled
+                or self._card_at(position) is not None):
+            return None
+        link = self._link_at(position)
+        if link is not None and link.data_type == "image" and link.connection.edge_id:
+            return link
+        return None
+
+    def _set_resource_hover(self, node_id: str, link: ConnectionItem | None = None) -> None:
+        if link is not self._resource_hover_link:
+            if self._resource_hover_link is not None:
+                self._resource_hover_link.set_highlighted(False)
+            if link is not None:
+                link.set_highlighted(True)
+            self._resource_hover_link = link
         if node_id == self._resource_hover_id:
             return
         for key in (self._resource_hover_id, node_id):
@@ -240,42 +272,51 @@ class ColorNodeView(QGraphicsView):
                 card.update()
         self._resource_hover_id = node_id
 
-    def dragEnterEvent(self, event: Any) -> None:
-        if decode_resource_mime(event.mimeData()) is not None:
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self.resource_drop_enabled and decode_resource_mime(event.mimeData()) is not None:
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
         else:
             event.ignore()
 
-    def dragMoveEvent(self, event: Any) -> None:
-        target = self.resource_target_at(event.position().toPoint()) if decode_resource_mime(event.mimeData()) else ""
-        self._set_resource_hover(target)
-        if target:
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        token = decode_resource_mime(event.mimeData())
+        position = event.position().toPoint()
+        target = self.resource_target_at(position) if token else ""
+        link = self._effect_wire_target_at(position) if token and token["kind"] == "effect" else None
+        self._set_resource_hover(target, link)
+        if target or link is not None:
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
         else:
             event.ignore()
 
-    def dragLeaveEvent(self, event: Any) -> None:
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
         self._set_resource_hover("")
         event.accept()
 
-    def dropEvent(self, event: Any) -> None:
+    def dropEvent(self, event: QDropEvent) -> None:
         token = decode_resource_mime(event.mimeData())
-        target = self.resource_target_at(event.position().toPoint())
+        position = event.position().toPoint()
+        target = self.resource_target_at(position)
+        link = self._effect_wire_target_at(position) if token and token["kind"] == "effect" else None
         self._set_resource_hover("")
-        if token is None or not target:
+        if token is None or (not target and link is None):
             event.ignore()
             return
-        self.resource_drop_requested.emit(target, token)
+        if link is not None:
+            point = self.mapToScene(position)
+            origin = NodeCardItem.corrector_origin_on_wire(point)
+            self.effect_wire_drop_requested.emit(link.connection.edge_id, token, (origin.x(), origin.y()))
+        else:
+            self.resource_drop_requested.emit(target, token)
         event.setDropAction(Qt.DropAction.CopyAction)
         event.accept()
 
     def _port_at(self, position: QPoint) -> NodePortItem | None:
-        for item in self.items(position):
-            if isinstance(item, NodePortItem):
-                return item
-        return None
+        ports = (item for item in self.items(position) if isinstance(item, NodePortItem))
+        return min(ports, key=lambda item: (self.mapFromScene(item.scenePos()) - position).manhattanLength(),
+                   default=None)
 
     def _link_at(self, position: QPoint) -> ConnectionItem | None:
         return next((item for item in self.items(position) if isinstance(item, ConnectionItem)), None)
@@ -290,16 +331,46 @@ class ColorNodeView(QGraphicsView):
         self.state.select(ids, active)
         self.active_node_changed.emit(active)
 
+    def _activate_card(self, card: NodeCardItem) -> None:
+        if not card.isSelected():
+            with QSignalBlocker(self.scene()):
+                self.scene().clearSelection()
+                card.setSelected(True)
+            self.state.select({card.node.id}, card.node.id)
+        else:
+            self.state.select(self.state.graph.selected_ids, card.node.id)
+        self.active_node_changed.emit(card.node.id)
+
     def _card_moved(self, node_id: str) -> None:
-        if self._syncing:
-            return
+        if not self._syncing:
+            self._update_links(node_id)
+
+    def _update_links(self, node_id: str | None = None) -> None:
         for link in self.links:
             connection = link.connection
-            if node_id in (connection.src_node, connection.dst_node):
+            if node_id is None or node_id in (connection.src_node, connection.dst_node):
                 start = self._port(connection.src_node, connection.src_port)
                 end = self._port(connection.dst_node, connection.dst_port)
                 if start is not None and end is not None:
                     link.set_endpoints(start.scenePos(), end.scenePos())
+
+    def _layout_connectors(self, *, zoom_changed: bool = True) -> None:
+        # Scene geometry remains the source of truth for wires and hit testing.
+        # Project fixed-size terminals from the viewport so legacy coordinates
+        # (including unset positions) never affect their visible placement.
+        zoom = self.transform().m11()
+        viewport = self.viewport()
+        terminal_y = max(12, min(viewport.height() // 2 + 6, viewport.height() - 49))
+        for card in self.cards.values():
+            if zoom_changed:
+                card.set_canvas_zoom(zoom)
+            if card.is_terminal:
+                kind = card.node.kind
+                x = 18 if kind == NodeKind.SOURCE else viewport.width() - 18
+                y = terminal_y + (37 if kind == NodeKind.ALPHA_OUTPUT else 0)
+                center = self.mapToScene(QPoint(x, y) + self._terminal_pan)
+                card.setPos(center - card.body_rect().center() / zoom)
+        self._update_links()
 
     def apply_edit(self, action: str, operation: Callable[[], Any], payload: Any = None) -> Any:
         """One UI operation, one draft history entry and one future host intent."""
@@ -348,23 +419,21 @@ class ColorNodeView(QGraphicsView):
 
     def set_hand_mode(self, hand: bool) -> None:
         self._hand_mode = hand
+        self.setInteractive(not hand)
         self.setCursor(Qt.CursorShape.OpenHandCursor if hand else Qt.CursorShape.ArrowCursor)
         self.setDragMode(QGraphicsView.DragMode.NoDrag if hand else QGraphicsView.DragMode.RubberBandDrag)
+        self.hand_mode_changed.emit(hand)
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
-        painter.fillRect(rect, QColor(C.BG_PANEL))
+        painter.fillRect(rect, self.backgroundBrush())
         if not self.show_grid:
             return
-        import math
-        for step, color in ((24, C.BG_INPUT), (120, C.BORDER_SUBTLE)):
-            pen = QPen(QColor(color), 0.0)
-            painter.setPen(pen)
-            left = math.floor(rect.left() / step) * step
-            top = math.floor(rect.top() / step) * step
-            for x in range(left, math.ceil(rect.right()), step):
-                painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
-            for y in range(top, math.ceil(rect.bottom()), step):
-                painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+        painter.setPen(QPen(QColor(COLORS["grid"]), 0.0))
+        column_width, row_height = 64, 42
+        for x in range(floor(rect.left() / column_width) * column_width, ceil(rect.right()), column_width):
+            painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+        for y in range(floor(rect.top() / row_height) * row_height, ceil(rect.bottom()), row_height):
+            painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
 
     def showEvent(self, event: Any) -> None:
         super().showEvent(event)
@@ -372,23 +441,39 @@ class ColorNodeView(QGraphicsView):
             self._has_fitted = True
             self.fit_graph()
 
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self._layout_connectors(zoom_changed=False)
+
     def fit_graph(self) -> None:
         bounds = QRectF()
         for card in self.cards.values():
-            bounds = bounds.united(card.sceneBoundingRect())
-        if bounds.isEmpty():
-            return
-        self.resetTransform()
-        scale = min(1.0, (self.viewport().width() - 44) / max(1.0, bounds.width() + 60),
-                    (self.viewport().height() - 44) / max(1.0, bounds.height() + 90))
-        self.scale(max(0.25, scale), max(0.25, scale))
-        self.centerOn(bounds.center())
-        self.zoom_changed.emit(self.transform().m11())
+            if not card.is_terminal:
+                bounds = bounds.united(card.sceneBoundingRect())
+        width, height = self.viewport().width(), self.viewport().height()
+        target = max(self.MIN_ZOOM, min(self.ORIGINAL_ZOOM,
+                     (width - 80) / max(1.0, bounds.width()),
+                     (height - 36) / max(1.0, bounds.height())))
+        self._terminal_pan = QPoint()
+        self.scale(target / self.transform().m11(), target / self.transform().m11())
+        # Leave space to grow a short graph to the right. Center wider graphs.
+        offset = max(0.0, width * 0.28 - bounds.width() * target / 2.0)
+        vertical_offset = max(0.0, min(height * 0.06, (height - 36 - bounds.height() * target) / 2.0))
+        self.centerOn(bounds.center() + QPointF(offset, vertical_offset) / target)
+        self._layout_connectors()
+        self.zoom_changed.emit(target)
 
-    def set_zoom(self, value: float) -> None:
+    def set_zoom(self, value: float, *, anchor: QPoint | None = None) -> None:
         current = self.transform().m11()
-        target = max(0.25, min(3.0, value))
+        target = max(self.MIN_ZOOM, min(self.MAX_ZOOM, value))
+        if target == current:
+            return
+        center = self.viewport().rect().center()
+        anchor = center if anchor is None else anchor
+        fixed_point = self.mapToScene(anchor)
         self.scale(target / current, target / current)
+        self.centerOn(fixed_point + QPointF(center - anchor) / target)
+        self._layout_connectors()
         self.zoom_changed.emit(target)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
@@ -396,10 +481,8 @@ class ColorNodeView(QGraphicsView):
         if not delta:
             event.ignore()
             return
-        before = self.mapToScene(event.position().toPoint())
-        self.set_zoom(self.transform().m11() * (1.12 if delta > 0 else 1.0 / 1.12))
-        after = self.mapToScene(event.position().toPoint())
-        self.translate(after.x() - before.x(), after.y() - before.y())
+        self.set_zoom(self.transform().m11() * (self.ZOOM_STEP if delta > 0 else 1.0 / self.ZOOM_STEP),
+                      anchor=event.position().toPoint())
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -422,30 +505,51 @@ class ColorNodeView(QGraphicsView):
                                      if (link.dst_node, link.dst_port) == (port.node_id, port.port_name)), None)
             self._wire = QGraphicsPathItem()
             self._wire.setZValue(10)
-            self._wire.setPen(QPen(QColor("#26a9e0" if port.data_type == "key" else "#a6a6ad"), 2.0))
+            pen = QPen(QColor(COLORS["key" if port.data_type == "key" else "wire"]), 1.6)
+            pen.setCosmetic(True)
+            self._wire.setPen(pen)
             self.scene().addItem(self._wire)
             event.accept()
             return
         card = self._card_at(position)
-        if event.button() == Qt.MouseButton.LeftButton and card is not None:
+        if event.button() == Qt.MouseButton.LeftButton and card is not None and not card.is_terminal:
             modifiers = event.modifiers()
+            if modifiers == Qt.KeyboardModifier.NoModifier and card.number_rect().contains(
+                    card.mapFromScene(self.mapToScene(position))):
+                self._number_pressed = card.node.id
+                self.setFocus()
+                event.accept()
+                return
             self._duplicate_drag = bool(modifiers & Qt.KeyboardModifier.AltModifier and not card.node.locked)
-            if card is not None:
-                self.state.graph.active_id = card.node.id
-                self._move_start = {node_id: (item.pos().x(), item.pos().y())
-                                    for node_id, item in self.cards.items()}
+            self.state.graph.active_id = card.node.id
+            self._move_start = {node_id: (item.pos().x(), item.pos().y())
+                                for node_id, item in self.cards.items() if not item.is_terminal}
         super().mousePressEvent(event)
-        if card is not None:
+        if self._move_start and card is not None:
             self.state.graph.active_id = card.node.id
             self.active_node_changed.emit(card.node.id)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        position = event.position().toPoint()
+        card = self._card_at(position)
+        if (event.button() == Qt.MouseButton.LeftButton and not (self._hand_mode or self._space_down)
+                and card is not None and card.label_hit_rect().contains(card.mapFromScene(self.mapToScene(position)))):
+            self._activate_card(card)
+            self.label_selected()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         position = event.position().toPoint()
         if self._panning:
             delta = position - self._pan_start
             self._pan_start = position
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            horizontal, vertical = self.horizontalScrollBar(), self.verticalScrollBar()
+            x, y = horizontal.value(), vertical.value()
+            horizontal.setValue(x - delta.x())
+            vertical.setValue(y - delta.y())
+            self._terminal_pan += QPoint(x - horizontal.value(), y - vertical.value())
             event.accept()
             return
         if self._wire is not None and self._wire_origin is not None:
@@ -480,6 +584,14 @@ class ColorNodeView(QGraphicsView):
             self.setCursor(Qt.CursorShape.OpenHandCursor if self._hand_mode else Qt.CursorShape.ArrowCursor)
             event.accept()
             return
+        if self._number_pressed and event.button() == Qt.MouseButton.LeftButton:
+            card = self.cards[self._number_pressed]
+            self._number_pressed = ""
+            if card.number_rect().contains(card.mapFromScene(self.mapToScene(event.position().toPoint()))):
+                self._activate_card(card)
+                self.toggle_selected()
+            event.accept()
+            return
         if self._wire_origin is not None:
             origin = self._wire_origin
             target = self._port_at(event.position().toPoint())
@@ -498,8 +610,9 @@ class ColorNodeView(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
         if self._move_start:
-            positions = {node_id: (item.pos().x(), item.pos().y()) for node_id, item in self.cards.items()
-                         if (item.pos().x(), item.pos().y()) != self._move_start.get(node_id)}
+            positions = {node_id: (self.cards[node_id].x(), self.cards[node_id].y())
+                         for node_id, original in self._move_start.items()
+                         if (self.cards[node_id].x(), self.cards[node_id].y()) != original}
             self._move_start = {}
             insertion = self._insert_target
             self._insert_target = None
@@ -736,6 +849,9 @@ class ColorNodeView(QGraphicsView):
         elif key == Qt.Key.Key_Space:
             self._space_down = True
             self.setCursor(Qt.CursorShape.OpenHandCursor)
+        elif key == Qt.Key.Key_H and mods == Qt.KeyboardModifier.NoModifier:
+            if not event.isAutoRepeat():
+                self.set_hand_mode(not self._hand_mode)
         elif alt and key == Qt.Key.Key_S:
             self.apply_edit("add_serial", lambda: self.state.add_serial(before=shift))
         elif alt and key == Qt.Key.Key_P:
@@ -744,7 +860,7 @@ class ColorNodeView(QGraphicsView):
             self.apply_edit("add_layer", lambda: self.state.add_branch(NodeKind.LAYER_MIXER))
         elif alt and key == Qt.Key.Key_O:
             self.apply_edit("add_outside", self.state.add_outside)
-        elif command and key == Qt.Key.Key_D:
+        elif (command or alt) and key == Qt.Key.Key_D:
             self.toggle_all() if alt else self.toggle_selected()
         elif command and key == Qt.Key.Key_Z:
             self.apply_edit("redo" if shift else "undo", self.state.redo if shift else self.state.undo)
@@ -753,7 +869,8 @@ class ColorNodeView(QGraphicsView):
         elif command and key == Qt.Key.Key_V:
             self.paste_grade()
         elif command and key == Qt.Key.Key_A:
-            self.state.select(set(self.cards), self.state.graph.active_id)
+            self.state.select({node_id for node_id, card in self.cards.items() if not card.is_terminal},
+                              self.state.graph.active_id)
             self.rebuild()
         elif key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             links = [item.connection for item in self.scene().selectedItems() if isinstance(item, ConnectionItem)]
@@ -764,6 +881,8 @@ class ColorNodeView(QGraphicsView):
                                 lambda: self.state.extract_nodes(self._editable_ids()) if alt else self.state.delete_nodes(self._editable_ids()))
         elif key == Qt.Key.Key_F2:
             self.label_selected()
+        elif key == Qt.Key.Key_E and mods == Qt.KeyboardModifier.NoModifier:
+            self.apply_edit("extract_nodes", lambda: self.state.extract_nodes(self._editable_ids()))
         elif key == Qt.Key.Key_Home:
             self.fit_graph()
         elif alt and key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
@@ -780,7 +899,8 @@ class ColorNodeView(QGraphicsView):
             if self._label is None:
                 key, mods = event.key(), event.modifiers()
                 canvas_key = key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace, Qt.Key.Key_Escape, Qt.Key.Key_F2)
-                canvas_key |= bool(mods & Qt.KeyboardModifier.AltModifier) and key in (Qt.Key.Key_S, Qt.Key.Key_P, Qt.Key.Key_L, Qt.Key.Key_O, Qt.Key.Key_Left, Qt.Key.Key_Right)
+                canvas_key |= key in (Qt.Key.Key_E, Qt.Key.Key_H) and mods == Qt.KeyboardModifier.NoModifier
+                canvas_key |= bool(mods & Qt.KeyboardModifier.AltModifier) and key in (Qt.Key.Key_S, Qt.Key.Key_P, Qt.Key.Key_L, Qt.Key.Key_O, Qt.Key.Key_D, Qt.Key.Key_Left, Qt.Key.Key_Right)
                 canvas_key |= bool(mods & Qt.KeyboardModifier.ControlModifier) and key in (Qt.Key.Key_A, Qt.Key.Key_C, Qt.Key.Key_V, Qt.Key.Key_D, Qt.Key.Key_Z)
                 if canvas_key:
                     event.accept()
@@ -796,6 +916,8 @@ class ColorNodeView(QGraphicsView):
     def focusOutEvent(self, event: Any) -> None:
         self._space_down = False
         self._panning = False
+        self._number_pressed = ""
+        self.setCursor(Qt.CursorShape.OpenHandCursor if self._hand_mode else Qt.CursorShape.ArrowCursor)
         super().focusOutEvent(event)
 
     def _action(self, menu: QMenu, key: str, title: str, callback: Callable[[], Any],
@@ -814,47 +936,113 @@ class ColorNodeView(QGraphicsView):
         return action
 
     def build_context_menu(self, position: QPoint | None = None) -> QMenu:
-        """Build once per invocation so enabled states always match selection."""
+        """Build the menu for the hit item or for the canvas background."""
         menu = QMenu(self)
         menu.setObjectName("ColorNodeContextMenu")
-        selected = self._editable_ids()
-        active = self.state.graph.nodes.get(self.state.graph.active_id)
-        has_node = bool(selected)
+        card = self._card_at(position) if position is not None else self.cards.get(self.state.graph.active_id)
+        active = card.node if card is not None else None
         if active is not None and active.kind == NodeKind.ALPHA_OUTPUT:
-            self._action(menu, "remove_alpha_output", "Remove Alpha Output", lambda: self.apply_edit("remove_alpha_output", lambda: self.state.remove_alpha_output(active.id)))
+            self._add_alpha_action(menu)
             return menu
-        if position is not None:
+        if card is None and position is not None:
             link = self._link_at(position)
-            if link is not None and self._card_at(position) is None:
-                self._action(menu, "delete_connection", "Delete Connection", lambda: self.apply_edit("disconnect", lambda: self.state.disconnect(link.connection)))
+            if link is not None:
+                edge = link.connection
+                self._action(menu, "delete_connection", "Delete Link",
+                             lambda: self.apply_edit("disconnect", lambda: self.state.disconnect(edge), edge))
                 return menu
+        if card is None or card.is_terminal:
+            self._canvas_menu(menu, position)
+        else:
+            self._node_menu(menu, card)
+        return menu
+
+    def _add_alpha_action(self, menu: QMenu) -> None:
+        alpha = next((node for node in self.state.graph.nodes.values() if node.kind == NodeKind.ALPHA_OUTPUT), None)
+        if alpha is None:
+            self._action(menu, "alpha_output", "Add Alpha Output",
+                         lambda: self.apply_edit("add_alpha_output", self.state.add_alpha_output))
+        else:
+            self._action(menu, "remove_alpha_output", "Remove Alpha Output",
+                         lambda: self.apply_edit("remove_alpha_output",
+                                                 lambda: self.state.remove_alpha_output(alpha.id)))
+
+    def _canvas_menu(self, menu: QMenu, position: QPoint | None) -> None:
+        self._action(menu, "reset_all", "Reset All Grades and Nodes", self.reset_graph)
+        menu.addSeparator()
+        self._add_node_menu(menu, position, attached=False)
+        self._add_alpha_action(menu)
+        self._action(menu, "paste_nodes", "Paste Nodes", self._paste_nodes, enabled=self._copied_graph is not None)
+        menu.addSeparator()
+        self._action(menu, "zoom_in", "Zoom In", lambda: self.set_zoom(self.transform().m11() * self.ZOOM_STEP),
+                     enabled=self.transform().m11() < self.MAX_ZOOM)
+        self._action(menu, "zoom_out", "Zoom Out", lambda: self.set_zoom(self.transform().m11() / self.ZOOM_STEP),
+                     enabled=self.transform().m11() > self.MIN_ZOOM)
+        self._action(menu, "fit", "Zoom to Window", self.fit_graph)
+        self._action(menu, "zoom_reset", "Original Size", lambda: self.set_zoom(self.ORIGINAL_ZOOM))
+        if self.toggle_display_mode is not None:
+            menu.addSeparator()
+            self._action(menu, "toggle_display_mode", "Toggle Display Mode", self.toggle_display_mode)
+        self._action(menu, "cleanup", "Cleanup Node Graph", self.cleanup_graph)
+
+    def reset_graph(self) -> None:
+        self.apply_edit("reset_all", self.state.reset_all)
+        self.fit_graph()
+
+    def cleanup_graph(self) -> None:
+        self.apply_edit("auto_layout", self.state.auto_layout)
+        self.fit_graph()
+
+    def _paste_nodes(self) -> None:
+        graph = self._copied_graph
+        if graph is not None:
+            self.apply_edit("paste_nodes", lambda: self.state.paste_nodes(graph, graph.selected_ids))
+
+    def _add_node_menu(self, menu: QMenu, position: QPoint | None = None, *, attached: bool) -> None:
         add = menu.addMenu(tr("add_node", "Add Node"))
-        self._action(add, "add_serial", "Add Serial", lambda: self.apply_edit("add_serial", self.state.add_serial), "Alt+S")
-        self._action(add, "add_before", "Add Serial Before", lambda: self.apply_edit("add_serial_before", lambda: self.state.add_serial(before=True)), "Shift+Alt+S")
-        self._action(add, "add_parallel", "Add Parallel", lambda: self.apply_edit("add_parallel", lambda: self.state.add_branch(NodeKind.PARALLEL_MIXER)), "Alt+P", has_node)
-        self._action(add, "add_layer", "Add Layer", lambda: self.apply_edit("add_layer", lambda: self.state.add_branch(NodeKind.LAYER_MIXER)), "Alt+L", has_node)
-        self._action(add, "add_outside", "Add Outside", lambda: self.apply_edit("add_outside", self.state.add_outside), "Alt+O", has_node)
-        self._action(add, "splitter_combiner", "Add Splitter Combiner", lambda: self.apply_edit("add_splitter_combiner", self.state.add_splitter_combiner), enabled=has_node)
-        add.addSeparator()
-        self._action(add, "add_key_mixer", "Add Key Mixer", lambda: self.apply_edit("add_key_mixer", self.state.add_key_mixer), enabled=has_node)
-        location = self.mapToScene(position or self.viewport().rect().center())
+        if attached:
+            self._action(add, "add_serial", "Add Serial", lambda: self.apply_edit("add_serial", self.state.add_serial), "Alt+S")
+            self._action(add, "add_before", "Add Serial Before", lambda: self.apply_edit("add_serial_before", lambda: self.state.add_serial(before=True)), "Shift+Alt+S")
+            self._action(add, "add_parallel", "Add Parallel", lambda: self.apply_edit("add_parallel", lambda: self.state.add_branch(NodeKind.PARALLEL_MIXER)), "Alt+P")
+            self._action(add, "add_layer", "Add Layer", lambda: self.apply_edit("add_layer", lambda: self.state.add_branch(NodeKind.LAYER_MIXER)), "Alt+L")
+            self._action(add, "add_outside", "Add Outside", lambda: self.apply_edit("add_outside", self.state.add_outside), "Alt+O")
+            self._action(add, "splitter_combiner", "Add Splitter Combiner", lambda: self.apply_edit("add_splitter_combiner", self.state.add_splitter_combiner))
+            self._action(add, "add_key_mixer", "Add Key Mixer", lambda: self.apply_edit("add_key_mixer", self.state.add_key_mixer),
+                         enabled=self._port(self.state.graph.active_id, "key_out") is not None)
+            combo_menu = add.addMenu(tr("window_combos", "Power Window Combos"))
+            for combo, title in (("cpw", "Circular (CPW)"), ("lpw", "Linear (LPW)"),
+                                 ("ppw", "Polygon (PPW)"), ("pcw", "Curve (PCW)")):
+                self._action(combo_menu, "combo_" + combo, title,
+                             lambda c=combo: self.apply_edit("add_window_combo",
+                                                             lambda: self.state.add_window_combo(c),
+                                                             payload={"combo": c}))
+            return
+        location = self.mapToScene(position if position is not None else self.viewport().rect().center())
         for kind, title in ((NodeKind.CORRECTOR, "Corrector"), (NodeKind.PARALLEL_MIXER, "Parallel Mixer"),
                             (NodeKind.LAYER_MIXER, "Layer Mixer"), (NodeKind.KEY_MIXER, "Key Mixer"),
                             (NodeKind.SPLITTER, "Splitter"), (NodeKind.COMBINER, "Combiner")):
             self._action(add, kind.value, title, lambda k=kind: self.apply_edit("add_node", lambda: self.state.add_node(k, location.x(), location.y())))
-        self._action(menu, "alpha_output", "Add Alpha Output", lambda: self.apply_edit("add_alpha_output", self.state.add_alpha_output))
-        menu.addSeparator()
-        self._action(menu, "label", "Node Label", self.label_selected, enabled=has_node)
+
+    def _node_menu(self, menu: QMenu, card: NodeCardItem) -> None:
+        active = card.node
+        selected = self._editable_ids()
+        if active.id not in selected:
+            selected = {active.id}
+        self._action(menu, "reset", "Reset Node Grade", lambda: self.apply_edit("reset_grade", lambda: self.state.reset_grades(selected)))
+        self._action(menu, "label", "Node Label", self.label_selected)
         colors = menu.addMenu(tr("node_color", "Node Color"))
         for name, color in (("Default", ""), ("Red", "#b55148"), ("Orange", "#ba824b"), ("Yellow", "#b5a457"),
                             ("Green", "#6c9462"), ("Cyan", "#589c9e"), ("Blue", "#587fa9"), ("Purple", "#926ba1"), ("Pink", "#b77892")):
-            self._action(colors, "color_" + name.lower(), name, lambda c=color: self.apply_edit("node_color", lambda: self.state.set_node_fields(selected, color=c)), enabled=has_node)
-        self._action(menu, "enable", "Enable Node", self.toggle_selected, "Cmd+D", has_node,
-                     active.enabled if active is not None else False)
-        self._action(menu, "lock", "Lock Node", lambda: self.apply_edit("lock_node", lambda: self.state.set_node_fields(selected, locked=not bool(active and active.locked))), enabled=has_node, checked=bool(active and active.locked))
+            self._action(colors, "color_" + name.lower(), name, lambda c=color: self.apply_edit("node_color", lambda: self.state.set_node_fields(selected, color=c)))
+        self._action(menu, "enable", "Enable Node", self.toggle_selected, "Cmd+D", checked=active.enabled)
+        self._action(menu, "lock", "Lock Node", lambda: self.apply_edit("lock_node", lambda: self.state.set_node_fields(selected, locked=not active.locked)), checked=active.locked)
+        self._add_node_menu(menu, attached=True)
+        self._action(menu, "shared", "Save as Shared Node", self._save_shared,
+                     enabled=active.kind == NodeKind.CORRECTOR and len(selected) == 1)
+        if active.shared_id:
+            self._action(menu, "local", "Convert to Corrector Node", lambda: self.apply_edit("unlink_shared", lambda: self.state.make_local(selected)))
         menu.addSeparator()
-        self._action(menu, "reset", "Reset Node Grade", lambda: self.apply_edit("reset_grade", lambda: self.state.reset_grades(selected)), enabled=has_node)
-        self._action(menu, "copy", "Copy", self.copy_grade, "Cmd+C", has_node)
+        self._action(menu, "copy", "Copy", self.copy_grade, "Cmd+C")
         paste_menu = menu.addMenu(tr("paste_domains", "Paste Domains"))
         has_clip = getattr(self, "_copied_domains", None) is not None
         for domain, title in (("grade", "Grade"), ("curves", "Curves"),
@@ -862,25 +1050,21 @@ class ColorNodeView(QGraphicsView):
                               ("effects", "Effects")):
             self._action(paste_menu, "paste_" + domain, title,
                          lambda d=(domain,): self.paste_domains(d),
-                         enabled=has_clip and has_node)
+                         enabled=has_clip)
         self._action(paste_menu, "paste_all", "All",
                      lambda: self.paste_domains(
                          ("grade", "curves", "lut", "window", "effects")),
-                     enabled=has_clip and has_node)
-        self._action(menu, "paste", "Paste", self.paste_grade, "Cmd+V", has_node and self._copied_grade is not None)
-        self._action(menu, "paste_nodes", "Paste Nodes", lambda: self.apply_edit("paste_nodes", lambda: self.state.paste_nodes(self._copied_graph, self._copied_graph.selected_ids)), enabled=self._copied_graph is not None)
-        self._action(menu, "duplicate", "Duplicate Node", lambda: self.apply_edit("duplicate_nodes", lambda: self.state.duplicate_nodes(selected)), enabled=has_node)
-        self._action(menu, "delete", "Delete Node", lambda: self.apply_edit("delete_nodes", lambda: self.state.delete_nodes(selected)), "Backspace", has_node)
-        self._action(menu, "extract", "Extract Node", lambda: self.apply_edit("extract_nodes", lambda: self.state.extract_nodes(selected)), "Alt+Backspace", has_node)
+                     enabled=has_clip)
+        self._action(menu, "paste", "Paste", self.paste_grade, "Cmd+V", self._copied_grade is not None)
+        self._action(menu, "duplicate", "Duplicate Node", lambda: self.apply_edit("duplicate_nodes", lambda: self.state.duplicate_nodes(selected)))
+        self._action(menu, "delete", "Delete Node", lambda: self.apply_edit("delete_nodes", lambda: self.state.delete_nodes(selected)), "Backspace")
+        self._action(menu, "extract", "Extract Node", lambda: self.apply_edit("extract_nodes", lambda: self.state.extract_nodes(selected)), "E")
         menu.addSeparator()
-        compound = bool(active is not None and active.kind == NodeKind.COMPOUND)
-        self._action(menu, "compound", "Create Compound Node", lambda: self.apply_edit("make_compound", lambda: self.state.make_compound(selected)), enabled=has_node)
-        self._action(menu, "show_compound", "Show Compound Node", lambda: self.compound_open_requested.emit(self.state.graph.active_id), enabled=compound)
-        self._action(menu, "decompose", "Decompose Compound Node", lambda: self.apply_edit("expand_compound", lambda: self.state.expand_compound(self.state.graph.active_id)), enabled=compound)
-        self._action(menu, "shared", "Save as Shared Node", self._save_shared, enabled=has_node)
-        if active is not None and active.shared_id:
-            self._action(menu, "local", "Convert to Corrector Node", lambda: self.apply_edit("unlink_shared", lambda: self.state.make_local(selected)))
-        if active is not None and active.kind == NodeKind.CORRECTOR:
+        self._action(menu, "compound", "Create Compound Node", lambda: self.apply_edit("make_compound", lambda: self.state.make_compound(selected)))
+        if active.kind == NodeKind.COMPOUND:
+            self._action(menu, "show_compound", "Show Compound Node", lambda: self.compound_open_requested.emit(active.id))
+            self._action(menu, "decompose", "Decompose Compound Node", lambda: self.apply_edit("expand_compound", lambda: self.state.expand_compound(active.id)))
+        if active.kind == NodeKind.CORRECTOR:
             # N02：Invert Key Input 已由图执行消费（key_in 外部 key 取反，
             # GL/CPU 同组合顺序）——菜单启用。
             self._action(menu, "key_invert", "Invert Key Input", lambda: self._set_grade_value("key_invert", not bool(active.node_options.get("key_invert"))), enabled=True, checked=bool(active.node_options.get("key_invert")))
@@ -915,19 +1099,7 @@ class ColorNodeView(QGraphicsView):
                 for value in values:
                     self._action(options, key + "_" + value.lower().replace(" ", "_"), value,
                                  lambda k=key, v=value: self._set_grade_value(k, v), checked=active.node_options.get(key, "Use Timeline") == value)
-        # N15：Resolve 窗口组合（CPW/LPW/PPW/PCW 一键 = Serial+默认形状
-        # 窗口；同一 add_window_combo 命令路径——一命令一 undo）
-        combo_menu = menu.addMenu(tr("window_combos", "Power Window Combos"))
-        for combo, title in (("cpw", "Circular (CPW)"), ("lpw", "Linear (LPW)"),
-                             ("ppw", "Polygon (PPW)"), ("pcw", "Curve (PCW)")):
-            self._action(
-                combo_menu, "combo_" + combo, title,
-                lambda c=combo: self.apply_edit(
-                    "add_window_combo",
-                    lambda c=c: self.state.add_window_combo(c),
-                    payload={"combo": c}),
-                enabled=has_node)
-        if active is not None and active.kind in (NodeKind.PARALLEL_MIXER, NodeKind.LAYER_MIXER, NodeKind.KEY_MIXER):
+        if active.kind in (NodeKind.PARALLEL_MIXER, NodeKind.LAYER_MIXER, NodeKind.KEY_MIXER):
             self._action(menu, "add_input", "Add One Input", lambda: self.apply_edit("add_input", lambda: self.state.set_node_fields({active.id}, input_count=active.input_count + 1)))
             if active.kind != NodeKind.KEY_MIXER:
                 target_kind = NodeKind.LAYER_MIXER if active.kind == NodeKind.PARALLEL_MIXER else NodeKind.PARALLEL_MIXER
@@ -945,12 +1117,8 @@ class ColorNodeView(QGraphicsView):
                             "Auto: cache forked outputs · On: always · "
                             "Off: never (within the node-cache budget)"))
         for mode in ("auto", "on", "off"):
-            self._action(cache, "cache_" + mode, mode.title(), lambda m=mode: self.apply_edit("node_cache", lambda: self.state.set_node_fields(selected, cache_mode=m)), enabled=has_node,
-                         checked=active is not None and active.cache_mode == mode)
-        menu.addSeparator()
-        self._action(menu, "cleanup", "Cleanup Node Graph", lambda: self.apply_edit("auto_layout", self.state.auto_layout))
-        self._action(menu, "fit", "Zoom to Fit", self.fit_graph)
-        return menu
+            self._action(cache, "cache_" + mode, mode.title(), lambda m=mode: self.apply_edit("node_cache", lambda: self.state.set_node_fields(selected, cache_mode=m)),
+                         checked=active.cache_mode == mode)
 
     def _save_shared(self) -> None:
         import uuid
@@ -973,10 +1141,14 @@ class ColorNodeView(QGraphicsView):
             self.apply_edit("set_node_option", lambda: self.state.set_node_fields({active.id}, node_options=options), {"name": name, "value": value})
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
-        card = self._card_at(event.pos())
-        if card is not None and not card.isSelected():
-            self.state.select({card.node.id}, card.node.id)
-            self.rebuild()
-        menu = self.build_context_menu(event.pos())
-        menu.exec(event.globalPos())
+        position = event.pos()
+        if event.reason() == QContextMenuEvent.Reason.Keyboard:
+            active = self.cards.get(self.state.graph.active_id)
+            position = self.mapFromScene(active.mapToScene(active.body_rect().center())) if active else self.viewport().rect().center()
+        card = self._card_at(position)
+        if card is not None and not card.is_terminal:
+            self._activate_card(card)
+        menu = self.build_context_menu(position)
+        menu.exec(self.viewport().mapToGlobal(position))
+        menu.deleteLater()
         event.accept()

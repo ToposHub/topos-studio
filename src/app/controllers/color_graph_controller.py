@@ -148,7 +148,9 @@ ACTION_CONTRACTS: dict[str, ActionContract] = {c.action: c for c in (
                    ("node_ids",), ()),
     # ── R03：资源命令（effects 实例 + 节点 LUT；不复用 set_grade 字典）──
     ActionContract("add_effect", "add_node_effect", IntentCategory.PARAMETER,
-                   ("node_id", "resource_id"), ("params",)),
+                   ("node_id", "resource_id"), ("params", "replace_existing")),
+    ActionContract("insert_effect_on_edge", "insert_effect_on_edge", IntentCategory.STRUCTURE,
+                   ("edge_id", "resource_id", "label", "position")),
     ActionContract("remove_effect", "remove_node_effect", IntentCategory.PARAMETER,
                    ("node_id", "instance_id"), ()),
     ActionContract("move_effect", "move_node_effect", IntentCategory.PARAMETER,
@@ -840,6 +842,7 @@ class ColorGraphPanelHost:
         self._bridge = bridge
         self._coordinator = coordinator
         self._panel: Any = None
+        self._canvas_owner: tuple[str, int, str, str | None] | None = None
         self._sync_lock = False
         self._active_node_id = ""
         self._active_handle: CorrectorHandle | None = None
@@ -852,6 +855,7 @@ class ColorGraphPanelHost:
     def attach_panel(self, panel: Any) -> None:
         """连接面板信号（Qt 信号 duck-typed）。"""
         self._panel = panel
+        self._canvas_owner = None
         view = getattr(panel, "view", None)
         if view is not None:
             view.project_history_enabled = True
@@ -886,17 +890,24 @@ class ColorGraphPanelHost:
             return
         if self._panel is None:
             return
-        path = [node_id for _, node_id in getattr(self._panel, "_parents", ())]
+        owner = (projection.session_id, projection.session_generation, projection.scope, projection.scope_owner_id)
+        same_canvas = owner == self._canvas_owner
+        path = [node_id for _, node_id in getattr(self._panel, "_parents", ())] if same_canvas else []
         previous_active = self._active_node_id
         self._sync_lock = True
         try:
             draft = graph_payload_to_draft(projection.graph)
-            self._panel.load_graph(draft, scope=projection.scope)
+            self._panel.load_graph(draft, scope=projection.scope, fit=not same_canvas)
+            opened = 0
             for node_id in path:
                 current = self._panel.view.state.graph.nodes.get(node_id)
                 if current is None or current.children is None:
                     break
-                self._panel.open_compound(node_id)
+                self._panel.open_compound(node_id, fit=False)
+                opened += 1
+            if opened != len(path):
+                self._panel.view.fit_graph()
+            self._canvas_owner = owner
             current = self._panel.view.state.graph
             new_correctors = [key for key in projection.id_mapping.values()
                               if key in current.nodes and current.nodes[key].kind.value == "corrector"]
@@ -1017,18 +1028,25 @@ class ColorGraphPanelHost:
         targets = sorted(selected or ({anchor} if anchor else set()))
         added = set(after_nodes) - ids
         removed = ids - set(after_nodes) if after is not None else set()
-        if action in {"add_serial", "add_serial_before"}:
-            before = action == "add_serial_before"
-            # Keyboard Shift+Alt+S currently uses the same action name.
-            if added and after is not None:
-                before = any(edge.src_node in added and edge.dst_node == anchor
-                             for edge in after.connections)
-            args = {"active_node_id": anchor, "before": before}
-        elif action == "add_window_combo":
-            # N15：一键 = Serial + 默认形状窗口（combo 从 UI envelope 透传；
-            # active_node_id 同 add_serial 锚点规则）
-            args = {"active_node_id": anchor,
-                    "combo": str(args.get("combo") or "cpw")}
+        if action in {"add_serial", "add_serial_before", "add_window_combo"}:
+            if action == "add_window_combo":
+                args = {"active_node_id": anchor, "combo": str(args.get("combo") or "cpw")}
+            else:
+                before = action == "add_serial_before"
+                # Shift+Alt+S shares the normal serial action in the canvas.
+                if added and after is not None:
+                    before = any(edge.src_node in added and edge.dst_node == anchor
+                                 for edge in after.connections)
+                args = {"active_node_id": anchor, "before": before}
+            if len(added) == 1:
+                node = after_nodes[next(iter(added))]
+                args["position"] = (node.x, node.y)
+                saved = (graph.get("ui_state") or {}).get("positions", {})
+                args["positions"] = {
+                    key: (item.x, item.y) for key, item in after_nodes.items()
+                    if key in ids and (key not in saved or
+                                       (item.x, item.y) != (authoritative.nodes[key].x, authoritative.nodes[key].y))
+                }
         elif action == "add_parallel":
             args = {"branch_origin_id": anchor}
         elif action == "add_layer":
@@ -1045,12 +1063,15 @@ class ColorGraphPanelHost:
         elif action == "connect":
             if is_dataclass(raw):
                 args = asdict(raw)
+                args.pop("edge_id", None)
             aliases = {"image_in": "image", "image_out": "image",
                        "red": "r", "green": "g", "blue": "b"}
             for key in ("src_port", "dst_port"):
                 args[key] = aliases.get(args.get(key), args.get(key))
             destination = authoritative.nodes.get(args.get("dst_node"))
             port = str(args.get("dst_port") or "")
+            if destination is not None and destination.kind.value == "alpha_output" and port == "key_in":
+                args["dst_port"] = "key"
             if destination is not None and port.startswith(("image_in_", "key_in_")):
                 index = int(port.rsplit("_", 1)[-1])
                 if destination.kind.value == "parallel_mixer":
@@ -2030,6 +2051,8 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
         if kind_value == "combiner":
             return {"r": "red", "g": "green", "b": "blue",
                     "image": "image_out"}.get(port, port)
+        if kind_value == "alpha_output" and port == "key":
+            return "key_in"
         # source/output/alpha/corrector/compound
         if port == "image":
             return "image_out" if out else "image_in"
@@ -2049,6 +2072,7 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
             dst_port=_port_name(str(edge.get("dst_node")),
                                 str(edge.get("dst_port")), False,
                                 str(edge.get("slot_id") or "")),
+            edge_id=str(edge.get("edge_id") or ""),
         ))
 
     display_number = 1
