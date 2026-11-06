@@ -7,13 +7,16 @@ evaluate grades, or own GPU resources.  The host supplies optional thumbnails.
 
 from __future__ import annotations
 
+from functools import cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import (
-    QColor, QFont, QLinearGradient, QPainter, QPainterPath,
+    QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath,
     QPainterPathStroker, QPen, QPixmap, QPolygonF,
 )
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QGraphicsItem, QGraphicsObject, QGraphicsPathItem,
     QGraphicsSceneHoverEvent, QGraphicsSceneMouseEvent,
@@ -29,6 +32,7 @@ if TYPE_CHECKING:
 
 COLORS: dict[str, str] = {
     "background": "#28282e",
+    "grid": "#222227",
     "card": "#333337",
     "card_bottom": "#252529",
     "border": "#101012",
@@ -37,6 +41,7 @@ COLORS: dict[str, str] = {
     "key": "#26a9e0",
     "wire": "#77777e",
     "key_wire": "#168fc5",
+    "wire_selection": "#e9923d",
     "text": "#e4e4e6",
     "muted": "#96969c",
 }
@@ -56,6 +61,11 @@ def _font(size: int = 10) -> QFont:
     font = QFont()
     font.setPixelSize(size)
     return font
+
+
+@cache
+def _badge_svg(name: str) -> QSvgRenderer:
+    return QSvgRenderer(str(Path(__file__).with_name("node_badges") / f"{name}.svg"))
 
 
 class NodePortItem(QGraphicsItem):
@@ -135,6 +145,9 @@ class NodePortItem(QGraphicsItem):
 class NodeCardItem(QGraphicsObject):
     """A compact corrector, mixer, channel router, or terminal card."""
 
+    CORRECTOR_WIDTH = 76.0
+    IMAGE_PORT_Y = 16.0
+
     moved = pyqtSignal(str)
     activated = pyqtSignal(str)
     opened = pyqtSignal(str)
@@ -153,11 +166,6 @@ class NodeCardItem(QGraphicsObject):
         self._initializing = True
         self._hovered = False
         self.resource_drop_hover = False
-        self.setFlags(
-            QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
-            | QGraphicsItem.GraphicsItemFlag.ItemIsMovable
-            | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
-        )
         self.setAcceptHoverEvents(True)
         self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
         self.setZValue(1.0)
@@ -169,27 +177,47 @@ class NodeCardItem(QGraphicsObject):
     def type(self) -> int:
         return int(QGraphicsItem.UserType) + 410
 
+    @property
+    def is_terminal(self) -> bool:
+        return _kind(self.node) in _TERMINALS
+
     def body_rect(self) -> QRectF:
         kind = _kind(self.node)
         if kind in _TERMINALS:
-            return QRectF(0.0, 0.0, 14.0, 26.0)
+            return QRectF(0.0, 0.0, 14.0, 24.0)
         if kind in _MIXERS:
             # Keep mixer inputs distinct even for a large branch count.
             return QRectF(0.0, 0.0, 28.0, max(50.0, 14.0 * self.node.input_count + 10.0))
         if kind in _CHANNELS:
             return QRectF(0.0, 0.0, 32.0, 64.0)
-        return QRectF(0.0, 0.0, 64.0, 56.0)
+        return QRectF(0.0, 0.0, self.CORRECTOR_WIDTH, 56.0)
+
+    @classmethod
+    def corrector_origin_on_wire(cls, point: QPointF) -> QPointF:
+        return point - QPointF(cls.CORRECTOR_WIDTH / 2.0, cls.IMAGE_PORT_Y)
 
     def boundingRect(self) -> QRectF:
         rect = self.body_rect().adjusted(-10.0, -2.0, 10.0, 2.0)
-        if self.node.label:
-            rect = rect.united(QRectF(-60.0, -20.0, 184.0, 18.0))
-        return rect
+        return rect.united(self.label_hit_rect())
 
     def shape(self) -> QPainterPath:
         path = QPainterPath()
         path.addRoundedRect(self.body_rect(), 2.0, 2.0)
+        label_rect = self.label_hit_rect()
+        if not label_rect.isEmpty():
+            path.addRect(label_rect)
         return path
+
+    def label_hit_rect(self) -> QRectF:
+        if self.is_terminal or not self.node.label:
+            return QRectF()
+        width = min(184, QFontMetrics(_font()).horizontalAdvance(self.node.label) + 6)
+        return QRectF(self.body_rect().center().x() - width / 2.0, -19.0, width, 17.0)
+
+    def number_rect(self) -> QRectF:
+        if _kind(self.node) not in ("corrector", "compound"):
+            return QRectF()
+        return QRectF(9.0, 40.0, 18.0, 15.0)
 
     def _build_ports(self) -> None:
         for name, (direction, data_type) in self._port_spec.items():
@@ -209,12 +237,22 @@ class NodeCardItem(QGraphicsObject):
         for direction in ("in", "out"):
             group = [port for port in self.ports.values() if port.direction == direction]
             for index, port in enumerate(group):
-                x = -8.0 if direction == "in" else rect.width() + 8.0
+                x = -4.0 if direction == "in" else rect.width() + 4.0
                 if kind in _MIXERS or kind in _CHANNELS or len(group) > 2:
                     y = rect.height() * (index + 1.0) / (len(group) + 1.0)
                 else:
-                    y = 40.0 if port.data_type == "key" else 16.0
+                    y = 40.0 if port.data_type == "key" else self.IMAGE_PORT_Y
                 port.setPos(x, y)
+
+    def set_canvas_zoom(self, zoom: float) -> None:
+        if self.is_terminal:
+            self.setScale(1.0 / zoom)
+            return
+        right = self.body_rect().right()
+        gap = 5.0 / zoom
+        for port in self.ports.values():
+            port.setScale(1.0 / zoom)
+            port.setX(-gap if port.direction == "in" else right + gap)
 
     def refresh(
         self,
@@ -233,11 +271,19 @@ class NodeCardItem(QGraphicsObject):
             self._port_spec = dict(ports)
             self._build_ports()
         self._position_ports()
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, not node.locked)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, not self.is_terminal)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, not self.is_terminal and not node.locked)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, not self.is_terminal)
         self.setCursor(
-            Qt.CursorShape.ArrowCursor if node.locked else Qt.CursorShape.OpenHandCursor
+            Qt.CursorShape.ArrowCursor if node.locked or self.is_terminal else Qt.CursorShape.OpenHandCursor
         )
-        self.setToolTip(node.label or I18N.tr("color_nodes." + _kind(node), _kind(node).replace("_", " ").title()))
+        kind = _kind(node)
+        key = "alpha_terminal" if kind == "alpha_output" else kind
+        title = I18N.tr("color_nodes." + key, kind.replace("_", " ").title())
+        self.setToolTip(title if self.is_terminal else node.label or title)
+        if self.is_terminal:
+            for port in self.ports.values():
+                port.setToolTip(title)
         self.update()
 
     def set_thumbnail(self, pixmap: QPixmap | None) -> None:
@@ -263,7 +309,7 @@ class NodeCardItem(QGraphicsObject):
         painter.drawRoundedRect(rect, 2.0, 2.0)
         if self.resource_drop_hover:
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(QColor(C.ORANGE), 2.0))
+            painter.setPen(QPen(QColor(COLORS["wire_selection"]), 2.0))
             painter.drawRoundedRect(rect.adjusted(0.8, 0.8, -0.8, -0.8), 2.0, 2.0)
         elif self.isSelected():
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -274,7 +320,7 @@ class NodeCardItem(QGraphicsObject):
             painter.setPen(QPen(QColor("#65656a"), 0.8))
             painter.drawRoundedRect(rect.adjusted(0.7, 0.7, -0.7, -0.7), 2.0, 2.0)
         painter.setFont(_font())
-        if self.node.label:
+        if self.node.label and kind not in _TERMINALS:
             painter.setPen(QColor(COLORS["text"]))
             label = painter.fontMetrics().elidedText(
                 self.node.label, Qt.TextElideMode.ElideRight, 178,
@@ -292,7 +338,7 @@ class NodeCardItem(QGraphicsObject):
         painter.restore()
 
     def _paint_corrector(self, painter: QPainter, rect: QRectF, kind: str) -> None:
-        image_rect = QRectF(4.0, 4.0, 56.0, 32.0)
+        image_rect = QRectF(4.0, 4.0, rect.width() - 8.0, 36.0)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor("#1d1d21"))
         painter.drawRect(image_rect)
@@ -310,50 +356,39 @@ class NodeCardItem(QGraphicsObject):
             painter.setPen(QPen(QColor("#56565d"), 1.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             for dx in (-7.0, 0.0, 7.0):
-                painter.drawEllipse(QPointF(32.0 + dx, 20.0), 6.5, 6.5)
+                painter.drawEllipse(image_rect.center() + QPointF(dx, 0.0), 6.5, 6.5)
             painter.setPen(QPen(QColor("#707078"), 1.0))
-            painter.drawLine(QPointF(22.0, 27.0), QPointF(42.0, 13.0))
+            center = image_rect.center()
+            painter.drawLine(center + QPointF(-10.0, 7.0), center + QPointF(10.0, -7.0))
         if not self.node.enabled:
             painter.fillRect(image_rect, QColor(15, 15, 18, 165))
-        footer = QRectF(4.0, 38.0, 56.0, 14.0)
+        footer = QRectF(4.0, 41.0, rect.width() - 8.0, 13.0)
         if self.node.color and QColor.isValidColor(self.node.color):
             color = QColor(self.node.color)
             color.setAlpha(115)
             painter.fillRect(footer, color)
-        painter.setFont(_font(10))
+        painter.setFont(_font(9))
         painter.setPen(QColor(COLORS["text"] if self.node.enabled else COLORS["muted"]))
-        painter.drawText(QRectF(9.0, 38.0, 18.0, 15.0), Qt.AlignmentFlag.AlignVCenter, f"{self.node.number:02d}")
+        painter.drawText(self.number_rect(), Qt.AlignmentFlag.AlignVCenter, f"{self.node.number:02d}")
         if not self.node.enabled:
             painter.setPen(QPen(QColor(COLORS["muted"]), 1.0))
-            painter.drawLine(QPointF(7.0, 48.0), QPointF(27.0, 42.0))
+            painter.drawLine(QPointF(7.0, 50.0), QPointF(23.0, 44.0))
         painter.setPen(QPen(QColor("#c4c4ca"), 0.8))
         if kind == "compound":
-            self._paint_diamond(painter, QPointF(38.0, 44.0), 4.5)
-            self._paint_diamond(painter, QPointF(42.0, 47.0), 4.5)
+            self._paint_diamond(painter, QPointF(38.0, 46.0), 4.5)
+            self._paint_diamond(painter, QPointF(42.0, 49.0), 4.5)
         else:
-            indicators = self.node.tool_indicators
-            capacity = 2 if self.node.locked or self.node.shared_id else 3
-            visible = indicators[:capacity]
-            overflow = len(indicators) > capacity
-            for index, tool in enumerate(visible):
-                painter.save()
-                painter.translate(30.0 + index * 9.0, 40.0)
-                painter.setOpacity(1.0 if self.node.enabled else 0.45)
-                if overflow and index == capacity - 1:
-                    for x in (1.0, 3.5, 6.0):
-                        painter.drawPoint(QPointF(x, 4.0))
-                else:
-                    self._paint_tool_indicator(painter, tool)
-                painter.restore()
+            self._paint_tool_badges(painter, footer)
+        status_x = footer.right() - 7.0
         if self.node.locked:
-            painter.drawRoundedRect(QRectF(49.0, 43.0, 6.0, 5.0), 0.5, 0.5)
-            painter.drawArc(QRectF(50.0, 39.0, 4.0, 7.0), 0, 180 * 16)
+            painter.drawRoundedRect(QRectF(status_x, 45.0, 6.0, 5.0), 0.5, 0.5)
+            painter.drawArc(QRectF(status_x + 1.0, 41.0, 4.0, 7.0), 0, 180 * 16)
         elif self.node.shared_id:
-            painter.drawRoundedRect(QRectF(47.0, 42.0, 6.0, 4.0), 2.0, 2.0)
-            painter.drawRoundedRect(QRectF(51.0, 45.0, 6.0, 4.0), 2.0, 2.0)
+            painter.drawRoundedRect(QRectF(status_x - 2.0, 44.0, 6.0, 4.0), 2.0, 2.0)
+            painter.drawRoundedRect(QRectF(status_x + 1.0, 47.0, 6.0, 4.0), 2.0, 2.0)
         if self.node.cache_mode == "on":
             # N06：底部蓝条 = 策略指示（cache: on），不承担命中语义
-            painter.fillRect(QRectF(4.0, rect.height() - 2.8, 56.0, 1.0), QColor("#329fd6"))
+            painter.fillRect(QRectF(4.0, rect.height() - 2.8, rect.width() - 8.0, 1.0), QColor("#329fd6"))
         if getattr(self, "_cache_hit_active", False):
             # N06：命中徽标 = 右上角圆点——**仅实际命中**后显示
             # （上一帧真实命中事件驱动；与策略蓝条严格区分）
@@ -378,50 +413,20 @@ class NodeCardItem(QGraphicsObject):
             text += "\n\n" + I18N.tr("color_nodes.applied_tools", "Applied tools") + ":\n" + "\n".join(labels)
         super().setToolTip(text)
 
-    @staticmethod
-    def _paint_tool_indicator(painter: QPainter, tool: str) -> None:
-        """Compact monochrome tool silhouettes in an 8×9 footer cell."""
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        if tool == "primary":
-            for x, handle_y in ((1.0, 2.0), (4.0, 6.0), (7.0, 3.5)):
-                painter.drawLine(QPointF(x, 0.0), QPointF(x, 8.0))
-                painter.drawLine(QPointF(x - 1.0, handle_y), QPointF(x + 1.0, handle_y))
-        elif tool == "curves":
-            painter.drawLine(QPointF(0.0, 8.0), QPointF(0.0, 0.0))
-            painter.drawLine(QPointF(0.0, 8.0), QPointF(8.0, 8.0))
-            path = QPainterPath(QPointF(1.0, 7.0))
-            path.cubicTo(5.0, 7.0, 3.0, 1.0, 7.0, 1.0)
-            painter.drawPath(path)
-        elif tool == "color_mapping":
-            painter.drawPolygon(QPolygonF([QPointF(4.0, 0.0), QPointF(8.0, 3.0),
-                QPointF(6.5, 8.0), QPointF(1.5, 8.0), QPointF(0.0, 3.0)]))
-            painter.drawLine(QPointF(0.0, 3.0), QPointF(6.5, 8.0))
-            painter.drawLine(QPointF(8.0, 3.0), QPointF(1.5, 8.0))
-        elif tool == "qualifier":
-            painter.drawLine(QPointF(1.0, 7.0), QPointF(7.0, 1.0))
-            painter.drawLine(QPointF(4.0, 1.0), QPointF(7.0, 4.0))
-            painter.drawLine(QPointF(0.0, 8.0), QPointF(3.0, 7.0))
-        elif tool == "window":
-            painter.drawEllipse(QRectF(1.0, 1.0, 6.0, 6.0))
-            for x, y in ((0.0, 0.0), (6.0, 0.0), (0.0, 6.0), (6.0, 6.0)):
-                painter.drawRect(QRectF(x, y, 2.0, 2.0))
-        elif tool == "blur":
-            painter.drawPolygon(QPolygonF([QPointF(0.0, 7.0), QPointF(4.0, 0.0), QPointF(8.0, 7.0)]))
-            painter.drawLine(QPointF(4.0, 0.0), QPointF(4.0, 7.0))
-        elif tool == "lut":
-            painter.drawRect(QRectF(1.0, 1.0, 6.0, 6.0))
-            painter.drawLine(QPointF(1.0, 1.0), QPointF(7.0, 7.0))
-            painter.drawLine(QPointF(1.0, 7.0), QPointF(7.0, 1.0))
-        elif tool == "ofx":
-            painter.setFont(_font(7))
-            painter.drawText(QRectF(0.0, -1.0, 9.0, 10.0), Qt.AlignmentFlag.AlignCenter, "fx")
-        elif tool == "key":
-            painter.drawEllipse(QRectF(0.0, 0.0, 4.0, 4.0))
-            painter.drawLine(QPointF(3.0, 3.0), QPointF(8.0, 8.0))
-            painter.drawLine(QPointF(6.0, 6.0), QPointF(8.0, 4.0))
-        elif tool == "keyframes":
-            painter.drawPolygon(QPolygonF([QPointF(4.0, 0.0), QPointF(8.0, 4.0),
-                QPointF(4.0, 8.0), QPointF(0.0, 4.0)]))
+    def _paint_tool_badges(self, painter: QPainter, footer: QRectF) -> None:
+        badges = tuple(tool for tool in self.node.tool_indicators if tool in TOOL_LABELS)
+        capacity = 3 if self.node.locked or self.node.shared_id else 4
+        if len(badges) > capacity:
+            badges = (*badges[:capacity - 1], "overflow")
+        size, spacing = 10.5, 11.5
+        y = footer.center().y() - size / 2.0
+        painter.save()
+        if not self.node.enabled:
+            painter.setOpacity(painter.opacity() * 0.45)
+        for index, name in enumerate(badges):
+            bounds = QRectF(26.0 + index * spacing, y, size, size)
+            _badge_svg(name).render(painter, bounds)
+        painter.restore()
 
     @staticmethod
     def _paint_diamond(painter: QPainter, center: QPointF, radius: float) -> None:
@@ -530,11 +535,12 @@ class ConnectionItem(QGraphicsPathItem):
 
     def _update_pen(self) -> None:
         color = QColor(COLORS["key_wire" if self.data_type == "key" else "wire"])
-        if self._highlighted:
-            color = QColor(COLORS["image"] if self.data_type == "image" else COLORS["key"])
-        elif self._hovered or self.isSelected():
+        if self._highlighted or self.isSelected():
+            color = QColor(COLORS["wire_selection"])
+        elif self._hovered:
             color = color.lighter(160)
-        pen = QPen(color, 1.8)
+        pen = QPen(color, 1.6)
+        pen.setCosmetic(True)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         self.setPen(pen)
 

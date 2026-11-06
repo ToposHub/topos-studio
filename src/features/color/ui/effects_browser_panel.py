@@ -6,11 +6,13 @@ is an intent, so this panel can be used before command/render integration exists
 from __future__ import annotations
 
 from copy import deepcopy
+from functools import cache
 import math
+from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QModelIndex, QMimeData, QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QDrag, QIcon, QPainter, QPen, QPixmap
+from PyQt6.QtCore import QModelIndex, QMimeData, QRect, QSignalBlocker, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QDrag, QIcon, QPaintEvent, QPainter, QPen, QResizeEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QListView, QListWidget, QListWidgetItem, QMenu, QPushButton,
@@ -19,12 +21,15 @@ from PyQt6.QtWidgets import (
 )
 
 from src.features.color.ui.node_resource_mime import resource_mime_data
-from src.shared.assets.icon_manager import icon_grid, icon_list, icon_search
+from src.shared.assets.icon_manager import get_icon, icon_grid, icon_list, icon_search
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, TOOLBAR_FLAT_BTN_STYLE
 from src.shared.ui.widgets.color_picker_control import ColorPickerControl, qcolor_to_linear_rgba
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
+
+
+_EFFECT_ICON_DIR = Path(__file__).with_name('effect_icons')
 
 
 def _tr(key: str, fallback: str) -> str:
@@ -39,36 +44,62 @@ def _number(value: Any, fallback: float) -> float:
     return result if math.isfinite(result) else fallback
 
 
-def _effect_icon(entry: dict[str, Any]) -> QIcon:
-    """Small monochrome tool glyph based on the effect's function."""
-    pixmap = QPixmap(36, 30)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(QColor(C.TEXT_LABEL), 1.3))
-    name = str(entry.get('name') or '').casefold()
-    if 'aces' in name:
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, 'ACES')
-    elif 'grain' in name or 'noise' in name:
-        for x, y in ((8, 8), (17, 6), (27, 11), (12, 18), (23, 23), (30, 19)):
-            painter.drawEllipse(x - 1, y - 1, 2, 2)
-    elif 'blur' in name or 'glow' in name:
-        for x, y, radius in ((12, 14, 7), (23, 14, 7), (18, 18, 7)):
-            painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
-    elif 'transform' in name or 'space' in name:
-        painter.drawRect(6, 8, 12, 12)
-        painter.drawRect(18, 11, 12, 12)
-        painter.drawLine(13, 14, 24, 17)
-    elif 'color' in name or 'contrast' in name:
-        for x, y in ((10, 14), (24, 11), (19, 22)):
-            painter.drawEllipse(x - 4, y - 4, 8, 8)
-    else:
-        painter.drawRoundedRect(7, 7, 22, 16, 2, 2)
-        painter.drawLine(9, 19, 15, 12)
-        painter.drawLine(15, 12, 21, 16)
-        painter.drawLine(21, 16, 27, 9)
-    painter.end()
-    return QIcon(pixmap)
+@cache
+def _effect_icon_paths() -> dict[str, Path]:
+    return {path.stem: path for path in _EFFECT_ICON_DIR.glob('*.svg')}
+
+
+def _effect_icon(resource_id: str) -> QIcon:
+    """Match the catalog's stable ID independently of the display language."""
+    plugin_id = resource_id.partition('@')[0]
+    path = _effect_icon_paths().get(plugin_id, _EFFECT_ICON_DIR / 'generic.svg')
+    return QIcon(str(path))
+
+
+class _EffectsTabs(QTabWidget):
+    """Draw one continuous header behind the tabs and corner actions."""
+
+    HEADER_HEIGHT = 36
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setDocumentMode(True)
+        self.tabBar().setDrawBase(False)
+        self.tabBar().setFixedHeight(self.HEADER_HEIGHT)
+        self.tabBar().setExpanding(False)
+        self.setStyleSheet(f"""
+            QTabWidget::pane {{ border: 0; }}
+            QTabBar {{ background: transparent; border: 0; }}
+            QTabBar::tab {{
+                background: transparent; color: {C.TEXT_LABEL};
+                border: 0; border-bottom: 3px solid transparent;
+                border-radius: 0; margin: 0; padding: 0 15px;
+                height: {self.HEADER_HEIGHT - 3}px; font-size: 12px;
+            }}
+            QTabBar::tab:first, QTabBar::tab:last, QTabBar::tab:only-one {{
+                border-radius: 0;
+            }}
+            QTabBar::tab:hover {{ color: {C.TEXT_PRIMARY}; background: {C.BG_ACTIVE}; }}
+            QTabBar::tab:selected {{
+                color: {C.TEXT_PRIMARY}; font-weight: bold;
+                background: transparent; border-bottom: 3px solid {C.ACCENT_SURFACE};
+            }}
+            QTabBar::tab:disabled {{ color: {C.TEXT_HINT}; }}
+        """)
+        self._header_rule = QFrame(self)
+        self._header_rule.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._header_rule.setStyleSheet(f'background: {C.PANEL_DIVIDER}; border: 0;')
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._header_rule.setGeometry(0, self.HEADER_HEIGHT - 1, self.width(), 1)
+        self._header_rule.raise_()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.fillRect(0, 0, self.width(), self.HEADER_HEIGHT - 1, QColor(C.BG_INPUT))
+        painter.end()
 
 
 class _ResourceList(QListWidget):
@@ -113,6 +144,8 @@ class _ResolveEffectDelegate(QStyledItemDelegate):
                              '⌄' if collapsed else '⌃')
         else:
             row = rect.adjusted(5, 2, -6, -2)
+            entry = index.data(Qt.ItemDataRole.UserRole)
+            available = isinstance(entry, dict) and entry.get('available', True)
             selected = bool(option.state & QStyle.StateFlag.State_Selected)
             painter.setPen(QPen(QColor(C.TEXT_LABEL if selected else C.PANEL_DIVIDER), 1))
             painter.setBrush(QColor(C.BG_ACTIVE if selected else C.BG_PANEL))
@@ -122,8 +155,9 @@ class _ResolveEffectDelegate(QStyledItemDelegate):
             painter.drawLine(well.right(), well.top(), well.right(), well.bottom())
             icon = index.data(Qt.ItemDataRole.DecorationRole)
             if isinstance(icon, QIcon):
-                icon.paint(painter, well.adjusted(8, 3, -8, -3))
-            painter.setPen(QColor(C.TEXT_PRIMARY if index.data(Qt.ItemDataRole.UserRole) else C.TEXT_HINT))
+                icon.paint(painter, well.adjusted(8, 3, -8, -3), mode=(
+                    QIcon.Mode.Normal if available else QIcon.Mode.Disabled))
+            painter.setPen(QColor(C.TEXT_PRIMARY if available else C.TEXT_HINT))
             painter.drawText(row.adjusted(53, 0, -5, 0),
                              Qt.AlignmentFlag.AlignVCenter,
                              str(index.data(Qt.ItemDataRole.DisplayRole) or ''))
@@ -149,21 +183,34 @@ class ColorEffectsBrowser(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        self.tabs.setStyleSheet(
-            f'QTabWidget::pane {{border:0; border-top:1px solid {C.PANEL_DIVIDER};}}'
-            'QTabBar::tab {padding:7px 13px; border:0; background:transparent;}'
-            f'QTabBar::tab:selected {{border-bottom:2px solid {C.ACCENT_SURFACE};}}')
+        self.tabs = _EffectsTabs()
         corner = QWidget()
+        corner.setObjectName('EffectsHeaderActions')
+        corner.setStyleSheet(
+            f'#EffectsHeaderActions {{ background: {C.BG_INPUT}; border: 0; }}')
         corner_bar = QHBoxLayout(corner)
-        corner_bar.setContentsMargins(0, 0, 3, 0)
+        corner_bar.setContentsMargins(0, 0, 0, 0)
         corner_bar.setSpacing(0)
         self.search_button = self._tool('⌕', _tr('search_effects', 'Search Effects'))
         self.search_button.setText('')
-        self.search_button.setIcon(icon_search())
+        self.search_button.setIcon(icon_search(C.TEXT_LABEL))
         self.search_button.setCheckable(True)
         self.more_button = self._tool('⋯', _tr('effect_options', 'Effect options'))
+        self.more_button.setText('')
+        self.more_button.setIcon(get_icon('fa5s.ellipsis-h', color=C.TEXT_LABEL))
+        corner.setFixedHeight(self.tabs.HEADER_HEIGHT - 1)
+        for button in (self.search_button, self.more_button):
+            button.setFixedSize(32, self.tabs.HEADER_HEIGHT - 1)
+            button.setIconSize(QSize(14, 14))
+            button.setStyleSheet(f"""
+                QToolButton {{
+                    background: transparent; border: 0; border-radius: 0;
+                    border-left: 1px solid {C.PANEL_DIVIDER}; padding: 0;
+                }}
+                QToolButton:hover, QToolButton:checked {{ background: {C.BG_ACTIVE}; }}
+                QToolButton:pressed {{ background: {C.BG_BUTTON_PRESS}; }}
+                QToolButton:focus {{ border-bottom: 2px solid {C.ACCENT_SURFACE}; }}
+            """)
         corner_bar.addWidget(self.search_button)
         corner_bar.addWidget(self.more_button)
         self.tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
@@ -213,7 +260,7 @@ class ColorEffectsBrowser(QWidget):
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setWordWrap(True)
         library.addWidget(self.empty_label)
-        self.description_label = QLabel(_tr('effects_hint', 'Drag an effect onto a node, or select an effect to add it.'))
+        self.description_label = QLabel(_tr('effects_hint', 'Drag an effect onto a node or an image connection.'))
         self.description_label.setWordWrap(True)
         self.description_label.setMinimumHeight(34)
         self.description_label.setStyleSheet(f'color:{C.TEXT_HINT};')
@@ -252,7 +299,7 @@ class ColorEffectsBrowser(QWidget):
         self.view_button.toggled.connect(self._set_grid)
         self.resource_list.currentItemChanged.connect(self._selection_changed)
         self.resource_list.itemClicked.connect(self._category_clicked)
-        self.resource_list.itemDoubleClicked.connect(lambda _item: self._activate())
+        self.resource_list.itemDoubleClicked.connect(self._double_clicked)
         self.resource_list.customContextMenuRequested.connect(self._resource_menu)
         self.add_button.clicked.connect(self._activate)
         self.search_button.toggled.connect(self._toggle_search)
@@ -271,8 +318,13 @@ class ColorEffectsBrowser(QWidget):
         return button
 
     def _toggle_search(self, visible: bool) -> None:
+        if not visible and self.tabs.currentWidget() is self.settings_scroll:
+            with QSignalBlocker(self.search_button):
+                self.search_button.setChecked(True)
+            visible = True
         self.search_row.setVisible(visible)
         if visible:
+            self.tabs.setCurrentWidget(self.library_page)
             self.search_edit.setFocus()
         else:
             self.search_edit.clear()
@@ -296,7 +348,8 @@ class ColorEffectsBrowser(QWidget):
     def set_resources(self, entries: list[dict[str, Any]]) -> None:
         self._resources = [deepcopy(entry) for entry in entries
                            if isinstance(entry, dict) and isinstance(entry.get('id'), str)
-                           and entry.get('kind', 'effect') == 'effect']
+                           and entry.get('kind', 'effect') == 'effect'
+                           and entry.get('disabled_reason') != 'color_backend_not_wired']
         for entry in self._resources:
             entry['kind'] = 'effect'
         current_category = self.category_combo.currentData()
@@ -379,11 +432,17 @@ class ColorEffectsBrowser(QWidget):
         self.tabs.setTabEnabled(1, bool(self._instances))
         self._syncing = False
 
+    def show_settings(self) -> None:
+        if self.tabs.isTabEnabled(1):
+            self.tabs.setCurrentWidget(self.settings_scroll)
+
     def _set_grid(self, enabled: bool) -> None:
         self._grid = enabled
         self.resource_list.setViewMode(QListView.ViewMode.IconMode if enabled else QListView.ViewMode.ListMode)
         self.resource_list.setResizeMode(QListView.ResizeMode.Adjust)
         self.resource_list.setMovement(QListView.Movement.Static)
+        # QListView's view and movement setters reset the drag mode.
+        self.resource_list.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         self.resource_list.setWordWrap(enabled)
         self.resource_list.setGridSize(QSize(132, 72) if enabled else QSize())
         self.view_button.setIcon(icon_list() if enabled else icon_grid())
@@ -421,12 +480,11 @@ class ColorEffectsBrowser(QWidget):
             if not self._grid and entry_category in self._collapsed and not query:
                 continue
             name = str(entry.get('name', entry['id']))
-            item = QListWidgetItem(_effect_icon(entry), ('★  ' if entry['id'] in self._favorites else '') + name)
+            item = QListWidgetItem(_effect_icon(entry['id']), ('★  ' if entry['id'] in self._favorites else '') + name)
             item.setSizeHint(QSize(0, 36))
             item.setData(Qt.ItemDataRole.UserRole, entry)
             item.setToolTip(name + '\n' + entry_category + '\n' + str(entry.get('description', '')))
             if not entry.get('available', True):
-                item.setForeground(QColor(C.TEXT_HINT))
                 item.setToolTip(item.toolTip() + '\n' + _tr('unavailable', 'Unavailable'))
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
             self.resource_list.addItem(item)
@@ -449,13 +507,15 @@ class ColorEffectsBrowser(QWidget):
         entry = item.data(Qt.ItemDataRole.UserRole) if item else None
         self.add_button.setEnabled(bool(self._editable and entry and entry.get('available', True)))
         self.description_label.setText(str(entry.get('description') or entry.get('category', '')) if entry else
-                                       _tr('effects_hint', 'Drag an effect onto a node, or select an effect to add it.'))
+                                       _tr('effects_hint', 'Drag an effect onto a node or an image connection.'))
+
+    def _double_clicked(self, _item: QListWidgetItem) -> None:
+        if not self._production_mode:
+            self._activate()
 
     def _activate(self) -> None:
         item = self.resource_list.currentItem()
         if self.add_button.isEnabled() and item is not None:
-            self.tabs.setTabEnabled(1, True)
-            self.tabs.setCurrentIndex(1)
             self.resource_activated.emit(deepcopy(item.data(Qt.ItemDataRole.UserRole)))
 
     def _resource_menu(self, position: Any) -> None:

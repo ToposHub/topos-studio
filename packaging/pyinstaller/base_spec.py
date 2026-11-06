@@ -220,6 +220,14 @@ def generate_analysis(
                 _sub_locales.relative_to(PROJECT_ROOT).as_posix(),
             ))
     datas += [
+        (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "effect_icons"),
+            "src/features/color/ui/effect_icons",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "node_badges"),
+            "src/features/color/ui/node_badges",
+        ),
         # Node usage help documents (per-node bilingual Markdown).
         (
             os.path.join(PROJECT_ROOT, "src", "shared", "node_help", "docs"),

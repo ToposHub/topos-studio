@@ -7,11 +7,10 @@
 
 - **typed target 在意图接收瞬间捕获**：`(session_id, generation, scope,
   scope_owner_id, stack_id, compound_path, node_id)` + 意图时刻的
-  ``expected_graph_revision``；不在异步完成后重新读活动节点。双击目标
-  = 信号到达时刻的活动 Corrector；拖动目标 = drop 传入的 node_id；多选
-  时只操作 active/落点节点（批量操作须另设命令，不悄悄全应用）。
-- **提交**：经 ``ColorGraphIntentNormalizer`` 规范化为 GraphIntent（9 个
-  资源 action 契约），走 ``bridge.submit`` → ApplyColorGraphCommand →
+  ``expected_graph_revision``；不在异步完成后重新读活动节点。菜单添加使用
+  活动 Corrector；拖放使用落点的 node_id 或 edge_id。
+- **提交**：经 ``ColorGraphIntentNormalizer`` 规范化为 GraphIntent，
+  走 ``bridge.submit`` → ApplyColorGraphCommand →
   工程 command 栈（一次操作一次 undo）；reject 不入历史、不递增 revision。
 - **水合**：ack 后从 ``coordinator.last_ack``（权威投影）派生浏览器状态；
   reject 后按权威投影恢复（不留 UI 成功状态）。
@@ -87,6 +86,8 @@ class ColorResourceController(QObject):
         self.panel.scope_changed.connect(lambda _s: self.refresh_target())
         self.panel.view.scene_refreshed.connect(lambda: self.refresh_target())
         self.panel.view.resource_drop_requested.connect(self.drop)
+        self.panel.view.effect_wire_drop_requested.connect(self.drop_effect_on_wire)
+        self.panel.view.effect_wire_drop_enabled = True
         self.import_feedback.connect(self._on_import_feedback)
         source_preview = getattr(host, 'color_node_source_preview', None)
         source_signal = getattr(source_preview, 'source_thumbnail_changed', None)
@@ -99,6 +100,7 @@ class ColorResourceController(QObject):
         if catalog_signal is not None:
             catalog_signal.connect(self.refresh_catalog)
         self.refresh_catalog()
+        self.refresh_target()
 
     # ── typed target（意图瞬间捕获） ───────────────────────────────
     def _coordinator(self) -> Any:
@@ -107,7 +109,7 @@ class ColorResourceController(QObject):
     def _capture_target(self, node_id: str) -> dict[str, Any] | None:
         """意图接收瞬间的 typed target + expected revision（不延后读取）。"""
         coordinator = self._coordinator()
-        if coordinator is None or not node_id:
+        if coordinator is None:
             return None
         return {
             'session_id': coordinator.session_id,
@@ -137,10 +139,13 @@ class ColorResourceController(QObject):
             stack_id=target['stack_id'],
             expected_graph_revision=target['expected_graph_revision'],
             session_generation=target['generation'])
+        args = dict(arguments)
+        if node_id:
+            args['node_id'] = node_id
         envelope = {
             'scope': target['scope'],
             'compound_path': list(target['compound_path']),
-            'payload': {'arguments': dict(arguments, node_id=node_id)},
+            'payload': {'arguments': args},
         }
         try:
             intent = normalizer.normalize(action, envelope)
@@ -195,9 +200,8 @@ class ColorResourceController(QObject):
                                          'message': entry.get('disabled_reason', ''),
                                          'target': self._capture_target(node_id)})
             return
-        self._submit('add_effect', node_id,
-                     {'resource_id': entry.get('id', ''),
-                      'params': self._default_params(entry.get('id', ''))})
+        if self._submit('add_effect', node_id, {'resource_id': entry.get('id', '')}):
+            self.effects.show_settings()
 
     def activate_resource(self, entry: object) -> None:
         if not isinstance(entry, dict):
@@ -224,15 +228,13 @@ class ColorResourceController(QObject):
             return
         self._submit('set_lut', node_id, {'lut_ref': lut_ref, 'strength': 1.0})
 
-    def _default_params(self, resource_id: str) -> dict[str, Any] | None:
-        """默认参数由 service 按 schema 构造（此处不传，避免复制当前值）。"""
-        return None
-
     def drop(self, node_id: str, token: object) -> None:
         """拖放落点即目标（不读活动节点）。"""
-        if not isinstance(token, dict):
+        if not isinstance(token, dict) or not self.panel.view.resource_drop_enabled:
             return
-        node = self._authoritative_node(node_id)
+        self._end_gesture()
+        path = tuple(item[1] for item in self.panel._parents)
+        node = self._authoritative_node(node_id, path)
         if node is None or node.get('node_type') not in ('corrector', 'shared_corrector'):
             self.resource_rejected.emit({'action': 'drop', 'code': 'node_not_effectable',
                                          'message': '落点不是 Corrector', 'target': None})
@@ -240,6 +242,23 @@ class ColorResourceController(QObject):
         if node.get('params', {}).get('locked'):
             self.resource_rejected.emit({'action': 'drop', 'code': 'node_locked',
                                          'message': '节点已锁定', 'target': None})
+            return
+        kind = token.get('kind')
+        resource_id = token.get('resource_id', '')
+        if kind == 'effect':
+            entry = self._effect_drop_entry(resource_id, node_id)
+            if entry is not None and self._submit(
+                'add_effect', node_id, {'resource_id': resource_id, 'replace_existing': True},
+            ):
+                self.effects.show_settings()
+            return
+        if kind != 'lut':
+            return
+        entry = self._catalog_entry('lut', resource_id)
+        if entry is None:
+            self.resource_rejected.emit({'action': 'set_lut', 'code': 'resource_unknown',
+                                         'message': f'未知 LUT 资源: {resource_id}',
+                                         'target': self._capture_target(node_id)})
             return
         # 落点命中后同步选中（与 preview 行为一致，供面板/底栏显示）。
         view = self.panel.view
@@ -252,24 +271,31 @@ class ColorResourceController(QObject):
             view._syncing = False
         view._selection_changed()
         self._target_node_id = node_id
-        kind = token.get('kind')
-        resource_id = token.get('resource_id', '')
-        if kind == 'effect':
-            entry = self._catalog_entry('effect', resource_id)
-            if entry is None:
-                self.resource_rejected.emit({'action': 'add_effect', 'code': 'resource_unknown',
-                                             'message': f'未知效果资源: {resource_id}',
-                                             'target': self._capture_target(node_id)})
-                return
-            self.activate_effect(entry)
-        elif kind == 'lut':
-            entry = self._catalog_entry('lut', resource_id)
-            if entry is None:
-                self.resource_rejected.emit({'action': 'set_lut', 'code': 'resource_unknown',
-                                             'message': f'未知 LUT 资源: {resource_id}',
-                                             'target': self._capture_target(node_id)})
-                return
-            self._apply_lut(entry)
+        self._apply_lut(entry)
+
+    def drop_effect_on_wire(self, edge_id: str, token: object,
+                            position: tuple[float, float]) -> None:
+        if (not self.panel.view.resource_drop_enabled or not isinstance(token, dict)
+                or token.get('kind') != 'effect'):
+            return
+        self._end_gesture()
+        entry = self._effect_drop_entry(token.get('resource_id', ''), '')
+        if entry is not None and self._submit('insert_effect_on_edge', '', {
+            'edge_id': edge_id, 'resource_id': entry['id'],
+            'label': str(entry.get('name') or entry['id']), 'position': position,
+        }):
+            self.effects.show_settings()
+
+    def _effect_drop_entry(self, resource_id: str, node_id: str) -> dict[str, Any] | None:
+        entry = self._catalog_entry('effect', resource_id)
+        if entry is not None and entry.get('available', True):
+            return entry
+        self.resource_rejected.emit({
+            'action': 'drop', 'code': 'resource_unknown' if entry is None else 'resource_unavailable',
+            'message': resource_id if entry is None else entry.get('disabled_reason', ''),
+            'target': self._capture_target(node_id),
+        })
+        return None
 
     def edit(self, action: str, payload: object) -> None:
         """浏览器实例编辑信号 → 资源命令（实例归属由 service 验证）。"""
@@ -474,11 +500,16 @@ class ColorResourceController(QObject):
             item[1] for item in getattr(self.panel, '_parents', ()))
         node = self._authoritative_node(self._target_node_id,
                                         self._active_compound_path)
+        coordinator = self._coordinator()
+        drop_enabled = bool(coordinator and coordinator.last_ack
+                            and coordinator.last_ack.scope == self.panel.scope
+                            and getattr(self.graph_host, '_bound_stack_id', '')
+                            and self.panel.scope != 'timeline')
         editable = bool(node is not None
                         and node.get('node_type') in ('corrector', 'shared_corrector')
                         and not node.get('params', {}).get('locked')
-                        and self.panel.scope != 'timeline')
-        self.panel.view.resource_drop_enabled = self.panel.scope != 'timeline'
+                        and drop_enabled)
+        self.panel.view.resource_drop_enabled = drop_enabled
         label = ''
         if node is not None:
             label = f"{node.get('number', 0):02d}" if node.get('number') else ''

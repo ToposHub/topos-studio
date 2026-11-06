@@ -59,6 +59,7 @@ class ConnectionDraft:
     src_port: str
     dst_node: str
     dst_port: str
+    edge_id: str = field(default="", compare=False)
 
 
 @dataclass
@@ -342,14 +343,15 @@ class NodeEditorState:
     def _serial(graph: GraphDraft, before: bool = False) -> NodeDraft:
         active = graph.nodes.get(graph.active_id)
         if active is None:
+            active = next((n for n in graph.nodes.values() if n.kind == NodeKind.CORRECTOR), None)
+        if active is None:
             active = next((n for n in graph.nodes.values() if n.kind == NodeKind.SOURCE), None)
-        x, y = (active.x, active.y) if active is not None else (0.0, 0.0)
-        node = NodeEditorState._new_node(graph, NodeKind.CORRECTOR,
-                                        x - 130.0 if before else x + 130.0, y)
+        incoming = (active is not None and "image_in" in node_ports(active)
+                    and (before or active.kind == NodeKind.OUTPUT))
+        x, y = NodeEditorState._serial_position(graph, active, incoming)
+        node = NodeEditorState._new_node(graph, NodeKind.CORRECTOR, x, y)
         if active is not None:
-            # Output terminals accept insertion on their input; source terminals on output.
-            incoming = before or active.kind in {NodeKind.OUTPUT, NodeKind.ALPHA_OUTPUT}
-            if incoming and "image_in" in node_ports(active):
+            if incoming:
                 edges = [c for c in graph.connections if c.dst_node == active.id and c.dst_port == "image_in"]
                 graph.connections = [c for c in graph.connections if c not in edges]
                 graph.connections.extend(ConnectionDraft(c.src_node, c.src_port, node.id, "image_in") for c in edges)
@@ -361,6 +363,38 @@ class NodeEditorState:
                 graph.connections.extend(ConnectionDraft(node.id, "image_out", c.dst_node, c.dst_port) for c in edges)
         NodeEditorState._activate(graph, node.id)
         return node
+
+    @staticmethod
+    def _serial_position(graph: GraphDraft, anchor: NodeDraft | None, before: bool) -> tuple[float, float]:
+        if anchor is None:
+            return 0.0, 0.0
+        direction = -1.0 if before else 1.0
+        spacing, clearance = 130.0, 96.0
+        slot = direction * anchor.x + spacing
+        row = sorted(
+            (node for node in graph.nodes.values()
+             if node.kind not in _TERMINALS and abs(node.y - anchor.y) < 56.0
+             and direction * node.x > slot - clearance),
+            key=lambda node: direction * node.x,
+        )
+        moves: list[tuple[NodeDraft, float]] = []
+        previous = slot
+        for node in row:
+            if direction * node.x >= previous + clearance:
+                break
+            if node.locked:
+                # Keep the row intact when a locked card blocks the insertion.
+                for neighbor in row:
+                    if direction * neighbor.x >= slot + clearance:
+                        break
+                    if direction * neighbor.x > slot - clearance:
+                        slot = direction * neighbor.x + spacing
+                return direction * slot, anchor.y
+            previous += spacing
+            moves.append((node, direction * previous))
+        for node, x in moves:
+            node.x = x
+        return direction * slot, anchor.y
 
     def add_window_combo(self, combo: str) -> str:
         """N15 草图侧：Serial + 默认形状窗口（与 service op 同默认表）。"""

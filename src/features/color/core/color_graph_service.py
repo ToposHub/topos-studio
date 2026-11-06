@@ -16,6 +16,7 @@ N08 规范化 intent 的统一入口（B01 ACTION_CONTRACTS.command 分派）。
 from __future__ import annotations
 
 import copy
+import math
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -171,7 +172,10 @@ class ColorGraphService:
 
     def op_insert_corrector(self, graph: ColorGraphData,
                             active_node_id: str | None = None,
-                            before: bool = False) -> GraphEditResult:
+                            before: bool = False, *,
+                            position: Sequence[float] | None = None,
+                            positions: Mapping[str, Sequence[float]] | None = None,
+                            ) -> GraphEditResult:
         """在 active 节点之后（或之前）插入空 Corrector（serial 命令）。
 
         策略：anchor 是 Corrector 时按其 image 边拆入；anchor 是
@@ -188,24 +192,43 @@ class ColorGraphService:
                 return self._fail(graph, "edge_endpoint_missing",
                                   f"{anchor_id} 无上游 image 边，无法 before 插入",
                                   node_id=anchor_id)
-            src, dst = edge.src_node, anchor_id
         else:
             edge = self._downstream_edge(graph, anchor_id)
             if edge is None:
                 return self._fail(graph, "edge_endpoint_missing",
                                   f"{anchor_id} 无下游 image 边，无法 after 插入",
                                   node_id=anchor_id)
-            src, dst = anchor_id, edge.dst_node
 
+        return self._insert_corrector_on_edge(graph, edge, position, positions)
+
+    def _insert_corrector_on_edge(
+        self, graph: ColorGraphData, edge: ColorEdgeData,
+        position: Sequence[float] | None = None,
+        positions: Mapping[str, Sequence[float]] | None = None,
+        *, label: str = "",
+    ) -> GraphEditResult:
         new_id = self._id_factory()
         node = ColorNodeData(node_id=new_id, node_type=NodeType.CORRECTOR.value,
-                             params={"key_source_mode": "node_input"})
-        kept = tuple(e for e in graph.edges
-                     if not (e.src_node == src and e.dst_node == dst
-                             and e.src_port == "image" and e.dst_port == "image"))
-        edges = kept + (_make_edge(src, "image", new_id, "image"),
-                        _make_edge(new_id, "image", dst, "image"))
+                             params={"key_source_mode": "node_input"}, label=label)
+        kept = tuple(e for e in graph.edges if e.edge_id != edge.edge_id)
+        downstream = _make_edge(new_id, "image", edge.dst_node, edge.dst_port, edge.slot_id)
+        if any(e.dst_node == edge.dst_node and e.dst_port == edge.dst_port
+               and e.slot_id == edge.slot_id for e in kept):
+            # A legacy mixer can share a slot ID. The compiler orders ties by edge ID.
+            downstream = replace(edge, src_node=new_id, src_port="image")
+        edges = kept + (
+            _make_edge(edge.src_node, edge.src_port, new_id, "image"),
+            downstream,
+        )
         candidate = replace(graph, nodes=graph.nodes + (node,), edges=edges)
+        layout = dict(positions or {})
+        if position is not None:
+            layout[new_id] = position
+        if layout:
+            updated = self.op_update_layout(candidate, layout)
+            if not updated.ok:
+                return GraphEditResult(False, graph, updated.diagnostics)
+            candidate = updated.graph
         return self._commit(graph, candidate, {new_id: new_id})
 
     # ═══ N10：节点 grade 域关键帧（实例 params；CORRECTOR 专属）═══
@@ -358,7 +381,10 @@ class ColorGraphService:
 
     def op_add_window_combo(self, graph: ColorGraphData,
                             active_node_id: str | None = None,
-                            combo: str = "cpw") -> GraphEditResult:
+                            combo: str = "cpw", *,
+                            position: Sequence[float] | None = None,
+                            positions: Mapping[str, Sequence[float]] | None = None,
+                            ) -> GraphEditResult:
         """N15：一键 = 新建 Serial Corrector + 挂默认形状窗口（一命令一 undo）。
 
         - 插入位置与 ``insert_corrector`` 同策略（anchor 后串入）；
@@ -373,7 +399,7 @@ class ColorGraphService:
             return self._fail(graph, "illegal_param_key",
                               f"未知窗口组合: {combo}（cpw/lpw/ppw/pcw）")
         inserted = self.op_insert_corrector(graph, active_node_id,
-                                            before=False)
+                                            position=position, positions=positions)
         if not inserted.ok:
             return inserted
         new_id = next(iter(inserted.id_mapping.values()))
@@ -1379,13 +1405,25 @@ class ColorGraphService:
         return self.op_reset_corrector_parameters(graph, ids)
 
     def op_reset_graph(self, graph: ColorGraphData) -> GraphEditResult:
-        """整图重置：保留 Source/Output 与 scope owner 绑定。"""
-        base = ColorGraphData.create_serial()
+        """Restore a neutral Corrector while retaining the graph's boundaries."""
+        source = self._node(graph, graph.source_node_id)
+        output = self._node(graph, graph.output_node_id)
+        if source is None or output is None:
+            return self._fail(graph, "terminal_count", "重置需要 Source 与 Output")
+        node_id = self._id_factory()
+        corrector = ColorNodeData(node_id=node_id, node_type=NodeType.CORRECTOR.value,
+                                  params={"key_source_mode": "node_input"})
+        positions = {key: pos for key, pos in graph.ui_state.positions.items()
+                     if key in (source.node_id, output.node_id)}
+        positions[node_id] = (0.0, 0.0)
+        ui = replace(graph.ui_state, positions=positions, selected_ids=(node_id,),
+                     active_node_id=node_id, layout_revision=graph.ui_state.layout_revision + 1)
         candidate = replace(
-            base, graph_id=graph.graph_id,
-            graph_revision=graph.graph_revision + 1,
-            working_color_context=dict(graph.working_color_context))
-        return GraphEditResult(True, candidate, {})
+            graph, nodes=(source, corrector, output),
+            edges=(_make_edge(source.node_id, "image", node_id, "image"),
+                   _make_edge(node_id, "image", output.node_id, "image")),
+            alpha_output_node_id=None, shared_definitions=(), ui_state=ui)
+        return self._commit(graph, candidate, {node_id: node_id})
 
     # ── 布局/元信息（不动 render revision） ──
 
@@ -1397,6 +1435,10 @@ class ColorGraphService:
             if self._node(graph, node_id) is None:
                 return self._fail(graph, "node_not_found",
                                   f"布局引用不存在节点: {node_id}")
+            if (not isinstance(pos, Sequence) or len(pos) != 2
+                    or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in pos)):
+                return self._fail(graph, "illegal_param_key",
+                                  f"布局坐标必须是两个有限数值: {node_id}", node_id=node_id)
             merged[node_id] = (float(pos[0]), float(pos[1]))
         ui = replace(graph.ui_state,
                      positions=merged,
@@ -1618,9 +1660,9 @@ class ColorGraphService:
         return -1
 
     def op_add_node_effect(self, graph: ColorGraphData, node_id: str,
-                           resource_id: str, params: Any = None) -> GraphEditResult:
-        """添加效果实例（同资源允许多实例；默认值来自版本化 schema，
-        不复制其他节点当前值）。"""
+                           resource_id: str, params: Any = None, *,
+                           replace_existing: bool = False) -> GraphEditResult:
+        """Add an effect, or replace the first slot on a Library drop."""
         target = self._resource_target(graph, node_id)
         if isinstance(target, GraphEditResult):
             return target
@@ -1634,14 +1676,39 @@ class ColorGraphService:
         if failure is not None or merged is None:
             return failure  # type: ignore[return-value]
         plugins = self._node_plugins(target)
-        plugins.append({
+        instance = {
             "instance_id": self._id_factory(),
             "plugin_id": resource_id,
             "params": merged,
             "enabled": True,
             "type": self._effect_plugin_type(resource_id),
-        })
-        return self._replace_node_payload(graph, target, plugins)
+        }
+        if replace_existing:
+            plugins[:1] = [instance]
+        else:
+            plugins.append(instance)
+        result = self._replace_node_payload(graph, target, plugins)
+        if replace_existing and result.ok:
+            return replace(result, id_mapping={node_id: node_id})
+        return result
+
+    def op_insert_effect_on_edge(
+        self, graph: ColorGraphData, edge_id: str, resource_id: str,
+        label: str, position: Sequence[float],
+    ) -> GraphEditResult:
+        """Split the exact image wire and attach the effect in one graph edit."""
+        edge = next((edge for edge in graph.edges if edge.edge_id == edge_id), None)
+        if edge is None or _port_kind_of(graph, edge) is not PortKind.IMAGE:
+            return self._fail(graph, "edge_endpoint_missing", "滤镜只能插入图像连线")
+        inserted = self._insert_corrector_on_edge(graph, edge, position, label=label)
+        if not inserted.ok:
+            return inserted
+        node_id = next(iter(inserted.id_mapping.values()))
+        applied = self.op_add_node_effect(inserted.graph, node_id, resource_id)
+        if not applied.ok:
+            return GraphEditResult(False, graph, applied.diagnostics)
+        return replace(applied, graph=replace(applied.graph, graph_revision=graph.graph_revision + 1),
+                       id_mapping=inserted.id_mapping)
 
     def _effect_plugin_type(self, resource_id: str) -> str:
         """实例 type 字段与 legacy Layer.add_plugin 对齐（dctl/ai）。

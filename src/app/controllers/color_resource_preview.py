@@ -250,9 +250,9 @@ class ColorResourcePreview(QObject):
             view._syncing = False
         view._selection_changed()
         self.refresh_target()
-        self.activate(entry)
+        self.activate(entry, replace_existing=True)
 
-    def activate(self, entry: object) -> None:
+    def activate(self, entry: object, *, replace_existing: bool = False) -> None:
         draft = self._current_draft()
         if draft is None or not isinstance(entry, dict):
             return
@@ -261,13 +261,17 @@ class ColorResourcePreview(QObject):
             return
         if resource['kind'] == 'effect':
             metadata = deepcopy(resource.get('parameters', []))
-            draft['instances'].append({'instance_id': uuid4().hex, 'resource_id': resource['id'],
-                                       'name': resource['name'], 'enabled': True,
-                                       'parameters': metadata,
-                                       'params': {p['var_name']: deepcopy(p.get('default')) for p in metadata
-                                                  if isinstance(p, dict) and 'var_name' in p}})
+            instance = {'instance_id': uuid4().hex, 'resource_id': resource['id'],
+                        'name': resource['name'], 'enabled': True,
+                        'parameters': metadata,
+                        'params': {p['var_name']: deepcopy(p.get('default')) for p in metadata
+                                   if isinstance(p, dict) and 'var_name' in p}}
+            if replace_existing:
+                draft['instances'][:1] = [instance]
+            else:
+                draft['instances'].append(instance)
             self.effects.set_instances(draft['instances'])
-            self.effects.tabs.setCurrentIndex(1)
+            self.effects.show_settings()
         else:
             draft['lut_id'] = resource['id']
             draft['strength'] = 1.0

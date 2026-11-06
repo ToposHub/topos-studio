@@ -30,6 +30,30 @@ def test_serial_insert_before_and_undo_is_a_single_gesture() -> None:
     assert second in state.graph.nodes
 
 
+def test_serial_insertion_clears_a_nearly_aligned_card_without_moving_its_row() -> None:
+    state = NodeEditorState()
+    first = state.graph.active_id
+    second = state.add_serial()
+    state.move_nodes({second: (140.0, 2.0)})
+    state.select({first}, first)
+    inserted = state.add_serial()
+    assert state.graph.nodes[inserted].y == state.graph.nodes[first].y
+    assert state.graph.nodes[second].y == 2.0
+    assert state.graph.nodes[second].x - state.graph.nodes[inserted].x >= 96.0
+
+
+def test_serial_before_on_pass_through_graph_places_node_after_source() -> None:
+    graph = NodeEditorState.default_graph()
+    del graph.nodes[graph.active_id]
+    graph.active_id = ""
+    graph.selected_ids.clear()
+    graph.connections = [image_edge("source", "output")]
+    state = NodeEditorState(graph)
+    inserted = state.add_serial(before=True)
+    assert state.graph.nodes[inserted].x > state.graph.nodes["source"].x
+    assert image_edge("source", inserted) in state.graph.connections
+
+
 @pytest.mark.parametrize("combo,kind,point_count", [
     ("cpw", "circle", None),
     ("lpw", "rect", None),

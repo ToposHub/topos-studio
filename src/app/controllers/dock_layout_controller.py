@@ -320,6 +320,7 @@ class DockLayoutMixin:
         # visible UI. Backend migration is tracked in the Color Nodes plan.
         self.dock_layers = create_custom_dock(I18N.tr("color_nodes.nodes", "Nodes"), self.color_node_panel, "dockLayers")
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_layers)
+        self.color_node_panel.view.toggle_display_mode = self._toggle_color_node_display_mode
 
         # Tracker 面板：按达芬奇曲线窗口提供足够横向空间，默认隐藏
         self.dock_tracker = create_custom_dock(I18N.tr("panel.tracker", "Tracker"), self.tracker_panel, "dockTracker")
@@ -2179,6 +2180,9 @@ class DockLayoutMixin:
         self._save_current_layout_to_store("Color")
         self.config_manager.save_config()
         logger.info("Migrated legacy color remapping docks to Color Mapping")
+
+    def _toggle_color_node_display_mode(self) -> None:
+        self.dock_viewport.setVisible(self.dock_viewport.isHidden())
 
     def _migrate_color_resource_dock_layout(self, force: bool = False) -> None:
         """One-time upgrade; later launches preserve custom/floating arrangements."""

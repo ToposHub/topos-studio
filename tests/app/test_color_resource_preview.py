@@ -118,6 +118,7 @@ def test_real_qt_drag_highlights_and_drops_without_graph_edit(qtbot: Any) -> Non
     move = QDragMoveEvent(point, Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     QApplication.sendEvent(view.viewport(), move)
     assert card.resource_drop_hover
+    assert not view.viewport().grab().isNull()  # Paint the hovered card before dropping.
     drop = QDropEvent(QPointF(point), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     QApplication.sendEvent(view.viewport(), drop)
     assert drop.isAccepted()

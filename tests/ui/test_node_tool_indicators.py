@@ -72,3 +72,20 @@ def test_footer_tooltip_keeps_complete_tool_list_when_source_preview_replaces_te
     assert "LUT" in card.toolTip()
     card.setToolTip(card.toolTip())
     assert card.toolTip().count("Applied tools") == 1
+
+
+def test_every_footer_badge_renders_at_node_scale(qapp) -> None:
+    from PyQt6.QtGui import QImage, QPainter
+
+    from src.features.color.ui.node_editor_items import _badge_svg
+    from src.features.color.ui.node_tool_indicators import TOOL_LABELS
+
+    for name in (*TOOL_LABELS, "overflow"):
+        svg = _badge_svg(name)
+        assert svg.isValid(), name
+        image = QImage(14, 14, QImage.Format.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        svg.render(painter)
+        painter.end()
+        assert any(image.pixelColor(x, y).alpha() > 127 for x in range(14) for y in range(14)), name
