@@ -193,6 +193,10 @@ ACTION_CONTRACTS: dict[str, ActionContract] = {c.action: c for c in (
     ActionContract("move_keyframe", "move_node_keyframe",
                    IntentCategory.PARAMETER,
                    ("node_id", "param", "from_frame", "to_frame"), ()),
+    # KF-03：关键帧批处理（多节点/多轨道/多帧一次事务；关键帧面板宿主
+    # 翻译 EditRequest 后经 submit_action 直发）
+    ActionContract("batch_edit_keyframes", "batch_edit_keyframes",
+                   IntentCategory.PARAMETER, ("edits",), ()),
     ActionContract("undo", "graph_undo", IntentCategory.HISTORY, ()),
     ActionContract("redo", "graph_redo", IntentCategory.HISTORY, ()),
     ActionContract("reset_grades", "reset_graph_parameters", IntentCategory.RESET, ()),
@@ -990,6 +994,42 @@ class ColorGraphPanelHost:
                     handler(combo, self._active_node_id)
                 except Exception:  # noqa: BLE001 — UI 激活失败不回滚已提交图命令
                     logger.warning("Window combo UI activation failed", exc_info=True)
+
+    def submit_action(self, action: str, arguments: Mapping[str, Any]) -> bool:
+        """KF-03：宿主面板（关键帧）直发领域 intent。
+
+        与 ``_on_edit_requested`` 同一规范化/提交/再投影路径，但参数由
+        调用方显式给定（跳过 UI envelope 补全——宿主已按权威图解析）。
+        失败（会话未就绪/领域 reject/revision 过期）返回 False，工程
+        无部分写入；再投影仍会执行以恢复权威快照。
+        """
+        if self._sync_lock:
+            return False  # hydrate 装载期间不回流 intent
+        if self._coordinator.state not in (GraphSessionState.READY,
+                                           GraphSessionState.PENDING):
+            return False
+        try:
+            normalizer = ColorGraphIntentNormalizer(
+                session_id=self._coordinator.session_id,
+                scope_owner_id=self._coordinator.scope_owner_id,
+                stack_id=self._bridge._stack_id(),
+                expected_graph_revision=(
+                    self._coordinator.last_ack.graph_revision
+                    if self._coordinator.last_ack else None),
+                session_generation=self._coordinator.generation)
+            intent = normalizer.normalize(action, {
+                "scope": self._coordinator.scope,
+                "compound_path": (),
+                "payload": {"arguments": dict(arguments)},
+            })
+        except EnvelopeError as exc:
+            logger.warning("Color keyframes intent rejected (%s): %s",
+                           action, exc)
+            return False
+        accepted = self._bridge.submit(intent)
+        if self._coordinator.last_ack is not None:
+            self.on_projection(self._coordinator.last_ack)
+        return accepted
 
     def _complete_ui_arguments(self, action: str, envelope: Any) -> Mapping[str, Any]:
         """Translate presentation deltas to explicit service arguments.
@@ -1857,6 +1897,15 @@ class ColorGraphAppHost:
 
     def begin_grade_gesture(self, transaction_id: str) -> None:
         self._adapter.begin_gesture(transaction_id)
+
+    def submit_keyframe_batch(self, edits: list[dict]) -> bool:
+        """KF-03：关键帧面板批处理命令（一次用户动作一个历史条目）。"""
+        return self._host.submit_action("batch_edit_keyframes",
+                                        {"edits": list(edits)})
+
+    def submit_panel_action(self, action: str, arguments: dict) -> bool:
+        """KF-03：关键帧面板节点级命令（lock/enable 等既有命令复用）。"""
+        return self._host.submit_action(action, arguments)
 
     def grade_gesture_open(self) -> bool:
         return bool(getattr(self._adapter, "_gesture_open", False))

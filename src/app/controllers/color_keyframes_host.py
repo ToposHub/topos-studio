@@ -38,6 +38,9 @@ from src.features.color.ui.color_keyframes_view_state import (
 
 logger = logging.getLogger(__name__)
 
+#: 值采样哨兵：字段不在载荷中（与合法的 None/0 值区分）。
+_UNRESOLVED = object()
+
 
 def _corrector_types() -> tuple:
     from src.shared.project.color_graph import NodeType
@@ -85,6 +88,11 @@ def build_keyframes_snapshot(
     """
     rows: list[Track] = []
     first_row = ""
+    from src.features.color.core.keyframe_tracks import (
+        GRADE_TRACK_FIELDS,
+        QUALIFIER_TRACK_FIELDS,
+        qualifier_track_name,
+    )
     for node in getattr(graph, "nodes", ()) or ():
         try:
             if node.known_type() not in _corrector_types():
@@ -94,9 +102,9 @@ def build_keyframes_snapshot(
         node_id = node.node_id
         payload = node_layer_payload(node, include_lut_cache=False) or {}
         shapes = payload.get("mask_shapes") or ()
-        leaves: list[Track] = []
-        for name, track_data in sorted(
-                (payload.get("grade_keyframes") or {}).items()):
+        # 既有轨道 → 标记（图域 mappingproxy 与 legacy dict 并存）
+        existing: dict[str, tuple[Any, list[Marker]]] = {}
+        for name, track_data in (payload.get("grade_keyframes") or {}).items():
             # 图域轨道经 freeze_params 是 mappingproxy，不能用 dict 判型
             if not isinstance(track_data, Mapping):
                 continue
@@ -113,15 +121,32 @@ def build_keyframes_snapshot(
                     continue  # 畸形关键帧不阻断其余投影
                 markers.append(Marker(int(decoded.frame), decoded.kind,
                                       decoded.start, decoded.end))
-            if not markers:
-                continue  # 空轨道不出行（与图命令删空即移除语义一致）
-            leaf_id = f"node:{node_id}|{name}"
-            leaves.append(Track(
-                id=leaf_id,
-                label=_leaf_label(address.domain, address.field, shapes),
-                scope="color",
-                markers=tuple(markers),
-            ))
+            existing[str(name)] = (address, markers)
+
+        def _leaf(domain: str, track_name: str, field: str,
+                  markers: list[Marker]) -> Track:
+            return Track(id=f"node:{node_id}|{track_name}",
+                         label=_leaf_label(domain, field, shapes),
+                         scope="color", markers=tuple(markers))
+
+        leaves: list[Track] = []
+        # grade/qualifier：登记字段全量常驻（空轨道无标记）——否则首个
+        # 关键帧无处可加（面板只对树内叶轨发请求）。窗口域仍按既有
+        # 轨道投影（写入走 Layer 域，KF-05/KF-07 开放）。
+        for spec in GRADE_TRACK_FIELDS:
+            _, markers = existing.get(spec.name, (None, []))
+            if not markers and spec.name in existing:
+                continue  # 有轨道无有效标记（畸形载荷）：不显示空行
+            leaves.append(_leaf("grade", spec.name, spec.name, markers))
+        for spec in QUALIFIER_TRACK_FIELDS:
+            name = qualifier_track_name(spec.name)
+            _, markers = existing.get(name, (None, []))
+            if not markers and name in existing:
+                continue
+            leaves.append(_leaf("qualifier", name, spec.name, markers))
+        for name, (address, markers) in existing.items():
+            if address.domain == "window" and markers:
+                leaves.append(_leaf("window", name, address.field, markers))
         row_id = f"node:{node_id}"
         label = str(getattr(node, "label", "") or payload.get("label")
                     or f"{tr('corrector', 'Corrector')} {len(rows) + 1}")
@@ -147,7 +172,13 @@ def build_keyframes_snapshot(
 
 
 class ColorKeyframesHost:
-    """关键帧面板宿主：投影回填 + 播放头同步 + 只读意图收口。"""
+    """关键帧面板宿主：投影回填 + 播放头同步 + 编辑意图 → 领域命令。
+
+    KF-03：写入口经 ``submit_batch``（batch_edit_keyframes 批处理命令）
+    与 ``submit_action``（lock/enable 既有命令）开放；同一用户动作一个
+    历史条目。``submit_batch``/``submit_action`` 缺席（未注入）时保持
+    KF-02 只读语义：核对会话身份后丢弃并记录日志。
+    """
 
     def __init__(
         self,
@@ -157,12 +188,16 @@ class ColorKeyframesHost:
         active_node_provider: Callable[[], str],
         session_provider: Callable[[], Any],
         playback: Any,
+        submit_batch: Optional[Callable[[list[dict]], bool]] = None,
+        submit_action: Optional[Callable[[str, dict], bool]] = None,
     ) -> None:
         self._panel = panel
         self._graph_provider = graph_provider
         self._active_node_provider = active_node_provider
         self._session_provider = session_provider
         self._playback = playback
+        self._submit_batch = submit_batch
+        self._submit_action = submit_action
         self._context = ""
         self._revision = -1
         self._frame_count = 0
@@ -257,17 +292,226 @@ class ColorKeyframesHost:
             self._playback.on_video_scrub_finished(self._last_seek_frame)
 
     def _on_edit_requested(self, request: Any) -> None:
-        """KF-02 只读：核对会话身份后丢弃（不产生工程副作用）。"""
+        """编辑意图 → 领域命令（KF-03 真实写入口）。
+
+        会话身份核对后翻译：关键帧动作合并为一个批处理命令（一次
+        提交、一个历史条目）；lock/enable 走既有节点级命令；auto 留待
+        KF-04 录制路由。无 submit 通道（宿主未注入）或翻译结果为空
+        时保持只读语义并记录原因。
+        """
         if not isinstance(request, EditRequest):
             return
         if request.context != self._context:
             logger.debug("keyframes edit dropped: stale context %r",
                          request.context)
             return
-        logger.info(
-            "keyframes edit ignored (read-only wiring, KF-03 opens the "
-            "real entry): action=%s targets=%d", request.action,
-            len(request.targets))
+        if request.action == "paste" and (
+                not request.sources
+                or request.source_context != self._context):
+            # 跨片段剪贴板载荷捕获未接线（KF-05/KF-07）：同 context 之外
+            # 的粘贴一律拒绝，不读可能已失效的源。
+            logger.info("keyframes paste dropped: source context %r != %r",
+                        request.source_context, self._context)
+            return
+        translated = self._translate_request(request)
+        if translated is None:
+            return
+        edits, node_actions, skipped = translated
+        if skipped:
+            logger.info(
+                "keyframes edit skipped targets (not writable yet): %s",
+                sorted(set(skipped)))
+        if edits and self._submit_batch is not None:
+            accepted = self._submit_batch(edits)
+            if not accepted:
+                logger.info("keyframes batch rejected by domain (no partial "
+                            "write): action=%s", request.action)
+        elif edits:
+            logger.info(
+                "keyframes edit ignored (no submit channel): action=%s "
+                "targets=%d", request.action, len(edits))
+        for action, arguments in node_actions:
+            if self._submit_action is not None:
+                self._submit_action(action, arguments)
+            else:
+                logger.info("keyframes node action ignored (no channel): %s",
+                            action)
+
+    # ── EditRequest → 领域语言 ──
+
+    def _translate_request(self, request: EditRequest):
+        """把面板请求翻译为 (批处理条目, 节点级命令, 跳过原因)。
+
+        值由宿主从权威图当前载荷采样（面板只发 intent，值归宿主——
+        计划 §UI 契约）；窗口/Sizing/FX/Master 轨道不可写目标原样跳过
+        并记录（与工具覆盖清单一致）。
+        """
+        graph = self._graph_provider()
+        if graph is None:
+            return None
+        nodes = {node.node_id: node for node in getattr(graph, "nodes", ())}
+        edits: list[dict] = []
+        node_actions: list[tuple[str, dict]] = []
+        skipped: list[str] = []
+        locked_state: dict[str, bool] = {}
+        enabled_state: dict[str, bool] = {}
+        if request.action == "paste":
+            if not self._translate_paste(request, nodes, edits):
+                return None
+            return (edits, node_actions, skipped)
+        for track_id, frame in request.targets:
+            parsed = self._parse_track_id(track_id)
+            if parsed is None:
+                skipped.append(track_id)
+                continue
+            node_id, domain, param = parsed
+            if request.action in ("lock", "enable"):
+                # 面板行按钮：node 行直发，叶行映射回父节点
+                if request.action == "lock":
+                    locked_state[node_id] = request.enabled
+                else:
+                    enabled_state[node_id] = request.enabled
+                continue
+            if request.action == "auto":
+                skipped.append(track_id)  # KF-04 自动录制路由
+                continue
+            if domain == "window":
+                skipped.append(track_id)  # KF-05/KF-07 域命令
+                continue
+            if domain not in ("grade", "qualifier"):
+                skipped.append(track_id)
+                continue
+            if request.action == "add":
+                value = self._current_value(nodes.get(node_id), domain,
+                                            param)
+                if value is _UNRESOLVED:
+                    skipped.append(track_id)
+                    continue
+                edits.append({
+                    "action": "set", "node_id": node_id, "param": param,
+                    "frame": int(frame), "value": value,
+                    "interpolation": ("hold" if request.kind == "static"
+                                      else "linear"),
+                })
+            elif request.action == "delete":
+                edits.append({"action": "remove", "node_id": node_id,
+                              "param": param, "frame": int(frame)})
+            elif request.action == "move":
+                edits.append({"action": "move", "node_id": node_id,
+                              "param": param, "frame": int(frame),
+                              "to_frame": int(frame) + int(request.delta)})
+            elif request.action == "convert":
+                edits.append({"action": "dynamics", "node_id": node_id,
+                              "param": param, "frame": int(frame),
+                              "kind": request.kind})
+            elif request.action == "dynamics":
+                edits.append({"action": "dynamics", "node_id": node_id,
+                              "param": param, "frame": int(frame),
+                              "kind": "dynamic",
+                              "start": float(request.start),
+                              "end": float(request.end)})
+            else:
+                skipped.append(track_id)
+        if locked_state:
+            node_actions.append(("lock_node", {
+                "node_ids": sorted(locked_state),
+                "locked": next(iter(locked_state.values())),
+            }))
+        if enabled_state:
+            node_actions.append(("set_enabled", {
+                "node_ids": sorted(enabled_state),
+                "enabled": next(iter(enabled_state.values())),
+            }))
+        return (edits, node_actions, skipped)
+
+    def _translate_paste(self, request: EditRequest, nodes: dict,
+                         edits: list[dict]) -> bool:
+        """粘贴：从源轨道取键载荷（深拷贝语义），按序对齐目标。
+
+        源键缺失（复制后被删）→ 整批拒绝（不读失效源）。
+        """
+        from src.features.color.core.keyframe_tracks import decode_keyframe
+        for (src_track, src_frame), (dst_track, dst_frame) in zip(
+                request.sources, request.targets):
+            src = self._parse_track_id(src_track)
+            dst = self._parse_track_id(dst_track)
+            if src is None or dst is None:
+                logger.info("keyframes paste dropped: unparsable ref")
+                return False
+            src_node, src_domain, src_param = src
+            dst_node_id, _dst_domain, dst_param = dst
+            if src_domain not in ("grade", "qualifier"):
+                logger.info("keyframes paste dropped: source domain %s",
+                            src_domain)
+                return False
+            source_node = nodes.get(src_node)
+            payload = (self._payload_of(source_node) or {})
+            track = (payload.get("grade_keyframes") or {}).get(
+                f"{src_param}" if src_domain == "grade"
+                else f"qualifier.{src_param}")
+            keyframes = (track or {}).get("keyframes") or ()
+            entry = next((k for k in keyframes
+                          if int(k.get("frame", -1)) == int(src_frame)), None)
+            if entry is None:
+                logger.info("keyframes paste dropped: source key %s@%s gone",
+                            src_track, src_frame)
+                return False
+            try:
+                decoded = decode_keyframe(dict(entry))
+            except ValueError:
+                logger.info("keyframes paste dropped: corrupt source key")
+                return False
+            edits.append({
+                "action": "set", "node_id": dst_node_id, "param": dst_param,
+                "frame": int(dst_frame), "value": decoded.value,
+                "interpolation": decoded.interpolation,
+                "kind": decoded.kind, "start": decoded.start,
+                "end": decoded.end,
+            })
+        return True
+
+    # ── 解析辅助 ──
+
+    @staticmethod
+    def _parse_track_id(track_id: str):
+        """面板轨道 id → (node_id, domain, field)；不可写/不可解析为 None。
+
+        id 形态：``node:{node_id}|{track_name}``（叶）与
+        ``node:{node_id}``（节点行，lock/enable 用）。
+        """
+        if not isinstance(track_id, str) or not track_id.startswith("node:"):
+            return None
+        rest = track_id[len("node:"):]
+        node_id, sep, track_name = rest.partition("|")
+        if not node_id:
+            return None
+        if not sep:
+            return (node_id, "node", "")
+        address = parse_track_name(track_name)
+        if address is None:
+            return None
+        return (node_id, address.domain, address.field)
+
+    def _payload_of(self, node: Any):
+        if node is None:
+            return None
+        try:
+            return node_layer_payload(node, include_lut_cache=False)
+        except Exception:  # noqa: BLE001 — 载荷不可读按未解析处理
+            return None
+
+    def _current_value(self, node: Any, domain: str, field: str):
+        """从节点当前载荷采样参数现值（添加键=当前值，计划 §录制规则 7）。"""
+        payload = self._payload_of(node)
+        if payload is None:
+            return _UNRESOLVED
+        if domain == "grade":
+            params = payload.get("grading_params") or {}
+        else:
+            params = payload.get("qualifier_params") or {}
+        if field not in params:
+            return _UNRESOLVED
+        return params[field]
 
     # ── 内部 ──
 

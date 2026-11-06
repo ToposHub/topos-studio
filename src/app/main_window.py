@@ -1568,6 +1568,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 active_node_provider=_active_node_provider,
                 session_provider=_session_provider,
                 playback=self,
+                # KF-03：真实写入口（批处理一次提交 = 一个历史条目；
+                # lock/enable 复用既有节点级命令）
+                submit_batch=self.color_graph_host.submit_keyframe_batch,
+                submit_action=self.color_graph_host.submit_panel_action,
             )
             self._color_keyframes_host = host
             self._color_keyframes_frame_hook = host.on_local_frame_changed
