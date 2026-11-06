@@ -137,6 +137,58 @@ class TestConeKeys:
         assert _passes(graph)["a"].cone_key != _passes(graph2)["a"].cone_key
 
 
+# ── KF-06：时域标志（legacy 载荷起源 + 下游传播 + 缓存绕过）────────────
+
+
+class TestTemporalAnimatedFlag:
+    def _animated_graph(self, *, origin: str):
+        """source → A（带关键帧）→ C → output；origin=legacy|params。"""
+        nodes = [_node("src", NodeType.SOURCE),
+                 _corrector("a", 0.2),
+                 _corrector("c", 0.1),
+                 _node("out", NodeType.OUTPUT)]
+        a = nodes[1]
+        kf = {"exposure": {"keyframes": [
+            {"frame": 0, "value": 0.0, "interpolation": "linear"},
+            {"frame": 24, "value": 0.5, "interpolation": "linear"}]}}
+        if origin == "legacy":
+            nodes[1] = _replace(
+                a, legacy_payload={**dict(a.legacy_payload),
+                                   "grade_keyframes": kf})
+        else:
+            nodes[1] = _replace(
+                a, params={**dict(a.params), "grade_keyframes": kf})
+        edges = [ColorEdgeData("e1", "src", "image", "a", "image"),
+                 ColorEdgeData("e2", "a", "image", "c", "image"),
+                 ColorEdgeData("e3", "c", "image", "out", "image")]
+        return ColorGraphData(nodes=tuple(nodes), edges=tuple(edges),
+                              source_node_id="src", output_node_id="out")
+
+    @pytest.mark.parametrize("origin", ["legacy", "params"])
+    def test_animation_flags_own_and_downstream_not_upstream(self, origin):
+        # legacy 起源轨道在 node.params 不可见——判据必须覆盖载荷域
+        passes = _passes(self._animated_graph(origin=origin))
+        assert passes["a"].key_frame_animated is True
+        assert passes["c"].key_frame_animated is True   # 时域下游
+        assert passes["out"].key_frame_animated is True
+        assert passes["src"].key_frame_animated is False  # 上游不受波及
+
+    def test_plain_graph_flags_all_false(self):
+        passes = _passes(_branch_graph())
+        assert not any(p.key_frame_animated for p in passes.values())
+
+    def test_tombstone_only_track_still_temporal(self):
+        # 墓碑-only（显式空轨道）非空 Mapping：保守按真处理
+        graph = self._animated_graph(origin="params")
+        nodes = list(graph.nodes)
+        nodes[1] = _replace(nodes[1], params={
+            **dict(nodes[1].params),
+            "grade_keyframes": {"exposure": {"keyframes": [],
+                                             "tombstone": True}}})
+        graph = _replace(graph, nodes=tuple(nodes))
+        assert _passes(graph)["a"].key_frame_animated is True
+
+
 # ── 执行器缓存行为 ──────────────────────────────────────────────────────
 
 
@@ -230,6 +282,65 @@ class TestExecutorNodeCache:
                 self._run(ctx, graph, executor, rid, counters=counters)
             assert counters.get("a") == 2
             assert executor.node_cache_stats["auto_skipped"] >= 2
+            executor.release_pool()
+        finally:
+            ctx.release()
+
+    def test_legacy_animated_forked_node_bypasses_cache(self):
+        """KF-06：legacy 载荷起源动画节点（params 无轨道域）即便
+        consumers=2（auto 可缓存）也逐帧重算——静像 seek 不命中陈旧纹理。"""
+        ctx = self._ctx()
+        try:
+            executor = ColorGraphExecutor(ctx)
+            base = _fork_graph()
+            nodes = list(base.nodes)
+            a = next(n for n in nodes if n.node_id == "a")
+            patched = _replace(
+                a, legacy_payload={
+                    **dict(a.legacy_payload),
+                    "grade_keyframes": {"exposure": {"keyframes": [
+                        {"frame": 0, "value": 0.0,
+                         "interpolation": "linear"}]}}})
+            graph = _replace(base, nodes=tuple(
+                patched if n.node_id == "a" else n for n in nodes))
+            counters: dict = {}
+            for rid in ("r1", "r2"):
+                result = self._run(ctx, graph, executor, rid,
+                                   counters=counters)
+                assert result.published
+            assert counters.get("a") == 2  # 无缓存条目 → 每帧重算
+            assert len(executor._node_cache) == 0
+            executor.release_pool()
+        finally:
+            ctx.release()
+
+    def test_downstream_of_animated_bypasses_cache(self):
+        """KF-06：时域上游的下游节点（cache_mode=on 强制可缓存）同样
+        绕过——其输入随帧变，缓存键无帧身份会命中陈旧合成。"""
+        ctx = self._ctx()
+        try:
+            executor = ColorGraphExecutor(ctx)
+            nodes = list(_branch_graph().nodes)
+            a = next(n for n in nodes if n.node_id == "a")
+            c = next(n for n in nodes if n.node_id == "c")
+            animated_a = _replace(
+                a, legacy_payload={
+                    **dict(a.legacy_payload),
+                    "grade_keyframes": {"exposure": {"keyframes": [
+                        {"frame": 0, "value": 0.0,
+                         "interpolation": "linear"}]}}})
+            forced_c = _replace(c, params={**dict(c.params),
+                                           "cache_mode": "on"})
+            graph = _replace(_branch_graph(), nodes=tuple(
+                animated_a if n.node_id == "a"
+                else forced_c if n.node_id == "c" else n
+                for n in nodes))
+            counters: dict = {}
+            for rid in ("r1", "r2"):
+                result = self._run(ctx, graph, executor, rid,
+                                   counters=counters)
+                assert result.published
+            assert counters.get("c") == 2  # on 策略被时域上游覆盖
             executor.release_pool()
         finally:
             ctx.release()
@@ -393,6 +504,7 @@ class TestExecutorNodeCache:
                 self.cone_key = cone
                 self.consumers = 1
                 self.params = {"cache_mode": "on"}
+                self.key_frame_animated = False
 
         ex = ColorGraphExecutor.__new__(ColorGraphExecutor)
         ex._pool = {}

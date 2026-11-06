@@ -426,14 +426,33 @@ class ColorKeyframesPanel(QWidget):
         if self.selected:
             self._clipboard_context = self.snapshot.context
             self._clipboard = tuple((ref, self._markers[ref]) for ref in sorted(self.selected))
+            # 计划 §edit_requested：复制时向宿主提交来源请求——宿主立即
+            # 解析并保存不可变值/动态属性/相对帧偏移/能力签名（正式跨
+            # 片段剪贴板；粘贴不再读可能已删改的源）。
+            self.request("copy", tuple(ref for ref, _ in self._clipboard),
+                         source_context=self._clipboard_context)
 
     def paste(self, frame: int, row: str) -> None:
-        if not self._clipboard or self._clipboard_context != self.snapshot.context:
+        if not self._clipboard:
             return
         anchor = min(ref[1] for ref, _ in self._clipboard)
         source_tracks = {ref[0] for ref, _ in self._clipboard}
         remap = row in self._tracks and not self._tracks[row].children and len(source_tracks) == 1
-        targets = tuple((row if remap else ref[0], frame + ref[1] - anchor)
+        cross = self._clipboard_context != self.snapshot.context
+        active = self.snapshot.corrector
+
+        def _target_track(ref_track: str) -> str:
+            # 跨 context：源轨道 id 属于旧片段——按轨道名重映射到当前
+            # 活动 Corrector 的同名叶轨（grade/qualifier 字段名即稳定
+            # 身份，与节点/片段无关）
+            if not cross:
+                return ref_track
+            _, _, track_name = ref_track.partition("|")
+            mapped = f"{active}|{track_name}" if active else ""
+            return mapped if mapped in self._tracks else ref_track
+
+        targets = tuple((row if remap else _target_track(ref[0]),
+                         frame + ref[1] - anchor)
                         for ref, _ in self._clipboard)
         if all(t in self._tracks and self.can_edit(t) and 0 <= f < self.snapshot.frame_count
                and (t, f) not in self._markers for t, f in targets):

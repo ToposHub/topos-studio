@@ -257,7 +257,8 @@ class ColorGraphService:
         normalized.sort(key=lambda e: e["frame"])
         return normalized
 
-    #: N10-B：关键帧可动画轨道名白名单（grade 域 ∪ qualifier 域）。
+    #: N10-B：关键帧可动画轨道名白名单（grade ∪ qualifier；窗口实例轨
+    #: 经 track_name_is_writable 解析谓词准入，不入可枚举集）。
     def _keyframe_track_whitelist(self) -> frozenset:
         from src.features.color.core.keyframe_tracks import (
             node_command_track_whitelist,
@@ -275,10 +276,30 @@ class ColorGraphService:
             return self._fail(graph, "node_not_found",
                               f"关键帧目标不是 Corrector 实例: {node_id}",
                               node_id=node_id)
-        if param is not None and param not in self._keyframe_track_whitelist():
-            return self._fail(graph, "illegal_param_key",
-                              f"关键帧轨道名不在白名单: {param}",
-                              node_id=node_id)
+        if param is not None:
+            from src.features.color.core.keyframe_tracks import (
+                parse_track_name, track_name_is_writable,
+            )
+            if not track_name_is_writable(param):
+                return self._fail(graph, "illegal_param_key",
+                                  f"关键帧轨道名不在白名单: {param}",
+                                  node_id=node_id)
+            address = parse_track_name(param)
+            if address is not None and address.domain == "window":
+                # 窗口实例轨：目标形状必须存在于节点载荷（合并视图）——
+                # 删除的形状不复活轨道（形状删除随 Layer 域事务清理）
+                from src.features.color.core.color_graph_param_source import (
+                    node_layer_payload,
+                )
+                shapes = ((node_layer_payload(node,
+                                              include_lut_cache=False) or {})
+                          .get("mask_shapes") or ())
+                if not any(isinstance(s, dict)
+                           and str(s.get("id")) == address.owner_id
+                           for s in shapes):
+                    return self._fail(
+                        graph, "illegal_param_key",
+                        f"窗口形状不存在: {param}", node_id=node_id)
         if node.params.get("locked"):
             return self._fail(graph, "node_locked",
                               "节点已锁定，先解锁再编辑关键帧",
@@ -401,8 +422,9 @@ class ColorGraphService:
                                 ) -> GraphEditResult:
         """关键帧批处理命令：多节点/多轨道/多帧一次事务。
 
-        条目形态（宿主翻译 EditRequest 后的领域语言；窗口/Sizing/FX
-        轨道走各自域命令，不在此白名单内）::
+        条目形态（宿主翻译 EditRequest 后的领域语言；窗口实例轨经
+        ``track_name_is_writable`` 谓词准入 + 形状存在性校验；
+        Sizing/FX 轨道未登记不可写）::
 
             {"action": "set",     "node_id", "param", "frame",
              "value", "interpolation"?, "kind"?, "start"?, "end"?}

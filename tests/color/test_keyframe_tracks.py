@@ -36,9 +36,15 @@ def test_graph_command_whitelist_matches_registry():
     assert "exposure" in service_whitelist
     assert "temperature" in service_whitelist  # 兼容双名仍可写
     assert kt.qualifier_track_name("hue_center") in service_whitelist
-    # 窗口轨道不在图命令白名单（Layer 域 shape 事务负责，KF-03 统一）
+    # 可枚举白名单不含 mask.*（per-shape UUID 不可枚举）——经解析谓词准入
     assert not any(
         name.startswith("mask.") for name in service_whitelist)
+    shape_id = "11111111-2222-3333-4444-555555555555"
+    assert kt.track_name_is_writable(
+        kt.mask_track_name(shape_id, "center"))
+    assert kt.track_name_is_writable("exposure")
+    assert not kt.track_name_is_writable("sizing/input")
+    assert not kt.track_name_is_writable("not_a_param")
 
 
 def test_parse_track_name_round_trip_all_domains():
@@ -291,7 +297,10 @@ def test_coverage_manifest_covers_all_registered_fields():
     for domain in ("Sizing", "Open FX"):
         assert domain in content
     assert "PENDING-KF00" in content
-    assert "mask.*" in content  # window write 缺口如实登记（KF-03 域命令）
+    # window 全能力开放（写入谓词 + 形状存在性校验；KF-03 后续完成项）
+    window_row = next(line for line in content.splitlines()
+                      if line.startswith("| Window"))
+    assert "✗" not in window_row
 
 
 def test_coverage_manifest_file_in_sync():
@@ -312,8 +321,7 @@ def test_capability_rows_shapes():
     for domain in ("grade", "qualifier"):
         summary = by_domain[domain][0]
         assert all(summary[column] for column in kt.CAPABILITY_COLUMNS)
-    # window 的 write 缺口带原因（deliver 已由 KF-06 导出求值补齐）
+    # window 全能力可用（write 谓词准入由批命令目标校验执行）
     window_summary = by_domain["window"][0]
-    assert window_summary["write"] is False
-    assert window_summary["deliver"] is True
-    assert "KF-03" in window_summary["reasons"]["write"]
+    assert all(window_summary[column] for column in kt.CAPABILITY_COLUMNS)
+    assert window_summary["write_domain"] == "graph+layer"

@@ -14,10 +14,33 @@
 | KF-03 | **完成** | `op_batch_edit_keyframes` 批处理领域命令（一次事务一个历史条目；move 先删后插；冲突/锁定整批拒；no-op 不入史）；面板 EditRequest → 领域语言翻译 + 真实写入口；grade/qualifier 登记字段全量常驻投影。25 项测试（含真实命令栈全链路）。提交 21962fe |
 | KF-04 | **完成** | `KeyframeAutoRecorder`（origin 隔离/手势绑定有效帧/Corrector 级开关作用后代）；手势 flush 前并入同一事务（base+关键帧一条历史）。9 项测试。提交 208fcb5 |
 | KF-05 | **完成** | 墓碑删除语义（params 显式空覆盖压制 legacy 复活，跨保存/重开/undo）；批处理懒导入 legacy 起源轨道；求值基线保护（播放中保存不固化插值临时值；删轨道恢复基线）；未知字段往返保留。6 项测试。提交 ac345e4 |
-| KF-06 | **完成（CPU 域）** | 导出侧窗口动画逐帧求值（`evaluate_mask_tracks_payload` + N03 matte 消费点）；uint8 fast-path 静默丢窗口 matte 的预存 bug 修复；`graph_node_layer_provider(frame)` 无动画节点返回完整 base（此前 None 回退 plan params 丢 legacy 域）；window 域 deliver ✗→✓。5 项新测试。提交 f26fe8c。Metal/AsyncRenderer 时域标志未动（清单第 7 项） |
+| KF-06 | **完成（CPU 域）** | 导出侧窗口动画逐帧求值（`evaluate_mask_tracks_payload` + N03 matte 消费点）；uint8 fast-path 静默丢窗口 matte 的预存 bug 修复；`graph_node_layer_provider(frame)` 无动画节点返回完整 base（此前 None 回退 plan params 丢 legacy 域）；window 域 deliver ✗→✓。5 项新测试。提交 f26fe8c。Metal/AsyncRenderer 时域标志遗留已由复检批次闭环（见下） |
 | KF-07 | **部分完成** | 过渡期写权限策略（E09 单路径路由 + 合并读）与发布清单见 [KF07_RELEASE_CHECKLIST.md](KF07_RELEASE_CHECKLIST.md)（含 8 项不等价项与切换门禁）。旧写入口退役待：KF-00 实测 + 真机验收（真实工程写入→保存→重开→全管线导出） |
 
-回归基线：2026-11-06 的 153 项基线保持全绿；关键帧相关回归（上表各项测试）合计 262 项全绿（2026-11-07，offscreen Qt）。
+## 复检批次（2026-11-07）
+
+对上表逐项复检发现并直接修复四项（不等价项 1/2/7 就此消解）：
+
+1. **时域标志盲区（KF-06 遗留）**：`key_frame_animated` 只看
+   `node.params.grade_keyframes` 且无消费者——legacy 载荷起源的动画
+   节点及其下游不绕过节点缓存，静像暂停 seek 会命中陈旧纹理。修：
+   编译器判据覆盖 legacy 载荷并沿拓扑传播下游；GL 执行器缓存绕过
+   消费该标志。`tests/color/test_color_graph_node_cache.py`。
+2. **qualifier 写入口从未生效（真 bug）**：宿主翻译发裸字段名，被批
+   命令白名单整批拒（`illegal_param_key`），既有测试零 qualifier 覆
+   盖故未暴露。修：命令域一律 canonical 全名（`qualifier.<field>`）。
+3. **正式跨片段剪贴板（计划 §edit_requested 后半段）**：复制时宿主
+   捕获不可变值/动态属性/能力签名；粘贴优先捕获载荷（源删改/源片
+   段离开不失效），跨 context 按轨道名重映射到活动 Corrector，分量
+   数不匹配整批拒。
+4. **窗口轨道图域写入（KF-03 登记后续）**：`track_name_is_writable`
+   谓词准入 + 形状存在性 fail-closed；预览经 provider 帧模式逐帧补
+   写形状（与导出同函数）；面板窗口叶轨按「形状 × 登记字段」常驻。
+   TOOL_COVERAGE window 域 write ✗→✓。
+
+回归基线：2026-11-06 的 153 项基线保持全绿；关键帧相关回归随复检批次扩至
+447 项全绿（2026-11-07，offscreen Qt：基线 11 文件 + 关键帧各套件 + 节点缓存/
+full outlets/m06/管线声明/Scope 出口 + 接线相邻 app 套件）。
 
 ## 参考行为与验收基线
 

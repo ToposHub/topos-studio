@@ -170,7 +170,7 @@ def graph_node_layer_provider(
     if frame is not None:
         from src.features.color.core.grade_keyframes import (
             GradeKeyframe, GradeKeyframeTrack, evaluate_grade_keyframes,
-            evaluate_qualifier_params_tracks,
+            evaluate_mask_tracks_payload, evaluate_qualifier_params_tracks,
         )
         evaluated = dict(payloads)
         for n in _iter_corrector_nodes(graph):
@@ -212,6 +212,16 @@ def graph_node_layer_provider(
                 merged["qualifier_params"] = evaluate_qualifier_params_tracks(
                     tracks, int(frame),
                     dict(payload.get("qualifier_params") or {}))
+            # KF-06/窗口写入：mask.<shape_id>.<field> 轨道逐帧补写形状
+            # （与导出侧 evaluate_mask_tracks_payload 同函数同基底——
+            # 每帧从 base shapes 重求值不累积；matte 生成按补写后的
+            # shapes 取哈希，逐帧自然不命中旧缓存）
+            if any(str(name).startswith("mask.") for name in tracks):
+                patched_shapes = evaluate_mask_tracks_payload(
+                    tracks, list(payload.get("mask_shapes") or []),
+                    int(frame))
+                if patched_shapes is not None:
+                    merged["mask_shapes"] = patched_shapes
             evaluated[n.node_id] = merged
 
     def provide(node_id: str) -> Mapping[str, Any] | None:
