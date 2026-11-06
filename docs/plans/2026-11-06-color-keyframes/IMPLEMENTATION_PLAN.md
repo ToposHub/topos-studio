@@ -4,6 +4,21 @@
 
 当前从调色页 **窗口 → 面板 → 调色 → 关键帧** 打开。标题旁显示“示例”，面板中的播放头、关键帧和轨道开关仅操作示例。当前可用的色轮录制入口暂时保留。`set_playhead(frame)` 可独立回填播放头，`set_snapshot()` 用于切换上下文或替换轨道投影；二者都不会反向发出 seek 或 edit。
 
+## 进度标记（2026-11-07 交接）
+
+| 编号 | 状态 | 交付与证据 |
+| --- | --- | --- |
+| KF-00 | **模板就绪，待实测** | [KF00_RESOLVE_FIXTURES.md](KF00_RESOLVE_FIXTURES.md)——量测协议（OP-01..OP-16 + 动态权重表）；实测须在装有 Resolve Studio 20 的机器上人工执行，未量测语义在代码与覆盖清单标 `PENDING-KF00` |
+| KF-01 | **完成** | `src/features/color/core/keyframe_tracks.py`（轨道三域身份/键型+动态属性编解码/统一权重函数/能力注册表）；[TOOL_COVERAGE.md](TOOL_COVERAGE.md) 由注册表生成（测试强制同步）；`tests/color/test_keyframe_tracks.py` 48 项。提交 19e4f4c |
+| KF-02 | **完成** | `src/app/controllers/color_keyframes_host.py` 只读宿主（权威投影回填 + 播放头双向同步 + 身份核对）；`ColorGraphAppHost.bound_graph()`；面板 scrub 手势边界信号。13 项测试。提交 905c14b |
+| KF-03 | **完成** | `op_batch_edit_keyframes` 批处理领域命令（一次事务一个历史条目；move 先删后插；冲突/锁定整批拒；no-op 不入史）；面板 EditRequest → 领域语言翻译 + 真实写入口；grade/qualifier 登记字段全量常驻投影。25 项测试（含真实命令栈全链路）。提交 21962fe |
+| KF-04 | **完成** | `KeyframeAutoRecorder`（origin 隔离/手势绑定有效帧/Corrector 级开关作用后代）；手势 flush 前并入同一事务（base+关键帧一条历史）。9 项测试。提交 208fcb5 |
+| KF-05 | **完成** | 墓碑删除语义（params 显式空覆盖压制 legacy 复活，跨保存/重开/undo）；批处理懒导入 legacy 起源轨道；求值基线保护（播放中保存不固化插值临时值；删轨道恢复基线）；未知字段往返保留。6 项测试。提交 ac345e4 |
+| KF-06 | **完成（CPU 域）** | 导出侧窗口动画逐帧求值（`evaluate_mask_tracks_payload` + N03 matte 消费点）；uint8 fast-path 静默丢窗口 matte 的预存 bug 修复；`graph_node_layer_provider(frame)` 无动画节点返回完整 base（此前 None 回退 plan params 丢 legacy 域）；window 域 deliver ✗→✓。5 项新测试。提交 f26fe8c。Metal/AsyncRenderer 时域标志未动（清单第 7 项） |
+| KF-07 | **部分完成** | 过渡期写权限策略（E09 单路径路由 + 合并读）与发布清单见 [KF07_RELEASE_CHECKLIST.md](KF07_RELEASE_CHECKLIST.md)（含 8 项不等价项与切换门禁）。旧写入口退役待：KF-00 实测 + 真机验收（真实工程写入→保存→重开→全管线导出） |
+
+回归基线：2026-11-06 的 153 项基线保持全绿；关键帧相关回归（上表各项测试）合计 262 项全绿（2026-11-07，offscreen Qt）。
+
 ## 参考行为与验收基线
 
 - 已在本机 Resolve Studio 20 调色页核对右下角面板、左侧轨道树、右侧时间线、Master / Corrector / Sizing 层级、子轨披露、缩放控件和红色播放头。
