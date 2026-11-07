@@ -5247,6 +5247,73 @@ class PreviewRenderWorker(QThread):
                                          getattr(layer, 'clip', None))
         return apply_stabilization_cpu(graded, state, int(getattr(layer, "source_frame", 0)))
 
+    def _clip_color_graph(self, layer: ClipLayerInfo) -> Optional[Any]:
+        """clip 调色栈携带的权威图（无图栈返回 None）。"""
+        clip = getattr(layer, "clip", None)
+        stack_id = getattr(clip, "color_stack_id", None)
+        if not stack_id:
+            return None
+        project = getattr(self._asset_resolver, "_project", None) \
+            if self._asset_resolver is not None else None
+        stacks = getattr(project, "color_stacks", {}) if project is not None else {}
+        stack = stacks.get(stack_id)
+        return getattr(stack, "color_graph", None) if stack is not None else None
+
+    def _apply_preview_color_graph_cpu(
+        self,
+        frame_data: np.ndarray,
+        layer: ClipLayerInfo,
+        graph: Any,
+        *,
+        exclude_timeline: bool = False,
+    ) -> Optional[np.ndarray]:
+        """R5：Edit CPU 预览回退按权威图逐节点合成。
+
+        与 Deliver 侧 ``run_graph_frame_cpu`` 同一入口/同一生产 oracle
+        （预览与导出回退路径一致）。不支持的算子/域：告警并降级到既有
+        扁平路径（Edit 预览域保持既有降级语义，成片路径不受影响）；
+        返回 None 表示降级。
+        """
+        from src.features.color.core.color_graph_compiler import (
+            GraphCompileError,
+        )
+        from src.features.color.core.color_graph_cpu import (
+            UnsupportedNode, run_graph_frame_cpu,
+        )
+        from src.features.edit.core.color_chain import chain_extra_params
+        project = (getattr(self._asset_resolver, "_project", None)
+                   if self._asset_resolver is not None else None)
+        current_timeline = getattr(
+            self._asset_resolver, "_current_timeline", None) \
+            if self._asset_resolver is not None else None
+        if current_timeline is None:
+            current_timeline = getattr(self, "_timeline_sequence", None)
+        timeline_id = str(getattr(current_timeline, "timeline_id", "") or "")
+        extras = [extra for extra in (
+            chain_extra_params(project, timeline_id,
+                               getattr(layer, "clip", None),
+                               exclude_timeline=exclude_timeline) or ())
+            if isinstance(extra, dict)]
+        for extra in extras:
+            if extra.get("_unsupported_advanced", False):
+                logger.warning(
+                    "Edit preview color chain: clip %s 链段含 curves/LUT 等"
+                    "高级操作，图执行路径跳过该段（成片渲染路径不受影响）",
+                    layer.clip_id)
+        pre = [e for e in extras if e.get("_chain_segment") == "pre"]
+        after = [e for e in extras if e.get("_chain_segment") != "pre"]
+        try:
+            return run_graph_frame_cpu(
+                graph, frame_data,
+                int(getattr(layer, "source_frame", 0) or 0),
+                pre_chain=pre, post_chain=after)
+        except (UnsupportedNode, GraphCompileError) as exc:
+            logger.warning(
+                "Edit preview color grade: clip %s 图 CPU 逐节点合成不支持"
+                "（%s）——降级到扁平路径（成片渲染路径不受影响）",
+                layer.clip_id, exc)
+            return None
+
     def _apply_preview_color_grade_unstabilized(
         self,
         frame_data: np.ndarray,
@@ -5255,6 +5322,12 @@ class PreviewRenderWorker(QThread):
         exclude_timeline: bool = False,
     ) -> np.ndarray:
         """Apply the realtime ColorStack primary grade for a CPU fallback."""
+        graph = self._clip_color_graph(layer)
+        if graph is not None:
+            graded = self._apply_preview_color_graph_cpu(
+                frame_data, layer, graph, exclude_timeline=exclude_timeline)
+            if graded is not None:
+                return graded
         grade = self._get_preview_color_grade(
             layer, exclude_timeline=exclude_timeline)
         if grade is None:
