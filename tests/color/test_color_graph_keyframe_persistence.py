@@ -246,3 +246,78 @@ def test_remove_last_keyframe_restores_base_value():
     assert not layer.grade_keyframes
     assert layer.grading_params["exposure"] == 0.5
     assert layer._grade_params_base is None
+
+
+# ---------------------------------------------------------------------------
+# R3 · 批编辑无损往返（未知字段经真实保存/重开/undo/redo 保留）
+# ---------------------------------------------------------------------------
+
+def test_lossless_batch_edit_survives_save_reopen_and_undo():
+    """编辑一条轨的键：另一轨的未知字段经保存/重开/undo/redo 原样保留，
+    每次编辑历史只增加一条。"""
+    from dataclasses import replace as dc_replace
+    from src.features.edit.core.commands import ProjectCommandStack
+    from src.features.edit.core.commands.color_commands import (
+        ApplyColorGraphCommand,
+    )
+    from src.features.edit.core.project import EditProject
+    from src.shared.project.color_graph import unfreeze_params
+    service = ColorGraphService()
+    graph, _sid = _migrated()
+    node = _corrector(graph)
+    custom = {
+        "exposure": {"keyframes": [
+            {"frame": 10, "value": 1.0, "interpolation": "linear"},
+            {"frame": 20, "value": 2.0, "interpolation": "linear"},
+        ]},
+        "temperature": {"keyframes": [
+            {"frame": 5, "value": 0.5, "interpolation": "ease"}],
+            "solo": True},
+    }
+    nodes = tuple(
+        dc_replace(n, params={**n.params, "grade_keyframes": custom})
+        if n.node_id == node.node_id else n for n in graph.nodes)
+    graph = dc_replace(graph, nodes=nodes)
+
+    project, sid = EditProject.create(name="r3").create_color_stack(
+        asset_id="a1", name="s")
+    project = project.update_color_stack(sid, color_graph=graph)
+    stack = ProjectCommandStack()
+    command = ApplyColorGraphCommand.create(
+        stack_id=sid, operation="batch_edit_keyframes",
+        arguments={"edits": [
+            {"action": "set", "node_id": node.node_id,
+             "param": "exposure", "frame": 20, "value": 9.0}]})
+    project = stack.execute(command, project)
+    edited = project.color_stacks[sid].color_graph
+    edited_node = _corrector(edited)
+    # 一次编辑一条历史
+    assert len(stack._undo_stack) == 1
+
+    # 保存/重开边界：未知字段不因编辑/序列化丢失
+    from src.shared.project.color_stack import ColorStackData
+    restored = ColorStackData.from_dict(
+        project.color_stacks[sid].to_dict()).color_graph
+    restored_params = unfreeze_params(
+        _corrector(restored).params["grade_keyframes"])
+    assert restored_params["temperature"] == {
+        "keyframes": [{"frame": 5, "value": 0.5,
+                       "interpolation": "ease"}], "solo": True}
+    assert {int(k["frame"]): k["value"] for k in restored_params
+            ["exposure"]["keyframes"]} == {10: 1.0, 20: 9.0}
+
+    # undo 恢复原值；redo 重放（未知字段全程保留）
+    undone = stack.undo(project)
+    undone_params = unfreeze_params(
+        _corrector(undone.color_stacks[sid].color_graph).params[
+            "grade_keyframes"])
+    assert {int(k["frame"]): k["value"] for k in undone_params
+            ["exposure"]["keyframes"]} == {10: 1.0, 20: 2.0}
+    assert undone_params["temperature"]["solo"] is True
+    redone = stack.redo(undone)
+    redone_params = unfreeze_params(
+        _corrector(redone.color_stacks[sid].color_graph).params[
+            "grade_keyframes"])
+    assert {int(k["frame"]): k["value"] for k in redone_params
+            ["exposure"]["keyframes"]}[20] == 9.0
+    assert redone_params["temperature"]["solo"] is True
