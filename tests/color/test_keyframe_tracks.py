@@ -76,9 +76,9 @@ def test_parse_track_name_rejects_unregistered():
     assert kt.parse_track_name("mask.s1.visible") is None
     assert kt.parse_track_name("mask.s1.points") is None
     assert kt.parse_track_name("mask.s1.grad_points") is None
-    # sizing / fx 轨道名尚未开放
+    # Sizing remains unavailable; FX field admission is checked against its instance schema.
     assert kt.parse_track_name("sizing/input") is None
-    assert kt.parse_track_name("fx.inst1.gain") is None
+    assert kt.parse_track_name("fx.inst1.gain") == kt.TrackAddress("fx", "gain", "inst1")
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +226,13 @@ def test_legacy_ease_decode_carries_zero_weights():
          "kind": "dynamic"})
     assert (decoded.start, decoded.end) == (0.0, 0.0)
     assert decoded.interpolation == "ease"
+
+
+def test_explicit_unit_weights_override_legacy_ease():
+    decoded = kt.decode_keyframe({"frame": 2, "value": 1.0,
+        "interpolation": "ease", "kind": "dynamic", "start": 1.0, "end": 1.0})
+    assert (decoded.start, decoded.end) == (1.0, 1.0)
+    assert kt.decode_keyframe(kt.encode_keyframe(decoded)) == decoded
 
 
 @pytest.mark.parametrize("payload,reason", [

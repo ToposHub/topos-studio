@@ -11,7 +11,7 @@
 | Window 窗口子轨 | graph+layer | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | Qualifier 限定器 | graph+layer | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | Sizing | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | read: 槽位身份（Input/Node/Output Sizing、Convergence 等）仅存在于面板演示数据；后端尚未定义（KF-03 落槽位域）、validate: 同上——无槽位注册表可校验、write: 槽位→坐标系归属待 KF-00 OP-16 实测后接命令、evaluate: 无后端轨道可求值、preview: 无后端轨道可求值、deliver: 无后端轨道可求值、copy: 无后端轨道可复制 |
-| Open FX / 独立 FX | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | read: 实例 ID（instance_id）与参数 schema（Effect Catalog）已存在，但 animatable 能力标志尚未接入注册表（KF-03）、validate: 无 per-instance schema 校验入口、write: FX 实例参数命令化待 KF-03、evaluate: 无逐帧 FX 参数求值（KF-06 时域投影）、preview: 无逐帧 FX 参数求值、deliver: 无逐帧 FX 参数求值、copy: 实例粘贴重建 instance_id（既有设计），参数级复制待命令化 |
+| Open FX / 独立 FX | graph+layer | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 条件支持：仅已注册 DCTL 实例的 slider/float 连续标量；按实例 schema 校验。Color/GL 逐帧求值，Deliver 使用 OpenGL；CPU/Metal 原生 FX、离散/颜色参数及 AI 效果尚未支持。 |
 
 ## 字段登记（逐行往返/拒绝用例见 tests/color/test_keyframe_tracks.py）
 
@@ -34,6 +34,9 @@
 | mid_detail | scalar | — | — |
 | sharpness | scalar | — | — |
 | hue_shift | scalar | — | — |
+| lift_saturation | scalar | — | — |
+| gamma_saturation | scalar | — | — |
+| gain_saturation | scalar | — | — |
 
 ### Window 窗口子轨（window）
 

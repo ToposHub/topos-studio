@@ -44,6 +44,36 @@ def _values(graph, node_id, param):
             for k in (track.get("keyframes") or ())}
 
 
+def test_nested_and_root_keys_commit_once_and_reject_atomically():
+    graph = _graph()
+    a, b, c = _correctors(graph)
+    service = ColorGraphService()
+    grouped = service.apply_intent(graph, "group_subgraph", {"member_ids": [a.node_id, b.node_id]})
+    assert grouped.ok
+    graph = grouped.graph
+    compound = next(n for n in graph.nodes if n.compound_children is not None)
+    edits = [
+        {"action": "set", "node_id": a.node_id, "compound_path": [compound.node_id],
+         "param": "exposure", "frame": 12, "value": 0.4},
+        {"action": "set", "node_id": c.node_id, "param": "contrast", "frame": 20, "value": 0.2},
+    ]
+    result = service.apply_intent(graph, "batch_edit_keyframes", {"edits": edits})
+    assert result.ok, result.diagnostics
+    assert result.graph.graph_revision == graph.graph_revision + 1
+    child = next(n for n in result.graph.nodes if n.node_id == compound.node_id).compound_children
+    assert _frames(child, a.node_id, "exposure") == [12]
+    assert _frames(result.graph, c.node_id, "contrast") == [20]
+    repeated = service.apply_intent(result.graph, "batch_edit_keyframes", {"edits": edits})
+    assert repeated.ok and repeated.graph is result.graph
+    bad = [edits[1], {**edits[0], "node_id": "missing"}]
+    rejected = service.apply_intent(graph, "batch_edit_keyframes", {"edits": bad})
+    assert not rejected.ok and rejected.graph is graph
+    locked = service.apply_intent(graph, "set_edit_lock", {"node_ids": [compound.node_id], "locked": True})
+    assert locked.ok
+    rejected = service.apply_intent(locked.graph, "batch_edit_keyframes", {"edits": edits})
+    assert not rejected.ok and rejected.primary_code == "node_locked"
+
+
 def test_batch_set_across_two_nodes_single_revision():
     graph = _graph()
     a, b, _c = _correctors(graph)

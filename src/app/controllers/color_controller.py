@@ -2006,6 +2006,8 @@ class ColorControllerMixin:
         - 录制模式（grading 面板 ◆）开启：全部改动形状记录。
         无当前帧（静态图/未播放）时不记录。
         """
+        if getattr(self, "_color_keyframes_host", None) is not None:
+            return  # project graph recorder is the only animation writer
         engine = getattr(self, 'engine', None)
         frame = getattr(engine, 'current_grade_frame', None)
         if frame is None or not updated_fields:

@@ -2012,6 +2012,13 @@ class PreviewRenderWorker(QThread):
         requires_cpu = self._retime_interp_requires_cpu(layers, frame)
         if requires_cpu:
             return False, {"fallback_reason": requires_cpu}
+        for layer in layers:
+            graph = self._clip_color_graph(layer)
+            if graph is not None:
+                from src.features.color.core.color_graph_texture import graph_texture_fallback_reason
+                reason = graph_texture_fallback_reason(graph, int(getattr(layer, "source_frame", 0)))
+                if reason:
+                    return False, {"fallback_reason": reason}
 
         # P0-PREV-GPU-T：转场帧按能力分流：
         # - cross_dissolve：仅 opacity 重写（合成器原生支持）；
@@ -4979,6 +4986,13 @@ class PreviewRenderWorker(QThread):
                                     exclude_timeline=exclude_timeline)
         extras_on = extras_active(extras)
 
+        graph = getattr(stack, "color_graph", None)
+        if graph is not None:
+            return {"stack_id": str(stack_id), "color_graph": graph,
+                    "source_frame": int(getattr(layer, "source_frame", 0)),
+                    "chain_extra_params": extras,
+                    "has_advanced_operations": True}
+
         if not basic_active and not advanced_active and not grade_keyframes \
                 and not extras_on:
             return None
@@ -5024,6 +5038,10 @@ class PreviewRenderWorker(QThread):
         """
         if not grade:
             return grade
+        if grade.get("color_graph") is not None:
+            # Task assembly may resolve a different source index (e.g. a
+            # composite or generated source). Never retain the initial index.
+            return {**grade, "source_frame": int(source_frame)}
         tracks_payload = grade.get("grade_keyframes")
         base_params = grade.get("grading_params")
         if not tracks_payload or not isinstance(base_params, dict):
@@ -5270,9 +5288,8 @@ class PreviewRenderWorker(QThread):
         """R5：Edit CPU 预览回退按权威图逐节点合成。
 
         与 Deliver 侧 ``run_graph_frame_cpu`` 同一入口/同一生产 oracle
-        （预览与导出回退路径一致）。不支持的算子/域：告警并降级到既有
-        扁平路径（Edit 预览域保持既有降级语义，成片路径不受影响）；
-        返回 None 表示降级。
+        （预览与导出回退路径一致）。能力不足或资源失败上报错误，
+        由现有预览任务错误通道保留上一帧，避免显示缺少效果的成片预览。
         """
         from src.features.color.core.color_graph_compiler import (
             GraphCompileError,
@@ -5298,7 +5315,7 @@ class PreviewRenderWorker(QThread):
             if extra.get("_unsupported_advanced", False):
                 logger.warning(
                     "Edit preview color chain: clip %s 链段含 curves/LUT 等"
-                    "高级操作，图执行路径跳过该段（成片渲染路径不受影响）",
+                    "高级操作，基础链段求值不能完整执行该段",
                     layer.clip_id)
         pre = [e for e in extras if e.get("_chain_segment") == "pre"]
         after = [e for e in extras if e.get("_chain_segment") != "pre"]
@@ -5310,17 +5327,14 @@ class PreviewRenderWorker(QThread):
         except (UnsupportedNode, GraphCompileError) as exc:
             logger.warning(
                 "Edit preview color grade: clip %s 图 CPU 逐节点合成不支持"
-                "（%s）——降级到扁平路径（成片渲染路径不受影响）",
+                "（%s）——未发布不完整画面",
                 layer.clip_id, exc)
-            return None
-        except Exception:  # noqa: BLE001 — 预览域降级（成片路径不受影响）
-            # 运行期失败（keyer/LUT 资源异常）：预览回退扁平路径并告警
-            # ——成片渲染（Deliver）对同类失败 fail-fast，不静默缺效果。
+            raise RuntimeError(f"Color graph preview failed for clip {layer.clip_id}: {exc}") from exc
+        except Exception:  # noqa: BLE001 — log and rethrow at render-task boundary
             logger.warning(
-                "Edit preview color graph cpu failed for clip %s——"
-                "降级到扁平路径（成片渲染路径不受影响）",
+                "Edit preview color graph cpu failed for clip %s; no partial grade published",
                 layer.clip_id, exc_info=True)
-            return None
+            raise
 
     def _apply_preview_color_grade_unstabilized(
         self,
@@ -5336,6 +5350,7 @@ class PreviewRenderWorker(QThread):
                 frame_data, layer, graph, exclude_timeline=exclude_timeline)
             if graded is not None:
                 return graded
+            raise RuntimeError(f"Color graph preview is unsupported for clip {layer.clip_id}; full grade was not rendered")
         grade = self._get_preview_color_grade(
             layer, exclude_timeline=exclude_timeline)
         if grade is None:

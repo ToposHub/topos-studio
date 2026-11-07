@@ -37,6 +37,17 @@ def _layer(stack_id: str) -> SimpleNamespace:
     )
 
 
+def test_graph_packet_binds_task_source_frame_without_mutating_cached_grade():
+    graph = object()
+    cached = {"color_graph": graph, "source_frame": 10}
+    first = PreviewRenderWorker._evaluate_preview_grade_at(cached, 11)
+    second = PreviewRenderWorker._evaluate_preview_grade_at(cached, 12)
+    assert first["source_frame"] == 11
+    assert second["source_frame"] == 12
+    assert cached["source_frame"] == 10
+    assert first["color_graph"] is graph
+
+
 def test_active_color_stack_disables_raw_direct_preview() -> None:
     stack = ColorStackData(
         stack_id="stack-1",

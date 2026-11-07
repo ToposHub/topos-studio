@@ -1547,7 +1547,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
 
             def _active_node_provider():
                 host = getattr(self, "color_graph_host", None)
-                return host.active_grade_node_id() if host is not None else ""
+                return host.active_grade_node_identity() if host is not None else ""
 
             def _session_provider():
                 manager = getattr(self, "_color_session_manager", None)
@@ -1568,6 +1568,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 session_provider=_session_provider,
                 playback=self,
                 stack_id_provider=lambda: self.color_graph_host.bound_stack_id,
+                binding_provider=self.color_graph_host.binding_description,
                 fps_provider=_timeline_fps,
                 # KF-03：真实写入口（批处理一次提交 = 一个历史条目；
                 # lock/enable 复用既有节点级命令）
@@ -1583,6 +1584,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                     self, "_color_last_source_frame", None))
             self._color_keyframes_host = host
             self._color_keyframes_frame_hook = host.on_local_frame_changed
+            self.grading_panel.use_central_keyframes()
 
             def _on_session_changed(_session) -> None:
                 try:
@@ -1636,6 +1638,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             def _set_project(project):
                 self._current_edit_project = project
                 self.edit_project_dirty = True
+                self._publish_color_graph_to_previews(project)
                 # N11：外部工程替换统一重投影（幂等：自家命令流已推同
                 # revision ack 时跳过）。
                 try:
@@ -1746,6 +1749,32 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         if combo in {"ppw", "pcw"}:
             self.canvas.set_mask_creation_mode(
                 "polygon" if combo == "ppw" else "curve")
+
+    def _publish_color_graph_to_previews(self, project: Any) -> None:
+        """Invalidate every grade consumer when the authoritative graph commits.
+
+        Graph gestures bypass the legacy stack-save callback. Both timeline
+        preview workers still need the new immutable snapshot, otherwise seek
+        can alternate old cached grades with the current Color render.
+        """
+        seen: set[int] = set()
+        for name in ("timeline_preview_renderer", "_color_timeline_preview_renderer"):
+            renderer = getattr(self, name, None)
+            if renderer is None or id(renderer) in seen:
+                continue
+            seen.add(id(renderer))
+            update = getattr(renderer, "update_color_stacks", None)
+            if callable(update):
+                update(project)
+        invalidate = getattr(self, "_invalidate_video_render_params_if_playing", None)
+        if callable(invalidate):
+            invalidate()
+        renderer = getattr(self, "_color_timeline_preview_renderer", None)
+        if renderer is not None and getattr(self, "current_page", None) == "Color":
+            provider = getattr(self, "_color_timeline_playback_controller", None)
+            controller = provider() if callable(provider) else None
+            if controller is not None:
+                renderer.request_render(int(controller.current_frame))
 
     def _set_color_stack_hydration_guard(self, on: bool) -> None:
         """图宿主投影同步期间的面板回流抑制（与既有水合守卫同一标志）。"""

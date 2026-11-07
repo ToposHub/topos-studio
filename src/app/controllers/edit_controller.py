@@ -1992,6 +1992,14 @@ class EditControllerMixin:
         if getattr(self, '_color_stack_hydration_in_progress', False):
             return
 
+        graph_host = getattr(self, 'color_graph_host', None)
+        if graph_host is not None and graph_host.grade_gesture_open():
+            # MainWindow's live handler already submitted this gesture to the
+            # graph transaction. A second legacy snapshot commit would rebuild
+            # node identities and can overwrite the just-recorded keys.
+            self._pending_grading_color_stack = None
+            return
+
         panel = getattr(self, 'grading_panel', None)
         if panel is None:
             return

@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 67 items
+
+tests/shared/test_fix_wd17g90_aud.py ................................... [ 52%]
+s.....................                                                   [ 85%]
+tests/ui/test_color_keyframes_panel.py ..........                        [100%]
+
+======================== 66 passed, 1 skipped in 4.42s =========================

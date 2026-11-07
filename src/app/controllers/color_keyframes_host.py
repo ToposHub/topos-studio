@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any, Callable, Mapping, Optional
 
+from src.shared.media.metadata import Rational
+from src.features.color.core.keyframe_frame_map import KeyframeFrameMap
 from src.features.color.core.color_graph_param_source import (
     node_layer_payload,
 )
@@ -12,6 +15,7 @@ from src.features.color.core.keyframe_tracks import (
     WINDOW_TRACK_FIELDS,
     decode_keyframe,
     expected_value_size,
+    iter_window_payloads,
     mask_track_name,
     parse_track_name,
 )
@@ -63,17 +67,35 @@ def _leaf_label(domain: str, field: str, shapes: Any,
     return field
 
 
+def _node_index(graph: Any, prefix: str = "") -> dict[str, Any]:
+    nodes = {}
+    for node in getattr(graph, "nodes", ()):
+        key = prefix + node.node_id
+        nodes[key] = node
+        if node.compound_children is not None:
+            nodes.update(_node_index(node.compound_children, key + "/"))
+    return nodes
+
+
+def _prefixed_track(track: Track, prefix: str) -> Track:
+    kind, sep, identity = track.id.partition(":")
+    return replace(track, id=f"{kind}:{prefix}{identity}" if sep else track.id,
+                   children=tuple(_prefixed_track(c, prefix) for c in track.children))
+
+
 def build_keyframes_snapshot(
     *,
     context: str,
     frame_count: int,
-    timecode_fps: int,
+    timecode_fps: int | float | Rational,
     playhead: int,
     corrector: str,
     graph: Any,
     auto_nodes: frozenset[str] = frozenset(),
     source_origin: int | None = 0,
     edit_notice: str = "",
+    frame_map: KeyframeFrameMap | None = None,
+    effect_schema_provider: Callable[[str], Any] | None = None,
 ) -> Snapshot:
     """从权威图对象构建只读快照（纯函数，宿主与测试共用）。
 
@@ -90,6 +112,19 @@ def build_keyframes_snapshot(
         qualifier_track_name,
     )
     for node in getattr(graph, "nodes", ()) or ():
+        if node.compound_children is not None:
+            child = build_keyframes_snapshot(
+                context=context, frame_count=frame_count, timecode_fps=timecode_fps,
+                playhead=playhead, corrector="", graph=node.compound_children,
+                auto_nodes=auto_nodes, source_origin=source_origin, frame_map=frame_map,
+                effect_schema_provider=effect_schema_provider)
+            children = tuple(_prefixed_track(t, node.node_id + "/") for t in child.tracks if t.scope == "color")
+            rows.append(Track("compound:" + node.node_id, node.label or tr("compound", "Compound"),
+                              "color", children, locked=bool(node.params.get("locked")),
+                              row_controls=False))
+            if not first_row and child.corrector:
+                first_row = child.corrector.replace("node:", "node:" + node.node_id + "/", 1)
+            continue
         try:
             if node.known_type() not in _corrector_types():
                 continue
@@ -97,7 +132,7 @@ def build_keyframes_snapshot(
             continue
         node_id = node.node_id
         payload = node_layer_payload(node, include_lut_cache=False) or {}
-        shapes = payload.get("mask_shapes") or ()
+        shapes = tuple(iter_window_payloads(payload.get("mask_shapes")))
         # 既有轨道 → 标记（图域 mappingproxy 与 legacy dict 并存）
         existing: dict[str, tuple[Any, list[Marker]]] = {}
         for name, track_data in (payload.get("grade_keyframes") or {}).items():
@@ -115,10 +150,10 @@ def build_keyframes_snapshot(
                     decoded = decode_keyframe(kf)
                 except ValueError:
                     continue  # 畸形关键帧不阻断其余投影
-                if source_origin is not None:
-                    local = int(decoded.frame) - source_origin
-                    if 0 <= local < frame_count:
-                        markers.append(Marker(local, decoded.kind, decoded.start, decoded.end))
+                local = (frame_map.panel_frame(int(decoded.frame)) if frame_map is not None else
+                         int(decoded.frame) - source_origin if source_origin is not None else None)
+                if local is not None and 0 <= local < frame_count:
+                    markers.append(Marker(local, decoded.kind, decoded.start, decoded.end))
             existing[str(name)] = (address, markers)
 
         def _leaf(domain: str, track_name: str, field: str,
@@ -126,7 +161,7 @@ def build_keyframes_snapshot(
             return Track(id=f"node:{node_id}|{track_name}",
                          label=_leaf_label(domain, field, shapes, owner_id),
                          scope="color", markers=tuple(markers),
-                         auto=node_id in auto_nodes, row_controls=False)
+                         auto=node_id in auto_nodes, row_controls=True, node_controls=False)
 
         row_id = f"node:{node_id}"
         grade: list[Track] = []
@@ -145,18 +180,37 @@ def build_keyframes_snapshot(
             shape_id = str(shape["id"])
             leaves = []
             for spec in WINDOW_TRACK_FIELDS:
+                if spec.name not in shape:
+                    continue
                 name = mask_track_name(shape_id, spec.name)
                 _, markers = existing.get(name, (None, []))
                 leaves.append(_leaf("window", name, spec.name, markers, shape_id))
             label = str(shape.get("name") or shape.get("type") or tr("window", "Window"))
             windows.append(Track(f"{row_id}/window/{shape_id}", label, "color", tuple(leaves),
-                                 auto=node_id in auto_nodes, row_controls=False))
+                                 auto=node_id in auto_nodes, row_controls=True, node_controls=False))
         groups = (*windows,
                   Track(f"{row_id}/grade", tr("correction", "Color Corrector"), "color", tuple(grade),
-                        auto=node_id in auto_nodes, row_controls=False),
+                        auto=node_id in auto_nodes, row_controls=True, node_controls=False),
                   Track(f"{row_id}/qualifier", tr("qualifier", "Qualifier"), "color", tuple(qualifier),
-                        auto=node_id in auto_nodes, row_controls=False))
-        label = str(getattr(node, "label", "") or payload.get("label")
+                        auto=node_id in auto_nodes, row_controls=True, node_controls=False))
+        from src.features.color.core.effect_keyframes import effect_animation_schema
+        fx_groups = []
+        for instance in payload.get("plugins") or ():
+            if not isinstance(instance, Mapping) or not instance.get("instance_id"):
+                continue
+            instance_id = str(instance["instance_id"])
+            leaves = []
+            for entry in effect_animation_schema(instance, schema_provider=effect_schema_provider):
+                name = f"fx.{instance_id}.{entry['var_name']}"
+                _, markers = existing.get(name, (None, []))
+                leaves.append(_leaf("fx", name, str(entry.get("name") or entry["var_name"]), markers, instance_id))
+            fx_groups.append(Track(f"{row_id}/fx/{instance_id}",
+                str(instance.get("name") or instance.get("plugin_id") or "FX"), "color", tuple(leaves),
+                available=bool(leaves), row_controls=bool(leaves), node_controls=False,
+                unavailable_reason="" if leaves else tr("fx_animation_unavailable", "This effect has no registered continuous animation parameters.")))
+        groups = (*groups, *fx_groups)
+        from src.features.color.core.color_node_labels import display_node_label
+        label = str(display_node_label(node.label, node.node_id, str(payload.get("id") or "")) or payload.get("label")
                     or tr("corrector", "Corrector {index}").format(index=len(rows) + 1))
         rows.append(Track(
             id=row_id,
@@ -170,7 +224,7 @@ def build_keyframes_snapshot(
         if not first_row:
             first_row = row_id
     active = corrector or first_row
-    if not any(row.id == active for row in rows):
+    if active.removeprefix("node:") not in _node_index(graph):
         active = ""
     rows.append(Track("sizing", tr("sizing", "Sizing"), "sizing", available=False,
                       row_controls=False,
@@ -178,7 +232,8 @@ def build_keyframes_snapshot(
     return Snapshot(
         context=context,
         frame_count=max(0, int(frame_count)),
-        timecode_fps=max(1, int(timecode_fps)),
+        timecode_fps=(timecode_fps if isinstance(timecode_fps, Rational) and timecode_fps.num > 0
+                      else max(1, int(float(timecode_fps)))),
         playhead=max(0, int(playhead)),
         corrector=active,
         tracks=tuple(rows),
@@ -204,7 +259,8 @@ class ColorKeyframesHost:
         session_provider: Callable[[], Any],
         playback: Any,
         stack_id_provider: Callable[[], str] | None = None,
-        fps_provider: Callable[[str], int] | None = None,
+        binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+        fps_provider: Callable[[str], int | float | Rational] | None = None,
         submit_batch: Optional[Callable[[list[dict]], bool]] = None,
         submit_action: Optional[Callable[[str, dict], bool]] = None,
         auto_recorder: Any = None,
@@ -215,10 +271,12 @@ class ColorKeyframesHost:
         self._session_provider = session_provider
         self._playback = playback
         self._stack_id_provider = stack_id_provider
+        self._binding_provider = binding_provider
         self._fps_provider = fps_provider
         self._source_origin: int | None = None
+        self._frame_map: KeyframeFrameMap | None = None
         self._corrector = ""
-        self._fps = 0
+        self._fps: int | float | Rational = 0
         self._submit_batch = submit_batch
         self._submit_action = submit_action
         self._recorder = auto_recorder  # KF-04：自动录制注册表（可缺席）
@@ -254,28 +312,18 @@ class ColorKeyframesHost:
                     else getattr(session, "color_stack_id", ""))
         if not stack_id:
             return "", {}
+        binding = self._binding_provider() if self._binding_provider is not None else {}
+        if binding and (not binding.get("writable") or binding.get("stack_id") != stack_id):
+            return "", {}
         if stack_id != getattr(session, "color_stack_id", ""):
             playback_context = {**playback_context, "non_clip_grade": True}
-        return _session_context_key(session, stack_id), playback_context
-
-    @staticmethod
-    def _linear_source_origin(playback_context: dict) -> int | None:
-        """Only a one-to-one forward clip window is safe for this panel to edit."""
-        if playback_context.get("non_clip_grade"):
-            return None
-        clip = playback_context["clip"]
-        speed = getattr(clip, "speed", 1.0)
-        ratio = getattr(clip, "_source_over_timeline_fps_ratio", None)
-        if (getattr(speed, "speed", speed) != 1.0 or getattr(speed, "reverse", False)
-                or getattr(speed, "speed_points", ())
-                or getattr(clip, "freeze_source_frame", None) is not None
-                or (callable(ratio) and ratio() != 1)):
-            return None
-        effective = playback_context.get("effective_source_start")
-        if effective is not None:
-            return int(effective)
-        mapper = getattr(clip, "clip_local_to_source_frame", None)
-        return int(mapper(0) if callable(mapper) else getattr(clip, "source_start", 0))
+        identity = _session_context_key(session, stack_id)
+        if binding:
+            identity += "|" + repr((binding.get("scope"), binding.get("scope_owner_id"), binding.get("generation")))
+        total = self._playback._color_timeline_clip_total_frames() or 0
+        identity += "|" + repr(KeyframeFrameMap(playback_context["clip"], int(total),
+                                               playback_context.get("effective_source_start")).signature)
+        return identity, playback_context
 
     def _clear(self) -> bool:
         if not self._context:
@@ -298,38 +346,63 @@ class ColorKeyframesHost:
         if graph is None:
             return self._clear()
 
-        origin = self._linear_source_origin(playback_context)
+        frame_map = KeyframeFrameMap(
+            playback_context["clip"], int(total), playback_context.get("effective_source_start"),
+            False)
+        origin = (frame_map.panel_origin if frame_map.available
+                  and not playback_context.get("non_clip_grade") else None)
+        panel_total = frame_map.panel_total
         corrector = self._active_node_row_id()
         fps = (self._fps_provider(str(playback_context.get("timeline_id", "")))
                if self._fps_provider is not None else
                int(getattr(playback_context.get("clip"), "fps", 0) or 0)) or 24
+        clip = playback_context["clip"]
+        source_num = int(getattr(clip, "_source_fps_num", 0) or 0)
+        source_den = int(getattr(clip, "_source_fps_den", 0) or 0)
+        if source_num > 0 and source_den > 0:
+            fps = Rational(source_num, source_den)
         revision = int(getattr(graph, "graph_revision", -1))
         if (context != self._context or origin != self._source_origin) and self._recorder is not None:
             self._recorder.reset()
-        if not force and (context, revision, corrector, origin, total, fps) == (
+        mapping_changed = self._frame_map is None or self._frame_map.signature != frame_map.signature
+        if not force and not mapping_changed and (context, revision, corrector, origin, panel_total, fps) == (
                 self._context, self._revision, self._corrector, self._source_origin,
                 self._frame_count, self._fps):
             return False
 
-        notice = ""
-        if playback_context.get("non_clip_grade"):
-            notice = tr("scope_read_only", "Keyframe editing is currently available in Clip grade scope.")
-        elif origin is None:
-            notice = tr("retime_read_only", "Keyframe editing is unavailable for retimed or mixed-frame-rate clips.")
+        notice = "" if origin is not None else tr("mapping_unavailable", "Keyframe editing is unavailable for this grade scope or frame mapping.")
         snapshot = build_keyframes_snapshot(
-            context=context, frame_count=int(total), timecode_fps=fps,
-            playhead=max(0, min(self._last_frame, int(total) - 1)),
+            context=context, frame_count=panel_total, timecode_fps=fps,
+            playhead=max(0, (frame_map.source_frame(max(0, min(self._last_frame, int(total) - 1))) or 0) - (origin or 0)),
             corrector=corrector, graph=graph, source_origin=origin,
-            edit_notice=notice,
+            edit_notice=notice, frame_map=frame_map if origin is not None else None,
             auto_nodes=(self._recorder.auto_nodes()
                         if self._recorder is not None else frozenset()),
         )
+        snapshot = replace(snapshot, frame_offset=origin or 0)
+        if (origin is not None and frame_map.source_frame(int(total) - 1) != origin + int(total) - 1):
+            snapshot = replace(snapshot, info_notice=tr("source_ruler", "Source-frame ruler. Playback seeks to the nearest timeline frame."))
         self._context = context
         self._revision = revision
         self._corrector = corrector
         self._source_origin = origin
+        self._frame_map = frame_map
         self._frame_count = snapshot.frame_count
         self._fps = fps
+        if self._recorder is not None:
+            def auto_state(track: Track) -> Track:
+                children = tuple(auto_state(child) for child in track.children)
+                parsed = self._parse_track_id(track.id)
+                enabled = track.auto
+                if children:
+                    enabled = all(child.auto for child in children)
+                elif parsed is not None:
+                    node_id, address = parsed
+                    *path, actual_id = node_id.split("/")
+                    enabled = self._recorder.auto_enabled(
+                        actual_id, address.track_name if address else None, tuple(path))
+                return replace(track, auto=enabled, children=children)
+            snapshot = replace(snapshot, tracks=tuple(auto_state(track) for track in snapshot.tracks))
         self._panel.set_snapshot(snapshot)
         return True
 
@@ -339,6 +412,9 @@ class ColorKeyframesHost:
         self._last_frame = frame
         if not self._context:
             return  # 演示快照：不回填，避免把演示播放头拖离 fixture
+        if self._frame_map is not None:
+            source = self._frame_map.source_frame(max(0, min(frame, self._frame_map.total - 1)))
+            frame = (source - self._frame_map.panel_origin) if source is not None else 0
         if self._frame_count:
             frame = max(0, min(frame, self._frame_count - 1))
         self._panel.set_playhead(frame)
@@ -351,6 +427,11 @@ class ColorKeyframesHost:
             self.refresh()
             return
         frame = int(frame)
+        if self._frame_map is not None:
+            local = self._frame_map.panel_to_local(frame)
+            if local is None:
+                return
+            frame = local
         self._last_seek_frame = frame
         playback = self._playback
         if self._scrubbing:
@@ -393,7 +474,11 @@ class ColorKeyframesHost:
             return
         context, playback_context = self._binding()
         if (not context or request.context != self._context or context != self._context
-                or self._linear_source_origin(playback_context) != self._source_origin):
+                or self._frame_map is None
+                or self._frame_map.signature != KeyframeFrameMap(
+                    playback_context["clip"], self._frame_map.total,
+                    playback_context.get("effective_source_start"),
+                    False).signature):
             self.refresh()
             logger.debug("keyframes edit dropped: stale context %r",
                          request.context)
@@ -420,11 +505,21 @@ class ColorKeyframesHost:
         if translated is None:
             return
         edits, node_actions, skipped, auto_toggles = translated
-        for node_id, enabled in auto_toggles:
+        for edit in edits:
+            *path, node_id = edit["node_id"].split("/")
+            edit["node_id"] = node_id
+            if path:
+                edit["compound_path"] = path
+        for node_id, param, enabled in auto_toggles:
             if self._recorder is not None:
-                self._recorder.set_auto(node_id, enabled)
-                # 会话域开关：不推 revision，强制重建投影刷新 auto 列
-                self.refresh(force=True)
+                *path, node_id = node_id.split("/")
+                if param:
+                    self._recorder.set_track_auto(node_id, param, enabled, tuple(path))
+                else:
+                    self._recorder.set_auto(node_id, enabled, tuple(path))
+        if auto_toggles and self._recorder is not None:
+            # One projection for a group toggle, rather than one per leaf.
+            self.refresh(force=True)
         if skipped:
             logger.info(
                 "keyframes edit skipped targets (not writable yet): %s",
@@ -457,10 +552,10 @@ class ColorKeyframesHost:
         graph = self._graph_provider()
         if graph is None:
             return None
-        nodes = {node.node_id: node for node in getattr(graph, "nodes", ())}
+        nodes = _node_index(graph)
         edits: list[dict] = []
         node_actions: list[tuple[str, dict]] = []
-        auto_toggles: list[tuple[str, bool]] = []
+        auto_toggles: list[tuple[str, str | None, bool]] = []
         skipped: list[str] = []
         locked_state: dict[str, bool] = {}
         enabled_state: dict[str, bool] = {}
@@ -477,6 +572,18 @@ class ColorKeyframesHost:
                 skipped.append(track_id)
                 continue
             node_id, address = parsed
+            if node_id not in nodes:
+                # Tool group rows carry a display suffix, never an entity ID.
+                group = self._panel._tracks.get(track_id)
+                if request.action == "auto" and group is not None:
+                    def leaves(track: Track) -> None:
+                        for child in track.children:
+                            parsed_child = self._parse_track_id(child.id)
+                            if parsed_child and parsed_child[1] is not None:
+                                auto_toggles.append((parsed_child[0], parsed_child[1].track_name, request.enabled))
+                            leaves(child)
+                    leaves(group)
+                continue
             if request.action in ("lock", "enable"):
                 # 面板行按钮：node 行直发，叶行映射回父节点
                 if request.action == "lock":
@@ -487,10 +594,10 @@ class ColorKeyframesHost:
             if request.action == "auto":
                 # KF-04：Corrector 级开关（作用于全部子轨，写入只落在
                 # 本次手势改动的参数）；会话域状态，非工程命令
-                auto_toggles.append((node_id, request.enabled))
+                auto_toggles.append((node_id, address.track_name if address else None, request.enabled))
                 continue
             if address is None or address.domain not in (
-                    "grade", "qualifier", "window"):
+                    "grade", "qualifier", "window", "fx"):
                 skipped.append(track_id)  # Sizing/FX/节点行等不可写目标
                 continue
             # 命令域一律用 canonical 轨道名（qualifier.*/mask.<id>.<f>）——
@@ -531,16 +638,23 @@ class ColorKeyframesHost:
             else:
                 skipped.append(track_id)
         if locked_state:
-            node_actions.append(("lock_node", {
-                "node_ids": sorted(locked_state),
-                "locked": next(iter(locked_state.values())),
-            }))
+            self._node_actions_by_path(node_actions, "lock_node", locked_state, "locked")
         if enabled_state:
-            node_actions.append(("set_enabled", {
-                "node_ids": sorted(enabled_state),
-                "enabled": next(iter(enabled_state.values())),
-            }))
+            self._node_actions_by_path(node_actions, "set_enabled", enabled_state, "enabled")
         return (edits, node_actions, skipped, auto_toggles)
+
+    @staticmethod
+    def _node_actions_by_path(actions: list[tuple[str, dict]], action: str,
+                              states: dict[str, bool], field: str) -> None:
+        groups: dict[tuple[str, ...], list[str]] = {}
+        for identity in states:
+            *path, node_id = identity.split("/")
+            groups.setdefault(tuple(path), []).append(node_id)
+        for path, node_ids in groups.items():
+            arguments = {"node_ids": sorted(node_ids), field: next(iter(states.values()))}
+            if path:
+                arguments["_compound_path"] = path
+            actions.append((action, arguments))
 
     def _translate_paste(self, request: EditRequest, nodes: dict,
                          edits: list[dict]) -> bool:
@@ -613,7 +727,7 @@ class ColorKeyframesHost:
         graph = self._graph_provider()
         if graph is None:
             return
-        nodes = {node.node_id: node for node in getattr(graph, "nodes", ())}
+        nodes = _node_index(graph)
         entries: dict[tuple[str, int], dict] = {}
         for track_id, frame in request.targets:
             parsed = self._parse_track_id(track_id)
@@ -659,6 +773,8 @@ class ColorKeyframesHost:
         }
 
     def _source_frame(self, local: int) -> int | None:
+        if self._frame_map is not None:
+            return self._frame_map.panel_source_frame(local)
         if self._source_origin is None or not 0 <= local < self._frame_count:
             return None
         return self._source_origin + local
@@ -723,8 +839,18 @@ class ColorKeyframesHost:
             if address.field not in params:
                 return _UNRESOLVED
             return params[address.field]
+        if address.domain == "fx":
+            from src.features.color.core.effect_keyframes import effect_animation_schema
+            for instance in payload.get("plugins") or ():
+                if isinstance(instance, Mapping) and instance.get("instance_id") == address.owner_id:
+                    params = instance.get("params") or {}
+                    if address.field in params:
+                        return params[address.field]
+                    return next((entry.get("default", _UNRESOLVED) for entry in effect_animation_schema(instance)
+                                 if entry.get("var_name") == address.field), _UNRESOLVED)
+            return _UNRESOLVED
         # window：形状字段现值
-        for shape in payload.get("mask_shapes") or ():
+        for shape in iter_window_payloads(payload.get("mask_shapes")):
             if (isinstance(shape, Mapping)
                     and str(shape.get("id")) == address.owner_id):
                 if address.field not in shape:

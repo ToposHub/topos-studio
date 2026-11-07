@@ -455,6 +455,22 @@ def test_color_timeline_clip_playback_context_uses_effective_source_start() -> N
     assert controller.canvas.video_control_bar.current_frame == 15
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_effective_source_override_keeps_the_retime_mapping(reverse: bool) -> None:
+    from src.features.edit.core.clip_params import SpeedParams
+    from src.features.color.core.keyframe_frame_map import KeyframeFrameMap
+    clip = ClipInstance(clip_id="retime", asset_id="a", track_id="v", timeline_start=100,
+                        timeline_duration=20, source_start=50, source_duration=40,
+                        speed=SpeedParams(speed=2.0, reverse=reverse))
+    controller = _Controller(clip)
+    controller._set_color_timeline_clip_playback_context("tl", clip, effective_source_start=62)
+    mapping = KeyframeFrameMap(clip, 20, 62)
+    for local in (0, 5, 12, 19):
+        source = mapping.source_frame(local)
+        assert controller._color_local_frame_to_source_frame(local) == source
+        assert controller._color_source_frame_to_local_frame(source) == local
+
+
 def test_color_clip_play_resyncs_range_before_first_play() -> None:
     clip = _clip()
     controller = _Controller(clip)

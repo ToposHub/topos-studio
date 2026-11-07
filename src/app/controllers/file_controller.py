@@ -5808,12 +5808,11 @@ class FileOpsMixin:
         local_frame = max(0, min(int(frame_number), total - 1))
         effective_start = context.get("effective_source_start")
         clip_start = int(getattr(clip, "source_start", 0) or 0)
-        if effective_start is not None and int(effective_start) != clip_start:
-            return int(effective_start) + local_frame
+        offset = int(effective_start) - clip_start if effective_start is not None else 0
         try:
-            return int(clip.clip_local_to_source_frame(local_frame))
+            return int(clip.clip_local_to_source_frame(local_frame)) + offset
         except (AttributeError, TypeError, ValueError):
-            return clip_start + local_frame
+            return clip_start + offset + local_frame
 
     def _color_local_frame_to_timeline_frame(self, frame_number: int) -> int | None:
         """Map Color's clip-local transport coordinate to the shared timeline."""
@@ -5848,13 +5847,11 @@ class FileOpsMixin:
         total = max(1, int(getattr(clip, "timeline_duration", 1) or 1))
         effective_start = context.get("effective_source_start")
         clip_start = int(getattr(clip, "source_start", 0) or 0)
-        if effective_start is not None and int(effective_start) != clip_start:
-            local = int(source_frame) - int(effective_start)
-            return max(0, min(local, total - 1))
+        offset = int(effective_start) - clip_start if effective_start is not None else 0
         try:
-            local = int(clip.source_to_clip_local_frame(int(source_frame)))
+            local = int(clip.source_to_clip_local_frame(int(source_frame) - offset))
         except (AttributeError, TypeError, ValueError):
-            local = int(source_frame) - clip_start
+            local = int(source_frame) - clip_start - offset
         return max(0, min(local, total - 1))
 
     def _sync_color_timeline_clip_video_controls(self) -> None:

@@ -753,7 +753,7 @@ def _cpu_node_matte(base: np.ndarray, params: Mapping[str, Any],
     windows = params.get("mask_shapes")
     if windows:
         from src.features.color.core.layer import MaskGroup, MaskShape
-        from src.features.color.core.mask_shapes_cpu import combine_masks_cpu
+        from src.features.color.core.window_rasterizer import WindowRasterizer
         items = []
         for shape in windows:
             data = dict(shape) if isinstance(shape, Mapping) else None
@@ -763,11 +763,10 @@ def _cpu_node_matte(base: np.ndarray, params: Mapping[str, Any],
             items.append(cls.from_dict(data))
         if items:
             h, w = base.shape[:2]
-            window_mask, report = combine_masks_cpu(items, w, h)
-            if report.unsupported:
-                _sid, stype, reason = report.unsupported[0]
-                raise UnsupportedNode(
-                    f"窗口形状 {stype} 在 CPU 图路径不支持: {reason}")
+            try:
+                window_mask = WindowRasterizer().render_items(items, w, h)
+            except ValueError as exc:
+                raise UnsupportedNode(str(exc)) from exc
             window_mask = window_mask[:, :, np.newaxis].astype(np.float32)
             matte = (window_mask if matte is None
                      else matte * window_mask)
@@ -1008,6 +1007,8 @@ def run_graph_frame_cpu(
             return buf
         from src.features.color.core.the_decompiler import GradingMath
         for extra in entries:
+            if extra.get("_unsupported_advanced"):
+                raise UnsupportedNode("Advanced Color chain segment requires full graph execution")
             flat = GradingMath.apply_grading(
                 buf[..., :3].reshape(-1, 3), dict(extra))
             buf = buf.copy()

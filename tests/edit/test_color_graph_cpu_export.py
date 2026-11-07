@@ -174,7 +174,7 @@ class TestGraphCpuExport:
 
 
 class TestGraphCpuFailurePolicy:
-    """R5 审计：图 CPU 路径运行期异常——导出 fail-fast、预览降级。"""
+    """R5：失败不得发布缺少节点/效果的预览或导出。"""
 
     def test_export_unexpected_failure_fails_fast_with_clip_id(
             self, monkeypatch):
@@ -191,7 +191,7 @@ class TestGraphCpuFailurePolicy:
             exporter._apply_color_grade_unstabilized(
                 frame.copy(), _layer(sid, source_frame=20))
 
-    def test_preview_unexpected_failure_degrades_to_flattened(
+    def test_preview_unexpected_failure_does_not_publish_flattened_grade(
             self, monkeypatch):
         from unittest.mock import MagicMock
         from src.features.color.core import color_graph_cpu
@@ -211,9 +211,8 @@ class TestGraphCpuFailurePolicy:
                 color_stacks={sid: stack})),
             video_renderer=None)
         try:
-            out = preview._apply_preview_color_grade_unstabilized(
-                frame.copy(), _layer(sid, source_frame=20))
+            with pytest.raises(RuntimeError, match="lut resource missing"):
+                preview._apply_preview_color_grade_unstabilized(
+                    frame.copy(), _layer(sid, source_frame=20))
         finally:
             preview._decode_executor.shutdown(wait=False)
-        # 预览域降级：不抛异常，走扁平路径出帧（成片路径不受影响）
-        assert out is not None and out.shape == frame.shape

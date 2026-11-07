@@ -218,6 +218,8 @@ def decode_keyframe(data: Mapping[str, Any]) -> DecodedKeyframe:
         if not value:
             raise ValueError("empty_value_sequence")
         value = tuple(float(component) for component in value)
+        if not all(math.isfinite(component) for component in value):
+            raise ValueError("non_finite_value")
     else:
         if not math.isfinite(float(value)):
             raise ValueError("non_finite_value")
@@ -229,8 +231,6 @@ def decode_keyframe(data: Mapping[str, Any]) -> DecodedKeyframe:
         kind = str(kind)
         if kind not in KEY_KINDS:
             raise ValueError("bad_key_kind")
-    start = data.get("start", 1.0)
-    end = data.get("end", 1.0)
 
     if kind is None:
         mode = str(interpolation) if interpolation is not None else "linear"
@@ -238,13 +238,13 @@ def decode_keyframe(data: Mapping[str, Any]) -> DecodedKeyframe:
             raise ValueError("bad_interpolation")
         return make_keyframe(frame, value, interpolation=mode)
     # kind 显式给出：键型为权威（与 interpolation 冲突时归一）。
-    # start/end 缺省（1.0 哨兵与显式 1.0 不可区分）时继承插值模式的
+    # start/end 缺省时继承插值模式的
     # 等价权重（ease→(0,0)），保证旧载荷往返无损。
     base_start, base_end = 1.0, 1.0
     if interpolation in INTERPOLATION_MODES:
         _, base_start, base_end = legacy_mode_to_dynamics(str(interpolation))
-    resolved_start = float(start) if start != 1.0 else base_start
-    resolved_end = float(end) if end != 1.0 else base_end
+    resolved_start = float(data["start"]) if "start" in data else base_start
+    resolved_end = float(data["end"]) if "end" in data else base_end
     return make_keyframe(frame, value, kind=kind,
                          start=resolved_start, end=resolved_end)
 
@@ -313,6 +313,9 @@ GRADE_TRACK_FIELDS: Tuple[TrackFieldSpec, ...] = (
     TrackFieldSpec("mid_detail", "scalar"),
     TrackFieldSpec("sharpness", "scalar"),
     TrackFieldSpec("hue_shift", "scalar"),
+    TrackFieldSpec("lift_saturation", "scalar"),
+    TrackFieldSpec("gamma_saturation", "scalar"),
+    TrackFieldSpec("gain_saturation", "scalar"),
 )
 
 #: 窗口域（mask.<shape_id>.<field>）。points/grad_points（点集）与离散
@@ -361,11 +364,20 @@ CIRCULAR_QUALIFIER_FIELDS = frozenset(
 
 MASK_TRACK_PREFIX = "mask."
 QUALIFIER_TRACK_PREFIX = "qualifier."
+FX_TRACK_PREFIX = "fx."
 
 
 def mask_track_name(shape_id: str, field: str) -> str:
     """窗口轨道名：mask.<shape_id>.<field>（身份 = shape uuid）。"""
     return f"{MASK_TRACK_PREFIX}{shape_id}.{field}"
+
+
+def iter_window_payloads(shapes: Any) -> Iterator[Mapping[str, Any]]:
+    """Stable IDs in nested Window groups share the same track namespace."""
+    for shape in shapes or ():
+        if isinstance(shape, Mapping):
+            yield shape
+            yield from iter_window_payloads(shape.get("children"))
 
 
 def parse_mask_track_name(name: str) -> Optional[Tuple[str, str]]:
@@ -419,11 +431,15 @@ class TrackAddress:
             return mask_track_name(self.owner_id or "", self.field)
         if self.domain == "qualifier":
             return qualifier_track_name(self.field)
+        if self.domain == "fx":
+            return f"{FX_TRACK_PREFIX}{self.owner_id}.{self.field}"
         return self.field
 
     @property
     def spec(self) -> Optional[TrackFieldSpec]:
         """字段的类型描述；未登记域返回 None。"""
+        if self.domain == "fx":
+            return TrackFieldSpec(self.field, "scalar")
         table = _SPEC_TABLES.get(self.domain)
         if table is None:
             return None
@@ -443,6 +459,11 @@ def parse_track_name(name: str) -> Optional[TrackAddress]:
     判定顺序：mask. 前缀 → window；qualifier. 前缀 → qualifier；
     其余按 grade 白名单键。sizing/fx 域轨道名尚未开放（登记于能力表）。
     """
+    if isinstance(name, str) and name.startswith(FX_TRACK_PREFIX):
+        owner, separator, field = name[len(FX_TRACK_PREFIX):].rpartition(".")
+        if owner and separator and field:
+            return TrackAddress("fx", field, owner)
+        return None
     parsed = parse_mask_track_name(name)
     if parsed is not None:
         return TrackAddress("window", parsed[1], parsed[0])
@@ -517,7 +538,7 @@ def track_name_is_writable(name: str) -> bool:
     if name in node_command_track_whitelist():
         return True
     address = parse_track_name(name)
-    return address is not None and address.domain == "window"
+    return address is not None and address.domain in ("window", "fx")
 
 
 # ---------------------------------------------------------------------------
@@ -561,18 +582,12 @@ DOMAIN_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         },
     },
     "fx": {
-        "write_domain": None,
-        "deliver": False,
-        "reasons": {
-            "read": "实例 ID（instance_id）与参数 schema（Effect Catalog）"
-                    "已存在，但 animatable 能力标志尚未接入注册表（KF-03）",
-            "validate": "无 per-instance schema 校验入口",
-            "write": "FX 实例参数命令化待 KF-03",
-            "evaluate": "无逐帧 FX 参数求值（KF-06 时域投影）",
-            "preview": "无逐帧 FX 参数求值",
-            "deliver": "无逐帧 FX 参数求值",
-            "copy": "实例粘贴重建 instance_id（既有设计），参数级复制待命令化",
-        },
+        "write_domain": "graph+layer",
+        "deliver": True,
+        "reasons": {},
+        "condition": "条件支持：仅已注册 DCTL 实例的 slider/float 连续标量；"
+                     "按实例 schema 校验。Color/GL 逐帧求值，Deliver 使用 OpenGL；"
+                     "CPU/Metal 原生 FX、离散/颜色参数及 AI 效果尚未支持。",
     },
 }
 
@@ -631,7 +646,7 @@ def render_coverage_markdown() -> str:
         row = _domain_row(domain)
         cells = "、".join(
             f"{column}: {reason}" for column, reason in
-            row["reasons"].items()) or "—"
+            row["reasons"].items()) or DOMAIN_CAPABILITIES[domain].get("condition", "—")
         marks = " | ".join(
             "✓" if row[c] else "✗" for c in CAPABILITY_COLUMNS)
         write_domain = row["write_domain"] or "—"

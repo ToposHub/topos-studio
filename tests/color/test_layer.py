@@ -264,6 +264,28 @@ class TestLayerHasGradingEffects:
 
 
 class TestLayerSerialization:
+    def test_restores_frozen_project_containers_without_dropping_or_aliasing(self, caplog):
+        from src.shared.project.color_graph import freeze_params
+        source = Layer("Frozen")
+        source.grading_params["exposure"] = 2.5
+        source.grading_params["gain"] = (0.1, 0.2, 0.3)
+        source.curves_data = {"M": [(0, 0), (128, 160), (255, 255)]}
+        group = source.add_group("Nested")
+        group.add_child(MaskShape(MaskShape.RECT))
+        source.plugins = [{"instance_id": "p", "plugin_id": "demo", "params": {"amount": 0.6}}]
+        frozen = freeze_params(source.to_dict(None))
+        restored = Layer.from_dict(frozen)
+        assert restored.grading_params["exposure"] == 2.5
+        assert restored.grading_params["gain"] == (0.1, 0.2, 0.3)
+        assert restored.curves_data["M"][1] == [128, 160]
+        assert restored.curves_lut is not None
+        assert len(restored.mask_shapes[0].children) == 1
+        assert restored.plugins[0]["type"] == "dctl"
+        assert "type" not in frozen["plugins"][0]
+        restored.plugins[0]["params"]["amount"] = 0.8
+        assert frozen["plugins"][0]["params"]["amount"] == 0.6
+        assert "结构非法" not in caplog.text
+
     def test_to_dict_from_dict_roundtrip(self):
         layer = Layer("Test")
         layer.visible = False

@@ -1156,14 +1156,20 @@ class FakeDemuxContainer:
 
 class TestAud35101MaxPackets:
     def _demuxer(self, count: int) -> tuple[PacketDemuxer, FakeDemuxContainer]:
+        import ctypes
+
+        # Real compressed samples have a nonempty backing buffer. A zero-size
+        # packet is PyAV's EOF flush marker and must never count as a sample.
+        buffers = [ctypes.create_string_buffer(bytes([i])) for i in range(count)]
         packets = [
             FakeDemuxPacket(
-                buffer_ptr=None, buffer_size=0, pts=i, dts=i,
+                buffer_ptr=ctypes.addressof(buffers[i]), buffer_size=1, pts=i, dts=i,
                 duration=1, is_keyframe=(i == 0),
             )
             for i in range(count)
         ]
         container = FakeDemuxContainer(packets)
+        container.buffers = buffers
         demuxer = PacketDemuxer()
         demuxer._container = container
         demuxer._stream = object()

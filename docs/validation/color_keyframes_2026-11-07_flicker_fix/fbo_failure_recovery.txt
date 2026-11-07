@@ -1,0 +1,14 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 42 items
+
+tests/color/test_color_graph_texture.py .................                [ 40%]
+tests/color/test_color_graph_cancel_resources.py ........                [ 59%]
+tests/edit/test_present_protocol_cleanup.py ........                     [ 78%]
+tests/edit/test_present_frame_integration.py .........                   [100%]
+
+============================= 42 passed in 10.29s ==============================

@@ -4625,6 +4625,30 @@ class EditGpuPreviewRenderer(QThread):
         for i, extra in enumerate(pre_extras):
             pre_tex = _chain_grade_tex(pre_tex, extra, f"color-chain-pre-{i}")
 
+        graph = grade.get("color_graph")
+        if graph is not None:
+            if any(e.get("_unsupported_advanced") for e in extras):
+                raise RuntimeError("Color graph chain contains an unsupported advanced grade")
+            renderer = getattr(self, "_color_graph_texture_renderer", None)
+            if renderer is None:
+                from src.features.color.core.color_graph_texture import ColorGraphTextureRenderer
+                renderer = ColorGraphTextureRenderer(self.ctx)
+                self._color_graph_texture_renderer = renderer
+            result = renderer.render(pre_tex, graph, int(grade.get("source_frame", 0)))
+            # Preserve the track output when the next track uses graph scratch.
+            if scratch_key is not None:
+                target_fbo, target_tex = self._ensure_adjustment_grade_fbo(scratch_key, w, h, pin_glo=pin_glo)
+            elif 0 <= index <= _MAX_GRADED_TRACK_TARGETS:
+                target_fbo, target_tex = self._ensure_graded_track_fbo(index, w, h)
+            else:
+                raise ValueError("Color graph track index is out of range")
+            from src.shared.gpu.framebuffer_scope import temporary_framebuffer
+            with temporary_framebuffer(self.ctx, [result]) as read_fbo:
+                self.ctx.copy_framebuffer(target_fbo, read_fbo)
+            for i, extra in enumerate(after_extras):
+                target_tex = _chain_grade_tex(target_tex, extra, f"color-chain-{i}")
+            return target_tex
+
         if scratch_key is not None:
             target_fbo, target_tex = self._ensure_adjustment_grade_fbo(
                 scratch_key, w, h, pin_glo=pin_glo,
@@ -5162,6 +5186,20 @@ void main() {
         self, final_tex, w: int, h: int, frame: int, generation_id: int,
         kind: str = "seek_snapshot",
     ) -> None:
+        # A snapshot is optional; failure must not abandon the main present
+        # lease before _finalize_present_frame. Keep allocation and binding
+        # queries inside this boundary as well as the readback itself.
+        from src.shared.gpu.framebuffer_scope import preserve_framebuffer
+        try:
+            with preserve_framebuffer(self.ctx):
+                self._capture_frame_snapshot_impl(final_tex, w, h, frame, generation_id, kind)
+        except Exception as exc:
+            logger.debug("frame snapshot capture failed: %s", exc)
+
+    def _capture_frame_snapshot_impl(
+        self, final_tex, w: int, h: int, frame: int, generation_id: int,
+        kind: str,
+    ) -> None:
         """把合成结果缩到 1/4 分辨率 readback 成 QImage 并发射（渲染线程）。
 
         专用小 FBO + copy shader，不触碰 present pool 的纹理状态。best-effort：
@@ -5169,13 +5207,6 @@ void main() {
         """
         import moderngl
         import numpy as np
-        from OpenGL.GL import (
-            GL_FRAMEBUFFER,
-            GL_FRAMEBUFFER_BINDING,
-            glBindFramebuffer,
-            glGetIntegerv,
-            glViewport,
-        )
         from PyQt6.QtGui import QImage
 
         # 行跨距必须 4 字节对齐（Qt QImage 与 GL UNPACK_ALIGNMENT 的约定）：
@@ -5187,25 +5218,34 @@ void main() {
 
         if (
             self._snapshot_tex is None
+            or self._snapshot_fbo is None
             or self._snapshot_tex.size != (small_w, small_h)
         ):
-            if self._snapshot_tex is not None:
-                try:
-                    self._snapshot_tex.release()
-                    self._snapshot_fbo.release()
-                except Exception:
-                    pass
-            self._snapshot_tex = self.ctx.texture((small_w, small_h), components=3, dtype='f1')
-            self._snapshot_fbo = self.ctx.framebuffer(color_attachments=[self._snapshot_tex])
+            texture = self.ctx.texture((small_w, small_h), components=3, dtype='f1')
+            try:
+                framebuffer = self.ctx.framebuffer(color_attachments=[texture])
+            except Exception:
+                texture.release()
+                raise
+            old_texture, old_framebuffer = self._snapshot_tex, self._snapshot_fbo
+            self._snapshot_tex, self._snapshot_fbo = texture, framebuffer
+            if old_framebuffer is not None:
+                old_framebuffer.release()
+            if old_texture is not None:
+                old_texture.release()
 
         if self._snapshot_program is None:
-            self._snapshot_program = self.ctx.program(
+            program = self.ctx.program(
                 vertex_shader=self._SNAPSHOT_VERTEX_SHADER,
                 fragment_shader=self._SNAPSHOT_FRAGMENT_SHADER,
             )
-            self._snapshot_vao = self.ctx.vertex_array(self._snapshot_program, [])
+            try:
+                vao = self.ctx.vertex_array(program, [])
+            except Exception:
+                program.release()
+                raise
+            self._snapshot_program, self._snapshot_vao = program, vao
 
-        prev_fbo = glGetIntegerv(GL_FRAMEBUFFER_BINDING)
         try:
             self._snapshot_fbo.use()
             # W05 快照 pass 状态卫生：渲染前显式归位 scissor/viewport 并
@@ -5215,12 +5255,8 @@ void main() {
             # 仍可能裁掉全屏三角——归位 + 清底把这类异常显性化为可检黑带
             # （清底后覆盖区必被重写，未覆盖区为黑而非陈旧帧内容，异常
             # 快照不再可能冒充有效内容进入 seek 缓存）。
-            from OpenGL.GL import (
-                GL_SCISSOR_TEST,
-                glDisable,
-            )
-            glDisable(GL_SCISSOR_TEST)
-            glViewport(0, 0, int(small_w), int(small_h))
+            self.ctx.scissor = None
+            self.ctx.viewport = (0, 0, int(small_w), int(small_h))
             self._snapshot_fbo.clear(0.0, 0.0, 0.0, 1.0)
             final_tex.use(0)
             self._snapshot_program["composite_tex"].value = 0
@@ -5253,12 +5289,6 @@ void main() {
             )
         except Exception as e:
             logger.debug(f"frame snapshot capture failed: {e}")
-        finally:
-            # 恢复 FBO 绑定与 viewport：本方法跑在合成任务的渲染线程上，
-            # 之后紧接 _finalize_present_frame / 下一任务合成，不能留下
-            # 小尺寸 viewport（否则后续 pass 渲染到错误区域）。
-            glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo)
-            glViewport(0, 0, int(w), int(h))
 
     def _finalize_present_frame(
         self,
@@ -5646,6 +5676,10 @@ void main() {
 
     def _cleanup(self) -> None:
         """Release all GL resources."""
+        graph_renderer = getattr(self, "_color_graph_texture_renderer", None)
+        if graph_renderer is not None:
+            graph_renderer.release()
+            self._color_graph_texture_renderer = None
         # Release queued tasks that were accepted but never processed.
         while True:
             try:

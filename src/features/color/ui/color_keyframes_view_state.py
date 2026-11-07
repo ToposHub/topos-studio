@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from src.shared.i18n.i18n import I18N
+from src.shared.media.metadata import Rational
 
 KeyKind = Literal["static", "dynamic"]
 Scope = Literal["all", "color", "sizing", "matte"]
@@ -37,6 +38,7 @@ class Track:
     available: bool = True
     enabled: bool = True
     row_controls: bool = True
+    node_controls: bool = True
     unavailable_reason: str = ""
 
 
@@ -44,13 +46,15 @@ class Track:
 class Snapshot:
     context: str = ""
     frame_count: int = 0
-        # R1：时间码帧率——整帧率 int/float（NDF）或精确 Rational（29.97/
+    # R1：时间码帧率——整帧率 int/float（NDF）或精确 Rational（29.97/
     # 59.94 家族按 drop-frame 显示；宿主从时间线传入）
-    timecode_fps: float = 24
+    timecode_fps: int | float | Rational = 24
     playhead: int = 0
     corrector: str = ""
     tracks: tuple[Track, ...] = ()
     edit_notice: str = ""
+    info_notice: str = ""
+    frame_offset: int = 0
 
 
 @dataclass(frozen=True, slots=True)

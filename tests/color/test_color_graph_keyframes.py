@@ -39,6 +39,36 @@ def _corrector(graph):
     return next(n for n in graph.nodes if n.node_type == "corrector")
 
 
+def test_nested_window_group_keys_project_and_evaluate_without_mutating_base():
+    from src.features.color.core.layer import Layer, MaskGroup, MaskShape
+    from src.features.color.core.color_graph_migration import migrate_legacy_stack
+    from tests.color.test_color_graph_migration import _stack_with_layers
+    from src.app.controllers.color_keyframes_host import build_keyframes_snapshot
+    layer = Layer("Nested windows")
+    group, shape = MaskGroup(), MaskShape(MaskShape.CIRCLE)
+    group.children = [shape]
+    layer.mask_shapes = [group]
+    graph = migrate_legacy_stack(_stack_with_layers([layer]))
+    node_id = _corrector(graph).node_id
+    edits = []
+    for frame, opacity, center in ((0, 0.2, [0.2, 0.5]), (20, 0.8, [0.8, 0.5])):
+        edits.extend([
+            {"action": "set", "node_id": node_id, "param": f"mask.{group.id}.opacity", "frame": frame, "value": opacity},
+            {"action": "set", "node_id": node_id, "param": f"mask.{shape.id}.center", "frame": frame, "value": center},
+        ])
+    result = ColorGraphService().apply_intent(graph, "batch_edit_keyframes", {"edits": edits})
+    assert result.ok, result.diagnostics
+    payload = graph_node_layer_provider(result.graph, frame=10)(node_id)
+    assert payload["mask_shapes"][0]["opacity"] == pytest.approx(0.5)
+    assert payload["mask_shapes"][0]["children"][0]["center"] == pytest.approx([0.5, 0.5])
+    assert group.opacity == 1.0
+    assert shape.center == [0.5, 0.5] or shape.center == (0.5, 0.5)
+    snapshot = build_keyframes_snapshot(context="s", frame_count=21, timecode_fps=25,
+                                       playhead=10, corrector="", graph=result.graph)
+    leaves = [leaf for row in snapshot.tracks[0].children for leaf in row.children]
+    assert any(leaf.id == f"node:{node_id}|mask.{shape.id}.center" and len(leaf.markers) == 2 for leaf in leaves)
+
+
 def _exposure_track(f0, v0, f1, v1):
     return {"keyframes": [
         {"frame": f0, "value": v0, "interpolation": "linear"},

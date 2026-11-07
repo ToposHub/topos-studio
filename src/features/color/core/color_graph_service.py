@@ -87,11 +87,15 @@ class ColorGraphService:
             compound = self._node(graph, str(compound_path[0]))
             if compound is None or compound.compound_children is None:
                 return self._fail(graph, "node_not_found", "compound 路径不存在")
+            if compound.params.get("locked"):
+                return self._fail(graph, "node_locked", "compound 已锁定", node_id=compound.node_id)
             child_result = self.apply_intent(
                 compound.compound_children, command,
                 {**arguments, "_compound_path": compound_path[1:]})
             if not child_result.ok:
                 return GraphEditResult(False, graph, child_result.diagnostics)
+            if child_result.graph is compound.compound_children:
+                return GraphEditResult(True, graph)
             replacement = replace(compound, compound_children=child_result.graph)
             candidate = replace(graph, nodes=tuple(
                 replacement if node.node_id == compound.node_id else node
@@ -448,7 +452,17 @@ class ColorGraphService:
                                   f"关键帧轨道名不在白名单: {param}",
                                   node_id=node_id)
             address = parse_track_name(param)
+            if address is not None and address.domain == "fx":
+                from src.features.color.core.effect_keyframes import effect_animation_schema
+                instance = next((p for p in self._node_plugins(node)
+                                 if isinstance(p, Mapping) and p.get("instance_id") == address.owner_id), None)
+                if instance is None:
+                    return self._fail(graph, "instance_not_found", f"FX 实例不存在: {param}", node_id=node_id)
+                schema = effect_animation_schema(instance, schema_provider=self._effect_schema)
+                if not any(entry.get("var_name") == address.field for entry in schema):
+                    return self._fail(graph, "illegal_param_key", f"FX 参数没有连续动画能力: {param}", node_id=node_id)
             if address is not None and address.domain == "window":
+                from src.features.color.core.keyframe_tracks import iter_window_payloads
                 # 窗口实例轨：目标形状必须存在于节点载荷（合并视图）——
                 # 删除的形状不复活轨道（形状删除随 Layer 域事务清理）
                 from src.features.color.core.color_graph_param_source import (
@@ -457,9 +471,8 @@ class ColorGraphService:
                 shapes = ((node_layer_payload(node,
                                               include_lut_cache=False) or {})
                           .get("mask_shapes") or ())
-                if not any(isinstance(s, dict)
-                           and str(s.get("id")) == address.owner_id
-                           for s in shapes):
+                if not any(str(s.get("id")) == address.owner_id and address.field in s
+                           for s in iter_window_payloads(shapes)):
                     return self._fail(
                         graph, "illegal_param_key",
                         f"窗口形状不存在: {param}", node_id=node_id)
@@ -579,10 +592,28 @@ class ColorGraphService:
         """
         from src.features.color.core.keyframe_tracks import (
             KEY_KINDS, decode_keyframe, encode_keyframe, make_keyframe,
-            validate_dynamic_weights, validate_value_shape,
+            parse_track_name, validate_dynamic_weights, validate_value_shape,
         )
         if not isinstance(edits, (list, tuple)) or not edits:
             return GraphEditResult(True, graph, ())  # 空动作不入史
+        if any(isinstance(edit, Mapping) and edit.get("compound_path") for edit in edits):
+            by_path: dict[tuple[str, ...], list[dict]] = {}
+            for edit in edits:
+                if not isinstance(edit, Mapping):
+                    return self._fail(graph, "illegal_arguments", "关键帧条目必须为 Mapping")
+                item = dict(edit)
+                path = tuple(item.pop("compound_path", ()))
+                by_path.setdefault(path, []).append(item)
+            candidate = graph
+            for path, items in by_path.items():
+                result = self.apply_intent(candidate, "batch_edit_keyframes",
+                                           {"edits": items, "_compound_path": path})
+                if not result.ok:
+                    return GraphEditResult(False, graph, result.diagnostics)
+                candidate = result.graph
+            if candidate == graph:
+                return GraphEditResult(True, graph)
+            return self._commit(graph, candidate, {})
         grouped: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
         for index, edit in enumerate(edits):
             if not isinstance(edit, Mapping):
@@ -595,6 +626,19 @@ class ColorGraphService:
             node_id = str(edit.get("node_id", ""))
             param = str(edit.get("param", ""))
             frame = int(edit.get("frame", -1))
+            address = parse_track_name(param)
+            if action == "set" and address is not None and address.domain == "fx":
+                target = self._node(graph, node_id)
+                instance = next((p for p in self._node_plugins(target) if isinstance(p, Mapping)
+                                 and p.get("instance_id") == address.owner_id), None) if target else None
+                if instance is not None:
+                    from src.features.color.core.effect_keyframes import effect_animation_schema
+                    entry = next((e for e in effect_animation_schema(instance, schema_provider=self._effect_schema)
+                                  if e.get("var_name") == address.field), None)
+                    if entry is not None:
+                        error = self._validate_effect_param(entry, edit.get("value"))
+                        if error:
+                            return self._fail(graph, error, f"FX 关键帧值不符合 schema: {param}", node_id=node_id)
             node = self._keyframe_target_or_fail(graph, node_id, param)
             if not isinstance(node, ColorNodeData):
                 return node  # type: ignore[return-value]
@@ -1577,10 +1621,22 @@ class ColorGraphService:
             if node.params.get("locked"):
                 return self._fail(graph, "node_locked",
                                   "节点已锁定，先解锁再粘贴", node_id=node_id)
+            tracks = payload.get("keyframes") if "keyframes" in domains else None
+            if isinstance(tracks, Mapping):
+                from src.features.color.core.keyframe_tracks import parse_track_name
+                instances = (payload.get("effects") if "effects" in domains else
+                             node.legacy_payload.get("plugins"))
+                owners = {str(p.get("instance_id")) for p in instances or () if isinstance(p, Mapping)}
+                for name in tracks:
+                    address = parse_track_name(str(name))
+                    if address is not None and address.domain == "fx" and address.owner_id not in owners:
+                        return self._fail(graph, "illegal_param_key",
+                                          "效果关键帧没有对应的目标实例，请同时粘贴效果域", node_id=node_id)
 
         def paste(node: ColorNodeData) -> ColorNodeData:
             params = dict(node.params)
             legacy = dict(node.legacy_payload or {})
+            effect_ids: dict[str, str] = {}
             for domain in domains:
                 data = payload.get(domain)
                 if data is None:
@@ -1594,7 +1650,9 @@ class ColorGraphService:
                     for plugin in data if isinstance(data, (list, tuple)) else ():
                         if isinstance(plugin, Mapping):
                             plugin = dict(plugin)
+                            old_id = str(plugin.get("instance_id", ""))
                             plugin["instance_id"] = self._id_factory()
+                            effect_ids[old_id] = plugin["instance_id"]
                             pid = str(plugin.get("plugin_id") or "")
                             if pid and self._effect_schema(pid) is None:
                                 plugin["missing"] = True
@@ -1627,9 +1685,18 @@ class ColorGraphService:
                             shapes.append(shape)
                     legacy["mask_shapes"] = shapes
                 elif param_key is not None:
-                    params[param_key] = copy.deepcopy(data)
+                    params[param_key] = unfreeze_params(data)
                 elif legacy_key is not None:
-                    legacy[legacy_key] = copy.deepcopy(data)
+                    legacy[legacy_key] = unfreeze_params(data)
+            if "effects" in domains:
+                from src.features.color.core.effect_keyframes import remap_effect_tracks
+                if "keyframes" in domains and isinstance(params.get("grade_keyframes"), Mapping):
+                    params["grade_keyframes"] = remap_effect_tracks(params["grade_keyframes"], effect_ids)
+                valid = {str(p.get("instance_id")): str(p.get("instance_id"))
+                         for p in legacy.get("plugins") or () if isinstance(p, Mapping)}
+                for container in (params, legacy):
+                    if isinstance(container.get("grade_keyframes"), Mapping):
+                        container["grade_keyframes"] = remap_effect_tracks(container["grade_keyframes"], valid, drop_missing=True)
             return replace(node, params=params, legacy_payload=legacy)
 
         return self._patch_nodes_with(graph, targets, paste)
@@ -1869,7 +1936,12 @@ class ColorGraphService:
 
     def op_set_node_metadata(self, graph: ColorGraphData, node_id: str,
                              label: str) -> GraphEditResult:
-        return self._patch_nodes(graph, [node_id], label=str(label))
+        def rename(node: ColorNodeData) -> ColorNodeData:
+            legacy = dict(node.legacy_payload or {})
+            if legacy and node.node_type in self._EFFECTABLE_TYPES:
+                legacy["name"] = str(label)
+            return replace(node, label=str(label), legacy_payload=legacy)
+        return self._patch_nodes_with(graph, [node_id], rename)
 
     def op_set_node_color(self, graph: ColorGraphData,
                           node_ids: Sequence[str], color: str) -> GraphEditResult:
@@ -2033,7 +2105,14 @@ class ColorGraphService:
         payload = dict(node.legacy_payload)
         payload["plugins"] = [dict(p) if isinstance(p, Mapping) else p
                               for p in plugins]
-        new_node = replace(node, legacy_payload=payload)
+        from src.features.color.core.effect_keyframes import remap_effect_tracks
+        valid = {str(p.get("instance_id")): str(p.get("instance_id"))
+                 for p in plugins if isinstance(p, Mapping)}
+        params = dict(node.params)
+        for container in (params, payload):
+            if isinstance(container.get("grade_keyframes"), Mapping):
+                container["grade_keyframes"] = remap_effect_tracks(container["grade_keyframes"], valid, drop_missing=True)
+        new_node = replace(node, params=params, legacy_payload=payload)
         candidate = replace(graph, nodes=tuple(
             new_node if n.node_id == node.node_id else n for n in graph.nodes))
         return self._commit(graph, candidate, {})

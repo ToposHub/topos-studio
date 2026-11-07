@@ -528,6 +528,11 @@ def evaluate_mask_tracks_payload(
             continue
         shape_id = str(shape.get("id", ""))
         patched = dict(shape)
+        if shape.get("children"):
+            children = evaluate_mask_tracks_payload(normalized, shape["children"], frame)
+            if children is not None:
+                patched["children"] = children
+                changed = True
         for name, track in normalized.items():
             parsed = parse_mask_track_name(name)
             if parsed is None or parsed[0] != shape_id:

@@ -189,6 +189,17 @@ def test_snapshot_builder_aggregates_metadata(qtbot):
     assert snapshot.corrector == snapshot.tracks[0].id
 
 
+def test_real_host_preserves_rational_fps_for_drop_frame_timecode(qtbot):
+    from src.shared.media import FPS_29_97
+    graph, _, _ = _graph_with_keyframes()
+    panel, host, _ = _host(qtbot, graph)
+    host._fps_provider = lambda _: FPS_29_97
+    assert host.refresh()
+    assert panel.snapshot.timecode_fps == FPS_29_97
+    assert panel.timeline._timecode(1800) == "00:01:00;02"
+    assert not host.refresh()
+
+
 def test_clip_trim_projects_local_frames_and_edits_source_frames(qtbot):
     graph, _sid, node_id = _graph_with_keyframes()
     playback = _FakePlayback(total=20)
@@ -199,6 +210,7 @@ def test_clip_trim_projects_local_frames_and_edits_source_frames(qtbot):
     assert host.refresh()
     leaf = f"node:{node_id}|exposure"
     assert (leaf, 10) in panel._markers  # Source 30.
+    assert panel.timeline._timecode(0) == "00:00:00:20"
     assert (leaf, 0) not in panel._markers  # Source 10 is outside the trim.
     panel.request("add", ((leaf, 12),))
     panel.request("move", ((leaf, 10),), delta=2)
@@ -225,6 +237,72 @@ def test_active_corrector_refresh_and_expired_binding_cannot_submit(qtbot):
     panel.request("add", ((f"{second}|exposure", 16),))
     assert not submissions
     assert not panel.snapshot.context
+
+
+@pytest.mark.parametrize("speed", [0.5, 2.0, "reverse", "freeze", "curve", "mixed"])
+def test_real_retimed_clip_edits_use_playback_source_frames(qtbot, speed):
+    from dataclasses import replace
+    from src.features.edit.core.timeline_v2 import ClipInstance
+    from src.features.edit.core.clip_params import SpeedParams, SpeedPoint
+    graph, _, node_id = _graph_with_keyframes()
+    playback = _FakePlayback(total=20)
+    instance = ClipInstance(clip_id="c1", asset_id="a", track_id="v", timeline_start=240,
+                            timeline_duration=20, source_start=100, source_duration=40)
+    if isinstance(speed, float):
+        instance = replace(instance, speed=speed)
+    elif speed == "reverse":
+        instance = replace(instance, speed=SpeedParams(reverse=True))
+    elif speed == "freeze":
+        instance = replace(instance, freeze_source_frame=112)
+    elif speed == "curve":
+        instance = replace(instance, speed=SpeedParams(speed_points=(SpeedPoint(10, 2.0),)))
+    else:
+        instance = replace(instance, _source_fps_num=30000, _source_fps_den=1001,
+                            _timeline_fps_num=24000, _timeline_fps_den=1001)
+    playback.clip = instance
+    panel, host, _ = _host(qtbot, graph, playback=playback)
+    writes = []
+    host._submit_batch = lambda edits: writes.append(edits) or True
+    assert host.refresh()
+    assert not panel.snapshot.edit_notice
+    assert panel.snapshot.frame_count == 40
+    assert panel.timeline._timecode(0) == ("00:00:04:04" if speed != "mixed" else "00:00:03;10")
+    host.on_local_frame_changed(12)
+    assert panel.playhead == instance.clip_local_to_source_frame(12) - instance.source_start
+    leaf = f"node:{node_id}|exposure"
+    panel.request("add", ((leaf, 12),))
+    assert writes[-1][0]["frame"] == instance.source_start + 12
+    panel.request("move", ((leaf, 12),), delta=3)
+    assert writes[-1][0]["to_frame"] == instance.source_start + 15
+    panel.request("add", ((leaf, 12),))
+    old_count = len(writes)
+    playback.clip = replace(instance, source_start=110)
+    panel.request("add", ((leaf, 13),))
+    assert len(writes) == old_count  # stale drag/edit has no write
+
+
+def test_fast_clip_keeps_unsampled_keys_and_quantizes_only_transport(qtbot):
+    from src.features.edit.core.timeline_v2 import ClipInstance
+    from src.features.color.core.color_graph_service import ColorGraphService
+    graph, _, node_id = _graph_with_keyframes()
+    graph = ColorGraphService().apply_intent(graph, "set_node_keyframe", {
+        "node_id": node_id, "param": "exposure", "frame": 41, "value": 0.4}).graph
+    playback = _FakePlayback(total=62)
+    playback.clip = ClipInstance(clip_id="c1", asset_id="a", track_id="v", timeline_start=0,
+                                timeline_duration=62, source_start=0, source_duration=124, speed=2.0)
+    panel, host, _ = _host(qtbot, graph, playback=playback)
+    assert host.refresh()
+    leaf = f"node:{node_id}|exposure"
+    assert (leaf, 41) in panel._markers
+    host._on_seek_requested(41)
+    assert playback.calls == [("seek", 21)]
+    host.on_local_frame_changed(21)
+    assert panel.playhead == 42
+    writes = []
+    host._submit_batch = lambda edits: writes.append(edits) or True
+    panel.request("move", ((leaf, 41),), delta=2)
+    assert writes[-1][0]["frame"] == 41
+    assert writes[-1][0]["to_frame"] == 43
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +441,30 @@ def test_panel_scrub_signals_exist(qtbot):
 
 class TestRealWriteEntry:
     """验收：一次用户动作一个历史条目；拒绝无部分写入；Undo/Redo 对称。"""
+
+    def test_compound_member_panel_edit_lock_and_undo(self, qtbot):
+        panel, host, app_host, holder, nodes = self._wired(qtbot)
+        assert app_host.submit_panel_action("make_compound", {"member_ids": nodes[:2]})
+        compound = next(n for n in app_host.bound_graph().nodes if n.compound_children is not None)
+        host.refresh(force=True)
+        leaf = f"node:{compound.node_id}/{nodes[0]}|exposure"
+        assert leaf in panel._tracks
+        before = self._depth(app_host)
+        panel.request("add", ((leaf, 12),))
+        graph = app_host.bound_graph()
+        child_graph = next(n for n in graph.nodes if n.node_id == compound.node_id).compound_children
+        node = next(n for n in child_graph.nodes if n.node_id == nodes[0])
+        assert node.params["grade_keyframes"]["exposure"]["keyframes"][0]["frame"] == 12
+        assert self._depth(app_host) == before + 1
+        host.refresh(force=True)
+        panel.request("lock", ((f"node:{compound.node_id}/{nodes[0]}", 0),), enabled=True)
+        host.refresh(force=True)
+        assert not panel.can_edit(leaf)
+        revision = app_host.bound_graph().graph_revision
+        panel.request("delete", ((leaf, 12),))
+        assert app_host.bound_graph().graph_revision == revision
+        panel.request("lock", ((f"node:{compound.node_id}/{nodes[0]}", 0),), enabled=False)
+        assert self._undo(app_host, holder) is not None
 
     def _wired(self, qtbot, *, with_window: bool = False):
         from unittest.mock import Mock
@@ -749,6 +851,21 @@ class TestRetimeReadOnlyMatrix:
 
 class TestBindingIdentity:
     """R4：绑定描述 + A→B→A 迟到请求失效。"""
+
+    def test_generation_change_drops_late_edit_with_same_clip_id(self, qtbot):
+        graph, _sid, node_id = _graph_with_keyframes()
+        panel, host, _ = _host(qtbot, graph)
+        binding = {"stack_id": "s1", "writable": True, "generation": 1, "scope": "clip"}
+        host._binding_provider = lambda: binding
+        writes = []
+        host._submit_batch = lambda edits: writes.append(edits) or True
+        host.refresh()
+        context = panel.snapshot.context
+        binding["generation"] = 3
+        from src.features.color.ui.color_keyframes_view_state import EditRequest
+        host._on_edit_requested(EditRequest(context, "add", ((f"node:{node_id}|exposure", 12),)))
+        assert not writes
+        assert panel.snapshot.context != context
 
     def test_binding_description_reports_authoritative_view(self, qtbot):
         _panel, _host, app_host, holder, _nodes = (

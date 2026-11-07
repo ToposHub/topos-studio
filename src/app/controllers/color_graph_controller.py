@@ -890,6 +890,10 @@ class ColorGraphPanelHost:
     def active_handle(self) -> CorrectorHandle | None:
         return self._active_handle
 
+    @property
+    def active_node_id(self) -> str:
+        return self._active_node_id
+
     def on_projection(self, projection: GraphProjection) -> None:
         """权威投影到达：锁内 hydrate 面板，无 intent 回流。"""
         if self._coordinator._is_stale(projection):
@@ -1382,7 +1386,7 @@ class LegacyGradingAdapter:
         self._flush_recorder_edits()
         return self._bridge.flush_transaction()
 
-    def _flush_recorder_edits(self) -> None:
+    def _flush_recorder_edits(self, transaction_id: str | None = None) -> None:
         """KF-04：手势收尾——自动录制的关键帧写入并入当前事务缓冲。"""
         recorder = self._recorder
         if recorder is None:
@@ -1416,7 +1420,7 @@ class LegacyGradingAdapter:
             if result.graph.graph_revision == graph.graph_revision:
                 continue  # 无差值（重复置值）：批处理不追加历史
             graph = result.graph
-            self._bridge.add_to_transaction(result, self._transaction_id,
+            self._bridge.add_to_transaction(result, transaction_id or self._transaction_id,
                                             "batch_edit_keyframes")
 
 
@@ -1631,7 +1635,7 @@ class ColorGraphAppHost:
             "view": "graph" if graph is not None else (
                 "migration" if self._bound_stack_id else "none"),
             "writable": bool(self._bound_stack_id)
-            and coordinator.state == GraphSessionState.READY,
+            and coordinator.state in (GraphSessionState.READY, GraphSessionState.PENDING),
             "scope": coordinator.scope,
             "scope_owner_id": coordinator.scope_owner_id,
             "graph_revision": (int(getattr(graph, "graph_revision", -1))
@@ -1842,15 +1846,23 @@ class ColorGraphAppHost:
         - 未选中但 ``color_graph_render_enabled``（B16.5 flag）开启且栈
           携带图：canvas/scope 已由图执行渲染，legacy 通道只是同值预览
           ——wheel 一律走图，避免两通道分叉；
-        - 其余（未选中 + flag 关）：原工作流零变更。
+        - 集中关键帧录制器已装配：未选中时按活动图层路由图命令；
+        - 无集中录制器、未选中且 flag 关：保留旧工作流。
         """
         if self._bound_stack_id == "":
             return False
         handle = self._host.active_handle
         if handle is not None:
             return handle.is_corrector
+        if self._host.active_node_id:
+            return False  # An explicitly selected non-corrector stays read-only.
         if self._stack_graph(self._bound_stack_id) is None:
             return False
+        # The centralized panel retires the legacy recorder. Tool gestures
+        # must still update the graph when no canvas node is selected, even
+        # while the independent GL production switch remains off.
+        if self._adapter._recorder is not None:
+            return True
         engine = (self._engine_provider()
                   if self._engine_provider else None)
         return bool(getattr(engine, "color_graph_render_enabled", False))
@@ -1881,17 +1893,29 @@ class ColorGraphAppHost:
         return ""
 
     def panel_grade_params(self) -> dict | None:
-        """句柄读路径（B06.2）：图命令域 grade 合并视图。"""
+        """Current evaluated tool values, including the unselected active layer.
+
+        Comparing against base values would record other animated parameters
+        even when the gesture changes only one control.
+        """
         handle = self._host.active_handle
-        if handle is None or not handle.is_corrector:
+        if handle is not None and not handle.is_corrector:
             return None
-        grade = dict(handle.grade_params())
-        payload = self._node_payload(handle.node_id)
+        node_id = handle.node_id if handle is not None else self.active_grade_node_id()
+        if not node_id:
+            return None
+        graph = self.bound_graph()
+        for compound_id in self._tool_compound_path():
+            compound = next((node for node in graph.nodes if node.node_id == compound_id), None) if graph else None
+            graph = compound.compound_children if compound is not None else None
+        if graph is None:
+            return None
+        from src.features.color.core.color_graph_param_source import graph_node_layer_provider
+        frame = self._adapter._frame_provider() if self._adapter._frame_provider else None
+        payload = graph_node_layer_provider(graph, frame=frame)(node_id)
         if payload:
-            base = dict(payload.get("grading_params") or {})
-            base.update(grade)
-            return base
-        return grade
+            return dict(payload.get("grading_params") or {})
+        return dict(handle.grade_params()) if handle is not None else None
 
     def _node_payload(self, node_id: str):
         graph = self._stack_graph(self._bound_stack_id)
@@ -1993,6 +2017,41 @@ class ColorGraphAppHost:
         """KF-03：关键帧面板节点级命令（lock/enable 等既有命令复用）。"""
         return self._host.submit_action(action, arguments)
 
+    def active_grade_node_identity(self) -> str:
+        """Keyframes identity includes the graph navigation path."""
+        node_id = self.active_grade_node_id()
+        return "/".join((*self._tool_compound_path(), node_id)) if node_id else ""
+
+    def observe_effect_parameter(self, node_id: str, instance_id: str,
+                                 name: str, value: Any,
+                                 compound_path: tuple[str, ...] = ()) -> None:
+        """Accepted resource-tool changes share the central gesture recorder."""
+        recorder = self._adapter._recorder
+        if recorder is None:
+            return
+        from src.features.color.core.effect_keyframes import effect_animation_schema
+        graph = self.bound_graph()
+        for step in compound_path:
+            node = next((n for n in graph.nodes if n.node_id == step), None) if graph else None
+            graph = node.compound_children if node is not None else None
+        node = next((n for n in graph.nodes if n.node_id == node_id), None) if graph else None
+        if node is None:
+            return
+        instance = next((p for p in node.legacy_payload.get("plugins") or ()
+                         if isinstance(p, Mapping) and p.get("instance_id") == instance_id), None)
+        if instance is None or not any(e.get("var_name") == name for e in effect_animation_schema(instance)):
+            return
+        recorder.observe(node_id, f"fx.{instance_id}.{name}", value,
+            self._adapter._frame_provider() if self._adapter._frame_provider else None,
+            compound_path=compound_path)
+
+    def flush_keyframe_recording(self, transaction_id: str) -> None:
+        self._adapter._flush_recorder_edits(transaction_id)
+
+    def cancel_keyframe_recording(self) -> None:
+        if self._adapter._recorder is not None:
+            self._adapter._recorder.cancel_pending()
+
     def attach_keyframe_recorder(self, recorder, frame_provider=None) -> None:
         """KF-04：注入自动录制器与有效帧提供者（源帧域）。
 
@@ -2001,6 +2060,19 @@ class ColorGraphAppHost:
         """
         self._adapter._recorder = recorder
         self._adapter._frame_provider = frame_provider
+
+        def track_provider(node_id: str, param: str, path: tuple[str, ...]) -> Mapping[str, Any] | None:
+            from src.features.color.core.color_graph_param_source import node_layer_payload
+            graph = self.bound_graph()
+            for compound_id in path:
+                node = next((n for n in graph.nodes if n.node_id == compound_id), None) if graph else None
+                graph = node.compound_children if node is not None else None
+            node = next((n for n in graph.nodes if n.node_id == node_id), None) if graph else None
+            if node is None:
+                return None
+            payload = node_layer_payload(node, include_lut_cache=False)
+            return (payload.get("grade_keyframes") or {}).get(param)
+        recorder.track_provider = track_provider
 
     def detach_keyframe_recorder(self) -> None:
         """会话/切片段更换时摘除录制状态（半开手势一并丢弃）。"""
@@ -2152,6 +2224,7 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
         NodeEditorState,
     )
 
+    from src.features.color.core.color_node_labels import display_node_label
     kind_alias = {
         "shared_corrector": "corrector",
         "outside": "corrector",
@@ -2193,7 +2266,9 @@ def graph_payload_to_draft(payload: Mapping[str, Any]):
         nodes[node_id] = NodeDraft(
             id=node_id,
             kind=kind,
-            label=str(node.get("label") or ""),
+            label=display_node_label(node.get("label"), str(node_id),
+                                     str(params.get("source_layer_id") or ""),
+                                     str((node.get("legacy_payload") or {}).get("id") or "")),
             x=float((positions.get(node_id) or (0.0, 0.0))[0]),
             y=float((positions.get(node_id) or (0.0, 0.0))[1]),
             tool_indicators=detect_tool_indicators(

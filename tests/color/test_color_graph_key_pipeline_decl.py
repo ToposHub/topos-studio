@@ -118,7 +118,7 @@ def test_plan_json_exposes_key_pipeline():
     assert corrector_json["key_input_source"] == "legacy_raw"
 
 
-def test_executor_registers_key_out_for_declared_pipeline():
+def test_executor_registers_key_out_for_declared_pipeline(monkeypatch):
     """执行一致性锚：声明了 qualifier 阶段的 pass，GL 执行必须登记
     key_out 产物（声明与执行不漂移；key 生产仍由宿主 matte_provider
     提供——此处注入与 keyer 同构的 CPU matte）。"""
@@ -161,16 +161,17 @@ def test_executor_registers_key_out_for_declared_pipeline():
     executor = ColorGraphExecutor(ctx)
     # 复用既有 N02 对拍的 CPU keyer 注入（同构宿主 matte_provider 契约）：
     # 注入梯度源与 ctx 后由 _cpu_matte_provider 完成 keyer→纹理。
-    key_channel._GRADIENT = np.tile(
+    monkeypatch.setattr(key_channel, "_GRADIENT", np.tile(
         np.stack([np.linspace(0.05, 0.95, 64, dtype=np.float32),
                   np.full(64, 0.5, dtype=np.float32),
                   1 - np.linspace(0.05, 0.95, 64, dtype=np.float32),
                   np.ones(64, dtype=np.float32)], axis=-1)[None, ...],
-        (64, 1, 1))
-    key_channel._W, key_channel._H = 64, 64
-    key_channel._CTX.clear()
-    key_channel._CTX.append(ctx)
-    matte = key_channel._cpu_matte_provider({})
+        (64, 1, 1)))
+    monkeypatch.setattr(key_channel, "_W", 64)
+    monkeypatch.setattr(key_channel, "_H", 64)
+    monkeypatch.setattr(key_channel, "_CTX", [ctx])
+    matte_cache = {}
+    matte = key_channel._cpu_matte_provider(matte_cache)
     try:
         ramp = np.linspace(0.05, 0.95, 64, dtype=np.float32)
         source = np.stack([ramp] * 4, axis=-1).reshape(1, 64, 4) \
@@ -192,4 +193,6 @@ def test_executor_registers_key_out_for_declared_pipeline():
         src_tex.release()
     finally:
         executor.release_pool()
+        for texture in matte_cache.values():
+            texture.release()
         ctx.release()

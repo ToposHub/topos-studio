@@ -227,6 +227,42 @@ def _keys():
     return LayerOpsMixin._GRADING_SIGNAL_KEYS
 
 
+def test_projection_hides_owned_uuid_labels_and_preserves_custom_names():
+    from dataclasses import replace
+    from uuid import uuid4
+    from src.app.controllers.color_graph_controller import graph_payload_to_draft
+    _project, _stack, graph = _project_with_graph_stack()
+    node = next(n for n in graph.nodes if n.node_type == "corrector")
+    layer_id = str(node.legacy_payload["id"])
+    for label in (node.node_id, layer_id, "自定义节点", str(uuid4())):
+        patched = replace(node, label=label)
+        candidate = replace(graph, nodes=tuple(patched if n.node_id == node.node_id else n for n in graph.nodes))
+        projected = graph_payload_to_draft(candidate.to_dict())
+        expected = "" if label in (node.node_id, layer_id) else label
+        assert projected.nodes[node.node_id].label == expected
+
+
+def test_graph_publish_updates_both_preview_snapshots_before_requesting_current_frame():
+    from types import SimpleNamespace
+    from src.app.main_window import MainWindow
+    from unittest.mock import Mock
+    project = object()
+    events = []
+    main = SimpleNamespace(update_color_stacks=lambda value: events.append(("edit", value)))
+    color = SimpleNamespace(update_color_stacks=lambda value: events.append(("color", value)),
+                            request_render=lambda frame: events.append(("request", frame)))
+    host = SimpleNamespace(timeline_preview_renderer=main, _color_timeline_preview_renderer=color,
+                           current_page="Color", _invalidate_video_render_params_if_playing=Mock(),
+                           _color_timeline_playback_controller=lambda: SimpleNamespace(current_frame=112))
+    MainWindow._publish_color_graph_to_previews(host, project)
+    assert events == [("edit", project), ("color", project), ("request", 112)]
+    host._invalidate_video_render_params_if_playing.assert_called_once_with()
+    events.clear()
+    host.timeline_preview_renderer = color
+    MainWindow._publish_color_graph_to_previews(host, project)
+    assert events == [("color", project), ("request", 112)]
+
+
 def _tuple_for(keys, exposure):
     values = []
     for k in keys:
@@ -285,8 +321,38 @@ class TestGradingGestureRouting:
         h.host.on_clip_stack_loaded(stack_id)
         # 无 mixer 节点——用 Source 选择模拟只读
         h.host.panel_host._on_active_node_changed(graph.source_node_id)
+        from src.app.controllers.color_keyframe_recorder import KeyframeAutoRecorder
+        h.host.attach_keyframe_recorder(KeyframeAutoRecorder(), frame_provider=lambda: 24)
         assert not h.host.graph_edit_context_active()
         assert h.host.panel_grade_params() is None
+
+    def test_central_recorder_routes_unselected_active_layer_without_render_flag(self, harness):
+        from src.app.controllers.color_keyframe_recorder import KeyframeAutoRecorder
+        h, stack_id, graph = harness
+        h.host.on_clip_stack_loaded(stack_id)
+        h.host.panel_host._on_active_node_changed("")
+        h.engine.color_graph_render_enabled = False
+        h.engine.active_layer_index = 0
+        from src.features.color.core.layer import Layer
+        from src.features.color.core.color_graph_param_source import node_layer_payload
+        h.engine.layers = [Layer.from_dict(node_layer_payload(node)) for node in graph.nodes
+                           if node.node_type == "corrector"]
+        h.engine.get_active_layer.return_value = h.engine.layers[0]
+        recorder = KeyframeAutoRecorder()
+        h.host.attach_keyframe_recorder(recorder, frame_provider=lambda: 24)
+        node_id = next(n.node_id for n in graph.nodes if n.node_type == "corrector")
+        recorder.set_auto(node_id, True)
+        assert h.host.graph_edit_context_active()
+        assert h.host.active_grade_node_id() == node_id
+        grading = _GradingHarness(h.host, h.engine)
+        current = h.host.panel_grade_params()
+        grading.run(*(12.0 if key == "exposure" else current.get(key, 0.0) for key in _keys()))
+        assert h.host.end_grade_gesture()
+        node = next(n for n in h.host.bound_graph().nodes if n.node_id == node_id)
+        assert set(node.params["grade_keyframes"]) == {"exposure"}
+        keys = node.params["grade_keyframes"]["exposure"]["keyframes"]
+        assert len(keys) == 1 and keys[0]["frame"] == 24 and keys[0]["value"] == 12.0
+        assert len(h.cmd_stack._undo_stack) == 1
 
 
 def _keys():

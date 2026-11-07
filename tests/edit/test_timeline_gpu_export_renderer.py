@@ -46,6 +46,26 @@ GRADE_TYPICAL = {
 }
 
 
+def test_deep_yuv_two_grade_passes_return_the_last_pass():
+    from src.features.edit.core.timeline_gpu_export_renderer import (
+        GpuYuvSource, TimelineGpuExportRenderer, grade_params_to_uniforms)
+    source = GpuYuvSource(planes=(np.full((8, 16), 400, np.uint16),
+                                 np.full((8, 8), 512, np.uint16),
+                                 np.full((8, 8), 512, np.uint16)),
+                          luma_bits=10, chroma_x_div=2, chroma_y_div=1,
+                          full_range=False, kr=0.2126, kb=0.0722)
+    renderer = TimelineGpuExportRenderer()
+    try:
+        identity = grade_params_to_uniforms({})
+        contrast = grade_params_to_uniforms({"contrast": 20.0})
+        combined = renderer.render_planar(source, [identity, contrast], 16, 8, 1.0, output_u16=True)
+        expected = renderer.render_planar(source, contrast, 16, 8, 1.0, output_u16=True)
+        assert combined is not None and expected is not None
+        np.testing.assert_allclose(combined.astype(float), expected.astype(float), atol=1)
+    finally:
+        renderer.release()
+
+
 def _make_planes(fmt: str, w: int = 96, h: int = 64):
     rng = np.random.default_rng(11)
     xs = np.linspace(0.0, 1.0, w, dtype=np.float32)

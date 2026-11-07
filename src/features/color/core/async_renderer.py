@@ -1994,9 +1994,7 @@ class AsyncRenderer(QThread):
         visible_rect = params.get('visible_rect', (0, 0, w, h))
 
         def _matte(layer, input_tex):
-            # 与旧循环同一 matte 生成器（窗口/qualifier/bitmap；缓存归
-            # renderer，执行器不释放）
-            return self._generate_matte(
+            return self._generate_graph_matte(
                 layer, input_tex or raw_view_tex, w, h, visible_rect)
 
         # N02-B 切片 3b：图执行期间 matte 管线 fail-closed——工具 shader
@@ -3822,6 +3820,44 @@ class AsyncRenderer(QThread):
             return self.current_video_texture
         # YUV video planes: no combined source-resolution RGB texture available
         return None
+
+    def _generate_graph_matte(self, layer: dict, input_tex: Any, w: int, h: int,
+                              visible_rect: tuple) -> Any:
+        """Rasterize evaluated graph windows rather than stale legacy layer masks.
+
+        The temporary mask is consumed by the existing keyer/combine pipeline,
+        which owns its resulting matte cache. Legacy texture ownership is
+        restored even when a shader fails. All work runs on this GL worker.
+        """
+        shapes = layer.get("mask_shapes") or ()
+        if not shapes:
+            return self._generate_matte(layer, input_tex, w, h, visible_rect)
+        from src.features.color.core.keyframe_tracks import iter_window_payloads
+        # Bitmap resources are supplied through the engine's asset upload lane.
+        # Preserve it until the graph's resource resolver supplies bitmap data.
+        if any(shape.get("type") == "bitmap" for shape in iter_window_payloads(shapes)):
+            return self._generate_matte(layer, input_tex, w, h, visible_rect)
+        from src.features.color.core.layer import MaskGroup, MaskShape
+        from src.features.color.core.window_rasterizer import WindowRasterizer
+        items = [(MaskGroup if shape.get("type") == "group" else MaskShape).from_dict(dict(shape))
+                 for shape in shapes]
+        sw, sh = self._get_source_matte_resolution(layer)
+        sw, sh = (sw, sh) if sw > 0 and sh > 0 else (w, h)
+        array = WindowRasterizer().render_items(items, sw, sh)
+        texture = self.ctx.texture((sw, sh), 1, np.ascontiguousarray(array, dtype="f4").tobytes(), dtype="f4")
+        texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        texture.repeat_x = texture.repeat_y = False
+        identity = layer.get("id")
+        original = self.layer_textures.get(identity)
+        self.layer_textures[identity] = {**(original or {}), "mask": texture}
+        try:
+            return self._generate_matte(layer, input_tex, w, h, visible_rect)
+        finally:
+            if original is None:
+                self.layer_textures.pop(identity, None)
+            else:
+                self.layer_textures[identity] = original
+            texture.release()
 
     def _generate_matte(self, layer, input_tex, w, h, visible_rect):
         """Generate matte for a layer, decoupled from viewport position/zoom.
