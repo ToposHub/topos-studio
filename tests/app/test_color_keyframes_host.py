@@ -666,3 +666,27 @@ class TestRealWriteEntry:
         # 帧盲 provider 不补写（base 形状原样）
         blind = graph_node_layer_provider(graph)(nodes[0])
         assert _center(blind["mask_shapes"]) == base_center
+
+
+class TestManualAddSamples:
+    """R6：手工 Add 采样当前求值结果（动画轨不复制不随时间变的 base）。"""
+
+    def test_add_samples_evaluated_value_on_animated_track(self, qtbot):
+        panel, _host, app_host, _holder, nodes = (
+            TestRealWriteEntry()._wired(qtbot))
+        node_id = nodes[0]
+        # 建动画轨 0@0=0.0 → 4@4=1.0（linear）
+        assert app_host.submit_keyframe_batch([
+            {"action": "set", "node_id": node_id, "param": "exposure",
+             "frame": 0, "value": 0.0},
+            {"action": "set", "node_id": node_id, "param": "exposure",
+             "frame": 4, "value": 1.0},
+        ])
+        leaf = f"node:{node_id}|exposure"
+        panel.request("add", ((leaf, 1),))  # local 1 = source 1 → 求值 0.25
+        node = next(n for n in app_host.bound_graph().nodes
+                    if n.node_id == node_id)
+        track = node.params["grade_keyframes"]["exposure"]
+        value_at_1 = next(k["value"] for k in track["keyframes"]
+                          if int(k["frame"]) == 1)
+        assert value_at_1 == pytest.approx(0.25)  # 不是 base 0.0

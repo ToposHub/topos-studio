@@ -11,14 +11,12 @@ from unittest.mock import Mock
 import pytest
 
 from src.app.controllers.color_keyframe_recorder import KeyframeAutoRecorder
+from src.features.color.core.color_graph_migration import migrate_legacy_stack
+from src.features.edit.core.project import EditProject
+from tests.color.fixtures.color_graph import f03_layer_stack
 
 
 def _graph_project():
-    from src.features.color.core.color_graph_migration import (
-        migrate_legacy_stack,
-    )
-    from src.features.edit.core.project import EditProject
-    from tests.color.fixtures.color_graph import f03_layer_stack
     project, sid = EditProject.create(name="kf04").create_color_stack(
         asset_id="a1", name="s")
     stack = project.color_stacks[sid].with_layers(
@@ -160,3 +158,112 @@ class TestGestureAutoRecord:
         depth_off = len(stack._undo_stack)
         # 录制器无差值 → auto 开与关的重复手势历史增量一致（批处理不追加）
         assert depth_on - depth1 == depth_off - depth_on == 1
+
+
+class TestToolGestureRecord:
+    """R6：Qualifier/Window 工具手势接入自动录制（真实提交路径）。"""
+
+    def _wired(self, source_frame=42, with_shape=False):
+        from src.app.controllers.color_graph_controller import (
+            ColorGraphAppHost,
+        )
+        from src.features.color.core.layer import MaskShape
+        from src.features.edit.core.commands import ProjectCommandStack
+        project, sid = EditProject.create(name="kf06").create_color_stack(
+            asset_id="a1", name="s")
+        layers = f03_layer_stack()
+        shape_id = ""
+        if with_shape:
+            shape = MaskShape(MaskShape.CIRCLE)
+            shape_id = shape.id
+            layers[0].mask_shapes = [shape]
+        stack = project.color_stacks[sid].with_layers(
+            [layer.to_dict(None) for layer in layers])
+        graph = migrate_legacy_stack(stack)
+        project = project.update_color_stack(sid, color_graph=graph)
+        holder = {"project": project, "frame": source_frame}
+        engine = Mock()
+        engine.layers = []
+        app_host = ColorGraphAppHost(
+            get_project=lambda: holder["project"],
+            set_project=lambda p: holder.__setitem__("project", p),
+            project_stack=ProjectCommandStack(),
+            engine_provider=lambda: engine,
+            request_render=lambda: None, panels_provider=lambda: {})
+        app_host.on_clip_stack_loaded(sid)
+        recorder = KeyframeAutoRecorder()
+        app_host.attach_keyframe_recorder(
+            recorder, frame_provider=lambda: holder["frame"])
+        return app_host, holder, recorder, _node_id(app_host.bound_graph()), \
+            shape_id
+
+    def _tracks(self, app_host, node_id):
+        node = next(n for n in app_host.bound_graph().nodes
+                    if n.node_id == node_id)
+        return node.params.get("grade_keyframes") or {}
+
+    def test_qualifier_tool_gesture_records_registered_fields(self):
+        app_host, holder, recorder, node_id, _shape = self._wired()
+        recorder.set_auto(node_id, True)
+        depth0 = len(app_host.bridge._project_stack._undo_stack)
+        transaction = "txn-q"
+        app_host.begin_grade_gesture(transaction)
+        # 登记字段 + 离散开关 + 未登记字段混合（只录登记字段）
+        assert app_host.submit_qualifier_change(
+            node_id, {"lum_low": 0.2, "enabled": True,
+                      "not_a_field": 1.0}, transaction)
+        assert app_host.end_grade_gesture()
+        tracks = self._tracks(app_host, node_id)
+        assert {int(k["frame"]): k["value"]
+                for k in tracks["qualifier.lum_low"]["keyframes"]} == {
+            42: 0.2}
+        assert "qualifier.enabled" not in tracks
+        assert not any(name.startswith("qualifier.not_a_field")
+                       for name in tracks)
+        # base patch + 关键帧 = 一个历史条目
+        assert len(app_host.bridge._project_stack._undo_stack) == depth0 + 1
+        undone = app_host.bridge._project_stack.undo(holder["project"])
+        undone_stack = undone.color_stacks[next(iter(undone.color_stacks))]
+        undone_node = next(n for n in undone_stack.color_graph.nodes
+                           if n.node_id == node_id)
+        assert not (undone_node.params.get("grade_keyframes") or {})
+
+    def test_window_shape_drag_records_mask_tracks(self):
+        app_host, _holder, recorder, node_id, shape_id = self._wired(
+            with_shape=True)
+        recorder.set_auto(node_id, True)
+        transaction = "txn-w"
+        app_host.begin_grade_gesture(transaction)
+        assert app_host.submit_window_shape_update(
+            node_id, shape_id,
+            {"center": [0.6, 0.4], "invert": True}, transaction)
+        assert app_host.end_grade_gesture()
+        tracks = self._tracks(app_host, node_id)
+        name = f"mask.{shape_id}.center"
+        assert {tuple(k["value"]) for k in tracks[name]["keyframes"]} == {
+            (0.6, 0.4)}
+        assert not any(f"{shape_id}.invert" in str(key) for key in tracks)
+
+    def test_two_moments_bind_first_frame_of_each_gesture(self):
+        app_host, holder, recorder, node_id, _shape = self._wired()
+        recorder.set_auto(node_id, True)
+        app_host.begin_grade_gesture("t1")
+        app_host.submit_qualifier_change(node_id, {"lum_low": 0.1}, "t1")
+        app_host.end_grade_gesture()
+        holder["frame"] = 43  # 播放头推进（第二个手势绑新帧）
+        app_host.begin_grade_gesture("t2")
+        app_host.submit_qualifier_change(node_id, {"lum_low": 0.3}, "t2")
+        app_host.end_grade_gesture()
+        tracks = self._tracks(app_host, node_id)
+        assert {int(k["frame"]): k["value"]
+                for k in tracks["qualifier.lum_low"]["keyframes"]} == {
+            42: 0.1, 43: 0.3}
+
+    def test_auto_off_tool_gesture_writes_base_only(self):
+        app_host, _holder, _recorder, node_id, _shape = self._wired()
+        transaction = "txn-q"
+        app_host.begin_grade_gesture(transaction)
+        assert app_host.submit_qualifier_change(
+            node_id, {"lum_low": 0.2}, transaction)
+        assert app_host.end_grade_gesture()
+        assert self._tracks(app_host, node_id) == {}

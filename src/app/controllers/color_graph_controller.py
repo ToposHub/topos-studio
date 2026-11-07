@@ -1998,20 +1998,59 @@ class ColorGraphAppHost:
                                 qualifier_patch: Mapping[str, Any],
                                 transaction_id: str) -> bool:
         """Qualifier 手势：merge patch 并入当前事务（一次拖动一次 undo）。"""
-        return self._bridge.submit_buffered(
+        ok = self._bridge.submit_buffered(
             "set_node_qualifier",
             {"node_id": node_id, "qualifier": dict(qualifier_patch)},
             transaction_id, compound_path=self._tool_compound_path())
+        if ok:
+            # R6：真实工具手势变更字段 → 自动录制（patch 成功后、
+            # flush 前；qualifier.<field> 登记轨道名，未登记字段跳过）
+            from src.features.color.core.keyframe_tracks import (
+                QUALIFIER_KEYFRAME_FIELDS, qualifier_track_name,
+            )
+            self._observe_tool_fields(node_id, {
+                qualifier_track_name(str(field)): value
+                for field, value in qualifier_patch.items()
+                if str(field) in QUALIFIER_KEYFRAME_FIELDS})
+        return ok
 
     def submit_window_shape_update(self, node_id: str, shape_id: str,
                                    attributes: Mapping[str, Any],
                                    transaction_id: str) -> bool:
         """窗口几何/参数拖动：单形状 patch 并入当前事务。"""
-        return self._bridge.submit_buffered(
+        ok = self._bridge.submit_buffered(
             "update_node_window_shape",
             {"node_id": node_id, "shape_id": str(shape_id),
              "attributes": dict(attributes)},
             transaction_id, compound_path=self._tool_compound_path())
+        if ok:
+            # R6：同上——mask.<shape_uuid>.<field>（结构操作增/删/复制
+            # 不属于参数手势，不录制）
+            from src.features.color.core.keyframe_tracks import (
+                MASK_KEYFRAME_FIELDS, mask_track_name,
+            )
+            self._observe_tool_fields(node_id, {
+                mask_track_name(str(shape_id), str(field)): value
+                for field, value in attributes.items()
+                if str(field) in MASK_KEYFRAME_FIELDS})
+        return ok
+
+    def _observe_tool_fields(self, node_id: str,
+                             fields: Mapping[str, Any]) -> None:
+        """R6：工具手势真实变更字段交自动录制器收集。
+
+        Qualifier/Window 工具与色轮手势共用同一录制器与手势生命周期
+        （begin_grade_gesture / end_grade_gesture —— flush 时与 base
+        patch 同一事务、一个历史条目）；auto 关闭的节点由录制器自身
+        跳过，未登记轨道名经 observe 的解析白名单再过滤一道。
+        """
+        recorder = getattr(self._adapter, "_recorder", None)
+        if recorder is None or not fields:
+            return
+        frame_provider = getattr(self._adapter, "_frame_provider", None)
+        frame = frame_provider() if frame_provider is not None else None
+        for track_name, value in fields.items():
+            recorder.observe(node_id, str(track_name), value, frame)
 
     def submit_window_structural_change(self, node_id: str,
                                         shapes: Sequence[Any]) -> bool:

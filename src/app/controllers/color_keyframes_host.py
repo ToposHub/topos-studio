@@ -497,7 +497,8 @@ class ColorKeyframesHost:
             # 裸字段名不在批命令白名单内（会被 illegal_param_key 整批拒）
             param = address.track_name
             if request.action == "add":
-                value = self._current_value(nodes.get(node_id), address)
+                value = self._current_value(nodes.get(node_id), address,
+                                            source_frame=frame)
                 if value is _UNRESOLVED:
                     skipped.append(track_id)
                     continue
@@ -693,13 +694,23 @@ class ColorKeyframesHost:
         except Exception:  # noqa: BLE001 — 载荷不可读按未解析处理
             return None
 
-    def _current_value(self, node: Any, address: Any):
-        """从节点当前载荷采样参数现值（添加键=当前值，计划 §录制规则 7）。
+    def _current_value(self, node: Any, address: Any,
+                       source_frame: int | None = None):
+        """采样参数现值（添加键=当前值，计划 §录制规则 7）。
 
-        grade → grading_params[field]；qualifier → qualifier_params[field]；
-        window → 形状 dict 的字段现值（owner_id 定位形状）。
+        R6：``source_frame`` 给出时优先取**当前帧求值后**的载荷
+        （graph_node_layer_provider 逐帧求值——动画轨上手工 Add 采样
+        插值现值，不直接复制不随时间变的 base）；求值不可用回退 base
+        载荷。grade → grading_params[field]；qualifier →
+        qualifier_params[field]；window → 形状 dict 的字段现值
+        （owner_id 定位形状，mask 轨道随帧补写）。
         """
-        payload = self._payload_of(node)
+        payload = None
+        if source_frame is not None:
+            payload = self._evaluated_payload(
+                getattr(node, "node_id", ""), int(source_frame))
+        if payload is None:
+            payload = self._payload_of(node)
         if payload is None:
             return _UNRESOLVED
         if address.domain == "grade":
@@ -720,6 +731,22 @@ class ColorKeyframesHost:
                     return _UNRESOLVED
                 return shape[address.field]
         return _UNRESOLVED
+
+    def _evaluated_payload(self, node_id: str, source_frame: int):
+        """当前帧求值后的节点载荷（无图/无节点返回 None，回退 base）。"""
+        graph = self._graph_provider()
+        if graph is None or not node_id:
+            return None
+        from src.features.color.core.color_graph_param_source import (
+            graph_node_layer_provider,
+        )
+        try:
+            return graph_node_layer_provider(
+                graph, frame=int(source_frame))(node_id)
+        except Exception:  # noqa: BLE001 — 求值失败回退 base 现值
+            logger.debug("keyframes add sampling fell back to base value",
+                         exc_info=True)
+            return None
 
     # ── 内部 ──
 
