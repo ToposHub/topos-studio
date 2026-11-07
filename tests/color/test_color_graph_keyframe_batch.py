@@ -236,3 +236,164 @@ def test_empty_batch_is_noop():
                                   {"edits": []})
     assert result.ok
     assert result.graph.graph_revision == graph.graph_revision
+
+
+# ---------------------------------------------------------------------------
+# R3：无损更新（只触及目标轨；未知字段/未来格式保留；触及不可解析整批拒）
+# ---------------------------------------------------------------------------
+
+from dataclasses import replace as _dc_replace
+
+from src.shared.project.color_graph import unfreeze_params as _unfreeze
+
+
+def _graph_with_custom_kf(kf: dict):
+    """携带自定义 params.grade_keyframes（含未知字段/未来格式）的图。"""
+    graph = _graph()
+    a, _b, _c = _correctors(graph)
+    nodes = tuple(
+        _dc_replace(n, params={**n.params, "grade_keyframes": kf})
+        if n.node_id == a.node_id else n for n in graph.nodes)
+    return _dc_replace(graph, nodes=nodes), a.node_id
+
+
+_FUTURE_TRACK = {"schema": "v9", "keyframes": None,
+                 "bezier_handles": [[0.1, 0.2]]}
+
+
+class TestLosslessBatchUpdate:
+    def _fixture(self):
+        kf = {
+            # 被编辑轨：一键带 keyframe 级未知字段（不被本批触及）
+            "exposure": {"keyframes": [
+                {"frame": 10, "value": 1.0, "interpolation": "linear",
+                 "bezier_handles": [[0.0, 0.0], [1.0, 1.0]]},
+                {"frame": 20, "value": 2.0, "interpolation": "linear"},
+            ], "track_note": "keep me"},
+            # 未触及轨：轨道级未知字段 + 墓碑扩展
+            "temperature": {"keyframes": [
+                {"frame": 5, "value": 0.5, "interpolation": "ease"}],
+                "solo": True},
+        }
+        return _graph_with_custom_kf(kf)
+
+    def test_edit_one_track_preserves_other_track_and_untouched_keys(self):
+        graph, node_id = self._fixture()
+        service = ColorGraphService()
+        result = service.apply_intent(graph, "batch_edit_keyframes",
+                                      {"edits": [
+            {"action": "set", "node_id": node_id, "param": "exposure",
+             "frame": 20, "value": 9.0},
+        ]})
+        assert result.ok, result.diagnostics
+        params = _unfreeze(_params(result.graph, node_id))
+        # 未触及轨逐字节保留（含轨道级未知字段）
+        assert params["temperature"] == {"keyframes": [
+            {"frame": 5, "value": 0.5, "interpolation": "ease"}],
+            "solo": True}
+        # 编辑轨：未触及键保留 keyframe 级未知字段；轨道级未知字段保留
+        entries = {int(k["frame"]): k
+                   for k in params["exposure"]["keyframes"]}
+        assert entries[10]["bezier_handles"] == [[0.0, 0.0], [1.0, 1.0]]
+        assert params["exposure"]["track_note"] == "keep me"
+        assert entries[20]["value"] == 9.0
+
+    def test_move_and_dynamics_only_touch_targeted_fields(self):
+        graph, node_id = self._fixture()
+        service = ColorGraphService()
+        moved = service.apply_intent(graph, "batch_edit_keyframes",
+                                     {"edits": [
+            {"action": "move", "node_id": node_id, "param": "exposure",
+             "frame": 10, "to_frame": 12},
+        ]})
+        assert moved.ok
+        entries = {int(k["frame"]): k for k in _unfreeze(
+            _params(moved.graph, node_id))["exposure"]["keyframes"]}
+        # move 只改帧号：未知字段随键原样迁移
+        assert entries[12]["bezier_handles"] == [[0.0, 0.0], [1.0, 1.0]]
+
+        dyn = service.apply_intent(moved.graph, "batch_edit_keyframes",
+                                   {"edits": [
+            {"action": "dynamics", "node_id": node_id,
+             "param": "exposure", "frame": 12,
+             "kind": "dynamic", "start": 0.25, "end": 0.75},
+        ]})
+        assert dyn.ok
+        entry = next(k for k in _unfreeze(_params(dyn.graph, node_id))
+                     ["exposure"]["keyframes"] if int(k["frame"]) == 12)
+        # dynamics 只改键型/动态属性：值与未知字段保留
+        assert (entry["kind"], entry["start"], entry["end"]) == (
+            "dynamic", 0.25, 0.75)
+        assert entry["bezier_handles"] == [[0.0, 0.0], [1.0, 1.0]]
+
+    def test_noop_edit_does_not_rewrite_other_tracks(self):
+        graph, node_id = self._fixture()
+        service = ColorGraphService()
+        revision = graph.graph_revision
+        result = service.apply_intent(graph, "batch_edit_keyframes",
+                                      {"edits": [
+            {"action": "set", "node_id": node_id, "param": "exposure",
+             "frame": 20, "value": 2.0},  # 与现状一致 → 无任何写入
+        ]})
+        assert result.ok
+        assert result.graph.graph_revision == revision
+        node = next(n for n in result.graph.nodes
+                    if n.node_id == node_id)
+        # params 域不被规范化重写（未知字段不因 no-op 编辑丢失）
+        assert node.params["grade_keyframes"]["exposure"][
+            "track_note"] == "keep me"
+
+    def test_touching_unparseable_track_rejects_whole_batch(self):
+        graph, node_id = _graph_with_custom_kf({
+            "exposure": dict(_FUTURE_TRACK)})
+        service = ColorGraphService()
+        seeded = service.apply_intent(graph, "batch_edit_keyframes",
+                                      {"edits": [
+            {"action": "set", "node_id": node_id, "param": "contrast",
+             "frame": 8, "value": 0.1},
+        ]})
+        assert seeded.ok  # 未触及的未来格式不受影响
+        revision = seeded.graph.graph_revision
+        result = service.apply_intent(seeded.graph, "batch_edit_keyframes",
+                                      {"edits": [
+            {"action": "set", "node_id": node_id, "param": "exposure",
+             "frame": 8, "value": 0.2},   # 触及不可解析轨道
+            {"action": "set", "node_id": node_id, "param": "contrast",
+             "frame": 9, "value": 0.3},
+        ]})
+        assert not result.ok
+        assert result.diagnostics[0].code == "track_format_unsupported"
+        assert "exposure" in str(result.diagnostics[0])  # 指名轨道
+        assert result.graph.graph_revision == revision  # 无部分写入
+        params = _params(result.graph, node_id)
+        assert _unfreeze(params["exposure"]) == _FUTURE_TRACK  # 数据原样
+        assert 9 not in _frames(result.graph, node_id, "contrast")
+
+    def test_touching_non_mapping_value_rejects_batch(self):
+        graph, node_id = _graph_with_custom_kf({"exposure": "future-blob"})
+        service = ColorGraphService()
+        result = service.apply_intent(graph, "batch_edit_keyframes",
+                                      {"edits": [
+            {"action": "remove", "node_id": node_id, "param": "exposure",
+             "frame": 8},
+        ]})
+        assert not result.ok
+        assert result.diagnostics[0].code == "track_format_unsupported"
+        # 非 Mapping 值原样保留（旧代码会静默丢弃）
+        assert _params(result.graph, node_id)["exposure"] == "future-blob"
+
+    def test_single_key_command_reuses_lossless_core(self):
+        # 兼容脚本单键命令：未触及轨与未知字段同样保留（R3 §2）
+        graph, node_id = self._fixture()
+        service = ColorGraphService()
+        result = service.apply_intent(graph, "set_node_keyframe", {
+            "node_id": node_id, "param": "exposure",
+            "frame": 30, "value": 3.0})
+        assert result.ok, result.diagnostics
+        params = _unfreeze(_params(result.graph, node_id))
+        assert params["temperature"]["solo"] is True
+        assert params["exposure"]["track_note"] == "keep me"
+        entries = {int(k["frame"]): k
+                   for k in params["exposure"]["keyframes"]}
+        assert entries[10]["bezier_handles"] == [[0.0, 0.0], [1.0, 1.0]]
+        assert entries[30]["value"] == 3.0

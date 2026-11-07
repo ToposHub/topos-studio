@@ -233,29 +233,192 @@ class ColorGraphService:
 
     # ═══ N10：节点 grade 域关键帧（实例 params；CORRECTOR 专属）═══
 
+    # ═══ R3：无损关键帧更新核心（单键/批命令共用）═══
+
+    #: 键级已知字段（编辑合并的权威字段集；条目携带的其他字段原样保留）
+    _KNOWN_KEYFRAME_FIELDS = frozenset(
+        ("frame", "value", "interpolation", "kind", "start", "end"))
+
+    class _KeyframeNotFound(Exception):
+        """dynamics 目标键不存在（批命令 fail-closed 原因码载体）。"""
+
     @staticmethod
-    def _normalized_keyframe_track(track: Any) -> list:
-        """关键帧序列化形态校验/规范化（[{frame,value,interpolation}]）。"""
+    def _legacy_grade_keyframes(node: ColorNodeData) -> Mapping:
+        """节点 legacy_payload 里的 grade_keyframes 域（缺省空）。"""
+        legacy = getattr(node, "legacy_payload", None) or {}
+        raw = (legacy.get("grade_keyframes")
+               if isinstance(legacy, Mapping) else None)
+        return raw if isinstance(raw, Mapping) else {}
+
+    @classmethod
+    def _legacy_track_names(cls, node: ColorNodeData) -> set:
+        """legacy 域存在实质轨道（有键）的轨道名集合（墓碑语义判据）。"""
+        return {
+            str(name)
+            for name, item in cls._legacy_grade_keyframes(node).items()
+            if isinstance(item, Mapping) and item.get("keyframes")
+        }
+
+    @classmethod
+    def _parse_touched_track(cls, track: Any,
+                             param: str) -> tuple[list, bool]:
+        """R3：触及轨道的严格解析（保留原始条目 dict 与未知字段）。
+
+        返回 (原始条目列表（升序）, 是否墓碑)。无法安全解析——非
+        Mapping、缺 ``keyframes`` 键的未来格式、含畸形条目——抛
+        ValueError：调用方整批拒绝并指名轨道，不再静默丢弃工程数据。
+        """
+        from src.features.color.core.keyframe_tracks import decode_keyframe
         if not isinstance(track, Mapping):
-            return []
-        raw = track.get("keyframes")
+            raise ValueError(
+                f"轨道 {param} 不是可编辑的 Mapping（未来格式）")
+        if "keyframes" not in track:
+            raise ValueError(
+                f"轨道 {param} 缺少 keyframes 字段（未来格式不支持无损编辑）")
+        raw = track["keyframes"]
         if not isinstance(raw, (list, tuple)):
-            return []
-        normalized = []
+            raise ValueError(f"轨道 {param} 的 keyframes 不是序列")
+        entries: list = []
         for item in raw:
             if not isinstance(item, Mapping):
-                continue
-            frame = int(item.get("frame", -1))
-            value = item.get("value")
-            if frame < 0 or value is None:
-                continue
-            entry = {"frame": frame, "value": value}
-            interp = str(item.get("interpolation", "linear"))
-            entry["interpolation"] = interp if interp in (
-                "linear", "ease", "hold") else "linear"
-            normalized.append(entry)
-        normalized.sort(key=lambda e: e["frame"])
-        return normalized
+                raise ValueError(
+                    f"轨道 {param} 含非 Mapping 关键帧条目（未来格式）")
+            try:
+                decode_keyframe(dict(item))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"轨道 {param} 含无法安全解析的关键帧条目: {exc}"
+                    ) from exc
+            entries.append(dict(item))
+        entries.sort(key=lambda entry: int(entry["frame"]))
+        return entries, bool(track.get("tombstone"))
+
+    @classmethod
+    def _load_touched_track(cls, node: ColorNodeData, candidate: Mapping,
+                            param: str) -> tuple[Any, list, bool, bool]:
+        """载入被触及轨道的工作集。
+
+        返回 (原轨道 dict|None, 条目列表, 是否墓碑, 是否 legacy 懒导入)。
+        params 缺该轨而 legacy 基底有时懒导入（KF-05 合并视图语义）；
+        两域都没有时为空新轨道。触及的未来格式（非 Mapping 值）抛
+        ValueError 整批拒。
+        """
+        item = candidate.get(param)
+        if isinstance(item, Mapping):
+            entries, tombstone = cls._parse_touched_track(item, param)
+            return dict(item), entries, tombstone, False
+        if item is not None:
+            raise ValueError(
+                f"轨道 {param} 不是可编辑的 Mapping（未来格式）")
+        legacy_item = cls._legacy_grade_keyframes(node).get(param)
+        if isinstance(legacy_item, Mapping):
+            entries, _tombstone = cls._parse_touched_track(
+                legacy_item, param)
+            return None, entries, False, True
+        if legacy_item is not None:
+            raise ValueError(
+                f"轨道 {param} 的 legacy 基底不是可编辑的 Mapping")
+        return None, [], False, False
+
+    @classmethod
+    def _merge_keyframe_entry(cls, existing: Any,
+                              canonical: Mapping) -> dict:
+        """已知字段按 canonical 覆盖，keyframe 级未知字段原样保留。"""
+        if not isinstance(existing, Mapping):
+            return dict(canonical)
+        merged = {key: value for key, value in existing.items()
+                  if key not in cls._KNOWN_KEYFRAME_FIELDS}
+        merged.update(canonical)
+        return merged
+
+    @classmethod
+    def _writeback_track(cls, candidate: dict, param: str,
+                         track_dict: Any, entries: list,
+                         was_tombstone: bool,
+                         legacy_names: set) -> None:
+        """把编辑后的轨道写回候选 params（墓碑/私有轨消失语义）。
+
+        KF-05：删空轨道的删除语义——legacy 基底存在同名轨道（或原为
+        墓碑）时写显式空覆盖，防止保存/重开后旧轨道复活；图域私有
+        轨道删空即消失。轨道级未知字段随原轨道 dict 保留。
+        """
+        if entries:
+            new_track = dict(track_dict or {})
+            new_track.pop("tombstone", None)
+            new_track["keyframes"] = entries
+            candidate[param] = new_track
+        elif param in legacy_names or was_tombstone:
+            new_track = dict(track_dict or {})
+            new_track["keyframes"] = []
+            new_track["tombstone"] = True
+            candidate[param] = new_track
+        else:
+            candidate.pop(param, None)
+
+    @classmethod
+    def _apply_set_entry(cls, track: list, frame: int, edit: Mapping) -> list:
+        """set 动作：canonical 键合并进既有条目（未知字段保留）。"""
+        from src.features.color.core.keyframe_tracks import (
+            encode_keyframe, make_keyframe,
+        )
+        decoded = make_keyframe(
+            frame, edit.get("value"),
+            interpolation=str(edit.get("interpolation", "linear")),
+            kind=(str(edit["kind"])
+                  if edit.get("kind") is not None else None),
+            start=float(edit.get("start", 1.0)),
+            end=float(edit.get("end", 1.0)))
+        canonical = encode_keyframe(decoded)
+        existing = next((k for k in track
+                         if int(k["frame"]) == frame), None)
+        entry = cls._merge_keyframe_entry(existing, canonical)
+        out = [k for k in track if int(k["frame"]) != frame]
+        out.append(entry)
+        out.sort(key=lambda item: int(item["frame"]))
+        return out
+
+    @classmethod
+    def _apply_dynamics_entry(cls, track: list, frame: int,
+                              edit: Mapping) -> list:
+        """dynamics 动作：改键型/动态属性，其余字段（含未知）保留。"""
+        from src.features.color.core.keyframe_tracks import (
+            decode_keyframe, encode_keyframe, make_keyframe,
+        )
+        existing = next((k for k in track
+                         if int(k["frame"]) == frame), None)
+        if existing is None:
+            raise cls._KeyframeNotFound(
+                f"dynamics 目标键不存在: {frame}")
+        decoded = decode_keyframe(existing)
+        requested_kind = str(edit.get("kind", decoded.kind))
+        if requested_kind != decoded.kind:
+            # 转换键型：保留原值与帧号，取消旧动态属性（默认权重随
+            # 新键型；实测默认待 KF-00 核对）
+            start_value, end_value = 1.0, 1.0
+        else:
+            start_value = float(edit.get("start", decoded.start))
+            end_value = float(edit.get("end", decoded.end))
+        replacement = make_keyframe(
+            frame, decoded.value, kind=requested_kind,
+            start=start_value, end=end_value)
+        entry = cls._merge_keyframe_entry(
+            existing, encode_keyframe(replacement))
+        out = [k for k in track if int(k["frame"]) != frame]
+        out.append(entry)
+        out.sort(key=lambda item: int(item["frame"]))
+        return out
+
+    @staticmethod
+    def _fresh_candidate(node: ColorNodeData) -> tuple[dict, dict]:
+        """params.grade_keyframes 的深拷贝候选与 no-op 对照基线。
+
+        R3：从不可变图数据深拷贝原载荷（含 MappingProxyType 深解冻）；
+        未触及轨道（含未知域/未来格式）在候选里原样保留。
+        """
+        source = node.params.get("grade_keyframes") or {}
+        if not isinstance(source, Mapping):
+            return {}, {}
+        return dict(unfreeze_params(source)), dict(unfreeze_params(source))
 
     #: N10-B：关键帧可动画轨道名白名单（grade ∪ qualifier；窗口实例轨
     #: 经 track_name_is_writable 解析谓词准入，不入可枚举集）。
@@ -307,32 +470,35 @@ class ColorGraphService:
         return node
 
     def _patch_node_keyframes(self, graph: ColorGraphData, node_id: str,
-                              mutate, *, param: str | None = None) -> GraphEditResult:
+                              apply_edits, *, param: str | None = None,
+                              ) -> GraphEditResult:
+        """R3：单键命令的无损轨道编辑核心（与批命令同一语义）。
+
+        深拷贝 params.grade_keyframes；仅解析并更新 ``param`` 轨道，
+        未触及轨道（含未知域/未来格式）与墓碑原样保留，编辑轨未改键
+        保留 keyframe 级未知字段。无实际变化时不推进 revision。
+        """
         node = self._keyframe_target_or_fail(graph, node_id, param)
         if not isinstance(node, ColorNodeData):
             return node  # type: ignore[return-value]
-        source = node.params.get("grade_keyframes") or {}
-        tracks = {str(k): self._normalized_keyframe_track(v)
-                  for k, v in source.items() if isinstance(v, Mapping)}
-        mutate(tracks)
-        # KF-05：删空轨道的墓碑语义（与批处理命令一致）——legacy 基底
-        # 存在同名轨道或原为墓碑时写显式空覆盖，其余图域私有轨道删空
-        # 即消失。
-        legacy_kf = getattr(node, "legacy_payload", None) or {}
-        raw_legacy = (legacy_kf.get("grade_keyframes")
-                      if isinstance(legacy_kf, Mapping) else None)
-        legacy_names = {str(k) for k, v in (raw_legacy or {}).items()
-                        if isinstance(v, Mapping) and v.get("keyframes")}
-        new_kf: dict[str, Any] = {}
-        for name, keyframes in tracks.items():
-            if keyframes:
-                new_kf[name] = {"keyframes": keyframes}
-            elif name in legacy_names or (
-                    isinstance(source.get(name), Mapping)
-                    and source[name].get("tombstone")):
-                new_kf[name] = {"keyframes": [], "tombstone": True}
+        candidate, baseline = self._fresh_candidate(node)
+        try:
+            track_dict, entries, was_tombstone, imported = (
+                self._load_touched_track(node, candidate, str(param)))
+            if imported and entries:
+                # 懒导入轨道的 no-op 基线 = legacy 条目原样
+                baseline[str(param)] = {
+                    "keyframes": [dict(entry) for entry in entries]}
+            entries = apply_edits(entries)
+        except ValueError as exc:
+            return self._fail(graph, "track_format_unsupported", str(exc),
+                              node_id=node_id)
+        self._writeback_track(candidate, str(param), track_dict, entries,
+                              was_tombstone, self._legacy_track_names(node))
+        if candidate == baseline:
+            return GraphEditResult(True, graph, ())  # 空动作不入史
         params = dict(node.params)
-        params["grade_keyframes"] = new_kf
+        params["grade_keyframes"] = candidate
         try:
             new_node = replace(node, params=params)
         except GraphSchemaError as exc:
@@ -346,76 +512,43 @@ class ColorGraphService:
                              interpolation: str = "linear",
                              ) -> GraphEditResult:
         """N10：插入/更新节点 grade 域关键帧（源帧域；一 op 一事务）。"""
-        def mutate(tracks: dict) -> None:
-            track = list(tracks.get(str(param)) or [])
-            entry = {"frame": int(frame), "value": value,
-                     "interpolation": str(interpolation)}
-            track = [k for k in track if k["frame"] != int(frame)]
-            track.append(entry)
-            track.sort(key=lambda e: e["frame"])
-            tracks[str(param)] = track
-        return self._patch_node_keyframes(graph, node_id, mutate,
+        def apply_edits(track: list) -> list:
+            return self._apply_set_entry(
+                track, int(frame),
+                {"value": value, "interpolation": str(interpolation)})
+        return self._patch_node_keyframes(graph, node_id, apply_edits,
                                           param=str(param))
 
     def op_remove_node_keyframe(self, graph: ColorGraphData, node_id: str,
                                 param: str, frame: int,
                                 ) -> GraphEditResult:
-        def mutate(tracks: dict) -> None:
-            track = [k for k in (tracks.get(str(param)) or [])
-                     if k["frame"] != int(frame)]
-            if track:
-                tracks[str(param)] = track
-            else:
-                tracks.pop(str(param), None)
-        return self._patch_node_keyframes(graph, node_id, mutate,
+        def apply_edits(track: list) -> list:
+            return [k for k in track if int(k["frame"]) != int(frame)]
+        return self._patch_node_keyframes(graph, node_id, apply_edits,
                                           param=str(param))
 
     def op_move_node_keyframe(self, graph: ColorGraphData, node_id: str,
                               param: str, from_frame: int, to_frame: int,
                               ) -> GraphEditResult:
-        def mutate(tracks: dict) -> None:
-            track = list(tracks.get(str(param)) or [])
-            moving = [k for k in track if k["frame"] == int(from_frame)]
+        """N10：移动节点 grade 域关键帧（同帧覆盖，源帧域）。"""
+        def apply_edits(track: list) -> list:
+            moving = [k for k in track
+                      if int(k["frame"]) == int(from_frame)]
             if not moving:
-                return
-            track = [k for k in track if k["frame"] != int(from_frame)]
-            for k in moving:
-                k = dict(k)
-                k["frame"] = int(to_frame)
-                track.append(k)
-            track.sort(key=lambda e: e["frame"])
-            tracks[str(param)] = track
-        return self._patch_node_keyframes(graph, node_id, mutate,
+                return track
+            track = [k for k in track
+                     if int(k["frame"]) != int(from_frame)]
+            for keyframe in moving:
+                track.append({**keyframe, "frame": int(to_frame)})
+            track.sort(key=lambda item: int(item["frame"]))
+            return track
+        return self._patch_node_keyframes(graph, node_id, apply_edits,
                                           param=str(param))
 
     # ═══ KF-03：关键帧批处理领域命令（一次校验、一个候选、一次 commit）═══
 
     #: 批处理条目动作全集（面板 EditRequest → 宿主翻译后的领域形态）。
     BATCH_KEYFRAME_ACTIONS = ("set", "remove", "move", "dynamics")
-
-    @staticmethod
-    def _normalized_keyframe_track_dynamic(track: Any) -> list:
-        """与 ``_normalized_keyframe_track`` 同校验容错，但保留显式键型
-        （kind/start/end 走 KF-01 编解码：等价档位不落盘，非等价档位
-        显式持久化）。畸形条目逐条跳过（与既有容错一致）。"""
-        from src.features.color.core.keyframe_tracks import (
-            decode_keyframe, encode_keyframe,
-        )
-        if not isinstance(track, Mapping):
-            return []
-        raw = track.get("keyframes")
-        if not isinstance(raw, (list, tuple)):
-            return []
-        normalized = []
-        for item in raw:
-            if not isinstance(item, Mapping):
-                continue
-            try:
-                normalized.append(encode_keyframe(decode_keyframe(dict(item))))
-            except (ValueError, TypeError):
-                continue
-        normalized.sort(key=lambda e: e["frame"])
-        return normalized
 
     def op_batch_edit_keyframes(self, graph: ColorGraphData,
                                 edits: Sequence[Mapping[str, Any]],
@@ -433,11 +566,15 @@ class ColorGraphService:
             {"action": "dynamics","node_id", "param", "frame",
              "kind", "start"?, "end"?}
 
-        语义（计划 §轨道规则 5）：
+        语义（计划 §轨道规则 5 + R3 无损更新）：
         - 一次校验 fail-closed：任一条目非法（锁定节点/白名单外/值形态/
-          权重越界/移动目标冲突）整批拒绝，无部分写入；
+          权重越界/移动目标冲突/触及轨道无法安全解析）整批拒绝，无
+          部分写入，诊断指名轨道；
+        - 无损更新：深拷贝原载荷后只触及目标轨——未触及轨道（含未知
+          域/未来格式）、编辑轨未改键的 keyframe 级未知字段、轨道级
+          未知字段原样保留；set/dynamics 合并已知字段，move 只改帧号；
         - 批量 move 先移除全部源帧再插入目标帧（相邻帧交换不自覆盖）；
-        - 空批 / 全部条目为重复置值或原位（候选与现状逐字节一致）不推
+        - 空批 / 全部条目为重复置值或原位（候选与基线逐字节一致）不推
           revision、不入史。
         """
         from src.features.color.core.keyframe_tracks import (
@@ -491,7 +628,7 @@ class ColorGraphService:
                                       node_id=node_id)
             grouped.setdefault(node_id, []).append((param, edit))
 
-        # ── 逐节点构造候选（深拷贝 params；事务无部分写入）──
+        # ── 逐节点构造候选（R3 无损：深拷贝原载荷，只触及目标轨）──
         moves_by_key: dict[tuple[str, str],
                            list[tuple[int, int]]] = {}
         for node_id, entries in grouped.items():
@@ -506,89 +643,42 @@ class ColorGraphService:
         for node_id, entries in grouped.items():
             node = self._node(graph, node_id)
             assert node is not None  # 校验阶段已确认
-            source = node.params.get("grade_keyframes") or {}
-            legacy_kf = getattr(node, "legacy_payload", None) or {}
-            raw_legacy = (legacy_kf.get("grade_keyframes")
-                          if isinstance(legacy_kf, Mapping) else None)
-            legacy_raw = raw_legacy if isinstance(raw_legacy, Mapping) else {}
-            legacy_names = {
-                str(k) for k, v in legacy_raw.items()
-                if isinstance(v, Mapping) and v.get("keyframes")}
-            touch_names = {str(param) for param, _ in entries}
+            candidate, baseline = self._fresh_candidate(node)
+            legacy_names = self._legacy_track_names(node)
+            touch_names = sorted({str(param) for param, _ in entries})
 
-            # ── 工作集（params 现状 + 被触及轨道的 legacy 懒导入）──
-            # KF-05：legacy 起源轨道经合并视图对外可见，编辑必须落在
-            # 合并视图上再写回 params（写回即完成一次性导入）。未被
-            # 本批触及的 legacy 轨道保持原域，不随编辑扩散。
-            tracks: dict[str, list] = {}
-            tombstones: set[str] = set()
-            for name, item in source.items():
-                if not isinstance(item, Mapping):
-                    continue
-                normalized = self._normalized_keyframe_track_dynamic(item)
-                if normalized:
-                    tracks[str(name)] = normalized
-                elif item.get("tombstone"):
-                    tombstones.add(str(name))
-                    tracks[str(name)] = []
-            for param in sorted(touch_names):
-                if tracks.get(param):
-                    continue  # params 已是权威（非空）
-                legacy_item = legacy_raw.get(param)
-                legacy_norm = (
-                    self._normalized_keyframe_track_dynamic(legacy_item)
-                    if isinstance(legacy_item, Mapping) else [])
-                if legacy_norm and param not in tombstones:
-                    tracks[param] = legacy_norm  # 懒导入
-                elif param not in tracks:
-                    tracks[param] = []  # set 等动作将写入的新轨道
+            # ── 工作集：触及轨道严格解析（params 现状 + legacy 懒导入）──
+            # KF-05：legacy 起源轨道经合并视图对外可见，编辑落在合并
+            # 视图上再写回 params（写回即完成一次性导入）。未被本批
+            # 触及的轨道（含未知域/未来格式）原样保留，不随编辑扩散。
+            loaded: dict[str, tuple[Any, list, bool]] = {}
+            try:
+                for param in touch_names:
+                    track_dict, track_entries, was_tombstone, imported = (
+                        self._load_touched_track(node, candidate, param))
+                    if imported and track_entries:
+                        # 懒导入轨道的 no-op 基线 = legacy 条目原样
+                        baseline[param] = {"keyframes": [
+                            dict(entry) for entry in track_entries]}
+                    loaded[param] = (track_dict, track_entries,
+                                     was_tombstone)
+            except ValueError as exc:
+                return self._fail(graph, "track_format_unsupported",
+                                  str(exc), node_id=node_id)
 
-            # ── 基线（"本批无任何效果时 params 应有的形态"）──
-            baseline: dict[str, dict[str, Any]] = {}
-            for name, item in source.items():
-                if not isinstance(item, Mapping):
-                    continue
-                normalized = self._normalized_keyframe_track_dynamic(item)
-                if normalized:
-                    baseline[str(name)] = {"keyframes": normalized}
-                elif item.get("tombstone"):
-                    baseline[str(name)] = {"keyframes": [], "tombstone": True}
-            for param in sorted(touch_names):
-                merged = tracks.get(param) or []
-                if merged:
-                    baseline[param] = {"keyframes": [dict(k) for k in merged]}
-                elif param in tombstones or param in legacy_names:
-                    baseline[param] = {"keyframes": [], "tombstone": True}
             for param, edit in entries:
                 action = str(edit["action"])
                 frame = int(edit["frame"])
-                track = list(tracks.get(param) or [])
+                track_dict, track, was_tombstone = loaded[param]
                 if action == "set":
                     try:
-                        entry = encode_keyframe(make_keyframe(
-                            frame, edit.get("value"),
-                            interpolation=str(edit.get("interpolation",
-                                                     "linear")),
-                            kind=(str(edit["kind"])
-                                  if edit.get("kind") is not None else None),
-                            start=float(edit.get("start", 1.0)),
-                            end=float(edit.get("end", 1.0))))
+                        track = self._apply_set_entry(track, frame, edit)
                     except ValueError as exc:
                         return self._fail(graph, str(exc),
                                           f"edits[{param}@{frame}] 非法: {exc}",
                                           node_id=node_id)
-                    existing = next((k for k in track
-                                     if k["frame"] == frame), None)
-                    if existing is not None and existing == entry:
-                        continue  # 重复置值：不推进历史
-                    track = [k for k in track if k["frame"] != frame]
-                    track.append(entry)
-                    track.sort(key=lambda e: e["frame"])
-                    tracks[param] = track
                 elif action == "remove":
-                    kept = [k for k in track if k["frame"] != frame]
-                    if len(kept) != len(track):
-                        tracks[param] = kept
+                    track = [k for k in track if int(k["frame"]) != frame]
                 elif action == "move":
                     if (node_id, param) in applied_moves:
                         continue  # 组级操作：整组一次，防重复重放换回
@@ -601,8 +691,8 @@ class ColorGraphService:
                             graph, "frame_conflict",
                             f"move 目标帧冲突（同轨道多键落同帧）: "
                             f"{param}@{node_id}", node_id=node_id)
-                    others = {k["frame"] for k in track
-                              if k["frame"] not in moving_frames}
+                    others = {int(k["frame"]) for k in track
+                              if int(k["frame"]) not in moving_frames}
                     clash = sorted(set(target_frames) & others)
                     if clash:
                         return self._fail(
@@ -610,63 +700,41 @@ class ColorGraphService:
                             f"move 目标与既有键冲突: {param} 帧 {clash}",
                             node_id=node_id)
                     moving = [k for k in track
-                              if k["frame"] in moving_frames]
-                    # 先移除全部源帧再插入目标（相邻帧交换不自覆盖）
+                              if int(k["frame"]) in moving_frames]
+                    # 先移除全部源帧再插入目标（相邻帧交换不自覆盖）；
+                    # 逐键只改帧号，其余字段（含未知）保留
                     track = [k for k in track
-                             if k["frame"] not in moving_frames]
+                             if int(k["frame"]) not in moving_frames]
                     for keyframe in moving:
                         target = next(t for f, t in pairs
-                                      if f == keyframe["frame"])
+                                      if f == int(keyframe["frame"]))
                         track.append({**keyframe, "frame": target})
-                    track.sort(key=lambda e: e["frame"])
-                    tracks[param] = track
+                    track.sort(key=lambda item: int(item["frame"]))
                 else:  # dynamics
-                    existing = next((k for k in track
-                                     if k["frame"] == frame), None)
-                    if existing is None:
+                    try:
+                        track = self._apply_dynamics_entry(track, frame,
+                                                           edit)
+                    except self._KeyframeNotFound:
                         return self._fail(
                             graph, "keyframe_not_found",
                             f"dynamics 目标键不存在: {param}@{frame}",
                             node_id=node_id)
-                    try:
-                        decoded = decode_keyframe(existing)
-                        requested_kind = str(edit.get("kind", decoded.kind))
-                        if requested_kind != decoded.kind:
-                            # 转换键型：保留原值与帧号，取消旧动态属性
-                            # （默认权重随新键型；实测默认待 KF-00 核对）
-                            start_value, end_value = 1.0, 1.0
-                        else:
-                            start_value = float(edit.get("start",
-                                                         decoded.start))
-                            end_value = float(edit.get("end",
-                                                       decoded.end))
-                        replacement = make_keyframe(
-                            frame, decoded.value, kind=requested_kind,
-                            start=start_value, end=end_value)
                     except ValueError as exc:
                         return self._fail(graph, str(exc),
                                           f"dynamics 非法: {exc}",
                                           node_id=node_id)
-                    entry = encode_keyframe(replacement)
-                    if existing == entry:
-                        continue
-                    track = [k for k in track if k["frame"] != frame]
-                    track.append(entry)
-                    track.sort(key=lambda e: e["frame"])
-                    tracks[param] = track
-            candidate_params: dict[str, Any] = {}
-            # KF-05：删空轨道的删除语义——legacy 基底存在同名轨道（或
-            # 原为墓碑）时写显式空覆盖，防止保存/重开后旧轨道复活；
-            # 图域私有轨道删空即消失（既有语义）。
-            for name, kfs in tracks.items():
-                if kfs:
-                    candidate_params[name] = {"keyframes": kfs}
-                elif name in legacy_names or name in tombstones:
-                    candidate_params[name] = {"keyframes": [],
-                                              "tombstone": True}
-            if candidate_params != baseline:
+                loaded[param] = (track_dict, track, was_tombstone)
+
+            changed_here = False
+            for param in touch_names:
+                track_dict, track, was_tombstone = loaded[param]
+                self._writeback_track(candidate, param, track_dict, track,
+                                      was_tombstone, legacy_names)
+            if candidate != baseline:
                 changed_any = True
-            updated[node_id] = candidate_params
+                changed_here = True
+            if changed_here:
+                updated[node_id] = candidate
         if not changed_any:
             return GraphEditResult(True, graph, ())  # 拖回原位/空动作
         nodes = tuple(
