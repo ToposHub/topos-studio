@@ -1554,10 +1554,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 return (manager.get_current_session()
                         if manager is not None else None)
 
-            def _timeline_fps(timeline_id: str) -> int:
+            def _timeline_fps(timeline_id: str):
+                # R1：传递时间线精确帧率（Rational）——29.97/59.94 家族
+                # 的 DF 时间码显示与真实帧映射不按名义整数帧率折算
                 project = getattr(self, "_current_edit_project", None)
                 timeline = project.timelines.get(timeline_id) if project is not None else None
-                return round(float(timeline.fps)) if timeline is not None else 0
+                return timeline.fps if timeline is not None else 0
 
             host = ColorKeyframesHost(
                 panel,

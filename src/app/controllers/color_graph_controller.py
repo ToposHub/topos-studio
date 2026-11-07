@@ -1605,6 +1605,33 @@ class ColorGraphAppHost:
         stack = project.color_stacks.get(stack_id)
         return getattr(stack, "color_graph", None) if stack else None
 
+    def binding_description(self) -> dict[str, Any]:
+        """R4：当前图绑定的明确描述（面板/录制器/脚本的身份依据）。
+
+        - ``view``：``"graph"``（栈持久化权威图）或 ``"migration"``
+          （legacy 栈的迁移只读视图——首次写入经既有 ApplyColorGraph
+          Command 建图事务，不由界面直改项目）；
+        - ``writable``：已绑定栈且图会话 READY（迁移视图同此门——
+          写入口走命令事务而非视图直改）；
+        - ``scope``/``scope_owner_id``/``graph_revision``/``generation``：
+          身份四元组，迟到请求（revision/generation 不匹配）由消费方
+          对照丢弃。
+        """
+        coordinator = self._coordinator
+        graph = self._stack_graph(self._bound_stack_id)
+        return {
+            "stack_id": self._bound_stack_id,
+            "view": "graph" if graph is not None else (
+                "migration" if self._bound_stack_id else "none"),
+            "writable": bool(self._bound_stack_id)
+            and coordinator.state == GraphSessionState.READY,
+            "scope": coordinator.scope,
+            "scope_owner_id": coordinator.scope_owner_id,
+            "graph_revision": (int(getattr(graph, "graph_revision", -1))
+                               if graph is not None else -1),
+            "generation": coordinator.generation,
+        }
+
     @property
     def bound_stack_id(self) -> str:
         return self._bound_stack_id

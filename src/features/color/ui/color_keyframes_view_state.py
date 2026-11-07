@@ -44,7 +44,9 @@ class Track:
 class Snapshot:
     context: str = ""
     frame_count: int = 0
-    timecode_fps: int = 24
+        # R1：时间码帧率——整帧率 int/float（NDF）或精确 Rational（29.97/
+    # 59.94 家族按 drop-frame 显示；宿主从时间线传入）
+    timecode_fps: float = 24
     playhead: int = 0
     corrector: str = ""
     tracks: tuple[Track, ...] = ()

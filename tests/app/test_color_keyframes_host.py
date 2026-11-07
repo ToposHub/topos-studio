@@ -690,3 +690,134 @@ class TestManualAddSamples:
         value_at_1 = next(k["value"] for k in track["keyframes"]
                           if int(k["frame"]) == 1)
         assert value_at_1 == pytest.approx(0.25)  # 不是 base 0.0
+
+
+class TestRetimeReadOnlyMatrix:
+    """R1：复杂帧映射显式只读（非 1× 正向同速率一律无写入口）。"""
+
+    def _host(self, qtbot, **clip_attrs):
+        graph, _sid, node_id = _graph_with_keyframes()
+        playback = _FakePlayback(total=20)
+        for key, value in clip_attrs.items():
+            setattr(playback.clip, key, value)
+        panel, host, _ = _host(qtbot, graph, playback=playback)
+        return panel, host, node_id
+
+    def test_speed_variants_are_read_only(self, qtbot):
+        cases = [
+            {"speed": 0.5},                        # 慢速
+            {"speed": 2.0},                        # 快速
+            {"speed": SimpleNamespace(speed=1.0, reverse=True,
+                                      speed_points=())},   # 倒放
+            {"speed": SimpleNamespace(speed=1.0, reverse=False,
+                                      speed_points=(0.3, 0.9))},  # 速度曲线
+            {"freeze_source_frame": 24},           # 冻结
+        ]
+        for clip_attrs in cases:
+            panel, host, node_id = self._host(qtbot, **clip_attrs)
+            assert host.refresh(), clip_attrs
+            snapshot = panel.snapshot
+            assert snapshot.edit_notice, clip_attrs  # 显式只读提示
+            assert not panel.can_edit(f"node:{node_id}|exposure")
+            submissions = []
+            host._submit_batch = lambda edits: submissions.append(edits) or True
+            panel.request("add", ((f"node:{node_id}|exposure", 12),))
+            assert not submissions, clip_attrs  # 无写入口
+
+    def test_mixed_frame_rate_ratio_is_read_only(self, qtbot):
+        panel, host, node_id = self._host(
+            qtbot, _source_over_timeline_fps_ratio=lambda: 1.5)
+        assert host.refresh()
+        assert panel.snapshot.edit_notice
+        assert not panel.can_edit(f"node:{node_id}|exposure")
+
+    def test_effective_source_start_wins_over_source_start(self, qtbot):
+        # 有效源偏移（裁切后）优先于原始 source_start——写入落在真实源帧
+        graph, _sid, node_id = _graph_with_keyframes()
+        playback = _FakePlayback(total=20)
+        playback.clip.source_start = 100
+        playback._active_color_timeline_clip_playback_context = (
+            lambda: {"timeline_id": "t1", "clip": playback.clip,
+                     "effective_source_start": 36})
+        panel, host, _ = _host(qtbot, graph, playback=playback)
+        submissions = []
+        host._submit_batch = lambda edits: submissions.append(edits) or True
+        assert host.refresh()
+        panel.request("add", ((f"node:{node_id}|exposure", 12),))
+        assert submissions[0][0]["frame"] == 48  # 36 + 12，不是 100 + 12
+
+
+class TestBindingIdentity:
+    """R4：绑定描述 + A→B→A 迟到请求失效。"""
+
+    def test_binding_description_reports_authoritative_view(self, qtbot):
+        _panel, _host, app_host, holder, _nodes = (
+            TestRealWriteEntry()._wired(qtbot))
+        binding = app_host.binding_description()
+        assert binding["view"] == "graph"
+        assert binding["writable"] is True
+        assert binding["stack_id"]
+        graph = app_host.bound_graph()
+        assert binding["graph_revision"] == graph.graph_revision
+
+    def test_binding_description_marks_legacy_migration_view(self):
+        # 无图旧栈：迁移只读视图（首次写入走建图命令事务）
+        from unittest.mock import Mock
+
+        from src.app.controllers.color_graph_controller import (
+            ColorGraphAppHost,
+        )
+        from src.features.edit.core.commands import ProjectCommandStack
+        from src.features.edit.core.project import EditProject
+        from tests.color.fixtures.color_graph import f03_layer_stack
+        project, sid = EditProject.create(name="r4").create_color_stack(
+            asset_id="a1", name="s")
+        stack = project.color_stacks[sid].with_layers(
+            [layer.to_dict(None) for layer in f03_layer_stack()])
+        project = project.update_color_stack(sid, **{})  # 无 color_graph
+        holder = {"project": project}
+        app_host = ColorGraphAppHost(
+            get_project=lambda: holder["project"],
+            set_project=lambda p: holder.__setitem__("project", p),
+            project_stack=ProjectCommandStack(),
+            engine_provider=lambda: Mock(),
+            request_render=lambda: None, panels_provider=lambda: {})
+        app_host.on_clip_stack_loaded(sid)
+        binding = app_host.binding_description()
+        assert binding["view"] == "migration"
+        assert binding["stack_id"] == sid
+        # 迁移视图仍可读（bound_graph 返回投影），写入经命令事务
+        assert app_host.bound_graph() is not None
+
+    def test_a_to_b_to_a_invalidates_stale_requests(self, qtbot):
+        graph, _sid, node_id = _graph_with_keyframes()
+        panel, host, playback = _host(qtbot, graph)
+        session_a1 = _session()                    # A 首次进入
+        host._session_provider = lambda: session_a1
+        assert host.refresh()
+        context_a1 = panel.snapshot.context
+        submissions = []
+        host._submit_batch = lambda edits: submissions.append(edits) or True
+        panel.request("add", ((f"node:{node_id}|exposure", 8),))
+        assert submissions  # A 首次上下文可写
+
+        session_b = _session(clip_id="c2")         # 切到 B
+        host._session_provider = lambda: session_b
+        assert host.refresh(force=True)
+        assert panel.snapshot.context != context_a1
+
+        session_a2 = _session()                    # 切回 A：新 session_id
+        session_a2.session_id = "sess-2"
+        host._session_provider = lambda: session_a2
+        assert host.refresh(force=True)
+        context_a2 = panel.snapshot.context
+        assert context_a2 != context_a1  # 同 ID 重进 ≠ 旧 context
+        # A 旧上下文的迟到请求被整批拒（session_id 已换）
+        from src.features.color.ui.color_keyframes_view_state import (
+            EditRequest,
+        )
+        stale = EditRequest(
+            action="add", context=context_a1,
+            targets=((f"node:{node_id}|exposure", 9),))
+        host._on_edit_requested(stale)
+        assert len(submissions) == 1

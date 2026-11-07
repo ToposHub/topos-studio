@@ -190,3 +190,18 @@ def test_context_menu_nudges_selected_keys_and_master_can_clear_visible_keys(
     timeline.contextMenuEvent(QContextMenuEvent(
         QContextMenuEvent.Reason.Mouse, _point(panel, "", 80)))
     assert not panel._markers
+
+
+def test_timecode_uses_rational_drop_frame(qtbot: QtBot) -> None:
+    """R1：29.97 家族按 DF 时间码显示（Timecode 的 Rational 接口）。"""
+    from src.shared.media import FPS_29_97, Rational
+    panel = _open(qtbot)
+    snapshot = demo_snapshot()
+    snapshot = replace(snapshot, timecode_fps=FPS_29_97)
+    panel.set_snapshot(snapshot)
+    assert panel.timeline._timecode(1800) == "00:01:00;02"  # DF：跳 0/1 帧
+    panel.set_snapshot(replace(snapshot, timecode_fps=Rational(24, 1)))
+    assert panel.timeline._timecode(1800) == "00:01:15:00"  # NDF 整帧率
+    # 旧载荷的 int 帧率仍按 NDF divmod（回退路径）
+    panel.set_snapshot(replace(snapshot, timecode_fps=25))
+    assert panel.timeline._timecode(1800) == "00:01:12:00"
