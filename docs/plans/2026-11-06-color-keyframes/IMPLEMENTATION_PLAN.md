@@ -43,6 +43,36 @@
 447 项全绿（2026-11-07，offscreen Qt：基线 11 文件 + 关键帧各套件 + 节点缓存/
 full outlets/m06/管线声明/Scope 出口 + 接线相邻 app 套件）。
 
+
+## 后端缺口整改批次（2026-11-07 第二轮，R1–R8）
+
+按 [BACKEND_REMEDIATION_PLAN.md](BACKEND_REMEDIATION_PLAN.md) 逐项修复，
+提交 2c51b69…0a7edcf：
+
+- **R2 显式 Dynamics 求值**：GradeKeyframe 增 kind/start/end（KF-01
+  编解码单一入口，legacy 载荷逐字节不变）；value_at 统一语义（精确帧
+  左键值/静态右保持/legacy 等价键旧路径逐位一致/显式动态读 A.start、
+  B.end 走 Hermite 权重）；图 provider/保存重开/导出 25%/50%/75% 一致。
+- **R3 批编辑无损化**：单键/批命令共用无损核心——只触及目标轨，
+  未触及轨与 keyframe/轨道级未知字段原样保留；触及不可解析轨道整批
+  拒（track_format_unsupported）；no-op 以候选 vs 基线判定；真实
+  保存/重开/undo/redo 无损往返。
+- **R5a 播放过期帧**：RENDER_VIDEO_FRAME（CPU/GPU 零拷贝两路径）任务
+  边界按实际解码帧覆盖 color_graph_source_frame；UI 缓存对象不被改写。
+- **R5b CPU 逐节点合成**：run_graph_frame_cpu（冻结快照 + compile +
+  provider 逐帧求值 + run_plan_cpu 生产 oracle）；导出/预览 CPU 回退
+  消费权威图（多 Corrector 动画不丢、active 层无关）；能力不足默认
+  拒绝、allow_degraded_grade 才降级扁平；预览/导出 parity。
+- **R6 工具手势录制**：submit_qualifier_change / submit_window_shape_
+  update 在 patch 成功后、flush 前收集真实变更字段（与色轮手势同一
+  录制器/生命周期/单历史条目）；手工 Add 采样当前求值结果。
+- **R1/R4 收尾**：复杂映射（变速/倒放/冻结/速度曲线/混帧率）只读
+  矩阵；有效源偏移优先；DF 时间码（Timecode Rational）；
+  binding_description 身份四元组 + A→B→A 迟到请求失效。
+
+仍待实机/量测门槛不变（KF-00 量测、V01–V08 真机验收、R7 Sizing/FX、
+GPU 导出图执行、auto 关闭态锚点语义）。
+
 ## 参考行为与验收基线
 
 - 已在本机 Resolve Studio 20 调色页核对右下角面板、左侧轨道树、右侧时间线、Master / Corrector / Sizing 层级、子轨披露、缩放控件和红色播放头。

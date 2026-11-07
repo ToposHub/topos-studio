@@ -6,6 +6,8 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 
 本轮已修复启动后宿主接线、真实工作区使用演示数据、活动 Corrector 同步、轨道分组和删除末键后空轨丢失。普通 1× 同速率片段接入源帧偏移，复杂映射及非 Clip 调色范围显示只读。时间码使用时间线名义帧率，失效上下文清理投影。另已修正嵌套关键帧载荷的 Mapping 解冻及内部静态键的精确帧边界。动态属性对话框使用合法的 0–3 值域和 Topos 兼容权重曲线。松手会经正式 seek 结算精确帧，取消手势只结束 scrub。轨道右键可左右微移一帧，Master 菜单可整批删除当前剪辑范围内可见键。锁定键存在时禁用整批删除，裁切范围外的源键保留。下面任务保留仍需完成的范围。
 
+**R 批次整改（2026-11-07 第二轮，提交 2c51b69…0a7edcf）已消解 R2/R3/R5a/R5b/R6 全部代码项与 R1/R4 的可代码化部分**：显式 Dynamics 经 KF-01 编解码贯通求值域（0→1 Start=0/End=1 的 25% = 0.109375，legacy 帧值逐位不变）；批编辑无损化（只触及目标轨、未知字段保留、触及不可解析整批拒）；播放任务过期帧按实际解码帧覆盖（动画不停旧值）；Edit/Deliver CPU 回退按权威图逐节点合成（run_graph_frame_cpu 生产 oracle，能力不足默认拒绝）；Qualifier/Window 工具手势接入自动录制；手工 Add 采样当前求值结果；复杂映射只读矩阵 + DF 时间码（Timecode Rational 接口）；图宿主绑定描述 + A→B→A 迟到请求失效。回归扩至关键帧/导出/预览/录制相关 300+ 项通过。下面各任务保留仍需实机/量测/后续版本的范围。
+
 ## Topos 实机记录
 
 在 macOS Cocoa 启动正式 MainWindow，导入用户提供的 [测试素材01.mov](../../../tests/test_videos/测试素材01.mov)（H.264、1920×1080、25 fps、124 帧），插入临时时间线并添加 Corrector。通过正式停靠面板和 Qt 鼠标、键盘操作提交真实工程图命令。普通片段在 local 24 写入 source 24。经 Edit 的 TrimClipCommand 裁掉开头 12 帧后，在 local 24 写入 source 36。两次均看到静态键回显、local 47 动态键拖到 53 后保持选中、锁定时 Delete 无效、解锁后删除成功且 24 帧静态键保留。Resolve 参考窗口显示 Apple ProRes 4444，因此本轮对比操作和轨道结果，未作两个文件的像素等价判定。
@@ -26,7 +28,7 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 
 ### R1 · 统一 panel-local、source 和 timeline 坐标
 
-**旧路径已复现，普通裁切已修，复杂映射待实现。** 测试片段 `timeline_start=240`、`source_start=100`。在面板 local 12 添加键，旧路径存为 source 12，实际渲染帧应为 source 112，时间线为 252。自动录制使用源帧，手工键与录制键因此可能落入两个位置。本轮将 1× 正向且同速率的投影、手工写、复制/粘贴和移动接到源帧偏移，复杂 retime 显式只读。跨 clip 剪贴板、变速和不单射的往返仍须独立验收。
+**旧路径已复现，普通裁切已修；复杂映射显式只读（R 批次补齐只读矩阵与 DF 时间码，完整适配器待 R7 后续版本）。** 测试片段 `timeline_start=240`、`source_start=100`。在面板 local 12 添加键，旧路径存为 source 12，实际渲染帧应为 source 112，时间线为 252。自动录制使用源帧，手工键与录制键因此可能落入两个位置。本轮将 1× 正向且同速率的投影、手工写、复制/粘贴和移动接到源帧偏移，复杂 retime 显式只读。跨 clip 剪贴板、变速和不单射的往返仍须独立验收。
 
 1. 定义单一坐标适配器，把剪辑、有效源起点、时间线帧率/素材帧率、retime 与当前范围冻结到会话绑定。UI 和拖拽偏移使用 clip-local，轨道保持历史 source 域。Timeline 范围以及无单一源资产的槽位登记独立时间线域。复用 [FileController](/Users/heng/Documents/vscode/topos-studio/src/app/controllers/file_controller.py) 的现有 seek/scrub 协议及 [ClipInstance](/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_v2.py) 的映射。单独核查有效源偏移与 retime 同时存在的分支。
 2. 改 [ColorKeyframesHost](/Users/heng/Documents/vscode/topos-studio/src/app/controllers/color_keyframes_host.py) 的投影和写请求翻译。读轨道时保留领域帧身份，按可见范围投影。trim 外的点过滤出视图而保存在工程。添加、删除、转换、动态属性、复制、粘贴均使用同一适配器。Move 先求每个 local 目的帧，再分别映射源帧。跨片段复制捕获值和源 clip-local 间距，粘贴时按目标 clip 映射。禁止把 clip-local 偏移直接加到 source frame。
@@ -35,7 +37,7 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 
 ### R2 · 统一显式 Dynamics 求值，修正 Static 中间键边界
 
-**显式动态属性丢失仍已复现，静态精确帧已修。** [图参数提供者](/Users/heng/Documents/vscode/topos-studio/src/features/color/core/color_graph_param_source.py) 重建 `GradeKeyframe` 时只传 frame/value/interpolation，显式 kind/start/end 在持久化与 UI 中存在，但被求值丢掉。对于 0→1、起点 Start=0、终点 End=1 的区间，25% 处当前提供者得到 **0.25**，仓库已定义的 Hermite 兼容权重为 **0.109375**。原 [GradeKeyframeTrack.value_at](/Users/heng/Documents/vscode/topos-studio/src/features/color/core/grade_keyframes.py) 以闭区间扫描段，三个 hold 键在 f0/f10/f20 值为 0/10/20 时，f9/f10/f11 得到 **0/0/10**。本轮改用左闭右开，修复的预期值为 **0/10/10**，统一求值时保留此边界行为。
+**已闭环（R 批次，提交 2c51b69）。** provider 经 from_dict 重建、value_at 统一语义（精确帧左键值/静态右保持/legacy 等价键旧路径逐位一致/显式动态读 A.start、B.end）；原文备查： [图参数提供者](/Users/heng/Documents/vscode/topos-studio/src/features/color/core/color_graph_param_source.py) 重建 `GradeKeyframe` 时只传 frame/value/interpolation，显式 kind/start/end 在持久化与 UI 中存在，但被求值丢掉。对于 0→1、起点 Start=0、终点 End=1 的区间，25% 处当前提供者得到 **0.25**，仓库已定义的 Hermite 兼容权重为 **0.109375**。原 [GradeKeyframeTrack.value_at](/Users/heng/Documents/vscode/topos-studio/src/features/color/core/grade_keyframes.py) 以闭区间扫描段，三个 hold 键在 f0/f10/f20 值为 0/10/20 时，f9/f10/f11 得到 **0/0/10**。本轮改用左闭右开，修复的预期值为 **0/10/10**，统一求值时保留此边界行为。
 
 1. 让 [keyframe_tracks.py](/Users/heng/Documents/vscode/topos-studio/src/features/color/core/keyframe_tracks.py) 的 decode 和段权重成为共同入口。优先查找精确键，其他时间使用左闭右开的段。A→B 使用 A 的 Start 和 B 的 End，静态 A 决定保持到 B 之前，动态 A 允许插值到静态 B。无显式参数的旧 hold/linear/ease 保持既有非边界数值，静态精确帧按键值修正。保留向量分量及限定器 hue 最短弧规则。
 2. 从不可变 payload 构造已验证轨道，接 Color graph provider、Layer/旧工程、Edit CPU/GPU 监看、Deliver CPU/GPU 及适用的 Metal 入口。保留原始序列化字段和解析诊断。渲染快照可以按 graph revision 与轨道 ID 缓存解码结果，逐帧只求值。清点 `GradeKeyframe.from_dict` 与手写构造器调用点。
@@ -43,7 +45,7 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 
 ### R3 · 批量编辑只改目标轨，保留不透明数据
 
-**已复现。** [ColorGraphService.op_batch_edit_keyframes](/Users/heng/Documents/vscode/topos-studio/src/features/color/core/color_graph_service.py) 解析节点全部轨道，再按 `{"keyframes": ...}` 重组。改 exposure 一条轨就可能丢同节点未编辑轨的元数据或未来 schema；编辑轨里未改的键也可能经 decode/encode 丢字段。已有工程往返测试通过，并未覆盖真实批改后往返。
+**已闭环（R 批次，提交 0e59a10）。** 单键/批命令共用无损更新核心，未知字段保留、触及不可解析整批拒；原文备查：[ColorGraphService.op_batch_edit_keyframes](/Users/heng/Documents/vscode/topos-studio/src/features/color/core/color_graph_service.py) 解析节点全部轨道，再按 `{"keyframes": ...}` 重组。改 exposure 一条轨就可能丢同节点未编辑轨的元数据或未来 schema；编辑轨里未改的键也可能经 decode/encode 丢字段。已有工程往返测试通过，并未覆盖真实批改后往返。
 
 1. 从不可变图数据深拷贝原载荷。只对 `touch_names` 解析并更新已知字段。未触及轨的 Mapping、未知域、无键的未来格式、墓碑扩展和不认识的键级字段原样保留。move 只改帧号，dynamics 只改键型/动态属性，set 已存在时合并已知字段，删除只移除目标键。无法安全解析被触及的未来格式时整批拒绝并指明轨道。
 2. 通过实际触及的数据差异判定空动作。一批先验证再一次提交。删空 legacy 轨时保留同名墓碑，新增该轨只恢复本次显式写入的数据。兼容脚本的单键命令复用同一无损更新逻辑。带 `MappingProxyType` 的嵌套数据在 DTO/渲染边界深解冻，对正常未知字段的保留独立验收。
@@ -51,7 +53,7 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 
 ### R4 · 权威图、旧项目绑定与跨会话隔离
 
-**旧图读投影和失效上下文清理已补，完整身份契约仍待做。** [ColorGraphAppHost._bind_and_hydrate](/Users/heng/Documents/vscode/topos-studio/src/app/controllers/color_graph_controller.py) 可为无图 legacy 栈创建迁移投影。原先面板只读取持久化图，会把仍有可读轨道的旧栈当空。现已有迁移投影回退。仍需核对真实写入所使用的已绑定 stack、grade 版本、scope owner、compound path、generation 和 expected revision，尤其是 Timeline/Group 与 A→B→A 的迟到请求。
+**读投影/失效清理/绑定描述（binding_description）/A→B→A 失效已补（R 批次，提交 0a7edcf）；剩余为实机会话矩阵验收。** [ColorGraphAppHost._bind_and_hydrate](/Users/heng/Documents/vscode/topos-studio/src/app/controllers/color_graph_controller.py) 可为无图 legacy 栈创建迁移投影。原先面板只读取持久化图，会把仍有可读轨道的旧栈当空。现已有迁移投影回退。仍需核对真实写入所使用的已绑定 stack、grade 版本、scope owner、compound path、generation 和 expected revision，尤其是 Timeline/Group 与 A→B→A 的迟到请求。
 
 1. 让 graph host 对外提供一份明确绑定描述，含只读迁移视图或权威图、是否允许写、scope/owner、实际 stack、图 revision、已生效的会话 generation。旧图首次写入复用既有 graph 命令建图的事务，不能由界面直接改变项目。若读投影与写入口暂时未对齐，先只读。
 2. 拖拽开始、复制和工具手势绑定上述身份，提交重新比较。播放帧回填也带 generation。换片、换版本、换 scope、退出页面、卸载工程及 hydration 失败立即失效待处理手势和录制；旧结果只丢弃。切回相同 ID 时 generation 仍须不同。只有 project publish、graph/selection 变化和 transport 回填触发各自所需更新。
@@ -59,9 +61,9 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 
 ### R5 · Edit 与 Deliver 按执行图消费所有 Corrector
 
-**已确认回退路径的结构性缺口。** [TimelineExporter](/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_export.py) 的 `_grade_from_stack` 仍提取活动层或首个有轨层作为扁平 `grade_keyframes`，窗口 matte 路径还会只看活动层并用该扁平轨道。复杂图通过能力硬门拒绝。 [TimelinePreviewRenderer](/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_preview_renderer.py) 的 `_get_preview_color_grade` 也取第一个有轨层。这些回退路径与图快照能力不同，单独修复 mappingproxy 能让输入通过，但无法恢复被压平的节点及动画。
+**CPU 回退已按权威图逐节点合成（R 批次，提交 a4e5e03：run_graph_frame_cpu 生产 oracle + 能力诊断默认拒绝）；GPU 导出图执行与 Metal 入口仍待接。原文备查：** [TimelineExporter](/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_export.py) 的 `_grade_from_stack` 仍提取活动层或首个有轨层作为扁平 `grade_keyframes`，窗口 matte 路径还会只看活动层并用该扁平轨道。复杂图通过能力硬门拒绝。 [TimelinePreviewRenderer](/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_preview_renderer.py) 的 `_get_preview_color_grade` 也取第一个有轨层。这些回退路径与图快照能力不同，单独修复 mappingproxy 能让输入通过，但无法恢复被压平的节点及动画。
 
-**已复现播放任务沿用过期帧。** 当缓存参数携带 `color_graph_source_frame=112` 而后续解码帧为 113 时，`RENDER_VIDEO_FRAME` 的 graph provider 仍用 112。播放画面上的动画可停在旧值，即使图节点缓存已按时域标记绕过。图执行还受 TOPOS_COLOR_GRAPH_RENDER 开关控制，默认走旧 Layer 路径。测试时分别记录开关关闭与开启的路径。
+**已修复（R 批次，提交 dcc2784：任务边界按实际解码帧覆盖 color_graph_source_frame）。原文备查：** 当缓存参数携带 `color_graph_source_frame=112` 而后续解码帧为 113 时，`RENDER_VIDEO_FRAME` 的 graph provider 仍用 112。播放画面上的动画可停在旧值，即使图节点缓存已按时域标记绕过。图执行还受 TOPOS_COLOR_GRAPH_RENDER 开关控制，默认走旧 Layer 路径。测试时分别记录开关关闭与开启的路径。
 
 1. 对项目栈、scope 顺序、图快照、源帧与时间线帧建立共同求值计划。可投影串行图仍按图执行顺序保留每节点的 base、轨道、曲线、遮罩、opacity 与启停。CPU fallback 必须逐节点合成，无法等价执行的图返回能力诊断。复杂图走既有编译、执行及预检机制。保留用户显式允许的可诊断降级入口。
 2. 拆分 [VideoPlayback](/Users/heng/Documents/vscode/topos-studio/src/shared/video/video_playback.py) 的可缓存图/静态参数和任务逐帧身份。生产 `RENDER_VIDEO_FRAME` 时携带实际解码帧的 source frame 与 generation。在 [AsyncRenderer](/Users/heng/Documents/vscode/topos-studio/src/features/color/core/async_renderer.py) 的任务边界按该值覆盖任务私有快照的帧字段，让 graph provider 读取真实帧。用一份静态参数提交解码帧 112、113、114，断言三次 provider 看到对应帧，任务之间原缓存对象不变，并补丢帧、seek、loop 和跨 clip。
@@ -70,7 +72,7 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 
 ### R6 · 给 Qualifier、Window 与后续工具补全真实录制
 
-**已确认实际路由缺口。** [KeyframeAutoRecorder](/Users/heng/Documents/vscode/topos-studio/src/app/controllers/color_keyframe_recorder.py) 支持已登记参数名，但实际 observe 走 grade 适配器。 `submit_qualifier_change` 与 `submit_window_shape_update` 直接缓冲图命令，点亮的 auto 状态无法覆盖这两种真实工具手势。auto 关闭当前跳过录制，对已有动画的区间/锚点缺少 Resolve 行为。
+**已闭环（R 批次，提交 3a147a1）。** submit_qualifier_change/submit_window_shape_update 在 patch 成功后、flush 前收集真实变更字段；手工 Add 采样当前求值结果；auto 关闭态锚点行为仍待 OP-15。原文备查：** [KeyframeAutoRecorder](/Users/heng/Documents/vscode/topos-studio/src/app/controllers/color_keyframe_recorder.py) 支持已登记参数名，但实际 observe 走 grade 适配器。 `submit_qualifier_change` 与 `submit_window_shape_update` 直接缓冲图命令，点亮的 auto 状态无法覆盖这两种真实工具手势。auto 关闭当前跳过录制，对已有动画的区间/锚点缺少 Resolve 行为。
 
 1. 让 graph host 在验证工具 patch 成功后、事务 flush 前统一收集真实变更字段。Qualifier 使用 `qualifier.<field>`，Window 使用 `mask.<shape_uuid>.<field>`。身份包含 scope/owner、路径、节点与帧。实际开关以行的能力与父子级别合成，Corrector 开关作用于各可用子域，单个子轨开关只影响本轨。已锁、只读和未登记工具给出明确状态。
 2. 区分真实手势、播放、回填、加载、撤销和脚本来源。一次手势锁定首个有效帧，汇总最后值，base patch 与批关键帧只入一次历史。切片、换版本、改变目标或取消时按实际手势生命周期处理。手工 Add 采样当前求值结果，不直接复制不随时间变的 base。auto 关时按当前键和相邻锚点选择已有键，补充首末、段中、混合键型的实测。无轨的真实手势仍走原参数修改路径。
@@ -115,11 +117,11 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 | 用例 | 当前状态 | 完成条件 |
 | --- | --- | --- |
 | V01 写入范围 | **部分。** Resolve 已观察 All/Color/Sizing，Topos 只有已登记域可写。 | R4/R7 后以两 Corrector、独立 FX、EXT MATTE、Sizing 做实际工程读回，对照选择与轨道集合。 |
-| V02 静态/动态 | **部分。** 内部 Static 精确帧已修，自定义 Dynamics 在求值仍丢失。 | R2 数值、界面、保存重开、各后端一致，Resolve 动态曲线另完成量测。 |
+| V02 静态/动态 | **代码侧已闭环。** 显式 Dynamics 贯通求值域（数值/保存重开/导出一致）；Resolve 动态曲线档位仍待实测。 | R2 数值、界面、保存重开、各后端一致——代码侧已过；Resolve 档位量测后定稿。 |
 | V03 手势与锁 | **部分。** 两边已测父轨拖动和锁。Topos 实媒体验证了锁定禁止删除和解锁后删除。 | 真实 UI 手势和工程历史，包括跨轨框选、跨上下文失效、锁定规则、取消和撤销重做。 |
 | V04 时间映射 | **部分。** 普通裁切已修，复杂映射只读。 | R1 的剪辑与帧率矩阵全部通过。 |
-| V05 旧工程与版本 | **部分。** 真实文件的 legacy 墓碑/A/B 及撤销重做已验证，批命令元数据丢失已确认。 | R3/R4 后用带未知字段、旧图和多个版本的真实工程完成编辑、保存、重开、撤销、再编辑。 |
-| V06 渲染与导出 | **未通过完整验收。** 播放任务可沿用过期帧，部分回退路径只消费一层或未使用权威图。 | R2/R5 后输出逐帧数据与媒体对比，含多节点、缺能力、取消和快进。 |
+| V05 旧工程与版本 | **代码侧已闭环。** 无损批编辑（未知字段经保存/重开/undo/redo 保留）已有测试；真实工程验收待实机。 | 用带未知字段、旧图和多个版本的真实工程完成编辑、保存、重开、撤销、再编辑。 |
+| V06 渲染与导出 | **代码侧主链已闭环。** 过期帧已修；CPU 导出/预览按图逐节点合成；GPU 导出图执行与真机媒体对比待验收。 | 输出逐帧数据与媒体对比，含多节点、缺能力、取消和快进（真机）。 |
 | V07 UI 与集中入口 | **部分。** 原生与面板修复随本轮独立验收，工具自动录制和旧入口退役待做。 | 同一视频夹具用真实工具、快捷键、旁路、锁、切片/版本及重开；没有双录且操作只提交一次。 |
 | V08 性能 | **部分。** 已测离屏面板 10,000 键，4K 播放尚待实测。 | 同机 4K 测空轨、常用轨与 20 Corrector/200 轨/10,000 键，记录 60 秒播放掉帧、P95 界面帧耗时、seek 延时、缓存和内存；有可见回退先定位再放行。 |
 

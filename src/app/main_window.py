@@ -1718,7 +1718,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                     self.canvas.update_mask_overlay(active_layer)
         finally:
             self._set_color_stack_hydration_guard(False)
-        self._color_keyframes_host_refresh()
+        # 关键帧面板随正确体选择/参数反馈刷新（测试替身可能未装配宿主）
+        refresh_keyframes = getattr(self, "_color_keyframes_host_refresh", None)
+        if callable(refresh_keyframes):
+            refresh_keyframes()
 
     def _on_color_window_combo(self, combo: str, node_id: str) -> None:
         """成功的组合命令选中 Window，曲线组合进入绘制状态。"""

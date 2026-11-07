@@ -46,6 +46,13 @@
 | qualifier 写入 canonical 全名（裸字段名回归） | `tests/app/test_color_keyframes_host.py::test_qualifier_add_writes_canonical_track_name` |
 | 窗口轨图域写入 + 形状存在性 fail-closed + 预览逐帧补写 | `tests/app/test_color_keyframes_host.py`（窗口三例） |
 | 时域标志覆盖 legacy 载荷 + 下游传播 + 节点缓存绕过 | `tests/color/test_color_graph_node_cache.py::TestTemporalAnimatedFlag` + 执行器两例 |
+| 显式 Dynamics 求值闭环（0.109375/0.375/0.703125；legacy 逐位不变） | `tests/color/test_grade_keyframes.py`（R2 组）、`test_color_graph_keyframes.py::TestExplicitDynamicsEvaluation` |
+| 批编辑无损（未知字段/未来格式保留；触及不可解析整批拒） | `tests/color/test_color_graph_keyframe_batch.py::TestLosslessBatchUpdate` + `test_color_graph_keyframe_persistence.py`（R3 往返） |
+| 播放任务逐帧身份（112/113/114；缓存对象不变；过期任务丢弃） | `tests/video/test_video_upload_command.py::TestRenderVideoFrameGraphIdentity` |
+| CPU 导出/预览按图逐节点合成 + 能力诊断默认拒绝 + parity | `tests/edit/test_color_graph_cpu_export.py`（active 层不变/常量+动画节点/降级门/预览导出一致） |
+| 工具手势自动录制（qualifier/window；auto 关只写 base；两时刻两键） | `tests/app/test_color_keyframe_recorder.py::TestToolGestureRecord` |
+| 手工 Add 采样求值现值（动画轨 0.25 非 base 0.0） | `tests/app/test_color_keyframes_host.py::TestManualAddSamples` |
+| 复杂映射只读矩阵 + DF 时间码 + 绑定描述/A→B→A | `test_color_keyframes_host.py::TestRetimeReadOnlyMatrix`/`TestBindingIdentity`、`test_color_keyframes_panel.py` DF 用例 |
 
 ## 剩余不等价项（如实登记）
 
@@ -63,8 +70,9 @@
    拒绝写已删形状）。
 3. **Sizing / FX 轨道**：仅身份登记，全部能力 ✗（原因见
    TOOL_COVERAGE.md；槽位坐标归属待 KF-00 OP-16）。
-4. **动态权重非默认档位**：统一权重函数按 Hermite 兼容语义求值，
-   真实档位映射 PENDING-KF00（Dissolve 滑杆量测表未填）。
+4. **动态权重非默认档位**：统一权重函数按 Hermite 兼容语义**贯通
+   求值/保存/导出全域**（R2 批次；此前求值侧静默丢失）；真实档位
+   映射仍 PENDING-KF00（Dissolve 滑杆量测表未填）。
 5. **auto 关闭态改既有锚点**：Resolve 参考行为（修改当前/邻近锚点）
    未实现——关闭 auto 的手势不触碰关键帧（保守，待 KF-00 OP-15）。
 6. **GPU 导出窗口 matte**：CPU 导出已贯通；GPU 导出的窗口 matte 属
@@ -74,6 +82,8 @@
    标志绕过（静像暂停 seek 不命中陈旧纹理）。Metal/CPU 执行器无
    节点缓存（无对应面）。
 8. **auto 开关持久化**：会话域状态，不进工程（持久范围待 KF-00）。
+   另：auto 对 Qualifier/Window 真实工具手势的覆盖已接通（R6 批次），
+   auto 关闭态改既有锚点语义仍待 OP-15。
 
 ## 最终切换门禁（旧写入口退役的前置条件）
 
