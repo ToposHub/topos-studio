@@ -9708,6 +9708,83 @@ class TimelineExporter:
         return apply_stabilization_cpu(graded, self._clip_stabilization_state(layer),
                                        int(getattr(layer, 'source_frame', 0)))
 
+    def _clip_color_graph(self, layer: "ClipLayerInfo") -> Optional[Any]:
+        """clip 调色栈携带的权威图（无图栈返回 None）。"""
+        clip = getattr(layer, "clip", None)
+        stack_id = getattr(clip, "color_stack_id", None)
+        if not stack_id:
+            return None
+        project = self._project
+        stacks = getattr(project, "color_stacks", {}) if project is not None else {}
+        stack = stacks.get(stack_id)
+        return getattr(stack, "color_graph", None) if stack is not None else None
+
+    def _apply_color_graph_cpu(
+        self,
+        frame_data: "np.ndarray",
+        layer: "ClipLayerInfo",
+        graph: Any,
+        *,
+        exclude_timeline: bool = False,
+    ) -> Optional["np.ndarray"]:
+        """R5：图栈 CPU 导出逐节点合成（run_plan_cpu 生产 oracle）。
+
+        权威图按执行顺序逐节点合成（base/轨道/曲线/遮罩/opacity/启停
+        全量保留——替代"活动层/首轨层"扁平消费）。不支持的算子/域：
+        默认拒绝导出（能力诊断指名节点，allow_degraded_grade=True 才
+        显式降级到扁平路径，不静默"成功但少效果"）。返回 None 表示
+        显式降级，调用方走既有扁平路径。
+        """
+        import numpy as np
+        from src.features.color.core.color_graph_compiler import (
+            GraphCompileError,
+        )
+        from src.features.color.core.color_graph_cpu import (
+            UnsupportedNode, run_graph_frame_cpu,
+        )
+        project = self._project
+        timeline = getattr(self, "_timeline", None)
+        timeline_id = (getattr(timeline, "timeline_id", None)
+                       if timeline is not None
+                       else getattr(getattr(layer, "clip", None),
+                                    "timeline_id", None))
+        from src.features.edit.core.color_chain import chain_extra_params
+        extras = [extra for extra in (
+            chain_extra_params(project, timeline_id,
+                               getattr(layer, "clip", None),
+                               exclude_timeline=exclude_timeline) or ())
+            if isinstance(extra, dict)]
+
+        def _split(entries):
+            pre = [e for e in entries if e.get("_chain_segment") == "pre"]
+            after = [e for e in entries if e.get("_chain_segment") != "pre"]
+            for extra in entries:
+                if extra.get("_unsupported_advanced", False):
+                    logger.warning(
+                        "Export color chain: clip %s 链段含 curves/LUT 等"
+                        "高级操作，图执行路径跳过该段", layer.clip_id)
+            return pre, after
+
+        pre, after = _split(extras)
+        allow_degraded = bool(getattr(self, "allow_degraded_grade", False))
+        source_frame = int(getattr(layer, "source_frame", 0) or 0)
+        try:
+            return run_graph_frame_cpu(
+                graph, frame_data, source_frame,
+                plan_cache=getattr(self, "_graph_plan_cache", None),
+                pre_chain=pre, post_chain=after)
+        except (UnsupportedNode, GraphCompileError) as exc:
+            if not allow_degraded:
+                raise ExportGradeDegradedError(
+                    f"clip {getattr(layer, 'clip_id', '?')} 图调色 CPU 逐节点"
+                    f"合成不支持：{exc}——默认拒绝导出"
+                    "（allow_degraded_grade=True 可显式降级到扁平路径）"
+                ) from exc
+            logger.warning(
+                "Export color grade: clip %s 图 CPU 逐节点合成不支持"
+                "（%s）——显式降级到扁平路径", layer.clip_id, exc)
+            return None
+
     def _apply_color_grade_unstabilized(
         self,
         frame_data: "np.ndarray",
@@ -9721,7 +9798,15 @@ class TimelineExporter:
         等价于 TimelinePreviewRenderer._apply_preview_color_grade。
         只跑 primary grade（lift/gamma/gain/exposure/temp/.../hue_shift），
         不处理 curves/hsl_curve/mixer/soft_clip/lut（与预览 CPU fallback 同等降级）。
+        R5：栈携带权威图时优先逐节点 CPU 合成（全量生产域）；能力不足
+        默认拒绝、显式 allow_degraded_grade 才走下方扁平路径。
         """
+        graph = self._clip_color_graph(layer)
+        if graph is not None:
+            graded = self._apply_color_graph_cpu(
+                frame_data, layer, graph, exclude_timeline=exclude_timeline)
+            if graded is not None:
+                return graded
         grade = self._get_clip_color_grade(
             layer, exclude_timeline=exclude_timeline)
         if grade is None:

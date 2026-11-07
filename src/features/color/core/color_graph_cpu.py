@@ -954,3 +954,101 @@ def run_plan_cpu(plan: ColorGraphRenderPlan, source: np.ndarray,
     final = plan.passes[-1]
     result = outputs.get(final.node_id, source)
     return CpuExecution(output=result, alpha_output=alpha_result)
+
+
+def run_graph_frame_cpu(
+    graph: Any,
+    frame: np.ndarray,
+    source_frame: int,
+    *,
+    plan_cache: dict | None = None,
+    pre_chain: Sequence[Mapping[str, Any]] = (),
+    post_chain: Sequence[Mapping[str, Any]] = (),
+) -> np.ndarray:
+    """R5：图栈整帧 CPU 逐节点合成（Edit/Deliver 回退路径共用入口）。
+
+    ``frame``：BGR(A) uint8/uint16 或 float 工作位深——与既有扁平调色
+    路径同域（float 帧保持 HDR 原值不截断，整数帧按位深量化回写）。
+    逐节点按图执行顺序经 ``run_plan_cpu`` 生产 oracle 合成（grading/
+    曲线/HSL/soft-clip/LUT/qualifier/窗口/混合/key/opacity/启停）；
+    关键帧按 ``source_frame`` 经 ``graph_node_layer_provider`` 逐帧
+    求值（grade/qualifier/window 三域同函数）。
+
+    ``pre_chain``/``post_chain``：调色链段（主栈前/后的顺序 grading
+    dict，``GradingMath.apply_grading`` 逐段应用——与扁平路径同序；
+    含不支持高级操作的段由调用方先行过滤告警）。
+
+    不支持的算子/参数域抛 :class:`UnsupportedNode`、坏图抛
+    ``GraphCompileError``——调用方决定默认拒绝（能力诊断）还是显式
+    降级到扁平路径，不静默"成功但少效果"。``alpha_output`` 图需要
+    4 通道帧（matte 写回 alpha 通道）。
+    """
+    from src.features.color.core.color_graph_compiler import compile_graph
+    from src.features.color.core.color_graph_param_source import (
+        graph_node_layer_provider,
+    )
+    from src.features.color.core.color_graph_snapshot import freeze_graph
+
+    if frame.ndim != 3 or frame.shape[2] < 3:
+        raise UnsupportedNode("frame 需要 3+ 通道（BGR/BGRA）")
+    integer_input = bool(np.issubdtype(frame.dtype, np.integer))
+    max_value = (float(np.iinfo(frame.dtype).max) if integer_input
+                 else 1.0)
+    scale = _F32(max_value)
+    rgb = frame[..., :3][..., ::-1].astype(_F32) / scale
+    if frame.shape[2] >= 4:
+        work = np.concatenate(
+            [rgb, frame[..., 3:4].astype(_F32) / scale], axis=-1)
+    else:
+        work = rgb
+
+    def _apply_chain(buf: np.ndarray,
+                     entries: Sequence[Mapping[str, Any]]) -> np.ndarray:
+        if not entries:
+            return buf
+        from src.features.color.core.the_decompiler import GradingMath
+        for extra in entries:
+            flat = GradingMath.apply_grading(
+                buf[..., :3].reshape(-1, 3), dict(extra))
+            buf = buf.copy()
+            buf[..., :3] = flat.reshape(buf.shape[:2] + (3,))
+        return buf
+
+    work = _apply_chain(work, pre_chain)
+
+    snapshot = freeze_graph(graph, session_id="cpu-frame",
+                            source_frame=int(source_frame))
+    plan = compile_graph(snapshot, size=(work.shape[1], work.shape[0]),
+                         cache=plan_cache)
+    provider = graph_node_layer_provider(snapshot.graph,
+                                         frame=int(source_frame))
+    execution = run_plan_cpu(
+        plan, work,
+        params_of=lambda render_pass: provider(render_pass.node_id) or {})
+    out = np.asarray(execution.output, dtype=_F32)
+    if execution.alpha_output is not None:
+        if frame.shape[2] < 4:
+            raise UnsupportedNode("alpha_output 图需要 4 通道帧（RGBA）")
+        alpha = np.clip(np.asarray(execution.alpha_output, dtype=_F32),
+                        0.0, 1.0)
+        if alpha.ndim == 2:
+            alpha = alpha[..., None]
+        out = out.copy()
+        out[..., 3:4] = alpha
+
+    out = _apply_chain(out, post_chain)
+
+    result = frame.copy()
+    if integer_input:
+        result[..., :3] = np.rint(
+            np.clip(out[..., :3][..., ::-1], 0.0, 1.0)
+            * scale).astype(frame.dtype)
+        if frame.shape[2] >= 4:
+            result[..., 3:4] = np.rint(
+                np.clip(out[..., 3:4], 0.0, 1.0)
+                * scale).astype(frame.dtype)
+    else:
+        result[..., :3] = out[..., :3][..., ::-1]
+        if frame.shape[2] >= 4:
+            result[..., 3:4] = out[..., 3:4]
+    return result
