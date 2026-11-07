@@ -151,6 +151,31 @@ class TestScopeSamplingContract:
 # ═══ S04 前置：生产 provider（图命令域参数必须生效）═════════════════════
 
 class TestProductionProviderMerge:
+    def test_unlabelled_graph_corrector_never_projects_uuid_as_layer_name(self):
+        from uuid import uuid4
+        from src.shared.project.color_graph import ColorNodeData
+        identity = str(uuid4())
+        for legacy in ({}, {"id": identity, "name": identity, "grading_params": {}}):
+            node = ColorNodeData(node_id=identity, node_type="corrector", legacy_payload=legacy)
+            assert node_layer_payload(node)["name"] == ""
+
+    def test_rename_and_clear_survive_layer_projection_and_save(self):
+        from src.features.color.core.color_graph_migration import project_legacy_layers, reconcile_projectable_graph
+        graph = _migrated_graph()
+        identity = next(n.node_id for n in graph.nodes if n.node_type == "corrector")
+        service = ColorGraphService()
+        for label in ("肤色", "", "Custom-01"):
+            result = service.apply_intent(graph, "set_node_metadata", {"node_id": identity, "label": label})
+            assert result.ok
+            graph = result.graph
+            node = next(n for n in graph.nodes if n.node_id == identity)
+            assert node_layer_payload(node)["name"] == label
+            layers = project_legacy_layers(graph)
+            layers[0]["grading_params"]["temp"] = layers[0]["grading_params"].get("temp", 0) + 1
+            graph, changed = reconcile_projectable_graph(graph, layers)
+            assert changed
+            assert next(n for n in graph.nodes if n.node_id == identity).label == label
+
     def _graph_with_grade_patch(self):
         graph = _migrated_graph()
         svc = ColorGraphService(id_factory=lambda: "x")

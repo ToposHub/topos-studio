@@ -261,14 +261,25 @@ class PacketDemuxer:
             except StopIteration:
                 break
 
+            # PyAV emits a zero-size dummy packet to flush its own decoder at
+            # EOF. VT receives compressed samples, not PyAV flush markers:
+            # a zero-length CMBlockBuffer fails with BadLengthParameter (-12704).
+            # Count only real samples, including after a bounded demux resumes.
+            if packet.buffer_size <= 0:
+                continue
+
             # Extract raw packet bytes using buffer_ptr (PyAV doesn't expose .data directly)
             packet_bytes = b''
-            if packet.buffer_ptr is not None and packet.buffer_size > 0:
+            if packet.buffer_ptr:
                 try:
                     buf = (ctypes.c_ubyte * packet.buffer_size).from_address(packet.buffer_ptr)
                     packet_bytes = bytes(buf)
                 except Exception as e:
                     logger.warning(f"PacketDemuxer: failed to read packet buffer: {e}")
+            else:
+                logger.warning("PacketDemuxer: nonempty packet has no buffer pointer")
+            if not packet_bytes:
+                continue
 
             compressed = CompressedPacket(
                 data=packet_bytes,

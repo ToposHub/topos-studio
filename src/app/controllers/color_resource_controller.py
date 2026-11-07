@@ -348,6 +348,9 @@ class ColorResourceController(QObject):
             self._cancel_gesture()
             return
         arguments = {'instance_id': instance_id, 'name': name, 'value': value}
+        if self._gesture is None:
+            self._begin_gesture(node_id, instance_id, name)
+            phase = 'commit'
         if phase == 'change' and self._gesture is not None:
             gesture = self._gesture
             if (gesture['node_id'] != node_id
@@ -367,6 +370,10 @@ class ColorResourceController(QObject):
                 self.resource_rejected.emit({'action': 'set_parameter',
                                              'code': 'param_out_of_range',
                                              'message': '中间值被拒绝', 'target': None})
+            else:
+                observer = getattr(self.graph_host, 'observe_effect_parameter', None)
+                if callable(observer):
+                    observer(node_id, instance_id, name, value, self._active_compound_path)
             return
         # commit（或无手势的离散 change）：末次进入缓冲后 flush。
         self._gestured_submit(node_id, 'set_node_effect_parameter',
@@ -397,6 +404,11 @@ class ColorResourceController(QObject):
                 self._cancel_gesture()
                 self.refresh_target()
                 return
+            if service_operation == 'set_node_effect_parameter':
+                observer = getattr(self.graph_host, 'observe_effect_parameter', None)
+                if callable(observer):
+                    observer(node_id, str(arguments['instance_id']), str(arguments['name']),
+                             arguments['value'], self._active_compound_path)
             if phase == 'commit':
                 self._end_gesture()
                 self.refresh_target()
@@ -419,6 +431,9 @@ class ColorResourceController(QObject):
             return
         transaction = self._gesture['transaction']
         self._gesture = None
+        flush = getattr(self.graph_host, 'flush_keyframe_recording', None)
+        if callable(flush):
+            flush(transaction)
         self.graph_host.bridge.flush_transaction()
 
     def _cancel_gesture(self) -> None:
@@ -426,6 +441,9 @@ class ColorResourceController(QObject):
         if self._gesture is None:
             return
         self._gesture = None
+        cancel = getattr(self.graph_host, 'cancel_keyframe_recording', None)
+        if callable(cancel):
+            cancel()
         self.graph_host.bridge.cancel_transaction()
         self.refresh_target()
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Any, Callable, Mapping
 
 import numpy as np
+from src.features.color.core.color_node_labels import display_node_label
 
 from src.shared.project.color_graph import (
     ColorGraphData,
@@ -63,12 +64,15 @@ def node_layer_payload(node: Any, *,
         base.setdefault("id", node.node_id)
     else:
         from src.features.color.core.layer import Layer
-        default_layer = Layer(str(getattr(node, "label", None)
-                                  or node.node_id))
+        default_layer = Layer(display_node_label(node.label, node.node_id))
         default_layer.id = node.node_id
         base = default_layer.to_dict(None)
     payload = dict(base)
     params = node.params if isinstance(node.params, Mapping) else {}
+    identities = (node.node_id, str(payload.get("id") or ""),
+                  str(params.get("source_layer_id") or ""))
+    payload["name"] = display_node_label(
+        node.label if node.label else payload.get("name", ""), *identities)
     # 结构化 dict 域：基底 + 图命令域覆盖（浅合并；图域键是完整语义键）
     for graph_key, dto_key in _DICT_PARAM_OVERLAYS:
         overlay = params.get(graph_key)
@@ -221,6 +225,10 @@ def graph_node_layer_provider(
                 if patched_shapes is not None:
                     merged["mask_shapes"] = patched_shapes
             evaluated[n.node_id] = merged
+            from src.features.color.core.effect_keyframes import evaluate_effect_tracks
+            plugins = evaluate_effect_tracks(tracks, payload.get("plugins") or (), int(frame))
+            if plugins is not None:
+                merged["plugins"] = plugins
 
     def provide(node_id: str) -> Mapping[str, Any] | None:
         if evaluated is not None:

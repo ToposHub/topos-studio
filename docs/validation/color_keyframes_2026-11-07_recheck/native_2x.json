@@ -1,0 +1,38 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "macOS Cocoa MainWindow with imported media and project-backed Keyframes",
+  "per_node_rendering": "not_checked",
+  "asset_id": "f10c4137-dd93-46e8-aa5b-2b50ec48768f",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 124
+  },
+  "keyframes": {
+    "context": true,
+    "static_panel_frame": 24,
+    "static_source_frame": 24,
+    "ruler_start": "00:00:00:00",
+    "speed": 2.0,
+    "transport_frame": 12,
+    "dynamic_panel_frame": 48,
+    "moved_to_panel_frame": 54,
+    "lock_prevented_delete": true,
+    "unlocked_delete": true,
+    "fps": 25.0,
+    "marker_count": 29,
+    "graph_revision": 8
+  },
+  "auto_record": {
+    "selected_corrector": true,
+    "source_frame": 48,
+    "single_history_entry": true,
+    "undo_restored": true
+  },
+  "screenshot": "native_2x.png",
+  "status": "passed",
+  "error": "",
+  "elapsed_seconds": 5.46
+}

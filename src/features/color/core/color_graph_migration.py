@@ -247,6 +247,46 @@ def reconcile_projectable_graph(
             and _norm(current_projection) == _norm(list(layers))):
         return graph, False
 
+    # A parameter-only legacy save must update the existing nodes. Re-migrating
+    # a graph-created Corrector hashes its synthetic layer id into a new node id,
+    # invalidating selection, clipboard and keyframe ownership on every save.
+    old_layers = {str(p.get("id")): p for p in current_projection}
+    incoming = {str(p.get("id")): p for p in layers if isinstance(p, Mapping)}
+    if (len(incoming) == len(layers) == len(current_projection)
+            and [p.get("id") for p in layers] == [p.get("id") for p in current_projection]):
+        from src.features.color.core.color_graph_param_source import node_layer_payload
+        replacements = {}
+        try:
+            for node in graph.nodes:
+                if node.node_type != NodeType.CORRECTOR.value:
+                    continue
+                projected = node_layer_payload(node, include_lut_cache=False)
+                identity = str(projected.get("id"))
+                previous, updated = old_layers[identity], incoming[identity]
+                params = unfreeze_params(node.params)
+                for domain, dto in (("grade", "grading_params"), ("qualifier", "qualifier_params"),
+                                    ("soft_clip", "soft_clip_params"), ("mixer", "mixer_params"),
+                                    ("effects", "effects_params"), ("grade_keyframes", "grade_keyframes")):
+                    if _norm(previous.get(dto)) != _norm(updated.get(dto)):
+                        params[domain] = dict(updated.get(dto) or {})
+                for name in ("opacity", "blend_mode"):
+                    if name in updated:
+                        params[name] = updated[name]
+                if previous.get("active_lut_path") != updated.get("active_lut_path"):
+                    resources = dict(params.get("resources") or {})
+                    resources.pop("lut_ref", None)
+                    resources.pop("lut_strength", None)
+                    params["resources"] = resources
+                replacements[node.node_id] = replace(node, params=params,
+                    legacy_payload={**unfreeze_params(node.legacy_payload), **updated},
+                    enabled=bool(updated.get("visible", True)),
+                    label=str(updated["name"]) if "name" in updated else node.label)
+            candidate = replace(graph, nodes=tuple(replacements.get(n.node_id, n) for n in graph.nodes),
+                                graph_revision=graph.graph_revision + 1)
+        except (GraphSchemaError, TypeError, ValueError, KeyError):
+            return graph, False
+        return (graph, False) if candidate.validate() else (candidate, True)
+
     probe = ColorStackData.create(asset_id=None, name="reconcile")
     probe_stack = probe.with_layers(
         [dict(p) for p in layers],

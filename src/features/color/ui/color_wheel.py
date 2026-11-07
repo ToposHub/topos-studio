@@ -1146,6 +1146,14 @@ class GradingPanel(QWidget):
 
     # ==================== P1-COLOR-03: Grade Keyframes ====================
 
+    def use_central_keyframes(self) -> None:
+        """The project-backed Keyframes panel owns animation controls."""
+        blocked = self.keyframe_mode_btn.blockSignals(True)
+        self.keyframe_mode_btn.setChecked(False)
+        self.keyframe_mode_btn.blockSignals(blocked)
+        for button in (self.keyframe_mode_btn, self.kf_snapshot_btn, self.kf_remove_btn):
+            button.hide()
+
     @property
     def keyframe_mode(self) -> bool:
         """关键帧录制模式是否开启。"""

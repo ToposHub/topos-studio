@@ -60,6 +60,48 @@ def _depth(rig) -> int:
     return len(rig.graph.cmd_stack._undo_stack)
 
 
+def test_effect_gesture_records_with_base_change_in_one_undo(rig, monkeypatch):
+    from types import SimpleNamespace
+    from src.features.color.core import plugin_manager
+    from src.app.controllers.color_keyframe_recorder import KeyframeAutoRecorder
+    monkeypatch.setattr(plugin_manager, "get_plugin_manager",
+                        lambda: SimpleNamespace(get_plugin=lambda _: {"params": SCHEMA}))
+    recorder = KeyframeAutoRecorder()
+    rig.graph.host.attach_keyframe_recorder(recorder, frame_provider=lambda: 42)
+    recorder.set_auto(rig.corrector, True)
+    base = _depth(rig)
+    for phase, value in (("start", 0.2), ("change", 0.5), ("change", 0.7), ("commit", 0.9)):
+        rig.controller.edit("set_parameter", {"instance_id": rig.instance,
+                            "name": "amount", "value": value, "phase": phase})
+    node = rig.graph_node(rig.corrector)
+    keys = node.params["grade_keyframes"][f"fx.{rig.instance}.amount"]["keyframes"]
+    assert [(key["frame"], key["value"]) for key in keys] == [(42, 0.9)]
+    assert _depth(rig) == base + 1
+    assert rig.graph.host.undo()
+    assert _param(rig) == 0.2
+    assert not rig.graph_node(rig.corrector).params.get("grade_keyframes")
+
+
+def test_cancelled_effect_recording_cannot_leak_to_next_gesture(rig, monkeypatch):
+    from types import SimpleNamespace
+    from src.features.color.core import plugin_manager
+    from src.app.controllers.color_keyframe_recorder import KeyframeAutoRecorder
+    monkeypatch.setattr(plugin_manager, "get_plugin_manager",
+                        lambda: SimpleNamespace(get_plugin=lambda _: {"params": SCHEMA}))
+    recorder = KeyframeAutoRecorder()
+    rig.graph.host.attach_keyframe_recorder(recorder, frame_provider=lambda: 12)
+    recorder.set_auto(rig.corrector, True)
+    for phase, value in (("start", 0.2), ("change", 0.8), ("cancel", 0.8)):
+        rig.controller.edit("set_parameter", {"instance_id": rig.instance,
+                            "name": "amount", "value": value, "phase": phase})
+    assert recorder.take_pending_edits() == []
+    assert recorder.auto_enabled(rig.corrector)
+    rig.controller.edit("set_parameter", {"instance_id": rig.instance,
+                        "name": "amount", "value": 0.4, "phase": "commit"})
+    keys = rig.graph_node(rig.corrector).params["grade_keyframes"][f"fx.{rig.instance}.amount"]["keyframes"]
+    assert [(key["frame"], key["value"]) for key in keys] == [(12, 0.4)]
+
+
 def test_hundred_change_frames_are_one_undo(rig) -> None:
     base = _depth(rig)
     rig.controller.edit('set_parameter', {'instance_id': rig.instance,

@@ -90,6 +90,33 @@ class TestReconcileProjectableGraph:
         assert changed2
         assert len(project_legacy_layers(new2)) == 1
 
+    def test_graph_created_corrector_keeps_identity_and_other_domains_on_legacy_save(self):
+        from src.features.color.core.color_graph_service import ColorGraphService
+        from dataclasses import replace
+        _project, _stack, graph = _graph_project()
+        result = ColorGraphService().apply_intent(graph, "insert_corrector", {})
+        assert result.ok
+        graph = result.graph
+        created = next(n for n in graph.nodes if n.node_type == "corrector" and not n.legacy_payload)
+        keyed = ColorGraphService().apply_intent(graph, "set_node_keyframe", {
+            "node_id": created.node_id, "param": "exposure", "frame": 24, "value": 12.0})
+        assert keyed.ok
+        graph = keyed.graph
+        created = next(n for n in graph.nodes if n.node_id == created.node_id)
+        decorated = replace(created, params={**created.params, "cache_mode": "on", "future": {"keep": 1}})
+        graph = replace(graph, nodes=tuple(decorated if n.node_id == created.node_id else n for n in graph.nodes))
+        layers = project_legacy_layers(graph)
+        target = next(layer for layer in layers if layer["id"] == created.node_id)
+        target["grading_params"]["temp"] = 20.0
+        updated, changed = reconcile_projectable_graph(graph, layers)
+        assert changed
+        assert [n.node_id for n in updated.nodes] == [n.node_id for n in graph.nodes]
+        assert updated.edges == graph.edges
+        node = next(n for n in updated.nodes if n.node_id == created.node_id)
+        assert node.params["grade_keyframes"] == created.params["grade_keyframes"]
+        assert node.params["cache_mode"] == "on" and node.params["future"]["keep"] == 1
+        assert next(p for p in project_legacy_layers(updated) if p["id"] == created.node_id)["grading_params"]["temp"] == 20.0
+
     def test_non_projectable_graph_kept_authoritative(self):
         from src.features.color.core.color_graph_service import ColorGraphService
         _p, _s, graph = _graph_project()

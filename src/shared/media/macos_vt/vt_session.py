@@ -1655,6 +1655,11 @@ class VtSession:
         Returns:
             True if the packet was submitted to VT successfully.
         """
+        # A PyAV EOF flush marker has no compressed sample. CoreMedia requires
+        # blockLength > 0, so callers with empty data must never reach buffer
+        # construction. The source drains delayed output through its queue.
+        if not packet_data:
+            return False
         if not _PYOBJC_AVAILABLE:
             return False
 

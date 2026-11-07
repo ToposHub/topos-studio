@@ -366,11 +366,10 @@ def test_window_key_out_and_parallel_declared_key(gl) -> None:
 
     def window_provider(layer, input_tex):
         from src.features.color.core.layer import MaskShape
-        from src.features.color.core.mask_shapes_cpu import combine_masks_cpu
+        from src.features.color.core.window_rasterizer import WindowRasterizer
         items = [MaskShape.from_dict(dict(s))
                  for s in layer.get("mask_shapes") or []]
-        mask, report = combine_masks_cpu(items, _W, _H)
-        assert not report.unsupported
+        mask = WindowRasterizer().render_items(items, _W, _H)
         return _upload(mask[:, :, np.newaxis], _PROVIDER_CACHE, "cw")
 
     plan = compile_graph(freeze_graph(graph, session_id="s",

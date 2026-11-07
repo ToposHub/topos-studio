@@ -11,8 +11,7 @@
 - **开关语义**：Corrector 级 auto 开关（面板行按钮）作用于该节点全部
   子轨；真正写入只发生在本次手势实际改动的登记参数。开关状态是会话
   域 UI 状态（不持久化——持久范围按 KF-00 实测后于 KF-05 落工程）。
-  关闭 auto 的手势不触碰关键帧（关闭态修改既有锚点的 Resolve 语义
-  待 KF-00 量测，见 KF00_RESOLVE_FIXTURES.md OP-15）。
+  关闭 auto 时修改当前或左侧已有锚点；没有动画轨时仅修改 base。
 
 线程边界：observe/开关切换仅在 UI 线程（手势与面板事件）；
 take_pending_edits 由适配器在 flush（UI 线程）调用。
@@ -21,7 +20,7 @@ take_pending_edits 由适配器在 flush（UI 线程）调用。
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from src.features.color.core.keyframe_tracks import parse_track_name
 
@@ -32,28 +31,47 @@ class KeyframeAutoRecorder:
     """自动录制注册表 + 手势字段收集（写入口经批处理命令落工程）。"""
 
     def __init__(self) -> None:
-        self._auto: Dict[str, bool] = {}          # node_id → 开关
+        self.track_provider: Callable[[str, str, Tuple[str, ...]], Mapping[str, Any] | None] | None = None
+        self._track_auto: dict[tuple[Tuple[str, ...], str, str], bool] = {}
+        self._key_overrides: dict[tuple[Tuple[str, ...], str, str], dict] = {}
+        self._auto: Dict[Tuple[Tuple[str, ...], str], bool] = {}          # node_id → 开关
         self._gesture_frame: Optional[int] = None
         self._gesture_open = False
-        # (node,param) → (最后值, compound 路径)——身份含路径（R6.1），
+        # (compound path,node,param) → 最后值——身份含路径（R6.1），
         # compound 成员的批命令须带 _compound_path 下行才找得到节点
-        self._pending: Dict[Tuple[str, str], Tuple[Any, Tuple[str, ...]]] = {}
+        self._pending: Dict[Tuple[Tuple[str, ...], str, str], Any] = {}
 
     # ── 开关（会话域；面板 auto 列）──
 
-    def set_auto(self, node_id: str, enabled: bool) -> None:
-        self._auto[str(node_id)] = bool(enabled)
+    def set_auto(self, node_id: str, enabled: bool,
+                 compound_path: Tuple[str, ...] = ()) -> None:
+        identity = (tuple(compound_path), str(node_id))
+        self._auto[identity] = bool(enabled)
+        self._track_auto = {key: value for key, value in self._track_auto.items()
+                            if key[:2] != identity}
 
-    def auto_enabled(self, node_id: str) -> bool:
-        return bool(self._auto.get(str(node_id), False))
+    def set_track_auto(self, node_id: str, param: str, enabled: bool,
+                       compound_path: Tuple[str, ...] = ()) -> None:
+        self._track_auto[tuple(compound_path), str(node_id), param] = bool(enabled)
 
-    def auto_nodes(self) -> frozenset:
-        """当前开启 auto 的节点集合（快照投影用）。"""
-        return frozenset(node for node, on in self._auto.items() if on)
+    def auto_enabled(self, node_id: str, param: str | None = None,
+                     compound_path: Tuple[str, ...] = ()) -> bool:
+        identity = (tuple(compound_path), str(node_id))
+        return self._track_auto.get((*identity, param), self._auto.get(identity, False))
+
+    def auto_nodes(self) -> frozenset[str]:
+        """Display identities of nodes with auto enabled in this session."""
+        return frozenset("/".join((*path, node))
+                         for (path, node), on in self._auto.items() if on)
 
     def reset(self) -> None:
         """会话/切片段/版本更换：丢弃开关与半开手势（不落工程）。"""
         self._auto.clear()
+        self._track_auto.clear()
+        self._discard_gesture()
+
+    def cancel_pending(self) -> None:
+        """Discard a cancelled tool gesture while preserving the Auto switches."""
         self._discard_gesture()
 
     # ── 手势收集（仅调色手势路径调用）──
@@ -63,7 +81,7 @@ class KeyframeAutoRecorder:
                 compound_path: Tuple[str, ...] = ()) -> None:
         """手势中的一次真实参数改动（最后值生效）。
 
-        只收集登记的可动画参数；auto 关闭的节点不收集。首次观察绑定
+        只收集登记的可动画参数；auto 关闭时只修改已有锚点。首次观察绑定
         有效帧（源帧域；播放上下文缺席 → None，flush 时整批放弃）。
         ``compound_path``：目标节点的 compound 下行路径（R6.1 身份含
         路径——compound 成员的批命令不带路径会被 node_not_found 整批
@@ -71,14 +89,33 @@ class KeyframeAutoRecorder:
         """
         if parse_track_name(str(param_name)) is None:
             return  # 未登记字段不可动画（工具覆盖清单）
-        if not self.auto_enabled(node_id):
+        identity = (tuple(compound_path), str(node_id), str(param_name))
+        if identity in self._pending:
+            self._pending[identity] = value
             return
+        override = None
+        if not self.auto_enabled(node_id, param_name, compound_path):
+            track = (self.track_provider(node_id, param_name, compound_path)
+                     if self.track_provider is not None else None)
+            anchor_frame = self._gesture_frame if self._gesture_open else frame
+            from src.features.color.core.keyframe_tracks import decode_keyframe
+            try:
+                keys = sorted((track or {}).get("keyframes") or (), key=lambda key: decode_keyframe(key).frame)
+            except (TypeError, ValueError, KeyError, AttributeError):
+                logger.warning("Keyframe anchor cannot be decoded: %s/%s", node_id, param_name)
+                return
+            if anchor_frame is None or not keys:
+                return
+            anchor = next((key for key in reversed(keys) if int(key["frame"]) <= anchor_frame), keys[0])
+            override = {key: anchor[key] for key in ("frame", "interpolation", "kind", "start", "end") if key in anchor}
         if not self._gesture_open:
             self._gesture_open = True
             self._gesture_frame = int(frame) if frame is not None else None
             self._pending.clear()
-        self._pending[(str(node_id), str(param_name))] = (
-            value, tuple(str(step) for step in compound_path))
+            self._key_overrides.clear()
+        if override is not None:
+            self._key_overrides[identity] = override
+        self._pending[identity] = value
 
     def take_pending_edits(self) -> list:
         """手势结束：把收集的参数差值转为批处理条目并复位手势。
@@ -99,7 +136,7 @@ class KeyframeAutoRecorder:
             return {}
         groups: Dict[Tuple[str, ...], list] = {}
         frame = self._gesture_frame
-        for (node_id, param), (value, path) in self._pending.items():
+        for (path, node_id, param), value in self._pending.items():
             if frame is None:
                 logger.debug("auto-record dropped: no effective frame")
                 continue
@@ -108,6 +145,7 @@ class KeyframeAutoRecorder:
                 "frame": int(frame), "value": value,
                 # 自动录制建立动态帧（linear）；实测档位待 KF-00
                 "interpolation": "linear",
+                **self._key_overrides.get((path, node_id, param), {}),
             })
         self._discard_gesture()
         return groups
@@ -116,3 +154,4 @@ class KeyframeAutoRecorder:
         self._gesture_open = False
         self._gesture_frame = None
         self._pending.clear()
+        self._key_overrides.clear()

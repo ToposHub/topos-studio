@@ -1491,6 +1491,39 @@ class TimelineGpuExportRenderer:
         # F4.1: grade_uniforms 兼容单 dict（旧调用）或链序列 [主, 链段...]
         # （_gpu_grade_uniforms 产出）。链段顺序 pre→trim→post 逐段过
         # grade pass（mid FBO 乒乓），与 CPU 顺序应用逐段一致。
+        if isinstance(grade_uniforms, dict) and grade_uniforms.get("color_graph") is not None:
+            packet = grade_uniforms
+            extras = packet.get("chain_extra_params") or ()
+            if any(e.get("_unsupported_advanced") for e in extras):
+                return None  # CPU path reports the unsupported chain explicitly.
+            if extras or effect_chain:
+                return None  # Preserve ordering/precision until graph+chain passes are supported.
+            # Packed input can arrive at higher precision than the legacy u8
+            # uploader. Normalize it before upload, preserving signed HDR floats.
+            raw_tex = None
+            if isinstance(source, np.ndarray):
+                scale = float(np.iinfo(source.dtype).max) if np.issubdtype(source.dtype, np.integer) else 1.0
+                rgb = np.ascontiguousarray(source[..., :3][..., ::-1], dtype="f4") / scale
+                raw_tex = self._ctx.texture((rgb.shape[1], rgb.shape[0]), 3, rgb.tobytes(), dtype="f4")
+                prepared = (raw_tex, False)
+            else:
+                prepared = self._prepare_layer_texture(source, None, True)
+            if prepared is None:
+                return None
+            try:
+                renderer = getattr(self, "_color_graph_texture_renderer", None)
+                if renderer is None:
+                    from src.features.color.core.color_graph_texture import ColorGraphTextureRenderer
+                    renderer = ColorGraphTextureRenderer(self._ctx)
+                    self._color_graph_texture_renderer = renderer
+                slot = int(getattr(self, "_color_graph_output_slot", 0))
+                self._color_graph_output_slot = 1 - slot
+                result = renderer.render(prepared[0], packet["color_graph"],
+                    int(packet.get("source_frame", 0)), output_key=str(slot), integer_source=prepared[1])
+                return result, False
+            finally:
+                if raw_tex is not None:
+                    raw_tex.release()
         if isinstance(grade_uniforms, (list, tuple)):
             grade_list = [g for g in grade_uniforms if g]
         else:
@@ -1595,12 +1628,12 @@ class TimelineGpuExportRenderer:
                 grade_uniforms = saved_main
                 if effect_chain:
                     merged = self._apply_effect_chain_deep_u16(
-                        self._tex_mid_u16[1], effect_chain, width, height,
-                        out_slot=0)
+                        self._tex_mid_u16[slot], effect_chain, width, height,
+                        out_slot=1 - slot)
                     if merged is None:
                         return None
                     return merged, True
-                return self._tex_mid_u16[1], True
+                return self._tex_mid_u16[slot], True
 
             if self._prog_yuv is None \
                     or (grade_uniforms and self._prog_grade is None):
@@ -2175,6 +2208,10 @@ class TimelineGpuExportRenderer:
             self._fbo_side[1], self._tex_side[1],
             self._fbo_wipe, self._tex_wipe, self._tex_mask,
         ]
+        graph_renderer = getattr(self, "_color_graph_texture_renderer", None)
+        if graph_renderer is not None:
+            graph_renderer.release()
+            self._color_graph_texture_renderer = None
         for vao in self._vao.values():
             try:
                 vao.release()

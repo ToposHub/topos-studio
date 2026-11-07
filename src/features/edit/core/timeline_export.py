@@ -6381,7 +6381,8 @@ class TimelineExporter:
                         < int(getattr(clip, "timeline_end", 0)))):
             return None
 
-        if (self._get_clip_color_grade(layer) is not None
+        if (self._clip_color_graph(layer) is not None
+                or self._get_clip_color_grade(layer) is not None
                 or self._get_clip_video_denoise(layer) is not None):
             return None
 
@@ -7733,6 +7734,7 @@ class TimelineExporter:
                     tuple(getattr(layer, "crop", ()) or ()))
                 or not transform_is_identity(
                     tuple(getattr(layer, "transform", ()) or ()))
+                or self._clip_color_graph(layer) is not None
                 or self._get_clip_color_grade(layer) is not None
                 or self._get_clip_video_denoise(layer) is not None)
         except Exception:  # noqa: BLE001 — 判定异常按"可能有重活"保留 GPU
@@ -7849,6 +7851,17 @@ class TimelineExporter:
         if self._gpu_render_disabled:
             return None
         graphics_backend = getattr(self, "_timeline_graphics_backend", "opengl")
+        if graphics_backend == "metal" and any(self._clip_color_graph(layer) is not None for layer in sorted_layers):
+            self._record_gpu_fallback("color_graph_cpu_compositor")
+            return None
+        for layer in sorted_layers:
+            graph = self._clip_color_graph(layer)
+            if graph is not None:
+                from src.features.color.core.color_graph_texture import graph_texture_fallback_reason
+                reason = graph_texture_fallback_reason(graph, int(getattr(layer, "source_frame", 0)))
+                if reason:
+                    self._record_gpu_fallback(reason)
+                    return None
         if graphics_backend == "d3d11":
             # The D3D11 selector is intentionally fail-closed until the
             # native decoder -> render-plan -> encoder bridge is connected to
@@ -9142,6 +9155,13 @@ class TimelineExporter:
     ) -> Optional[Dict[str, Any]]:
         """层调色参数 → shader uniform（关键帧按 source_frame 求值，
         镜像 _apply_color_grade 的参数解析路径）。"""
+        graph = self._clip_color_graph(layer)
+        if graph is not None:
+            from src.features.edit.core.color_chain import chain_extra_params
+            extras = chain_extra_params(self._project, str(getattr(
+                getattr(self, "_sequence", None), "timeline_id", "")), getattr(layer, "clip", None))
+            return {"color_graph": graph, "source_frame": int(layer.source_frame),
+                    "chain_extra_params": extras}
         grade = self._get_clip_color_grade(layer)
         if grade is None:
             return None
@@ -9762,7 +9782,7 @@ class TimelineExporter:
                 if extra.get("_unsupported_advanced", False):
                     logger.warning(
                         "Export color chain: clip %s 链段含 curves/LUT 等"
-                        "高级操作，图执行路径跳过该段", layer.clip_id)
+                        "高级操作，基础链段求值不能完整执行该段", layer.clip_id)
             return pre, after
 
         pre, after = _split(extras)

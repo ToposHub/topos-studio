@@ -102,3 +102,16 @@ def test_stack_hydration_invalidates_and_refreshes_the_video_preview() -> None:
 
     controller._invalidate_video_render_params_if_playing.assert_called_once_with()
     controller.video_controller.refresh_current_frame_view.assert_called_once_with()
+
+
+def test_graph_gesture_cannot_queue_a_second_legacy_stack_commit() -> None:
+    controller = _Controller('stack-a')
+    controller.color_graph_host = MagicMock()
+    controller.color_graph_host.grade_gesture_open.return_value = True
+    controller._pending_grading_color_stack = ('stack-a', {'exposure': 0.0})
+    controller._on_grading_changed_for_color_stack = MagicMock()
+    controller._on_grading_panel_changed('stack-a')
+    controller.color_graph_host.grade_gesture_open.return_value = False
+    controller._commit_pending_grading_color_stack('stack-a')
+    assert controller._pending_grading_color_stack is None
+    controller._on_grading_changed_for_color_stack.assert_not_called()

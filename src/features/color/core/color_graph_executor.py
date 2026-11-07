@@ -23,6 +23,8 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
+from src.shared.gpu.framebuffer_scope import temporary_framebuffer
+
 import numpy as np
 
 from src.features.color.core.color_graph_compiler import (
@@ -612,13 +614,15 @@ class ColorGraphExecutor:
             # 不用图像 R 通道/常白替代）；invert_key_in 在此取反
             external_key = self._key_input_for(render_pass, "key_in",
                                                key_outputs or {})
-            out_tex = self._alloc_texture(width, height)
-            fbo = self.ctx.framebuffer(color_attachments=[out_tex])
-            fbo.use()
             key_scratch: list = []
             if matte_provider is not None:
                 # 生产 matte（窗口/qualifier/bitmap）：缓存归宿主，不释放
-                matte = matte_provider(layer, input_tex)
+                try:
+                    matte = matte_provider(layer, input_tex)
+                except Exception:
+                    for scratch_tex in cs_scratch:
+                        self._release_texture(scratch_tex)
+                    raise
             else:
                 matte = None
             if external_key is not None:
@@ -665,15 +669,23 @@ class ColorGraphExecutor:
                 aux = lambda prog: bind_aux(prog, layer)  # noqa: E731
             else:
                 aux = self._layer_aux_textures(layer, render_pass.node_id)
-            render_corrector_gl(
-                self.ctx, prepared, layer=layer,
-                grade_input_tex=input_tex, matte_tex=matte,
-                viewport=(width, height),
-                update_uniforms=self._make_uniform_uploader(
-                    layer, width, height, prepared.bindings),
-                bind_aux=aux,
-                render_quad=quad_fn)
-            fbo.release()
+            # Matte/key passes may change the framebuffer binding.
+            out_tex = self._alloc_texture(width, height)
+            try:
+                with temporary_framebuffer(self.ctx, [out_tex]):
+                    render_corrector_gl(
+                        self.ctx, prepared, layer=layer,
+                        grade_input_tex=input_tex, matte_tex=matte,
+                        viewport=(width, height),
+                        update_uniforms=self._make_uniform_uploader(
+                            layer, width, height, prepared.bindings),
+                        bind_aux=aux,
+                        render_quad=quad_fn)
+            except Exception:
+                self._release_texture(out_tex)
+                for scratch_tex in cs_scratch:
+                    self._release_texture(scratch_tex)
+                raise
             if cs_spec is not None:
                 # ODT：graded（工作线性）→ 节点标记空间；原 out 归还池
                 encoded = self._run_cs_transform(
@@ -796,18 +808,24 @@ class ColorGraphExecutor:
             if key_outputs is not None:
                 key_outputs[(render_pass.node_id, "key_out")] = matte
             out_tex = self._alloc_texture(width, height)
-            fbo = self.ctx.framebuffer(color_attachments=[out_tex])
-            fbo.use()
-            aux = self._layer_aux_textures(layer, render_pass.node_id)
-            render_corrector_gl(
-                self.ctx, prepared, layer=layer,
-                grade_input_tex=image_in, matte_tex=matte,
-                viewport=(width, height),
-                update_uniforms=self._make_uniform_uploader(
-                    layer, width, height, prepared.bindings),
-                bind_aux=aux,
-                render_quad=lambda prog: self._default_quad(prog).render(
-                    _TRIANGLE_STRIP()))
+            try:
+                with temporary_framebuffer(self.ctx, [out_tex]):
+                    aux = self._layer_aux_textures(layer, render_pass.node_id)
+                    render_corrector_gl(
+                        self.ctx, prepared, layer=layer,
+                        grade_input_tex=image_in, matte_tex=matte,
+                        viewport=(width, height),
+                        update_uniforms=self._make_uniform_uploader(
+                            layer, width, height, prepared.bindings),
+                        bind_aux=aux,
+                        render_quad=lambda prog: self._default_quad(prog).render(
+                            _TRIANGLE_STRIP()))
+            except Exception:
+                self._release_texture(out_tex)
+                self._release_texture(matte)
+                raise
+            if leases is not None:
+                leases.append(_Lease(matte, render_pass.node_id, render_pass.release_after))
             return out_tex
 
         if render_pass.op == "splitter":
@@ -931,26 +949,30 @@ class ColorGraphExecutor:
                 fragment_shader=source)
             cache[name] = program
         out_tex = self._alloc_texture(width, height)
-        fbo = self.ctx.framebuffer(color_attachments=[out_tex])
-        fbo.use()
-        for uniform_name, (tex, unit) in textures.items():
-            tex.use(unit)
-            program[uniform_name].value = unit
-        for uniform_name, value in uniforms.items():
-            program[uniform_name].value = value
-        self._default_quad(program).render(_TRIANGLE_STRIP())
-        fbo.release()
+        try:
+            with temporary_framebuffer(self.ctx, [out_tex]):
+                for uniform_name, (tex, unit) in textures.items():
+                    tex.use(unit)
+                    program[uniform_name].value = unit
+                for uniform_name, value in uniforms.items():
+                    program[uniform_name].value = value
+                self._default_quad(program).render(_TRIANGLE_STRIP())
+        except Exception:
+            self._release_texture(out_tex)
+            raise
         return out_tex
 
     def _copy_texture(self, tex: Any, width: int, height: int) -> Any:
         out = self._alloc_texture(width, height)
-        fbo = self.ctx.framebuffer(color_attachments=[out])
-        fbo.use()
-        prog = self._passthrough_program()
-        tex.use(0)
-        prog["u_texture"].value = 0
-        self._default_quad(prog).render(_TRIANGLE_STRIP())  # noqa: direct VAO
-        fbo.release()
+        try:
+            with temporary_framebuffer(self.ctx, [out]):
+                prog = self._passthrough_program()
+                tex.use(0)
+                prog["u_texture"].value = 0
+                self._default_quad(prog).render(_TRIANGLE_STRIP())  # noqa: direct VAO
+        except Exception:
+            self._release_texture(out)
+            raise
         return out
 
     def _layer_aux_textures(self, layer, node_id: str):

@@ -229,8 +229,8 @@ class ColorKeyframesPanel(QWidget):
             self.horizontal.setValue(0)
             self.vertical.setValue(0)
         self.snapshot = snapshot
-        self.edit_notice.setText(snapshot.edit_notice)
-        self.edit_notice.setVisible(bool(snapshot.edit_notice))
+        self.edit_notice.setText(snapshot.edit_notice or snapshot.info_notice)
+        self.edit_notice.setVisible(bool(snapshot.edit_notice or snapshot.info_notice))
         self.playhead = self.clamp(snapshot.playhead)
         self.timeline.cancel_gesture()
         self._tracks.clear()
@@ -419,6 +419,8 @@ class ColorKeyframesPanel(QWidget):
     def row_action(self, track_id: str, column: int) -> None:
         track = self._tracks.get(track_id)
         if track is None or not track.available or not track.row_controls:
+            return
+        if column < 2 and not track.node_controls:
             return
         if column == 1 and self.can_edit(self._parents[track_id]):
             self.request("lock", ((track_id, self.playhead),), enabled=not track.locked)
@@ -716,16 +718,17 @@ class _Timeline(QWidget):
         p.save()
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if track.row_controls:
-            p.setPen(QColor("#151518"))
-            color = "#ededee" if track.enabled and track.available else "#56565d"
-            p.setBrush(QColor(color))
-            p.drawEllipse(QPoint(12, mid), 4, 4)
-            inherited_lock = not self.panel.can_edit(self.panel._parents[row])
-            lock = track.locked or inherited_lock
-            p.setPen(QColor("#d1d1d7" if lock else "#5b5b62"))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawArc(QRect(25 + (0 if lock else 2), mid - 6, 6, 8), 0, 180 * 16)
-            p.drawRoundedRect(QRect(24, mid - 1, 9, 6), 1, 1)
+            if track.node_controls:
+                p.setPen(QColor("#151518"))
+                color = "#ededee" if track.enabled and track.available else "#56565d"
+                p.setBrush(QColor(color))
+                p.drawEllipse(QPoint(12, mid), 4, 4)
+                inherited_lock = not self.panel.can_edit(self.panel._parents[row])
+                lock = track.locked or inherited_lock
+                p.setPen(QColor("#d1d1d7" if lock else "#5b5b62"))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawArc(QRect(25 + (0 if lock else 2), mid - 6, 6, 8), 0, 180 * 16)
+                p.drawRoundedRect(QRect(24, mid - 1, 9, 6), 1, 1)
             p.setPen(QColor("#151518"))
             p.setBrush(QColor(_RED if track.auto else "#888990"))
             p.drawPolygon(self._diamond(45, mid, 5))
@@ -808,6 +811,7 @@ class _Timeline(QWidget):
                 p.drawEllipse(QPoint(x, y), 4, 4)
 
     def _timecode(self, frame: int) -> str:
+        frame += self.panel.snapshot.frame_offset
         # R1：DF/NDF 经 Timecode 的 Rational 接口——29.97/59.94 家族按
         # drop-frame 显示，整帧率 NDF；无理数/异常回退名义帧率 divmod。
         fps = self.panel.snapshot.timecode_fps or 24
@@ -958,11 +962,11 @@ class _Timeline(QWidget):
             if track is not None and (p.x() < self.divider or track.unavailable_reason):
                 if track.unavailable_reason:
                     tip = track.unavailable_reason
-                elif track.row_controls and p.x() < 20:
+                elif track.row_controls and track.node_controls and p.x() < 20:
                     tip = tr("enable", "Enable / Disable")
-                elif track.row_controls and p.x() < 37:
+                elif track.row_controls and track.node_controls and p.x() < 37:
                     tip = tr("lock", "Lock / Unlock")
-                elif track.row_controls and p.x() < 53:
+                elif track.row_controls and 37 <= p.x() < 53:
                     tip = tr("auto", "Auto Keyframe")
                 else:
                     tip = track.label

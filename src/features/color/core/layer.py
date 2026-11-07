@@ -20,6 +20,7 @@ import os
 import numpy as np
 import cv2
 import uuid
+from collections.abc import Mapping
 from typing import List, Tuple, Union, Optional, Dict, Any, Iterable
 
 try:
@@ -39,6 +40,15 @@ from src.features.color.core.curves_soft_clip import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _mutable_layer_snapshot(value: Any) -> Any:
+    """Detach immutable project containers before restoring editable Layer data."""
+    if isinstance(value, Mapping):
+        return {key: _mutable_layer_snapshot(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_mutable_layer_snapshot(item) for item in value]
+    return copy.deepcopy(value)
 
 class MaskShape:
     """Power Window 蒙版形状（circle/rect/curve/gradient/bitmap/brush）。
@@ -616,6 +626,7 @@ class Layer:
         # 都以基线为准，防止播放中保存把插值临时值固化成 base。
         self._grade_params_base: Dict[str, Any] | None = None
         self._qualifier_params_base: Dict[str, Any] | None = None
+        self._plugins_base: list[dict[str, Any]] | None = None
 
     def ensure_grade_base_snapshot(self) -> None:
         """KF-05：首次动画求值前固化参数基线（幂等；求值每帧从基线起）。"""
@@ -623,6 +634,8 @@ class Layer:
             self._grade_params_base = dict(self.grading_params)
         if self._qualifier_params_base is None:
             self._qualifier_params_base = dict(self.qualifier_params or {})
+        if self._plugins_base is None and any(name.startswith("fx.") for name in self.grade_keyframes):
+            self._plugins_base = copy.deepcopy(self.plugins)
 
     def restore_grade_base(self, param: str | None = None) -> None:
         """KF-05：把被动画回写的参数恢复为基线值。
@@ -631,6 +644,14 @@ class Layer:
         清基线（轨道全删/重置——无动画后 grading_params 即真值）。
         """
         if param is not None:
+            from src.features.color.core.keyframe_tracks import parse_track_name
+            address = parse_track_name(param)
+            if address is not None and address.domain == "fx" and self._plugins_base is not None:
+                base = next((p for p in self._plugins_base if p.get("instance_id") == address.owner_id), None)
+                current = next((p for p in self.plugins if p.get("instance_id") == address.owner_id), None)
+                if base is not None and current is not None and address.field in (base.get("params") or {}):
+                    current["params"][address.field] = base["params"][address.field]
+                return
             if self._grade_params_base and param in self._grade_params_base:
                 self.grading_params[param] = self._grade_params_base[param]
             if (self._qualifier_params_base
@@ -646,6 +667,9 @@ class Layer:
             self.qualifier_params = dict(self._qualifier_params_base)
         self._grade_params_base = None
         self._qualifier_params_base = None
+        if self._plugins_base is not None:
+            self.plugins = copy.deepcopy(self._plugins_base)
+        self._plugins_base = None
 
     def reset_params(self) -> None:
         """把图层整体重置回 ``__init__`` 的默认状态。
@@ -684,6 +708,7 @@ class Layer:
         # KF-05：重置即回到默认真值，动画基线一并作废
         self._grade_params_base = None
         self._qualifier_params_base = None
+        self._plugins_base = None
         self.curves_lut = None
         self.curves_data = {}
         # 曲线面板侧栏状态按默认重建（同 qualifier：残留会让重置后的
@@ -876,6 +901,7 @@ class Layer:
             copy.deepcopy(source_layer._grade_params_base)
             if getattr(source_layer, '_grade_params_base', None) is not None
             else None)
+        self._plugins_base = copy.deepcopy(getattr(source_layer, "_plugins_base", None))
         self._qualifier_params_base = (
             copy.deepcopy(source_layer._qualifier_params_base)
             if getattr(source_layer, '_qualifier_params_base', None) is not None
@@ -1227,6 +1253,8 @@ class Layer:
         
         # Plugin Effect Stack
         data["plugins"] = self.plugins
+        if self._plugins_base is not None:
+            data["plugins"] = copy.deepcopy(self._plugins_base)
 
         # P1-COLOR-03: 调色关键帧轨道（仅在有轨道时序列化）
         if self.grade_keyframes:
@@ -1263,7 +1291,7 @@ class Layer:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict, assets_dir: str = None) -> 'Layer':
+    def from_dict(cls, data: Mapping[str, Any], assets_dir: str | None = None) -> 'Layer':
         """
         Deserialize a Layer from a dictionary.
         
@@ -1275,6 +1303,9 @@ class Layer:
         Returns:
             A Layer instance.
         """
+        if not isinstance(data, Mapping):
+            raise ValueError(f"Layer 反序列化需要 Mapping，得到 {type(data).__name__}")
+        data = _mutable_layer_snapshot(data)
         layer = cls(data.get("name", "Layer"))
         layer.id = data.get("id", str(uuid.uuid4()))
         layer.visible = data.get("visible", True)

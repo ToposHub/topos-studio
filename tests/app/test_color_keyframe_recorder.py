@@ -72,12 +72,75 @@ def test_recorder_reset_on_session_switch():
     assert recorder.take_pending_edits() == []
 
 
+@pytest.mark.parametrize("frame,anchor", [(0, 10), (10, 10), (19, 10), (20, 20), (40, 20)])
+def test_auto_off_updates_existing_anchor_preserving_dynamics(frame, anchor):
+    recorder = KeyframeAutoRecorder()
+    recorder.track_provider = lambda *_: {"keyframes": [
+        {"frame": 10, "value": 0.0, "kind": "static", "start": 0.2, "end": 0.8},
+        {"frame": 20, "value": 1.0, "kind": "dynamic", "start": 2.0, "end": 0.3},
+    ]}
+    recorder.observe("n1", "exposure", 0.4, frame)
+    recorder.observe("n1", "exposure", 0.7, 80)  # 手势中的播放头变化不换锚点
+    edit, = recorder.take_pending_edits()
+    assert edit["frame"] == anchor
+    assert edit["value"] == 0.7
+    assert edit["kind"] == ("static" if anchor == 10 else "dynamic")
+    assert edit["start"] == (0.2 if anchor == 10 else 2.0)
+
+
+def test_leaf_auto_overrides_and_parent_toggle_resets_children():
+    recorder = KeyframeAutoRecorder()
+    recorder.set_auto("n", True)
+    recorder.set_track_auto("n", "exposure", False)
+    recorder.observe("n", "exposure", 0.4, 10)
+    recorder.observe("n", "contrast", 0.5, 10)
+    assert [edit["param"] for edit in recorder.take_pending_edits()] == ["contrast"]
+    recorder.set_auto("n", False)
+    recorder.set_track_auto("n", "exposure", True)
+    assert recorder.auto_enabled("n", "exposure")
+    recorder.set_auto("n", False)
+    assert not recorder.auto_enabled("n", "exposure")
+
+
+def test_identical_member_ids_in_two_compounds_do_not_share_recording():
+    recorder = KeyframeAutoRecorder()
+    recorder.set_auto("n", True, ("a",))
+    recorder.set_auto("n", True, ("b",))
+    recorder.observe("n", "exposure", 0.3, 12, ("a",))
+    recorder.observe("n", "exposure", 0.8, 12, ("b",))
+    groups = recorder.take_pending_edit_groups()
+    assert groups[("a",)][0]["value"] == 0.3
+    assert groups[("b",)][0]["value"] == 0.8
+
+
 # ---------------------------------------------------------------------------
 # 手势事务全链路（真实 AppHost + ProjectCommandStack）
 # ---------------------------------------------------------------------------
 
 
 class TestGestureAutoRecord:
+    def test_tonal_saturation_controller_uses_same_recording_transaction(self):
+        from src.app.controllers.layer_controller import LayerOpsMixin
+        app_host, _holder, recorder, node_id = self._wired()
+        app_host.graph_edit_context_active = lambda: True
+        app_host.active_grade_node_id = lambda: node_id
+        recorder.set_auto(node_id, True)
+
+        class Controller(LayerOpsMixin):
+            pass
+
+        controller = Controller()
+        controller.engine = Mock()
+        controller.color_graph_host = app_host
+        controller._invalidate_video_render_params_if_playing = Mock()
+        controller._is_video_playing = lambda: False
+        controller.request_render = Mock()
+        controller.on_tonal_saturation_changed(12.0, 0.0, -3.0)
+        assert app_host.end_grade_gesture()
+        assert self._keyframes(app_host, node_id, "lift_saturation") == {42: 12.0}
+        assert self._keyframes(app_host, node_id, "gain_saturation") == {42: -3.0}
+        assert len(app_host.bridge._project_stack._undo_stack) == 1
+
     def _wired(self, source_frame=42):
         from src.app.controllers.color_graph_controller import (
             ColorGraphAppHost,
@@ -136,6 +199,23 @@ class TestGestureAutoRecord:
         assert self._gesture(app_host, node_id, [0.5])
         assert self._keyframes(app_host, node_id) == {}
         assert len(app_host.bridge._project_stack._undo_stack) == depth0 + 1
+
+    def test_auto_off_real_gesture_updates_anchor_and_undo_restores_it(self):
+        app_host, holder, recorder, node_id = self._wired(source_frame=15)
+        assert app_host.submit_keyframe_batch([
+            {"action": "set", "node_id": node_id, "param": "exposure", "frame": 10, "value": 0.2, "interpolation": "hold"},
+            {"action": "set", "node_id": node_id, "param": "exposure", "frame": 20, "value": 0.8},
+        ])
+        depth = len(app_host.bridge._project_stack._undo_stack)
+        assert self._gesture(app_host, node_id, [0.4, 0.5])
+        assert self._keyframes(app_host, node_id) == {10: 0.5, 20: 0.8}
+        assert len(app_host.bridge._project_stack._undo_stack) == depth + 1
+        undone = app_host.bridge._project_stack.undo(holder["project"])
+        graph = next(iter(undone.color_stacks.values())).color_graph
+        node = next(n for n in graph.nodes if n.node_id == node_id)
+        keys = node.params["grade_keyframes"]["exposure"]["keyframes"]
+        assert keys[0]["value"] == 0.2
+        assert keys[0]["interpolation"] == "hold"
 
     def test_no_playback_context_drops_recording(self):
         app_host, _holder, recorder, node_id = self._wired(source_frame=None)
@@ -317,7 +397,7 @@ class TestCompoundChildRecord:
 
     def test_compound_child_tool_gesture_records(self):
         app_host, _holder, recorder, child_id = self._wired_compound()
-        recorder.set_auto(child_id, True)
+        recorder.set_auto(child_id, True, app_host._tool_compound_path())
         transaction = "txn-cc"
         app_host.begin_grade_gesture(transaction)
         assert app_host.submit_qualifier_change(
@@ -336,7 +416,7 @@ class TestCompoundChildRecord:
     def test_recorder_groups_by_compound_path(self):
         recorder = KeyframeAutoRecorder()
         recorder.set_auto("n1", True)
-        recorder.set_auto("c2", True)
+        recorder.set_auto("c2", True, ("c1",))
         recorder.observe("n1", "exposure", 0.5, frame=7)
         recorder.observe("c2", "exposure", 0.8, frame=7,
                          compound_path=("c1",))

@@ -1928,12 +1928,27 @@ class LayerOpsMixin:
                                     gain_sat: float) -> None:
         """色调区间饱和度面板变化：写入引擎并按播放态选择渲染策略。
 
-        P1-COLOR-03 关键帧暂不覆盖这三个参数（关键帧轨道参数名映射
-        基于 LGG 信号元组）；后续如需动画，扩展 _maybe_record_grade_
-        keyframes 的参数名映射即可。
+        图模式下与色轮共用手势事务和集中关键帧录制器。
         """
         if self.engine.get_current_image() is None:
             return
+        graph_host = getattr(self, "color_graph_host", None)
+        if graph_host is not None and graph_host.graph_edit_context_active():
+            node_id = graph_host.active_grade_node_id()
+            if not node_id:
+                return
+            if not graph_host.grade_gesture_open():
+                counter = int(getattr(self, "_graph_gesture_counter", 0)) + 1
+                self._graph_gesture_counter = counter
+                self._graph_gesture_tid = f"grading-{counter}"
+                graph_host.begin_grade_gesture(self._graph_gesture_tid)
+            current = graph_host.panel_grade_params() or {}
+            for name, value in zip(("lift_saturation", "gamma_saturation", "gain_saturation"),
+                                   (lift_sat, gamma_sat, gain_sat)):
+                if current.get(name, 0.0) != value:
+                    if not graph_host.submit_grade_change(node_id, name, float(value), self._graph_gesture_tid):
+                        return
+            graph_host.align_engine_active_layer(node_id)
         self.engine.set_tonal_saturation(lift_sat, gamma_sat, gain_sat)
         self._invalidate_video_render_params_if_playing()
         if self._is_video_playing():
@@ -1951,6 +1966,8 @@ class LayerOpsMixin:
         无当前帧（静态图/未播放）时不记录。写入发生在滑条手势的
         interaction 边界内，撤销粒度 = 一次手势一次 history push。
         """
+        if getattr(self, "_color_keyframes_host", None) is not None:
+            return  # centralized recorder commits with the graph gesture
         engine = self.engine
         frame = getattr(engine, 'current_grade_frame', None)
         if frame is None:
@@ -2004,6 +2021,11 @@ class LayerOpsMixin:
 
     def on_keyframe_mode_toggled(self, checked: bool) -> None:
         """P1-COLOR-03: 关键帧录制模式开关。"""
+        if getattr(self, "_color_keyframes_host", None) is not None:
+            panel = self.color_keyframes_panel
+            if panel.snapshot.corrector:
+                panel.request("auto", ((panel.snapshot.corrector, panel.playhead),), enabled=checked)
+            return
         frame = getattr(self.engine, 'current_grade_frame', None)
         if checked and frame is None:
             self.status_bar.showMessage(
@@ -2013,6 +2035,10 @@ class LayerOpsMixin:
 
     def on_keyframe_snapshot_requested(self) -> None:
         """P1-COLOR-03: 当前帧为所有已动画参数写关键帧。"""
+        if getattr(self, "_color_keyframes_host", None) is not None:
+            panel = self.color_keyframes_panel
+            panel.request("add", panel.scope_targets(panel.playhead), kind="dynamic")
+            return
         engine = self.engine
         frame = getattr(engine, 'current_grade_frame', None)
         if frame is None:
@@ -2063,6 +2089,10 @@ class LayerOpsMixin:
 
     def on_keyframe_remove_requested(self) -> None:
         """P1-COLOR-03: 删除当前帧的所有调色关键帧。"""
+        if getattr(self, "_color_keyframes_host", None) is not None:
+            panel = self.color_keyframes_panel
+            panel.request("delete", panel.scope_targets(panel.playhead))
+            return
         engine = self.engine
         frame = getattr(engine, 'current_grade_frame', None)
         if frame is None:

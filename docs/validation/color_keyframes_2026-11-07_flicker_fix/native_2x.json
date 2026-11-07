@@ -1,0 +1,80 @@
+{
+  "media": "tests/test_videos/测试素材01.mov",
+  "sha256": "b5c4e14d9f68662ba08f3d750edf87f3b0d4ed23f49cd14349ef6212ed2418dd",
+  "validation": "macOS Cocoa MainWindow with imported media and project-backed Keyframes",
+  "per_node_rendering": "Timeline GPU snapshot; repeated graded-frame pixels checked",
+  "asset_id": "6d7462e1-0ebd-4f6f-96c9-25b275709489",
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "total_frames": 124
+  },
+  "keyframes": {
+    "context": true,
+    "static_panel_frame": 24,
+    "static_source_frame": 24,
+    "ruler_start": "00:00:00:00",
+    "speed": 2.0,
+    "transport_frame": 12,
+    "dynamic_panel_frame": 48,
+    "moved_to_panel_frame": 54,
+    "lock_prevented_delete": true,
+    "unlocked_delete": true,
+    "fps": 25.0,
+    "marker_count": 29,
+    "graph_revision": 8
+  },
+  "auto_record": {
+    "selected_corrector": true,
+    "source_frame": 48,
+    "single_history_entry": true,
+    "undo_restored": true
+  },
+  "scrub": {
+    "current_project_snapshot": true,
+    "repeat_pixels_identical": true,
+    "errors": [],
+    "frames": [
+      {
+        "timeline_frame": 0,
+        "sha256": "fb251650c62b42ebd2c131bb69c91727eadd593888f3d9257a7d8a2507e55b47",
+        "mean": 86.11929650821597
+      },
+      {
+        "timeline_frame": 21,
+        "sha256": "c4a95667a307e05b525f095364cfec03b84455bd42d480bbf049121d90d8218d",
+        "mean": 83.80075740903756
+      },
+      {
+        "timeline_frame": 41,
+        "sha256": "ae018993ca523488d8f48815b94928762886376673de6b6ae2b4f79220168c71",
+        "mean": 96.14009316314554
+      },
+      {
+        "timeline_frame": 61,
+        "sha256": "a56987cc0b0693fa45921b8a9bbc958dd5f04b3db8707f05aa5e6a9cda125e43",
+        "mean": 123.77818185152582
+      },
+      {
+        "timeline_frame": 41,
+        "sha256": "ae018993ca523488d8f48815b94928762886376673de6b6ae2b4f79220168c71",
+        "mean": 96.14009316314554
+      },
+      {
+        "timeline_frame": 21,
+        "sha256": "c4a95667a307e05b525f095364cfec03b84455bd42d480bbf049121d90d8218d",
+        "mean": 83.80075740903756
+      },
+      {
+        "timeline_frame": 0,
+        "sha256": "fb251650c62b42ebd2c131bb69c91727eadd593888f3d9257a7d8a2507e55b47",
+        "mean": 86.11929650821597
+      }
+    ]
+  },
+  "screenshot": "native_2x.png",
+  "status": "passed",
+  "error": "",
+  "elapsed_seconds": 13.28
+}

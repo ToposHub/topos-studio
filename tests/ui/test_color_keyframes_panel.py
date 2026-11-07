@@ -29,6 +29,20 @@ def _point(panel: ColorKeyframesPanel, row: str, frame: int) -> QPoint:
                 for key, _, y in panel.timeline._visible_rows() if key == row)
 
 
+def test_central_panel_retires_duplicate_color_wheel_controls(qtbot: QtBot) -> None:
+    from src.features.color.ui.color_wheel import GradingPanel
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    emissions = []
+    panel.keyframe_mode_changed.connect(emissions.append)
+    panel.keyframe_mode_btn.setChecked(True)
+    emissions.clear()
+    panel.use_central_keyframes()
+    assert not panel.keyframe_mode
+    assert not emissions
+    assert all(button.isHidden() for button in (panel.keyframe_mode_btn, panel.kf_snapshot_btn, panel.kf_remove_btn))
+
+
 def test_scope_shortcut_and_row_menu_have_distinct_write_targets(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     panel = _open(qtbot)
     panel.mode.setCurrentIndex(panel.mode.findData("sizing"))

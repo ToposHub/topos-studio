@@ -1,5 +1,7 @@
 # Color Keyframes 后端缺口与整改计划
 
+**最新复检：** [2026-11-07 复检与直接修复记录](RECHECK_2026-11-07.md) 补齐本轮实现、原生素材证据、Resolve Auto 关闭态量测及仍未完成的范围。下面保留原批次历史；“已闭环”不代表 R1–R8 全部验收通过，状态以最新复检为准。
+
 2026-11-07 · 配合 [原实施计划](IMPLEMENTATION_PLAN.md)、[Resolve 量测协议](KF00_RESOLVE_FIXTURES.md)、[工具覆盖清单](TOOL_COVERAGE.md) 和 [发布清单](KF07_RELEASE_CHECKLIST.md) 使用。本表记录本轮复核得到的新证据。已有单测通过代表相应的测试路径可用，不能替代真实工程、各工具和各后端的对标验收。
 
 Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Topos KF Parity Audit 2026-11-07** 操作后切回原工程。下表时间码均为当时关键帧面板的 clip-local 显示。参考为 **DaVinci Resolve Studio 20** 调色页及同版本手册第 148 章。About 的完整 build、工程帧率、色彩管理和自定义动态权重尚未采集，仍是对标证据的待补项。Topos 本轮初始回归为 **207 项通过**，修复后，面板、宿主、图命令、持久化、导出与播放坐标相关测试合计 370 项通过。 [Blackmagic Design Colorist Guide](https://documents.blackmagicdesign.com/UserManuals/DaVinci-Resolve-20-Colorist-Guide.pdf)
