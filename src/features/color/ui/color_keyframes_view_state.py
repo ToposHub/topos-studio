@@ -36,6 +36,8 @@ class Track:
     auto: bool = False
     available: bool = True
     enabled: bool = True
+    row_controls: bool = True
+    unavailable_reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +48,7 @@ class Snapshot:
     playhead: int = 0
     corrector: str = ""
     tracks: tuple[Track, ...] = ()
+    edit_notice: str = ""
 
 
 @dataclass(frozen=True, slots=True)

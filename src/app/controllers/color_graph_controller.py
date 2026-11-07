@@ -27,7 +27,7 @@ import enum
 import logging
 import uuid
 from dataclasses import asdict, dataclass, field, is_dataclass
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence
 
 from src.features.edit.core.commands.color_commands import (
     ApplyColorGraphCommand,
@@ -36,6 +36,8 @@ from src.features.edit.core.commands.color_commands import (
     SetColorGraphLockCommand,
 )
 
+if TYPE_CHECKING:
+    from src.shared.project.color_graph import ColorGraphData
 
 logger = logging.getLogger(__name__)
 
@@ -1573,6 +1575,11 @@ class ColorGraphAppHost:
         """绑定栈并水合投影；无图栈用迁移视图（首次命令自动建图）。"""
         self._bridge.bind_stack(stack_id)
         self._bound_stack_id = stack_id
+        graph = self._stack_projection(stack_id)
+        if graph is not None:
+            self._hydrate(graph, scope, scope_owner_id)
+
+    def _stack_projection(self, stack_id: str) -> ColorGraphData | None:
         graph = self._stack_graph(stack_id)
         if graph is None:
             project = self._get_project() if self._get_project else None
@@ -1589,8 +1596,7 @@ class ColorGraphAppHost:
                         "graph host: legacy migration view failed for %s",
                         stack_id[:8], exc_info=True)
                     graph = None
-        if graph is not None:
-            self._hydrate(graph, scope, scope_owner_id)
+        return graph
 
     def _stack_graph(self, stack_id: str):
         project = self._get_project() if self._get_project else None
@@ -1599,12 +1605,13 @@ class ColorGraphAppHost:
         stack = project.color_stacks.get(stack_id)
         return getattr(stack, "color_graph", None) if stack else None
 
-    def bound_graph(self):
-        """KF-02：当前绑定栈的权威图对象（关键帧面板只读投影用）。
+    @property
+    def bound_stack_id(self) -> str:
+        return self._bound_stack_id
 
-        与求值/命令同源；无绑定栈返回 None。
-        """
-        return self._stack_graph(self._bound_stack_id)
+    def bound_graph(self) -> ColorGraphData | None:
+        """当前绑定栈的图视图。旧栈首次写入时再持久化迁移。"""
+        return self._stack_projection(self._bound_stack_id)
 
     def _hydrate(self, graph, scope: str, scope_owner_id) -> None:
         if self._coordinator.state != GraphSessionState.HYDRATING:

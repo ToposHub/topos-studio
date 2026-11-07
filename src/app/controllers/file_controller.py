@@ -5778,6 +5778,9 @@ class FileOpsMixin:
                 self.video_controller.clear_in_out_range()
             except Exception:
                 pass
+        refresh_keyframes = getattr(self, "_color_keyframes_host_refresh", None)
+        if callable(refresh_keyframes):
+            refresh_keyframes()
 
     def _active_color_timeline_clip_playback_context(self) -> dict | None:
         if getattr(self, "current_page", None) != "Color":

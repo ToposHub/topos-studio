@@ -10,7 +10,7 @@ from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 
 from src.features.color.ui.color_keyframes_panel import ColorKeyframesPanel
-from src.features.color.ui.color_keyframes_view_state import EditRequest, demo_snapshot
+from src.features.color.ui.color_keyframes_view_state import EditRequest, demo_snapshot, tr
 
 LEFT = Qt.MouseButton.LeftButton
 
@@ -167,3 +167,26 @@ def test_dissolve_dialog_commits_only_on_accept(qtbot: QtBot) -> None:
     panel.edit_dynamics((ref,))
     assert panel._markers[ref].start == 2
     assert panel._markers[ref].end == 3
+
+
+def test_context_menu_nudges_selected_keys_and_master_can_clear_visible_keys(
+        qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    panel = _open(qtbot)
+    timeline = panel.timeline
+    label = tr("move_right", "Move Selected Keyframes Right")
+
+    def choose(menu: QMenu, _: QPoint) -> None:
+        action = next(action for action in menu.actions() if action.text() == label)
+        assert action.isEnabled()
+        action.trigger()
+
+    monkeypatch.setattr(QMenu, "exec", choose)
+    timeline.contextMenuEvent(QContextMenuEvent(
+        QContextMenuEvent.Reason.Mouse, _point(panel, "corrector-1", 58)))
+    assert ("corrector-1/correction", 59) in panel._markers
+    assert ("corrector-1/correction", 58) not in panel._markers
+
+    label = tr("delete_visible", "Delete All Visible Keyframes")
+    timeline.contextMenuEvent(QContextMenuEvent(
+        QContextMenuEvent.Reason.Mouse, _point(panel, "", 80)))
+    assert not panel._markers

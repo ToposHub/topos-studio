@@ -104,9 +104,7 @@ def node_layer_payload(node: Any, *,
             if not isinstance(track, Mapping):
                 continue
             if track.get("keyframes"):
-                merged_kf[str(track_name)] = {
-                    "keyframes": unfreeze_params(
-                        list(track["keyframes"]))}
+                merged_kf[str(track_name)] = unfreeze_params(track)
             elif track.get("tombstone"):
                 merged_kf[str(track_name)] = {"keyframes": []}
         payload["grade_keyframes"] = merged_kf
