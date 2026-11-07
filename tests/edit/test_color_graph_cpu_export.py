@@ -171,3 +171,49 @@ class TestGraphCpuExport:
                 frame.copy(), _layer(sid, source_frame=source_frame))
             # Edit CPU 预览回退与 Deliver CPU 导出同一入口同一输出
             assert np.array_equal(exported, previewed)
+
+
+class TestGraphCpuFailurePolicy:
+    """R5 审计：图 CPU 路径运行期异常——导出 fail-fast、预览降级。"""
+
+    def test_export_unexpected_failure_fails_fast_with_clip_id(
+            self, monkeypatch):
+        from src.features.color.core import color_graph_cpu
+        stack, sid = _graph_with_tracks()
+        frame = _gradient_frame()
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("keyer exploded")
+
+        monkeypatch.setattr(color_graph_cpu, "run_graph_frame_cpu", _boom)
+        exporter = _exporter(stack)
+        with pytest.raises(ValueError, match="clip-1.*keyer exploded"):
+            exporter._apply_color_grade_unstabilized(
+                frame.copy(), _layer(sid, source_frame=20))
+
+    def test_preview_unexpected_failure_degrades_to_flattened(
+            self, monkeypatch):
+        from unittest.mock import MagicMock
+        from src.features.color.core import color_graph_cpu
+        from src.features.edit.core.timeline_preview_renderer import (
+            AssetResolver, PreviewRenderWorker,
+        )
+        stack, sid = _graph_with_tracks()
+        frame = _gradient_frame()
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("lut resource missing")
+
+        monkeypatch.setattr(color_graph_cpu, "run_graph_frame_cpu", _boom)
+        preview = PreviewRenderWorker(
+            frame_provider=MagicMock(),
+            asset_resolver=AssetResolver(SimpleNamespace(
+                color_stacks={sid: stack})),
+            video_renderer=None)
+        try:
+            out = preview._apply_preview_color_grade_unstabilized(
+                frame.copy(), _layer(sid, source_frame=20))
+        finally:
+            preview._decode_executor.shutdown(wait=False)
+        # 预览域降级：不抛异常，走扁平路径出帧（成片路径不受影响）
+        assert out is not None and out.shape == frame.shape

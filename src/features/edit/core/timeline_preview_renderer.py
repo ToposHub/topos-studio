@@ -5313,6 +5313,14 @@ class PreviewRenderWorker(QThread):
                 "（%s）——降级到扁平路径（成片渲染路径不受影响）",
                 layer.clip_id, exc)
             return None
+        except Exception:  # noqa: BLE001 — 预览域降级（成片路径不受影响）
+            # 运行期失败（keyer/LUT 资源异常）：预览回退扁平路径并告警
+            # ——成片渲染（Deliver）对同类失败 fail-fast，不静默缺效果。
+            logger.warning(
+                "Edit preview color graph cpu failed for clip %s——"
+                "降级到扁平路径（成片渲染路径不受影响）",
+                layer.clip_id, exc_info=True)
+            return None
 
     def _apply_preview_color_grade_unstabilized(
         self,

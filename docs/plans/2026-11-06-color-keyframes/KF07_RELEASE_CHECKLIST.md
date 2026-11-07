@@ -53,6 +53,9 @@
 | 工具手势自动录制（qualifier/window；auto 关只写 base；两时刻两键） | `tests/app/test_color_keyframe_recorder.py::TestToolGestureRecord` |
 | 手工 Add 采样求值现值（动画轨 0.25 非 base 0.0） | `tests/app/test_color_keyframes_host.py::TestManualAddSamples` |
 | 复杂映射只读矩阵 + DF 时间码 + 绑定描述/A→B→A | `test_color_keyframes_host.py::TestRetimeReadOnlyMatrix`/`TestBindingIdentity`、`test_color_keyframes_panel.py` DF 用例 |
+| 节点缓存逐帧身份（静态节点不跨视频帧命中旧输出） | `tests/color/test_color_graph_node_cache.py::TestGraphCacheContextIdentity` |
+| 图 CPU 异常策略（Deliver fail-fast / Edit 预览降级） | `tests/edit/test_color_graph_cpu_export.py::TestGraphCpuFailurePolicy` |
+| compound 成员手势录制（路径分组下行） | `tests/app/test_color_keyframe_recorder.py::TestCompoundChildRecord` |
 
 ## 剩余不等价项（如实登记）
 
