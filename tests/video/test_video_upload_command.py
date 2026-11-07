@@ -1418,8 +1418,10 @@ class TestP4ADecodedVideoUpload:
         })
 
         assert renderer.video_texture_pending is False
+        # R5：任务边界按实际解码帧写入逐帧身份字段
         renderer._do_render.assert_called_once_with(
-            {'viewport_size': (2, 2)}, allow_during_playback=True,
+            {'viewport_size': (2, 2), 'stabilization_source_frame': 5},
+            allow_during_playback=True,
         )
 
     def test_yuv_render_restores_raw_view_fbo_after_conversion(self) -> None:
@@ -2329,3 +2331,76 @@ class TestGpuFrameAtomicSwap:
 
 if __name__ == '__main__':
     run_manual_tests()
+
+
+class TestRenderVideoFrameGraphIdentity:
+    """R5：播放任务边界按实际解码帧覆盖图求值帧。
+
+    播放期 UI 线程复用缓存的静态 render_params，其中
+    color_graph_source_frame 停留在构建时刻——不覆盖则图执行 provider
+    沿用过期帧（画面上的动画停在旧值）。
+    """
+
+    def _renderer(self):
+        from src.features.color.core.async_renderer import AsyncRenderer
+        renderer = AsyncRenderer.__new__(AsyncRenderer)
+        renderer.ctx = object()
+        renderer._video_generation_id = 0
+        renderer._debug_frame_path = ''
+        renderer._yuv_gpu_uploader = MagicMock()
+        renderer._yuv_gpu_uploader.is_r16_available.return_value = False
+        renderer._do_upload_video_planes = MagicMock(
+            return_value=(MagicMock(), MagicMock()))
+        renderer._do_render = MagicMock()
+        renderer.canvas_size = (0, 0)
+        renderer.raw_preview_params = {}
+        return renderer
+
+    @staticmethod
+    def _nv12_frame(index: int):
+        from src.shared.media.frame import DecodedFrame
+        return DecodedFrame(
+            frame_index=index, pts=index,
+            time_seconds=index / 25.0,
+            data=np.zeros((6, 8), dtype=np.uint8),
+            pixel_format='nv12', width=8, height=4)
+
+    def test_playback_frames_override_stale_graph_source_frame(self):
+        renderer = self._renderer()
+        cached = {'viewport_size': (8, 4), 'layers': [],
+                  'color_graph_source_frame': 112,
+                  'color_graph_snapshot': object()}
+        for expected in (112, 113, 114):  # 连投三帧（drop_if_stale 播放道）
+            renderer._do_render_video_frame({
+                'decoded_frame': self._nv12_frame(expected),
+                'frame_index': expected,
+                'render_params': cached,
+                'reason': 'playback', 'drop_if_stale': True,
+                'quality': 'proxy'})
+            params = renderer._do_render.call_args.args[0]
+            # 任务私有参数按实际解码帧取值（provider 读到真实帧）
+            assert params['color_graph_source_frame'] == expected
+            assert params['stabilization_source_frame'] == expected
+        # 任务之间缓存对象不变（UI 线程静态参数不被渲染线程改写）
+        assert cached['color_graph_source_frame'] == 112
+        assert renderer._do_render.call_count == 3
+
+    def test_seek_generation_drop_and_no_graph_key(self):
+        renderer = self._renderer()
+        # 参数未携带图键（图路径未激活）→ 不引入新语义
+        renderer._do_render_video_frame({
+            'decoded_frame': self._nv12_frame(7),
+            'frame_index': 7, 'render_params': {
+                'viewport_size': (8, 4), 'layers': []}})
+        params = renderer._do_render.call_args.args[0]
+        assert 'color_graph_source_frame' not in params
+        # 过期 generation（seek 后旧任务）直接丢弃，不进渲染
+        before = renderer._do_render.call_count
+        renderer._video_generation_id = 5
+        renderer._do_render_video_frame({
+            'decoded_frame': self._nv12_frame(8),
+            'frame_index': 8, 'generation_id': 4,
+            'render_params': {'viewport_size': (8, 4), 'layers': [],
+                              'color_graph_source_frame': 8},
+            'drop_if_stale': True})
+        assert renderer._do_render.call_count == before

@@ -5678,6 +5678,24 @@ class AsyncRenderer(QThread):
             logger.exception("_apply_video_denoise failed; passthrough")
             return source_tex
 
+    @staticmethod
+    def _apply_task_frame_identity(render_params: Dict[str, Any],
+                                   frame_index: int) -> Dict[str, Any]:
+        """R5：任务边界按实际解码帧覆盖逐帧身份字段。
+
+        播放期 UI 线程复用缓存的静态 render_params（VideoPlayback
+        ``_cached_render_params``），其中 ``color_graph_source_frame``
+        停留在构建时刻——不覆盖则图执行 provider 沿用过期帧（动画停在
+        旧值，即使节点缓存已按时域标志绕过）。仅在参数已携带该键时
+        覆盖（图路径激活的标志，不引入新语义）；返回浅拷贝，调用方
+        缓存对象不被改动。
+        """
+        params = dict(render_params)
+        params['stabilization_source_frame'] = int(frame_index)
+        if 'color_graph_source_frame' in params:
+            params['color_graph_source_frame'] = int(frame_index)
+        return params
+
     def _do_render_video_frame(self, data: Dict[str, Any]) -> None:
         """
         P4.B: Combined upload + render for video playback (S2.A 修改).
@@ -5965,8 +5983,8 @@ class AsyncRenderer(QThread):
         if bool(self.__dict__.get("video_texture_pending", False)):
             self._force_finish_next_publish = True
         self.video_texture_pending = False
-        render_params = dict(render_params)
-        render_params['stabilization_source_frame'] = int(frame_index)
+        render_params = self._apply_task_frame_identity(render_params,
+                                                        frame_index)
         self._do_render(render_params, allow_during_playback=True)
         self.debug_last_rendered_video_frame_index = int(frame_index)
         if data.get('reason') == 'seek' or not drop_if_stale:
@@ -6161,8 +6179,8 @@ class AsyncRenderer(QThread):
         if bool(self.__dict__.get("video_texture_pending", False)):
             self._force_finish_next_publish = True
         self.video_texture_pending = False
-        render_params = dict(render_params)
-        render_params['stabilization_source_frame'] = int(frame_index)
+        render_params = self._apply_task_frame_identity(render_params,
+                                                        frame_index)
         self._do_render(render_params, allow_during_playback=True)
         self.debug_last_rendered_video_frame_index = int(frame_index)
         if data.get('reason') == 'seek' or not drop_if_stale:
