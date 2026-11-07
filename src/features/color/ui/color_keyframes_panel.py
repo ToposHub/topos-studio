@@ -808,10 +808,23 @@ class _Timeline(QWidget):
                 p.drawEllipse(QPoint(x, y), 4, 4)
 
     def _timecode(self, frame: int) -> str:
-        seconds, f = divmod(frame, max(1, self.panel.snapshot.timecode_fps))
-        minutes, s = divmod(seconds, 60)
-        h, m = divmod(minutes, 60)
-        return f"{h:02}:{m:02}:{s:02}:{f:02}"
+        # R1：DF/NDF 经 Timecode 的 Rational 接口——29.97/59.94 家族按
+        # drop-frame 显示，整帧率 NDF；无理数/异常回退名义帧率 divmod。
+        fps = self.panel.snapshot.timecode_fps or 24
+        try:
+            from src.shared.media import Rational
+            from src.shared.media.timecode import Timecode
+            ratio = fps if isinstance(fps, Rational) else Rational(
+                max(1, round(float(fps))), 1)
+            return Timecode.from_frame_number(
+                int(frame), ratio, Timecode.auto_detect_type(ratio),
+            ).to_string()
+        except (TypeError, ValueError, ZeroDivisionError):
+            fps_int = max(1, round(float(fps)))
+            seconds, f = divmod(int(frame), fps_int)
+            minutes, s = divmod(seconds, 60)
+            h, m = divmod(minutes, 60)
+            return f"{h:02}:{m:02}:{s:02}:{f:02}"
 
     def _ruler_frames(self) -> range:
         step = max(1, ceil(106 / self.scale))
