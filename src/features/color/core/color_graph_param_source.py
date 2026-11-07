@@ -187,10 +187,10 @@ def graph_node_layer_provider(
                     if not isinstance(entry, Mapping):
                         continue
                     try:
-                        points.append(GradeKeyframe(
-                            int(entry.get("frame", -1)),
-                            entry.get("value"),
-                            str(entry.get("interpolation", "linear"))))
+                        # R2：经 from_dict（KF-01 decode 单一入口）重建——
+                        # 显式键型/动态属性随载荷进入求值域，不再丢失。
+                        points.append(GradeKeyframe.from_dict(
+                            dict(entry)))
                     except (TypeError, ValueError):
                         continue
                 if points:
