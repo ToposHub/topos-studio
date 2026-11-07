@@ -1,20 +1,4 @@
-"""KF-02：调色关键帧面板只读宿主（权威快照回填 + 播放头双向同步）。
-
-职责边界（写入口保持关闭，KF-03 起开放领域命令）：
-
-- **下行**：从绑定栈权威图（ColorGraphAppHost.bound_graph）+ 会话身份
-  + 播放上下文构建只读 ``Snapshot`` 推给面板；video 帧回调按 clip-local
-  域回填播放头（``set_playhead`` 不发 seek，天然无回声）。
-- **上行**：``seek_requested`` 复用既有 Color seek 协议；ruler 拖拽手势
-  边界（scrub_started/finished）路由到视口非阻塞 scrub 车道，move 合并
-  与 release 精确帧由该车道既有逻辑保证（与 tracker_graph 同模式）。
-- **只读**：``edit_requested`` 核对会话身份后丢弃并记录日志——过期
-  context 的请求不产生任何工程副作用。
-
-会话/切片段/版本/Undo 更换后由宿主 ``refresh()`` 重建投影；context 或
-graph_revision 未变化时跳过重复推送。无真实播放上下文（无 clip、无图）
-时保留面板演示数据，不推空快照。
-"""
+"""Project the bound Color Graph and translate panel intents into graph commands."""
 
 from __future__ import annotations
 
@@ -51,7 +35,7 @@ def _corrector_types() -> tuple:
 
 
 def _session_context_key(session: Any, stack_id: str) -> str:
-    """会话身份键：project|timeline|clip|stack 任一变化都换 context。"""
+    """会话身份键：切换绑定或重新进入同一片段均作废旧请求。"""
     if session is None:
         return ""
     parts = (
@@ -59,6 +43,7 @@ def _session_context_key(session: Any, stack_id: str) -> str:
         getattr(session, "timeline_id", "") or "",
         getattr(session, "clip_id", "") or "",
         stack_id or getattr(session, "color_stack_id", "") or "",
+        getattr(session, "session_id", "") or "",
     )
     return "|".join(parts)
 
@@ -86,13 +71,15 @@ def build_keyframes_snapshot(
     playhead: int,
     corrector: str,
     graph: Any,
-    auto_nodes: frozenset = frozenset(),
+    auto_nodes: frozenset[str] = frozenset(),
+    source_origin: int | None = 0,
+    edit_notice: str = "",
 ) -> Snapshot:
     """从权威图对象构建只读快照（纯函数，宿主与测试共用）。
 
     每个正确体节点一行（图序），叶轨来自 ``node_layer_payload`` 的合并
     关键帧（params 域覆盖 legacy 域，与执行求值同源）。锁 = params.locked，
-    启停 = 节点 enabled（白圆），auto 留待 KF-04 录制路由（恒 False）。
+    启停 = 节点 enabled（白圆），auto 来自当前会话录制状态。
     Master 汇总行由面板按子轨聚合，不在快照内。
     """
     rows: list[Track] = []
@@ -128,8 +115,10 @@ def build_keyframes_snapshot(
                     decoded = decode_keyframe(kf)
                 except ValueError:
                     continue  # 畸形关键帧不阻断其余投影
-                markers.append(Marker(int(decoded.frame), decoded.kind,
-                                      decoded.start, decoded.end))
+                if source_origin is not None:
+                    local = int(decoded.frame) - source_origin
+                    if 0 <= local < frame_count:
+                        markers.append(Marker(local, decoded.kind, decoded.start, decoded.end))
             existing[str(name)] = (address, markers)
 
         def _leaf(domain: str, track_name: str, field: str,
@@ -137,48 +126,55 @@ def build_keyframes_snapshot(
             return Track(id=f"node:{node_id}|{track_name}",
                          label=_leaf_label(domain, field, shapes, owner_id),
                          scope="color", markers=tuple(markers),
-                         auto=node_id in auto_nodes)  # Corrector 开关作用后代
+                         auto=node_id in auto_nodes, row_controls=False)
 
-        leaves: list[Track] = []
-        # grade/qualifier：登记字段全量常驻（空轨道无标记）——否则首个
-        # 关键帧无处可加（面板只对树内叶轨发请求）。窗口域同策略：
-        # 每个实际形状 × 登记字段常驻（形状删除 → 叶行随载荷消失）。
+        row_id = f"node:{node_id}"
+        grade: list[Track] = []
+        qualifier: list[Track] = []
+        windows: list[Track] = []
         for spec in GRADE_TRACK_FIELDS:
             _, markers = existing.get(spec.name, (None, []))
-            if not markers and spec.name in existing:
-                continue  # 有轨道无有效标记（畸形载荷）：不显示空行
-            leaves.append(_leaf("grade", spec.name, spec.name, markers))
+            grade.append(_leaf("grade", spec.name, spec.name, markers))
         for spec in QUALIFIER_TRACK_FIELDS:
             name = qualifier_track_name(spec.name)
             _, markers = existing.get(name, (None, []))
-            if not markers and name in existing:
+            qualifier.append(_leaf("qualifier", name, spec.name, markers))
+        for shape in shapes:
+            if not isinstance(shape, Mapping) or not shape.get("id"):
                 continue
-            leaves.append(_leaf("qualifier", name, spec.name, markers))
-        shape_ids = [str(s.get("id")) for s in (shapes or ())
-                     if isinstance(s, dict) and s.get("id")]
-        for shape_id in shape_ids:
+            shape_id = str(shape["id"])
+            leaves = []
             for spec in WINDOW_TRACK_FIELDS:
                 name = mask_track_name(shape_id, spec.name)
                 _, markers = existing.get(name, (None, []))
-                if not markers and name in existing:
-                    continue
-                leaves.append(_leaf("window", name, spec.name, markers,
-                                    shape_id))
-        row_id = f"node:{node_id}"
+                leaves.append(_leaf("window", name, spec.name, markers, shape_id))
+            label = str(shape.get("name") or shape.get("type") or tr("window", "Window"))
+            windows.append(Track(f"{row_id}/window/{shape_id}", label, "color", tuple(leaves),
+                                 auto=node_id in auto_nodes, row_controls=False))
+        groups = (*windows,
+                  Track(f"{row_id}/grade", tr("correction", "Color Corrector"), "color", tuple(grade),
+                        auto=node_id in auto_nodes, row_controls=False),
+                  Track(f"{row_id}/qualifier", tr("qualifier", "Qualifier"), "color", tuple(qualifier),
+                        auto=node_id in auto_nodes, row_controls=False))
         label = str(getattr(node, "label", "") or payload.get("label")
-                    or f"{tr('corrector', 'Corrector')} {len(rows) + 1}")
+                    or tr("corrector", "Corrector {index}").format(index=len(rows) + 1))
         rows.append(Track(
             id=row_id,
             label=label,
             scope="color",
-            children=tuple(leaves),
+            children=groups,
             locked=bool((getattr(node, "params", {}) or {}).get("locked")),
             enabled=bool(getattr(node, "enabled", True)),
             auto=node_id in auto_nodes,
         ))
         if not first_row:
             first_row = row_id
-    active = corrector if any(row.id == corrector for row in rows) else first_row
+    active = corrector or first_row
+    if not any(row.id == active for row in rows):
+        active = ""
+    rows.append(Track("sizing", tr("sizing", "Sizing"), "sizing", available=False,
+                      row_controls=False,
+                      unavailable_reason=tr("sizing_unavailable", "Sizing keyframes are not supported yet.")))
     return Snapshot(
         context=context,
         frame_count=max(0, int(frame_count)),
@@ -186,6 +182,7 @@ def build_keyframes_snapshot(
         playhead=max(0, int(playhead)),
         corrector=active,
         tracks=tuple(rows),
+        edit_notice=edit_notice,
     )
 
 
@@ -206,6 +203,8 @@ class ColorKeyframesHost:
         active_node_provider: Callable[[], str],
         session_provider: Callable[[], Any],
         playback: Any,
+        stack_id_provider: Callable[[], str] | None = None,
+        fps_provider: Callable[[str], int] | None = None,
         submit_batch: Optional[Callable[[list[dict]], bool]] = None,
         submit_action: Optional[Callable[[str, dict], bool]] = None,
         auto_recorder: Any = None,
@@ -215,6 +214,11 @@ class ColorKeyframesHost:
         self._active_node_provider = active_node_provider
         self._session_provider = session_provider
         self._playback = playback
+        self._stack_id_provider = stack_id_provider
+        self._fps_provider = fps_provider
+        self._source_origin: int | None = None
+        self._corrector = ""
+        self._fps = 0
         self._submit_batch = submit_batch
         self._submit_action = submit_action
         self._recorder = auto_recorder  # KF-04：自动录制注册表（可缺席）
@@ -233,55 +237,100 @@ class ColorKeyframesHost:
         panel.seek_requested.connect(self._on_seek_requested)
         panel.scrub_started.connect(self._on_scrub_started)
         panel.scrub_finished.connect(self._on_scrub_finished)
+        panel.scrub_cancelled.connect(self._on_scrub_cancelled)
         panel.edit_requested.connect(self._on_edit_requested)
 
     # ── 下行：快照与播放头 ──
 
-    def refresh(self, *, force: bool = False) -> bool:
-        """重建并回填快照；返回是否实际推送。
-
-        context 或 graph_revision 未变化时跳过（幂等）；无会话/无播放
-        上下文/无图时保留面板现有（演示）数据。
-        """
+    def _binding(self) -> tuple[str, dict]:
         session = self._session_provider()
-        playback = self._playback
-        total = None
-        clip_fps = 0
-        context_obj = None
-        try:
-            context_obj = playback._active_color_timeline_clip_playback_context()
-        except Exception:  # noqa: BLE001 — 播放上下文不可用按无上下文处理
-            context_obj = None
-        if context_obj:
-            total = playback._color_timeline_clip_total_frames()
-            clip_fps = int(getattr(context_obj.get("clip"), "fps", 0) or 0)
-        graph = self._graph_provider()
-        if session is None or not total or graph is None:
+        playback_context = self._playback._active_color_timeline_clip_playback_context()
+        if session is None or not playback_context:
+            return "", {}
+        clip_id = getattr(playback_context.get("clip"), "clip_id", None)
+        if clip_id and clip_id != getattr(session, "clip_id", None):
+            return "", {}
+        stack_id = (self._stack_id_provider() if self._stack_id_provider is not None
+                    else getattr(session, "color_stack_id", ""))
+        if not stack_id:
+            return "", {}
+        if stack_id != getattr(session, "color_stack_id", ""):
+            playback_context = {**playback_context, "non_clip_grade": True}
+        return _session_context_key(session, stack_id), playback_context
+
+    @staticmethod
+    def _linear_source_origin(playback_context: dict) -> int | None:
+        """Only a one-to-one forward clip window is safe for this panel to edit."""
+        if playback_context.get("non_clip_grade"):
+            return None
+        clip = playback_context["clip"]
+        speed = getattr(clip, "speed", 1.0)
+        ratio = getattr(clip, "_source_over_timeline_fps_ratio", None)
+        if (getattr(speed, "speed", speed) != 1.0 or getattr(speed, "reverse", False)
+                or getattr(speed, "speed_points", ())
+                or getattr(clip, "freeze_source_frame", None) is not None
+                or (callable(ratio) and ratio() != 1)):
+            return None
+        effective = playback_context.get("effective_source_start")
+        if effective is not None:
+            return int(effective)
+        mapper = getattr(clip, "clip_local_to_source_frame", None)
+        return int(mapper(0) if callable(mapper) else getattr(clip, "source_start", 0))
+
+    def _clear(self) -> bool:
+        if not self._context:
             return False
-        context = _session_context_key(
-            session, getattr(session, "color_stack_id", "") or "")
-        revision = int(getattr(graph, "graph_revision", -1) or -1)
-        if context != self._context:
-            # 切片段/版本/页面：丢弃旧会话的录制开关与半开手势
-            if self._recorder is not None:
-                self._recorder.reset()
-        if not force and context == self._context and revision == self._revision:
+        self._context = ""
+        self._revision = -1
+        self._frame_count = 0
+        self._last_frame = 0
+        self._on_scrub_cancelled()
+        if self._recorder is not None:
+            self._recorder.reset()
+        self._panel.set_snapshot(Snapshot())
+        return True
+
+    def refresh(self, *, force: bool = False) -> bool:
+        """Rebuild the projection when its clip, frame mapping or graph changes."""
+        context, playback_context = self._binding()
+        total = self._playback._color_timeline_clip_total_frames() if context else None
+        graph = self._graph_provider() if total else None
+        if graph is None:
+            return self._clear()
+
+        origin = self._linear_source_origin(playback_context)
+        corrector = self._active_node_row_id()
+        fps = (self._fps_provider(str(playback_context.get("timeline_id", "")))
+               if self._fps_provider is not None else
+               int(getattr(playback_context.get("clip"), "fps", 0) or 0)) or 24
+        revision = int(getattr(graph, "graph_revision", -1))
+        if (context != self._context or origin != self._source_origin) and self._recorder is not None:
+            self._recorder.reset()
+        if not force and (context, revision, corrector, origin, total, fps) == (
+                self._context, self._revision, self._corrector, self._source_origin,
+                self._frame_count, self._fps):
             return False
-        playhead = max(0, min(self._last_frame, int(total) - 1))
+
+        notice = ""
+        if playback_context.get("non_clip_grade"):
+            notice = tr("scope_read_only", "Keyframe editing is currently available in Clip grade scope.")
+        elif origin is None:
+            notice = tr("retime_read_only", "Keyframe editing is unavailable for retimed or mixed-frame-rate clips.")
         snapshot = build_keyframes_snapshot(
-            context=context,
-            frame_count=int(total),
-            timecode_fps=clip_fps or 24,
-            playhead=playhead,
-            corrector=self._active_node_row_id(),
-            graph=graph,
+            context=context, frame_count=int(total), timecode_fps=fps,
+            playhead=max(0, min(self._last_frame, int(total) - 1)),
+            corrector=corrector, graph=graph, source_origin=origin,
+            edit_notice=notice,
             auto_nodes=(self._recorder.auto_nodes()
                         if self._recorder is not None else frozenset()),
         )
-        self._panel.set_snapshot(snapshot)
         self._context = context
         self._revision = revision
+        self._corrector = corrector
+        self._source_origin = origin
         self._frame_count = snapshot.frame_count
+        self._fps = fps
+        self._panel.set_snapshot(snapshot)
         return True
 
     def on_local_frame_changed(self, frame: int) -> None:
@@ -297,6 +346,10 @@ class ColorKeyframesHost:
     # ── 上行：seek / scrub / 只读编辑意图 ──
 
     def _on_seek_requested(self, frame: int) -> None:
+        context, _ = self._binding()
+        if not context or context != self._context:
+            self.refresh()
+            return
         frame = int(frame)
         self._last_seek_frame = frame
         playback = self._playback
@@ -314,12 +367,18 @@ class ColorKeyframesHost:
         self._scrub_lane_started = False
 
     def _on_scrub_finished(self) -> None:
+        started = self._scrub_lane_started
+        self._on_scrub_cancelled()
+        context, _ = self._binding()
+        if started and context and context == self._context:
+            self._playback.on_video_seek(self._last_seek_frame)
+
+    def _on_scrub_cancelled(self) -> None:
         if not self._scrubbing:
             return
         self._scrubbing = False
         if self._scrub_lane_started:
             self._scrub_lane_started = False
-            # release 的最后一帧经 scrub 车道 settle（与 tracker 同约定）
             self._playback.on_video_scrub_finished(self._last_seek_frame)
 
     def _on_edit_requested(self, request: Any) -> None:
@@ -332,9 +391,14 @@ class ColorKeyframesHost:
         """
         if not isinstance(request, EditRequest):
             return
-        if request.context != self._context:
+        context, playback_context = self._binding()
+        if (not context or request.context != self._context or context != self._context
+                or self._linear_source_origin(playback_context) != self._source_origin):
+            self.refresh()
             logger.debug("keyframes edit dropped: stale context %r",
                          request.context)
+            return
+        if self._source_origin is None:
             return
         if request.action == "copy":
             # 复制时捕获不可变载荷（正式跨片段剪贴板）
@@ -404,7 +468,10 @@ class ColorKeyframesHost:
             if not self._translate_paste(request, nodes, edits):
                 return None
             return (edits, node_actions, skipped, auto_toggles)
-        for track_id, frame in request.targets:
+        for track_id, local_frame in request.targets:
+            frame = self._source_frame(local_frame)
+            if frame is None:
+                return None
             parsed = self._parse_track_id(track_id)
             if parsed is None:
                 skipped.append(track_id)
@@ -444,9 +511,12 @@ class ColorKeyframesHost:
                 edits.append({"action": "remove", "node_id": node_id,
                               "param": param, "frame": int(frame)})
             elif request.action == "move":
+                destination = self._source_frame(local_frame + request.delta)
+                if destination is None:
+                    return None
                 edits.append({"action": "move", "node_id": node_id,
-                              "param": param, "frame": int(frame),
-                              "to_frame": int(frame) + int(request.delta)})
+                              "param": param, "frame": frame,
+                              "to_frame": destination})
             elif request.action == "convert":
                 edits.append({"action": "dynamics", "node_id": node_id,
                               "param": param, "frame": int(frame),
@@ -480,8 +550,13 @@ class ColorKeyframesHost:
         拒绝。能力签名（值分量数）与目标轨不匹配 → 清晰拒绝（计划
         §剪贴板规则 8）。
         """
+        if len(request.sources) != len(request.targets):
+            return False
         for (src_track, src_frame), (dst_track, dst_frame) in zip(
-                request.sources, request.targets):
+                request.sources, request.targets, strict=True):
+            dst_source = self._source_frame(dst_frame)
+            if dst_source is None:
+                return False
             src = self._parse_track_id(src_track)
             dst = self._parse_track_id(dst_track)
             if (src is None or dst is None
@@ -494,16 +569,18 @@ class ColorKeyframesHost:
                 logger.info("keyframes paste dropped: source domain %s",
                             src_address.domain)
                 return False
-            entry = self._clipboard_entries.get(
-                (src_track, int(src_frame)))
+            entry = (self._clipboard_entries.get((src_track, int(src_frame)))
+                     if request.source_context == self._clipboard_source_context else None)
             if entry is None:
                 if request.source_context != self._context:
                     logger.info(
                         "keyframes paste dropped: source key %s@%s not "
                         "captured (cross-context)", src_track, src_frame)
                     return False
-                entry = self._resolve_live_source(
-                    nodes, src_node, src_address, int(src_frame))
+                src_source = self._source_frame(src_frame)
+                if src_source is None:
+                    return False
+                entry = self._resolve_live_source(nodes, src_node, src_address, src_source)
                 if entry is None:
                     logger.info(
                         "keyframes paste dropped: source key %s@%s gone",
@@ -519,7 +596,7 @@ class ColorKeyframesHost:
             edits.append({
                 "action": "set", "node_id": dst_node,
                 "param": dst_address.track_name,
-                "frame": int(dst_frame), "value": entry["value"],
+                "frame": dst_source, "value": entry["value"],
                 "interpolation": entry["interpolation"],
                 "kind": entry["kind"], "start": entry["start"],
                 "end": entry["end"],
@@ -542,8 +619,10 @@ class ColorKeyframesHost:
             if parsed is None or parsed[1] is None:
                 continue
             node_id, address = parsed
-            resolved = self._resolve_live_source(
-                nodes, node_id, address, int(frame))
+            source = self._source_frame(frame)
+            if source is None:
+                return
+            resolved = self._resolve_live_source(nodes, node_id, address, source)
             if resolved is None:
                 logger.info("keyframes copy capture incomplete: %s@%s",
                             track_id, frame)
@@ -577,6 +656,11 @@ class ColorKeyframesHost:
             "size": expected_value_size(address.track_name),
             "src_node": node_id, "src_track": address.track_name,
         }
+
+    def _source_frame(self, local: int) -> int | None:
+        if self._source_origin is None or not 0 <= local < self._frame_count:
+            return None
+        return self._source_origin + local
 
     # ── 解析辅助 ──
 

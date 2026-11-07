@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
     QScrollBar, QSizePolicy, QSlider, QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
 
+from src.features.color.core.keyframe_tracks import DYNAMIC_WEIGHT_MAX, segment_weight
+
 from .color_keyframes_view_state import (
     EditKind, EditRequest, KeyKind, KeyRef, Marker, Scope, Snapshot, Track, demo_snapshot, tr,
 )
@@ -46,10 +48,8 @@ class _DissolveGraph(QWidget):
         points = []
         for i in range(65):
             x = i / 64
-            # Illustrative only; the eventual evaluator defines the exact curve.
-            a, b = x ** self.start, (1 - x) ** self.end
             points.append(QPoint(round(rect.left() + x * rect.width()),
-                                 round(rect.bottom() - a / (a + b) * rect.height())))
+                                 round(rect.bottom() - segment_weight(x, self.start, self.end) * rect.height())))
         p.drawPolyline(QPolygon(points))
 
 
@@ -76,7 +76,7 @@ class _DissolveDialog(QDialog):
         label = QLabel(name)
         slider = QSlider(_HORIZONTAL)
         slider.setAccessibleName(name)
-        slider.setRange(10, 100)
+        slider.setRange(0, round(DYNAMIC_WEIGHT_MAX * 10))
         slider.setValue(round(initial * 10))
         value = QLabel(f"{slider.value() / 10:g}")
         value.setMinimumWidth(28)
@@ -101,6 +101,7 @@ class ColorKeyframesPanel(QWidget):
     # viewport's nonblocking scrub lane and settles the exact release frame.
     scrub_started = pyqtSignal()
     scrub_finished = pyqtSignal()
+    scrub_cancelled = pyqtSignal()
     expand_requested = pyqtSignal(bool)
 
     def __init__(self, parent: QWidget | None = None, *, demo: bool = False) -> None:
@@ -196,6 +197,10 @@ class ColorKeyframesPanel(QWidget):
         self.expand_button.toggled.connect(self._expand_changed)
         toolbar.addWidget(self.expand_button)
         layout.addWidget(header)
+        self.edit_notice = QLabel()
+        self.edit_notice.setContentsMargins(8, 3, 8, 3)
+        self.edit_notice.setWordWrap(True)
+        layout.addWidget(self.edit_notice)
 
         body = QHBoxLayout()
         body.setSpacing(0)
@@ -224,6 +229,8 @@ class ColorKeyframesPanel(QWidget):
             self.horizontal.setValue(0)
             self.vertical.setValue(0)
         self.snapshot = snapshot
+        self.edit_notice.setText(snapshot.edit_notice)
+        self.edit_notice.setVisible(bool(snapshot.edit_notice))
         self.playhead = self.clamp(snapshot.playhead)
         self.timeline.cancel_gesture()
         self._tracks.clear()
@@ -376,6 +383,8 @@ class ColorKeyframesPanel(QWidget):
         self._rebuild_rows()
 
     def can_edit(self, track_id: str) -> bool:
+        if self.snapshot.edit_notice:
+            return False
         while track_id:
             track = self._tracks[track_id]
             if track.locked or not track.available:
@@ -390,7 +399,7 @@ class ColorKeyframesPanel(QWidget):
                 kind: KeyKind = "static", delta: int = 0, start: float = 1.0,
                 end: float = 1.0, enabled: bool = False,
                 sources: tuple[KeyRef, ...] = (), source_context: str = "") -> None:
-        if not self.snapshot.frame_count or not targets or any(
+        if self.snapshot.edit_notice or not self.snapshot.frame_count or not targets or any(
             track not in self._tracks or not 0 <= frame < self.snapshot.frame_count
             for track, frame in targets
         ):
@@ -401,10 +410,15 @@ class ColorKeyframesPanel(QWidget):
             self._apply_demo(edit)
         else:
             self.edit_requested.emit(edit)
+            if action == "move" and self.snapshot.context == edit.context:
+                moved = {(track, frame + delta) for track, frame in targets}
+                if moved.issubset(self._markers) and not (set(targets) - moved).intersection(self._markers):
+                    self.selected.update(moved)
+                    self.timeline.invalidate()
 
     def row_action(self, track_id: str, column: int) -> None:
         track = self._tracks.get(track_id)
-        if track is None or not track.available:
+        if track is None or not track.available or not track.row_controls:
             return
         if column == 1 and self.can_edit(self._parents[track_id]):
             self.request("lock", ((track_id, self.playhead),), enabled=not track.locked)
@@ -665,6 +679,7 @@ class _Timeline(QWidget):
         p.setClipRect(left, _RULER, self.width() - left, max(0, self.height() - _RULER))
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         for row, _, y in rows:
+            p.setOpacity(1.0 if self.panel.can_edit(row) else 0.48)
             self._paint_markers(p, row, y + _ROW // 2)
         p.restore()
 
@@ -700,19 +715,20 @@ class _Timeline(QWidget):
         mid = y + _ROW // 2
         p.save()
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QColor("#151518"))
-        color = "#ededee" if track.enabled and track.available else "#56565d"
-        p.setBrush(QColor(color))
-        p.drawEllipse(QPoint(12, mid), 4, 4)
-        inherited_lock = not self.panel.can_edit(self.panel._parents[row])
-        lock = track.locked or inherited_lock
-        p.setPen(QColor("#d1d1d7" if lock else "#5b5b62"))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawArc(QRect(25 + (0 if lock else 2), mid - 6, 6, 8), 0, 180 * 16)
-        p.drawRoundedRect(QRect(24, mid - 1, 9, 6), 1, 1)
-        p.setPen(QColor("#151518"))
-        p.setBrush(QColor(_RED if track.auto else "#888990"))
-        p.drawPolygon(self._diamond(45, mid, 5))
+        if track.row_controls:
+            p.setPen(QColor("#151518"))
+            color = "#ededee" if track.enabled and track.available else "#56565d"
+            p.setBrush(QColor(color))
+            p.drawEllipse(QPoint(12, mid), 4, 4)
+            inherited_lock = not self.panel.can_edit(self.panel._parents[row])
+            lock = track.locked or inherited_lock
+            p.setPen(QColor("#d1d1d7" if lock else "#5b5b62"))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawArc(QRect(25 + (0 if lock else 2), mid - 6, 6, 8), 0, 180 * 16)
+            p.drawRoundedRect(QRect(24, mid - 1, 9, 6), 1, 1)
+            p.setPen(QColor("#151518"))
+            p.setBrush(QColor(_RED if track.auto else "#888990"))
+            p.drawPolygon(self._diamond(45, mid, 5))
         x = self._disclosure_x(depth)
         if track.children:
             p.setPen(QColor("#a4a4a8"))
@@ -890,12 +906,12 @@ class _Timeline(QWidget):
             delta = round((event.position().toPoint().x() - self._origin.x()) / self.scale)
         refs = tuple(sorted(self._move_refs))
         moved = self._gesture == "move" and delta != 0 and self.panel.move_allowed(self._move_refs, delta)
-        self.cancel_gesture()
+        self.cancel_gesture(settle=True)
         if moved:
             self.panel.request("move", refs, delta=delta)
         event.accept()
 
-    def cancel_gesture(self) -> None:
+    def cancel_gesture(self, *, settle: bool = False) -> None:
         was_seek = self._gesture == "seek"
         self._origin = None
         self._gesture = ""
@@ -904,9 +920,8 @@ class _Timeline(QWidget):
         self.unsetCursor()
         self.invalidate()
         if was_seek:
-            # 单一收口：release / Hide / WindowDeactivate / 换快照都会走
-            # 这里，宿主据此结算 scrub 车道的精确帧。
-            self.panel.scrub_finished.emit()
+            signal = self.panel.scrub_finished if settle else self.panel.scrub_cancelled
+            signal.emit()
 
     def wheelEvent(self, event: QWheelEvent | None) -> None:
         if event is None:
@@ -927,12 +942,14 @@ class _Timeline(QWidget):
             p = event.pos()
             row = self._row_at(p.y())
             track = self.panel._tracks.get(row)
-            if track is not None and p.x() < self.divider:
-                if p.x() < 20:
+            if track is not None and (p.x() < self.divider or track.unavailable_reason):
+                if track.unavailable_reason:
+                    tip = track.unavailable_reason
+                elif track.row_controls and p.x() < 20:
                     tip = tr("enable", "Enable / Disable")
-                elif p.x() < 37:
+                elif track.row_controls and p.x() < 37:
                     tip = tr("lock", "Lock / Unlock")
-                elif p.x() < 53:
+                elif track.row_controls and p.x() < 53:
                     tip = tr("auto", "Auto Keyframe")
                 else:
                     tip = track.label
@@ -977,9 +994,10 @@ class _Timeline(QWidget):
         menu = QMenu(self)
         original = panel.snapshot
 
-        def apply(action: EditKind, targets: tuple[KeyRef, ...], kind: KeyKind = "static") -> None:
+        def apply(action: EditKind, targets: tuple[KeyRef, ...],
+                  kind: KeyKind = "static", *, delta: int = 0) -> None:
             if panel.snapshot is original:
-                panel.request(action, targets, kind=kind)
+                panel.request(action, targets, kind=kind, delta=delta)
 
         def edit_attributes() -> None:
             if panel.snapshot is original:
@@ -998,6 +1016,17 @@ class _Timeline(QWidget):
                            lambda: apply("delete", chosen)).setEnabled(bool(chosen))
             menu.addAction(tr("attributes", "Change Dynamic Attributes…"),
                            edit_attributes).setEnabled(bool(dynamics))
+            menu.addSeparator()
+            selection = set(chosen)
+            menu.addAction(tr("move_left", "Move Selected Keyframes Left"),
+                           lambda: apply("move", chosen, delta=-1)).setEnabled(panel.move_allowed(selection, -1))
+            menu.addAction(tr("move_right", "Move Selected Keyframes Right"),
+                           lambda: apply("move", chosen, delta=1)).setEnabled(panel.move_allowed(selection, 1))
+            if row == _MASTER:
+                keys = tuple(sorted(panel._markers))
+                menu.addAction(tr("delete_visible", "Delete All Visible Keyframes"),
+                               lambda: apply("delete", keys)).setEnabled(
+                                   bool(keys) and all(panel.can_edit(track) for track, _ in keys))
             menu.addSeparator()
         menu.addAction(tr("max_zoom", "Maximum Zoom"), lambda: panel.zoom.setValue(100))
         menu.addAction(tr("reset_zoom", "Reset Zoom"), lambda: panel.zoom.setValue(0))

@@ -572,6 +572,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
 
         if not self._test_mode:
             self.setup_docks()
+            self._wire_color_keyframes_host()
             self.setup_menus()
             # Sync mask overlay state between Viewport panel and main window shortcut
             self.canvas.viewport_menu.mask_toggled.connect(
@@ -1524,21 +1525,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         # 失败不阻断启动（color_graph_host=None → 原工作流不变）。
         self._wire_color_graph_host()
 
-        # KF-02：关键帧面板只读宿主（权威投影 + 播放头双向同步）。
-        self._wire_color_keyframes_host()
-
     def _wire_color_keyframes_host(self) -> None:
-        """装配 ColorKeyframesHost（关键帧面板只读接线，KF-02）。
-
-        - 下行：clip 水合（page_controller）/ 会话切换（observer）/
-          工程发布（_set_project 闭包）三类触发点重建只读投影；
-        - 播放头：video 帧钩子按 clip-local 域回填（file_controller
-          _on_color_video_source_frame_changed 转发）；
-        - 上行：seek 复用既有协议，ruler 拖拽走视口 scrub 车道；
-        - 写入口保持关闭：edit_requested 核对会话后丢弃（KF-03 开放）。
-
-        失败不阻断启动（宿主缺席时面板保持演示数据）。
-        """
+        """装配关键帧面板、播放头和图命令。停靠面板创建后调用。"""
         self._color_keyframes_host = None
         self._color_keyframes_frame_hook = None
         panel = getattr(self, "color_keyframes_panel", None)
@@ -1566,12 +1554,19 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 return (manager.get_current_session()
                         if manager is not None else None)
 
+            def _timeline_fps(timeline_id: str) -> int:
+                project = getattr(self, "_current_edit_project", None)
+                timeline = project.timelines.get(timeline_id) if project is not None else None
+                return round(float(timeline.fps)) if timeline is not None else 0
+
             host = ColorKeyframesHost(
                 panel,
                 graph_provider=_graph_provider,
                 active_node_provider=_active_node_provider,
                 session_provider=_session_provider,
                 playback=self,
+                stack_id_provider=lambda: self.color_graph_host.bound_stack_id,
+                fps_provider=_timeline_fps,
                 # KF-03：真实写入口（批处理一次提交 = 一个历史条目；
                 # lock/enable 复用既有节点级命令）
                 submit_batch=self.color_graph_host.submit_keyframe_batch,
@@ -1598,7 +1593,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             if manager is not None:
                 manager.add_session_observer(_on_session_changed)
             host.refresh()
-            logger.debug("color keyframes host wired (read-only projection)")
+            logger.debug("color keyframes host wired")
         except Exception:
             logger.warning("color keyframes host wiring failed",
                            exc_info=True)
@@ -1721,6 +1716,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                     self.canvas.update_mask_overlay(active_layer)
         finally:
             self._set_color_stack_hydration_guard(False)
+        self._color_keyframes_host_refresh()
 
     def _on_color_window_combo(self, combo: str, node_id: str) -> None:
         """成功的组合命令选中 Window，曲线组合进入绘制状态。"""

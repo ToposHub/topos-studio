@@ -131,15 +131,17 @@ def test_refresh_pushes_readonly_projection(qtbot):
     assert snapshot.context.startswith("p1|t1|c1|s1")
     assert snapshot.frame_count == 120
     assert snapshot.timecode_fps == 24
-    assert len(snapshot.tracks) == 3  # 三个 Corrector 节点行
+    assert len([track for track in snapshot.tracks if track.scope == "color"]) == 3
+    assert not snapshot.tracks[-1].available  # Sizing placeholder is explicitly read-only.
     first = snapshot.tracks[0]
     assert first.id == f"node:{node_id}"
-    leaf_ids = {child.id for child in first.children}
+    leaves = [leaf for group in first.children for leaf in group.children]
+    leaf_ids = {leaf.id for leaf in leaves}
     # grade 叶轨（图命令域）与窗口叶轨（legacy 合并域）同树投影
     assert f"node:{node_id}|exposure" in leaf_ids
     assert any(leaf_id.endswith("|mask.11111111-2222-3333-4444-555555555555.center")
                for leaf_id in leaf_ids)
-    exposure = next(child for child in first.children
+    exposure = next(child for child in leaves
                     if child.id == f"node:{node_id}|exposure")
     assert [marker.frame for marker in exposure.markers] == [10, 30]
     assert all(marker.kind == "dynamic" for marker in exposure.markers)
@@ -180,11 +182,49 @@ def test_snapshot_builder_aggregates_metadata(qtbot):
     graph, _sid, _node = _graph_with_keyframes()
     snapshot = build_keyframes_snapshot(
         context="ctx", frame_count=48, timecode_fps=25, playhead=7,
-        corrector="node:missing", graph=graph)
+        corrector="", graph=graph)
     assert snapshot.context == "ctx"
     assert snapshot.timecode_fps == 25
-    # corrector 不在树内时回退首行（面板 scope_row 的稳定目标）
+    # 初始没有节点选择时回退首行。
     assert snapshot.corrector == snapshot.tracks[0].id
+
+
+def test_clip_trim_projects_local_frames_and_edits_source_frames(qtbot):
+    graph, _sid, node_id = _graph_with_keyframes()
+    playback = _FakePlayback(total=20)
+    playback.clip.source_start = 20
+    panel, host, _ = _host(qtbot, graph, playback=playback)
+    submissions = []
+    host._submit_batch = lambda edits: submissions.append(edits) or True
+    assert host.refresh()
+    leaf = f"node:{node_id}|exposure"
+    assert (leaf, 10) in panel._markers  # Source 30.
+    assert (leaf, 0) not in panel._markers  # Source 10 is outside the trim.
+    panel.request("add", ((leaf, 12),))
+    panel.request("move", ((leaf, 10),), delta=2)
+    assert submissions[0][0]["frame"] == 32
+    assert (submissions[1][0]["frame"], submissions[1][0]["to_frame"]) == (30, 32)
+    playback.clip.speed = 0.5
+    assert host.refresh()
+    assert panel.snapshot.edit_notice
+    panel.request("add", ((leaf, 13),))
+    assert len(submissions) == 2
+
+
+def test_active_corrector_refresh_and_expired_binding_cannot_submit(qtbot):
+    graph, _sid, _node = _graph_with_keyframes()
+    panel, host, _ = _host(qtbot, graph)
+    assert host.refresh()
+    second = panel.snapshot.tracks[1].id
+    host._active_node_provider = lambda: second.removeprefix("node:")
+    assert host.refresh()
+    assert panel.snapshot.corrector == second
+    submissions = []
+    host._submit_batch = lambda edits: submissions.append(edits) or True
+    host._session_provider = lambda: None
+    panel.request("add", ((f"{second}|exposure", 16),))
+    assert not submissions
+    assert not panel.snapshot.context
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +273,18 @@ def test_ruler_scrub_uses_viewport_scrub_lane(qtbot):
     kinds = [kind for kind, _frame in playback.calls]
     # 首个 seek 初始化车道（scrub_started），其余走 moved，release 结算
     assert kinds == ["scrub_started", "scrub_moved", "scrub_moved",
-                     "scrub_finished"]
-    assert playback.calls[-1] == ("scrub_finished", 30)  # release 最后一帧
+                     "scrub_finished", "seek"]
+    assert playback.calls[-1] == ("seek", 30)
+
+
+def test_cancelling_scrub_does_not_seek(qtbot):
+    graph, _sid, _node = _graph_with_keyframes()
+    panel, host, playback = _host(qtbot, graph)
+    assert host.refresh()
+    panel.scrub_started.emit()
+    panel.seek(10)
+    panel.scrub_cancelled.emit()
+    assert playback.calls == [("scrub_started", 10), ("scrub_finished", 10)]
 
 
 def test_scrub_finished_without_lane_start_is_noop(qtbot):
@@ -275,7 +325,7 @@ def test_context_switch_rebuilds_projection(qtbot):
     session.clip_id = "c2"  # 切片段：身份键变化 → 面板换投影
     assert host.refresh(force=True) is True
     assert panel.snapshot.context != first_context
-    assert panel.snapshot.context.endswith("|c2|s1")
+    assert panel.snapshot.context.split("|")[2:4] == ["c2", "s1"]
 
 
 def test_bound_graph_accessor_reads_bound_stack():
@@ -554,7 +604,8 @@ class TestRealWriteEntry:
         leaf = f"node:{nodes[0]}|mask.{shape_id}.center"
         assert any(child.id == leaf
                    for row in panel.snapshot.tracks
-                   for child in row.children)  # 形状叶轨常驻投影
+                   for group in row.children
+                   for child in group.children)  # 形状叶轨常驻投影
         revision0 = app_host.bound_graph().graph_revision
         panel.request("add", ((leaf, 8),))
         graph = app_host.bound_graph()

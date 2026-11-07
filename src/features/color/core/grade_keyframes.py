@@ -254,7 +254,7 @@ class GradeKeyframeTrack:
         for index in range(len(keyframes) - 1):
             left = keyframes[index]
             right = keyframes[index + 1]
-            if left.frame <= frame <= right.frame:
+            if left.frame <= frame < right.frame:
                 span = right.frame - left.frame
                 t = 0.0 if span <= 0 else (frame - left.frame) / span
                 t = _interp_factor(t, left.interpolation)

@@ -397,7 +397,7 @@ class DockLayoutMixin:
         from src.features.color.ui.color_keyframes_panel import ColorKeyframesPanel
         from src.features.color.ui.color_keyframes_view_state import tr as keyframes_tr
 
-        self.color_keyframes_panel = ColorKeyframesPanel(demo=True)
+        self.color_keyframes_panel = ColorKeyframesPanel()
         self.dock_color_keyframes = create_custom_dock(
             keyframes_tr("title", "Keyframes"), self.color_keyframes_panel, "dockColorKeyframes"
         )

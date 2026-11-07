@@ -9,6 +9,8 @@ fail-closed。trim/retime 恒速域语义（源帧域）；剪贴板/定义级�
 """
 from __future__ import annotations
 
+from copy import deepcopy
+
 import numpy as np
 import pytest
 
@@ -135,6 +137,8 @@ class TestFrameEvaluation:
                        if n.node_id == node.node_id)
         payload = node_layer_payload(patched)
         assert payload["grade_keyframes"]["exposure"]["keyframes"]
+        # Export copies projected layer DTOs, including graph-owned keyframes.
+        assert deepcopy(payload["grade_keyframes"]) == payload["grade_keyframes"]
         # legacy 基底轨道并存（params 逐 param 胜出）
         assert payload["grade_keyframes"]  # 合并结果非空
 

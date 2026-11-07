@@ -88,6 +88,9 @@ def test_value_at_hold_and_ease_interpolation():
     hold.set_keyframe(0, 0.0, interpolation="hold")
     hold.set_keyframe(10, 10.0)
     assert hold.value_at(5, 0.0) == 0.0  # hold 保持左值
+    hold.set_keyframe(20, 20.0)
+    assert hold.value_at(9, 0.0) == 0.0
+    assert hold.value_at(10, 0.0) == 10.0  # 内部键从自身帧生效
 
     ease = GradeKeyframeTrack("exposure")
     ease.set_keyframe(0, 0.0, interpolation="ease")
