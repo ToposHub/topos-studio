@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # KF-01：轨道注册表与编解码的单一权威在 keyframe_tracks——本模块保留
 # Layer 域轨道类与求值行为，白名单/轨道名助手从此再导出（既有导入方
@@ -34,16 +34,24 @@ from src.features.color.core.keyframe_tracks import (  # noqa: F401
     CIRCULAR_QUALIFIER_FIELDS,
     GRADE_KEYFRAME_PARAMS,
     INTERPOLATION_MODES,
+    KEY_KINDS,
+    KEY_KIND_STATIC,
     MASK_KEYFRAME_FIELDS,
     MASK_TRACK_PREFIX,
     QUALIFIER_KEYFRAME_FIELDS,
     QUALIFIER_TRACK_PREFIX,
+    DecodedKeyframe,
+    decode_keyframe,
+    dynamics_to_legacy_mode,
+    encode_keyframe,
     expected_value_size,
     is_qualifier_animatable,
+    legacy_mode_to_dynamics,
     mask_track_name,
     parse_mask_track_name,
     parse_qualifier_track_name,
     qualifier_track_name,
+    segment_weight,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,55 +86,78 @@ class GradeKeyframe:
             tuple/list（vec3 轨道）。
         interpolation: 到**下一**关键帧的插值模式
             （"linear" / "ease" / "hold"，非法值回退 linear）。
+        kind/start/end: KF-01 键型与动态属性（static/dynamic + 入出
+            权重）。``kind=""``（缺省）由插值模式派生——legacy 构造
+            兼容；显式给出时以键型为权威，interpolation 随键型归一。
+            序列化经 ``encode_keyframe``/``decode_keyframe`` 单一入口
+            （canonical-minimal：等价键型不落盘，非等价显式持久化）。
     """
 
     frame: int
     value: Any  # float 或 3 元素 tuple/list
     interpolation: str = "linear"  # 到下一帧的插值模式
+    kind: str = ""                 # 缺省由插值模式派生（legacy 构造）
+    start: float = 1.0
+    end: float = 1.0
 
     def __post_init__(self) -> None:
-        """规范化存储：frame 强转 int，非法插值模式回退 "linear"。"""
+        """规范化存储：frame 强转 int，键型与插值模式互相同步。
+
+        R2：段求值需要每键的显式动态属性——legacy 构造（kind 缺省）
+        按插值模式派生等价键型；显式键型归一 interpolation。构造期
+        同步缓存 ``legacy_equivalent``（键型与插值模式等价判据），
+        求值热路径不再逐帧重算。
+        """
         self.frame = int(self.frame)
         if self.interpolation not in INTERPOLATION_MODES:
             self.interpolation = "linear"
+        if self.kind in KEY_KINDS:
+            self.start = float(self.start)
+            self.end = float(self.end)
+            self.interpolation = dynamics_to_legacy_mode(
+                self.kind, self.start, self.end)
+        else:
+            # legacy 构造 / 非法键型：由插值模式派生等价键型。
+            # (start, end) 未显式定制（保持默认 1.0）时跟随模式等价对。
+            derived_kind, derived_start, derived_end = (
+                legacy_mode_to_dynamics(self.interpolation))
+            self.kind = derived_kind
+            self.start = derived_start if self.start == 1.0 else float(self.start)
+            self.end = derived_end if self.end == 1.0 else float(self.end)
+        self.legacy_equivalent = (
+            (self.kind, self.start, self.end)
+            == legacy_mode_to_dynamics(self.interpolation))
 
     def to_dict(self) -> Dict[str, Any]:
-        """序列化为可 JSON 持久化的 dict（value 归一为 float 或 list[float]）。"""
-        value = self.value
-        if isinstance(value, (tuple, list)):
-            value = [float(v) for v in value]
-        else:
-            value = float(value)
-        return {
-            "frame": self.frame,
-            "value": value,
-            "interpolation": self.interpolation,
-        }
+        """序列化为可 JSON 持久化的 dict。
+
+        R2：经 KF-01 ``encode_keyframe`` 单一入口——canonical-minimal
+        （与插值模式等价的键型信息不落盘，legacy 载荷逐字节不变）；
+        非等价显式动态属性（kind/start/end）显式持久化（KF-05）。
+        """
+        return encode_keyframe(DecodedKeyframe(
+            frame=self.frame, value=self.value,
+            interpolation=self.interpolation, kind=self.kind,
+            start=self.start, end=self.end))
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GradeKeyframe":
-        """从序列化 dict 重建关键帧（缺省 frame=0 / value=0.0 / linear）。
+        """从序列化 dict 重建关键帧（R2：经 KF-01 ``decode_keyframe``
+        单一入口——显式键型/权重随载荷进入求值域，不再丢失）。
 
         AUD-0520：外部工程数据的 ``value`` 在加载期校验形态——标量须为
         int/float，序列的每个分量须可 float 化；str/dict/None/bool 等
         畸形值抛 ValueError，由 ``Track.from_dict`` 逐帧容错跳过，不再
         延迟到渲染/保存热路径（``value_at`` 的 float()/zip）才崩溃。
         """
-        value = data.get("value", 0.0)
-        if isinstance(value, (tuple, list)):
-            if not value:
-                raise ValueError("keyframe value: empty sequence")
-            coerced: Any = tuple(float(component) for component in value)
-        elif isinstance(value, bool) or not isinstance(value, (int, float)):
-            # bool 是 int 子类，但作为关键帧值属畸形数据，显式拒绝
-            raise ValueError(
-                f"keyframe value: unsupported type {type(value).__name__}")
-        else:
-            coerced = float(value)
+        decoded = decode_keyframe(data)
         return cls(
-            frame=int(data.get("frame", 0)),
-            value=coerced,
-            interpolation=str(data.get("interpolation", "linear")),
+            frame=decoded.frame,
+            value=decoded.value,
+            interpolation=decoded.interpolation,
+            kind=decoded.kind,
+            start=decoded.start,
+            end=decoded.end,
         )
 
     def __lt__(self, other: "GradeKeyframe") -> bool:
@@ -181,12 +212,18 @@ class GradeKeyframeTrack:
     # ------------------------------------------------------------------
 
     def set_keyframe(self, frame: int, value: Any,
-                     interpolation: str = "linear") -> None:
+                     interpolation: str = "linear", *,
+                     kind: Optional[str] = None,
+                     start: float = 1.0, end: float = 1.0) -> None:
         """写入/覆盖某帧的关键帧。
 
         同帧覆盖原位替换；新帧追加后重排序，维持轨道升序不变式。
+        ``kind``/``start``/``end`` 显式给出时记录键型与动态属性
+        （R2：与批命令/解码同一键型模型）。
         """
-        kf = GradeKeyframe(frame, value, interpolation)
+        kf = GradeKeyframe(frame, value, interpolation,
+                           kind=kind if kind is not None else "",
+                           start=start, end=end)
         with self._lock:
             for index, existing in enumerate(self.keyframes):
                 if existing.frame == kf.frame:
@@ -227,7 +264,16 @@ class GradeKeyframeTrack:
 
     def value_at(self, frame: int, default: Any,
                  *, circular: bool = False) -> Any:
-        """帧求值：端点保持外推，相邻关键帧间按插值模式混合。
+        """帧求值：端点保持外推，相邻关键帧间按统一权重混合。
+
+        R2 统一求值语义（左闭右开段，精确帧命中左键值）：
+
+        - 静态左键：右侧保持到下一键前（hold）；
+        - 两个 legacy 等价键（键型与插值模式等价，无显式动态属性）：
+          走旧插值路径——帧值与历史版本**逐位一致**；
+        - 任一键携带显式动态属性：A→B 段读 A 的 start、B 的 end，
+          经 ``segment_weight``（Hermite 兼容）求值——动态 A 允许
+          插值到静态 B。
 
         vector 值分量独立插值；default 与关键帧值形态不一致时按标量处理。
         ``circular``（标量专用，N10-B）：0-1 环形量按最短弧插值。
@@ -257,7 +303,13 @@ class GradeKeyframeTrack:
             if left.frame <= frame < right.frame:
                 span = right.frame - left.frame
                 t = 0.0 if span <= 0 else (frame - left.frame) / span
-                t = _interp_factor(t, left.interpolation)
+                if left.kind == KEY_KIND_STATIC:
+                    t = 0.0  # 静态左键：右侧保持
+                elif (getattr(left, "legacy_equivalent", True)
+                        and getattr(right, "legacy_equivalent", True)):
+                    t = _interp_factor(t, left.interpolation)
+                else:
+                    t = segment_weight(t, left.start, right.end)
                 if is_vec:
                     return tuple(
                         _lerp(float(a), float(b), t)

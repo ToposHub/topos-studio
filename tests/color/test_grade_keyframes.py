@@ -810,3 +810,105 @@ class TestMaskKeyframeSnapshot:
         snap = layer.grade_keyframes["mask.s1.center"].get_keyframe(12)
         assert tuple(snap.value) == (0.7, 0.7)
         assert eng.history.snapshots == [[0]]  # push 时 mask 帧 12 尚未写入
+
+
+# ---------------------------------------------------------------------------
+# R2：统一显式 Dynamics 求值（键型/权重进入 value_at；legacy 帧值不变）
+# ---------------------------------------------------------------------------
+
+def test_value_at_explicit_dynamics_weights_hermite():
+    # 0→1、A Start=0、B End=1 的段：25%/50%/75% 处的 Hermite 兼容权重
+    track = GradeKeyframeTrack("exposure")
+    track.set_keyframe(0, 0.0, kind="dynamic", start=0.0, end=0.5)
+    track.set_keyframe(4, 1.0, kind="dynamic", start=0.5, end=1.0)
+    # 段求值读 A 的 start 与 B 的 end
+    assert track.value_at(1, 0.0) == pytest.approx(0.109375)  # w(0.25, 0, 1)
+    assert track.value_at(2, 0.0) == pytest.approx(0.375)     # w(0.5, 0, 1)
+    assert track.value_at(3, 0.0) == pytest.approx(0.703125)  # w(0.75, 0, 1)
+
+
+def test_value_at_static_left_holds_dynamic_left_interpolates():
+    # 静态 A：右侧保持到 B 前；动态 A：允许插值到静态 B
+    static_left = GradeKeyframeTrack("exposure")
+    static_left.set_keyframe(0, 0.0, interpolation="hold")
+    static_left.set_keyframe(10, 10.0)
+    assert static_left.value_at(9, 0.0) == 0.0
+    assert static_left.value_at(10, 0.0) == 10.0
+
+    dynamic_left = GradeKeyframeTrack("exposure")
+    dynamic_left.set_keyframe(0, 0.0, kind="dynamic", start=1.0, end=1.0)
+    dynamic_left.set_keyframe(4, 4.0, interpolation="hold")
+    assert dynamic_left.value_at(2, 0.0) == pytest.approx(2.0)  # 线性到静态 B
+    assert dynamic_left.value_at(3, 0.0) == pytest.approx(3.0)
+
+
+def test_value_at_explicit_dynamics_affects_only_segments_touching_them():
+    # legacy linear A + legacy ease B：两侧均无显式动态 → 旧插值路径
+    # （只看左键模式；帧值与历史版本一致，不引入 B 的 end 权重）
+    track = GradeKeyframeTrack("exposure")
+    track.set_keyframe(0, 0.0, interpolation="linear")
+    track.set_keyframe(4, 1.0, interpolation="ease")
+    assert track.value_at(1, 0.0) == pytest.approx(0.25)  # linear 段恒等
+    assert track.value_at(2, 0.0) == pytest.approx(0.5)
+    assert track.value_at(3, 0.0) == pytest.approx(0.75)
+
+    # A 携带显式非等价动态 → 统一权重（读 A.start=0、B.end=1）
+    explicit = GradeKeyframeTrack("exposure")
+    explicit.set_keyframe(0, 0.0, kind="dynamic", start=0.0, end=1.0)
+    explicit.set_keyframe(4, 1.0, interpolation="ease")  # B legacy (0,0)
+    assert explicit.value_at(1, 0.0) == pytest.approx(
+        0.15625)  # w(0.25, A.start=0, B.end=0)
+
+
+def test_value_at_vec3_and_circular_with_explicit_dynamics():
+    vec = GradeKeyframeTrack("lift")
+    vec.set_keyframe(0, (0.0, 0.0, 0.0), kind="dynamic",
+                     start=0.0, end=1.0)
+    vec.set_keyframe(4, (1.0, 2.0, -1.0))
+    value = vec.value_at(1, (0, 0, 0))
+    assert value == pytest.approx(
+        (0.109375, 0.21875, -0.109375))  # 分量独立按统一权重
+
+    hue = GradeKeyframeTrack("qualifier.hue_center")
+    hue.set_keyframe(0, 0.9, kind="dynamic", start=0.0, end=1.0)
+    hue.set_keyframe(4, 0.1)  # 最短弧 0.9 → 1.0(+0.1)
+    # w(0.5, A.start=0, B.end=1)=0.375 → 0.9 + 0.2×0.375 = 0.975
+    assert hue.value_at(2, 0.0, circular=True) == pytest.approx(0.975)
+
+
+def test_keyframe_dynamics_roundtrip_and_legacy_equivalence():
+    # 序列化 canonical-minimal：legacy 键逐字节不变；显式动态落盘并往返
+    legacy = GradeKeyframe(3, 1.5, "ease")
+    assert legacy.to_dict() == {"frame": 3, "value": 1.5,
+                                "interpolation": "ease"}
+    assert legacy.kind == "dynamic" and legacy.legacy_equivalent
+
+    explicit = GradeKeyframe(3, 1.5, "linear", kind="dynamic",
+                             start=0.25, end=0.75)
+    payload = explicit.to_dict()
+    assert payload == {"frame": 3, "value": 1.5, "interpolation": "linear",
+                       "kind": "dynamic", "start": 0.25, "end": 0.75}
+    restored = GradeKeyframe.from_dict(payload)
+    assert (restored.kind, restored.start, restored.end) == (
+        "dynamic", 0.25, 0.75)
+    assert not restored.legacy_equivalent
+    assert restored.value_at if False else restored.value == 1.5
+
+    # from_dict 经 decode：畸形值与负帧在加载期拒绝（AUD-0520 收口）
+    with pytest.raises(ValueError):
+        GradeKeyframe.from_dict({"frame": 0})
+    with pytest.raises(ValueError):
+        GradeKeyframe.from_dict({"frame": -1, "value": 1.0})
+
+
+def test_track_serialization_keeps_explicit_dynamics():
+    track = GradeKeyframeTrack("exposure")
+    track.set_keyframe(0, 0.0, kind="dynamic", start=0.5, end=0.5)
+    track.set_keyframe(10, 1.0)  # legacy linear
+    data = track.to_dict()
+    assert data["keyframes"][0]["start"] == 0.5
+    assert "kind" not in data["keyframes"][1]  # legacy 键 canonical-minimal
+    restored = GradeKeyframeTrack.from_dict(data)
+    assert restored.get_keyframe(0).start == 0.5
+    # 求值语义随往返保留（A.start=0.5、B.end=1 → w(0.5,0.5,1)=0.4375）
+    assert restored.value_at(5, 0.0) == pytest.approx(0.4375)

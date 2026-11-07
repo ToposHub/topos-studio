@@ -287,3 +287,52 @@ def test_two_animated_nodes_both_evaluate_per_frame():
     # 未动画节点保持完整 base 参数
     third = provider(nodes[2].node_id)
     assert third["grading_params"]["saturation"] == pytest.approx(1.15)
+
+
+class TestExplicitDynamicsEvaluation:
+    """R2：显式键型/权重经 provider、求值与持久化往返保持一致。"""
+
+    def _seeded_graph(self):
+        graph = _graph()
+        node = _corrector(graph)
+        service = ColorGraphService()
+        seeded = service.apply_intent(graph, "batch_edit_keyframes",
+                                      {"edits": [
+            {"action": "set", "node_id": node.node_id,
+             "param": "exposure", "frame": 0, "value": 0.0,
+             "kind": "dynamic", "start": 0.0, "end": 1.0},
+            {"action": "set", "node_id": node.node_id,
+             "param": "exposure", "frame": 4, "value": 1.0},
+        ]})
+        assert seeded.ok, seeded.diagnostics
+        return seeded.graph, node.node_id
+
+    def test_provider_evaluates_unified_weight(self):
+        graph, node_id = self._seeded_graph()
+        # A 显式 dynamic(0,·)，B legacy linear(1,1)：段读 A.start=0、B.end=1
+        by_frame = {
+            frame: graph_node_layer_provider(graph, frame)(
+                node_id)["grading_params"]["exposure"]
+            for frame in (0, 1, 2, 3, 4)}
+        assert by_frame == {0: 0.0, 1: pytest.approx(0.109375),
+                            2: pytest.approx(0.375),
+                            3: pytest.approx(0.703125), 4: 1.0}
+
+    def test_save_reopen_preserves_explicit_dynamics(self):
+        # 保存边界：图 → 工程栈 → to_dict → from_dict（重开）→ 求值一致
+        from src.features.edit.core.project import EditProject
+        from src.shared.project.color_stack import ColorStackData
+        graph, node_id = self._seeded_graph()
+        project, sid = EditProject.create(name="r2").create_color_stack(
+            asset_id="a1", name="s")
+        project = project.update_color_stack(sid, color_graph=graph)
+        restored = ColorStackData.from_dict(
+            project.color_stacks[sid].to_dict()).color_graph
+        assert restored is not None
+        values = {
+            frame: graph_node_layer_provider(restored, frame)(
+                node_id)["grading_params"]["exposure"]
+            for frame in (1, 2, 3)}
+        assert values == {1: pytest.approx(0.109375),
+                          2: pytest.approx(0.375),
+                          3: pytest.approx(0.703125)}
