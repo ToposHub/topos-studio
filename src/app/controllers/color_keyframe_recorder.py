@@ -35,7 +35,9 @@ class KeyframeAutoRecorder:
         self._auto: Dict[str, bool] = {}          # node_id → 开关
         self._gesture_frame: Optional[int] = None
         self._gesture_open = False
-        self._pending: Dict[Tuple[str, str], Any] = {}  # (node,param) → 最后值
+        # (node,param) → (最后值, compound 路径)——身份含路径（R6.1），
+        # compound 成员的批命令须带 _compound_path 下行才找得到节点
+        self._pending: Dict[Tuple[str, str], Tuple[Any, Tuple[str, ...]]] = {}
 
     # ── 开关（会话域；面板 auto 列）──
 
@@ -57,11 +59,15 @@ class KeyframeAutoRecorder:
     # ── 手势收集（仅调色手势路径调用）──
 
     def observe(self, node_id: str, param_name: str, value: Any,
-                frame: Optional[int]) -> None:
+                frame: Optional[int],
+                compound_path: Tuple[str, ...] = ()) -> None:
         """手势中的一次真实参数改动（最后值生效）。
 
         只收集登记的可动画参数；auto 关闭的节点不收集。首次观察绑定
         有效帧（源帧域；播放上下文缺席 → None，flush 时整批放弃）。
+        ``compound_path``：目标节点的 compound 下行路径（R6.1 身份含
+        路径——compound 成员的批命令不带路径会被 node_not_found 整批
+        拒，录制静默丢失）。
         """
         if parse_track_name(str(param_name)) is None:
             return  # 未登记字段不可动画（工具覆盖清单）
@@ -71,7 +77,8 @@ class KeyframeAutoRecorder:
             self._gesture_open = True
             self._gesture_frame = int(frame) if frame is not None else None
             self._pending.clear()
-        self._pending[(str(node_id), str(param_name))] = value
+        self._pending[(str(node_id), str(param_name))] = (
+            value, tuple(str(step) for step in compound_path))
 
     def take_pending_edits(self) -> list:
         """手势结束：把收集的参数差值转为批处理条目并复位手势。
@@ -79,22 +86,31 @@ class KeyframeAutoRecorder:
         - 无播放上下文（帧未绑定）→ 放弃录制（不猜帧）；
         - 值与帧无关的判重交给批处理命令的 no-op 语义（重复置值不入史）。
         """
+        return [edit for _path, group in
+                self.take_pending_edit_groups().items() for edit in group]
+
+    def take_pending_edit_groups(
+            self) -> Dict[Tuple[str, ...], list]:
+        """同 take_pending_edits，但按 compound 路径分组返回
+        ``{path: [批处理条目]}``——flush 侧每路径一次 apply_intent
+        （``_compound_path`` 下行），同一手势事务仍是一个历史条目。
+        """
         if not self._gesture_open:
-            return []
-        edits = []
+            return {}
+        groups: Dict[Tuple[str, ...], list] = {}
         frame = self._gesture_frame
-        for (node_id, param), value in self._pending.items():
+        for (node_id, param), (value, path) in self._pending.items():
             if frame is None:
                 logger.debug("auto-record dropped: no effective frame")
                 continue
-            edits.append({
+            groups.setdefault(path, []).append({
                 "action": "set", "node_id": node_id, "param": param,
                 "frame": int(frame), "value": value,
                 # 自动录制建立动态帧（linear）；实测档位待 KF-00
                 "interpolation": "linear",
             })
         self._discard_gesture()
-        return edits
+        return groups
 
     def _discard_gesture(self) -> None:
         self._gesture_open = False

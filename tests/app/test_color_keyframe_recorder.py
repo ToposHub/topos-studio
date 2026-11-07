@@ -267,3 +267,86 @@ class TestToolGestureRecord:
             node_id, {"lum_low": 0.2}, transaction)
         assert app_host.end_grade_gesture()
         assert self._tracks(app_host, node_id) == {}
+
+
+class TestCompoundChildRecord:
+    """R6 审计：compound 成员的手势录制（批命令须带 _compound_path）。"""
+
+    def _wired_compound(self, source_frame=42):
+        from src.app.controllers.color_graph_controller import (
+            ColorGraphAppHost,
+        )
+        from src.features.color.core.color_graph_service import ColorGraphService
+        from src.features.edit.core.commands import ProjectCommandStack
+        project, sid = EditProject.create(name="kf06c").create_color_stack(
+            asset_id="a1", name="s")
+        stack = project.color_stacks[sid].with_layers(
+            [layer.to_dict(None) for layer in f03_layer_stack()])
+        graph = migrate_legacy_stack(stack)
+        # 前两个 Corrector 组成 compound——工具手势以成员为 target
+        counter = iter(range(500))
+        service = ColorGraphService(id_factory=lambda: f"g{next(counter)}")
+        correctors = [n.node_id for n in graph.nodes
+                      if n.node_type == "corrector"]
+        grouped = service.apply_intent(graph, "group_subgraph", {
+            "member_ids": correctors[:2]})
+        assert grouped.ok, grouped.diagnostics
+        graph = grouped.graph
+        compound = next(n for n in graph.nodes
+                        if n.compound_children is not None)
+        child = next(n for n in compound.compound_children.nodes
+                     if n.node_type == "corrector")
+        project = project.update_color_stack(sid, color_graph=graph)
+        holder = {"project": project}
+        engine = Mock()
+        engine.layers = []
+        app_host = ColorGraphAppHost(
+            get_project=lambda: holder["project"],
+            set_project=lambda p: holder.__setitem__("project", p),
+            project_stack=ProjectCommandStack(),
+            engine_provider=lambda: engine,
+            request_render=lambda: None, panels_provider=lambda: {})
+        app_host.on_clip_stack_loaded(sid)
+        recorder = KeyframeAutoRecorder()
+        app_host.attach_keyframe_recorder(
+            recorder, frame_provider=lambda: source_frame)
+        # 工具路径：面板父链指向 compound
+        from types import SimpleNamespace as _NS
+        app_host._panel = _NS(_parents=(("compound", compound.node_id),))
+        return app_host, holder, recorder, child.node_id
+
+    def test_compound_child_tool_gesture_records(self):
+        app_host, _holder, recorder, child_id = self._wired_compound()
+        recorder.set_auto(child_id, True)
+        transaction = "txn-cc"
+        app_host.begin_grade_gesture(transaction)
+        assert app_host.submit_qualifier_change(
+            child_id, {"lum_low": 0.25}, transaction)
+        assert app_host.end_grade_gesture()
+        # 成员的关键帧写入成功（不带路径会被 node_not_found 整批拒）
+        compound = next(n for n in app_host.bound_graph().nodes
+                        if n.compound_children is not None)
+        node = next(n for n in compound.compound_children.nodes
+                    if n.node_id == child_id)
+        track = (node.params.get("grade_keyframes") or {}).get(
+            "qualifier.lum_low") or {}
+        assert {int(k["frame"]): k["value"]
+                for k in track.get("keyframes") or ()} == {42: 0.25}
+
+    def test_recorder_groups_by_compound_path(self):
+        recorder = KeyframeAutoRecorder()
+        recorder.set_auto("n1", True)
+        recorder.set_auto("c2", True)
+        recorder.observe("n1", "exposure", 0.5, frame=7)
+        recorder.observe("c2", "exposure", 0.8, frame=7,
+                         compound_path=("c1",))
+        groups = recorder.take_pending_edit_groups()
+        assert set(groups) == {(), ("c1",)}
+        assert groups[()][0]["node_id"] == "n1"
+        assert groups[("c1",)][0]["node_id"] == "c2"
+        # 兼容面：take_pending_edits 仍返回平铺条目
+        recorder.observe("n1", "exposure", 0.5, frame=7)
+        flat = recorder.take_pending_edits()
+        assert flat == [{"action": "set", "node_id": "n1",
+                         "param": "exposure", "frame": 7, "value": 0.5,
+                         "interpolation": "linear"}]

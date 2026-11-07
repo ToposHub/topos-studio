@@ -6,7 +6,9 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 
 本轮已修复启动后宿主接线、真实工作区使用演示数据、活动 Corrector 同步、轨道分组和删除末键后空轨丢失。普通 1× 同速率片段接入源帧偏移，复杂映射及非 Clip 调色范围显示只读。时间码使用时间线名义帧率，失效上下文清理投影。另已修正嵌套关键帧载荷的 Mapping 解冻及内部静态键的精确帧边界。动态属性对话框使用合法的 0–3 值域和 Topos 兼容权重曲线。松手会经正式 seek 结算精确帧，取消手势只结束 scrub。轨道右键可左右微移一帧，Master 菜单可整批删除当前剪辑范围内可见键。锁定键存在时禁用整批删除，裁切范围外的源键保留。下面任务保留仍需完成的范围。
 
-**R 批次整改（2026-11-07 第二轮，提交 2c51b69…0a7edcf）已消解 R2/R3/R5a/R5b/R6 全部代码项与 R1/R4 的可代码化部分**：显式 Dynamics 经 KF-01 编解码贯通求值域（0→1 Start=0/End=1 的 25% = 0.109375，legacy 帧值逐位不变）；批编辑无损化（只触及目标轨、未知字段保留、触及不可解析整批拒）；播放任务过期帧按实际解码帧覆盖（动画不停旧值）；Edit/Deliver CPU 回退按权威图逐节点合成（run_graph_frame_cpu 生产 oracle，能力不足默认拒绝）；Qualifier/Window 工具手势接入自动录制；手工 Add 采样当前求值结果；复杂映射只读矩阵 + DF 时间码（Timecode Rational 接口）；图宿主绑定描述 + A→B→A 迟到请求失效。回归扩至关键帧/导出/预览/录制相关 300+ 项通过。下面各任务保留仍需实机/量测/后续版本的范围。
+**R 批次整改（2026-11-07 第二轮，提交 2c51b69…0a7edcf）已消解 R2/R3/R5a/R5b/R6 全部代码项与 R1/R4 的可代码化部分**：显式 Dynamics 经 KF-01 编解码贯通求值域（0→1 Start=0/End=1 的 25% = 0.109375，legacy 帧值逐位不变）；批编辑无损化（只触及目标轨、未知字段保留、触及不可解析整批拒）；播放任务过期帧按实际解码帧覆盖（动画不停旧值）；Edit/Deliver CPU 回退按权威图逐节点合成（run_graph_frame_cpu 生产 oracle，能力不足默认拒绝）；Qualifier/Window 工具手势接入自动录制；手工 Add 采样当前求值结果；复杂映射只读矩阵 + DF 时间码（Timecode Rational 接口）；图宿主绑定描述 + A→B→A 迟到请求失效。回归扩至关键帧/导出/预览/录制相关 300+ 项通过。
+
+**复审批次（同日第三轮）追加修复四处**：① 节点缓存键并入任务逐帧身份（R5.3"静态上游对变化视频纹理误命中"——播放期缓存参数携带冻结快照，静态节点跨解码帧命中旧输出；`_graph_cache_context` 并入 RENDER_VIDEO_FRAME 任务边界写入的实际解码帧，暂停态缓存行为不变）；② 图 CPU 路径运行期异常策略——Deliver fail-fast（带 clip 诊断，不静默缺效果）、Edit 预览告警降级扁平（成片路径不受影响）；③ 图执行分支的调色链段 timeline_id 与扁平路径同源（`_sequence`，此前误用不存在的 `_timeline` 属性会导致时间线域链段丢失）；④ compound 成员的手势录制——录制身份含 compound 路径，flush 按路径分组下行（此前成员批命令不带路径被 node_not_found 整批拒、录制静默丢失）。下面各任务保留仍需实机/量测/后续版本的范围。
 
 ## Topos 实机记录
 
@@ -61,7 +63,7 @@ Resolve 实测使用用户原工程当时打开的片段，在独立工程 **Top
 
 ### R5 · Edit 与 Deliver 按执行图消费所有 Corrector
 
-**CPU 回退已按权威图逐节点合成（R 批次，提交 a4e5e03：run_graph_frame_cpu 生产 oracle + 能力诊断默认拒绝）；GPU 导出图执行与 Metal 入口仍待接。原文备查：** [TimelineExporter](/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_export.py) 的 `_grade_from_stack` 仍提取活动层或首个有轨层作为扁平 `grade_keyframes`，窗口 matte 路径还会只看活动层并用该扁平轨道。复杂图通过能力硬门拒绝。 [TimelinePreviewRenderer](/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_preview_renderer.py) 的 `_get_preview_color_grade` 也取第一个有轨层。这些回退路径与图快照能力不同，单独修复 mappingproxy 能让输入通过，但无法恢复被压平的节点及动画。
+**CPU 回退已按权威图逐节点合成（R 批次，提交 a4e5e03：run_graph_frame_cpu 生产 oracle + 能力诊断默认拒绝；复审批次补节点缓存逐帧身份与异常策略）；Edit GPU 监看、GPU 导出图执行与 Metal 入口仍待接（GPU 监看仍消费扁平 grade）。原文备查：** [TimelineExporter](/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_export.py) 的 `_grade_from_stack` 仍提取活动层或首个有轨层作为扁平 `grade_keyframes`，窗口 matte 路径还会只看活动层并用该扁平轨道。复杂图通过能力硬门拒绝。 [TimelinePreviewRenderer](/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_preview_renderer.py) 的 `_get_preview_color_grade` 也取第一个有轨层。这些回退路径与图快照能力不同，单独修复 mappingproxy 能让输入通过，但无法恢复被压平的节点及动画。
 
 **已修复（R 批次，提交 dcc2784：任务边界按实际解码帧覆盖 color_graph_source_frame）。原文备查：** 当缓存参数携带 `color_graph_source_frame=112` 而后续解码帧为 113 时，`RENDER_VIDEO_FRAME` 的 graph provider 仍用 112。播放画面上的动画可停在旧值，即使图节点缓存已按时域标记绕过。图执行还受 TOPOS_COLOR_GRAPH_RENDER 开关控制，默认走旧 Layer 路径。测试时分别记录开关关闭与开启的路径。
 

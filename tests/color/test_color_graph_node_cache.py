@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import replace as _replace
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -590,3 +592,38 @@ class TestExecutorNodeCache:
             np.testing.assert_array_equal(with_cache, without_cache)
         finally:
             ctx.release()
+
+
+class TestGraphCacheContextIdentity:
+    """R5.3：节点缓存键含任务逐帧身份（静态节点不跨视频帧命中旧输出）。"""
+
+    @staticmethod
+    def _context(params, revision=7, mask_epoch=None):
+        from src.features.color.core.async_renderer import AsyncRenderer
+        snapshot = SimpleNamespace(
+            source_content_revision=revision,
+            color_context_cache_key=lambda: "ctx-key",
+        )
+        return AsyncRenderer._graph_cache_context(
+            snapshot, params, mask_epoch or {})
+
+    def test_video_task_frame_enters_key(self):
+        base = {"color_output_target": "front"}
+        # 播放期缓存参数携带冻结快照（revision 恒定）；任务边界写入的
+        # 实际解码帧使静态节点的缓存键逐帧失效
+        assert (self._context({**base, "stabilization_source_frame": 112})
+                != self._context({**base, "stabilization_source_frame": 113}))
+        assert (self._context({**base, "stabilization_source_frame": 113})
+                == self._context({**base, "stabilization_source_frame": 113}))
+
+    def test_still_render_context_is_stable(self):
+        # 非视频渲染（无逐帧键）：暂停态缓存行为不变
+        base = {"color_output_target": "front"}
+        assert self._context(base) == self._context(dict(base))
+
+    def test_mask_epoch_and_target_enter_key(self):
+        base = {"color_output_target": "front"}
+        assert self._context(base) != self._context(
+            base, mask_epoch={"l1": 2})
+        assert self._context(base) != self._context(
+            {"color_output_target": "full_res"})

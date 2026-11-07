@@ -1366,11 +1366,13 @@ class LegacyGradingAdapter:
         self._bridge.add_to_transaction(result, transaction_id,
                                         "set_node_option")
         # KF-04：自动录制路由——手势内的真实改动交录制器收集（auto 开启
-        # 且参数已登记时），flush 时与 base 参数进同一事务（一个历史条目）
+        # 且参数已登记时），flush 时与 base 参数进同一事务（一个历史条目）。
+        # R6.1：身份含 compound 路径（成员批命令须带 _compound_path 下行）
         if self._recorder is not None:
             self._recorder.observe(
                 node_id, param_name, value,
-                self._frame_provider() if self._frame_provider else None)
+                self._frame_provider() if self._frame_provider else None,
+                compound_path=path)
         return True
 
     def end_gesture(self) -> bool:
@@ -1385,8 +1387,8 @@ class LegacyGradingAdapter:
         recorder = self._recorder
         if recorder is None:
             return
-        edits = recorder.take_pending_edits()
-        if not edits:
+        groups = recorder.take_pending_edit_groups()
+        if not groups:
             return
         from src.features.color.core.color_graph_service import (
             ColorGraphService,
@@ -1401,16 +1403,21 @@ class LegacyGradingAdapter:
         if pending is not None:
             from src.shared.project.color_graph import ColorGraphData
             graph = ColorGraphData.from_dict(pending)
-        result = ColorGraphService().apply_intent(
-            graph, "batch_edit_keyframes", {"edits": edits})
-        if not result.ok:
-            logger.warning("auto-record keyframes rejected: %s",
-                           result.diagnostics)
-            return
-        if result.graph.graph_revision == graph.graph_revision:
-            return  # 无差值（重复置值）：批处理不追加历史
-        self._bridge.add_to_transaction(result, self._transaction_id,
-                                        "batch_edit_keyframes")
+        # R6.1：按 compound 路径分组逐组下行（apply_intent 的
+        # _compound_path 语义）；同组同事务——flush 仍是一个历史条目
+        for path, edits in groups.items():
+            result = ColorGraphService().apply_intent(
+                graph, "batch_edit_keyframes",
+                {"edits": edits, "_compound_path": tuple(path)})
+            if not result.ok:
+                logger.warning("auto-record keyframes rejected: %s",
+                               result.diagnostics)
+                continue
+            if result.graph.graph_revision == graph.graph_revision:
+                continue  # 无差值（重复置值）：批处理不追加历史
+            graph = result.graph
+            self._bridge.add_to_transaction(result, self._transaction_id,
+                                            "batch_edit_keyframes")
 
 
 # ── B06.5：真实 app 装配（MainWindow 持有）────────────────────────────────
@@ -2076,8 +2083,10 @@ class ColorGraphAppHost:
             return
         frame_provider = getattr(self._adapter, "_frame_provider", None)
         frame = frame_provider() if frame_provider is not None else None
+        path = self._tool_compound_path()
         for track_name, value in fields.items():
-            recorder.observe(node_id, str(track_name), value, frame)
+            recorder.observe(node_id, str(track_name), value, frame,
+                             compound_path=path)
 
     def submit_window_structural_change(self, node_id: str,
                                         shapes: Sequence[Any]) -> bool:

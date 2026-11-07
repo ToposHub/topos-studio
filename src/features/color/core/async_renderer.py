@@ -2028,22 +2028,9 @@ class AsyncRenderer(QThread):
                     self._bind_aux_textures_single_layer(prog, layer),
                 matte_provider=_matte,
                 dtype=graph_dtype,
-                # N06：节点缓存键的外源身份——源内容 revision（视频每帧
-                # 变→播放期缓存自然不命中；暂停调色命中分叉节点）+
-                # 色彩上下文 + 出口 target（f4/f2 已在键内）
-                cache_context=(
-                    snapshot.source_content_revision,
-                    snapshot.color_context_cache_key(),
-                    str(params.get('color_output_target') or 'front'),
-                    # N02-B 切片 3：mask/bitmap 内容代际进节点缓存键。
-                    # bitmap 像素不在图数据里（cone_key 只见 legacy 形状
-                    # 参数），引擎侧 _mask_epoch 是唯一内容身份；不并进
-                    # 则 bitmap 变更后 N06 命中陈旧输出（按 layer 聚合的
-                    # 粗粒度，正确优先；bitmap 完整资源化登记 v2）。
-                    # __dict__ 直取：裸 __new__ 宿主（测试）无该属性
-                    # （N10 帧随参同款防御）。
-                    tuple(sorted(
-                        (self.__dict__.get('_mask_epoch') or {}).items()))),
+                cache_context=self._graph_cache_context(
+                    snapshot, params,
+                    self.__dict__.get('_mask_epoch') or {}),
             )
         except Exception as exc:  # noqa: BLE001 —— 编译/执行异常 fail-closed
             scope_diagnostics.record(
@@ -5677,6 +5664,29 @@ class AsyncRenderer(QThread):
         except Exception:
             logger.exception("_apply_video_denoise failed; passthrough")
             return source_tex
+
+    @staticmethod
+    def _graph_cache_context(snapshot: Any, params: Dict[str, Any],
+                             mask_epoch: Any) -> tuple:
+        """N06/R5.3：节点缓存键的外源身份。
+
+        - 源内容 revision + 色彩上下文 + 出口 target（f4/f2 已在键内）；
+        - mask/bitmap 内容代际（bitmap 像素不在图数据里，引擎侧
+          ``_mask_epoch`` 是唯一内容身份；__dict__ 直取由调用方防御）；
+        - **任务逐帧身份**（R5.3）：播放期 UI 线程复用缓存的静态
+          render_params，快照的 ``source_content_revision`` 跨解码帧
+          不变——静态节点（无轨道、consumers≥2）会跨帧命中旧视频
+          纹理的输出。RENDER_VIDEO_FRAME 任务边界已按实际解码帧写入
+          ``stabilization_source_frame``（R5a），并入键使逐帧自然失效；
+          非视频渲染（无该键）键值恒定，暂停态缓存行为不变。
+        """
+        return (
+            snapshot.source_content_revision,
+            snapshot.color_context_cache_key(),
+            str(params.get('color_output_target') or 'front'),
+            params.get('stabilization_source_frame'),
+            tuple(sorted((mask_epoch or {}).items())),
+        )
 
     @staticmethod
     def _apply_task_frame_identity(render_params: Dict[str, Any],

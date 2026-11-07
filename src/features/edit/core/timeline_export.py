@@ -9743,11 +9743,11 @@ class TimelineExporter:
             UnsupportedNode, run_graph_frame_cpu,
         )
         project = self._project
-        timeline = getattr(self, "_timeline", None)
-        timeline_id = (getattr(timeline, "timeline_id", None)
-                       if timeline is not None
-                       else getattr(getattr(layer, "clip", None),
-                                    "timeline_id", None))
+        # 链段 timeline_id 与扁平路径同源（self._sequence；测试替身可能
+        # 只装配 _project——防御 getattr，不猜 clip.timeline_id 代替）
+        timeline_id = str(
+            getattr(getattr(self, "_sequence", None),
+                    "timeline_id", "") or "")
         from src.features.edit.core.color_chain import chain_extra_params
         extras = [extra for extra in (
             chain_extra_params(project, timeline_id,
@@ -9784,6 +9784,15 @@ class TimelineExporter:
                 "Export color grade: clip %s 图 CPU 逐节点合成不支持"
                 "（%s）——显式降级到扁平路径", layer.clip_id, exc)
             return None
+        except Exception as exc:  # noqa: BLE001 — 与扁平路径同口径 fail-fast
+            # 运行期失败（keyer/LUT 资源/数学异常）属内容错误：结构化上
+            # 抛由 export_timeline 统一转 EXPORT_FAILED，不静默缺效果。
+            logger.error(
+                "Export color graph cpu failed for clip %s: %s",
+                getattr(layer, "clip_id", "?"), exc)
+            raise ValueError(
+                f"color graph cpu failed for clip "
+                f"{getattr(layer, 'clip_id', '?')}: {exc}") from exc
 
     def _apply_color_grade_unstabilized(
         self,
