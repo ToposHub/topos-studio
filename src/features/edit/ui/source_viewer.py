@@ -1667,6 +1667,11 @@ class SourceViewerWidget(QWidget):
         # 只携带渲染器回调与最新显示 slot id（VP-B02 销毁兜底）。
         self._slot_release_state: dict = {"slot_id": -1, "ack": None}
 
+        # VP-B11: shutdown token — once set, play/tick decode submits,
+        # watchdog fallbacks, CPU fallback requests and results are all
+        # rejected (no new requests after the shutdown sequence starts).
+        self._shutdown_prepared: bool = False
+
         # GPU timeout watchdog: if GPU async result doesn't arrive within
         # _gpu_timeout_ms, fall back to CPU decode for that frame
         self._gpu_timeout_ms: int = 100  # 100ms timeout
@@ -1909,6 +1914,39 @@ class SourceViewerWidget(QWidget):
 
         logger.info(f"Source opened: {asset.display_name} ({self._total_frames} frames @ {self._fps} fps)")
 
+    def prepare_for_shutdown(self) -> None:
+        """VP-B11: 关闭序列的 widget 侧入口（幂等）。
+
+        对齐计划 B11-1 的顺序：先停止一切新请求（播放/周期 tick/
+        watchdog/CPU 回退入口全部关门并撤销会话 generation），再释放
+        独占资源（CPU 解码器、显示中的 present slot、scrub 音频线程），
+        widget 本体留给宿主销毁。closeEvent/换工程必须**先**调本方法、
+        再停 decode worker／GPU renderer——顺序颠倒会让 scrub 音频
+        QThread（parent 为本 widget）随窗口析构（abort 风险）且显示
+        slot 永不归还（池耗尽）。
+        """
+        if self._shutdown_prepared:
+            return
+        self._shutdown_prepared = True
+
+        # 1) 停止新请求：播放/时钟/watchdog + 撤销会话 generation
+        self._is_playing = False
+        self._playback_timer.stop()
+        self._gpu_watchdog_timer.stop()
+        self._gpu_pending_frame = -1
+        self._gpu_generation += 1  # 在飞结果作废
+
+        # 2) 释放独占资源
+        self._cpu_worker.close_decoder()
+        self._frame_cache.clear()
+        self._cache_order.clear()
+        self._ack_gpu_slot(self._gpu_displayed_slot_id)
+        self._gpu_displayed_slot_id = -1
+        self._slot_release_state["slot_id"] = -1
+        self._cleanup_scrub_audio_manager()
+        self._last_good_qimage = None
+        self._last_good_frame = -1
+
     def close_source(self) -> None:
         """Close the current source."""
         # Stop playback
@@ -2143,6 +2181,8 @@ class SourceViewerWidget(QWidget):
 
     def play(self) -> None:
         """Start playback."""
+        if self._shutdown_prepared:
+            return  # VP-B11: 关闭序列后不再起播
         if not self._current_asset:
             return
 
@@ -2514,6 +2554,9 @@ class SourceViewerWidget(QWidget):
             self.pause()
             return
 
+        if self._shutdown_prepared:
+            return  # VP-B11: 关闭序列后的 tick 不再提交解码
+
         import time as _time
         now = _time.perf_counter()
         elapsed = now - self._playback_start_time
@@ -2662,6 +2705,8 @@ class SourceViewerWidget(QWidget):
 
     def _load_video_frame(self, frame: int) -> None:
         """Load a video frame — GPU path first, CPU fallback only when GPU unavailable."""
+        if self._shutdown_prepared:
+            return  # VP-B11: 关闭后不再提交任何解码
         from src.shared.video.playback_frame_trace import (
             EditPlaybackFrameTrace,
             get_trace_collector,
@@ -2726,6 +2771,8 @@ class SourceViewerWidget(QWidget):
 
     def _on_gpu_timeout(self) -> None:
         """GPU watchdog: fall back to CPU decode when GPU result doesn't arrive in time."""
+        if self._shutdown_prepared:
+            return  # VP-B11: 关闭后超时不再拉起新解码
         timed_out_frame = self._gpu_pending_frame
         if timed_out_frame < 0:
             return
@@ -2747,6 +2794,8 @@ class SourceViewerWidget(QWidget):
         the UI thread because it dispatches the decode request whose result
         is uploaded from the UI thread (paintGL deferred channel).
         """
+        if self._shutdown_prepared:
+            return  # VP-B11: 关闭 token
         if self._current_asset is None or not self._current_asset.is_video:
             return
         # The viewer already moved on (playback/seek): skip stale frames.
@@ -2781,6 +2830,10 @@ class SourceViewerWidget(QWidget):
     def _on_cpu_frame_ready(self, frame: int, image: QImage, decode_ms: float,
                             generation: int) -> None:
         """后台 CPU 解码结果（UI 线程）：staleness 守卫后上传并写缓存。"""
+        # VP-B11: 关闭 token 在 generation 守卫之前——即使代数巧合相同，
+        # 关闭序列启动后的结果也不上屏。
+        if self._shutdown_prepared:
+            return
         # Generation guard: discard results from previous asset/seek
         if self._current_asset is None or generation != self._gpu_generation:
             return
