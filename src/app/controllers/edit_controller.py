@@ -3431,6 +3431,51 @@ class EditControllerMixin:
         except Exception as e:
             logger.warning("Failed to import take %s: %s", take.file_path, e)
 
+    def apply_clip_speed_settings(
+        self, clip_id: str, track_id: str, settings: object,
+    ) -> bool:
+        """B14：接收高级速度 draft——契约校验/能力预检后单事务执行。
+
+        接收链：EditPage 读取最新上下文 → 本编排 →
+        ``speed_settings.plan_speed_settings_edit``（版本/类型/一致性/
+        能力矩阵）→ 时间线命令栈提交。支持的意图一次提交全部设置
+        （单步 undo）；不支持/校验失败返回明确诊断，clip/history/
+        revision 零变化。
+
+        Returns:
+            True = 已提交；False = 明确拒绝（状态栏已显示诊断）。
+        """
+        panel = getattr(self, 'timeline_panel', None)
+        view_getter = getattr(panel, 'get_timeline_view', None)
+        timeline_view = view_getter() if callable(view_getter) else None
+        timeline = (timeline_view.get_timeline()
+                    if timeline_view is not None else None)
+        if timeline is None:
+            logger.warning("Speed settings: no active timeline context")
+            return False
+
+        from src.features.edit.core.speed_settings import (
+            plan_speed_settings_edit,
+        )
+        plan = plan_speed_settings_edit(
+            timeline, track_id, clip_id, settings)
+        message = plan.unsupported or plan.error
+        if message is not None:
+            status_bar = getattr(self, 'status_bar', None)
+            if status_bar is not None:
+                status_bar.showMessage(message, 5000)
+            logger.info("Speed settings rejected: %s", message)
+            return False
+        try:
+            timeline_view.execute_command(plan.command)
+        except (ValueError, RuntimeError) as exc:
+            status_bar = getattr(self, 'status_bar', None)
+            if status_bar is not None:
+                status_bar.showMessage(str(exc), 5000)
+            logger.warning("Speed settings commit failed: %s", exc)
+            return False
+        return True
+
     def _place_voiceover_clip(self, session: dict, asset, take) -> None:
         """B10③：voiceover take 完成 → 会话目标轨锚点落 clip（单步 undo）。
 
