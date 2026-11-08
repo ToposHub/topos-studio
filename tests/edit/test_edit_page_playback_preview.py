@@ -372,6 +372,12 @@ def test_set_timeline_panel_wires_scrub_moved_to_preview_request(qapp) -> None:
         source_insert_requested = pyqtSignal()
         source_overwrite_requested = pyqtSignal()
         source_append_requested = pyqtSignal()
+        # W09：集中绑定面（Resolve 工具栏请求；真实 TimelinePanel 均具备）
+        source_replace_requested = pyqtSignal()
+        source_patch_changed = pyqtSignal(str, str, bool)
+        keyframe_tray_requested = pyqtSignal(bool)
+        voiceover_requested = pyqtSignal()
+        flag_requested = pyqtSignal(str)
 
         def __init__(self, view: DummyTimelineView) -> None:
             super().__init__()
