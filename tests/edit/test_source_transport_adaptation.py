@@ -147,14 +147,20 @@ def test_b05_source_loop_wraps_at_out_with_audio_relocation(qapp):
     widget.set_loop(True)
     widget._current_frame = 29
     widget._is_playing = True
-    _anchor(widget, 10, 1.0)  # elapsed 1s → target 34 ≥ Out 30 → 回卷
+    _anchor(widget, 29, 1.0 / 24.0 + 0.0001)  # Out 帧本身到时
     provider.requests.clear()
 
     widget._on_playback_tick()
 
-    assert widget._current_frame == 20            # 回卷到 In
+    assert widget._current_frame == 30            # Out 包含，必须先呈现
+    assert provider.requests == [30]
+    assert seeks == []
+    _anchor(widget, 29, 2.0 / 24.0 + 0.0001)       # 下一帧到时才回卷
+    widget._gpu_pending_frame = -1
+    widget._on_playback_tick()
+    assert widget._current_frame == 20
     assert 20 in seeks                            # 边界音频重定位
-    assert provider.requests == [20]              # 回卷帧照常提交
+    assert provider.requests == [30, 20]
     assert widget.is_playing                      # 循环继续
 
 
@@ -194,13 +200,16 @@ def test_b05_source_one_frame_loop_range_terminates_each_tick(qapp):
     widget._is_playing = True
     provider.requests.clear()
 
-    for _ in range(3):  # 每个 tick 恰好回卷一次，绝不死循环
+    for _ in range(3):  # 快速timer在同一帧周期内不反复重定位音频
         widget._current_frame = 5
         _anchor(widget, 5, 0.0)
         widget._on_playback_tick()
 
     assert widget._current_frame == 5
-    assert len(seeks) == 3                        # 每 tick 一次（有界）
+    assert seeks == []
+    _anchor(widget, 5, 1.0 / 24.0 + 0.0001)
+    widget._on_playback_tick()
+    assert seeks == [5]
 
 
 # ── Source：Reverse（capability 如实） ─────────────────────────────
@@ -252,6 +261,20 @@ def test_b05_source_forward_play_clears_reverse_mode(qapp):
     assert widget._current_frame == 13            # 正向步进
 
 
+def test_b05_source_reverse_pauses_forward_audio_before_starting(qapp):
+    widget, starts, _ = _widget(qapp, _Provider())
+    pauses: list[bool] = []
+    widget._pause_source_audio = lambda: pauses.append(True)
+    widget._current_frame = 10
+    widget.play()
+    assert starts == [10]
+    widget.play_reverse()
+    assert pauses == [True]
+    assert widget._reverse_playback
+    assert starts == [10]
+    widget.pause()
+
+
 # ── scrub 结束后的播放恢复 ─────────────────────────────────────────
 
 
@@ -278,4 +301,20 @@ def test_b05_source_scrub_release_stays_paused_if_was_paused(qapp):
     widget._on_slider_released()
 
     assert widget.is_playing is False
+    widget.pause()
+
+
+def test_b05_source_scrub_release_restores_reverse_without_starting_audio(qapp):
+    widget, starts, _ = _widget(qapp, _Provider())
+    widget._current_frame = 10
+    widget.play_reverse()
+    widget._on_slider_pressed()
+    widget.slider.setValue(15)
+    widget._on_slider_released()
+    assert widget.is_playing
+    assert widget._reverse_playback
+    assert starts == []
+    _anchor(widget, 15, 0.125)
+    widget._on_playback_tick()
+    assert widget.current_frame == 12
     widget.pause()

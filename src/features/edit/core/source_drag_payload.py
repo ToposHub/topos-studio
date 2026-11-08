@@ -32,6 +32,11 @@ STREAM_INTENT_AUDIO = "audio"
 _VALID_INTENTS = (STREAM_INTENT_AV, STREAM_INTENT_VIDEO, STREAM_INTENT_AUDIO)
 
 
+def _is_integer(value: Any) -> bool:
+    """JSON/frame integers exclude booleans and coercible numeric values."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 @dataclass(frozen=True)
 class SourceDragPayload:
     """Source → Timeline 拖拽载荷（Out 包含语义）。"""
@@ -71,17 +76,21 @@ def build_source_drag_payload(
         source_fps: Optional[Tuple[int, int]] = None,
 ) -> Optional[SourceDragPayload]:
     """构造载荷；非法参数（空资产/坏区间/坏意图）返回 None 而非抛错。"""
-    if not asset_id:
+    if not isinstance(asset_id, str) or not asset_id.strip():
         return None
     if stream_intent not in _VALID_INTENTS:
         return None
-    in_frame, out_frame = int(in_frame), int(out_frame)
+    if not _is_integer(in_frame) or not _is_integer(out_frame):
+        return None
     if in_frame < 0 or out_frame < in_frame:
         return None
     fps_num = fps_den = None
     if source_fps is not None:
-        fps_num, fps_den = int(source_fps[0]), int(source_fps[1])
-        if fps_num <= 0 or fps_den <= 0:
+        if not isinstance(source_fps, (tuple, list)) or len(source_fps) != 2:
+            return None
+        fps_num, fps_den = source_fps
+        if (not _is_integer(fps_num) or not _is_integer(fps_den)
+                or fps_num <= 0 or fps_den <= 0):
             return None  # 坏帧率整单拒绝（调用方 bug 信号）
     return SourceDragPayload(
         asset_id=asset_id, in_frame=in_frame, out_frame=out_frame,
@@ -109,28 +118,29 @@ def decode_source_drag_payload(raw: Any) -> Optional[SourceDragPayload]:
     if not isinstance(data, dict):
         return None
     version = data.get("version")
-    if version != PAYLOAD_VERSION:
+    if not _is_integer(version) or version != PAYLOAD_VERSION:
         return None  # 未来/未知版本：不猜结构
     asset_id = data.get("asset_id")
-    if not isinstance(asset_id, str) or not asset_id:
+    if not isinstance(asset_id, str) or not asset_id.strip():
         return None
     intent = data.get("stream_intent", STREAM_INTENT_AV)
     if intent not in _VALID_INTENTS:
         return None
     in_frame = data.get("in_frame")
     out_frame = data.get("out_frame")
-    if not isinstance(in_frame, int) or isinstance(in_frame, bool):
+    if not _is_integer(in_frame):
         return None
-    if not isinstance(out_frame, int) or isinstance(out_frame, bool):
+    if not _is_integer(out_frame):
         return None
     if in_frame < 0 or out_frame < in_frame:
         return None
     fps_num = data.get("source_fps_num")
     fps_den = data.get("source_fps_den")
-    if fps_num is not None and (not isinstance(fps_num, int)
-                                or isinstance(fps_num, bool) or fps_num <= 0):
-        fps_num = fps_den = None
+    if "source_fps_num" in data or "source_fps_den" in data:
+        if (not _is_integer(fps_num) or not _is_integer(fps_den)
+                or fps_num <= 0 or fps_den <= 0):
+            return None
     return SourceDragPayload(
         asset_id=asset_id, in_frame=in_frame, out_frame=out_frame,
         stream_intent=intent, source_fps_num=fps_num,
-        source_fps_den=fps_den if fps_num is not None else None)
+        source_fps_den=fps_den)

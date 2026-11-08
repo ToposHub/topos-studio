@@ -2481,6 +2481,10 @@ class ViewportMenuBar(ViewportToolBarBase):
 
     def _position_timeline_selector(self) -> None:
         """Position the borderless timeline selector at toolbar center."""
+        chrome = getattr(self, "_color_chrome", None)
+        if chrome is not None:
+            chrome.position_title()
+            return
         if not hasattr(self, "_timeline_selector"):
             return
         selector = self._timeline_selector
@@ -2703,9 +2707,18 @@ class ViewportMenuBar(ViewportToolBarBase):
     
     def _toggle_focus_mode(self) -> None:
         """Toggle focus mode (hide all panels except viewport)."""
-        window = self.window()
-        if hasattr(window, 'toggle_focus_mode'):
-            window.toggle_focus_mode()
+        host = self._focus_mode_host()
+        if host is not None:
+            host.toggle_focus_mode()
+
+    def _focus_mode_host(self) -> QWidget | None:
+        """Resolve the application host even while its viewport dock floats."""
+        candidate = self._get_canvas()
+        while isinstance(candidate, QWidget):
+            if callable(getattr(candidate, "toggle_focus_mode", None)):
+                return candidate
+            candidate = candidate.parentWidget()
+        return None
     
     def sync_menu_state(self) -> None:
         """Sync menu states with canvas state.
@@ -2718,7 +2731,7 @@ class ViewportMenuBar(ViewportToolBarBase):
         - 程序化 setChecked 前后 blockSignals（状态锁），防止程序化
           更新触发 toggled 递归广播。
         """
-        canvas = self.parent()
+        canvas = self._get_canvas()
         # Ensure parent is a Canvas instance with required attributes
         if not canvas or not hasattr(canvas, '_show_mask_overlays'):
             return
@@ -2768,6 +2781,10 @@ class _InOutSlider(QSlider):
         self.update()
 
     def paintEvent(self, event) -> None:
+        if self.property("colorMonitorScrubber"):
+            from src.features.color.ui.color_viewport_chrome import paint_color_scrubber
+            paint_color_scrubber(self)
+            return
         # Draw the native slider first.
         super().paintEvent(event)
         if self._in_point is None and self._out_point is None:
@@ -2949,6 +2966,7 @@ class VideoControlBar(QFrame):
 
     # Signals
     seek_requested = pyqtSignal(int)
+    timecode_changed = pyqtSignal(str)
     scrub_started = pyqtSignal(int)
     scrub_moved = pyqtSignal(int)
     scrub_finished = pyqtSignal(int)
@@ -3250,6 +3268,7 @@ class VideoControlBar(QFrame):
     def set_time_info(self, time_str: str) -> None:
         """Set the legacy duration display used by Composite's Fusion mode."""
         self.timecode_label.setText(time_str)
+        self.timecode_changed.emit(time_str)
 
     def set_frame_rate(self, fps: float) -> None:
         """Set the frame rate used to format the Color transport timecode."""
@@ -3308,6 +3327,9 @@ class VideoControlBar(QFrame):
 
     def _set_fusion_mode(self, enabled: bool) -> None:
         """Switch between Color's compact bar and Composite's Fusion-style bar."""
+        chrome = getattr(self, "_color_chrome", None)
+        if chrome is not None:
+            chrome.suspend_transport()
         self._fusion_mode = bool(enabled)
         self.ruler_slider.setVisible(self._fusion_mode)
         self.slider.setVisible(not self._fusion_mode)
@@ -3331,6 +3353,8 @@ class VideoControlBar(QFrame):
             self.label_frame.setObjectName("")
             self.label_frame.setStyleSheet("color: #aaa; font-size: 11px;")
         self._update_display()
+        if chrome is not None and not self._fusion_mode:
+            chrome.activate_transport()
         self.updateGeometry()
 
     def _set_io_visible(self, visible: bool) -> None:
@@ -3418,6 +3442,7 @@ class VideoControlBar(QFrame):
         self.timecode_label.setText(
             f"{hours:02d}:{minutes:02d}:{seconds:02d}:{frames:02d}"
         )
+        self.timecode_changed.emit(self.timecode_label.text())
 
     def _on_loop_toggled(self, checked: bool) -> None:
         """Keep the loop icon state in sync with Edit's transport bar."""
@@ -3466,6 +3491,8 @@ class VideoControlBar(QFrame):
             self.label_frame.setText(f"{value + 1} / {max(1, self.total_frames)}")
             if self._fusion_mode:
                 self._update_display()
+            else:
+                self._update_timecode()
             self.scrub_moved.emit(value)
 
     @pyqtSlot(bool)
@@ -3956,9 +3983,9 @@ class Canvas(QGraphicsView):
         # DaVinci 级别视觉优化：OpenGL 视口下使用全量更新，避免 CPU 计算脏矩形开销
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        # Match the ProgramViewer/OpenGL clear colour (#141414).  The GL
-        # viewport also clears this value before native texture presentation.
-        self.setBackgroundBrush(QBrush(QColor(20, 20, 20)))
+        # Match the Color viewer's #191919 native letterbox surround. This is
+        # UI backdrop styling; the rendered media's color values are untouched.
+        self.setBackgroundBrush(QBrush(QColor(25, 25, 25)))
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -4071,6 +4098,8 @@ class Canvas(QGraphicsView):
         # Video Control Bar (shown only for videos)
         self.video_control_bar = VideoControlBar(self)
         self.video_control_bar.setVisible(False)  # Initially hidden
+        from src.features.color.ui.color_viewport_chrome import ColorViewportChrome
+        self.color_viewport_chrome = ColorViewportChrome(self)
 
     # ================================================================
     # Tracker overlay 控制（阶段 4）
@@ -4252,6 +4281,9 @@ class Canvas(QGraphicsView):
         self.viewport().update()
 
     def _update_lod(self):
+        chrome = getattr(self, "color_viewport_chrome", None)
+        if chrome is not None:
+            chrome.update_zoom(self.transform().m11())
         if not self.engine or not self.logical_size: return False
         changed = False
         self.engine.scene_size = (float(self.logical_size.width()), float(self.logical_size.height()))
@@ -4341,14 +4373,26 @@ class Canvas(QGraphicsView):
         view_rect = self.viewport().rect()
         if view_rect.width() <= 10 or view_rect.height() <= 10: return
         img_w, img_h = self.logical_size.width(), self.logical_size.height()
-        # Fit to fill the entire viewport height and width (no padding)
-        scale = min(view_rect.width() / img_w, view_rect.height() / img_h)
+        # Color's transport overlays the QGraphicsView. Reserve its visible
+        # height while fitting, without changing the shared GL viewport size.
+        bar = getattr(self, "video_control_bar", None)
+        reserved = bar.height() if (
+            bar is not None and not bar.isHidden()
+            and getattr(bar, "_color_chrome", None) is not None
+            and not bar._fusion_mode
+        ) else 0
+        usable_height = max(1, view_rect.height() - reserved)
+        scale = min(view_rect.width() / img_w, usable_height / img_h)
         self.resetTransform()
         self.scale(scale, scale)
         # P4-3: 先 centerOn，后扩展 pan bounds
         # 确保 centerOn 时 sceneRect 已包含目标中心点，避免跳位
-        self.centerOn(img_w / 2, img_h / 2)
-        self._update_scene_pan_bounds()
+        if reserved:
+            self._update_scene_pan_bounds()
+            self.centerOn(img_w / 2, img_h / 2 + reserved / (2.0 * scale))
+        else:
+            self.centerOn(img_w / 2, img_h / 2)
+            self._update_scene_pan_bounds()
         if self._update_lod():
             if not self._refresh_video_frame_view():
                 if self.engine:
@@ -4451,10 +4495,8 @@ class Canvas(QGraphicsView):
             bar.set_provider_diagnostics(provider_diag)
         if decode_path is not None:
             bar.set_decode_path(decode_path)
-        bar.move(
-            max(8, (self.viewport().width() - bar.width()) // 2),
-            max(4, self.viewport().height() - bar.height() - 4))
         bar.show()
+        self.update_video_control_bar_position()
         bar.raise_()
 
     def _probe_denoise_quality(self) -> str | None:
@@ -6478,6 +6520,13 @@ class Canvas(QGraphicsView):
             bar_height = bar.height()
             # 固定在底部，左对齐，宽度匹配 Canvas
             bar.setGeometry(0, self.height() - bar_height, bar_width, bar_height)
+        status = getattr(self, "color_status_bar", None)
+        if status is not None and not status.isHidden():
+            transport = getattr(self, "video_control_bar", None)
+            reserved = transport.height() if transport is not None and not transport.isHidden() else 0
+            status.move(
+                max(8, (self.viewport().width() - status.width()) // 2),
+                max(4, self.viewport().height() - reserved - status.height() - 4))
 
     @staticmethod
     def _should_present_renderer_front_texture(renderer: object) -> bool:
@@ -6508,7 +6557,7 @@ class Canvas(QGraphicsView):
                 # to clear a QOpenGLWidget framebuffer.  Explicitly paint the
                 # whole exposed rect; otherwise the uninitialised GL buffer
                 # leaks as bright-green bands around the fitted QImage.
-                painter.fillRect(rect, QColor(20, 20, 20))
+                painter.fillRect(rect, QColor(25, 25, 25))
                 self._record_presented_preview_frame()
                 return
             if self.engine and self.engine.renderer:

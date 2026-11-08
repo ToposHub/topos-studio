@@ -47,7 +47,7 @@ import logging
 import math
 import numpy as np
 import time
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Callable
 
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import (
@@ -60,7 +60,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QMouseEvent, QWheelEvent, QKeyEvent, QPainter, QColor, QPen, QBrush,
-    QFont, QFontMetrics, QImage, QTransform, QPolygon,
+    QFont, QFontMetrics, QImage, QTransform, QPolygon, QIcon, QPaintEvent,
 )
 
 from src.shared.i18n.i18n import I18N
@@ -358,6 +358,11 @@ class ProgramViewerBar(ViewportToolBarBase):
         if not hasattr(self, "_timeline_selector"):
             return
         selector = self._timeline_selector
+        if selector.parentWidget() is not self:
+            position_title = getattr(selector.parentWidget(), "position_title", None)
+            if callable(position_title):
+                position_title()
+            return
         width = min(320, max(80, selector.sizeHint().width()))
         x = max(0, (self.width() - width) // 2)
         selector.setGeometry(x, 0, width, self.height())
@@ -432,6 +437,27 @@ class ProgramTimelineSelector(ChevronComboBox):
     """
 
     timeline_switch_requested = pyqtSignal(str)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        """Use one application-drawn title when hosted by the Edit monitor."""
+        if not self.property("resolveMonitorTitle"):
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor(self.property("monitorTitleColor") or "#dedee0")
+        painter.setPen(color)
+        text = self.fontMetrics().elidedText(
+            self.currentText(), Qt.TextElideMode.ElideRight, max(0, self.width() - 22))
+        text_width = self.fontMetrics().horizontalAdvance(text)
+        x = (self.width() - text_width - 14) / 2.0
+        painter.drawText(QRectF(x, 0, text_width, self.height()),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        painter.setPen(QPen(QColor("#8f8f95"), 1.0))
+        cx, cy = x + text_width + 8.0, self.height() / 2.0
+        painter.drawLine(QPointF(cx - 3.0, cy - 1.0), QPointF(cx, cy + 2.0))
+        painter.drawLine(QPointF(cx, cy + 2.0), QPointF(cx + 3.0, cy - 1.0))
+        painter.end()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -574,6 +600,7 @@ class TransportControlBar(QFrame):
 
         self._is_playing: bool = False
         self._loop_enabled: bool = False
+        self._presentation_icon_provider: Optional[Callable[[str], QIcon]] = None
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 2, 8, 4)
@@ -712,7 +739,9 @@ class TransportControlBar(QFrame):
     def _on_loop_clicked(self) -> None:
         """Handle loop button toggle."""
         self._loop_enabled = self.btn_loop.isChecked()
-        if self._loop_enabled:
+        if self._presentation_icon_provider is not None:
+            self.btn_loop.setIcon(self._presentation_icon_provider("loop"))
+        elif self._loop_enabled:
             self.btn_loop.setIcon(icon_loop(IconColors.ORANGE))
         else:
             self.btn_loop.setIcon(icon_loop(IconColors.DEFAULT))
@@ -730,7 +759,9 @@ class TransportControlBar(QFrame):
     def update_play_button(self, is_playing: bool) -> None:
         """Update play button icon based on playback state."""
         self._is_playing = is_playing
-        if is_playing:
+        if self._presentation_icon_provider is not None:
+            self.btn_play.setIcon(self._presentation_icon_provider("pause" if is_playing else "play"))
+        elif is_playing:
             self.btn_play.setIcon(icon_pause(IconColors.ORANGE))
         else:
             self.btn_play.setIcon(icon_play(IconColors.ORANGE))
@@ -755,11 +786,19 @@ class TransportControlBar(QFrame):
         self.btn_loop.blockSignals(True)
         self.btn_loop.setChecked(checked)
         self._loop_enabled = checked
-        if checked:
+        if self._presentation_icon_provider is not None:
+            self.btn_loop.setIcon(self._presentation_icon_provider("loop"))
+        elif checked:
             self.btn_loop.setIcon(icon_loop(IconColors.ORANGE))
         else:
             self.btn_loop.setIcon(icon_loop(IconColors.DEFAULT))
         self.btn_loop.blockSignals(False)
+
+    def set_presentation_icon_provider(self, provider: Callable[[str], QIcon]) -> None:
+        """Skin existing controls without replacing their transport signals."""
+        self._presentation_icon_provider = provider
+        self.update_play_button(self._is_playing)
+        self.set_loop_checked(self._loop_enabled)
 
 
 # ================================================================
@@ -961,7 +1000,7 @@ class ProgramViewer(QOpenGLWidget):
             self._create_quad_vbo()
 
             # Set clear color (dark background)
-            _gl.glClearColor(0.08, 0.08, 0.08, 1.0)
+            _gl.glClearColor(0.0980392157, 0.0980392157, 0.0980392157, 1.0)
 
             self._gl_initialized = True
             logger.info("ProgramViewer GL initialized")
@@ -1310,7 +1349,7 @@ class ProgramViewer(QOpenGLWidget):
         # Clear background
         self._reset_copy_gl_state()
         _gl.glViewport(0, 0, max(1, self.width()), max(1, self.height()))
-        _gl.glClearColor(0.08, 0.08, 0.08, 1.0)
+        _gl.glClearColor(0.0980392157, 0.0980392157, 0.0980392157, 1.0)
         _gl.glClear(GL_COLOR_BUFFER_BIT)
 
         # Get viewport dimensions

@@ -2238,12 +2238,20 @@ class FileOpsMixin:
         # Open in Source Viewer
         self.source_viewer_widget.open_asset(asset)
 
-        # Raise Source Viewer dock to front
-        self.dock_source_viewer.raise_()
-
         # Switch to Edit page if not already there
         if self.current_page != "Edit":
             self.switch_to_page("Edit")
+
+        viewport = getattr(self, "edit_viewport", None)
+        if viewport is not None:
+            viewport.show_source(focus=True)
+            self.dock_program_viewer.show()
+            self.dock_program_viewer.raise_()
+        else:
+            # Compatibility with lightweight hosts that still own two docks.
+            source_dock = getattr(self, "dock_source_viewer", None)
+            if source_dock is not None:
+                source_dock.raise_()
 
         # A double-click is an explicit request to work with this source.
         # Move focus off the media pool so Space immediately controls Source.

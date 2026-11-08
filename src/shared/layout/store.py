@@ -309,7 +309,14 @@ class LayoutStore:
         Returns:
             A new LayoutProfile with filtered visible_panels.
         """
-        filtered = list(profile.visible_panels)
+        # The Edit monitors now share one panel. Preserve old profiles' intent
+        # without changing their opaque Qt state or unrelated panel choices.
+        legacy_viewers = {"edit.program_viewer", "edit.source_viewer"}
+        filtered: list[str] = []
+        for panel_id in profile.visible_panels:
+            migrated_id = "edit.viewport" if panel_id in legacy_viewers else panel_id
+            if migrated_id not in filtered:
+                filtered.append(migrated_id)
 
         # Filter by enabled features (using panel_id prefix convention)
         # Panel IDs follow "{feature}.{panel_name}" format
@@ -330,7 +337,7 @@ class LayoutStore:
                     "Skipped %d missing panels during restore", skipped
                 )
 
-        if len(filtered) == len(profile.visible_panels):
+        if tuple(filtered) == profile.visible_panels:
             return profile
 
         return profile.with_visible_panels(filtered)
@@ -392,8 +399,7 @@ class LayoutStore:
             ],
             "Edit": [
                 "edit.media_pool",
-                "edit.program_viewer",
-                "edit.source_viewer",
+                "edit.viewport",
                 "edit.timeline",
                 "edit.properties",
                 "edit.effects",
@@ -415,8 +421,7 @@ class LayoutStore:
             ],
             "Edit": [
                 "edit.media_pool",
-                "edit.program_viewer",
-                "edit.source_viewer",
+                "edit.viewport",
                 "edit.timeline",
                 "edit.properties",
                 "edit.effects",

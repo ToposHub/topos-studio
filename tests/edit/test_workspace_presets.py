@@ -48,14 +48,14 @@ def test_editing_preset_matches_factory_edit_layout():
     assert set(preset.visible_docks) == {
         "dockEditMediaPool",
         "dockProgramViewer",
-        "dockSourceViewer",
         "dockEditTimeline",
         "dockProperties",
         "dockEditEffects",
         "dockEditInfo",
     }
-    # 出厂布局：Program/Source tab 化，Properties/Effects/Info tab 化。
-    assert ("dockProgramViewer", "dockSourceViewer") in preset.tabify_groups
+    # Source lives inside Viewport; only the right inspector stack is tabified.
+    assert "dockSourceViewer" not in EDIT_WORKSPACE_MANAGED_DOCKS
+    assert ("dockProperties", "dockEditEffects", "dockEditInfo") in preset.tabify_groups
 
 
 def test_task_presets_swap_panels_meaningfully():
@@ -177,10 +177,10 @@ def test_apply_editing_preset_visibility_and_tabs(qapp):
     assert host.apply_edit_workspace_preset("editing") is True
     preset = get_workspace_preset("editing")
     assert _visible(host) == set(preset.visible_docks)
-    # Program/Source 同组 tab 化。
+    # The viewport is a single dock; inspector tabs remain grouped.
     program = host.docks_by_name["dockProgramViewer"]
-    source = host.docks_by_name["dockSourceViewer"]
-    assert source in host.tabifiedDockWidgets(program)
+    assert host.tabifiedDockWidgets(program) == []
+    assert host.dock_source_viewer is None
     # 快照写进 page_layouts["Edit"]。
     assert "Edit" in host.page_layouts
     assert not host.page_layouts["Edit"].isEmpty()

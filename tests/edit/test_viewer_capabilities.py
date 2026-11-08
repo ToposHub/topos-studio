@@ -71,6 +71,15 @@ def test_b07_no_source_asset_gates_reverse():
     assert not caps["source.reverse_play"].supported
 
 
+def test_unsupported_source_loop_has_explicit_reason() -> None:
+    capability = _caps(source_loop_supported=False)["source.loop"]
+    assert not capability.supported
+    assert capability.reason == "Source loop playback is not supported."
+    supported = _caps(source_loop_supported=True)["source.loop"]
+    assert supported.supported
+    assert supported.reason is None
+
+
 def test_b07_deliver_forces_timeline_monitoring():
     caps = _caps(in_deliver=True, source_asset_open=True)
     assert not caps["source.loop"].supported

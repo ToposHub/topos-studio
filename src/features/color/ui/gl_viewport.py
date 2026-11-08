@@ -6,10 +6,9 @@ from src.shared.gpu.gl_backend import GLContextManager
 
 logger = logging.getLogger(__name__)
 
-# Keep Color's OpenGL framebuffer identical to Edit's ProgramViewer backdrop.
-# This must be set at the GL layer: QGraphicsView's background brush does not
-# paint the areas left outside a letterboxed native-painting quad.
-VIEWER_BACKGROUND = (0.08, 0.08, 0.08, 1.0)
+# Color's viewer chrome uses #191919 for the empty canvas / letterbox surround.
+# This affects only the UI backdrop, never the media's HDR/color processing.
+VIEWER_BACKGROUND = (25.0 / 255.0, 25.0 / 255.0, 25.0 / 255.0, 1.0)
 
 class GLCanvasViewport(QOpenGLWidget):
     """
@@ -132,7 +131,7 @@ class GLCanvasViewport(QOpenGLWidget):
         if self.gl_manager.ctx:
             # A paused seek can briefly retain the widget framebuffer while
             # the renderer owns the shared context.  Clear it to the exact
-            # same #141414 backdrop used by Edit's ProgramViewer.
+            # same #191919 surround used by Color's Qt background brush.
             self.gl_manager.ctx.clear(*VIEWER_BACKGROUND)
 
     def showEvent(self, event) -> None:

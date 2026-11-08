@@ -1623,3 +1623,25 @@ def test_edit_space_shortcut_plays_timeline_and_reveals_program_monitor(monkeypa
     timeline.toggle_playback.assert_called_once_with()
     program_dock.show.assert_called_once_with()
     program_dock.raise_.assert_called_once_with()
+
+
+def test_edit_source_shortcut_reveals_source_inside_unified_viewport(monkeypatch) -> None:
+    source_focus = object()
+    source = _FocusContainer(source_focus)
+    source.current_asset = object()
+    source.toggle_playback = MagicMock(return_value=True)
+    viewport = SimpleNamespace(show_source=MagicMock(), show_program=MagicMock())
+    dock = SimpleNamespace(show=MagicMock(), raise_=MagicMock())
+    host = SimpleNamespace(
+        current_page="Edit", source_viewer_widget=source,
+        timeline_panel=None, program_viewer_widget=None,
+        edit_viewport=viewport, dock_program_viewer=dock,
+        dock_source_viewer=None,
+    )
+    monkeypatch.setattr("src.app.main_window.QApplication.focusWidget", lambda: source_focus)
+
+    assert MainWindow._handle_edit_space_playback_shortcut(host) is True
+    viewport.show_source.assert_called_once_with(focus=False)
+    viewport.show_program.assert_not_called()
+    source.toggle_playback.assert_called_once_with()
+    dock.raise_.assert_called_once_with()

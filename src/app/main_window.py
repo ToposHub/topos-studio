@@ -1019,7 +1019,14 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             return False
 
     def _raise_edit_viewer_dock(self, dock_name: str) -> None:
-        """Bring the requested Edit monitor tab to the foreground."""
+        """Reveal the requested monitor inside the shared Edit Viewport."""
+        viewport = getattr(self, "edit_viewport", None)
+        if viewport is not None:
+            if dock_name == "dock_source_viewer":
+                viewport.show_source(focus=False)
+            else:
+                viewport.show_program(focus=False)
+            dock_name = "dock_program_viewer"
         dock = getattr(self, dock_name, None)
         if dock is None:
             return

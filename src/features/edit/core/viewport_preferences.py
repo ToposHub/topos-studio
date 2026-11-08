@@ -127,7 +127,7 @@ def parse_viewport_preferences(
 
     version = raw.get("version", VIEWPORT_PREFS_VERSION)
     if not isinstance(version, int) or isinstance(version, bool) \
-            or version > VIEWPORT_PREFS_VERSION:
+            or version != VIEWPORT_PREFS_VERSION:
         diagnostics.append(
             f"version: unsupported {version!r}; "
             "all defaults applied (single view, Timeline)")

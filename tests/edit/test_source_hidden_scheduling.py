@@ -150,6 +150,44 @@ def test_b02_show_requests_current_frame_once(qapp):
     widget.pause()
 
 
+def test_b02_hidden_pending_decode_does_not_hold_logic_clock(qapp):
+    provider = _Provider()
+    widget = _widget(qapp, provider)
+    widget._current_frame = 0
+    widget._last_good_frame = 0
+    widget._gpu_pending_frame = 0
+    widget._playback_start_time = time.perf_counter() - 0.5
+    widget._playback_start_frame = 0
+    widget._is_playing = True
+    provider.requests.clear()
+    widget.hide()
+    widget._on_playback_tick()
+    assert widget.current_frame == 12
+    assert provider.requests == []
+    widget.show()
+    assert provider.requests == [12]
+    widget.pause()
+
+
+def test_b02_hidden_late_failure_never_submits_cpu_decode(qapp):
+    provider = _Provider()
+    widget = _widget(qapp, provider)
+    submitted: list[tuple] = []
+    widget._cpu_worker.request = lambda *args, **kwargs: submitted.append((args, kwargs))
+    widget.seek(20)
+    widget._gpu_expected_frame = 20
+    widget._gpu_pending_frame = 20
+    provider.requests.clear()
+    widget.hide()
+    widget.request_cpu_fallback(20)
+    widget._on_gpu_timeout()
+    assert submitted == []
+    assert provider.requests == []
+    widget.show()
+    assert provider.requests == [20]
+    widget.pause()
+
+
 # ── slot 收支闭环 ───────────────────────────────────────────────────
 
 

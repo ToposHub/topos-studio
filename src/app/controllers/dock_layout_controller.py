@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _VIEWPORT_MIN_WIDTH = 640
 _VIEWPORT_MIN_HEIGHT = 360
+_EDIT_VIEWPORT_PREFERENCES_KEY = "edit_viewport_preferences"
 
 
 # Versioned one-shot repair for a persisted Edit layout from builds that let
@@ -465,6 +466,8 @@ class DockLayoutMixin:
         # Edit Page Docks (P1 phase) - Phase 8: Conditional creation
         self.dock_edit_media_pool = None
         self.dock_program_viewer = None
+        self.edit_viewport = None
+        # Kept as an absent legacy attribute for old layout/host adapters.
         self.dock_source_viewer = None
         self.dock_edit_timeline = None
 
@@ -475,19 +478,19 @@ class DockLayoutMixin:
             )
             self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_edit_media_pool)
 
-            # Program Viewer - Top area (节目监视器)
+            from src.features.edit.ui.edit_viewport import EditViewport
+
+            self.edit_viewport = EditViewport(
+                self.program_viewer_widget, self.source_viewer_widget
+            )
+            self._setup_edit_viewport_preferences()
+            # Retain the stable dock identity so existing workspace snapshots
+            # restore the Viewport to the old Program monitor's position.
             self.dock_program_viewer = create_custom_dock(
-                I18N.tr("panel.program_viewer", "Program"), self.program_viewer_widget, "dockProgramViewer"
+                I18N.tr("panel.edit_viewport", "Viewport"), self.edit_viewport, "dockProgramViewer"
             )
             self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dock_program_viewer)
-
-            # Source Viewer - Top area, tabified with Program Viewer (P3.1)
-            self.dock_source_viewer = create_custom_dock(
-                I18N.tr("panel.source_viewer", "Source"), self.source_viewer_widget, "dockSourceViewer"
-            )
-            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dock_source_viewer)
-            self.tabifyDockWidget(self.dock_program_viewer, self.dock_source_viewer)
-            self.dock_program_viewer.raise_()  # Program Viewer is default visible
+            self.dock_program_viewer.raise_()
 
             # Timeline - Bottom area
             self.dock_edit_timeline = create_custom_dock(
@@ -529,6 +532,19 @@ class DockLayoutMixin:
                 self._sync_color_timeline_selector()
             if self.source_viewer_widget is not None:
                 self.edit_page.set_source_viewer(self.source_viewer_widget)
+            if self.edit_viewport is not None and self.timeline_panel is not None:
+                controller = self.timeline_panel.get_playback_controller()
+                if controller is not None:
+                    self.edit_viewport.program_seek_requested.connect(controller.seek)
+                    self.edit_viewport.program_stop_requested.connect(controller.stop_in_place)
+                    controller.frame_changed.connect(self.edit_viewport.set_program_position)
+                self.edit_page.timeline_display_changed.connect(self._sync_edit_viewport_timeline)
+                self.edit_viewport.bind_timeline_widget(
+                    self.timeline_panel.get_timeline_view().viewport()
+                )
+                self._sync_edit_viewport_timeline(
+                    self.timeline_panel.get_timeline_view().get_timeline()
+                )
 
         # Connect MediaPoolPanel double-click to Source Viewer (P3.1)
         if self._edit_available and self.media_pool_panel is not None:
@@ -1111,8 +1127,6 @@ class DockLayoutMixin:
             self.all_docks.append(self.dock_edit_media_pool)
         if self.dock_program_viewer:
             self.all_docks.append(self.dock_program_viewer)
-        if self.dock_source_viewer:
-            self.all_docks.append(self.dock_source_viewer)
         if self.dock_edit_timeline:
             self.all_docks.append(self.dock_edit_timeline)
         if self.dock_edit_info:
@@ -1381,15 +1395,13 @@ class DockLayoutMixin:
         self.page_layouts["Library"] = self.saveState()
 
         # 2. Edit Layout (P1 phase) - conditional
-        # Default layout: Media Pool left, Program Viewer/Source Viewer top, Timeline bottom, Properties/Effects right
+        # Default layout: Media Pool left, unified Viewport top, Timeline bottom.
         if self._edit_available:
             for d in self.all_docks: d.setVisible(False)
             if self.dock_properties is not None and self.edit_properties_panel is not None:
                 self.dock_properties.setWidget(self.edit_properties_panel)
             if self.dock_program_viewer:
                 self.dock_program_viewer.setVisible(True)
-            if self.dock_source_viewer:
-                self.dock_source_viewer.setVisible(True)
             if self.dock_edit_media_pool:
                 self.dock_edit_media_pool.setVisible(True)
             if self.dock_edit_timeline:
@@ -1402,10 +1414,6 @@ class DockLayoutMixin:
                 self.dock_edit_effects.setVisible(True)
             if self.dock_program_viewer:
                 self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dock_program_viewer)
-            if self.dock_source_viewer:
-                self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dock_source_viewer)
-            if self.dock_program_viewer and self.dock_source_viewer:
-                self.tabifyDockWidget(self.dock_program_viewer, self.dock_source_viewer)
             if self.dock_program_viewer:
                 self.dock_program_viewer.raise_()
             if self.dock_edit_media_pool:
@@ -3202,6 +3210,8 @@ class DockLayoutMixin:
             for d in edit_only:
                 if d is not None:
                     d.setVisible(False)
+        elif getattr(self, "edit_viewport", None) is not None:
+            self._migrate_edit_viewport_visibility()
 
         # Media Pool dock — shared by Edit & Composite; hide on other pages
         if self.current_page not in ("Edit", "Composite"):
@@ -3266,10 +3276,13 @@ class DockLayoutMixin:
         attach = getattr(workspace, "attach_edit_panels", None)
         if not callable(attach):
             return
+        viewport = getattr(self, "edit_viewport", None)
+        if viewport is not None:
+            viewport.set_deliver_mode(True)
         attach(
             self.program_viewer_widget,
             self.timeline_panel,
-            self.dock_program_viewer,
+            None if viewport is not None else self.dock_program_viewer,
             self.dock_edit_timeline,
         )
 
@@ -3279,6 +3292,126 @@ class DockLayoutMixin:
         detach = getattr(workspace, "detach_edit_panels", None)
         if callable(detach):
             detach()
+        viewport = getattr(self, "edit_viewport", None)
+        if viewport is not None:
+            viewport.restore_program_viewer()
+            viewport.set_deliver_mode(False)
+
+    def _sync_edit_viewport_timeline(self, timeline: object) -> None:
+        """Keep the monitor's scrub range on the existing timeline timebase."""
+        viewport = getattr(self, "edit_viewport", None)
+        if viewport is None:
+            return
+        from src.features.edit.core.timeline_v2 import effective_timeline_duration_frames
+
+        duration = effective_timeline_duration_frames(timeline) if timeline is not None else 0
+        viewport.set_program_range(duration, getattr(timeline, "fps", 24.0))
+
+    def _setup_edit_viewport_preferences(self) -> None:
+        """Restore the versioned display preference before observing UI changes."""
+        from src.features.edit.core.viewport_preferences import (
+            LEGACY_KEY_DUAL_VIEW,
+            LEGACY_KEY_SPLITTER_SIZES,
+            parse_viewport_preferences,
+        )
+
+        self._edit_viewport_preferences_timer = QTimer(self)
+        self._edit_viewport_preferences_timer.setSingleShot(True)
+        self._edit_viewport_preferences_timer.setInterval(300)
+        self._edit_viewport_preferences_timer.timeout.connect(
+            self.config_manager.save_config
+        )
+        raw = self.config_manager.get(_EDIT_VIEWPORT_PREFERENCES_KEY)
+        if raw is None:
+            raw = {
+                LEGACY_KEY_DUAL_VIEW: self.config_manager.get(
+                    LEGACY_KEY_DUAL_VIEW, False
+                ),
+                LEGACY_KEY_SPLITTER_SIZES: self.config_manager.get(
+                    LEGACY_KEY_SPLITTER_SIZES
+                ),
+            }
+        preferences, diagnostics = parse_viewport_preferences(raw)
+        for diagnostic in diagnostics:
+            logger.info("Edit Viewport preferences: %s", diagnostic)
+        self._edit_viewport_preferences = preferences
+        viewport = self.edit_viewport
+        if preferences.splitter_sizes is not None:
+            viewport.restore_splitter_sizes(list(preferences.splitter_sizes))
+        viewport.set_dual_view(preferences.dual_view)
+        if preferences.single_view_target == "source":
+            viewport.show_source(focus=False)
+        else:
+            viewport.show_program(focus=False)
+
+        # Persist normalized/migrated data without deleting old keys or touching
+        # other page layouts. Restoring the widgets itself does not echo a save.
+        if raw != preferences.to_dict():
+            self.config_manager.set(
+                _EDIT_VIEWPORT_PREFERENCES_KEY,
+                preferences.to_dict(), auto_save=False,
+            )
+            self._edit_viewport_preferences_timer.start()
+        viewport.mode_changed.connect(self._save_edit_viewport_preferences)
+        viewport.active_monitor_changed.connect(self._save_edit_viewport_preferences)
+        viewport.splitter.splitterMoved.connect(self._save_edit_viewport_preferences)
+
+    def _save_edit_viewport_preferences(self, *_args: object) -> None:
+        """Debounce validated display preferences; ignore Deliver's borrowed UI."""
+        from src.features.edit.core.viewport_preferences import (
+            ViewportPreferences,
+            parse_viewport_preferences,
+        )
+
+        viewport = self.edit_viewport
+        if (
+            getattr(self, "current_page", None) != "Edit"
+            or getattr(viewport, "_deliver_mode", False)
+        ):
+            return
+        previous = self._edit_viewport_preferences
+        sizes = previous.splitter_sizes
+        if viewport.dual_view:
+            candidate, _ = parse_viewport_preferences({
+                "splitter_sizes": viewport.splitter.sizes(),
+            })
+            if candidate.splitter_sizes is not None:
+                sizes = candidate.splitter_sizes
+        preferences = ViewportPreferences(
+            dual_view=viewport.dual_view,
+            splitter_sizes=sizes,
+            single_view_target=(
+                "source" if viewport.active_monitor == "source" else "timeline"
+            ),
+        )
+        if preferences == previous:
+            return
+        self._edit_viewport_preferences = preferences
+        self.config_manager.set(
+            _EDIT_VIEWPORT_PREFERENCES_KEY,
+            preferences.to_dict(), auto_save=False,
+        )
+        self._edit_viewport_preferences_timer.start()
+
+    def _migrate_edit_viewport_visibility(self) -> None:
+        """Reveal the merged monitor once when replacing legacy viewer docks.
+
+        A saved Source-only layout can hide the old Program dock. Qt retains
+        that hidden flag even though Source no longer exists, so keep the
+        unified panel discoverable on the first Edit visit in each workspace.
+        Later user choices, including closing the Viewport, remain respected.
+        """
+        if self.current_page != "Edit" or getattr(self, "edit_viewport", None) is None:
+            return
+        key = f"edit_viewport_layout_version_{self._current_product_mode()}_{self._current_work_mode()}"
+        if self.config_manager.get(key) == 1:
+            return
+        self.dock_program_viewer.show()
+        self.dock_program_viewer.raise_()
+        self.config_manager.set(key, 1, auto_save=False)
+        self.page_layouts["Edit"] = self.saveState()
+        self._save_current_layout_to_store("Edit")
+        self.config_manager.save_config()
 
     def _migrate_deliver_layout(self) -> None:
         """Repair old Deliver layouts that collapsed the settings dock.
