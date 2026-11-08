@@ -210,3 +210,111 @@ class TestSpeedAnimationRemap:
                   clip2.animated_params["opacity"].keyframes.keyframes]
         assert clip2.timeline_duration == 48
         assert frames == [100, 147]
+
+
+# ── B17：变速 undo 完整动画快照（禁反算） ────────────────────────────
+
+
+def _speed_undo_timeline() -> TimelineSequence:
+    """互链 A/V：视频 key@1、音频 key@40（审查探针基线）。"""
+    from dataclasses import replace as _dcreplace
+
+    from src.shared.keyframe import InterpolationType
+
+    video = ClipInstance("v", "asset", "v1", 0, 100, 0, 100,
+                         linked_clip_id="a")
+    video = video.with_keyframe_added("opacity", 1, 0.2)
+    keys = list(video.animated_params["opacity"].keyframes.keyframes)
+    rich = _dcreplace(
+        keys[0], interpolation=InterpolationType.BEZIER,
+        tangent_mode="broken", handle_left=(-2.0, 0.1),
+        handle_right=(3.0, -0.1))
+    video = _dcreplace(video, animated_params={"opacity": _dcreplace(
+        video.animated_params["opacity"],
+        keyframes=_dcreplace(
+            video.animated_params["opacity"].keyframes, keyframes=[rich]))})
+    audio = _dcreplace(
+        video, clip_id="a", track_id="a1", linked_clip_id="v",
+        animated_params={})
+    audio = audio.with_keyframe_added("opacity", 40, 0.8)
+    return TimelineSequence(
+        "speed-undo-b17", "Speed undo", fps=Rational(24, 1),
+        video_tracks=(EditTrack("v1", "V1", "video", 0, clips=(video,)),),
+        audio_tracks=(EditTrack("a1", "A1", "audio", 0, clips=(audio,)),),
+    )
+
+
+def test_b17_undo_restores_exact_animation_for_primary_and_linked() -> None:
+    """反例：2x 变速 undo 后视频 key 回到 1、音频回 40，曲线完整。"""
+    timeline = _speed_undo_timeline()
+    changed = ChangeClipSpeedCommand.create("v", "v1", 2.0).apply(timeline)[0]
+    # apply 后动画已重锚（压缩）
+    assert changed.get_clip_by_id("v").timeline_duration == 50
+    restored = ChangeClipSpeedCommand.create("v", "v1", 2.0)  # not used
+    cmd = ChangeClipSpeedCommand.create("v", "v1", 2.0)
+    applied, updated = cmd.apply(timeline)
+    undone = updated.undo(applied)
+
+    video_keys = undone.get_clip_by_id("v").animated_params[
+        "opacity"].keyframes.keyframes
+    assert [k.frame for k in video_keys] == [1]
+    assert video_keys[0].tangent_mode == "broken"
+    assert video_keys[0].handle_left == (-2.0, 0.1)
+    assert video_keys[0].handle_right == (3.0, -0.1)
+    audio_keys = undone.get_clip_by_id("a").animated_params[
+        "opacity"].keyframes.keyframes
+    assert [k.frame for k in audio_keys] == [40]
+    # 时长/速度也完全还原
+    assert undone.get_clip_by_id("v").timeline_duration == 100
+    assert undone.get_clip_by_id("a").timeline_duration == 100
+
+
+def test_b17_high_rate_compression_undo_no_key_loss() -> None:
+    """8x 压缩导致关键帧合并后，undo 恢复全部原始关键帧。"""
+    clip = ClipInstance("v", "asset", "v1", 0, 100, 0, 100)
+    for frame in range(0, 100, 10):
+        clip = clip.with_keyframe_added("opacity", frame, frame / 100)
+    timeline = TimelineSequence(
+        "b17", "B17", fps=Rational(24, 1),
+        video_tracks=(EditTrack("v1", "V1", "video", 0, clips=(clip,)),),
+        audio_tracks=(EditTrack("a1", "A1", "audio", 0),),
+    )
+    before_frames = [k.frame for k in timeline.get_clip_by_id(
+        "v").animated_params["opacity"].keyframes.keyframes]
+
+    applied, updated = ChangeClipSpeedCommand.create("v", "v1", 8.0).apply(
+        timeline)
+    # 8x 压缩后有合并（时长 13 帧 vs 10 个关键帧）
+    assert applied.get_clip_by_id("v").timeline_duration < 20
+    undone = updated.undo(applied)
+    restored = undone.get_clip_by_id("v").animated_params[
+        "opacity"].keyframes.keyframes
+    assert [k.frame for k in restored] == before_frames
+
+
+def test_b17_linked_partner_different_span_undo_restores_animation() -> None:
+    """链接伙伴时长不同：apply 各自重锚，undo 各自完整还原。"""
+    from dataclasses import replace as _dcreplace
+
+    video = ClipInstance("v", "asset", "v1", 0, 100, 0, 100,
+                         linked_clip_id="a")
+    video = video.with_keyframe_added("opacity", 25, 0.5)
+    audio = _dcreplace(
+        ClipInstance("a", "asset", "a1", 0, 100, 0, 50,
+                     linked_clip_id="v"),
+        animated_params={})
+    audio = audio.with_keyframe_added("opacity", 60, 0.6)
+    timeline = TimelineSequence(
+        "b17-span", "B17", fps=Rational(24, 1),
+        video_tracks=(EditTrack("v1", "V1", "video", 0, clips=(video,)),),
+        audio_tracks=(EditTrack("a1", "A1", "audio", 0, clips=(audio,)),),
+    )
+
+    applied, updated = ChangeClipSpeedCommand.create("v", "v1", 2.0).apply(
+        timeline)
+    undone = updated.undo(applied)
+    assert [k.frame for k in undone.get_clip_by_id("v").animated_params[
+        "opacity"].keyframes.keyframes] == [25]
+    assert [k.frame for k in undone.get_clip_by_id("a").animated_params[
+        "opacity"].keyframes.keyframes] == [60]
+    assert undone.get_clip_by_id("a").timeline_duration == 100
