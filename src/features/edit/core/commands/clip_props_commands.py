@@ -1207,6 +1207,12 @@ class ChangeClipSpeedCommand:
     _old_linked_fade_out: int = 0
     _before_transitions: tuple = None
     _before_linked_transitions: tuple = None
+    # B17：apply 前完整动画快照（clip/effect 关键帧，deepcopy 隔离可变
+    # KeyframeTrack 列表）。undo 直接还原快照，禁止反向重映射——高倍
+    # 压缩后反算不可逆（主片关键帧回不到原帧位），链接伙伴此前完全
+    # 缺少动画恢复路径。
+    _before_animation: tuple | None = None
+    _before_linked_animation: tuple | None = None
 
     def apply(self, timeline: Any) -> tuple:
         """Apply speed change."""
@@ -1231,6 +1237,9 @@ class ChangeClipSpeedCommand:
         # Store old values
         old_speed = clip.speed
         old_timeline_duration = clip.timeline_duration
+        # B17：apply 前完整动画快照（主片）；链接伙伴快照在下方成对取
+        before_animation = (
+            _copy.deepcopy(clip.animated_params), _copy.deepcopy(clip.effects))
 
         # Calculate new timeline_duration based on speed ratio
         from src.features.edit.core.clip_params import SpeedParams
@@ -1295,6 +1304,7 @@ class ChangeClipSpeedCommand:
         new_timeline = timeline.with_track_updated(new_track)
         linked_old_speed = None
         linked_old_duration = 0
+        before_linked_animation = None
         # C04（第六轮审计）：链接轨转场快照必须在 with_clip_updated 之前
         # 取——旧代码从已更新的 new_timeline 取，拿到的是被新时长钳制过
         # 的转场（实测 80→50→undo 仍 50，原始 80 帧转场永久丢失）。
@@ -1307,6 +1317,9 @@ class ChangeClipSpeedCommand:
         if linked_clip is not None:
             linked_old_speed = linked_clip.speed
             linked_old_duration = linked_clip.timeline_duration
+            before_linked_animation = (
+                _copy.deepcopy(linked_clip.animated_params),
+                _copy.deepcopy(linked_clip.effects))
             linked_duration = timeline_duration_for_source(
                 linked_clip.source_duration,
                 new_params,
@@ -1356,6 +1369,8 @@ class ChangeClipSpeedCommand:
             ),
             _before_transitions=track.transitions,
             _before_linked_transitions=before_linked_transitions,
+            _before_animation=before_animation,
+            _before_linked_animation=before_linked_animation,
         )
         return new_timeline, updated_cmd
 
@@ -1380,10 +1395,21 @@ class ChangeClipSpeedCommand:
         new_clip = clip.with_speed_params(old_speed).with_timeline_duration(
             self._old_timeline_duration
         )
-        # F2.4：反向重映射动画关键帧（apply 按比例迁到新 span，undo 从
-        # 当前时长映射回旧时长，曲线与画面保持同锚）
-        new_clip = new_clip.with_animation_time_remapped(
-            clip.timeline_duration, self._old_timeline_duration)
+        # B17：动画直接还原 apply 前快照，禁止反算——高倍率压缩后的
+        # 反向重映射不可逆（帧位四舍五入漂移），且快照含完整
+        # clip/effect 关键帧、tangent/handles 与 effect 动画。旧命令
+        # （无快照）回退到 F2.4 的反向重映射近似路径。
+        if self._before_animation is not None:
+            new_clip = replace(
+                new_clip,
+                animated_params=self._before_animation[0],
+                effects=self._before_animation[1],
+            )
+        else:
+            # F2.4：反向重映射动画关键帧（apply 按比例迁到新 span，undo
+            # 从当前时长映射回旧时长，曲线与画面保持同锚）
+            new_clip = new_clip.with_animation_time_remapped(
+                clip.timeline_duration, self._old_timeline_duration)
         # R05：变速 apply 钳制了 fade，undo 恢复原 envelope
         if self._old_fade_in or self._old_fade_out:
             new_clip = replace(
@@ -1412,6 +1438,19 @@ class ChangeClipSpeedCommand:
                 restored_linked = linked.with_speed_params(
                     linked_speed
                 ).with_timeline_duration(self._old_linked_timeline_duration)
+                # B17：链接伙伴动画恢复——此前 undo 完全遗漏伙伴的
+                # 关键帧重映射还原，apply 压缩过的曲线永久停留在新 span
+                if self._before_linked_animation is not None:
+                    restored_linked = replace(
+                        restored_linked,
+                        animated_params=self._before_linked_animation[0],
+                        effects=self._before_linked_animation[1],
+                    )
+                elif linked.timeline_duration != self._old_linked_timeline_duration:
+                    restored_linked = (
+                        restored_linked.with_animation_time_remapped(
+                            linked.timeline_duration,
+                            self._old_linked_timeline_duration))
                 if self._old_linked_fade_in or self._old_linked_fade_out:
                     restored_linked = replace(
                         restored_linked,
