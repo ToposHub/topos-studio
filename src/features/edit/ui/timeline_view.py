@@ -12446,22 +12446,47 @@ class TimelineView(QGraphicsView):
             logger.warning("Speed change rejected: %s", exc)
             self.status_message_requested.emit(str(exc))
 
+    def _plan_rate_stretch_speed(
+        self, clip: ClipInstance, new_duration: int,
+    ) -> "tuple[float, int, str | None] | None":
+        """R04：比例拉伸统一 planner——用权威源时基反解速度。
+
+        旧换算 ``s' = s × old/new`` 拿**已舍入**的旧时长推速（源 5 帧、
+        3x、时间线 2 帧拉到 10 帧得 0.6x → 实际 8 帧）。这里从源帧数
+        与源/时间线 fps 的精确积分（Fraction 无舍入）反解
+        ``s = base_ticks / target``，未钳时提交时长 == 松手目标
+        （图形边缘 = 提交边缘）；越界钳到 [MIN, MAX] 并返回实际可
+        实现时长与钳制原因供高级请求/诊断使用。速度无变化返回 None
+        （零 history）。
+        """
+        from src.features.edit.core.timeline_ops import (
+            solve_speed_for_timeline_duration,
+        )
+
+        seq_fps = getattr(self._timeline, "fps", None)
+        speed, achievable, reason = solve_speed_for_timeline_duration(
+            clip.source_duration, new_duration,
+            clip._source_fps_num, clip._source_fps_den,
+            clip._timeline_fps_num or getattr(seq_fps, "num", None),
+            clip._timeline_fps_den or getattr(seq_fps, "den", None),
+        )
+        params = self._retime_speed_params_for_clip(clip)
+        if speed == params.speed:
+            return None  # 零变化：不入历史
+        return speed, achievable, reason
+
     def _on_rate_stretch_finished(
         self, clip_id: str, track_id: str,
         original_duration: int, new_duration: int,
     ) -> None:
         """B4/B18: 比例拉伸结束——时长变化换算为速度并提交既有速度命令。
 
-        B18：速度按**当前时长比**换算（s' = s × old/new）——混合帧率时
-        当前时长已含源/时间线 fps 比，不再用"源帧数/时间线帧数"把
-        fps 比再算一遍（48fps 源 200 帧在 24fps 时间线拉到 50 帧得
-        2x/50 帧，而非 4x/25 帧）。非目标字段（reverse/
-        preserve_pitch/插值等）经 ``params.with_speed`` 保留；复杂
-        curve/freeze/动画（含 linked 伙伴）预检不过时发高级请求并
-        明确反馈，不降级执行；零变化不入历史。
+        R04：速度由统一 planner 从权威源时基反解（不拿已舍入时长推
+        速）。非目标字段（reverse/preserve_pitch/插值等）经
+        ``params.with_speed`` 保留；复杂 curve/freeze/动画（含 linked
+        伙伴）预检不过时发高级请求并明确反馈，不降级执行；零变化
+        不入历史。
         """
-        from src.features.edit.core.timeline_v2 import MAX_SPEED, MIN_SPEED
-
         clip = self._timeline.get_clip_by_id(clip_id) if self._timeline else None
         if (clip is None or new_duration <= 0
                 or new_duration == original_duration
@@ -12469,28 +12494,30 @@ class TimelineView(QGraphicsView):
                 or self._position_lock_enabled
                 or self._is_track_locked(track_id)):
             return
-        params = self._retime_speed_params_for_clip(clip)
-        raw_speed = params.speed * original_duration / new_duration
-        speed = max(float(MIN_SPEED), min(float(MAX_SPEED), raw_speed))
-        if speed == params.speed:
-            return  # 零变化：不入历史
+        plan = self._plan_rate_stretch_speed(clip, new_duration)
+        if plan is None:
+            return
+        speed, achievable, reason = plan
         if self._retime_controls_need_backend(clip):
             self._request_advanced_retime(clip, "stretch", 0, {
                 "original_duration": original_duration,
                 "duration": new_duration,
                 "speed": speed,
+                "achievable_duration": achievable,
+                "clamped": reason,
             })
             return
+        params = self._retime_speed_params_for_clip(clip)
         try:
             self._commit_retime_params(
                 clip, params.with_speed(speed), "Rate stretch")
         except (RuntimeError, ValueError) as exc:
             self.status_message_requested.emit(str(exc))
             return
-        if speed != raw_speed:
+        if reason is not None:
             logger.info(
-                "Rate stretch clamped to %.2fx (requested %.2fx)",
-                speed, raw_speed,
+                "Rate stretch clamped to %.2fx (%s); achievable %d frames "
+                "(requested %d)", speed, reason, achievable, new_duration,
             )
 
     def _retime_controls_need_backend(self, clip: ClipInstance) -> bool:
@@ -12523,18 +12550,23 @@ class TimelineView(QGraphicsView):
     def _on_retime_stretch_finished(
         self, clip_id: str, track_id: str, original_duration: int, new_duration: int,
     ) -> None:
-        """Translate header geometry to a basic speed request in timeline units."""
+        """R04：retime 顶部拉伸与比例拉伸共用统一 planner（权威源时基）。"""
         clip = self._timeline.get_clip_by_id(clip_id) if self._timeline else None
         if (clip is None or new_duration <= 0 or new_duration == original_duration
                 or clip.timeline_duration != original_duration
                 or self._position_lock_enabled or self._is_track_locked(track_id)):
             return
-        params = self._retime_speed_params_for_clip(clip)
-        speed = max(0.1, min(8.0, params.speed * original_duration / new_duration))
+        plan = self._plan_rate_stretch_speed(clip, new_duration)
+        if plan is None:
+            return
+        speed, achievable, reason = plan
         if self._retime_controls_need_backend(clip):
             self._request_advanced_retime(clip, "stretch", 0, {
-                "original_duration": original_duration, "duration": new_duration, "speed": speed})
+                "original_duration": original_duration, "duration": new_duration,
+                "speed": speed, "achievable_duration": achievable,
+                "clamped": reason})
             return
+        params = self._retime_speed_params_for_clip(clip)
         try:
             self._commit_retime_params(clip, params.with_speed(speed), "Change clip speed")
         except (ValueError, RuntimeError) as exc:
