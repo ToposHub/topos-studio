@@ -103,7 +103,7 @@ def test_segment_menu_is_grouped_and_cancel_is_noop(qtbot: Any, monkeypatch: pyt
     assert not view._command_stack._undo_stack
 
 
-@pytest.mark.parametrize('key', ['freeze', 'rewind', 'ramp_up', 'clear_point'])
+@pytest.mark.parametrize('key', ['freeze', 'rewind', 'ramp_up'])
 def test_advanced_segment_menu_request_preserves_intent(qtbot: Any, key: str) -> None:
     view = _view(qtbot)
     before = view.get_timeline()
@@ -112,6 +112,23 @@ def test_advanced_segment_menu_request_preserves_intent(qtbot: Any, key: str) ->
     view._on_retime_action_requested('c', 'v', key, 25, 2.0)
     assert requests == [('c', 'v', {'operation': 'retime_controls', 'action': key, 'source_offset': 25, 'value': 2.0})]
     assert view.get_timeline() == before
+
+
+def test_clear_point_executes_single_point_removal(qtbot: Any) -> None:
+    """B14 stage-3：clear_point 是已支持能力——单点删除并入前段速度，
+    不再发高级请求（回归见 test_speed_settings_reception）。"""
+    from src.features.edit.core.clip_params import SpeedPoint
+    view = _view(qtbot, SpeedParams(speed=1.0, speed_points=(
+        SpeedPoint(source_offset=25, speed=2.0),)))
+    requests = []
+    view.clip_speed_settings_requested.connect(lambda *args: requests.append(args))
+    view._on_retime_action_requested('c', 'v', 'clear_point', 25, 2.0)
+    assert requests == []  # 不发请求：本地执行
+    assert view.get_timeline().get_clip_by_id('c').speed.speed_points == ()
+    assert len(view._command_stack._undo_stack) == 1
+    view.undo()
+    restored = view.get_timeline().get_clip_by_id('c').speed.speed_points
+    assert [p.source_offset for p in restored] == [25]
 
 
 def test_basic_menu_reverse_and_pitch_refresh_and_undo(qtbot: Any) -> None:
