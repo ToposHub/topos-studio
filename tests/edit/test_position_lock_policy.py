@@ -270,3 +270,108 @@ def test_service_without_policy_backward_compatible() -> None:
     result = EditProjectService.commit_command(
         state, "lock", cmd, base_revision=state.sequences["lock"].revision)
     assert result.applied is True
+
+
+# ── B06：service 错误契约（revision 先验 + 单次受控 apply + 归一） ──────
+
+
+def test_b06_stale_revision_with_policy_returns_conflict_result() -> None:
+    """反例：stale revision + 命令引用缺失 clip → RevisionConflict 结果。
+
+    旧实现先跑锁 dry-run，ValueError('Clip not found') 直接泄漏为异常。
+    """
+    from src.features.edit.ai_editing.edit_project_service import (
+        EditProjectService,
+    )
+
+    state = _state()
+    cmd = MoveClipCommand.create(
+        "v1", "missing", new_start=20, old_start=0)
+    result = EditProjectService.commit_command(
+        state, "lock", cmd, base_revision=state.sequences["lock"].revision + 999,
+        position_locked_clip_ids={"c1"},
+    )
+    assert result.applied is False
+    assert result.error and "Revision conflict" in result.error
+    assert result.new_project is state.project
+
+
+def test_b06_invalid_command_with_policy_returns_failure_result() -> None:
+    """命令非法（clip 不存在）+ 策略在位 → 归一 CommitResult，不抛异常。"""
+    from src.features.edit.ai_editing.edit_project_service import (
+        EditProjectService,
+    )
+
+    state = _state()
+    cmd = MoveClipCommand.create(
+        "v1", "missing", new_start=20, old_start=0)
+    result = EditProjectService.commit_command(
+        state, "lock", cmd,
+        base_revision=state.sequences["lock"].revision,
+        position_locked_clip_ids={"c1"},
+    )
+    assert result.applied is False
+    assert result.error and "failed to apply" in result.error
+    assert result.new_sequences == dict(state.sequences)
+    # 状态与 revision 原样
+    assert state.sequences["lock"].get_clip_by_id("c1").timeline_start == 0
+
+
+def test_b06_macro_second_half_failure_normalized() -> None:
+    """宏命令后段失败 + 策略在位 → CommitResult 且无部分写入。"""
+    from src.features.edit.core.commands import MacroCommand
+    from src.features.edit.ai_editing.edit_project_service import (
+        EditProjectService,
+    )
+
+    state = _state()
+    good = SlipClipCommand(
+        command_id=str(uuid.uuid4()), label="slip", track_id="v1",
+        clip_id="c1", delta_frames=8, max_source_frames=1000,
+    )
+    bad = MoveClipCommand.create("v1", "missing", new_start=5, old_start=0)
+    macro = MacroCommand.create("slip+bad", (good, bad))
+    result = EditProjectService.commit_command(
+        state, "lock", macro,
+        base_revision=state.sequences["lock"].revision,
+        position_locked_clip_ids={"c1"},
+    )
+    assert result.applied is False
+    assert result.error and "failed to apply" in result.error
+    # 前半段的 slip 也没有留下半套状态
+    assert state.sequences["lock"].get_clip_by_id("c1").source_start == 0
+
+
+def test_b06_empty_lock_set_allows_footprint_changes() -> None:
+    """空锁集合 = 显式"无锁"策略：足迹变化不违规。"""
+    from src.features.edit.ai_editing.edit_project_service import (
+        EditProjectService,
+    )
+
+    state = _state()
+    cmd = MoveClipCommand.create("v1", "c1", new_start=20, old_start=0)
+    result = EditProjectService.commit_command(
+        state, "lock", cmd,
+        base_revision=state.sequences["lock"].revision,
+        position_locked_clip_ids=set(),
+    )
+    assert result.applied is True
+
+
+def test_b06_footprint_between_safe_matches_dry_run() -> None:
+    """快照判定与 dry-run 判定同语义（同一拒绝文案）。"""
+    from src.features.edit.core.position_lock import (
+        evaluate_footprint_between_safe,
+    )
+
+    timeline = _timeline()
+    cmd = MoveClipCommand.create("v1", "c1", new_start=20, old_start=0)
+    after = cmd.apply(timeline)
+    allowed, reason = evaluate_footprint_between_safe(
+        timeline, after, {"c1"})
+    assert allowed is False
+    assert reason and "Position lock" in reason
+    # 未锁 clip 的变化不拦
+    allowed, reason = evaluate_footprint_between_safe(
+        timeline, after, {"c2"})
+    assert allowed is True and reason is None

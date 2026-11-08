@@ -140,3 +140,36 @@ def evaluate_command_footprint_safe(
     except PositionLockViolation as exc:
         return False, str(exc)
     return True, None
+
+
+def evaluate_footprint_between_safe(
+    before: TimelineSequence,
+    after: TimelineSequence,
+    locked_clip_ids: Optional[Iterable[str]] = None,
+) -> tuple[bool, Optional[str]]:
+    """B06：对**已完成的** before/after 快照做锁策略判定。
+
+    与 ``evaluate_command_footprint_safe`` 的 dry-run 不同，本函数不
+    执行命令——service 提交链在受控 apply 得到 proposed 之后调用，
+    同一结果既做锁判定又做最终提交，命令不再被执行两次；命令本身
+    非法（apply 抛错）由提交链归一为失败结果，不会从本判定泄漏。
+
+    Returns:
+        (allowed, reason)；reason 为 None 表示通过。
+    """
+    if after is None or after is before:
+        return True, None  # no-op 或非时间线结果——不改足迹
+    changes = footprint_changes(before, after)
+    if not changes:
+        return True, None
+    if locked_clip_ids is None:
+        violations = changes
+    else:
+        locked = set(locked_clip_ids)
+        violations = tuple(c for c in changes if c.clip_id in locked)
+    if violations:
+        first = violations[0].describe()
+        return False, (
+            f"Position lock: edit rejected ({first}); "
+            f"{len(violations)} locked clip(s) would move, resize or vanish")
+    return True, None
