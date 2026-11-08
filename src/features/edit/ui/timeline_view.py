@@ -9083,6 +9083,86 @@ class TimelineView(QGraphicsView):
             return resolved
         return resolved
 
+    def _plan_group_copy(
+        self, session, delta: int,
+    ) -> Optional[dict[str, tuple[str, int, bool]]]:
+        """B11：整组复制的共同落位计划（共同 delta + 共同避让位移）。
+
+        互链/多选成员不得逐片独立避让——那会产出"互链却错位 80 帧"的
+        副本对。计划约束：
+
+        - 所有成员共用同一 delta，且避让时共用同一**共同位移**
+          （任一成员轨上有 blocker → 整组一起后移）；
+        - 每条目标轨的既有 clip 是障碍；同批成员互相也是障碍
+          （保持相对几何，正常拖拽不会触发，防御异常 track 映射）；
+        - 任一成员的目标轨锁定、目标不可解析、或迭代上限内找不到
+          全员同时无冲突的位移 → 返回 None，调用方整次拒绝。
+
+        Returns:
+            ``{clip_id: (target_track_id, resolved_start, goes_to_new_track)}``；
+            ``target_track_id`` 为真实轨 ID 或 ``__new_*`` 伪 ID。
+        """
+        if self._timeline is None:
+            return None
+        desired: dict[str, int] = {}
+        meta: dict[str, tuple[str, bool]] = {}
+        durations: dict[str, int] = {}
+        obstacles_by_track: dict[str, list[tuple[int, int]]] = {}
+        for cid, orig_start in session.original_positions.items():
+            clip = self._timeline.get_clip_by_id(cid)
+            if clip is None:
+                continue
+            target_tid = session.current_track_ids.get(
+                cid, session.original_track_ids.get(cid, clip.track_id))
+            goes_to_new = target_tid.startswith("__new_")
+            if not goes_to_new:
+                track = self._timeline.get_track_by_id(target_tid)
+                if track is None:
+                    target_tid = session.original_track_ids.get(
+                        cid, clip.track_id)
+                    goes_to_new = target_tid.startswith("__new_")
+                    track = self._timeline.get_track_by_id(target_tid)
+                if track is None:
+                    return None
+                if self._is_track_locked(track.track_id):
+                    return None
+                obstacles_by_track.setdefault(track.track_id, [
+                    (c.timeline_start, c.timeline_end) for c in track.clips
+                ])
+                target_tid = track.track_id
+            desired[cid] = max(0, orig_start + delta)
+            durations[cid] = clip.timeline_duration
+            meta[cid] = (target_tid, goes_to_new)
+
+        shift = 0
+        max_iters = sum(len(v) for v in obstacles_by_track.values()) \
+            + len(desired) + 2
+        for _ in range(max_iters):
+            required = shift
+            placed: dict[str, tuple[int, int]] = {}
+            for cid in desired:
+                track_tid, goes_to_new = meta[cid]
+                start = desired[cid] + shift
+                end = start + durations[cid]
+                intervals = ([] if goes_to_new
+                             else list(obstacles_by_track.get(track_tid, ())))
+                intervals += [iv for other, iv in placed.items()
+                              if meta[other][0] == track_tid]
+                conflict = next(
+                    ((s, e) for s, e in intervals
+                     if start < e and end > s), None)
+                if conflict is not None:
+                    required = max(required, conflict[1] - desired[cid])
+                else:
+                    placed[cid] = (start, end)
+            if required == shift and len(placed) == len(desired):
+                return {
+                    cid: (meta[cid][0], placed[cid][0], meta[cid][1])
+                    for cid in desired
+                }
+            shift = required
+        return None
+
     def _handle_copy_drag_finished(
         self,
         primary_clip_id: str,
@@ -9127,6 +9207,18 @@ class TimelineView(QGraphicsView):
         if delta == 0 and not any_track_change:
             return
 
+        # B11：先为整组求共同落位计划——所有成员共同 delta 与共同避让
+        # 位移；任一成员轨被锁或找不到共同落位时整次拒绝，绝不逐片
+        # 独立避让产出互链却错位的副本对。
+        plan = self._plan_group_copy(session, delta)
+        if plan is None:
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.copy.group_blocked",
+                "Copy: no common placement for the whole group"))
+            logger.warning(
+                "Alt-drag copy rejected: no common placement (group blocked)")
+            return
+
         # Build old_id -> new_id mapping for linked remapping
         old_to_new = {}
         for cid in session.original_positions:
@@ -9139,10 +9231,6 @@ class TimelineView(QGraphicsView):
         # project_changed 而状态失步（FX-H03 generator 路径同型问题）。
         project_before_copy = self._project
 
-        # Positions already assigned to this batch, per target track, so
-        # multiple copies never resolve onto the same spot.
-        reserved_by_track: dict[str, list[tuple[int, int]]] = {}
-
         commands = []
         # Copies headed for the auto-created track (one command creates the
         # track and places all of them, regardless of how many there are).
@@ -9153,51 +9241,16 @@ class TimelineView(QGraphicsView):
             clip = self._timeline.get_clip_by_id(cid)
             if clip is None:
                 continue
-
-            # Use the live target track from the drag session (supports
-            # cross-track copy). A pseudo __new_ ID means the clip lands on a
-            # track that will be auto-created on drop.
-            target_tid = session.current_track_ids.get(cid, track_id)
-            goes_to_new_track = target_tid.startswith("__new_")
+            planned = plan.get(cid)
+            if planned is None:
+                continue
+            target_tid, resolved_start, goes_to_new_track = planned
+            if goes_to_new_track:
+                new_track_pseudo_id = target_tid
 
             clip_dict = clip.to_dict()
             new_clip_id = old_to_new[cid]
             clip_dict["clip_id"] = new_clip_id
-
-            # Resolve a non-overlapping start position on the target.
-            # NOTE: do NOT exclude the source clip — this is a copy, so the
-            # original stays and the copy must avoid it too.
-            duration = clip_dict.get("timeline_duration", 0)
-            desired_start = orig_start + delta
-            if goes_to_new_track:
-                # Auto-create zone: the track does not exist yet (it will be
-                # empty), so only avoid collisions with other batch copies
-                # headed to the same new track.
-                new_track_pseudo_id = target_tid
-                resolved_start = max(0, desired_start)
-                reserved = reserved_by_track.setdefault("__new__", [])
-                changed = True
-                while changed:
-                    changed = False
-                    for (s, e) in reserved:
-                        if resolved_start < e and resolved_start + duration > s:
-                            resolved_start = max(resolved_start, e)
-                            changed = True
-                reserved.append((resolved_start, resolved_start + duration))
-            else:
-                target_track = self._timeline.get_track_by_id(target_tid)
-                if target_track is None:
-                    target_tid = session.original_track_ids.get(cid, track_id)
-                    target_track = self._timeline.get_track_by_id(target_tid)
-                if target_track is None:
-                    continue
-                if self._is_track_locked(target_tid):
-                    continue
-                reserved = reserved_by_track.setdefault(target_track.track_id, [])
-                resolved_start = self._resolve_copy_start(
-                    target_track, desired_start, duration, occupied=reserved,
-                )
-                reserved.append((resolved_start, resolved_start + duration))
             clip_dict["timeline_start"] = resolved_start
 
             # Remap linked_clip_id within the copy batch
@@ -9276,7 +9329,7 @@ class TimelineView(QGraphicsView):
                 if binding_command is not None:
                     new_track_binding_commands.append(binding_command)
             else:
-                cmd = AddClipCommand.create(target_track.track_id, new_clip)
+                cmd = AddClipCommand.create(target_tid, new_clip)
                 commands.append(cmd)
                 if binding_command is not None:
                     commands.append(binding_command)
