@@ -181,6 +181,11 @@ class UIState:
     # SUB-P1-06: per-timeline layout (track heights / scroll / area ratios) so
     # reopening a project restores the user's arrangement. None = not saved.
     timeline_layout: dict | None = None
+    # W07（接线计划 §6）：有版本的时间线展示 payload——缩略图模式/波形
+    # 开关/zoom preset 与自定义 ppf+scroll/Position Lock/Keyframe Tray/
+    # 源目的轨 UI 路由。只存标识符与可重建数值；缺字段 → 默认（旧包），
+    # 未知字段随 dict 原样保留可重存。None = 未保存（旧工程）。
+    timeline_presentation: dict | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
@@ -194,11 +199,13 @@ class UIState:
             "expanded_bins": self.expanded_bins,
             "view_mode": self.view_mode,
             "timeline_layout": self.timeline_layout,
+            "timeline_presentation": self.timeline_presentation,
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> UIState:
         """从字典创建实例"""
+        presentation = data.get("timeline_presentation")
         return UIState(
             active_timeline_id=data.get("active_timeline_id"),
             playhead_frame=data.get("playhead_frame", 0),
@@ -209,6 +216,8 @@ class UIState:
             expanded_bins=data.get("expanded_bins", []),
             view_mode=data.get("view_mode", "list"),
             timeline_layout=data.get("timeline_layout"),
+            timeline_presentation=(
+                presentation if isinstance(presentation, dict) else None),
         )
 
 # 序列化版本号

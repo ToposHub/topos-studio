@@ -2152,6 +2152,7 @@ class TimelineView(QGraphicsView):
                         # enabled Item，菜单显示 Disable、点击反而启用）
                         is_enabled=clip.is_enabled,
                         label_color=clip.label_color,
+                        flag_color=getattr(clip, "flag_color", None),
                         waveform_show_channels=getattr(clip, "waveform_show_channels", False),
                     )
                     self._scene.addItem(item)
@@ -4463,6 +4464,61 @@ class TimelineView(QGraphicsView):
     def is_position_lock_enabled(self) -> bool:
         return self._position_lock_enabled
 
+    # ==================== W07: Presentation state (no commands) ====================
+
+    def export_presentation_state(self) -> dict:
+        """W07：导出 view 级展示偏好（保存/恢复用；零命令副作用）。
+
+        ``source_destination_ui``：{timeline_id: {track_type: track_id|None}}；
+        值为 None 表示蓝徽章显式关闭该流，键缺席 = 无显式条目（回退
+        红 target）。未知字段由 UIState 原样往返保留。
+        """
+        routes: dict[str, dict[str, Any]] = {}
+        for (timeline_id, track_type), track_id in self._source_patch_routes.items():
+            routes.setdefault(str(timeline_id), {})[track_type] = track_id
+        return {
+            "thumbnail_mode": self._thumbnail_display_mode,
+            "waveforms_visible": self._waveforms_visible,
+            "position_lock": self._position_lock_enabled,
+            "source_destination_ui": routes,
+        }
+
+    def apply_presentation_state(self, state: dict) -> None:
+        """恢复展示偏好（零命令、零 revision；非法值安全回退）。
+
+        恢复顺序遵循计划 §6：先展示开关，后源目的轨（徽章重投影）。
+        不触发内容命令、不推进 revision；轨删除后的陈旧路由由
+        ``resolve_source_destination_track_id`` 惰性清理。
+        """
+        if not isinstance(state, dict):
+            return
+        mode = state.get("thumbnail_mode")
+        if isinstance(mode, str) and mode in {
+                "auto", "filmstrip", "start_end", "none"}:
+            self.set_thumbnail_display_mode(mode)
+        waveforms = state.get("waveforms_visible")
+        if isinstance(waveforms, bool):
+            self.set_waveforms_visible(waveforms)
+        lock = state.get("position_lock")
+        if isinstance(lock, bool):
+            self.set_position_lock_enabled(lock)
+        routes = state.get("source_destination_ui")
+        if isinstance(routes, dict):
+            for timeline_id, per_type in routes.items():
+                if not isinstance(per_type, dict):
+                    continue
+                for track_type, track_id in per_type.items():
+                    if track_type not in {"video", "audio"}:
+                        continue
+                    if track_id is None or isinstance(track_id, str):
+                        self._source_patch_routes[
+                            (str(timeline_id), track_type)] = track_id
+            for header in self._track_headers.values():
+                if header.track_type in {"video", "audio"}:
+                    header.set_source_patch_enabled(
+                        self.source_patch_track_id(header.track_type)
+                        == header.track_id)
+
     def set_track_height_for_type(self, track_type: str, height: int) -> None:
         """Resize a track group in one layout pass using the shared engine."""
         from src.features.edit.ui.timeline_layout import (
@@ -6299,6 +6355,21 @@ class TimelineView(QGraphicsView):
 
         # Store old timeline for change detection
         old_timeline = self._timeline
+
+        # W06：Position Lock 提交预检（契约 D3）。footprint 级判定——
+        # 覆盖鼠标/键盘/菜单/拖放全部经此入口的编辑，undo/redo 不经
+        # 此路径（历史恢复优先）。拒绝 = 命令未执行、零 revision、
+        # 零 history；异常沿既有 ValueError 反馈路径显示。
+        if self._position_lock_enabled:
+            from src.features.edit.core.position_lock import (
+                PositionLockViolation, evaluate_command_footprint,
+            )
+            try:
+                evaluate_command_footprint(command, self._timeline)
+            except PositionLockViolation as exc:
+                self.status_message_requested.emit(str(exc))
+                raise
+
         transaction = self._prepare_project_transaction(command)
 
         # Execute command (CommandStack handles tuple unwrapping)
@@ -6828,6 +6899,9 @@ class TimelineView(QGraphicsView):
         # Check label color
         if old_clip.label_color != new_clip.label_color:
             return True
+        if getattr(old_clip, "flag_color", None) != getattr(
+                new_clip, "flag_color", None):
+            return True
 
         # Check audio waveform display mode
         if getattr(old_clip, "waveform_show_channels", False) != getattr(
@@ -7221,6 +7295,7 @@ class TimelineView(QGraphicsView):
             color_stack_id=clip.color_stack_id if hasattr(clip, 'color_stack_id') else None,
             color_shared=clip.color_shared if hasattr(clip, 'color_shared') else False,
             label_color=clip.label_color if hasattr(clip, 'label_color') else None,
+            flag_color=getattr(clip, "flag_color", None),
             waveform_show_channels=getattr(clip, "waveform_show_channels", False),
         )
 
@@ -17916,6 +17991,61 @@ class TimelineView(QGraphicsView):
             if partner is not None and partner.clip_id != clip.clip_id:
                 return (track.track_id, partner)
         return None
+
+    # ==================== W05: Clip Flags (wiring plan D4) ====================
+
+    def set_clip_flags(self, color: str | None) -> bool:
+        """为选中 clip（无选中时播放头下 clip）设置/清除彩色旗标。
+
+        契约 D4：``color`` 为白名单 "#RRGGBB" 或 None（面板的 "" 清除
+        信号在 EditPage 归一为 None）；多选批量一条命令单步 undo；不随
+        linked 伙伴传播；无目标 → 状态栏提示、零写入。全部目标已是
+        目标色时命令 no-op（不入历史）。
+
+        Returns:
+            True if a flag transaction was committed (含 no-op), False on rejection.
+        """
+        from src.features.edit.core.commands import SetClipFlagCommand
+        from src.features.edit.core.timeline_v2 import CLIP_FLAG_COLORS
+
+        if self._timeline is None:
+            logger.warning("Cannot flag: no timeline loaded")
+            return False
+        if color is not None and color not in CLIP_FLAG_COLORS:
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.flag.unknown_color",
+                "Flag: unknown color"))
+            return False
+
+        targets: list[tuple[str, str]] = []
+        selected = list(getattr(self._selection, "selected_clip_ids", ()) or ())
+        all_tracks = (list(self._timeline.video_tracks)
+                      + list(self._timeline.audio_tracks))
+        if selected:
+            for track in all_tracks:
+                for clip in track.clips:
+                    if clip.clip_id in selected:
+                        targets.append((track.track_id, clip.clip_id))
+        else:
+            frame = self._playhead_frame
+            for track in all_tracks:
+                for clip in track.clips:
+                    if (clip.timeline_start <= frame
+                            < clip.timeline_start + clip.timeline_duration):
+                        targets.append((track.track_id, clip.clip_id))
+        if not targets:
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.flag.no_target",
+                "Flag: select clips or park the playhead over one"))
+            return False
+
+        cmd = SetClipFlagCommand.create(targets, color)
+        try:
+            self._execute_command(cmd)
+        except ValueError as exc:
+            self.status_message_requested.emit(str(exc))
+            return False
+        return True
 
     # ==================== Gap Indicators (Phase 3.3) ====================
 

@@ -679,6 +679,10 @@ class TimelinePanel(QWidget):
 
         layout.addWidget(self.timeline_view, stretch=1)
 
+        # W03：Keyframe Tray 宿主位（惰性创建、默认隐藏；EditPage 经
+        # set_keyframe_tray_visible 控制，实际状态回写工具栏按钮）。
+        self._keyframe_tray: Optional[Any] = None
+
     def _configure_resolve_toolbar(self, layout: QVBoxLayout, tools_bar: QHBoxLayout) -> None:
         """Group the editing instruments while preserving public button objects."""
         self._zoom_preset: str = "custom"
@@ -932,14 +936,20 @@ class TimelinePanel(QWidget):
         flags = QMenu(self)
         group = QActionGroup(flags)
         self._flag_actions: dict[str, QAction] = {}
+        # W05：白名单单一真值来源在 core.timeline_v2（模型/命令/菜单共用）
+        from src.features.edit.core.timeline_v2 import CLIP_FLAG_COLORS
+        _flag_titles = {
+            "#4BA6DD": I18N.tr("timeline.flag.blue", "Blue"),
+            "#46C7CA": I18N.tr("timeline.flag.cyan", "Cyan"),
+            "#72B66B": I18N.tr("timeline.flag.green", "Green"),
+            "#E4C454": I18N.tr("timeline.flag.yellow", "Yellow"),
+            "#E06B66": I18N.tr("timeline.flag.red", "Red"),
+            "#D88BB7": I18N.tr("timeline.flag.pink", "Pink"),
+            "#A38CCC": I18N.tr("timeline.flag.purple", "Purple"),
+        }
         for color, title in (
-            ("#4BA6DD", I18N.tr("timeline.flag.blue", "Blue")),
-            ("#46C7CA", I18N.tr("timeline.flag.cyan", "Cyan")),
-            ("#72B66B", I18N.tr("timeline.flag.green", "Green")),
-            ("#E4C454", I18N.tr("timeline.flag.yellow", "Yellow")),
-            ("#E06B66", I18N.tr("timeline.flag.red", "Red")),
-            ("#D88BB7", I18N.tr("timeline.flag.pink", "Pink")),
-            ("#A38CCC", I18N.tr("timeline.flag.purple", "Purple")),
+            (value, _flag_titles.get(value, value))
+            for value in CLIP_FLAG_COLORS
         ):
             action = flags.addAction(get_icon("fa5s.flag", color), title)
             action.setCheckable(True)
@@ -1005,6 +1015,49 @@ class TimelinePanel(QWidget):
     def _remember_custom_scroll(self, value: int) -> None:
         if self._zoom_preset == "custom" and not self._applying_zoom_preset:
             self._custom_zoom = (self.timeline_view._pixels_per_frame, value)
+
+    def export_presentation_state(self) -> dict:
+        """W07：导出时间线展示偏好（view 偏好 + zoom/Tray 宿主状态）。
+
+        只保存标识符与可重建数值（不含 Qt 对象/设备路径）；未知字段由
+        UIState 原样往返。FileController 在保存工程时收集。
+        """
+        state = self.timeline_view.export_presentation_state()
+        state.update({
+            "zoom_preset": self._zoom_preset,
+            "custom_pixels_per_frame": float(self._custom_zoom[0]),
+            "custom_scroll": int(self._custom_zoom[1]),
+            "keyframe_tray_visible": self.is_keyframe_tray_visible(),
+        })
+        return state
+
+    def apply_presentation_state(self, state: dict) -> None:
+        """恢复展示偏好（零内容命令、零 revision；非法值安全回退）。
+
+        恢复顺序（计划 §6）：view 展示开关/源目的轨 → zoom（preset 或
+        自定义 ppf+scroll）→ Tray 宿主状态。状态锁语义由各 setter 内部
+        的 blocker/守卫保证（不重发工具栏请求）。
+        """
+        if not isinstance(state, dict):
+            return
+        self.timeline_view.apply_presentation_state(state)
+        preset = state.get("zoom_preset")
+        if preset in {"full", "detail"}:
+            self._set_zoom_preset(preset)
+        else:
+            ppf = state.get("custom_pixels_per_frame")
+            if isinstance(ppf, (int, float)) and ppf > 0:
+                self._custom_zoom = (float(ppf), int(
+                    state.get("custom_scroll", 0) or 0))
+                self._zoom_preset = "custom"
+                self.timeline_view.set_zoom(float(ppf))
+                scroll = state.get("custom_scroll")
+                if isinstance(scroll, int) and scroll > 0:
+                    self.timeline_view.horizontalScrollBar().setValue(scroll)
+            self._sync_zoom_preset_buttons()
+        tray = state.get("keyframe_tray_visible")
+        if isinstance(tray, bool):
+            self.set_keyframe_tray_visible(tray)
 
     def _sync_zoom_preset_buttons(self) -> None:
         for btn, preset in ((self.btn_zoom_fit, "full"), (self.btn_zoom_detail, "detail"),
@@ -2710,6 +2763,42 @@ class TimelinePanel(QWidget):
             self.btn_keyframe_tray.setChecked(bool(checked))
         finally:
             self.btn_keyframe_tray.blockSignals(False)
+
+    def set_keyframe_tray_visible(self, visible: bool) -> bool:
+        """W03：显示/隐藏 Keyframe Tray，返回实际可见性（契约 D5）。
+
+        Tray 惰性创建并托管在时间线视图下方；隐藏不产生任何内容命令，
+        重新显示时从提交后的模型重投影。
+        """
+        if visible:
+            if self._keyframe_tray is None:
+                from src.features.edit.ui.edit_keyframe_tray import (
+                    EditKeyframeTray,
+                )
+                self._keyframe_tray = EditKeyframeTray(
+                    self.timeline_view, self)
+                layout = self.layout()
+                if layout is not None:
+                    layout.insertWidget(
+                        layout.indexOf(self.timeline_view) + 1,
+                        self._keyframe_tray)
+            self._keyframe_tray.refresh_from_model()
+            self._keyframe_tray.show()
+            self.set_keyframe_tray_checked(True)
+            return True
+        if self._keyframe_tray is not None:
+            self._keyframe_tray.hide()
+        self.set_keyframe_tray_checked(False)
+        return False
+
+    def is_keyframe_tray_visible(self) -> bool:
+        """Tray 实际可见性（宿主回写与持久化的真值来源）。
+
+        用 ``isHidden`` 判定宿主状态而非屏幕可见性——面板处于隐藏 dock
+        或离屏测试中时，用户请求的展开状态仍然成立。
+        """
+        return bool(self._keyframe_tray is not None
+                    and not self._keyframe_tray.isHidden())
 
     def clear(self) -> None:
         """Clear the timeline content."""

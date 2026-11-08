@@ -712,6 +712,7 @@ class ClipItem(QGraphicsObject):
         opacity: float = 1.0,  # Phase 2.4: 透明度 (0.0 - 1.0)
         effects: Optional[tuple] = None,  # Phase 2.1: 效果列表
         label_color: Optional[str] = None,  # P2: Clip label color
+        flag_color: Optional[str] = None,  # W05: clip colored flag
         waveform_show_channels: bool = False,
         is_enabled: bool = True,  # Clip enabled/disabled state
         parent: Optional[QGraphicsItem] = None
@@ -747,6 +748,9 @@ class ClipItem(QGraphicsObject):
         # dashed seam indicates a cut between two pieces of one source asset.
         self._right_seam_is_same_source: bool = False
         self._label_color = label_color  # P2: User-set label color
+        # W05：clip 级彩色旗标（与 label_color 配色独立）；未知历史值
+        # 保留在模型，绘制端 fallback 默认色（契约 D4）。
+        self._flag_color = flag_color
 
         # P9.1: Color stack info for Grade mode
         self._color_stack_id = color_stack_id
@@ -1804,6 +1808,10 @@ class ClipItem(QGraphicsObject):
 
             # Phase 2.4: Draw opacity indicator
             self._draw_opacity_indicator(painter, clip_rect)
+
+        # W05：彩色旗标徽章——与 label_color 配色、素材 flag 独立；
+        # 不受 is_wide/hide_details 门控（窄片段也要可见），锁定轨仍显示。
+        self._draw_flag_badge(painter, clip_rect)
 
         # Resolve-style retime controls intentionally sit on the clip instead
         # of opening a modal editor.  The strip remains a UI-only overlay;
@@ -3761,6 +3769,43 @@ class ClipItem(QGraphicsObject):
             speed_text
         )
 
+        painter.restore()
+
+    def _draw_flag_badge(self, painter: QPainter, clip_rect: QRectF) -> None:
+        """W05：clip 彩色旗标——左上角小旗（色块+缺角），窄片段也显示。
+
+        未知历史颜色值 fallback 到白名单蓝（模型值保留，契约 D4）。
+        """
+        flag = getattr(self, "_flag_color", None)
+        if not flag:
+            return
+        color = QColor(flag)
+        if not color.isValid():
+            from src.features.edit.core.timeline_v2 import CLIP_FLAG_COLORS
+            color = QColor(CLIP_FLAG_COLORS[0])
+
+        painter.save()
+        # 小旗尺寸固定（不随轨高缩放）：10x7 旗面 + 1px 旗杆
+        badge_w, badge_h = 10.0, 7.0
+        x = 4.0
+        y = 3.0
+        pole = QRectF(x, y, 1.5, badge_h + 3.0)
+        flag_rect = QRectF(x + 1.5, y + 0.5, badge_w, badge_h)
+        # 缺角旗形：右侧去掉三角形角
+        path = QPainterPath()
+        path.moveTo(flag_rect.left(), flag_rect.top())
+        path.lineTo(flag_rect.right(), flag_rect.top())
+        path.lineTo(flag_rect.right() - 3.0, flag_rect.center().y())
+        path.lineTo(flag_rect.right(), flag_rect.bottom())
+        path.lineTo(flag_rect.left(), flag_rect.bottom())
+        path.closeSubpath()
+
+        painter.setPen(QPen(QColor(0, 0, 0, 140), 1.0))
+        painter.setBrush(QBrush(color))
+        painter.drawPath(path)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 170)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(pole, 0.75, 0.75)
         painter.restore()
 
     def _draw_freeze_badge(self, painter: QPainter, clip_rect: QRectF) -> None:
@@ -5997,6 +6042,7 @@ class ClipItem(QGraphicsObject):
 
         # Update label color (P2)
         self._label_color = clip.label_color if hasattr(clip, 'label_color') else None
+        self._flag_color = getattr(clip, "flag_color", None)
         self._waveform_show_channels = bool(
             getattr(clip, "waveform_show_channels", False)
         )

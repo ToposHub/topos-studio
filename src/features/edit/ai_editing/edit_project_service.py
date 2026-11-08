@@ -28,7 +28,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 
 from src.features.edit.core.project import EditProject, TimelineSequenceRef
 from src.features.edit.core.timeline_v2 import TimelineSequence
@@ -169,6 +169,7 @@ class EditProjectService:
         base_revision: int | None = None,
         undo_label: str | None = None,
         validate: bool = True,
+        position_locked_clip_ids: "Iterable[str] | None" = None,
     ) -> CommitResult:
         """执行单个 ``EditCommand`` 并原子提交。
 
@@ -193,6 +194,11 @@ class EditProjectService:
                 由用户最新操作定义真相）。
             undo_label: undo 显示名；None 时取 ``command.label``。
             validate: 是否跑 ``validate_timeline`` domain 校验。
+            position_locked_clip_ids: W06/契约 D3——显式 Position Lock 策略。
+                None = 无锁（默认，向后兼容）；提供集合时，命令的 footprint
+                dry-run 不得改变这些 clip 的 (track, start, duration) 或将其
+                移除，否则 ``applied=False`` 且状态原样。与 UI 工具栏锁共用
+                同一判定（``core.position_lock``）。
 
         Returns:
             ``CommitResult``。
@@ -207,6 +213,21 @@ class EditProjectService:
                 new_sequences=dict(state.sequences),
                 error=str(exc),
             )
+
+        # W06：Position Lock 策略预检（与 UI 提交口同一 footprint 判定）。
+        if position_locked_clip_ids is not None:
+            from src.features.edit.core.position_lock import (
+                evaluate_command_footprint_safe,
+            )
+            allowed, reason = evaluate_command_footprint_safe(
+                command, sequence, position_locked_clip_ids)
+            if not allowed:
+                return CommitResult(
+                    applied=False,
+                    new_project=state.project,
+                    new_sequences=dict(state.sequences),
+                    error=reason or "Position lock: edit rejected",
+                )
 
         # 乐观锁：AI/脚本路径必须传 base_revision，与当前 revision 比较。
         # AUD-13406：冲突折叠进 ``CommitResult(applied=False)``，与 domain

@@ -244,6 +244,20 @@ def _int_or_default(value, default: int | None) -> int | None:
     return value if value >= 0 else default
 
 
+# W05（契约 D4）：clip 彩色旗标白名单——UI 菜单与命令校验共用同一
+# 真值来源；时间线面板的 Flags 菜单从这里取色，未知/历史值读取保留、
+# 绘制 fallback 默认色。
+CLIP_FLAG_COLORS: tuple[str, ...] = (
+    "#4BA6DD",  # Blue
+    "#46C7CA",  # Cyan
+    "#72B66B",  # Green
+    "#E4C454",  # Yellow
+    "#E06B66",  # Red
+    "#D88BB7",  # Pink
+    "#A38CCC",  # Purple
+)
+
+
 @dataclass(frozen=True)
 class ClipInstance:
     """
@@ -286,6 +300,11 @@ class ClipInstance:
     is_enabled: bool = True
     # Label color for clip identification (hex color string or None for default)
     label_color: str | None = None
+    # W05：clip 级彩色旗标（接线计划契约 D4）。"#RRGGBB" 白名单色或
+    # None=无旗标。独立于 MediaAsset.flag（素材级 reject 标记）与
+    # label_color（片段配色）；序列化非默认才消费，未知值读取保留、
+    # UI 绘制 fallback 默认色。split/复制/Replace 经字段保留自动继承。
+    flag_color: str | None = None
     # Audio timeline display preference. False keeps stereo source peaks
     # mixed into one compact envelope; True shows separate L/R envelopes.
     waveform_show_channels: bool = False
@@ -1080,6 +1099,10 @@ class ClipInstance:
         """
         return replace(self, label_color=label_color)
 
+    def with_flag_color(self, flag_color: str | None) -> ClipInstance:
+        """W05：返回更新了彩色旗标的新实例（None = 清除，契约 D4）。"""
+        return replace(self, flag_color=flag_color)
+
     def with_waveform_show_channels(self, show_channels: bool) -> ClipInstance:
         """Create a new clip with mono or separate-channel waveform display."""
         return replace(self, waveform_show_channels=bool(show_channels))
@@ -1408,6 +1431,8 @@ class ClipInstance:
             "effects": effects_list,
             "is_enabled": self.is_enabled,
             "label_color": self.label_color,
+            # W05：与 label_color 同型直出；旧工程缺该键读取 → None（契约 D4）
+            "flag_color": self.flag_color,
             "waveform_show_channels": self.waveform_show_channels,
             # Phase 1.2: Fade in/out
             "fade_in_duration": self.fade_in_duration,
@@ -1512,6 +1537,8 @@ class ClipInstance:
             effects=tuple(effects_list),
             is_enabled=data.get("is_enabled", True),
             label_color=data.get("label_color"),
+            # W05：旧工程缺键 → None；未知颜色值保留（UI fallback 绘制）
+            flag_color=data.get("flag_color"),
             waveform_show_channels=bool(data.get("waveform_show_channels", False)),
             # Phase 1.2: Fade in/out
             fade_in_duration=data.get("fade_in_duration", 0),

@@ -523,7 +523,9 @@
       "yellow": "黄色",
       "red": "红色",
       "pink": "粉色",
-      "purple": "紫色"
+      "purple": "紫色",
+      "unknown_color": "旗标：未知颜色",
+      "no_target": "旗标：先选中片段，或将播放头移到片段上"
     },
     "replace": {
       "asset_missing": "替换：源素材不在当前工程中",
@@ -532,7 +534,8 @@
       "multi_selection": "替换：只能选中一个片段"
     },
     "replace_edit": "替换编辑",
-    "replace_edit_av": "替换编辑（A/V）"
+    "replace_edit_av": "替换编辑（A/V）",
+    "keyframe_tray_hint": "点击添加关键帧；拖动移动时间位置；右键删除；Esc 取消拖动"
   },
   "ai_composer": {
     "scope_tooltip": "选择本次对话使用的素材范围",
