@@ -2281,6 +2281,7 @@ class TimelineView(QGraphicsView):
                     item.retime_action_requested.connect(self._on_retime_action_requested)
                     item.retime_point_dragged.connect(self._on_retime_point_dragged)
                     item.retime_point_move_finished.connect(self._on_retime_point_move_finished)
+                    item.fade_end_curve_requested.connect(self._on_fade_end_curve_requested)
 
                     # Slip signals (P4.4)
                     item.clip_slip.connect(self._on_clip_slip)
@@ -7789,6 +7790,7 @@ class TimelineView(QGraphicsView):
         item.retime_action_requested.connect(self._on_retime_action_requested)
         item.retime_point_dragged.connect(self._on_retime_point_dragged)
         item.retime_point_move_finished.connect(self._on_retime_point_move_finished)
+        item.fade_end_curve_requested.connect(self._on_fade_end_curve_requested)
         item.clip_slip.connect(self._on_clip_slip)
         item.slip_finished.connect(self._on_slip_finished)
         item.clip_slide.connect(self._on_clip_slide)
@@ -12745,6 +12747,21 @@ class TimelineView(QGraphicsView):
         params = self._retime_speed_params_for_clip(clip)
         try:
             self._commit_retime_params(clip, params.with_speed(speed), "Change clip speed")
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
+
+    def _on_fade_end_curve_requested(
+        self, clip_id: str, track_id: str, end: str, curve: object,
+    ) -> None:
+        """R09：单端淡化曲线菜单 → 单命令提交（另一端/共享字段不动）。"""
+        if self._timeline is None:
+            return
+        if self._is_track_locked(track_id):
+            return
+        from src.features.edit.core.commands import SetFadeEndCurveCommand
+        try:
+            self._execute_command(SetFadeEndCurveCommand.create(
+                clip_id, track_id, end, curve))
         except (ValueError, RuntimeError) as exc:
             self.status_message_requested.emit(str(exc))
 

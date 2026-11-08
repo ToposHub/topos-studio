@@ -317,6 +317,11 @@ class ClipInstance:
     # split/复制经 replace 自动继承；序列化非默认才写出，未知历史值
     # 读取保留（消费者按 legacy 默认解释，不丢字段）。
     fade_curve: str | None = None
+    # R09：两端**独立**曲线（Resolve 契约：In smooth / Out linear 可共存）。
+    # None = 回落共享 ``fade_curve``（B16 旧字段）→ legacy 默认；白名单同
+    # fade_curve。单端修改不触碰另一端与共享字段。
+    fade_curve_in: str | None = None
+    fade_curve_out: str | None = None
     # F3.3 · 采样级音频语义（有理数时钟见 core/sample_time.py）：
     # - audio_sample_offset: 时间线侧子帧偏移（clip 帧起点后延迟的样本数
     #   @48k 参考率，r ≥ 0；不做帧进位归一化——非整数帧率下任何进位都
@@ -416,12 +421,15 @@ class ClipInstance:
         if self.fade_out_duration < 0:
             raise ValueError(f"fade_out_duration cannot be negative: {self.fade_out_duration}")
         # B16：fade_curve 白名单（None=legacy 默认；未知历史值读取保留
-        # 由 from_dict 负责，构造路径严格校验新写）
-        if self.fade_curve is not None and self.fade_curve not in (
-                "linear", "equal_power", "smooth"):
-            raise ValueError(
-                f"fade_curve must be linear|equal_power|smooth or None: "
-                f"{self.fade_curve!r}")
+        # 由 from_dict 负责，构造路径严格校验新写）。R09：两端独立字段
+        # 同一白名单。
+        for _curve_field in ("fade_curve", "fade_curve_in", "fade_curve_out"):
+            _curve = getattr(self, _curve_field)
+            if _curve is not None and _curve not in (
+                    "linear", "equal_power", "smooth"):
+                raise ValueError(
+                    f"{_curve_field} must be linear|equal_power|smooth or "
+                    f"None: {_curve!r}")
         # fade duration cannot exceed clip duration
         if self.fade_in_duration > self.timeline_duration:
             raise ValueError(f"fade_in_duration ({self.fade_in_duration}) exceeds clip duration ({self.timeline_duration})")
@@ -1021,6 +1029,56 @@ class ClipInstance:
         object.__setattr__(clip, "_extra_fields", extras)
         return clip
 
+    # ── R09：两端独立曲线 ────────────────────────────────────────────
+
+    @property
+    def effective_fade_curve_in(self) -> "str | None":
+        """淡入端生效曲线：独立字段 → 共享 fade_curve（B16）→ None。"""
+        return self.fade_curve_in if self.fade_curve_in is not None \
+            else self.fade_curve
+
+    @property
+    def effective_fade_curve_out(self) -> "str | None":
+        """淡出端生效曲线：独立字段 → 共享 fade_curve（B16）→ None。"""
+        return self.fade_curve_out if self.fade_curve_out is not None \
+            else self.fade_curve
+
+    def with_fade_end_curve(self, end: str, curve: "str | None",
+                            ) -> ClipInstance:
+        """R09：用户显式写单端曲线（另一端与共享字段不动；清该端原值）。"""
+        return self.with_fade_end_curve_state(end, curve, None)
+
+    def fade_end_curve_raw(self, end: str) -> Any:
+        """R09：该端加载时保留的未支持原值（无则 None）。"""
+        if end not in ("in", "out"):
+            raise ValueError(f"end must be 'in' or 'out': {end!r}")
+        field_name = f"fade_curve_{end}"
+        if getattr(self, field_name) is not None:
+            return None
+        return self._extra_fields.get(field_name)
+
+    def with_fade_end_curve_state(
+        self, end: str, curve: "str | None", raw_unknown: Any,
+    ) -> ClipInstance:
+        """R09：单端完整状态恢复（undo/加载路径；另一端不受影响）。"""
+        if end not in ("in", "out"):
+            raise ValueError(f"end must be 'in' or 'out': {end!r}")
+        if curve is not None and curve not in (
+                "linear", "equal_power", "smooth"):
+            raise ValueError(
+                f"fade_curve_{end} must be linear|equal_power|smooth or "
+                f"None: {curve!r}")
+        field_name = f"fade_curve_{end}"
+        clip = replace(self, **{field_name: curve})
+        extras = {
+            key: value for key, value in self._extra_fields.items()
+            if key != field_name
+        }
+        if curve is None and raw_unknown is not None:
+            extras[field_name] = raw_unknown
+        object.__setattr__(clip, "_extra_fields", extras)
+        return clip
+
     def with_audio_gain_db(self, gain_db: float) -> ClipInstance:
         """C3: 返回设置片段级音频增益的新实例（clamp [-48, +12] dB）。"""
         clamped = max(-48.0, min(12.0, float(gain_db)))
@@ -1496,6 +1554,9 @@ class ClipInstance:
             "fade_out_duration": self.fade_out_duration,
             # B16：淡化曲线——非默认才写出（旧工程序列化字节不变）
             "fade_curve": self.fade_curve,
+            # R09：两端独立曲线（None 不改变 B16 共享字段语义）
+            "fade_curve_in": self.fade_curve_in,
+            "fade_curve_out": self.fade_curve_out,
             # F3.3：采样级字段——非默认才写出（旧工程序列化字节不变；
             # 字段语义声明见 sample_time.py；旧版读新工程保留于 _extra_fields）
             "audio_sample_offset": self.audio_sample_offset or None,
@@ -1604,10 +1665,18 @@ class ClipInstance:
             fade_out_duration=data.get("fade_out_duration", 0),
             # B16：曲线缺键 → None（legacy）。构造校验拒绝未知新写；
             # 损坏/未来值清洗为 None（freeze_source_frame 同先例），
-            # 不让坏字段阻断整个工程加载
+            # 不让坏字段阻断整个工程加载。R09：两端独立字段同策略。
             fade_curve=(
                 data.get("fade_curve")
                 if data.get("fade_curve") in (
+                    "linear", "equal_power", "smooth") else None),
+            fade_curve_in=(
+                data.get("fade_curve_in")
+                if data.get("fade_curve_in") in (
+                    "linear", "equal_power", "smooth") else None),
+            fade_curve_out=(
+                data.get("fade_curve_out")
+                if data.get("fade_curve_out") in (
                     "linear", "equal_power", "smooth") else None),
             # F3.3：采样级字段（缺省=旧工程；负值/非 int 防御回退默认，
             # 不静默舍入语义——非法载荷回退 0/None 并保持可检测）
@@ -1661,8 +1730,12 @@ class ClipInstance:
         打开→保存不丢曲线定义（渲染仍按 legacy 降级，不冒充已支持）。
         """
         result = self._to_dict_known()
-        if self.fade_curve is None and "fade_curve" in self._extra_fields:
-            result["fade_curve"] = self._extra_fields["fade_curve"]
+        # R05/R09：未支持原值回写（fade_curve* 为 None 且 extras 存有
+        # 原始未支持值时写出原值；用户改写后 extras 已清）
+        for curve_key in ("fade_curve", "fade_curve_in", "fade_curve_out"):
+            if getattr(self, curve_key) is None and \
+                    curve_key in self._extra_fields:
+                result[curve_key] = self._extra_fields[curve_key]
         for key, value in self._extra_fields.items():
             result.setdefault(key, value)
         return result
@@ -1705,17 +1778,19 @@ class ClipInstance:
         }
         # R05：未支持曲线原值保留在 extras（不在 _KNOWN_CLIP_KEYS 是
         # 有意的——原值要能随工程往返）。已知值/None 不入 extras，
-        # 保持"extras 含 fade_curve ⟺ 未支持原值待回写"的不变式。
-        raw_curve = data.get("fade_curve")
-        if raw_curve is None or raw_curve in (
-                "linear", "equal_power", "smooth"):
-            extras.pop("fade_curve", None)
-        else:
-            logger.warning(
-                "ClipInstance.from_dict: 未支持 fade_curve %r（clip=%s）"
-                "——渲染按 legacy 默认降级，原值保留待保存回写",
-                raw_curve, data.get("clip_id", "?"),
-            )
+        # 保持"extras 含 fade_curve* ⟺ 未支持原值待回写"的不变式。
+        # R09：两端独立字段同策略。
+        for _curve_key in ("fade_curve", "fade_curve_in", "fade_curve_out"):
+            raw_curve = data.get(_curve_key)
+            if raw_curve is None or raw_curve in (
+                    "linear", "equal_power", "smooth"):
+                extras.pop(_curve_key, None)
+            else:
+                logger.warning(
+                    "ClipInstance.from_dict: 未支持 %s %r（clip=%s）"
+                    "——渲染按 legacy 默认降级，原值保留待保存回写",
+                    _curve_key, raw_curve, data.get("clip_id", "?"),
+                )
         if extras:
             object.__setattr__(clip, "_extra_fields", extras)
         return clip

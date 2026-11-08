@@ -448,7 +448,9 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
                     fade_in_samples_override: int | None = None,
                     fade_out_samples_override: int | None = None,
                     audio_sample_offset: int = 0,
-                    fade_curve: str | None = None) -> np.ndarray:
+                    fade_curve: str | None = None,
+                    fade_curve_in: str | None = None,
+                    fade_curve_out: str | None = None) -> np.ndarray:
     """对一块样本应用 clip 淡入/淡出包络（AM-06）。
 
     根据当前块在 clip 时间线范围内的绝对采样位置生成包络并逐样本相乘。
@@ -533,9 +535,12 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
         """Evaluate the selected curve without restarting it per audio block."""
         t = np.clip(t, 0.0, 1.0)
         # B16：显式 fade_curve 优先（与视频同一形状定义）；缺省回落
-        # envelope_fn（实时路径 legacy equal_power / 显式注入的 linear）
-        selected = (FADE_CURVE_ENVELOPES.get(fade_curve)
-                    if fade_curve is not None else None)
+        # envelope_fn（实时路径 legacy equal_power / 显式注入的 linear）。
+        # R09：两端独立曲线优先（in/out 各自），再回落共享 fade_curve。
+        per_end = fade_curve_in if fade_in else fade_curve_out
+        chosen = per_end if per_end is not None else fade_curve
+        selected = (FADE_CURVE_ENVELOPES.get(chosen)
+                    if chosen is not None else None)
         if selected is smooth_fade_envelope:
             s = 3.0 * t * t - 2.0 * t * t * t
             return s if fade_in else 1.0 - s

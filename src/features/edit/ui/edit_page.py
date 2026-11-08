@@ -1627,8 +1627,13 @@ class EditPage(QWidget):
                         clip, "audio_sample_offset", 0) or 0),
                     source_sample_offset=int(getattr(
                         clip, "source_sample_offset", 0) or 0),
-                    # B16：淡化曲线（None=音频 legacy equal_power）
+                    # B16：淡化曲线（None=音频 legacy equal_power）；
+                    # R09：两端独立曲线（优先于共享字段）
                     fade_curve=getattr(clip, "fade_curve", None),
+                    fade_curve_in=getattr(
+                        clip, "effective_fade_curve_in", None),
+                    fade_curve_out=getattr(
+                        clip, "effective_fade_curve_out", None),
                 ):
                     registered_any = True
                     # P-clip-FX: 把该 clip 的 audio 效果同步到引擎
