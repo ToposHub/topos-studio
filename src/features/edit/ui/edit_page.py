@@ -283,6 +283,11 @@ class EditPage(QWidget):
         self._panel_request_connections: list[tuple[Any, Any]] = []
         self._panel_request_generation: int = 0
 
+        # W08: current audio_level_changed → panel.update_audio_levels
+        # connection, so re-attaching a panel drops the stale panel's feed
+        # instead of leaving a duplicate/leaked connection on the manager.
+        self._timeline_level_connection: Optional[tuple[Any, Any]] = None
+
         # Timeline data model
         self._current_timeline: Optional[Any] = None
         self._fps: float = 24.0
@@ -507,6 +512,10 @@ class EditPage(QWidget):
         # Connect transport bar (ProgramViewerWidget <-> TimelinePanel)
         self._connect_transport_to_timeline()
 
+        # W08：manager 已存在时，把电平订阅换到新附着的 panel 上
+        if self._audio_manager is not None:
+            self._reconnect_timeline_level_meter()
+
     # ==================== W09: Centralized Toolbar Request Binding ====================
 
     def _bind_timeline_panel_requests(self, panel: Any) -> None:
@@ -587,14 +596,17 @@ class EditPage(QWidget):
         view.replace_clip_with_source(asset_id, in_frame, out_frame)
 
     def _on_timeline_keyframe_tray_requested(self, visible: bool) -> None:
-        """W03：Keyframe Tray 可见性请求（契约 D5；宿主实现见后续批次）。
+        """W03：Keyframe Tray 可见性请求（契约 D5）。
 
-        宿主未提供 Tray 前回写按钮为未选中，避免"假打开"。
+        Tray 由 TimelinePanel 托管在视图下方；实际可见性由 host 回写
+        工具栏按钮（用户点击 → 请求 → host 提供面板 → 回写），避免
+        按钮长期显示"已打开"而宿主未创建面板。隐藏/显示不产生内容命令。
         """
         panel = self._timeline_panel
-        if panel is not None and hasattr(panel, "set_keyframe_tray_checked"):
-            panel.set_keyframe_tray_checked(False)
-        logger.debug("Keyframe tray requested=%s (host wiring pending W03)", visible)
+        if panel is None or not hasattr(panel, "set_keyframe_tray_visible"):
+            logger.warning("Keyframe tray: timeline panel cannot host a tray")
+            return
+        panel.set_keyframe_tray_visible(visible)
 
     def _on_timeline_voiceover_requested(self) -> None:
         """W04：Voiceover——桥接既有 ADR/录音链（不做"立即采默认麦克风"）。
@@ -638,8 +650,18 @@ class EditPage(QWidget):
             main._start_recording(track_id)
 
     def _on_timeline_flag_requested(self, color: str) -> None:
-        """W05：彩色 Flag 入口（契约 D4；宿主实现见后续批次）。"""
-        logger.debug("Flag requested color=%r (host wiring pending W05)", color)
+        """W05：彩色 Flag 入口（契约 D4）。
+
+        面板发白名单 hex 或 ""（清除）；"" 在此归一为 None。目标解析
+        （选中优先/播放头回退）、批量单步 undo、linked 不传播都在
+        ``TimelineView.set_clip_flags`` 中完成；无目标零写入。
+        """
+        panel = self._timeline_panel
+        view = panel.get_timeline_view() if panel is not None else None
+        if view is None or view.get_timeline() is None:
+            logger.warning("Flag: no active timeline context")
+            return
+        view.set_clip_flags(color or None)
 
     def set_media_pool_panel(self, panel: Any) -> None:
         """
@@ -1044,10 +1066,9 @@ class EditPage(QWidget):
             self._audio_manager.prewarm_output()
 
             # 连接电平信号到 TimelinePanel 电平表
-            if hasattr(self, '_timeline_panel') and self._timeline_panel is not None:
-                self._audio_manager.audio_level_changed.connect(
-                    self._timeline_panel.update_audio_levels
-                )
+            # （W08：经统一重连入口，面板重附着/manager 重建都只保留
+            # 一条有效连接）
+            self._reconnect_timeline_level_meter()
 
             # 连接电平信号到 Audio Mixer 面板：
             #   - audio_level_changed（总和）→ Master 电平表
@@ -1062,6 +1083,32 @@ class EditPage(QWidget):
             logger.warning(f"AudioPlaybackManager unavailable: {e}")
             return None
 
+    def _reconnect_timeline_level_meter(self) -> None:
+        """W08：电平信号跟随当前 timeline panel（先断旧连新，幂等）。
+
+        manager/panel 任一缺席时只断不连；替换面板不会让旧 panel 继续
+        收到更新，也不会在 manager 上累积重复连接。
+        """
+        self._disconnect_timeline_level_meter()
+        manager = self._audio_manager
+        panel = self._timeline_panel
+        signal = getattr(manager, "audio_level_changed", None)
+        slot = getattr(panel, "update_audio_levels", None)
+        if signal is None or slot is None:
+            return
+        signal.connect(slot)
+        self._timeline_level_connection = (signal, slot)
+
+    def _disconnect_timeline_level_meter(self) -> None:
+        if self._timeline_level_connection is None:
+            return
+        signal, slot = self._timeline_level_connection
+        try:
+            signal.disconnect(slot)
+        except TypeError:
+            pass  # already disconnected (e.g. panel destroyed)
+        self._timeline_level_connection = None
+
     def shutdown_audio_playback(self) -> None:
         """Fully stop and release all edit-page audio worker resources.
 
@@ -1075,6 +1122,7 @@ class EditPage(QWidget):
         manager = self._audio_manager
         self._audio_active = False
         self._audio_timeline_signature = None
+        self._disconnect_timeline_level_meter()  # W08：停机即断电平订阅
         if manager is None:
             return
 

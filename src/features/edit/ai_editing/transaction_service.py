@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Iterable
 
 from src.features.edit.ai_editing.approval_service import (
     ApprovalError,
@@ -436,6 +436,7 @@ class TransactionService:
         approval: "ApprovalGrant | ApprovalService | str | None" = None,
         approval_service: "ApprovalService | None" = None,
         client: str = "",
+        position_locked_clip_ids: "Iterable[str] | None" = None,
     ) -> CommitResult:
         """validate → compile → 乐观锁 → 原子提交 → audit。
 
@@ -518,12 +519,14 @@ class TransactionService:
                 ),
             )
 
-        # 原子提交（commit_command 内部做乐观锁 + bump + sync）
+        # 原子提交（commit_command 内部做乐观锁 + bump + sync；
+        # position_locked_clip_ids 为 W06 显式锁策略，None = 不锁）
         try:
             result = EditProjectService.commit_command(
                 state, plan.target.timeline_id, preview.compiled.macro,
                 base_revision=plan.base_revision,
                 undo_label=preview.compiled.undo_label,
+                position_locked_clip_ids=position_locked_clip_ids,
             )
         except RevisionConflict:
             # AUD-14817 残余窗口（预检与提交之间 state 被并发改写）：

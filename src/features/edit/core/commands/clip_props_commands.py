@@ -2130,6 +2130,139 @@ class ReplaceClipWithSourceCommand:
 
 
 # ================================================================
+# W05: SetClipFlagCommand（clip 级彩色旗标，契约 D4）
+# ================================================================
+
+@dataclass(frozen=True)
+class SetClipFlagCommand:
+    """设置/清除一组 clip 的彩色旗标（接线计划 W05 / 契约 D4）。
+
+    多选批量：``targets`` 全部应用同一颜色，一条命令单步 undo。旗标是
+    clip 级独立数据（``flag_color``），不改 ``label_color``（配色）也不
+    改 ``MediaAsset.flag``（素材级 reject 标记）；不随 linked 伙伴传播。
+    全部目标已是目标色时 apply 为 no-op（CommandStack 不入栈不清 redo）。
+
+    Attributes:
+        command_id: Unique identifier
+        label: Human-readable label
+        targets: ((track_id, clip_id), ...) 元组
+        flag_color: "#RRGGBB" 白名单色或 None（清除）
+        _previous: apply 期捕获的 ((clip_id, 原色), ...) 快照
+    """
+
+    command_id: str
+    label: str
+    targets: tuple
+    flag_color: str | None
+    _previous: tuple | None = None
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self.flag_color is not None and not (
+                isinstance(self.flag_color, str)
+                and self.flag_color.startswith("#")
+                and len(self.flag_color) == 7):
+            raise ValueError(
+                f"Invalid clip flag color: {self.flag_color!r}")
+        # 第一遍：目标存在性 + 轨锁校验 + 是否真有变化（no-op 判定）
+        pending: list[tuple[str, str, ClipInstance]] = []
+        for track_id, clip_id in self.targets:
+            track = timeline.get_track_by_id(track_id)
+            if track is None:
+                raise ValueError(f"Track not found: {track_id}")
+            clip = track.get_clip_by_id(clip_id)
+            if clip is None:
+                raise ValueError(f"Clip not found: {clip_id}")
+            assert_track_editable(timeline, track_id, "Set clip flag")
+            if clip.flag_color != self.flag_color:
+                pending.append((track_id, clip_id, clip))
+        if not pending:
+            # 全部目标已是目标色：no-op 返回同一实例（CommandStack 不入栈）
+            return timeline
+        previous: list[tuple[str, str | None]] = []
+        result = timeline
+        for track_id, clip_id, clip in pending:
+            track = result.get_track_by_id(track_id)
+            previous.append((clip_id, clip.flag_color))
+            new_clip = clip.with_flag_color(self.flag_color)
+            new_clips = tuple(
+                new_clip if c.clip_id == clip_id else c for c in track.clips)
+            result = result.with_track_updated(
+                track._rebuild(clips=new_clips))
+        object.__setattr__(self, "_previous", tuple(previous))
+        return result
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._previous is None:
+            raise ValueError("Cannot undo: command was never applied")
+        restore = dict(self._previous)
+        result = timeline
+        for track_id, clip_id in self.targets:
+            track = result.get_track_by_id(track_id)
+            if track is None:
+                raise ValueError(f"Track not found: {track_id}")
+            clip = track.get_clip_by_id(clip_id)
+            if clip is None:
+                raise ValueError(f"Clip not found: {clip_id}")
+            new_clip = clip.with_flag_color(restore.get(clip_id))
+            new_clips = tuple(
+                new_clip if c.clip_id == clip_id else c for c in track.clips)
+            result = result.with_track_updated(
+                track._rebuild(clips=new_clips))
+        return result
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetClipFlagCommand",
+            "label": self.label,
+            "targets": [
+                {"track_id": track_id, "clip_id": clip_id}
+                for track_id, clip_id in self.targets
+            ],
+            "flag_color": self.flag_color,
+            "_previous": [
+                {"clip_id": clip_id, "flag_color": flag_color}
+                for clip_id, flag_color in (self._previous or ())
+            ] or None,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetClipFlagCommand":
+        targets = tuple(
+            (str(item["track_id"]), str(item["clip_id"]))
+            for item in data.get("targets", [])
+        )
+        previous = tuple(
+            (str(item["clip_id"]), item.get("flag_color"))
+            for item in (data.get("_previous") or [])
+        )
+        return SetClipFlagCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Clip Flag"),
+            targets=targets,
+            flag_color=data.get("flag_color"),
+            _previous=previous or None,
+        )
+
+    @staticmethod
+    def create(
+        targets: tuple | list, flag_color: str | None,
+        label: str | None = None,
+    ) -> "SetClipFlagCommand":
+        targets = tuple((track_id, clip_id) for track_id, clip_id in targets)
+        if flag_color is None:
+            text = "Clear clip flags"
+        else:
+            text = "Flag clips"
+        return SetClipFlagCommand(
+            command_id=str(uuid.uuid4()),
+            label=label or f"{text} ({len(targets)})",
+            targets=targets,
+            flag_color=flag_color,
+        )
+
+
+# ================================================================
 # C3: SetClipAudioGainCommand（片段级音频增益，阶段 1）
 # ================================================================
 

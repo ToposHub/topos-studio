@@ -523,7 +523,9 @@
       "yellow": "Yellow",
       "red": "Red",
       "pink": "Pink",
-      "purple": "Purple"
+      "purple": "Purple",
+      "unknown_color": "Flag: unknown color",
+      "no_target": "Flag: select clips or park the playhead over one"
     },
     "replace": {
       "asset_missing": "Replace: source asset is not in the project",
@@ -532,7 +534,8 @@
       "multi_selection": "Replace: select exactly one clip"
     },
     "replace_edit": "Replace Edit",
-    "replace_edit_av": "Replace Edit (A/V)"
+    "replace_edit_av": "Replace Edit (A/V)",
+    "keyframe_tray_hint": "Click to add a keyframe; drag to move in time; right-click to remove; Esc cancels the drag"
   },
   "ai_composer": {
     "scope_tooltip": "Choose the assets included in this conversation",

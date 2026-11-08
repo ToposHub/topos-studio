@@ -1445,6 +1445,17 @@ class FileOpsMixin:
                 ui_state.timeline_layout = view.layout_state()
         except Exception:
             logger.debug("Failed to capture timeline layout state", exc_info=True)
+        # W07（接线计划 §6）：时间线展示偏好（缩略图/波形/zoom preset 与
+        # 自定义 ppf+scroll/Position Lock/Tray/源目的轨 UI 路由）。
+        try:
+            export = getattr(self.timeline_panel, 'export_presentation_state', None)
+            if callable(export):
+                presentation = export()
+                if presentation:
+                    ui_state.timeline_presentation = presentation
+        except Exception:
+            logger.debug("Failed to capture timeline presentation state",
+                         exc_info=True)
         return ui_state
 
     def _get_timeline_sequences(self) -> dict[str, TimelineSequence] | None:
@@ -4648,6 +4659,18 @@ class FileOpsMixin:
                     view.set_layout_state(ui_state.timeline_layout)
             except Exception:
                 logger.debug("Failed to restore timeline layout state", exc_info=True)
+
+        # W07（接线计划 §6）：展示偏好恢复——layout 之后、选区/playhead
+        # 同步之前；恢复零内容命令、零 revision（各 setter 内含状态锁）。
+        if getattr(ui_state, 'timeline_presentation', None):
+            try:
+                apply = getattr(self.timeline_panel,
+                                'apply_presentation_state', None)
+                if callable(apply):
+                    apply(ui_state.timeline_presentation)
+            except Exception:
+                logger.debug("Failed to restore timeline presentation state",
+                             exc_info=True)
 
         # Restore expanded bins
         if hasattr(self.media_pool_panel, 'set_expanded_bins'):

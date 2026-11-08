@@ -48,6 +48,14 @@ def _view(timeline: TimelineSequence):
     view._timeline = timeline
     view._command_stack = CommandStack()
     view._batch_drop_commands = None
+    # W06/W02：Position Lock 预检与源目的轨解析需真实值
+    # （MagicMock 属性恒真值会误触发锁拒绝/路由失败）。
+    view._position_lock_enabled = False
+    view._source_patch_routes = {}
+    view.source_destination_stream_disabled = lambda track_type: False
+    view.resolve_source_destination_track_id = (
+        lambda track_type: "v1" if track_type == "video" else "a1")
+    view.status_message_requested = MagicMock()
     view._clip_change_detector = lambda old, new: MagicMock(full_reload_needed=True)
     view._update_range_visuals = lambda tl: None
     view.load_timeline = lambda tl: None
@@ -144,6 +152,12 @@ def _source_view(timeline, project, asset):
     view._playhead_frame = 0
     view.get_target_track_id = lambda: "v1"
     view.get_target_audio_track_id = lambda: "a1"
+    # W02：蓝徽章源目的轨解析（无显式路由 → 红 target 回退语义）
+    view._source_patch_routes = {}
+    view.source_destination_stream_disabled = lambda track_type: False
+    view.resolve_source_destination_track_id = (
+        lambda track_type: "v1" if track_type == "video" else "a1")
+    view.status_message_requested = MagicMock()
     executed = []
     view._execute_command.side_effect = executed.append
     # R22：overwrite/append 现经统一 fps 元数据解析（MagicMock 需显式绑定）
