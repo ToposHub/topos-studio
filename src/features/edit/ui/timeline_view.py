@@ -761,6 +761,8 @@ class TimelineView(QGraphicsView):
     selection_changed = pyqtSignal(object)  # TimelineSelection
     tool_changed = pyqtSignal(str)  # tool name
     snap_changed = pyqtSignal(bool)  # enabled
+    position_lock_changed = pyqtSignal(bool)
+    source_patch_changed = pyqtSignal(str, str, bool)  # type, destination track, enabled; UI request
     # E22: command_executed 已删除（1 个 emit、0 个 connect 的死信号；
     # timeline_changed 是宿主消费的活链路）
     # 操作失败等状态栏提示（如冻结帧失败）——面板/主窗口接到状态栏展示。
@@ -878,6 +880,10 @@ class TimelineView(QGraphicsView):
         self._corner_timecode_text: str = "00:00:00:00"
         self._pixels_per_frame = DEFAULT_ZOOM
         self._active_tool = EditTool.SELECT
+        self._position_lock_enabled: bool = False
+        self._thumbnail_display_mode: str = ClipItem._thumbnail_display_mode
+        self._waveforms_visible: bool = True
+        self._source_patch_routes: dict[tuple[str, str], Optional[str]] = {}
         self._snap_enabled = True
         self._interaction = InteractionSession()  # Interaction state machine
         self._current_drag_session: Optional[ClipDragSession] = None  # P2-2: Clip drag session
@@ -1475,6 +1481,7 @@ class TimelineView(QGraphicsView):
             # Position header
             header = self._track_headers.get(track_id)
             if header is not None:
+                header.set_source_patch_enabled(self.source_patch_track_id(track.track_type) == track_id)
                 header.set_track_height(track_h)
                 header.set_track_index(track_index)
                 header.set_clip_count(len(track.clips))
@@ -1990,6 +1997,7 @@ class TimelineView(QGraphicsView):
                 header.solo_changed.connect(self._on_track_solo_changed)
                 header.lock_changed.connect(self._on_track_lock_changed)
                 header.sync_lock_changed.connect(self._on_track_sync_lock_changed)
+                self._configure_source_patch_header(header)
                 header.visibility_changed.connect(self._on_track_visibility_changed)
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
@@ -2021,6 +2029,7 @@ class TimelineView(QGraphicsView):
                 header.solo_changed.connect(self._on_track_solo_changed)
                 header.lock_changed.connect(self._on_track_lock_changed)
                 header.sync_lock_changed.connect(self._on_track_sync_lock_changed)
+                self._configure_source_patch_header(header)
                 header.visibility_changed.connect(self._on_track_visibility_changed)
                 header.volume_changed.connect(self._on_track_volume_changed)
                 header.rename_requested.connect(self._on_track_rename_requested)
@@ -2052,6 +2061,7 @@ class TimelineView(QGraphicsView):
                 # and solo have no defined caption preview/deliver semantics.
                 header.lock_changed.connect(self._on_track_lock_changed)
                 header.sync_lock_changed.connect(self._on_track_sync_lock_changed)
+                self._configure_source_patch_header(header)
                 header.visibility_changed.connect(self._on_track_visibility_changed)
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
@@ -2142,6 +2152,7 @@ class TimelineView(QGraphicsView):
                     )
                     self._scene.addItem(item)
                     self._items_map[clip.clip_id] = item
+                    self._configure_clip_presentation(item)
                     # 轨道音量驱动的波形显示缩放（W-gain: 视觉联动）
                     item.set_waveform_gain(getattr(track, 'volume', 1.0))
 
@@ -2487,6 +2498,7 @@ class TimelineView(QGraphicsView):
             header.solo_changed.connect(self._on_track_solo_changed)
         header.lock_changed.connect(self._on_track_lock_changed)
         header.sync_lock_changed.connect(self._on_track_sync_lock_changed)
+        self._configure_source_patch_header(header)
         header.visibility_changed.connect(self._on_track_visibility_changed)
         if track.track_type == "audio":
             header.volume_changed.connect(self._on_track_volume_changed)
@@ -4386,6 +4398,119 @@ class TimelineView(QGraphicsView):
 
         self.tool_changed.emit(tool.value)
         logger.debug(f"Tool changed to {tool.value}")
+
+    def _configure_clip_presentation(self, item: ClipItem) -> None:
+        """Project view-only preferences onto newly created graphics items."""
+        item._thumbnail_display_mode = self._thumbnail_display_mode
+        item._waveforms_visible = self._waveforms_visible
+        item._position_lock_enabled = self._position_lock_enabled
+
+    def thumbnail_display_mode(self) -> str:
+        return self._thumbnail_display_mode
+
+    def set_thumbnail_display_mode(self, mode: str) -> None:
+        """Change thumbnail presentation within this view, without model writes."""
+        if mode not in {"auto", "filmstrip", "start_end", "none"}:
+            raise ValueError(f"Unknown timeline thumbnail mode: {mode!r}")
+        if mode == self._thumbnail_display_mode:
+            return
+        self._thumbnail_display_mode = mode
+        for item in self._items_map.values():
+            if isinstance(item, ClipItem):
+                item._thumbnail_display_mode = mode
+                item._cached_thumbnail_set = None
+                item._thumbnail_request_key = None
+                item._thumbnail_pending = False
+                item.update()
+        self.viewport().update()
+
+    def waveforms_visible(self) -> bool:
+        return self._waveforms_visible
+
+    def set_waveforms_visible(self, visible: bool) -> None:
+        """Hide/show waveform graphics without changing audio or clip content."""
+        if self._waveforms_visible == bool(visible):
+            return
+        self._waveforms_visible = bool(visible)
+        for item in self._items_map.values():
+            if isinstance(item, ClipItem):
+                item._waveforms_visible = self._waveforms_visible
+                item.update()
+        self.viewport().update()
+
+    def set_position_lock_enabled(self, enabled: bool) -> None:
+        """Set the UI position-lock guard and cancel any gesture in flight.
+
+        This is a view preference, not a persistent editing permission. Host
+        and command-level enforcement is documented in the wiring plan.
+        """
+        enabled = bool(enabled)
+        if self._position_lock_enabled == enabled:
+            return
+        if not self._interaction.is_idle:
+            self._cancel_current_interaction()
+        self._position_lock_enabled = enabled
+        for item in self._items_map.values():
+            if isinstance(item, ClipItem):
+                item._position_lock_enabled = enabled
+                item.update()
+        self.position_lock_changed.emit(enabled)
+
+    def is_position_lock_enabled(self) -> bool:
+        return self._position_lock_enabled
+
+    def set_track_height_for_type(self, track_type: str, height: int) -> None:
+        """Resize a track group in one layout pass using the shared engine."""
+        from src.features.edit.ui.timeline_layout import (
+            MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT,
+            MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT,
+        )
+        limits = {
+            "video": (MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT),
+            "audio": (MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT),
+            "subtitle": (MIN_SUBTITLE_TRACK_HEIGHT, MAX_SUBTITLE_TRACK_HEIGHT),
+        }
+        if track_type not in limits:
+            raise ValueError(f"Unknown track type: {track_type!r}")
+        if self._timeline is None:
+            return
+        lo, hi = limits[track_type]
+        clamped = max(lo, min(hi, int(height)))
+        tracks = getattr(self._timeline, f"{track_type}_tracks")
+        for track in tracks:
+            self._layout_state.track_heights[track.track_id] = clamped
+            self._layout_engine.set_track_height(track.track_id, clamped)
+        self._layout_track_items()
+        self.viewport().update()
+
+    def source_patch_track_id(self, track_type: str) -> Optional[str]:
+        """Read the UI source destination, independently of the edit target."""
+        if self._timeline is None or track_type not in {"video", "audio"}:
+            return None
+        key = (self._timeline.timeline_id, track_type)
+        tracks = getattr(self._timeline, f"{track_type}_tracks")
+        if key in self._source_patch_routes:
+            selected = self._source_patch_routes[key]
+            if selected is None or any(track.track_id == selected for track in tracks):
+                return selected
+        return tracks[0].track_id if tracks else None
+
+    def _configure_source_patch_header(self, header: TrackHeaderItem) -> None:
+        header.set_source_patch_enabled(self.source_patch_track_id(header.track_type) == header.track_id)
+        header.source_patch_requested.connect(self._on_source_patch_requested)
+
+    def _on_source_patch_requested(self, track_id: str, enabled: bool) -> None:
+        """Update badges and expose a host request; do not alter source routing."""
+        if self._timeline is None:
+            return
+        track = self._timeline.get_track_by_id(track_id)
+        if track is None or track.track_type not in {"video", "audio"}:
+            return
+        self._source_patch_routes[(self._timeline.timeline_id, track.track_type)] = track_id if enabled else None
+        for header in self._track_headers.values():
+            if header.track_type == track.track_type:
+                header.set_source_patch_enabled(enabled and header.track_id == track_id)
+        self.source_patch_changed.emit(track.track_type, track_id, enabled)
 
     def set_snap_enabled(self, enabled: bool) -> None:
         """
@@ -7101,6 +7226,7 @@ class TimelineView(QGraphicsView):
 
         self._scene.addItem(item)
         self._items_map[clip.clip_id] = item
+        self._configure_clip_presentation(item)
         # 轨道音量驱动的波形显示缩放（W-gain: 视觉联动）
         item.set_waveform_gain(getattr(track, 'volume', 1.0))
 

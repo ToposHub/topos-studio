@@ -63,6 +63,7 @@ from PyQt6.QtGui import (
 )
 
 from src.features.edit.ui.edit_style import EDIT_SIZES, get_color
+from src.shared.i18n.i18n import I18N
 from src.features.edit.core.audio_waveform import (
     WaveformData,
     WaveformExtractor,
@@ -1486,18 +1487,18 @@ class ClipItem(QGraphicsObject):
         is_wide = clip_width >= 90       # Wide: full details with thumbnails
 
         # P5-1: Thumbnail mode — use user preference if set, otherwise auto LOD
-        if ClipItem._thumbnail_display_mode == "auto":
+        if self._thumbnail_display_mode == "auto":
             thumbnail_mode = self._calculate_thumbnail_mode(clip_width)
-        elif ClipItem._thumbnail_display_mode == "none":
+        elif self._thumbnail_display_mode == "none":
             thumbnail_mode = THUMBNAIL_MODE_NONE
-        elif ClipItem._thumbnail_display_mode == "start_end":
+        elif self._thumbnail_display_mode == "start_end":
             # Force start_end mode, but respect minimum width for single
             if clip_width < THUMBNAIL_WIDTH_NONE:
                 thumbnail_mode = THUMBNAIL_MODE_NONE
             else:
                 thumbnail_mode = THUMBNAIL_MODE_START_END
         else:
-            thumbnail_mode = ClipItem._thumbnail_display_mode  # "filmstrip" etc.
+            thumbnail_mode = self._thumbnail_display_mode  # "filmstrip" etc.
 
         # Determine colors based on track role. Linked A/V clips can carry a
         # video asset type while being placed on an audio track.
@@ -1681,7 +1682,7 @@ class ClipItem(QGraphicsObject):
         # Draw waveform for every readable audio clip.  ``is_medium`` means
         # width < 90px, so using it here accidentally suppressed waveforms on
         # the wide clips where users most expect to see them.
-        if is_audio and not hide_details and not is_narrow:
+        if is_audio and not hide_details and not is_narrow and getattr(self, "_waveforms_visible", True):
             # Give the envelope a quiet, translucent analysis bed. This is
             # independent of the label hue so the waveform remains readable
             # on every custom clip color.
@@ -1757,7 +1758,8 @@ class ClipItem(QGraphicsObject):
 
         # Phase 6.1: Draw linked group border (bottom colored line)
         # Only show when linked selection is enabled (clips move together)
-        if self._linked_clip_id and not is_narrow and self._linked_selection_enabled:
+        if (self._linked_clip_id and not is_narrow and self._linked_selection_enabled
+                and (self._is_group_highlighted or self._linked_to_selection)):
             self._draw_linked_group_border(painter, clip_rect)
 
         # Draw lock indicator in top-right if locked
@@ -1785,7 +1787,8 @@ class ClipItem(QGraphicsObject):
         # Phase 2: Draw badge and indicators (only for wide clips)
         if not is_locked and not hide_details and is_wide:
             # Phase 2.3: Draw clip type icon
-            self._draw_clip_type_icon(painter, clip_rect)
+            if self._media_type not in {"video", "audio", "image"}:
+                self._draw_clip_type_icon(painter, clip_rect)
 
             # Phase 2.1: Draw effects badge
             self._draw_effects_badge(painter, clip_rect)
@@ -2128,6 +2131,15 @@ class ClipItem(QGraphicsObject):
             painter: QPainter instance
             handle_size: Dynamic handle size based on zoom
         """
+        if self._active_tool == EditTool.TRIM and self._hover_edge in {"ripple_trim_left", "ripple_trim_right"}:
+            edge = "left" if self._hover_edge.endswith("left") else "right"
+            painter.setBrush(QBrush(TRIM_IN_HOVER_COLOR if edge == "left" else TRIM_OUT_HOVER_COLOR))
+            painter.setPen(QPen(Qt.PenStyle.NoPen))
+            x = 0.0 if edge == "left" else self._width - handle_size
+            painter.drawRect(QRectF(x, 0.0, handle_size, self._track_height))
+            self._draw_trim_edge_glyph(painter, handle_size, edge)
+            return
+
         # Ripple trim handles (P4.2): distinct visual indicator
         if self._active_tool == EditTool.RIPPLE:
             if self._hover_edge == "ripple_left":
@@ -4307,6 +4319,32 @@ class ClipItem(QGraphicsObject):
 
     # ==================== Interaction ====================
 
+    def _smart_trim_mode_at(self, pos: QPointF) -> str:
+        """Resolve T-mode: ripple edges, slip picture, slide name strip.
+
+        Keep the edge target proportional on tiny clips so a clip body stays
+        reachable even when the timeline is zoomed out. The shared cut-point
+        handle supplies roll editing at the exact junction.
+        """
+        edge_width = min(float(HANDLE_SIZE), max(1.0, self._width * 0.22))
+        if pos.x() < edge_width:
+            return "ripple_trim_left"
+        if pos.x() > self._width - edge_width:
+            return "ripple_trim_right"
+        label_height = min(19.0, self._track_height * 0.4)
+        return "slide" if pos.y() >= self._track_height - label_height else "slip"
+
+    def _position_lock_blocks(self, drag_mode: str) -> bool:
+        """UI position lock prevents moving clips; source/fade edits remain available.
+
+        Domain-level protection for keyboard, paste and external clients is
+        deliberately a separate backend integration task.
+        """
+        return bool(getattr(self, "_position_lock_enabled", False)) and drag_mode in {
+            "move", "slide", "ripple_trim_left", "ripple_trim_right",
+            "rate_stretch_left", "rate_stretch_right", "motion_graphic_duration",
+        }
+
     def hoverMoveEvent(self, event: Any) -> None:
         """Handle hover move to detect edge proximity and set cursor.
 
@@ -4333,6 +4371,22 @@ class ClipItem(QGraphicsObject):
             new_fade = None
             new_tooltip = f"{self._asset_name}\nFrame: {self._start_frame}\n(Track Locked)"
             new_cursor = Qt.CursorShape.ForbiddenCursor
+
+        elif self._active_tool == EditTool.TRIM:
+            mode = self._smart_trim_mode_at(pos)
+            new_edge = mode
+            new_fade = None
+            labels = {
+                "ripple_trim_left": I18N.tr("timeline.smart_trim.ripple_in", "Ripple In — drag the edge"),
+                "ripple_trim_right": I18N.tr("timeline.smart_trim.ripple_out", "Ripple Out — drag the edge"),
+                "slip": I18N.tr("timeline.smart_trim.slip", "Slip — drag the picture to change the source range"),
+                "slide": I18N.tr("timeline.smart_trim.slide", "Slide — drag the name strip to adjust adjacent edits"),
+            }
+            new_tooltip = labels[mode]
+            new_cursor = Qt.CursorShape.SizeAllCursor if mode == "slide" else Qt.CursorShape.SizeHorCursor
+            if self._position_lock_blocks(mode):
+                new_cursor = Qt.CursorShape.ForbiddenCursor
+                new_tooltip = I18N.tr("timeline.position_locked", "Position Lock is enabled")
 
         # Slip tool (P4.4): entire clip becomes slip handle
         elif self._active_tool == EditTool.SLIP:
@@ -4413,6 +4467,13 @@ class ClipItem(QGraphicsObject):
                     new_tooltip = f"{self._asset_name}\nFrame: {self._start_frame}"
                     # P2-7: Open hand cursor for clip body (indicates draggability)
                     new_cursor = Qt.CursorShape.OpenHandCursor
+
+        lock_mode = {"ripple_left": "ripple_trim_left", "ripple_right": "ripple_trim_right"}.get(new_edge, new_edge or "move")
+        if self._active_tool == EditTool.RATE_STRETCH and new_edge in {"left", "right"}:
+            lock_mode = f"rate_stretch_{new_edge}"
+        if new_fade is None and self._position_lock_blocks(lock_mode):
+            new_cursor = Qt.CursorShape.ForbiddenCursor
+            new_tooltip = I18N.tr("timeline.position_locked", "Position Lock is enabled")
 
         # 只在实际变化时写回（避免 DeviceCoordinateCache 整卡重建）
         if new_edge != old_edge or new_fade != old_fade:
@@ -4516,7 +4577,7 @@ class ClipItem(QGraphicsObject):
             # Phase 1.2: Check the moving fade endpoint before the other
             # tool-specific edge handling.  This is intentionally larger than
             # the visible triangle so audio waveform clips remain easy to use.
-            fade_handle = self._fade_handle_at(pos)
+            fade_handle = self._fade_handle_at(pos) if self._active_tool != EditTool.TRIM else None
             if motion_graphic_retime:
                 self._drag_mode = "motion_graphic_duration"
                 self._drag_start_frame = self._duration_frames
@@ -4526,6 +4587,13 @@ class ClipItem(QGraphicsObject):
             elif fade_handle == "out":
                 self._drag_mode = "fade_out"
                 self._drag_start_pos = event.scenePos()
+            elif self._active_tool == EditTool.TRIM:
+                self._drag_mode = self._smart_trim_mode_at(pos)
+                self._slip_delta = 0
+                self._drag_start_frame = (
+                    self._start_frame + self._duration_frames
+                    if self._drag_mode == "ripple_trim_right" else self._start_frame
+                )
             # Slip tool (P4.4): entire clip is slip handle
             elif self._active_tool == EditTool.SLIP:
                 self._drag_mode = "slip"
@@ -4579,6 +4647,14 @@ class ClipItem(QGraphicsObject):
             else:
                 self._drag_mode = "move"
                 self._drag_start_frame = self._start_frame
+
+            if self._position_lock_blocks(self._drag_mode):
+                self._drag_mode = None
+                self._drag_pending = False
+                self.clip_clicked.emit(self._clip_id, self._track_id)
+                self.setCursor(Qt.CursorShape.ForbiddenCursor)
+                event.accept()
+                return
 
             # INT-02：让 view 的 InteractionSession 感知片段级拖拽/修剪，
             # Esc/换工具/失焦才能取消；此前媒体 item press 从不 begin，
@@ -4905,7 +4981,7 @@ class ClipItem(QGraphicsObject):
                 I18N.tr("edit.clip.thumbnail_menu", "Thumbnails")
             )
 
-            current_mode = ClipItem._thumbnail_display_mode
+            current_mode = self._thumbnail_display_mode
 
             thumb_off_action = thumb_menu.addAction(
                 I18N.tr("edit.clip.thumbnail_off", "Off")
@@ -5120,18 +5196,14 @@ class ClipItem(QGraphicsObject):
                 new_thumb_mode = "start_end"
             elif selected(thumb_filmstrip_action):
                 new_thumb_mode = "filmstrip"
-            if new_thumb_mode and new_thumb_mode != ClipItem._thumbnail_display_mode:
-                ClipItem._thumbnail_display_mode = new_thumb_mode
-                # Clear thumbnail cache so clips re-render with new mode
-                ClipItem._thumbnail_cache.clear()
-                # Trigger repaint of all clip items in the scene
-                if self.scene():
-                    for item in self.scene().items():
-                        if isinstance(item, ClipItem):
-                            item._cached_thumbnail_set = None
-                            item._thumbnail_request_key = None
-                            item._thumbnail_pending = False
-                            item.update()
+            if new_thumb_mode:
+                views = self.scene().views() if self.scene() else []
+                view = views[0] if views else None
+                if view is not None and hasattr(view, "set_thumbnail_display_mode"):
+                    view.set_thumbnail_display_mode(new_thumb_mode)
+                else:
+                    self._thumbnail_display_mode = new_thumb_mode
+                    self.update()
                 return
 
         # Audio waveform display mode. The actual change goes through the
@@ -6923,6 +6995,7 @@ class TrackHeaderItem(QGraphicsObject):
     solo_changed = pyqtSignal(str, bool)  # track_id, solo
     lock_changed = pyqtSignal(str, bool)  # track_id, lock
     sync_lock_changed = pyqtSignal(str, bool)  # track_id, sync_lock (P1-05)
+    source_patch_requested = pyqtSignal(str, bool)  # UI-only source destination request
     visibility_changed = pyqtSignal(str, bool)  # track_id, visible
     volume_changed = pyqtSignal(str, float)  # track_id, volume
     rename_requested = pyqtSignal(str)  # track_id
@@ -6982,6 +7055,7 @@ class TrackHeaderItem(QGraphicsObject):
         self._is_target = is_target  # NEW
         self._volume = max(0.0, min(2.0, volume))  # Clamp to valid range
         self._clip_count: int = 0  # Number of clips on this track (displayed in header)
+        self._source_patch_enabled: bool = track_index == 0 and track_type != "subtitle"
 
         # Interaction state
         self._hover_button: Optional[str] = None  # 'mute', 'solo', 'lock', 'volume', 'resize', 'name', or None
@@ -7101,82 +7175,37 @@ class TrackHeaderItem(QGraphicsObject):
 
     # ==================== Button Areas (Enhanced) ====================
 
+    def _get_source_patch_rect(self) -> QRectF:
+        """The source destination and the red target badge are separate controls."""
+        if self._track_type == "subtitle":
+            return QRectF()
+        y = 4.0 if self._track_height >= 40 else (self._track_height - 18.0) / 2.0
+        return QRectF(10.0, y, 30.0, 18.0)
+
     def _get_track_badge_rect(self) -> QRectF:
-        """Get track type badge rect (V1/A1).
-
-        In two-row layout: top-left corner.
-        In single-row layout: left side, vertically centered.
-        """
-        badge_w = EDIT_SIZES["track_badge_w"]   # 32
-        badge_h = EDIT_SIZES["track_badge_h"]   # 20
-        use_two_rows = self._track_height >= 40
-
-        if use_two_rows:
-            # DaVinci-like: leave room at left for track info text, then badge.
-            return QRectF(54, 6, badge_w, badge_h)
-        else:
-            # Single row: vertically centered
-            y = (self._track_height - badge_h) / 2
-            return QRectF(6, y, badge_w, badge_h)
+        """Return the target-track badge independently of source patching."""
+        y = 4.0 if self._track_height >= 40 else (self._track_height - 18.0) / 2.0
+        return QRectF(46.0, y, 30.0, 18.0)
 
     def _get_name_rect(self) -> QRectF:
-        """Get clickable area for name/badge (for target/double-click detection)."""
-        use_two_rows = self._track_height >= 40
-        badge_rect = self._get_track_badge_rect()
-
-        if use_two_rows:
-            # Track label area + badge both set target track.
-            return QRectF(8, 4, max(88, badge_rect.right() - 8), self._track_height - 8)
-        else:
-            return badge_rect.adjusted(-2, -2, 2, 2)
+        """Name and badge both select the destination; double-click renames."""
+        return QRectF(8.0, 27.0, TRACK_HEADER_WIDTH - 16.0, max(0.0, self._track_height - 30.0))
 
     def _get_lock_button_rect(self) -> QRectF:
-        """Get lock button bounding rect (leftmost of three buttons)."""
-        use_two_rows = self._track_height >= 40
-        if use_two_rows:
-            y = 7
-            x = self._get_track_badge_rect().right() + 10
-        else:
-            y = (self._track_height - BUTTON_SIZE) / 2
-            x = TRACK_HEADER_WIDTH - 3 * BUTTON_SIZE - 3 * BUTTON_MARGIN
-        return QRectF(
-            x,
-            y,
-            BUTTON_SIZE,
-            BUTTON_SIZE
-        )
+        y = 4.0 if self._track_height >= 40 else (self._track_height - BUTTON_SIZE) / 2.0
+        return QRectF(84.0, y, BUTTON_SIZE, BUTTON_SIZE)
+
+    def _get_sync_lock_button_rect(self) -> QRectF:
+        rect = self._get_lock_button_rect()
+        return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
 
     def _get_solo_button_rect(self) -> QRectF:
-        """Get solo button bounding rect (middle button)."""
-        use_two_rows = self._track_height >= 40
-        if use_two_rows:
-            y = 7
-            x = self._get_lock_button_rect().right() + BUTTON_MARGIN + 3
-        else:
-            y = (self._track_height - BUTTON_SIZE) / 2
-            x = TRACK_HEADER_WIDTH - 2 * BUTTON_SIZE - 2 * BUTTON_MARGIN
-        return QRectF(
-            x,
-            y,
-            BUTTON_SIZE,
-            BUTTON_SIZE
-        )
+        rect = self._get_sync_lock_button_rect()
+        return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
 
     def _get_mute_button_rect(self) -> QRectF:
-        """Get mute/hide button bounding rect (rightmost button)."""
-        use_two_rows = self._track_height >= 40
-        if use_two_rows:
-            y = 7
-            x = self._get_solo_button_rect().right() + BUTTON_MARGIN + 3
-        else:
-            y = (self._track_height - BUTTON_SIZE) / 2
-            x = TRACK_HEADER_WIDTH - BUTTON_SIZE - BUTTON_MARGIN
-        return QRectF(
-            x,
-            y,
-            BUTTON_SIZE,
-            BUTTON_SIZE
-        )
+        rect = self._get_solo_button_rect()
+        return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
 
     def _get_resize_handle_rect(self) -> QRectF:
         """Get resize handle bounding rect (at bottom of header)."""
@@ -7211,36 +7240,28 @@ class TrackHeaderItem(QGraphicsObject):
         )
 
     def _get_button_at_pos(self, pos: QPointF) -> Optional[str]:
-        """Determine which button is at the given position."""
-        if self._track_type == "subtitle":
-            if self._get_mute_button_rect().contains(pos):
-                return "visibility"
-            if self._get_lock_button_rect().contains(pos):
-                return "lock"
-            if self._get_resize_handle_rect().contains(pos):
-                return "resize"
-            if self._get_name_rect().contains(pos):
-                return "name"
-            return None
-        # Video tracks use the eye glyph as a visibility control.  It used to
-        # be painted as an eye but dispatched the audio mute command, which
-        # made the control appear broken and left the clips visible.
-        if self._track_type == "video" and self._get_mute_button_rect().contains(pos):
-            return "visibility"
-        if self._get_mute_button_rect().contains(pos):
-            return "mute"
-        if self._get_solo_button_rect().contains(pos):
-            return "solo"
+        """Hit testing uses the same rectangles as the painted controls."""
         if self._get_lock_button_rect().contains(pos):
             return "lock"
+        if self._get_mute_button_rect().contains(pos):
+            return "mute" if self._track_type == "audio" else "visibility"
+        if self._track_type != "subtitle":
+            if self._get_source_patch_rect().contains(pos):
+                return "source_patch"
+            if self._get_sync_lock_button_rect().contains(pos):
+                return "sync_lock"
+            if self._track_type == "audio" and self._get_solo_button_rect().contains(pos):
+                return "solo"
         if self._get_resize_handle_rect().contains(pos):
             return "resize"
-        # NEW: Name area for double-click detection
+        if self._get_track_badge_rect().contains(pos):
+            return "target"
+        if self._track_type == "audio":
+            slider = self._get_volume_slider_rect()
+            if slider.bottom() < self._track_height - 2 and slider.contains(pos):
+                return "volume"
         if self._get_name_rect().contains(pos):
             return "name"
-        # Volume slider only for audio tracks
-        if self._track_type == "audio" and self._get_volume_slider_rect().contains(pos):
-            return "volume"
         return None
 
     # ==================== Painting (Enhanced - kdenlive style) ====================
@@ -7274,9 +7295,9 @@ class TrackHeaderItem(QGraphicsObject):
         if use_two_rows:
             painter.setBrush(QBrush(QColor(get_color("track_header_bg_alt"))))
             painter.setPen(QPen(Qt.PenStyle.NoPen))
-            painter.drawRect(QRectF(0, 0, TRACK_HEADER_WIDTH, min(32, self._track_height)))
+            painter.drawRect(QRectF(0, 0, TRACK_HEADER_WIDTH, min(26, self._track_height)))
             painter.setPen(QPen(QColor(255, 255, 255, 10), 1))
-            painter.drawLine(QPointF(0, 31.5), QPointF(TRACK_HEADER_WIDTH, 31.5))
+            painter.drawLine(QPointF(0, 25.5), QPointF(TRACK_HEADER_WIDTH, 25.5))
 
         # Bottom separator line (#0A0A0C)
         painter.setPen(QPen(QColor(get_color("track_header_divider")), 1))
@@ -7347,7 +7368,8 @@ class TrackHeaderItem(QGraphicsObject):
 
     def _paint_two_rows(self, painter: QPainter) -> None:
         """Paint two-row DaVinci layout: Row 1 = badge+name+clip_count, Row 2 = buttons."""
-        # Top strip: track badge + compact control buttons
+        # Resolve: source destination, target badge, then track controls.
+        self._draw_source_patch(painter)
         self._draw_track_badge(painter)
         self._draw_buttons(painter)
 
@@ -7365,6 +7387,7 @@ class TrackHeaderItem(QGraphicsObject):
 
     def _paint_single_row(self, painter: QPainter) -> None:
         """Paint single-row collapsed layout: badge + buttons only."""
+        self._draw_source_patch(painter)
         self._draw_track_badge(painter)
         self._draw_buttons(painter)
 
@@ -7421,57 +7444,30 @@ class TrackHeaderItem(QGraphicsObject):
         painter.setFont(font)
         painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, prefix)
 
+    def _draw_source_patch(self, painter: QPainter) -> None:
+        """Paint the source badge; backend routing is exposed as a request signal."""
+        if self._track_type == "subtitle":
+            return
+        rect = self._get_source_patch_rect()
+        color = QColor(get_color("video_clip") if self._track_type == "video" else get_color("audio_clip"))
+        painter.setBrush(QBrush(color.darker(145) if self._source_patch_enabled else QColor(get_color("track_header_bg"))))
+        painter.setPen(QPen(color.lighter(150) if self._source_patch_enabled else TEXT_MUTED_COLOR, 0.7))
+        painter.drawRoundedRect(rect, 2.0, 2.0)
+        painter.setPen(QPen(TEXT_COLOR if self._source_patch_enabled else TEXT_MUTED_COLOR))
+        painter.setFont(QFont("Arial", 8, QFont.Weight.DemiBold))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "V1" if self._track_type == "video" else "A1")
+
     def _draw_track_name(self, painter: QPainter) -> None:
-        """Draw DaVinci-like track label in the lower body."""
-        use_two_rows = self._track_height >= 40
-        if use_two_rows:
-            y = 34 if self._track_height >= 52 else 30
-            name_rect = QRectF(16, y, 90, 16)
-            from src.shared.i18n.i18n import I18N as _I18N
-            if self._track_type == "video" and self._track_role == "graphics":
-                display_name = _I18N.tr(
-                    "timeline.track.name_graphics",
-                    "图形 {index}",
-                    index=self._badge_index + 1,
-                )
-            elif self._track_type == "video":
-                display_name = _I18N.tr(
-                    "timeline.track.name_video",
-                    "视频 {index}",
-                    index=self._badge_index + 1,
-                )
-            elif self._track_type == "subtitle":
-                display_name = _I18N.tr(
-                    "timeline.track.name_subtitle",
-                    "字幕 {index}",
-                    index=self._badge_index + 1,
-                )
-            else:
-                display_name = _I18N.tr(
-                    "timeline.track.name_audio",
-                    "音频 {index}",
-                    index=self._badge_index + 1,
-                )
-        else:
-            badge_rect = self._get_track_badge_rect()
-            name_rect = QRectF(badge_rect.right() + 5, badge_rect.top(), 70, badge_rect.height())
-            display_name = self._track_name
-
-        # Name background (optional hover highlight)
+        """Show the actual track name, including user renames."""
+        y = 29.0 if self._track_height >= 46 else 26.0
+        width = 90.0 if self._track_type == "audio" and self._track_height < 60 else TRACK_HEADER_WIDTH - 24.0
+        name_rect = QRectF(12.0, y, width, min(15.0, self._track_height - y))
         if self._hover_button == "name":
-            painter.setBrush(QBrush(QColor(50, 50, 55)))
-            painter.setPen(QPen(Qt.PenStyle.NoPen))
-            painter.drawRoundedRect(name_rect.adjusted(-2, -1, 2, 1), 2, 2)
-
-        # Name text
-        name_color = TEXT_COLOR if not self._is_locked else TEXT_MUTED_COLOR
-        painter.setPen(QPen(name_color))
-        font = QFont("Arial", 9)
-        painter.setFont(font)
-        # Elide text if too long
-        metrics = painter.fontMetrics()
-        elided = metrics.elidedText(display_name, Qt.TextElideMode.ElideRight, int(name_rect.width()))
-        painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
+            painter.fillRect(name_rect, QColor(255, 255, 255, 12))
+        painter.setPen(QPen(TEXT_COLOR if not self._is_locked else TEXT_MUTED_COLOR))
+        painter.setFont(QFont("Arial", 8, QFont.Weight.DemiBold))
+        text = painter.fontMetrics().elidedText(self._track_name, Qt.TextElideMode.ElideRight, int(name_rect.width()))
+        painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
     def _draw_clip_count(self, painter: QPainter) -> None:
         """Draw clip count under the track label."""
@@ -7481,9 +7477,9 @@ class TrackHeaderItem(QGraphicsObject):
         if self._track_height < 52:
             return
 
-        count_text = f"{self._clip_count} 个片段"
+        count_text = I18N.tr("timeline.track.clip_count", "{count} Clips", count=self._clip_count)
 
-        count_rect = QRectF(16, 48, 90, 14)
+        count_rect = QRectF(12, 44, 90, 14)
 
         painter.setPen(QPen(TEXT_MUTED_COLOR))
         font = QFont("Arial", 8)
@@ -7516,15 +7512,15 @@ class TrackHeaderItem(QGraphicsObject):
             )
             return
 
-        # Solo button (S - green when active)
         self._draw_button(
-            painter,
-            self._get_solo_button_rect(),
-            "solo",
-            self._is_solo,
-            SOLO_ACTIVE_COLOR,
-            "S"
+            painter, self._get_sync_lock_button_rect(), "sync_lock",
+            self._is_sync_locked, QColor(get_color("track_header_bg_alt")), "<>"
         )
+        if self._track_type == "audio":
+            self._draw_button(
+                painter, self._get_solo_button_rect(), "solo",
+                self._is_solo, SOLO_ACTIVE_COLOR, "S"
+            )
 
         if self._track_type == "video":
             # Video tracks expose visibility through an eye, not audio mute.
@@ -7557,7 +7553,23 @@ class TrackHeaderItem(QGraphicsObject):
         fallback_text: str
     ) -> None:
         """Draw a single button with crisp vector icons."""
-        # Enable antialiasing for smooth vector icons
+        # Resolve uses letter buttons for audio Solo/Mute and an auto-select glyph.
+        if button_type in {"solo", "mute", "sync_lock"}:
+            if is_active or self._hover_button == button_type:
+                painter.fillRect(rect.adjusted(1, 1, -1, -1), active_color if is_active else QColor(255, 255, 255, 18))
+            painter.setPen(QPen(TEXT_COLOR if is_active else TEXT_MUTED_COLOR))
+            if button_type == "sync_lock":
+                cx, cy = rect.center().x(), rect.center().y()
+                painter.setPen(QPen(TEXT_COLOR if is_active else TEXT_MUTED_COLOR, 1.2))
+                painter.drawLine(QPointF(cx, cy - 4), QPointF(cx, cy + 4))
+                for direction in (-1, 1):
+                    tip = QPointF(cx + direction * 6, cy)
+                    painter.drawLine(QPointF(cx + direction * 3, cy - 3), tip)
+                    painter.drawLine(tip, QPointF(cx + direction * 3, cy + 3))
+                return
+            painter.setFont(QFont("Arial", 8, QFont.Weight.DemiBold))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, fallback_text)
+            return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         # Determine button color
@@ -7827,6 +7839,12 @@ class TrackHeaderItem(QGraphicsObject):
 
     def _button_tooltip(self, button: Optional[str]) -> str:
         """Return the current action label for a hovered header control."""
+        if button == "source_patch":
+            return I18N.tr("timeline.track.source_patch", "Source patch — choose the destination track")
+        if button == "sync_lock":
+            return I18N.tr("timeline.track.auto_select", "Auto Select — include this track in ripple edits")
+        if button == "target":
+            return I18N.tr("timeline.track.target", "Target track — click to activate")
         if button == "lock":
             return "解锁轨道" if self._is_locked else "锁定轨道"
         if button == "solo":
@@ -7858,7 +7876,19 @@ class TrackHeaderItem(QGraphicsObject):
             pos = event.pos()
             button = self._get_button_at_pos(pos)
 
-            if button == "mute":
+            if button == "source_patch":
+                self.source_patch_requested.emit(self._track_id, not self._source_patch_enabled)
+                event.accept()
+                return
+            elif button == "sync_lock":
+                self.sync_lock_changed.emit(self._track_id, not self._is_sync_locked)
+                event.accept()
+                return
+            elif button == "target":
+                self._set_as_target()
+                event.accept()
+                return
+            elif button == "mute":
                 self._toggle_mute()
                 event.accept()
                 return
@@ -8371,6 +8401,12 @@ class TrackHeaderItem(QGraphicsObject):
         """Set lock state (external call)."""
         if self._is_locked != locked:
             self._is_locked = locked
+            self.update()
+
+    def set_source_patch_enabled(self, enabled: bool) -> None:
+        """Update only the source-routing presentation state."""
+        if self._source_patch_enabled != enabled:
+            self._source_patch_enabled = enabled
             self.update()
 
     def set_sync_locked(self, sync_locked: bool) -> None:
@@ -9170,9 +9206,8 @@ class RollHandleItem(QGraphicsObject):
     - Right clip's left edge moves opposite
     - Timeline duration remains constant
 
-    The handle is active at the junction between two adjacent clips only
-    while the Roll tool is selected. The native horizontal resize cursor is
-    the sole visual feedback.
+    Selection/Trim modes expose a narrow center target at a shared cut.
+    The explicit Roll tool offers a wider target for precise editing.
 
     Signals:
         roll_trim_started: Roll trim drag started (left_clip_id, right_clip_id, cut_frame)
@@ -9283,7 +9318,7 @@ class RollHandleItem(QGraphicsObject):
     def shape(self) -> QPainterPath:
         """Return shape for collision detection."""
         path = QPainterPath()
-        path.addRect(self.boundingRect())
+        path.addRect(QRectF(-2.0, 0.0, 4.0, self._track_height) if self._active_tool != EditTool.ROLL else self.boundingRect())
         return path
 
     # ==================== Painting ====================
@@ -9372,7 +9407,7 @@ class RollHandleItem(QGraphicsObject):
     def mousePressEvent(self, event: Any) -> None:
         """Handle mouse press to start roll trim drag."""
         if event.button() == Qt.MouseButton.LeftButton:
-            if self._active_tool != EditTool.ROLL or self._is_track_locked:
+            if self._active_tool not in {EditTool.SELECT, EditTool.ROLL, EditTool.TRIM} or self._is_track_locked:
                 event.ignore()
                 return
             # Store original state
@@ -9457,14 +9492,15 @@ class RollHandleItem(QGraphicsObject):
     # ==================== State Updates ====================
 
     def set_active_tool(self, tool: EditTool) -> None:
-        """Enable Roll interaction only while the Roll tool is selected."""
+        """Expose center-roll in A/T and a wide handle for the explicit Roll tool."""
+        self.prepareGeometryChange()
         self._active_tool = tool
         self.setAcceptedMouseButtons(
             Qt.MouseButton.LeftButton
-            if tool == EditTool.ROLL
+            if tool in {EditTool.SELECT, EditTool.ROLL, EditTool.TRIM}
             else Qt.MouseButton.NoButton
         )
-        if tool != EditTool.ROLL and not self._is_dragging:
+        if tool not in {EditTool.SELECT, EditTool.ROLL, EditTool.TRIM} and not self._is_dragging:
             self._is_hovered = False
             self.setToolTip("")
         if not self._is_dragging:
@@ -9916,13 +9952,10 @@ class DragPreviewItem(QGraphicsObject):
 
 class GapIndicatorItem(QGraphicsRectItem):
     """
-    Visual indicator for gaps between clips on a track.
+    Invisible geometry for gaps between clips on a track.
 
-    参考 kdenlive 时间线间隙显示：
-    - 半透明斜线图案背景
-    - 虚线边框
-    - 位于 clips 下方作为背景
-    - 不响应鼠标事件（pass through）
+    Empty spans retain the plain timeline canvas. Geometry is kept for
+    layout, culling and future gap-selection presentation.
 
     Attributes:
         _track_id: Track containing this gap
@@ -10041,58 +10074,14 @@ class GapIndicatorItem(QGraphicsRectItem):
         self,
         painter: QPainter,
         option: QStyleOptionGraphicsItem,
-        widget: Optional[Any] = None
+        widget: Optional[Any] = None,
     ) -> None:
+        """Leave gaps as the plain track canvas, as in Resolve.
+
+        Geometry remains available to layout and visibility culling. Striped
+        empty cards visually implied disabled media where there was no clip.
         """
-        Paint gap indicator with diagonal stripe pattern.
-
-        参考 kdenlive 时间线间隙显示：
-        - bg_input 颀色半透明填充
-        - 斜线图案（45度角，间距 4px）
-        - border_subtle 虚线边框
-        """
-        gap_rect = self.rect()
-
-        if gap_rect.width() <= 0 or gap_rect.height() <= 0:
-            return
-
-        # 使用设计 token（bg_input 半透明 + border_subtle）
-        bg_color = QColor(get_color("bg_input"))
-        bg_color.setAlpha(180)  # 半透明
-
-        border_color = QColor(get_color("border_subtle"))
-        border_color.setAlpha(150)
-
-        # 填充背景（半透明）
-        painter.setBrush(QBrush(bg_color))
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.drawRect(gap_rect)
-
-        # 绘制斜线图案（参考 kdenlive 的间隙显示风格）
-        stripe_color = QColor(80, 80, 85, 60)  # 半透明灰色
-        painter.setPen(QPen(stripe_color, 1))
-
-        # 斜线间距 4px，从左上到右下
-        spacing = 4
-        width = int(gap_rect.width())
-        height = int(gap_rect.height())
-
-        # 绘制斜线（45度，从左上到右下）
-        for offset in range(-height, width + height, spacing):
-            # 斜线方程: y = -x + offset  =>  从 (max(0, offset-height), min(height, offset)) 到 (min(width, offset), max(0, offset-width))
-            x1 = max(0, offset - height)
-            y1 = min(height, offset)
-            x2 = min(width, offset)
-            y2 = max(0, offset - width)
-            if x1 < width and x2 > 0:
-                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
-
-        # 绘制虚线边框
-        painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-        dashed_pen = QPen(border_color, 1)
-        dashed_pen.setStyle(Qt.PenStyle.DashLine)
-        painter.setPen(dashed_pen)
-        painter.drawRect(gap_rect)
+        return
 
     # ==================== Visibility ====================
 
