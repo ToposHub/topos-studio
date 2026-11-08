@@ -18292,26 +18292,39 @@ class TimelineView(QGraphicsView):
             return False
         track_id, clip = target
 
-        # 源侧所需帧数：timeline_duration × |speed| × (源fps/时间线fps)
-        (s_num, s_den, t_num, t_den) = self._resolve_source_fps_metadata(asset_id)
-        speed = abs(clip.effective_speed()) or 1.0
-        factor = Fraction(speed).limit_denominator(100000)
-        if s_num and t_num:
-            source_fps = Fraction(s_num, s_den or 1)
-            timeline_fps = Fraction(t_num, t_den or 1)
-            if source_fps > 0 and timeline_fps > 0:
-                factor *= source_fps / timeline_fps
-        needed_source_frames = max(1, int(round(clip.timeline_duration * factor)))
-
-        available = self._get_asset_source_duration_frames(asset) - int(in_frame)
-        if available < needed_source_frames:
-            self.status_message_requested.emit(I18N.tr(
-                "timeline.replace.source_too_short",
-                "Replace: source range is shorter than the target clip"))
-            logger.warning(
-                "Replace blocked: source %s has %d frames from %d, needs %d",
-                asset_id, max(available, 0), in_frame, needed_source_frames)
+        # B05：目标轨类型 × 源流兼容性预检——缺流整次拒绝、零写入
+        if not self._replace_stream_compatible(asset, track_id):
             return False
+
+        # 契约 D1-5：linked 伙伴（互链有效且新源为有声视频）成对替换
+        partner = self._find_linked_partner(clip)
+        pair_replace = partner is not None and (
+            asset.media_type == "video"
+            and getattr(asset, "audio_channels", None))
+        members: list[tuple[str, Any]] = [(track_id, clip)]
+        if pair_replace:
+            members.append(partner)
+
+        # B03：逐成员按完整速度映射求源窗并独立预检
+        (s_num, s_den, t_num, t_den) = self._resolve_source_fps_metadata(asset_id)
+        available = self._get_asset_source_duration_frames(asset) - int(in_frame)
+        needed_by_member: dict[str, int] = {}
+        for member_track_id, member_clip in members:
+            if not self._replace_stream_compatible(asset, member_track_id):
+                return False
+            needed = self._replace_needed_source_frames(
+                member_clip, s_num, s_den, t_num, t_den)
+            if available < needed:
+                self.status_message_requested.emit(I18N.tr(
+                    "timeline.replace.source_too_short",
+                    "Replace: source range is shorter than the target clip"))
+                logger.warning(
+                    "Replace blocked: source %s has %d frames from %d, "
+                    "member %s needs %d",
+                    asset_id, max(available, 0), in_frame,
+                    member_clip.clip_id, needed)
+                return False
+            needed_by_member[member_clip.clip_id] = needed
 
         # VFR 生产绑定的 PTS 表随新素材刷新
         pts_raw = (getattr(asset, "metadata", None) or {}).get("pts_index")
@@ -18323,22 +18336,18 @@ class TimelineView(QGraphicsView):
             track_id=track_id,
             new_asset_id=asset_id,
             new_source_start=int(in_frame),
-            new_source_duration=needed_source_frames,
+            new_source_duration=needed_by_member[clip.clip_id],
             new_fps_meta=fps_meta,
         )]
 
-        # 契约 D1-5：linked 伙伴存在且新源为有声视频 → 成对替换
-        partner = self._find_linked_partner(clip)
-        if partner is not None and (
-                asset.media_type == "video"
-                and getattr(asset, "audio_channels", None)):
+        if pair_replace:
             p_track_id, p_clip = partner
             commands.append(ReplaceClipWithSourceCommand.create(
                 clip_id=p_clip.clip_id,
                 track_id=p_track_id,
                 new_asset_id=asset_id,
                 new_source_start=int(in_frame),
-                new_source_duration=needed_source_frames,
+                new_source_duration=needed_by_member[p_clip.clip_id],
                 new_fps_meta=fps_meta,
             ))
             command = MacroCommand.create("Replace edit (A/V)", commands)
@@ -18355,9 +18364,78 @@ class TimelineView(QGraphicsView):
             self.status_message_requested.emit(str(exc))
             return False
         logger.debug(
-            "Replace edit: clip=%s asset=%s source_start=%d source_duration=%d",
-            clip.clip_id, asset_id, in_frame, needed_source_frames)
+            "Replace edit: clip=%s asset=%s source_start=%d source_duration=%s",
+            clip.clip_id, asset_id, in_frame,
+            needed_by_member.get(clip.clip_id))
         return True
+
+    def _replace_stream_compatible(self, asset: MediaAsset, track_id: str) -> bool:
+        """B05：目标轨类型 × 源流兼容性预检。
+
+        视频轨需要可视流（video/image/image_sequence），音频轨需要
+        声流（audio_info.channels）。不支持的组合整次拒绝零写入，
+        不再把纯音频素材写上视频轨（或无声源写上音频轨）后交给
+        解码端"发现"缺流。
+        """
+        if self._timeline is None:
+            return False
+        track = self._timeline.get_track_by_id(track_id)
+        if track is None:
+            return False
+        if track.track_type == "video":
+            if asset.media_type not in ("video", "image", "image_sequence"):
+                self.status_message_requested.emit(I18N.tr(
+                    "timeline.replace.no_video_stream",
+                    "Replace: source has no video stream for a video track"))
+                logger.warning(
+                    "Replace blocked: asset %s (%s) has no video stream "
+                    "for track %s", asset.asset_id, asset.media_type, track_id)
+                return False
+        elif track.track_type == "audio":
+            if not getattr(asset, "audio_channels", None):
+                self.status_message_requested.emit(I18N.tr(
+                    "timeline.replace.no_audio_stream",
+                    "Replace: source has no audio stream for an audio track"))
+                logger.warning(
+                    "Replace blocked: asset %s (%s) has no audio stream "
+                    "for track %s", asset.asset_id, asset.media_type, track_id)
+                return False
+        return True
+
+    def _replace_needed_source_frames(
+        self, clip: Any,
+        s_num: Optional[int], s_den: Optional[int],
+        t_num: Optional[int], t_den: Optional[int],
+    ) -> int:
+        """B03/B04：Replace 逐成员源窗帧数——完整速度映射。
+
+        - 冻结片（B04）整段只播一帧：源窗 = 1，冻结帧重映射到新源
+          对齐帧（命令层完成），不再用 duration×speed 夸大需求；
+        - 速度点片按曲线窗口积分（与采样路径同一映射，含窗口/
+          曲线坐标时基），取代旧"仅 base 速度"标量换算；
+        - 恒速片保持既有有理数公式；混合帧率统一折入源/时间线
+          fps 比，不二次换算。
+        """
+        if clip.freeze_source_frame is not None:
+            return 1
+        ratio = Fraction(1, 1)
+        if s_num and t_num:
+            source_fps = Fraction(s_num, s_den or 1)
+            timeline_fps = Fraction(t_num, t_den or 1)
+            if source_fps > 0 and timeline_fps > 0:
+                ratio = source_fps / timeline_fps
+        speed = clip.speed
+        if (isinstance(speed, SpeedParams)
+                and speed.is_variable_speed):
+            # 等效速度域时间（timeline_to_source_frame 同一换算）后的
+            # 曲线终点位置 = 从窗口起点消费的源帧总数
+            t_curve = float(clip.timeline_duration * ratio)
+            position = speed.source_position_at_time(
+                t_curve, clip.source_duration)
+            return max(1, int(math.ceil(round(position, 9))))
+        factor = Fraction(
+            abs(clip.effective_speed()) or 1.0).limit_denominator(100000)
+        return max(1, int(round(clip.timeline_duration * factor * ratio)))
 
     def _resolve_replace_target_clip(self) -> Optional[tuple[str, Any]]:
         """契约 D1-1：唯一选中 clip → 播放头下有效视频目的轨 clip → None。"""
@@ -18397,15 +18475,21 @@ class TimelineView(QGraphicsView):
         return None
 
     def _find_linked_partner(self, clip: Any) -> Optional[tuple[str, Any]]:
-        """返回 (track_id, partner_clip)；链接不存在或伙伴缺失返回 None。"""
+        """返回 (track_id, partner_clip)；链接不存在或无效返回 None。
+
+        B03 补充：Replace 消费互链伙伴前必须通过
+        ``get_reciprocal_linked_clip`` 校验——双向链接 + 视频/音频异轨，
+        悬空/单向引用不得把无关片段拉进替换事务。
+        """
         if self._timeline is None or not clip.linked_clip_id:
             return None
-        for track in (list(self._timeline.video_tracks)
-                      + list(self._timeline.audio_tracks)):
-            partner = track.get_clip_by_id(clip.linked_clip_id)
-            if partner is not None and partner.clip_id != clip.clip_id:
-                return (track.track_id, partner)
-        return None
+        partner = self._timeline.get_reciprocal_linked_clip(clip)
+        if partner is None:
+            return None
+        partner_track = self._timeline.get_track_by_id(partner.track_id)
+        if partner_track is None:
+            return None
+        return (partner_track.track_id, partner)
 
     # ==================== W05: Clip Flags (wiring plan D4) ====================
 
