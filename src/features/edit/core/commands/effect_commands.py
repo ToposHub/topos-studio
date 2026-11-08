@@ -663,6 +663,183 @@ class AddKeyframeCommand:
 
 
 @dataclass(frozen=True)
+class MoveKeyframeCommand:
+    """B12：完整关键帧时间移动——整 key 复制只改 frame。
+
+    既有 Remove+Add 桥只携带 value/interpolation，丢 tangent_mode、
+    handle_left/right、legacy bezier_in/out 与未知扩展字段，移动时间
+    等于改写曲线形状且 undo 无法完整还原。本命令按**整 Keyframe** 移动：
+    复制源 key 仅替换 frame；目的帧已有关键帧时显式拒绝（冲突规则
+    可 review，不静默覆盖）；undo 以 apply 期完整快照精确还原。
+
+    Attributes:
+        command_id: Unique identifier
+        label: Human-readable label
+        track_id: Track containing the clip
+        clip_id: Clip ID
+        param_name: Parameter path
+        from_frame: 源帧号
+        to_frame: 目的帧号（不得与现有其他关键帧重合）
+        effect_id: Optional effect ID (for effect parameters)
+        _moved_key: apply 期捕获的完整源 key 快照（to_dict，undo 用）
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    clip_id: str
+    param_name: str
+    from_frame: int
+    to_frame: int
+    effect_id: str | None = None
+    _moved_key: dict[str, Any] | None = None
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        assert_track_editable(timeline, self.track_id, "Move keyframe")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        if self.from_frame == self.to_frame:
+            return timeline
+
+        anim_param = self._resolve_anim_param(clip)
+        if anim_param is None or not anim_param.keyframes:
+            raise ValueError(
+                f"No keyframes for param {self.param_name!r} at "
+                f"frame {self.from_frame}")
+        source = anim_param.keyframes.get_keyframe_at(self.from_frame)
+        if source is None:
+            raise ValueError(
+                f"No keyframe at frame {self.from_frame}")
+        if anim_param.keyframes.get_keyframe_at(self.to_frame) is not None:
+            raise ValueError(
+                f"Keyframe already exists at frame {self.to_frame}")
+
+        object.__setattr__(self, "_moved_key", source.to_dict())
+        moved = replace(source, frame=self.to_frame)
+        new_clip = self._write_moved(clip, anim_param, moved)
+        new_track = track.with_clip_updated(new_clip)
+        return timeline.with_track_updated(new_track)
+
+    def _resolve_anim_param(self, clip: ClipInstance):
+        if self.effect_id is not None:
+            effect = clip.get_effect_by_id(self.effect_id)
+            if effect is None:
+                raise ValueError(f"Effect not found: {self.effect_id}")
+            return effect.animated_params.get(self.param_name)
+        return clip.animated_params.get(self.param_name)
+
+    def _write_moved(
+        self, clip: ClipInstance, anim_param, moved_key,
+    ) -> ClipInstance:
+        from dataclasses import replace as _dc_replace
+
+        old_track = anim_param.keyframes
+        new_keys = [k for k in old_track.keyframes
+                    if k.frame != self.from_frame]
+        new_keys.append(moved_key)
+        new_keys.sort()
+        new_anim = _dc_replace(
+            anim_param,
+            keyframes=_dc_replace(old_track, keyframes=new_keys),
+        )
+        if self.effect_id is not None:
+            effect = clip.get_effect_by_id(self.effect_id)
+            new_effect = _dc_replace(
+                effect,
+                animated_params={
+                    **effect.animated_params, self.param_name: new_anim},
+            )
+            return clip.with_effect_updated(self.effect_id, new_effect)
+        return _dc_replace(
+            clip, animated_params={
+                **clip.animated_params, self.param_name: new_anim})
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._moved_key is None:
+            raise ValueError("Cannot undo: command was never applied")
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+
+        from src.shared.keyframe import Keyframe
+
+        anim_param = self._resolve_anim_param(clip)
+        if anim_param is None or not anim_param.keyframes:
+            raise ValueError(
+                f"No keyframes for param {self.param_name!r} on undo")
+        restored = Keyframe.from_dict(self._moved_key)
+        if anim_param.keyframes.get_keyframe_at(restored.frame) is not None:
+            raise ValueError(
+                f"Keyframe already exists at frame {restored.frame}")
+        # 以快照整 key 还原（含 tangent/handles/extras），先移除目的帧
+        undo_cmd = MoveKeyframeCommand(
+            command_id=self.command_id, label=self.label,
+            track_id=self.track_id, clip_id=self.clip_id,
+            param_name=self.param_name,
+            from_frame=self.to_frame, to_frame=restored.frame,
+            effect_id=self.effect_id, _moved_key=self._moved_key,
+        )
+        new_clip = undo_cmd._write_moved(clip, anim_param, restored)
+        new_track = track.with_clip_updated(new_clip)
+        return timeline.with_track_updated(new_track)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "MoveKeyframeCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "clip_id": self.clip_id,
+            "param_name": self.param_name,
+            "from_frame": self.from_frame,
+            "to_frame": self.to_frame,
+            "effect_id": self.effect_id,
+            "_moved_key": self._moved_key,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "MoveKeyframeCommand":
+        return MoveKeyframeCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Move Keyframe"),
+            track_id=data.get("track_id", ""),
+            clip_id=data.get("clip_id", ""),
+            param_name=data.get("param_name", ""),
+            from_frame=data.get("from_frame", 0),
+            to_frame=data.get("to_frame", 0),
+            effect_id=data.get("effect_id"),
+            _moved_key=data.get("_moved_key"),
+        )
+
+    @staticmethod
+    def create(
+        track_id: str,
+        clip_id: str,
+        param_name: str,
+        from_frame: int,
+        to_frame: int,
+        effect_id: str | None = None,
+    ) -> "MoveKeyframeCommand":
+        return MoveKeyframeCommand(
+            command_id=str(uuid.uuid4()),
+            label=f"Move keyframe F{from_frame}→F{to_frame}",
+            track_id=track_id,
+            clip_id=clip_id,
+            param_name=param_name,
+            from_frame=int(from_frame),
+            to_frame=int(to_frame),
+            effect_id=effect_id,
+        )
+
+
+@dataclass(frozen=True)
 class RemoveKeyframeCommand:
     """
     Command to remove a keyframe from a clip parameter (P5.3).

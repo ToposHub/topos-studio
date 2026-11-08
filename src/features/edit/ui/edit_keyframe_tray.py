@@ -410,10 +410,14 @@ class EditKeyframeTray(QFrame):
         self.refresh_from_model()
 
     def _commit_drag(self) -> None:
-        """释放：时间移动 = Remove(旧帧)+Add(新帧) 宏，单步 undo。"""
-        from src.features.edit.core.commands import (
-            AddKeyframeCommand, MacroCommand, RemoveKeyframeCommand,
-        )
+        """释放：时间移动 = MoveKeyframeCommand（整 key 复制只改 frame）。
+
+        B12：旧 Remove+Add 桥只带 value/interpolation，丢 tangent_mode、
+        handle_left/right、legacy bezier 与未知扩展字段——移动时间会改写
+        曲线形状且 undo 无法完整还原。改用完整 key 移动命令：仅 frame
+        变化，其余逐字段保留；目的帧冲突由命令显式拒绝。
+        """
+        from src.features.edit.core.commands import MoveKeyframeCommand
 
         if (self._drag_param is None or self._drag_from_frame is None
                 or self._drag_to_frame is None
@@ -434,17 +438,10 @@ class EditKeyframeTray(QFrame):
         if source_key is None:
             self._cancel_drag()
             return
-        # Retain the supported interpolation when reusing the existing
-        # Remove+Add bridge. Full tangent metadata needs a move-key command.
-        interpolation = source_key.interpolation.value
-        remove = RemoveKeyframeCommand.create(
-            self._track_id, self._clip_id, param_name, from_frame)
-        add = AddKeyframeCommand.create(
-            self._track_id, self._clip_id, param_name, to_frame,
-            value=float(source_key.value), interpolation=interpolation)
-        macro = MacroCommand.create("Move keyframe", (remove, add))
+        cmd = MoveKeyframeCommand.create(
+            self._track_id, self._clip_id, param_name, from_frame, to_frame)
         try:
-            self._view.execute_command(macro)
+            self._view.execute_command(cmd)
         except ValueError:
             self._cancel_drag()
             self.refresh_from_model()
