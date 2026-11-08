@@ -7360,6 +7360,20 @@ class FileOpsMixin:
         elif self._composite_available and self.composite_page is not None:
             self.composite_page.cleanup()
 
+        # VP-B11: the Source widget must enter its shutdown sequence BEFORE
+        # the decode worker / GPU renderer stop — otherwise its playback
+        # timer, watchdog, displayed present slot (never acked -> pool
+        # exhaustion) and the scrub-audio QThread (parented to the widget,
+        # QThread::~QThread abort risk) all outlive this teardown.
+        source_widget = getattr(self, 'source_viewer_widget', None)
+        if source_widget is not None:
+            try:
+                source_widget.prepare_for_shutdown()
+            except RuntimeError:
+                pass  # C++ side already destroyed
+            except AttributeError:
+                pass  # widget without the B11 entry point
+
         # Stop Source decode worker thread, then the GPU renderer thread
         if hasattr(self, '_source_decode_worker') and self._source_decode_worker is not None:
             try:
