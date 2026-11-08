@@ -1957,7 +1957,10 @@ class ReplaceClipWithSourceCommand:
       源帧数（含混合帧率 fps 比）；
     - fps 时基元数据（``_source_fps_num/_den``、``_timeline_fps_num/_den``、
       ``_source_pts_index``、``_source_frame_phase_*``）→ 新素材时基，避免
-      换素材后沿用旧素材帧率导致映射错位。
+      换素材后沿用旧素材帧率导致映射错位；
+    - ``freeze_source_frame``（B04）：冻结片整段只播一帧，冻结帧重映射
+      到新源对齐帧 ``new_source_start``——旧素材的绝对帧引用不跨素材
+      保留；undo 快照记录原冻结帧。
 
     源不足预检（可用源帧 < new_source_duration）由调用方完成；命令层只
     保证写入值非负且 source_duration > 0。undo 完整还原上述全部字段。
@@ -2011,6 +2014,7 @@ class ReplaceClipWithSourceCommand:
              clip._timeline_fps_num, clip._timeline_fps_den,
              clip._source_pts_index),
             (clip._source_frame_phase_num, clip._source_frame_phase_den),
+            clip.freeze_source_frame,
         ))
 
         s_num, s_den, t_num, t_den, pts = self._resolved_fps_meta(clip)
@@ -2028,6 +2032,11 @@ class ReplaceClipWithSourceCommand:
             _source_frame_phase_num=phase_num,
             _source_frame_phase_den=phase_den,
         )
+        # B04：冻结语义重映射——冻结片整段只播一帧，冻结帧 = 新源
+        # 对齐帧。旧素材的绝对帧引用（freeze_source_frame）对新窗口
+        # 无意义，不得沿用；undo 快照记录原值完整还原。
+        if clip.freeze_source_frame is not None:
+            new_clip = new_clip.with_freeze_frame(self.new_source_start)
         new_clips = tuple(
             new_clip if c.clip_id == clip.clip_id else c for c in track.clips)
         new_track = track._rebuild(clips=new_clips)
@@ -2055,7 +2064,8 @@ class ReplaceClipWithSourceCommand:
         clip = track.get_clip_by_id(self.clip_id)
         if clip is None:
             raise ValueError(f"Clip not found: {self.clip_id}")
-        (asset_id, source_start, source_duration, fps_meta, phase) = self._snapshot
+        (asset_id, source_start, source_duration, fps_meta, phase,
+         *freeze_rest) = self._snapshot
         s_num, s_den, t_num, t_den, pts = fps_meta
         phase_num, phase_den = phase
         restored = replace(
@@ -2071,6 +2081,9 @@ class ReplaceClipWithSourceCommand:
             _source_frame_phase_num=phase_num,
             _source_frame_phase_den=phase_den,
         )
+        # B04：undo 还原冻结帧；旧序列化 5 元快照没有该位，保持现状
+        if freeze_rest:
+            restored = restored.with_freeze_frame(freeze_rest[0])
         new_clips = tuple(
             restored if c.clip_id == clip.clip_id else c for c in track.clips)
         new_track = track._rebuild(clips=new_clips)

@@ -217,6 +217,194 @@ def test_replace_mixed_fps_needs_scaled_source(qtbot: Any) -> None:
     assert (clip._source_fps_num, clip._source_fps_den) == (48, 1)
 
 
+# ── B03/B04/B05：Replace 源窗/成员/流预检回归 ─────────────────────────
+
+
+def test_b03_speed_point_clip_keeps_curve_window(qtbot: Any) -> None:
+    """B03 反例一：速度点片按曲线积分求源窗，采样不再尾部夹帧。
+
+    48 帧 clip，base 1x + 点(16→2x)，原 source_duration=80；替换后
+    源窗必须是 80（旧代码写 48，尾段 [0,16,32,47,47,47]）。
+    """
+    from src.features.edit.core.clip_params import SpeedParams, SpeedPoint
+
+    timeline = _sequence_with_clip()
+    curved = replace(
+        timeline.get_clip_by_id("vc1"),
+        speed=SpeedParams(speed=1.0, speed_points=(
+            SpeedPoint(source_offset=16, speed=2.0),)),
+        source_start=0, source_duration=80)
+    timeline = timeline.with_track_updated(
+        replace(timeline.video_tracks[0], clips=(curved,)))
+    view = _view(qtbot, timeline, assets={
+        "old": _asset("old", frames=200),
+        "new": _asset("new", frames=400),
+    })
+    view.set_selection(_selection_with("vc1"))
+
+    assert view.replace_clip_with_source("new", 0, 47) is True
+
+    clip = view.get_timeline().get_clip_by_id("vc1")
+    assert clip.source_start == 0
+    assert clip.source_duration == 80  # 曲线积分，不是 48×1
+    assert clip.speed.speed_points == curved.speed.speed_points
+    # 逐帧采样连续：与替换前同样的映射（audit 基线 [0,16,32,48,64,78]）
+    sampled = [
+        clip.timeline_to_source_frame(clip.timeline_start + t)
+        for t in (0, 16, 24, 32, 40, 47)]
+    assert sampled == [0, 16, 32, 48, 64, 78]
+
+
+def test_b03_linked_partner_gets_own_window(qtbot: Any) -> None:
+    """B03 反例二：伙伴按自身速度独立求源窗（2x 伙伴需要 192）。
+
+    24fps 时间线，主视频 1x、音频伙伴 2x，各 48 帧；换 48fps 有声源。
+    """
+    timeline = _sequence_with_clip()
+    from src.features.edit.core.clip_params import SpeedParams
+
+    audio = replace(
+        timeline.get_clip_by_id("ac1"),
+        speed=SpeedParams(speed=2.0), source_duration=96)
+    timeline = timeline.with_track_updated(
+        replace(timeline.audio_tracks[0], clips=(audio,)))
+    view = _view(qtbot, timeline, assets={
+        "old": _asset("old", frames=200),
+        "new_av": _asset("new_av", frames=400, fps=48.0, audio=True),
+    })
+    view.set_selection(_selection_with("vc1"))
+
+    assert view.replace_clip_with_source("new_av", 0, 47) is True
+
+    new_timeline = view.get_timeline()
+    video = new_timeline.get_clip_by_id("vc1")
+    partner = new_timeline.get_clip_by_id("ac1")
+    assert video.source_duration == 96   # 48 × 1x × (48/24)
+    assert partner.source_duration == 192  # 48 × 2x × (48/24)
+    assert len(view._command_stack._undo_stack) == 1
+    view.undo()
+    restored = view.get_timeline()
+    assert restored.get_clip_by_id("vc1").asset_id == "old"
+    assert restored.get_clip_by_id("ac1").asset_id == "old"
+
+
+def test_b03_partner_window_insufficient_rejects_whole_pair(qtbot: Any) -> None:
+    """B03：伙伴所需源窗不足时整次拒绝，零写入。"""
+    timeline = _sequence_with_clip()
+    from src.features.edit.core.clip_params import SpeedParams
+
+    audio = replace(
+        timeline.get_clip_by_id("ac1"),
+        speed=SpeedParams(speed=2.0), source_duration=96)
+    timeline = timeline.with_track_updated(
+        replace(timeline.audio_tracks[0], clips=(audio,)))
+    # 48fps 只有 300 帧：视频需要 96、音频需要 192——从 200 起不足
+    view = _view(qtbot, timeline, assets={
+        "old": _asset("old", frames=200),
+        "new_av": _asset("new_av", frames=300, fps=48.0, audio=True),
+    })
+    view.set_selection(_selection_with("vc1"))
+    before = view.get_timeline()
+
+    assert view.replace_clip_with_source("new_av", 200, 247) is False
+
+    assert view.get_timeline() is before
+    assert not view._command_stack._undo_stack
+
+
+def test_b03_dangling_link_does_not_pull_partner(qtbot: Any) -> None:
+    """B03 补充：单向/悬空链接不把无关片段拉进替换事务。"""
+    timeline = _sequence_with_clip()
+    # 主片指向一个不存在的伙伴 ID
+    dangling = replace(timeline.get_clip_by_id("vc1"), linked_clip_id="ghost")
+    timeline = timeline.with_track_updated(
+        replace(timeline.video_tracks[0], clips=(dangling,)))
+    view = _view(qtbot, timeline)
+    view.set_selection(_selection_with("vc1"))
+
+    assert view.replace_clip_with_source("new_av", 0, 47) is True
+
+    assert view.get_timeline().get_clip_by_id("vc1").asset_id == "new_av"
+    assert view.get_timeline().get_clip_by_id("ac1").asset_id == "old"
+
+
+def test_b04_freeze_remaps_to_new_alignment_frame(qtbot: Any) -> None:
+    """B04 反例：冻结片换 In=200 后冻结帧=200，不再映射旧素材帧 5。"""
+    timeline = _sequence_with_clip()
+    frozen = replace(
+        timeline.get_clip_by_id("vc1"),
+        freeze_source_frame=5, source_start=0, source_duration=48)
+    timeline = timeline.with_track_updated(
+        replace(timeline.video_tracks[0], clips=(frozen,)))
+    view = _view(qtbot, timeline, assets={
+        "old": _asset("old", frames=200),
+        "new": _asset("new", frames=400),
+    })
+    view.set_selection(_selection_with("vc1"))
+
+    assert view.replace_clip_with_source("new", 200, 247) is True
+
+    clip = view.get_timeline().get_clip_by_id("vc1")
+    assert clip.source_start == 200
+    assert clip.source_duration == 1  # 冻结片只播一帧
+    assert clip.freeze_source_frame == 200
+    assert clip.timeline_to_source_frame(clip.timeline_start) == 200
+    assert clip.timeline_to_source_frame(
+        clip.timeline_start + clip.timeline_duration - 1) == 200
+    # undo 完整还原冻结帧与源窗
+    view.undo()
+    back = view.get_timeline().get_clip_by_id("vc1")
+    assert back.freeze_source_frame == 5
+    assert (back.source_start, back.source_duration) == (0, 48)
+    assert back.asset_id == "old"
+
+
+def test_b05_audio_source_rejected_for_video_track(qtbot: Any) -> None:
+    """B05 反例：纯音频源 Replace 视频轨 clip 必须拒绝、零写入。"""
+    from src.features.edit.core.project import MediaAsset
+
+    audio_asset = MediaAsset(
+        asset_id="pure_audio", path="/tmp/pa.mp3", media_type="audio",
+        display_name="pure_audio",
+        metadata={"fps": 48.0, "total_frames": 400,
+                  "audio_info": {"channels": 2}},
+    )
+    view = _view(qtbot, assets={
+        "old": _asset("old", frames=200), "pure_audio": audio_asset})
+    view.set_selection(_selection_with("vc1"))
+    before = view.get_timeline()
+
+    assert view.replace_clip_with_source("pure_audio", 0, 47) is False
+
+    assert view.get_timeline() is before
+    assert not view._command_stack._undo_stack
+
+
+def test_b05_silent_source_rejected_for_audio_track(qtbot: Any) -> None:
+    """B05：无声视频源不能替换音频轨目标（选中音频成员）。"""
+    view = _view(qtbot)  # new：video 无 audio_info
+    view.set_selection(_selection_with("ac1"))
+    before = view.get_timeline()
+
+    assert view.replace_clip_with_source("new", 0, 47) is False
+
+    assert view.get_timeline() is before
+
+
+def test_b05_subtitle_source_rejected(qtbot: Any) -> None:
+    from src.features.edit.core.project import MediaAsset
+
+    subtitle = MediaAsset(
+        asset_id="subs", path="/tmp/s.srt", media_type="subtitle",
+        display_name="subs", metadata={})
+    view = _view(qtbot, assets={
+        "old": _asset("old", frames=200), "subs": subtitle})
+    view.set_selection(_selection_with("vc1"))
+
+    assert view.replace_clip_with_source("subs", 0, 0) is False
+    assert view.get_timeline().get_clip_by_id("vc1").asset_id == "old"
+
+
 def _selection_with(*clip_ids: str) -> Any:
     from src.features.edit.core.selection import TimelineSelection
 
