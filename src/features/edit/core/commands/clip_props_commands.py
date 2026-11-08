@@ -2147,7 +2147,9 @@ class SetClipFlagCommand:
         label: Human-readable label
         targets: ((track_id, clip_id), ...) 元组
         flag_color: "#RRGGBB" 白名单色或 None（清除）
-        _previous: apply 期捕获的 ((clip_id, 原色), ...) 快照
+        _previous: apply 期捕获的 ((track_id, clip_id, 原色), ...) 快照；
+            只记录实际变更的目标（no-op 目标不进快照、undo 不触碰），
+            身份用 track+clip 双键（B01）
     """
 
     command_id: str
@@ -2156,13 +2158,24 @@ class SetClipFlagCommand:
     flag_color: str | None
     _previous: tuple | None = None
 
-    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
-        if self.flag_color is not None and not (
-                isinstance(self.flag_color, str)
-                and self.flag_color.startswith("#")
-                and len(self.flag_color) == 7):
+    @staticmethod
+    def _validate_flag_color(flag_color: str | None) -> None:
+        """B08：新写统一 validator——白名单色或 None。
+
+        与 UI（``TimelineView.set_clip_flags``）、Flags 菜单共用
+        ``CLIP_FLAG_COLORS`` 单一真值；历史工程里已存在的未知值在模型
+        读取层保留，不经本命令重写。白名单外新写（含格式合法的
+        "#zzzzzz"）在命令边界拒绝，防止 AI/脚本路径落盘非法内容。
+        """
+        from src.features.edit.core.timeline_v2 import CLIP_FLAG_COLORS
+
+        if flag_color is not None and flag_color not in CLIP_FLAG_COLORS:
             raise ValueError(
-                f"Invalid clip flag color: {self.flag_color!r}")
+                f"Invalid clip flag color: {flag_color!r}; expected one of "
+                f"{CLIP_FLAG_COLORS} or None")
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        self._validate_flag_color(self.flag_color)
         # 第一遍：目标存在性 + 轨锁校验 + 是否真有变化（no-op 判定）
         pending: list[tuple[str, str, ClipInstance]] = []
         for track_id, clip_id in self.targets:
@@ -2178,11 +2191,14 @@ class SetClipFlagCommand:
         if not pending:
             # 全部目标已是目标色：no-op 返回同一实例（CommandStack 不入栈）
             return timeline
-        previous: list[tuple[str, str | None]] = []
+        previous: list[tuple[str, str, str | None]] = []
         result = timeline
         for track_id, clip_id, clip in pending:
             track = result.get_track_by_id(track_id)
-            previous.append((clip_id, clip.flag_color))
+            # B01：快照记 track+clip 双键与原色；只含实际变更项，
+            # 混合 no-op 批次 undo 时不会把"本来就已是目标色"的
+            # clip 清成 None。
+            previous.append((track_id, clip_id, clip.flag_color))
             new_clip = clip.with_flag_color(self.flag_color)
             new_clips = tuple(
                 new_clip if c.clip_id == clip_id else c for c in track.clips)
@@ -2194,16 +2210,29 @@ class SetClipFlagCommand:
     def undo(self, timeline: TimelineSequence) -> TimelineSequence:
         if self._previous is None:
             raise ValueError("Cannot undo: command was never applied")
-        restore = dict(self._previous)
         result = timeline
-        for track_id, clip_id in self.targets:
-            track = result.get_track_by_id(track_id)
+        for entry in self._previous:
+            # 新格式 (track_id, clip_id, 原色)；旧序列化只有
+            # (clip_id, 原色) 二元组——按 clip_id 全轨扫描兜底。
+            if len(entry) == 3:
+                track_id, clip_id, flag_color = entry
+            else:
+                clip_id, flag_color = entry
+                track_id = None
+            track = (result.get_track_by_id(track_id)
+                     if track_id is not None else None)
             if track is None:
-                raise ValueError(f"Track not found: {track_id}")
+                for candidate in (list(result.video_tracks)
+                                  + list(result.audio_tracks)):
+                    if candidate.get_clip_by_id(clip_id) is not None:
+                        track = candidate
+                        break
+            if track is None:
+                raise ValueError(f"Track not found for clip: {clip_id}")
             clip = track.get_clip_by_id(clip_id)
             if clip is None:
                 raise ValueError(f"Clip not found: {clip_id}")
-            new_clip = clip.with_flag_color(restore.get(clip_id))
+            new_clip = clip.with_flag_color(flag_color)
             new_clips = tuple(
                 new_clip if c.clip_id == clip_id else c for c in track.clips)
             result = result.with_track_updated(
@@ -2221,8 +2250,9 @@ class SetClipFlagCommand:
             ],
             "flag_color": self.flag_color,
             "_previous": [
-                {"clip_id": clip_id, "flag_color": flag_color}
-                for clip_id, flag_color in (self._previous or ())
+                {"track_id": track_id, "clip_id": clip_id,
+                 "flag_color": flag_color}
+                for track_id, clip_id, flag_color in (self._previous or ())
             ] or None,
         }
 
@@ -2233,22 +2263,31 @@ class SetClipFlagCommand:
             for item in data.get("targets", [])
         )
         previous = tuple(
-            (str(item["clip_id"]), item.get("flag_color"))
+            (str(item["track_id"]), str(item["clip_id"]),
+             item.get("flag_color"))
+            if item.get("track_id") is not None
+            else (str(item["clip_id"]), item.get("flag_color"))
             for item in (data.get("_previous") or [])
         )
-        return SetClipFlagCommand(
+        revived = SetClipFlagCommand(
             command_id=data.get("command_id", str(uuid.uuid4())),
             label=data.get("label", "Set Clip Flag"),
             targets=targets,
             flag_color=data.get("flag_color"),
             _previous=previous or None,
         )
+        # B08：序列化恢复同样过新写校验——命令边界之外没有第二条
+        # 合法入口；非法载荷明确失败优于静默执行。
+        revived._validate_flag_color(revived.flag_color)
+        return revived
 
     @staticmethod
     def create(
         targets: tuple | list, flag_color: str | None,
         label: str | None = None,
     ) -> "SetClipFlagCommand":
+        # B08：构造即校验——服务/AI 直接 create 的路径与 UI 同规则。
+        SetClipFlagCommand._validate_flag_color(flag_color)
         targets = tuple((track_id, clip_id) for track_id, clip_id in targets)
         if flag_color is None:
             text = "Clear clip flags"
