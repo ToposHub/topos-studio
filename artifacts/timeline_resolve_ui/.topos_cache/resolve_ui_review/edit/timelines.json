@@ -1,0 +1,12 @@
+{
+  "resolve-ui-review": {
+    "timeline_id": "resolve-ui-review",
+    "name": "Timeline UI Review",
+    "fps": 25.0,
+    "width": 1920,
+    "height": 1080,
+    "sample_rate": 48000,
+    "format_settings": {},
+    "created_at": 1794107565.570457
+  }
+}

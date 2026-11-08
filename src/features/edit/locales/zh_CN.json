@@ -453,7 +453,11 @@
       "name_subtitle": "字幕 {index}",
       "name_graphics": "图形 {index}",
       "height_small": "小",
-      "height_large": "大"
+      "height_large": "大",
+      "clip_count": "{count} 个片段",
+      "source_patch": "源轨补丁 — 选择目标轨道",
+      "auto_select": "自动选择 — 波纹编辑时包含此轨道",
+      "target": "目标轨道 — 点击激活"
     },
     "menu": {
       "rename_track": "重命名轨道…",
@@ -475,6 +479,51 @@
     "transition": {
       "locked_tooltip": "转场（轨道已锁定）",
       "trim_tooltip": "修剪转场时长（拖动调整）"
+    },
+    "view_options": "时间线显示选项",
+    "keyframe_tray": "显示关键帧托盘",
+    "voiceover": "配音",
+    "advanced_tools": "更多编辑工具",
+    "position_lock": "位置锁定",
+    "position_locked": "已启用位置锁定",
+    "replace_clip": "替换片段",
+    "flags": "旗标",
+    "more_actions": "更多时间线操作",
+    "video_view": "视频显示",
+    "show_waveforms": "音频波形",
+    "video_track_height": "视频轨道高度",
+    "audio_track_height": "音频轨道高度",
+    "follow_playhead": "跟随播放头",
+    "insert_drop": "拖入素材时波纹插入",
+    "add_marker": "添加标记（M）",
+    "previous_marker": "上一个标记",
+    "next_marker": "下一个标记",
+    "clear_flags": "清除旗标",
+    "zoom": {
+      "full": "完整时间线缩放",
+      "detail": "细节缩放",
+      "custom": "自定义缩放"
+    },
+    "thumbnails": {
+      "auto": "自动",
+      "filmstrip": "连续缩略图",
+      "start_end": "首尾帧",
+      "none": "仅显示片段名称"
+    },
+    "smart_trim": {
+      "ripple_in": "波纹入点 — 拖动左边缘",
+      "ripple_out": "波纹出点 — 拖动右边缘",
+      "slip": "滑移 — 拖动画面改变源素材范围",
+      "slide": "滑动 — 拖动名称栏调整相邻剪辑点"
+    },
+    "flag": {
+      "blue": "蓝色",
+      "cyan": "青色",
+      "green": "绿色",
+      "yellow": "黄色",
+      "red": "红色",
+      "pink": "粉色",
+      "purple": "紫色"
     }
   },
   "ai_composer": {

@@ -453,7 +453,11 @@
       "name_subtitle": "Subtitle {index}",
       "name_graphics": "Graphics {index}",
       "height_small": "Small",
-      "height_large": "Large"
+      "height_large": "Large",
+      "clip_count": "{count} Clips",
+      "source_patch": "Source patch — choose the destination track",
+      "auto_select": "Auto Select — include this track in ripple edits",
+      "target": "Target track — click to activate"
     },
     "menu": {
       "rename_track": "Rename Track...",
@@ -475,6 +479,51 @@
     "transition": {
       "locked_tooltip": "Transition (Track Locked)",
       "trim_tooltip": "Trim transition duration (drag to adjust)"
+    },
+    "view_options": "Timeline View Options",
+    "keyframe_tray": "Show Keyframe Tray",
+    "voiceover": "Voiceover",
+    "advanced_tools": "More Editing Tools",
+    "position_lock": "Position Lock",
+    "position_locked": "Position Lock is enabled",
+    "replace_clip": "Replace Clip",
+    "flags": "Flags",
+    "more_actions": "More Timeline Actions",
+    "video_view": "Video View",
+    "show_waveforms": "Audio Waveforms",
+    "video_track_height": "Video Track Height",
+    "audio_track_height": "Audio Track Height",
+    "follow_playhead": "Follow Playhead",
+    "insert_drop": "Ripple Insert When Dropping Media",
+    "add_marker": "Add Marker (M)",
+    "previous_marker": "Previous Marker",
+    "next_marker": "Next Marker",
+    "clear_flags": "Clear Flags",
+    "zoom": {
+      "full": "Full Extent Zoom",
+      "detail": "Detail Zoom",
+      "custom": "Custom Zoom"
+    },
+    "thumbnails": {
+      "auto": "Automatic",
+      "filmstrip": "Filmstrip",
+      "start_end": "First and Last Frame",
+      "none": "Clip Names Only"
+    },
+    "smart_trim": {
+      "ripple_in": "Ripple In — drag the edge",
+      "ripple_out": "Ripple Out — drag the edge",
+      "slip": "Slip — drag the picture to change the source range",
+      "slide": "Slide — drag the name strip to adjust adjacent edits"
+    },
+    "flag": {
+      "blue": "Blue",
+      "cyan": "Cyan",
+      "green": "Green",
+      "yellow": "Yellow",
+      "red": "Red",
+      "pink": "Pink",
+      "purple": "Purple"
     }
   },
   "ai_composer": {

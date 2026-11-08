@@ -1,0 +1,24 @@
+{
+  "format": "topos_project_archive",
+  "schema_version": 3,
+  "created_by": "Topos Color",
+  "project_id": "f05a5f89-1bbc-4084-bde0-a64f1f72e148",
+  "project_mode": "edit_project",
+  "features": [
+    "media_pool",
+    "edit",
+    "color"
+  ],
+  "primary_asset_id": null,
+  "active_timeline_id": "resolve-ui-review",
+  "created_at": 1794065963.4391098,
+  "modified_at": 1794107565.606377,
+  "last_saved_by": "topos-studio",
+  "required_features": [],
+  "optional_features": [],
+  "present_modules": [
+    "color",
+    "edit"
+  ],
+  "edit_content_schema_version": 4
+}

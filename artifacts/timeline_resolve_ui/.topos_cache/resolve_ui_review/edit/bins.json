@@ -1,0 +1,12 @@
+{
+  "029234a1-5ea4-490c-a3e0-ca5190ba1577": {
+    "bin_id": "029234a1-5ea4-490c-a3e0-ca5190ba1577",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "3613c607-801f-4fdb-b358-43c98bc6bb13",
+      "3926e59c-086e-421c-a24a-7b9fe2bf97ad"
+    ],
+    "timeline_ids": []
+  }
+}
