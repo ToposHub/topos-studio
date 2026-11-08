@@ -1039,6 +1039,7 @@ from .effect_commands import (
     UpdateClipParamCommand,
     AddKeyframeCommand,
     RemoveKeyframeCommand,
+    MoveKeyframeCommand,
     UpdateKeyframeCommand,
     SetKeyframeInterpolationCommand,
     AddEffectCommand,
@@ -1125,6 +1126,7 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "UpdateClipParamCommand": UpdateClipParamCommand.from_dict,
     "AddKeyframeCommand": AddKeyframeCommand.from_dict,
     "RemoveKeyframeCommand": RemoveKeyframeCommand.from_dict,
+    "MoveKeyframeCommand": MoveKeyframeCommand.from_dict,
     "UpdateKeyframeCommand": UpdateKeyframeCommand.from_dict,
     "SetKeyframeInterpolationCommand": SetKeyframeInterpolationCommand.from_dict,
     "SetAutomationKeyframeInterpolationCommand":

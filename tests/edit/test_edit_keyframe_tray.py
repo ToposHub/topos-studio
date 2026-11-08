@@ -351,3 +351,173 @@ def test_visible_close_button_emits_host_request_without_content_command(qtbot: 
     QTest.mouseClick(tray._close_button, Qt.MouseButton.LeftButton)
     assert requested == [True]
     assert not view._command_stack._undo_stack
+
+
+# ── B12：完整关键帧移动（整 key 复制只改 frame） ─────────────────────
+
+
+def _rich_clip() -> ClipInstance:
+    """frame10 关键帧带完整 tangent/handles/legacy bezier/未知扩展字段。"""
+    from dataclasses import replace as _dcreplace
+
+    from src.shared.keyframe import InterpolationType
+
+    clip = _clip()
+    param = clip.animated_params["opacity"]
+    base_keys = list(param.keyframes.keyframes)
+    rich = _dcreplace(
+        base_keys[0],
+        interpolation=InterpolationType.BEZIER,
+        tangent_mode="broken",
+        handle_left=(-3.0, 0.15),
+        handle_right=(4.0, -0.25),
+        bezier_in=(0.1, 0.05),
+        bezier_out=(0.9, 0.95),
+        _extra_fields={"future_curve": {"mode": "custom"}},
+    )
+    new_param = _dcreplace(
+        param, keyframes=_dcreplace(
+            param.keyframes, keyframes=[rich, base_keys[1]]))
+    return _dcreplace(clip, animated_params={
+        **clip.animated_params, "opacity": new_param})
+
+
+def _rich_timeline() -> TimelineSequence:
+    return TimelineSequence(
+        timeline_id="tray", name="Tray", width=64, height=48,
+        fps=Rational(24, 1),
+        video_tracks=(EditTrack(
+            "v1", "V1", "video", 0, clips=(_rich_clip(),)),),
+        audio_tracks=(EditTrack("a1", "A1", "audio", 0),),
+    )
+
+
+def _moved_key_at(view: Any, frame: int) -> Any:
+    param = view.get_timeline().get_clip_by_id(
+        "kc").animated_params["opacity"]
+    return param.keyframes.get_keyframe_at(frame)
+
+
+def test_b12_drag_move_preserves_full_key_metadata(qtbot: Any) -> None:
+    """B12 反例：移动时间后曲线元数据逐字段保留，undo 完整还原。"""
+    from src.features.edit.ui.timeline_panel import TimelinePanel
+
+    panel = TimelinePanel()
+    qtbot.addWidget(panel)
+    panel.load_timeline(_rich_timeline())
+    panel.set_keyframe_tray_visible(True)
+    tray = panel._keyframe_tray
+    view = panel.get_timeline_view()
+    view.set_selection(_selection("kc"))
+    tray.refresh_from_model()
+
+    tray._drag_param = "opacity"
+    tray._drag_from_frame = 10
+    tray._drag_to_frame = 30
+    tray._drag_value = 0.2
+    tray._commit_drag()
+
+    moved = _moved_key_at(view, 30)
+    assert moved is not None
+    source = _rich_clip().animated_params["opacity"].keyframes.keyframes[0]
+    assert moved.frame == 30
+    assert moved.value == source.value
+    assert moved.interpolation == source.interpolation
+    assert moved.tangent_mode == "broken"
+    assert moved.handle_left == (-3.0, 0.15)
+    assert moved.handle_right == (4.0, -0.25)
+    assert moved.bezier_in == (0.1, 0.05)
+    assert moved.bezier_out == (0.9, 0.95)
+    assert moved.to_dict()["future_curve"] == {"mode": "custom"}
+    # 未动的关键帧与单步 undo 保持
+    assert _moved_key_at(view, 40) is not None
+    assert len(view._command_stack._undo_stack) == 1
+    view.undo()
+    restored = _moved_key_at(view, 10)
+    assert restored is not None
+    assert restored.tangent_mode == "broken"
+    assert restored.handle_left == (-3.0, 0.15)
+    assert restored.handle_right == (4.0, -0.25)
+    assert restored.to_dict()["future_curve"] == {"mode": "custom"}
+    assert _moved_key_at(view, 30) is None
+
+
+def test_b12_move_command_conflict_and_missing_rejected() -> None:
+    from src.features.edit.core.commands import MoveKeyframeCommand
+
+    timeline = _rich_timeline()
+    # 目的帧已被 40 占用 → 显式拒绝
+    with pytest.raises(ValueError):
+        MoveKeyframeCommand.create(
+            "v1", "kc", "opacity", 10, 40).apply(timeline)
+    # 源帧不存在 → 拒绝
+    with pytest.raises(ValueError):
+        MoveKeyframeCommand.create(
+            "v1", "kc", "opacity", 11, 30).apply(timeline)
+    # 同帧 no-op：返回同一实例（不入历史）
+    same = MoveKeyframeCommand.create(
+        "v1", "kc", "opacity", 10, 10).apply(timeline)
+    assert same is timeline
+
+
+def test_b12_move_command_serialization_roundtrip() -> None:
+    from src.features.edit.core.commands import MoveKeyframeCommand
+
+    timeline = _rich_timeline()
+    cmd = MoveKeyframeCommand.create("v1", "kc", "opacity", 10, 30)
+    applied = cmd.apply(timeline)
+    revived = MoveKeyframeCommand.from_dict(cmd.to_dict())
+    assert revived.from_frame == 10 and revived.to_frame == 30
+    assert revived._moved_key["tangent_mode"] == "broken"
+    undone = revived.undo(applied)
+    param = undone.get_clip_by_id("kc").animated_params["opacity"]
+    assert param.keyframes.get_keyframe_at(10).handle_left == (-3.0, 0.15)
+
+
+def test_b12_move_command_effect_param_path(qtbot: Any) -> None:
+    """effect 级参数关键帧移动同样保留完整元数据。"""
+    from dataclasses import replace as _dcreplace
+
+    from src.features.edit.core.commands import MoveKeyframeCommand
+    from src.features.edit.core.effect_instance import EffectInstance
+
+    effect = EffectInstance(
+        effect_id="fx1", effect_type="gaussian_blur", params={"radius": 5.0})
+    clip = _clip()
+    param = clip.animated_params["opacity"]
+    effect = _dcreplace(
+        effect, animated_params={"radius": _dcreplace(
+            param, base_value=5.0, min_value=0.0, max_value=100.0)})
+    keys = list(effect.animated_params["radius"].keyframes.keyframes)
+    keys = [_dcreplace(
+        keys[0], tangent_mode="smooth", handle_left=(-2.0, 0.0)),
+        keys[1]]
+    effect = _dcreplace(
+        effect, animated_params={"radius": _dcreplace(
+            effect.animated_params["radius"].keyframes and
+            effect.animated_params["radius"],
+            keyframes=_dcreplace(
+                effect.animated_params["radius"].keyframes, keyframes=keys),
+        )})
+    clip = clip.with_effect_added(effect)
+    timeline = TimelineSequence(
+        timeline_id="tray", name="Tray", width=64, height=48,
+        fps=Rational(24, 1),
+        video_tracks=(EditTrack(
+            "v1", "V1", "video", 0, clips=(clip,)),),
+        audio_tracks=(EditTrack("a1", "A1", "audio", 0),),
+    )
+
+    cmd = MoveKeyframeCommand.create(
+        "v1", "kc", "radius", 10, 30, effect_id="fx1")
+    applied = cmd.apply(timeline)
+    moved = (applied.get_clip_by_id("kc").get_effect_by_id("fx1")
+             .animated_params["radius"].keyframes.get_keyframe_at(30))
+    assert moved is not None
+    assert moved.tangent_mode == "smooth"
+    assert moved.handle_left == (-2.0, 0.0)
+    undone = cmd.undo(applied)
+    restored = (undone.get_clip_by_id("kc").get_effect_by_id("fx1")
+                .animated_params["radius"].keyframes.get_keyframe_at(10))
+    assert restored is not None
+    assert restored.tangent_mode == "smooth"
