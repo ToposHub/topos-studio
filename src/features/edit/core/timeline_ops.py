@@ -4057,3 +4057,95 @@ def build_numeric_trim_command(
         track_id, clip.clip_id, new_duration, new_source_duration,
         old_duration=clip.timeline_duration,
         old_source_duration=clip.source_duration), clamped)
+
+
+def build_linked_numeric_trim_command(
+    sequence: TimelineSequence,
+    track_id: str,
+    clip_id: str,
+    trim_side: str,
+    delta_frames: int,
+    mode: str = "trim",
+    max_source_frames: int | None = None,
+    linked_max_source_frames: int | None = None,
+    mismatch: str = "reject",
+) -> tuple[Optional[Any], int]:
+    """B19：互链 A/V 数值 trim 的**共同边界**计划（域级，UI/service 共用）。
+
+    逐成员独立 ``build_numeric_trim_command`` 会按各自源余量得到不同
+    钳制（视频 +5、音频 +3 仍可组宏提交成 105/103 的失步对）。本函数
+    先对**全部成员**求合法范围，取共同区间：
+
+    - ``mismatch="reject"``（默认）：请求 delta 超出任一成员边界 →
+      整次拒绝 ``(None, 0)``——与 UI 既有提示一致；
+    - ``mismatch="clamp"``：钳制到共同区间（全体同一 delta），共同
+      区间为空或钳后为 0 → 拒绝。
+
+    成员 = 主片 + 互链伙伴（``get_reciprocal_linked_clip``，悬空/单向
+    链接不参与）。sync-lock 只由主命令施加一次（联动命令
+    ``apply_sync_lock=False``）；宏 = 单步 undo。
+
+    Returns:
+        (MacroCommand | 单命令 | None, common_delta)。
+    """
+    track = sequence.get_track_by_id(track_id)
+    clip = track.get_clip_by_id(clip_id) if track is not None else None
+    if clip is None:
+        return None, 0
+
+    members: list[tuple[str, str, int | None]] = [
+        (track_id, clip_id, max_source_frames)]
+    linked = sequence.get_reciprocal_linked_clip(clip)
+    if linked is not None:
+        members.append(
+            (linked.track_id, linked.clip_id, linked_max_source_frames))
+
+    # ① 共同范围预检：每成员独立求界，再取交集
+    per_member_bounds: list[tuple[int, int]] = []
+    for member_track_id, member_clip_id, member_max in members:
+        member_track = sequence.get_track_by_id(member_track_id)
+        member_clip = (member_track.get_clip_by_id(member_clip_id)
+                       if member_track is not None else None)
+        if member_clip is None:
+            return None, 0
+        ripple = mode == "ripple"
+        lo, hi = numeric_trim_bounds(
+            member_track, member_clip, trim_side,
+            max_source_frames=member_max, ripple=ripple)
+        per_member_bounds.append((lo, hi))
+    common_lo = max(lo for lo, _hi in per_member_bounds)
+    common_hi = min(hi for lo, hi in per_member_bounds)
+    if common_lo > common_hi:
+        return None, 0
+    requested = int(delta_frames)
+    if mismatch == "clamp":
+        common_delta = max(common_lo, min(common_hi, requested))
+    else:
+        # reject：请求必须落在每个成员的边界内（不悄悄改变用户输入）
+        common_delta = requested
+        if not all(lo <= requested <= hi
+                   for lo, hi in per_member_bounds):
+            return None, 0
+    if common_delta == 0:
+        return None, 0
+
+    # ③ 全组同一 delta 计划；④ sync-lock 主命令跟随一次
+    commands = []
+    for index, (member_track_id, member_clip_id, member_max) in enumerate(
+            members):
+        cmd, clamped = build_numeric_trim_command(
+            sequence, member_track_id, member_clip_id, trim_side,
+            common_delta, mode=mode, max_source_frames=member_max,
+            apply_sync_lock=(index == 0),
+        )
+        if cmd is None or clamped != common_delta:
+            # 共同区间已预检，此处不应触发；防御性整次拒绝
+            return None, 0
+        commands.append(cmd)
+    if len(commands) == 1:
+        return commands[0], common_delta
+    from src.features.edit.core.commands import MacroCommand
+
+    return (MacroCommand.create(
+        f"Trim linked clips {common_delta:+d}f", tuple(commands)),
+        common_delta)
