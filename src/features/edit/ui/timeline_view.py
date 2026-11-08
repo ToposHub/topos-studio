@@ -17433,6 +17433,10 @@ class TimelineView(QGraphicsView):
 
         return None
 
+    def is_track_locked(self, track_id: str) -> bool:
+        """B02：宿主可用的公共锁轨查询（委托既有判定，不改语义）。"""
+        return self._is_track_locked(track_id)
+
     # ------------------------------------------------------------------
     # B8: global edit mode (governs media-pool drop semantics)
     # ------------------------------------------------------------------
