@@ -1,0 +1,21 @@
+{
+  "baseline_observation": "1380e8bf before review fixes; rerun reflects current tree",
+  "audio_sync_signature_changed": true,
+  "audio_graph_snapshot_hash_changed": true,
+  "video_renderer_signature_changed": true,
+  "edit_page_video_signature_changed": true,
+  "future_curve_roundtrip": {
+    "input": "future_exp",
+    "model_value": null,
+    "extra_field": "future_exp",
+    "output": null,
+    "preserved": false
+  },
+  "macro_registry_observations": {},
+  "unapplied_curve_command_roundtrip_had_value": false,
+  "consumer_paths": {
+    "realtime": "AudioMixer.mix_samples -> apply_clip_fade once",
+    "offline_and_stem": "render_track_block -> apply_clip_fade once",
+    "double_fade_observed": false
+  }
+}

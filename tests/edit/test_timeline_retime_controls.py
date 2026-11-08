@@ -265,3 +265,59 @@ def test_retime_keeps_video_bottom_anchored_when_stack_overflows(qtbot: Any) -> 
     assert item.sceneBoundingRect().bottom() == bottom
     view._on_retime_controls_toggled('c', 'v', False)
     assert item.sceneBoundingRect().bottom() == bottom
+
+
+def test_smooth_ramp_menu_state_survives_initial_load_and_reload(qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    params = SpeedParams().with_speed_point(100, 200).with_point_easing(100, 'smooth')
+    view = _view(qtbot, params)
+    for _ in range(2):
+        item = view._items_map['c']
+        observed = []
+        def inspect(menu: QMenu, _pos: Any) -> None:
+            ramp = next(a.menu() for a in menu.actions()
+                        if a.menu() and any(child.objectName() == 'retime_smooth' for child in a.menu().actions()))
+            smooth = next(a for a in ramp.actions() if a.objectName() == 'retime_smooth')
+            observed.append(smooth.isChecked())
+            return None
+        monkeypatch.setattr(QMenu, 'exec', inspect)
+        item._show_retime_segment_speed_menu(QPoint(1, 1), item._width * .75)
+        assert observed == [True]
+        view.load_timeline(view.get_timeline())
+
+
+def test_sliced_curve_menu_uses_clip_relative_boundary(qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.features.edit.core.clip_params import SpeedPoint
+    params = SpeedParams(speed=1, speed_points=(SpeedPoint(40, 2),), curve_offset=24, curve_length=120)
+    view = _view(qtbot, params)
+    timeline = view.get_timeline()
+    track = timeline.video_tracks[0]
+    clip = replace(track.clips[0], source_duration=80)
+    view.load_timeline(replace(timeline, video_tracks=(replace(track, clips=(clip,)),)))
+    item = view._items_map['c']
+    assert item._retime_points == ((16, 2),)
+    assert [segment[0] for segment in item._retime_segments()] == [0, 16]
+    def choose_clear(menu: QMenu, _pos: Any) -> Any:
+        return next(a for a in menu.actions() if a.objectName() == 'retime_clear_point')
+    monkeypatch.setattr(QMenu, 'exec', choose_clear)
+    item._show_retime_segment_speed_menu(QPoint(1, 1), item._width * .75)
+    assert view.get_timeline().get_clip_by_id('c').speed.speed_points == ()
+    view.undo()
+    assert view._items_map['c']._retime_points == ((16, 2),)
+
+
+def test_clear_speed_point_rejection_reports_locked_partner_without_exception(qtbot: Any) -> None:
+    params = SpeedParams().with_speed_point(100, 200)
+    view = _view(qtbot, params)
+    timeline = view.get_timeline()
+    video = replace(timeline.video_tracks[0].clips[0], linked_clip_id='audio')
+    audio = replace(video, clip_id='audio', track_id='a', linked_clip_id='c')
+    view.load_timeline(replace(timeline,
+        video_tracks=(replace(timeline.video_tracks[0], clips=(video,)),),
+        audio_tracks=(EditTrack('a', 'A1', 'audio', 0, clips=(audio,), is_locked=True),)))
+    before = view.get_timeline()
+    errors = []
+    view.status_message_requested.connect(errors.append)
+    view._on_retime_action_requested('c', 'v', 'clear_point', 100, None)
+    assert errors
+    assert view.get_timeline() == before
+    assert not view._command_stack._undo_stack

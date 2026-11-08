@@ -1913,6 +1913,7 @@ class EditPage(QWidget):
                     speed_sig,
                     int(getattr(clip, "fade_in_duration", 0) or 0),
                     int(getattr(clip, "fade_out_duration", 0) or 0),
+                    getattr(clip, "fade_curve", None),
                     tuple(fx_sig),
                 ))
             # AM-02: Bus 轨即使无 clips 也生成 entry（否则 Bus 变更不扰动签名）。
@@ -1992,11 +1993,15 @@ class EditPage(QWidget):
                     int(getattr(clip, "source_start", 0) or 0),
                     int(getattr(clip, "source_duration", 0) or 0),
                     _float(getattr(clip, "opacity", 1.0), 1.0),
+                    int(getattr(clip, "fade_in_duration", 0) or 0),
+                    int(getattr(clip, "fade_out_duration", 0) or 0),
+                    getattr(clip, "fade_curve", None),
                     bool(getattr(clip, "is_enabled", True)),
                     repr(getattr(clip, "effects", ())),
                     repr(getattr(clip, "color_stack_id", None)),
                     repr(getattr(clip, "color_shared", None)),
                     repr(getattr(clip, "speed", None)),
+                    getattr(clip, "freeze_source_frame", None),
                     repr(transform),
                     repr(crop),
                 ))

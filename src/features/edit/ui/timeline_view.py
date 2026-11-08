@@ -4498,8 +4498,8 @@ class TimelineView(QGraphicsView):
         item._selected_edit_edge = self._selected_edit_edges.get(item.clip_id)
         item._timeline_display_fps = float(self._timeline.fps) if self._timeline is not None else EMPTY_TIMELINE_FPS
         clip = self._timeline.get_clip_by_id(item.clip_id) if self._timeline is not None else None
-        item._retime_reverse = bool(getattr(clip.speed, "reverse", False)) if clip is not None else False
-        item._retime_preserve_pitch = bool(getattr(clip.speed, "preserve_pitch", False)) if clip is not None else False
+        if clip is not None:
+            item.set_retime_presentation(clip.speed)
 
     def thumbnail_display_mode(self) -> str:
         return self._thumbnail_display_mode
@@ -12558,8 +12558,12 @@ class TimelineView(QGraphicsView):
                 return
             if updated is params:
                 return
+            try:
+                self._commit_retime_params(clip, updated, "Clear speed point")
+            except (ValueError, RuntimeError) as exc:
+                self.status_message_requested.emit(str(exc))
+                return
             self._retime_control_clip_ids.add(clip_id)
-            self._commit_retime_params(clip, updated, "Clear speed point")
             return
         if action not in {"reverse", "pitch", "reset_clip"} or self._retime_controls_need_backend(clip):
             self._request_advanced_retime(clip, action, source_offset, value)

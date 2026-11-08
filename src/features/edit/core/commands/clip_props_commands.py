@@ -2024,7 +2024,8 @@ class SetFadeCurveCommand:
             "clip_id": self.clip_id,
             "track_id": self.track_id,
             "fade_curve": self.fade_curve,
-            "_previous": self._previous,  # None 也写出：键存在 = 已 apply
+            "_previous": self._previous,
+            "_had_value": self._had_value,
         }
 
     @staticmethod
@@ -2037,7 +2038,7 @@ class SetFadeCurveCommand:
             fade_curve=data.get("fade_curve"),
             _previous=data.get("_previous"),
             # 序列化恢复：_previous 键存在 = 已 apply 过（含原值为 None）
-            _had_value="_previous" in data,
+            _had_value=bool(data.get("_had_value", "_previous" in data)),
         )
 
     @staticmethod

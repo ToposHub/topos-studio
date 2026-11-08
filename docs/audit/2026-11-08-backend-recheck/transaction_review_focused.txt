@@ -1,0 +1,14 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 45 items
+
+tests/edit/test_replace_edit_and_voiceover.py .........................  [ 55%]
+tests/edit/test_voiceover_completion.py ........                         [ 73%]
+tests/edit/test_alt_copy_group_plan.py .....                             [ 84%]
+tests/edit/test_linked_numeric_trim.py .......                           [100%]
+
+============================== 45 passed in 5.13s ==============================
