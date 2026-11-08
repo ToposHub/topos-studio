@@ -17,12 +17,13 @@ from typing import Any, Optional
 
 from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPen
-from PyQt6.QtWidgets import QFrame, QWidget
+from PyQt6.QtWidgets import QFrame, QToolButton, QWidget
 
 from src.shared.i18n.i18n import I18N
+from src.features.edit.ui.timeline_layout import TRACK_HEADER_WIDTH
 
 _LANE_HEIGHT = 24
-_GUTTER_WIDTH = 118
+_GUTTER_WIDTH = TRACK_HEADER_WIDTH
 _DIAMOND = 5.0
 
 
@@ -48,10 +49,20 @@ class EditKeyframeTray(QFrame):
         self.setFixedHeight(6 + _LANE_HEIGHT * 2 + 4)  # 标题行 + 2 泳道起步
         self.setMinimumHeight(6 + _LANE_HEIGHT + 2)
         self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setToolTip(I18N.tr(
             "timeline.keyframe_tray_hint",
             "Click to add a keyframe; drag to move in time; "
             "right-click to remove; Esc cancels the drag"))
+        self._close_button = QToolButton(self)
+        self._close_button.setObjectName("closeTimelineKeyframeTray")
+        self._close_button.setText("×")
+        self._close_button.setToolTip(I18N.tr("timeline.close_keyframe_tray", "Close Keyframe Tray"))
+        self._close_button.setAccessibleName(self._close_button.toolTip())
+        self._close_button.setFixedSize(20, 20)
+        self._close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._close_button.setAutoRaise(True)
+        self._close_button.clicked.connect(self.close_requested.emit)
         self._connect_view()
 
     # ---------------- projection (no commands) ----------------
@@ -70,10 +81,19 @@ class EditKeyframeTray(QFrame):
                 bar.valueChanged.connect(self.update)
             if hasattr(view, "zoom_changed"):
                 view.zoom_changed.connect(lambda _ppf: self.update())
+            if hasattr(view, "tool_changed"):
+                view.tool_changed.connect(self._on_tool_changed)
         except (AttributeError, TypeError):
             pass
 
     def _on_playhead(self, _frame: int) -> None:
+        if self.current_clip() != (self._track_id, self._clip_id):
+            self.refresh_from_model()
+        else:
+            self.update()
+
+    def _on_tool_changed(self, _tool: str) -> None:
+        self._cancel_drag()
         self.update()
 
     def current_clip(self) -> tuple[Optional[str], Optional[str]]:
@@ -83,6 +103,12 @@ class EditKeyframeTray(QFrame):
         if timeline is None:
             return (None, None)
         selected = list(getattr(view._selection, "selected_clip_ids", ()) or ())
+        if len(selected) == 2:
+            first = timeline.get_clip_by_id(selected[0])
+            partner = timeline.get_reciprocal_linked_clip(first) if first is not None else None
+            if partner is not None and partner.clip_id in selected:
+                primary = view._selection.primary_item
+                selected = [primary.item_id if primary is not None else first.clip_id]
         if len(selected) == 1:
             for track in (list(timeline.video_tracks)
                           + list(timeline.audio_tracks)):
@@ -103,7 +129,10 @@ class EditKeyframeTray(QFrame):
     def refresh_from_model(self) -> None:
         """重投影：从提交后的模型读参数轨（不产生任何写入）。"""
         self._cancel_drag()
+        previous_clip = (self._track_id, self._clip_id)
         self._track_id, self._clip_id = self.current_clip()
+        if previous_clip != (self._track_id, self._clip_id):
+            self._selected = None
         self._lanes = []
         timeline = self._view.get_timeline() if self._view else None
         if timeline is not None and self._clip_id is not None:
@@ -117,6 +146,11 @@ class EditKeyframeTray(QFrame):
                         for k in (track.keyframes if track else ())
                     ]
                     self._lanes.append((param_name, keys))
+        if self._selected is not None and not any(
+            name == self._selected[0] and any(frame == self._selected[1] for frame, _value in keys)
+            for name, keys in self._lanes
+        ):
+            self._selected = None
         self.setFixedHeight(6 + _LANE_HEIGHT * max(1, len(self._lanes)) + 4)
         self.update()
 
@@ -124,21 +158,25 @@ class EditKeyframeTray(QFrame):
 
     def _frame_to_x(self, frame: int) -> float:
         view = self._view
-        ppf = float(getattr(view, "_pixels_per_frame", 1.0) or 1.0)
-        offset = 0.0
-        bar = view.horizontalScrollBar() if view is not None else None
-        if bar is not None:
-            offset = float(bar.value())
-        return _GUTTER_WIDTH + frame * ppf - offset
+        scene_x = view._layout_engine.frame_to_x(frame)
+        viewport_x = view.viewportTransform().map(QPointF(scene_x, 0.0)).x()
+        return float(self._viewport_origin_x() + viewport_x)
+
+    def _viewport_origin_x(self) -> int:
+        """Project the view viewport into tray coordinates, including frame insets."""
+        return self.mapFromGlobal(self._view.viewport().mapToGlobal(QPoint(0, 0))).x()
+
+    def _content_left(self) -> int:
+        return self._viewport_origin_x() + _GUTTER_WIDTH
 
     def _x_to_frame(self, x: float) -> int:
         view = self._view
-        ppf = float(getattr(view, "_pixels_per_frame", 1.0) or 1.0)
-        if ppf <= 0:
+        viewport_x = x - self._viewport_origin_x()
+        inverse, valid = view.viewportTransform().inverted()
+        if not valid:
             return 0
-        bar = view.horizontalScrollBar() if view is not None else None
-        offset = float(bar.value()) if bar is not None else 0.0
-        return int(round((x - _GUTTER_WIDTH + offset) / ppf))
+        scene_x = inverse.map(QPointF(viewport_x, 0.0)).x()
+        return view._layout_engine.x_to_frame(scene_x)
 
     def _clip_extent(self) -> Optional[tuple[int, int]]:
         timeline = self._view.get_timeline() if self._view else None
@@ -155,6 +193,10 @@ class EditKeyframeTray(QFrame):
             return index
         return None
 
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self._close_button.move(max(0, self._content_left() - 25), 5)
+
     # ---------------- painting ----------------
 
     def paintEvent(self, event: Any) -> None:
@@ -163,6 +205,7 @@ class EditKeyframeTray(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w = self.width()
         h = self.height()
+        gutter = self._content_left()
 
         bg = QColor(24, 26, 30)
         lane_bg = QColor(30, 33, 38)
@@ -171,7 +214,7 @@ class EditKeyframeTray(QFrame):
 
         extent = self._clip_extent()
         if extent is not None:
-            x0 = max(self._frame_to_x(extent[0]), _GUTTER_WIDTH)
+            x0 = max(self._frame_to_x(extent[0]), gutter)
             x1 = min(self._frame_to_x(extent[1]), w)
             if x1 > x0:
                 painter.fillRect(QRectF(x0, 0, x1 - x0, h),
@@ -181,17 +224,19 @@ class EditKeyframeTray(QFrame):
             self._view.get_playhead_frame() if self._view else 0)
         for index, (param_name, keys) in enumerate(self._lanes):
             top = 4.0 + index * _LANE_HEIGHT
-            rect = QRectF(_GUTTER_WIDTH, top, w - _GUTTER_WIDTH,
+            rect = QRectF(gutter, top, max(0, w - gutter),
                           _LANE_HEIGHT - 2)
             painter.fillRect(rect, lane_bg)
-            painter.fillRect(QRectF(0, top, _GUTTER_WIDTH, _LANE_HEIGHT - 2),
+            painter.fillRect(QRectF(0, top, gutter, _LANE_HEIGHT - 2),
                              gutter_bg)
             painter.setPen(QPen(QColor(120, 128, 138), 1))
-            painter.drawText(QRectF(6, top, _GUTTER_WIDTH - 10,
+            painter.drawText(QRectF(6, top, max(0, gutter - (36 if index == 0 else 10)),
                                     _LANE_HEIGHT - 2),
                              Qt.AlignmentFlag.AlignVCenter
                              | Qt.AlignmentFlag.AlignLeft, param_name)
             # 值折线（轻量：直线段）
+            painter.save()
+            painter.setClipRect(QRectF(gutter, top, max(0, w - gutter), _LANE_HEIGHT - 2))
             if len(keys) >= 2:
                 painter.setPen(QPen(QColor(90, 160, 200, 160), 1))
                 prev: Optional[QPointF] = None
@@ -203,9 +248,10 @@ class EditKeyframeTray(QFrame):
                     prev = point
             for frame, _value in keys:
                 self._paint_diamond(painter, rect, param_name, frame)
+            painter.restore()
 
         # 播放头
-        if _GUTTER_WIDTH <= playhead_x <= w:
+        if gutter <= playhead_x <= w:
             painter.setPen(QPen(QColor(230, 120, 60), 1))
             painter.drawLine(QPointF(playhead_x, 0), QPointF(playhead_x, h))
         painter.end()
@@ -213,7 +259,7 @@ class EditKeyframeTray(QFrame):
     def _paint_diamond(self, painter: QPainter, rect: QRectF,
                        param_name: str, frame: int) -> None:
         x = self._frame_to_x(frame)
-        if not _GUTTER_WIDTH <= x <= self.width():
+        if not self._content_left() <= x <= self.width():
             return
         y = rect.center().y()
         is_drag = (self._drag_param == param_name
@@ -240,15 +286,15 @@ class EditKeyframeTray(QFrame):
     def _key_at(self, lane_index: int, frame: int,
                 tolerance: float = _DIAMOND + 3.0) -> Optional[int]:
         _param, keys = self._lanes[lane_index]
-        for key_frame, _value in keys:
-            if abs(self._frame_to_x(key_frame)
-                   - self._frame_to_x(frame)) <= tolerance:
-                return key_frame
-        return None
+        if not keys:
+            return None
+        pointer_x = self._frame_to_x(frame)
+        nearest = min(keys, key=lambda key: abs(self._frame_to_x(key[0]) - pointer_x))[0]
+        return nearest if abs(self._frame_to_x(nearest) - pointer_x) <= tolerance else None
 
     def mousePressEvent(self, event: Any) -> None:
         pos = event.position()
-        if pos.x() < _GUTTER_WIDTH:
+        if pos.x() < self._content_left():
             return
         lane_index = self._lane_at(pos.y())
         if lane_index is None:
@@ -261,6 +307,7 @@ class EditKeyframeTray(QFrame):
             return
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
         if hit is not None:
             # 开始拖动（预览态，不建命令）
             self._drag_param = param_name
@@ -282,7 +329,7 @@ class EditKeyframeTray(QFrame):
         extent = self._clip_extent()
         if extent is not None:
             frame = max(extent[0], min(extent[1] - 1, frame))
-        if frame != self._drag_from_frame:
+        if frame != self._drag_to_frame:
             self._drag_to_frame = frame
             self.update()
 
@@ -307,6 +354,15 @@ class EditKeyframeTray(QFrame):
             self._remove_keyframe(param_name, frame)
             return
         super().keyPressEvent(event)
+
+    def focusOutEvent(self, event: Any) -> None:
+        self._cancel_drag()
+        self.update()
+        super().focusOutEvent(event)
+
+    def hideEvent(self, event: Any) -> None:
+        self._cancel_drag()
+        super().hideEvent(event)
 
     def _cancel_drag(self) -> None:
         self._drag_param = None
@@ -367,12 +423,25 @@ class EditKeyframeTray(QFrame):
         if self._track_id is None or self._clip_id is None:
             self._cancel_drag()
             return
+        param_name = self._drag_param
+        from_frame = self._drag_from_frame
+        to_frame = self._drag_to_frame
+        timeline = self._view.get_timeline()
+        clip = timeline.get_clip_by_id(self._clip_id) if timeline is not None else None
+        param = clip.animated_params.get(param_name) if clip is not None else None
+        keys = param.keyframes.keyframes if param is not None and param.keyframes else ()
+        source_key = next((key for key in keys if key.frame == from_frame), None)
+        if source_key is None:
+            self._cancel_drag()
+            return
+        # Retain the supported interpolation when reusing the existing
+        # Remove+Add bridge. Full tangent metadata needs a move-key command.
+        interpolation = source_key.interpolation.value
         remove = RemoveKeyframeCommand.create(
-            self._track_id, self._clip_id, self._drag_param,
-            self._drag_from_frame)
+            self._track_id, self._clip_id, param_name, from_frame)
         add = AddKeyframeCommand.create(
-            self._track_id, self._clip_id, self._drag_param,
-            self._drag_to_frame, value=float(self._drag_value))
+            self._track_id, self._clip_id, param_name, to_frame,
+            value=float(source_key.value), interpolation=interpolation)
         macro = MacroCommand.create("Move keyframe", (remove, add))
         try:
             self._view.execute_command(macro)
@@ -380,6 +449,6 @@ class EditKeyframeTray(QFrame):
             self._cancel_drag()
             self.refresh_from_model()
             return
-        self._selected = (self._drag_param, self._drag_to_frame)
+        self._selected = (param_name, to_frame)
         self._cancel_drag()
         self.refresh_from_model()

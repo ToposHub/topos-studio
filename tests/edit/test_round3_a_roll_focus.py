@@ -70,41 +70,19 @@ def test_n15_trim_monitor_is_non_activating(qtbot: Any) -> None:
         Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
 
-def test_n15_focus_out_to_own_monitor_does_not_cancel_roll(
-        qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """自身监视器成为 activeWindow 的 FocusOut 不取消 ROLLING。"""
-    from PyQt6.QtWidgets import QApplication
-
+def test_embedded_monitor_has_no_focus_exception_for_external_window(qtbot: Any) -> None:
+    """A viewer child never activates a Tool window; real focus loss still cancels."""
     from src.features.edit.ui.timeline_view import TimelineView
-
     view = TimelineView()
     qtbot.addWidget(view)
     view.load_timeline(_three_clip_timeline())
-
     view._on_roll_trim_started("a", "b", 100)
-    assert view._interaction.state == InteractionState.ROLLING
-
     monitor = view._trim_monitor()
-    monitor.show()
-    monkeypatch.setattr(QApplication, "activeWindow",
-                        staticmethod(lambda: monitor))
-
-    focus_out = QFocusEvent(QEvent.Type.FocusOut,
-                            Qt.FocusReason.ActiveWindowFocusReason)
-    view.focusOutEvent(focus_out)
-    assert view._interaction.state == InteractionState.ROLLING, (
-        "own passive monitor must not cancel the roll session")
-
-    # 真正的外部窗口（非监视器）仍取消
-    from PyQt6.QtWidgets import QLabel
-
-    other = QLabel("external window")
-    qtbot.addWidget(other)
-    monkeypatch.setattr(QApplication, "activeWindow",
-                        staticmethod(lambda: other))
-    view.focusOutEvent(QFocusEvent(
-        QEvent.Type.FocusOut, Qt.FocusReason.ActiveWindowFocusReason))
-    assert view._interaction.is_idle, "real external focus must still cancel"
+    assert not monitor.isWindow()
+    assert monitor.focusPolicy() == Qt.FocusPolicy.NoFocus
+    assert monitor.isHidden()  # Standalone timelines do not open a monitor window.
+    view.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.ActiveWindowFocusReason))
+    assert view._interaction.is_idle
 
 
 def test_n15_normal_roll_commits_after_monitor_shown(

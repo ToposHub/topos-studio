@@ -315,6 +315,12 @@ class _FakeTrimView:
     def _get_asset_duration(self, asset_id):
         return 1000
 
+    def _effective_linked_selection(self):
+        return self._linked_selection_enabled
+
+    def _get_reciprocal_linked_clip(self, clip):
+        return self._timeline.get_reciprocal_linked_clip(clip)
+
     def _execute_command(self, cmd):
         self.executed.append(cmd)
 

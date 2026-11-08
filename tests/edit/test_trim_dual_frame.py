@@ -337,4 +337,4 @@ class TestTrimFinishSignal:
         view._on_roll_trim_started("a", "b", 100)
         view._on_roll_trim_dragged(10)
         view._hide_trim_monitor()
-        assert finished == [110]  # cut 100 + delta 10
+        assert finished == [view._playhead_frame]  # Restore program canvas to the actual playhead.

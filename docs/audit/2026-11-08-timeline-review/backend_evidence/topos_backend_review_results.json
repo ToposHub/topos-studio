@@ -1,0 +1,31 @@
+{
+  "flag_mixed_undo": {
+    "before": [
+      "#4BA6DD",
+      null
+    ],
+    "after": [
+      "#4BA6DD",
+      "#4BA6DD"
+    ],
+    "undo": [
+      null,
+      null
+    ]
+  },
+  "voiceover_without_audio": {
+    "exception": "AttributeError(\"'str' object has no attribute 'track_id'\")",
+    "audio_tracks_after": [
+      "e378baf4-2692-497f-b113-1676372865d9"
+    ],
+    "history": 1
+  },
+  "replace_partner_speed": {
+    "success": true,
+    "video_duration": 96,
+    "audio_duration": 96,
+    "audio_needed": 192,
+    "audio_source_last": 95,
+    "speed": 2.0
+  }
+}

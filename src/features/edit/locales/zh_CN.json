@@ -9,6 +9,43 @@
     "insights_open": "洞察(&I)"
   },
   "edit": {
+    "trim": {
+      "monitor_unavailable": "预览不可用",
+      "monitor_unavailable_hint": "素材不可用，或当前编辑暂不支持边界画面预览。"
+    },
+    "retime_menu": {
+      "add_point": "添加速度点",
+      "clear_point": "清除速度点",
+      "change_speed": "更改速度",
+      "custom": "更改片段速度…",
+      "reset_segment": "重置为 100%",
+      "freeze": "定格",
+      "reverse": "倒放片段",
+      "rewind": "回放",
+      "speed_ramp": "速度渐变",
+      "ramp_up": "0% 到 100%",
+      "ramp_down": "100% 到 0%",
+      "smooth": "平滑渐变",
+      "reset_clip": "重置片段",
+      "pitch": "音高校正",
+      "drag_hint": "拖动以调节片段速度"
+    },
+    "speed_dialog": {
+      "title": "更改片段速度",
+      "speed": "速度",
+      "fps": "每秒帧数",
+      "duration": "时长",
+      "ripple": "波纹时间线",
+      "reverse": "倒放速度",
+      "freeze": "定格画面",
+      "pitch": "音高校正",
+      "keyframes": "关键帧",
+      "maintain": "保持时间",
+      "stretch": "拉伸以适应",
+      "change": "更改",
+      "invalid_duration": "请输入有效的 HH:MM:SS:FF 时长，且速度须在支持范围内。",
+      "unsupported": "当前不支持所选高级变速选项，片段未修改。"
+    },
     "blend_mode": {
       "normal": "正常",
       "multiply": "正片叠底",
@@ -157,6 +194,7 @@
     "marker_color_red": "红色",
     "marker_color_yellow": "黄色",
     "clip": {
+      "speed_change": "速度变化",
       "add_speed_point": "添加变速点",
       "bypass_composite": "绕过合成",
       "change_speed": "更改速度",
@@ -409,6 +447,11 @@
     "frame_unset": "Frame: --"
   },
   "timeline": {
+    "linked_trim_limit": "链接片段无法按相同帧数修剪，已保留原位置。",
+    "fade_duration": "淡变：{frames} 帧",
+    "trim_in_hint": "修剪入点",
+    "trim_out_hint": "修剪出点",
+    "close_keyframe_tray": "关闭关键帧托盘",
     "empty_title": "尚未创建时间线",
     "empty_hint": "创建时间线或将素材拖到此处开始编辑",
     "marker": {

@@ -461,9 +461,10 @@ def test_scroll_to_timeline_start_resets_startup_offset(qapp) -> None:
     assert scroll_bar.value() == scroll_bar.minimum()
 
 
-def test_initial_timeline_load_resets_after_hidden_view_is_shown(qapp) -> None:
+def test_initial_timeline_load_resets_after_hidden_view_is_shown(qapp, qtbot) -> None:
     """A timeline loaded before entering Edit must still open at frame zero."""
     view = TimelineView()
+    qtbot.addWidget(view)
     view.resize(1_000, 600)
     view.load_timeline(_sequence_with_video_and_audio())
 

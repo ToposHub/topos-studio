@@ -35,14 +35,14 @@ from src.features.edit.ui.timeline_view import TimelineView, EditTool, MIN_ZOOM,
 from src.features.edit.ui.timeline_items import TRACK_HEADER_WIDTH
 from src.features.edit.ui.edit_style import EDIT_COLORS, EDIT_SIZES
 from src.shared.assets.icon_manager import (
-    icon_select_tool,
     icon_ripple, icon_roll, icon_slip, icon_slide, icon_hand_tool, icon_zoom_tool,
-    icon_snap, icon_link, icon_unlink, icon_zoom_in, icon_zoom_out,
+    icon_zoom_in, icon_zoom_out,
     icon_append_edit,
     get_icon, IconColors
 )
 from src.features.edit.ui.timeline_icons import (
-    timeline_icon, icon_trim_tool, icon_blade_tool,
+    timeline_icon, icon_select_tool, icon_trim_tool, icon_blade_tool,
+    icon_snap, icon_link, icon_unlink,
     icon_insert_edit, icon_overwrite_edit, icon_marker,
 )
 from src.features.edit.core.edit_playback_controller import (
@@ -155,6 +155,7 @@ class TimelinePanel(QWidget):
     source_overwrite_requested = pyqtSignal()
     source_append_requested = pyqtSignal()
     source_replace_requested = pyqtSignal()  # UI request; host supplies replace semantics
+    clip_speed_settings_requested = pyqtSignal(str, str, object)  # advanced speed draft
     source_patch_changed = pyqtSignal(str, str, bool)
     keyframe_tray_requested = pyqtSignal(bool)
     voiceover_requested = pyqtSignal()
@@ -239,7 +240,7 @@ class TimelinePanel(QWidget):
 
         # 按钮尺寸常量
         BTN_SIZE = EDIT_SIZES["icon_btn"]  # 26
-        ICON_SIZE = 15
+        ICON_SIZE = 18
 
         # Zoom state
         self._zoom_updating = False  # Anti-recursion lock
@@ -619,6 +620,7 @@ class TimelinePanel(QWidget):
         self._setup_timeline_menus()
         self.timeline_view.position_lock_changed.connect(self._sync_position_lock)
         self.timeline_view.source_patch_changed.connect(self.source_patch_changed.emit)
+        self.timeline_view.clip_speed_settings_requested.connect(self.clip_speed_settings_requested.emit)
         self.timeline_view.horizontalScrollBar().valueChanged.connect(self._remember_custom_scroll)
 
         # Connect TimelineView signals
@@ -629,6 +631,7 @@ class TimelinePanel(QWidget):
         self.timeline_view.tool_changed.connect(self._on_view_tool_changed)
         self.timeline_view.zoom_changed.connect(self._on_view_zoom_changed)
         self.timeline_view.snap_changed.connect(self._on_view_snap_changed)
+        self.timeline_view.linked_selection_changed.connect(self._sync_linked_selection)
         self.timeline_view.corner_timecode_clicked.connect(self._on_timecode_panel_clicked)
         # Forward timeline_changed signal to external listeners
         self.timeline_view.timeline_changed.connect(self.timeline_changed.emit)
@@ -732,14 +735,14 @@ class TimelinePanel(QWidget):
         self.btn_keyframe_tray.toggled.connect(self.keyframe_tray_requested.emit)
         self.btn_voiceover = button("timelineVoiceover",
             I18N.tr("timeline.voiceover", "Voiceover"),
-            get_icon("fa5s.microphone", IconColors.DEFAULT))
+            timeline_icon("voiceover"))
         self.btn_voiceover.clicked.connect(self.voiceover_requested.emit)
         self.btn_advanced_tools = button("timelineAdvancedTools",
             I18N.tr("timeline.advanced_tools", "More Editing Tools"),
             timeline_icon("dynamic_trim"), True)
         self.btn_position_lock = button("timelinePositionLock",
             I18N.tr("timeline.position_lock", "Position Lock"),
-            get_icon("fa5s.lock", IconColors.DEFAULT), True)
+            timeline_icon("position_lock"), True)
         self.btn_position_lock.toggled.connect(self._on_position_lock_toggled)
         self.btn_replace = button("timelineReplaceClip",
             I18N.tr("timeline.replace_clip", "Replace Clip"),
@@ -748,7 +751,7 @@ class TimelinePanel(QWidget):
         self.btn_replace.clicked.connect(self.source_replace_requested.emit)
         self._flag_color: str = "#4BA6DD"
         self.btn_flag = button("timelineFlags", I18N.tr("timeline.flags", "Flags"),
-            get_icon("fa5s.flag", self._flag_color))
+            timeline_icon("flag", self._flag_color))
         self.btn_flag.clicked.connect(lambda: self.flag_requested.emit(self._flag_color))
         self.btn_zoom_detail = button("timelineDetailZoom",
             I18N.tr("timeline.zoom.detail", "Detail Zoom"),
@@ -781,9 +784,10 @@ class TimelinePanel(QWidget):
 
         def separator() -> None:
             line = QFrame(toolbar)
-            line.setFrameShape(QFrame.Shape.VLine)
-            line.setFixedSize(9, 18)
-            line.setStyleSheet(f"color: {EDIT_COLORS['border_subtle']};")
+            line.setFrameShape(QFrame.Shape.NoFrame)
+            line.setFixedSize(1, 18)
+            line.setStyleSheet(f"background: {EDIT_COLORS['border_subtle']}; border: none;")
+            line.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             self._toolbar_separators.append(line)
             add(line)
 
@@ -818,6 +822,15 @@ class TimelinePanel(QWidget):
                 widget.setFixedSize(28, 28)
                 widget.setIconSize(QSize(18, 18))
         self.zoom_slider.setFixedWidth(92)
+        self.zoom_slider.setStyleSheet(f"""
+            QSlider {{ background: transparent; border: none; padding: 0; margin: 0; }}
+            QSlider::groove:horizontal {{ height: 3px; border: none; margin: 0;
+                background: {EDIT_COLORS['border']}; border-radius: 1px; }}
+            QSlider::sub-page:horizontal, QSlider::add-page:horizontal {{
+                background: transparent; border: none; }}
+            QSlider::handle:horizontal {{ width: 9px; height: 9px; margin: -3px 0;
+                border: none; background: {EDIT_COLORS['text_muted']}; border-radius: 4px; }}
+        """)
         self.btn_flag.setFixedWidth(36)
         self.btn_marker.setFixedWidth(36)
         self._timeline_zoom_widgets = {
@@ -951,7 +964,7 @@ class TimelinePanel(QWidget):
             (value, _flag_titles.get(value, value))
             for value in CLIP_FLAG_COLORS
         ):
-            action = flags.addAction(get_icon("fa5s.flag", color), title)
+            action = flags.addAction(timeline_icon("flag", color), title)
             action.setCheckable(True)
             action.setChecked(color == self._flag_color)
             group.addAction(action)
@@ -964,7 +977,7 @@ class TimelinePanel(QWidget):
 
     def _choose_flag_color(self, color: str) -> None:
         self._flag_color = color
-        self.btn_flag.setIcon(get_icon("fa5s.flag", color))
+        self.btn_flag.setIcon(timeline_icon("flag", color))
         self.flag_requested.emit(color)
 
     def _set_marker_list_visible(self, visible: bool) -> None:
@@ -1008,7 +1021,7 @@ class TimelinePanel(QWidget):
         self.btn_position_lock.blockSignals(True)
         try:
             self.btn_position_lock.setChecked(enabled)
-            self.btn_position_lock.setIcon(get_icon("fa5s.lock", IconColors.ORANGE if enabled else IconColors.DEFAULT))
+            self.btn_position_lock.setIcon(timeline_icon("position_lock", IconColors.ORANGE if enabled else IconColors.DEFAULT))
         finally:
             self.btn_position_lock.blockSignals(False)
 
@@ -1042,18 +1055,28 @@ class TimelinePanel(QWidget):
             return
         self.timeline_view.apply_presentation_state(state)
         preset = state.get("zoom_preset")
+        ppf = state.get("custom_pixels_per_frame")
+        scroll = state.get("custom_scroll", 0)
+        valid_ppf = (isinstance(ppf, (int, float)) and not isinstance(ppf, bool)
+                     and (isinstance(ppf, int) or math.isfinite(ppf)) and ppf > 0)
+        valid_scroll = isinstance(scroll, int) and not isinstance(scroll, bool) and scroll >= 0
+        custom = (float(max(MIN_ZOOM, min(MAX_ZOOM, ppf))) if valid_ppf else self._custom_zoom[0],
+                  min(scroll, 2**31 - 1) if valid_scroll else 0)
+        # A saved Full/Detail view still owns a remembered Custom view.
+        # Avoid capturing the just-loaded default view over that memory.
+        self._custom_zoom = custom
         if preset in {"full", "detail"}:
+            self._zoom_preset = preset
             self._set_zoom_preset(preset)
         else:
-            ppf = state.get("custom_pixels_per_frame")
-            if isinstance(ppf, (int, float)) and ppf > 0:
-                self._custom_zoom = (float(ppf), int(
-                    state.get("custom_scroll", 0) or 0))
+            if valid_ppf:
                 self._zoom_preset = "custom"
-                self.timeline_view.set_zoom(float(ppf))
-                scroll = state.get("custom_scroll")
-                if isinstance(scroll, int) and scroll > 0:
-                    self.timeline_view.horizontalScrollBar().setValue(scroll)
+                self._applying_zoom_preset = True
+                try:
+                    self.timeline_view.set_zoom(custom[0])
+                    self.timeline_view.horizontalScrollBar().setValue(custom[1])
+                finally:
+                    self._applying_zoom_preset = False
             self._sync_zoom_preset_buttons()
         tray = state.get("keyframe_tray_visible")
         if isinstance(tray, bool):
@@ -2266,6 +2289,14 @@ class TimelinePanel(QWidget):
 
     # ==================== Linked Selection & Marker ====================
 
+    def _sync_linked_selection(self, enabled: bool) -> None:
+        self.btn_linked_selection.blockSignals(True)
+        try:
+            self.btn_linked_selection.setChecked(enabled)
+            self.btn_linked_selection.setIcon(icon_link(IconColors.DEFAULT) if enabled else icon_unlink(IconColors.DEFAULT))
+        finally:
+            self.btn_linked_selection.blockSignals(False)
+
     def _on_linked_selection_toggled(self) -> None:
         """Handle linked selection button toggle — controls whether linked A/V clips move together."""
         enabled = self.btn_linked_selection.isChecked()
@@ -2777,6 +2808,8 @@ class TimelinePanel(QWidget):
                 )
                 self._keyframe_tray = EditKeyframeTray(
                     self.timeline_view, self)
+                self._keyframe_tray.close_requested.connect(
+                    lambda: self.set_keyframe_tray_visible(False))
                 layout = self.layout()
                 if layout is not None:
                     layout.insertWidget(

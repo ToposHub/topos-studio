@@ -402,6 +402,7 @@ class EditPage(QWidget):
 
             self._sync_program_guide_from_timeline()
 
+        self._connect_trim_monitor_to_viewer()
         # Connect transport bar (ProgramViewerWidget <-> TimelinePanel)
         self._connect_transport_to_timeline()
 
@@ -509,12 +510,31 @@ class EditPage(QWidget):
 
             logger.debug("TimelinePanel connected to EditPage")
 
+        self._connect_trim_monitor_to_viewer()
         # Connect transport bar (ProgramViewerWidget <-> TimelinePanel)
         self._connect_transport_to_timeline()
 
         # W08：manager 已存在时，把电平订阅换到新附着的 panel 上
         if self._audio_manager is not None:
             self._reconnect_timeline_level_meter()
+
+    def _connect_trim_monitor_to_viewer(self) -> None:
+        """Register the canvas host in either panel/viewer attachment order."""
+        from PyQt6 import sip
+        def alive(value: Any) -> bool:
+            return not isinstance(value, QObject) or not sip.isdeleted(value)
+        previous = getattr(self, "_trim_monitor_timeline_view", None)
+        panel = self._timeline_panel
+        current = panel.get_timeline_view() if panel is not None and alive(panel) else None
+        if previous is not None and previous is not current and alive(previous):
+            previous.set_trim_monitor_host(None)
+        viewer = self._program_viewer
+        host = viewer if alive(viewer) and callable(getattr(viewer, "set_trim_monitor", None)) else None
+        if current is not None and alive(current) and callable(getattr(current, "set_trim_monitor_host", None)):
+            current.set_trim_monitor_host(host)
+            self._trim_monitor_timeline_view = current
+        else:
+            self._trim_monitor_timeline_view = None
 
     # ==================== W09: Centralized Toolbar Request Binding ====================
 

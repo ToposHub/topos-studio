@@ -1,0 +1,35 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 19 items
+
+docs/audit/2026-11-08-timeline-review/ui_evidence/drag_audit_probe.py Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 457 ms. Replace uses of missing font family "SF Mono" with one that exists to avoid this cost. 
+AUDIT move {"preview": {"targets": {"v": "v1", "a": "a1"}, "start": 120, "height": 82, "target_height": 140.0, "ghosts": {}}, "result": [["v", "v1", 120, "a"], ["a", "a1", 120, "v"]], "undo": 1}
+.AUDIT cross {"preview": {"targets": {"v": "v2", "a": "a2"}, "start": 120, "height": 82, "target_height": 140.0, "ghosts": {}}, "result": [["v", "v2", 120, "a"], ["a", "a2", 120, "v"]], "undo": 1}
+.AUDIT copy {"preview": {"targets": {"v": "v1", "a": "a1"}, "start": 220, "height": 82, "target_height": 140.0, "ghosts": {"v": [220, 82], "a": [220, 66]}}, "result": [["v", "v1", 100, "a"], ["4cce290a-9721-4417-bbbd-87a9934f882d", "v1", 220, "0de78c90-4703-45b9-9e48-f3976ff6e977"], ["a", "a1", 100, "v"], ["0de78c90-4703-45b9-9e48-f3976ff6e977", "a1", 220, "4cce290a-9721-4417-bbbd-87a9934f882d"]], "undo": 1}
+.AUDIT copy_overlap {"preview": {"targets": {"v": "v1", "a": "a1"}, "start": 150, "height": 82, "target_height": 140.0, "ghosts": {"v": [150, 82], "a": [150, 66]}}, "result": [["v", "v1", 100, "a"], ["ea931216-e73f-449f-81e1-87d51a861041", "v1", 200, "2875213b-2b1f-408a-b1b0-6fbec0b91540"], ["a", "a1", 100, "v"], ["2875213b-2b1f-408a-b1b0-6fbec0b91540", "a1", 200, "ea931216-e73f-449f-81e1-87d51a861041"]], "undo": 1}
+.AUDIT copy_cross {"preview": {"targets": {"v": "v2", "a": "a2"}, "start": 120, "height": 82, "target_height": 140.0, "ghosts": {"v": [120, 82], "a": [120, 66]}}, "result": [["v", "v1", 100, "a"], ["55fc5828-763d-45f2-a4c4-efe2d594f0e6", "v2", 120, "906666f2-7a21-49b9-aa8f-737bf00a1299"], ["a", "a1", 100, "v"], ["906666f2-7a21-49b9-aa8f-737bf00a1299", "a2", 120, "55fc5828-763d-45f2-a4c4-efe2d594f0e6"]], "undo": 1}
+.AUDIT shift_cross {"preview": {"targets": {"v": "v2", "a": "a2"}, "start": 120, "height": 82, "target_height": 140.0, "ghosts": {}}, "result": [["v", "v2", 120, "a"], ["a", "a2", 120, "v"]], "undo": 1}
+.AUDIT copy_audio_blocked {"preview": {"targets": {"v": "v1", "a": "a1"}, "start": 220, "height": 82, "target_height": 140.0, "ghosts": {"v": [220, 82], "a": [220, 66]}}, "result": [["v", "v1", 100, "a"], ["a8c22942-b458-438d-8a1f-f9d6364518a6", "v1", 220, "0795dfc9-1c88-4cd4-9c88-9cdacb328bb9"], ["a", "a1", 100, "v"], ["block", "a1", 200, null], ["0795dfc9-1c88-4cd4-9c88-9cdacb328bb9", "a1", 300, "a8c22942-b458-438d-8a1f-f9d6364518a6"]], "undo": 1}
+.AUDIT_CANCEL trim_left return trim_left same_model True undo 0 idle True
+.AUDIT_CANCEL trim_right return trim_right same_model True undo 0 idle True
+.AUDIT_CANCEL ripple_left return ripple_trim_left same_model True undo 0 idle True
+.AUDIT_CANCEL ripple_right return ripple_trim_right same_model True undo 0 idle True
+.AUDIT_CANCEL fade_in return fade_in same_model True undo 0 idle True
+.AUDIT_CANCEL fade_out return fade_out same_model True undo 0 idle True
+.AUDIT_CANCEL trim_left escape trim_left same_model True undo 0 idle True
+.AUDIT_CANCEL trim_right escape trim_right same_model True undo 0 idle True
+.AUDIT_CANCEL ripple_left escape ripple_trim_left same_model True undo 0 idle True
+.AUDIT_CANCEL ripple_right escape ripple_trim_right same_model True undo 0 idle True
+.AUDIT_CANCEL fade_in escape fade_in same_model True undo 0 idle True
+.AUDIT_CANCEL fade_out escape fade_out same_model True undo 0 idle True
+.
+
+============================== 19 passed in 2.86s ==============================

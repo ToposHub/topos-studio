@@ -56,7 +56,7 @@ from PyQt6.QtWidgets import (
     QMenu, QComboBox,
 )
 from PyQt6.QtCore import (
-    Qt, pyqtSignal, QPoint, QPointF, QSize, QRectF, QSignalBlocker,
+    Qt, pyqtSignal, QPoint, QPointF, QSize, QRectF, QSignalBlocker, QEvent, QObject,
 )
 from PyQt6.QtGui import (
     QMouseEvent, QWheelEvent, QKeyEvent, QPainter, QColor, QPen, QBrush,
@@ -3292,6 +3292,8 @@ class ProgramViewerWidget(QWidget):
         # OpenGL Viewer
         self._viewer = ProgramViewer(self._viewer_container)
         viewer_layout.addWidget(self._viewer)
+        self._trim_monitor_widget: Optional[QWidget] = None
+        self._viewer.installEventFilter(self)
 
         # Transport Control Bar (bottom)
         self._transport_bar = TransportControlBar(self)
@@ -3340,6 +3342,38 @@ class ProgramViewerWidget(QWidget):
 
         # Set minimum size
         self.setMinimumSize(200, 150)
+
+    def set_trim_monitor(self, monitor: Optional[QWidget]) -> None:
+        """Attach a passive trim overlay to the actual canvas, including fullscreen."""
+        if monitor is self._trim_monitor_widget:
+            return
+        old = self._trim_monitor_widget
+        self._trim_monitor_widget = None
+        if old is not None:
+            old.destroyed.disconnect(self._on_trim_overlay_destroyed)
+            old.hide()
+            old.setParent(self)
+        self._trim_monitor_widget = monitor
+        if monitor is not None:
+            monitor.hide()
+            monitor.setParent(self._viewer)
+            monitor.setGeometry(self._viewer.rect())
+            monitor.destroyed.connect(self._on_trim_overlay_destroyed)
+
+    def _on_trim_overlay_destroyed(self) -> None:
+        # Old overlays disconnect this slot when detached. SIP may expose a
+        # different QObject wrapper while emitting destroyed, so sender identity
+        # cannot safely decide whether the current child has gone away.
+        self._trim_monitor_widget = None
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self._viewer and event.type() in {QEvent.Type.Resize, QEvent.Type.Show}:
+            monitor = self._trim_monitor_widget
+            if monitor is not None:
+                monitor.setGeometry(self._viewer.rect())
+                if not monitor.isHidden():
+                    monitor.raise_()
+        return super().eventFilter(watched, event)
 
     def _on_zoom_changed(self, zoom_level: float) -> None:
         """Handle zoom change."""

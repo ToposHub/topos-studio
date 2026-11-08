@@ -5754,6 +5754,18 @@ class EditControllerMixin:
             clips = [timeline.get_clip_by_id(cid) for cid in clip_ids]
             clips = [c for c in clips if c is not None]
 
+            # A linked A/V pair is one editing unit. Inspect the clicked side
+            # so its effects and controls stay available, while the timeline
+            # retains both actual selected members for group editing.
+            if (len(clips) == 2
+                    and clips[0].linked_clip_id == clips[1].clip_id
+                    and clips[1].linked_clip_id == clips[0].clip_id):
+                primary = selection.primary_item
+                primary_id = primary.item_id if primary is not None else clips[0].clip_id
+                inspected = next((clip for clip in clips if clip.clip_id == primary_id), clips[0])
+                clips = [inspected]
+                clip_ids = [inspected.clip_id]
+
             # P10.3: 选了视频/音频 clip 时清除字幕手柄
             self._clear_subtitle_viewer_selection()
 

@@ -178,3 +178,176 @@ def _selection(clip_id: str) -> Any:
     from src.features.edit.core.selection import TimelineSelection
 
     return TimelineSelection().with_clip_selected(clip_id, "v1", "tray")
+
+
+def _shown_tray(qtbot: Any) -> tuple[Any, Any, Any]:
+    panel = _panel(qtbot)
+    panel.show()
+    tray = _tray(panel)
+    view = panel.get_timeline_view()
+    view.set_selection(_selection("kc"))
+    view.set_zoom(6.0)
+    view.horizontalScrollBar().setValue(0)
+    qtbot.wait(1)
+    return panel, tray, view
+
+
+def _key_point(tray: Any, frame: int) -> Any:
+    from PyQt6.QtCore import QPoint
+
+    return QPoint(round(tray._frame_to_x(frame)), 15)
+
+
+def test_tray_coordinates_align_with_timeline_after_zoom_and_scroll(qtbot: Any) -> None:
+    from PyQt6.QtCore import QPointF
+
+    panel, tray, view = _shown_tray(qtbot)
+    for zoom, scroll in ((6.0, 0), (12.0, 80), (0.75, 0)):
+        view.set_zoom(zoom)
+        view.horizontalScrollBar().setValue(scroll)
+        for frame in (10, 25, 40):
+            point = view.mapFromScene(QPointF(view._layout_engine.frame_to_x(frame), 0))
+            expected_x = tray.mapFromGlobal(view.viewport().mapToGlobal(point)).x()
+            assert tray._frame_to_x(frame) == pytest.approx(expected_x, abs=1)
+            assert tray._x_to_frame(tray._frame_to_x(frame)) == frame
+
+
+def test_real_drag_out_and_back_to_origin_has_no_commit(qtbot: Any) -> None:
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    panel, tray, view = _shown_tray(qtbot)
+    origin = _key_point(tray, 10)
+    QTest.mousePress(tray, Qt.MouseButton.LeftButton, pos=origin)
+    QTest.mouseMove(tray, _key_point(tray, 25))
+    assert tray._drag_to_frame == 25
+    QTest.mouseMove(tray, origin)
+    QTest.mouseRelease(tray, Qt.MouseButton.LeftButton, pos=origin)
+    assert not view._command_stack._undo_stack
+    assert view.get_timeline().get_clip_by_id("kc").animated_params["opacity"].has_keyframe_at(10)
+
+
+def test_real_click_claims_focus_and_escape_cancels_drag(qtbot: Any) -> None:
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication
+
+    panel, tray, view = _shown_tray(qtbot)
+    view.setFocus()
+    QTest.mousePress(tray, Qt.MouseButton.LeftButton, pos=_key_point(tray, 10))
+    QTest.mouseMove(tray, _key_point(tray, 25))
+    assert QApplication.focusWidget() is tray
+    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Escape)
+    QTest.mouseRelease(tray, Qt.MouseButton.LeftButton, pos=_key_point(tray, 25))
+    assert tray._drag_param is None
+    assert not view._command_stack._undo_stack
+
+
+@pytest.mark.parametrize("cancel", ["focus", "hide", "tool"])
+def test_drag_cancel_paths_block_late_release(qtbot: Any, cancel: str) -> None:
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from src.features.edit.ui.timeline_items import EditTool
+
+    panel, tray, view = _shown_tray(qtbot)
+    QTest.mousePress(tray, Qt.MouseButton.LeftButton, pos=_key_point(tray, 10))
+    QTest.mouseMove(tray, _key_point(tray, 25))
+    assert tray._drag_to_frame == 25
+    if cancel == "focus":
+        view.setFocus()
+    elif cancel == "hide":
+        panel.set_keyframe_tray_visible(False)
+        panel.set_keyframe_tray_visible(True)
+    else:
+        view.set_tool(EditTool.BLADE)
+    QTest.mouseRelease(tray, Qt.MouseButton.LeftButton, pos=_key_point(tray, 25))
+    assert tray._drag_param is None
+    assert not view._command_stack._undo_stack
+
+
+def test_playhead_fallback_follows_clip_without_selection(qtbot: Any) -> None:
+    from dataclasses import replace
+    from src.features.edit.core.selection import TimelineSelection
+
+    panel, tray, view = _shown_tray(qtbot)
+    timeline = _timeline()
+    later = _clip("later", 60)
+    view.load_timeline(replace(timeline, video_tracks=(replace(
+        timeline.video_tracks[0], clips=(_clip(), later)),)))
+    view.set_selection(TimelineSelection())
+    view.seek_to_frame(10)
+    assert tray._clip_id == "kc"
+    view.seek_to_frame(70)
+    assert tray._clip_id == "later"
+    assert not view._command_stack._undo_stack
+
+
+def test_switching_selected_clip_clears_key_selection(qtbot: Any) -> None:
+    from dataclasses import replace
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    panel, tray, view = _shown_tray(qtbot)
+    timeline = _timeline()
+    view.load_timeline(replace(timeline, video_tracks=(replace(
+        timeline.video_tracks[0], clips=(_clip(), _clip("later", 60))),)))
+    view.set_selection(_selection("kc"))
+    view.set_zoom(6.0)
+    QTest.mouseClick(tray, Qt.MouseButton.LeftButton, pos=_key_point(tray, 10))
+    assert tray._selected == ("opacity", 10)
+    view.set_selection(_selection("later"))
+    assert tray._selected is None
+
+
+def test_time_drag_preserves_supported_interpolation_and_key_selection(qtbot: Any) -> None:
+    from dataclasses import replace
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from src.shared.keyframe import InterpolationType
+
+    panel, tray, view = _shown_tray(qtbot)
+    timeline = _timeline()
+    clip = _clip().with_keyframe_added("opacity", 10, 0.2, InterpolationType.HOLD)
+    view.load_timeline(replace(timeline, video_tracks=(replace(
+        timeline.video_tracks[0], clips=(clip,)),)))
+    view.set_selection(_selection("kc"))
+    view.set_zoom(6.0)
+    QTest.mousePress(tray, Qt.MouseButton.LeftButton, pos=_key_point(tray, 10))
+    QTest.mouseMove(tray, _key_point(tray, 25))
+    QTest.mouseRelease(tray, Qt.MouseButton.LeftButton, pos=_key_point(tray, 25))
+    param = view.get_timeline().get_clip_by_id("kc").animated_params["opacity"]
+    moved = next(key for key in param.keyframes.keyframes if key.frame == 25)
+    assert moved.interpolation == InterpolationType.HOLD
+    assert tray._selected == ("opacity", 25)
+    assert len(view._command_stack._undo_stack) == 1
+
+
+def test_crowded_lane_hits_nearest_key_instead_of_first_key(qtbot: Any) -> None:
+    from dataclasses import replace
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    panel, tray, view = _shown_tray(qtbot)
+    timeline = _timeline()
+    clip = _clip().with_keyframe_added("opacity", 14, 0.3)
+    view.load_timeline(replace(timeline, video_tracks=(replace(
+        timeline.video_tracks[0], clips=(clip,)),)))
+    view.set_selection(_selection("kc"))
+    view.set_zoom(1.0)
+    QTest.mouseClick(tray, Qt.MouseButton.LeftButton, pos=_key_point(tray, 14))
+    assert tray._selected == ("opacity", 14)
+    assert not view._command_stack._undo_stack
+
+
+def test_visible_close_button_emits_host_request_without_content_command(qtbot: Any) -> None:
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    panel, tray, view = _shown_tray(qtbot)
+    requested: list[bool] = []
+    tray.close_requested.connect(lambda: requested.append(True))
+    assert tray._close_button.isVisible()
+    assert tray._close_button.geometry().right() < tray._content_left()
+    QTest.mouseClick(tray._close_button, Qt.MouseButton.LeftButton)
+    assert requested == [True]
+    assert not view._command_stack._undo_stack

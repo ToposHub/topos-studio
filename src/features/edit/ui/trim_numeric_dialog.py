@@ -2,20 +2,20 @@
 
 - TrimNumericDialog：输入帧增量修剪选中片段入/出点（Trim/Ripple/Roll），
   实时显示手柄余量与合法范围，支持"对齐到最近标记"。
-- TrimMonitorDialog：roll trim 拖拽期间的轻量双画面监视器（cut 两侧
-  时间码 A/B + 位移量 + 手柄余量）。帧渲染走既有 program viewer /
-  scrub 管线；本对话框负责 trim 上下文的数值显示。
+- TrimMonitorWidget：在节目视图画布内显示 roll trim 的双画面、时间码、
+  位移和手柄余量。沿用异步边界帧接口，不创建独立窗口。
+  TrimMonitorDialog 是为旧调用方保留的名称别名。
 """
 
 from __future__ import annotations
 
 from typing import Callable, Optional, Tuple
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QImage, QPixmap, QResizeEvent, QShowEvent, QHideEvent
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-    QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget, QSizePolicy,
 )
 
 from src.shared.i18n.i18n import I18N
@@ -155,7 +155,7 @@ class TrimNumericDialog(QDialog):
         )
 
 
-class TrimMonitorDialog(QWidget):
+class TrimMonitorWidget(QWidget):
     """Trim Monitor（P1-04/F2.3）：trim/roll 期间的双画面上下文显示。
 
     A = cut 左侧最后一帧（真实保留边界帧 + 时间码），B = cut 右侧首帧；
@@ -163,35 +163,37 @@ class TrimMonitorDialog(QWidget):
     真实素材帧双画面（经 TrimDualFrameProvider 后台解码，generation
     校验后投递）；解码中显示占位，无素材侧显示灰面。
 
-    窗口仍是被动上下文显示（Tool + 不抢焦点，N15），帧到达只刷新画面。
+    嵌在 ProgramViewer 的画布内；不接收焦点或鼠标，帧到达只刷新画面。
     """
 
-    _FRAME_PANEL_MIN_H = 180
+    visibility_changed = pyqtSignal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(
-            parent, Qt.WindowType.Tool | Qt.WindowType.WindowDoesNotAcceptFocus)
-        self.setWindowTitle(I18N.tr("edit.trim.monitor_title", "Trim Monitor"))
-        # N15/T3-07：Trim Monitor 是 Roll 拖拽期间被动的上下文显示窗，
-        # 不是编辑目标。show() 绝不允许激活/抢焦点——此前 Tool 窗口首
-        # 次 show 会成为 activeWindow，正在 ROLLING 的 TimelineView 收
-        # 到 ActiveWindowFocusReason 的 FocusOut，拖拽在用户松手前就被
-        # 取消、正常 Roll 无法提交。
+        super().__init__(parent)
+        self.setObjectName("TrimMonitorWidget")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setStyleSheet("QWidget#TrimMonitorWidget { background: #0b0b0d; }")
+        self._images: dict[str, QImage] = {}
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
 
         # F2.3：双画面帧区（左=左片保留边界帧，右=右片首帧）
         frames_row = QHBoxLayout()
+        frames_row.setContentsMargins(0, 0, 0, 0)
+        frames_row.setSpacing(2)
         self._frame_a = QLabel(self)
         self._frame_b = QLabel(self)
         for frame_label in (self._frame_a, self._frame_b):
             frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            frame_label.setMinimumHeight(self._FRAME_PANEL_MIN_H)
-            frame_label.setStyleSheet(
-                "background: #101014; color: #666; border-radius: 4px;")
+            frame_label.setMinimumSize(1, 1)
+            frame_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+            frame_label.setStyleSheet("background: #0b0b0d; color: #777;")
         frames_row.addWidget(self._frame_a, stretch=1)
         frames_row.addWidget(self._frame_b, stretch=1)
-        layout.addLayout(frames_row)
+        layout.addLayout(frames_row, stretch=1)
 
         tc_row = QHBoxLayout()
         self._label_a = QLabel("—", self)
@@ -199,9 +201,8 @@ class TrimMonitorDialog(QWidget):
         for label in (self._label_a, self._label_b):
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setStyleSheet(
-                "font-family: monospace; font-size: 16px; font-weight: bold;"
-                "background: #1c1c20; color: #e8e8e8; padding: 6px;"
-                "border-radius: 4px;")
+                "font-family: monospace; font-size: 12px;"
+                "background: #0b0b0d; color: #e8e8e8; padding: 2px;")
         tc_row.addWidget(self._label_a, stretch=1)
         tc_row.addWidget(self._label_b, stretch=1)
         layout.addLayout(tc_row)
@@ -222,20 +223,53 @@ class TrimMonitorDialog(QWidget):
         """新 cut 位置已请求、帧解码中——两侧显示占位（保留旧画面会被
         误读为当前边界，占位更诚实；generation 校验失败的迟到帧由调用
         方丢弃，不会覆盖占位后的新帧）。"""
+        self._images.clear()
         for frame_label in (self._frame_a, self._frame_b):
             frame_label.setPixmap(QPixmap())
+            frame_label.setToolTip("")
             frame_label.setText(I18N.tr("edit.trim.monitor_decoding", "…"))
 
-    def update_frame(self, side: str, image) -> None:
-        """显示一侧的真实边界帧（side ∈ {"left", "right"}，QImage）。"""
+    def set_frame_unavailable(self, side: str) -> None:
+        """Replace an impossible/failed frame request with an honest empty state."""
+        if side not in {"left", "right"}:
+            return
+        self._images.pop(side, None)
         target = self._frame_a if side == "left" else self._frame_b
-        target.setText("")
-        scaled = QPixmap.fromImage(image).scaled(
-            target.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        target.setPixmap(scaled)
+        target.setPixmap(QPixmap())
+        target.setText(I18N.tr("edit.trim.monitor_unavailable", "Preview unavailable"))
+        target.setToolTip(I18N.tr("edit.trim.monitor_unavailable_hint",
+            "The source is unavailable or this edit cannot be previewed yet."))
+
+    def update_frame(self, side: str, image: QImage) -> None:
+        """Project an already-decoded boundary image without invoking GL."""
+        if side not in {"left", "right"} or image.isNull():
+            return
+        # Provider images own their pixels; retain an implicitly shared QImage
+        # value so resizing does not copy full-resolution frames on every move.
+        self._images[side] = QImage(image)
+        self._rescale_frames()
+
+    def _rescale_frames(self) -> None:
+        for side, target in (("left", self._frame_a), ("right", self._frame_b)):
+            image = self._images.get(side)
+            if image is not None:
+                target.setText("")
+                target.setPixmap(QPixmap.fromImage(image).scaled(
+                    target.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation))
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._rescale_frames()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._rescale_frames()
+        self.visibility_changed.emit(True)
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        super().hideEvent(event)
+        self.visibility_changed.emit(False)
 
     def update_roll(self, tc_a: str, tc_b: str, delta_frames: int,
                     headroom: Tuple[int, int] = (0, 0)) -> None:
@@ -254,6 +288,7 @@ class TrimMonitorDialog(QWidget):
         """普通/波纹 trim 刷新：单边 TC + 位移（帧区右半留给邻片/空）。"""
         self._label_a.setText(tc or "—")
         self._label_b.setText("—")
+        self._images.pop("right", None)
         self._frame_b.setText(I18N.tr("edit.trim.monitor_no_neighbor", "—"))
         self._frame_b.setPixmap(QPixmap())
         self._delta_label.setText(I18N.tr(
@@ -264,4 +299,7 @@ class TrimMonitorDialog(QWidget):
         ).format(head=headroom[0], tail=headroom[1]))
 
 
-__all__ = ["TrimMonitorDialog", "TrimNumericDialog"]
+# Compatibility for existing imports; production always supplies a child host.
+TrimMonitorDialog = TrimMonitorWidget
+
+__all__ = ["TrimMonitorWidget", "TrimMonitorDialog", "TrimNumericDialog"]

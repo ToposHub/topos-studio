@@ -15,6 +15,13 @@ from PyQt6.QtSvg import QSvgRenderer
 from src.shared.assets.icon_manager import IconColors
 
 _PATHS: dict[str, str] = {
+    "select": '<path d="m6 2 13 11-7 1 3 7-3 1-3-7-4 5z" fill="currentColor" stroke-width=".8"/>',
+    "snap": '<path d="M5 3v10a7 7 0 0 0 14 0V3h-4v10a3 3 0 0 1-6 0V3z"/><path d="M5 7h4M15 7h4"/>',
+    "link": '<path d="m10 7 2-2a5 5 0 0 1 7 7l-3 3a5 5 0 0 1-7 0M14 17l-2 2a5 5 0 0 1-7-7l3-3a5 5 0 0 1 7 0M8 16l8-8"/>',
+    "unlink": '<path d="m12 5 1-1a5 5 0 0 1 7 7l-3 3M12 19l-1 1a5 5 0 0 1-7-7l3-3M3 3l18 18"/>',
+    "position_lock": '<path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M7 16h10m-8-2-2 2 2 2m6-4 2 2-2 2"/>',
+    "voiceover": '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/>',
+    "flag": '<path d="M5 22V3h14l-3 5 3 5H5"/>',
     "trim": '<path d="M6 3H3v18h3M18 3h3v18h-3M12 4v16M9 8l-3 4 3 4M15 8l3 4-3 4"/>',
     "blade": '<path d="M3 6h18v4l-2 2 2 2v4H3v-4l2-2-2-2zM7 6v3M17 6v3M7 15v3M17 15v3M7 12h10M12 9v6"/>',
     "dynamic_trim": '<path d="M4 5v14M20 5v14M10 8l-4 4 4 4M14 8l4 4-4 4M6 12h12"/>',
@@ -66,3 +73,19 @@ def icon_overwrite_edit(color: str = IconColors.DEFAULT) -> QIcon:
 
 def icon_marker(color: str = IconColors.DEFAULT) -> QIcon:
     return timeline_icon("marker", color)
+
+
+def icon_select_tool(color: str = IconColors.DEFAULT) -> QIcon:
+    return timeline_icon("select", color)
+
+
+def icon_snap(color: str = IconColors.DEFAULT) -> QIcon:
+    return timeline_icon("snap", color)
+
+
+def icon_link(color: str = IconColors.DEFAULT) -> QIcon:
+    return timeline_icon("link", color)
+
+
+def icon_unlink(color: str = IconColors.DEFAULT) -> QIcon:
+    return timeline_icon("unlink", color)

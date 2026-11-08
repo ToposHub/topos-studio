@@ -1,0 +1,34 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 268 items
+
+tests/edit/test_timeline_retime_controls.py .................            [  6%]
+tests/edit/test_timeline_playhead_style.py ..                            [  7%]
+tests/edit/test_timeline_clip_affordance_gestures.py ................... [ 14%]
+..............                                                           [ 19%]
+tests/edit/test_timeline_view_layout.py ................................ [ 31%]
+......................................                                   [ 45%]
+tests/edit/test_resolve_timeline_interactions.py ................        [ 51%]
+tests/edit/test_timeline_host_drag_regression.py .....                   [ 53%]
+tests/edit/test_timeline_pointer_and_chrome.py .......................   [ 61%]
+tests/edit/test_change_clip_speed_dialog.py .............                [ 66%]
+tests/edit/test_timeline_resolve_ui_review.py OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+......OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+..OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+...OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+.OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+.........OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+.OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+..OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+.  [ 76%]
+tests/edit/test_trim_professional.py ..............................      [ 87%]
+tests/edit/test_round4_linked_roll.py ..........                         [ 91%]
+tests/edit/test_round3_a_roll_focus.py ....                              [ 92%]
+tests/edit/test_subtitle_layout_persistence.py .....                     [ 94%]
+tests/edit/test_timeline_clip_speed.py ...............                   [100%]
+
+============================= 268 passed in 17.29s =============================

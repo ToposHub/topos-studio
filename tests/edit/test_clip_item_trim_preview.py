@@ -105,8 +105,9 @@ def test_trim_edge_cursors_are_distinct() -> None:
     assert left.pixmap().cacheKey() != right.pixmap().cacheKey()
 
 
-def test_clip_seam_uses_horizontal_cursor_in_trim_tools(qapp: Any) -> None:
-    """A clip seam should advertise its horizontal drag affordance."""
+def test_clip_seam_uses_roll_cursor_in_trim_tools(qapp: Any) -> None:
+    """The double-sided edit cursor must be distinct from system resize."""
+    from src.features.edit.ui.timeline_edit_affordances import edit_cursor
     handle = RollHandleItem(
         left_clip_id="left",
         right_clip_id="right",
@@ -118,7 +119,7 @@ def test_clip_seam_uses_horizontal_cursor_in_trim_tools(qapp: Any) -> None:
 
     for tool in (EditTool.SELECT, EditTool.TRIM, EditTool.RIPPLE, EditTool.ROLL):
         handle.set_active_tool(tool)
-        assert handle.cursor().shape().name == "SizeHorCursor"
+        assert handle.cursor() == edit_cursor("roll")
 
     handle.set_active_tool(EditTool.BLADE)
     assert handle.cursor().shape().name == "ArrowCursor"

@@ -9,6 +9,43 @@
     "insights_open": "&Insights"
   },
   "edit": {
+    "trim": {
+      "monitor_unavailable": "Preview unavailable",
+      "monitor_unavailable_hint": "The source is unavailable or this edit cannot be previewed yet."
+    },
+    "retime_menu": {
+      "add_point": "Add Speed Point",
+      "clear_point": "Clear Speed Point",
+      "change_speed": "Change Speed",
+      "custom": "Change Clip Speed…",
+      "reset_segment": "Reset to 100%",
+      "freeze": "Freeze Frame",
+      "reverse": "Reverse Segment",
+      "rewind": "Rewind",
+      "speed_ramp": "Speed Ramp",
+      "ramp_up": "0% to 100%",
+      "ramp_down": "100% to 0%",
+      "smooth": "Smooth Ramp",
+      "reset_clip": "Reset Clip",
+      "pitch": "Pitch Correction",
+      "drag_hint": "Drag to change speed"
+    },
+    "speed_dialog": {
+      "title": "Change Clip Speed",
+      "speed": "Speed",
+      "fps": "Frames per Second",
+      "duration": "Duration",
+      "ripple": "Ripple Timeline",
+      "reverse": "Reverse Speed",
+      "freeze": "Freeze Frame",
+      "pitch": "Pitch Correction",
+      "keyframes": "Keyframes",
+      "maintain": "Maintain Timing",
+      "stretch": "Stretch to Fit",
+      "change": "Change",
+      "invalid_duration": "Enter a valid HH:MM:SS:FF duration within the supported speed range.",
+      "unsupported": "The selected speed options are not available yet. The clip is unchanged."
+    },
     "blend_mode": {
       "normal": "Normal",
       "multiply": "Multiply",
@@ -157,6 +194,7 @@
     "marker_color_red": "Red",
     "marker_color_yellow": "Yellow",
     "clip": {
+      "speed_change": "Speed Change",
       "add_speed_point": "Add Speed Point",
       "bypass_composite": "Bypass Composite",
       "change_speed": "Change Speed",
@@ -409,6 +447,11 @@
     "frame_unset": "Frame: --"
   },
   "timeline": {
+    "linked_trim_limit": "Linked clips cannot be trimmed by the same amount. The edit was not applied.",
+    "fade_duration": "Fade: {frames} frames",
+    "trim_in_hint": "Trim In",
+    "trim_out_hint": "Trim Out",
+    "close_keyframe_tray": "Close Keyframe Tray",
     "empty_title": "No Timeline Yet",
     "empty_hint": "Create a timeline or drag media here to begin editing",
     "marker": {
