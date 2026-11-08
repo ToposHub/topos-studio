@@ -1758,12 +1758,6 @@ class SetClipSpeedSettingsCommand:
             timeline_duration_for_source,
         )
 
-        base = (clip.speed if isinstance(clip.speed, _SP)
-                else _SP(speed=float(clip.speed)))
-        new_params = (base.with_speed(float(self.speed))
-                      .with_reverse(bool(self.reverse))
-                      .with_preserve_pitch(bool(self.preserve_pitch)))
-
         seq_fps = getattr(timeline, "fps", None)
         seq_fps_num = seq_fps.num if hasattr(seq_fps, "num") else None
         seq_fps_den = seq_fps.den if hasattr(seq_fps, "den") else 1
@@ -1782,27 +1776,56 @@ class SetClipSpeedSettingsCommand:
                  _copy.deepcopy(member.effects)),
             )
 
+        def _member_params(member_clip: ClipInstance) -> "_SP":
+            """R01：逐成员能力校验 + 从**成员自己的 base** 派生新参数。
+
+            互链伙伴的曲线窗口（curve_offset/curve_length）等非目标
+            字段不因主片 base 被静默覆盖；速度点/冻结在成员级拒绝
+            （防绕过接收层直连命令）。校验先于任何轨重建完成。
+            """
+            if isinstance(member_clip.speed, _SP):
+                if member_clip.speed.is_variable_speed:
+                    raise ValueError(
+                        f"Speed-point curves are not supported by this "
+                        f"operation yet (clip {member_clip.clip_id!r}); "
+                        f"the group is unchanged.")
+                base = member_clip.speed
+            else:
+                base = _SP(speed=float(member_clip.speed))
+            if member_clip.freeze_source_frame is not None:
+                raise ValueError(
+                    f"Clip {member_clip.clip_id!r} is already frozen; "
+                    f"speed settings are not supported yet.")
+            return (base.with_speed(float(self.speed))
+                    .with_reverse(bool(self.reverse))
+                    .with_preserve_pitch(bool(self.preserve_pitch)))
+
         members = [clip] + ([linked] if linked is not None else [])
-        member_plans: list[tuple[ClipInstance, ClipInstance, int]] = []
+        member_plans: list[tuple] = []
         for member in members:
             member_track = timeline.get_track_by_id(member.track_id)
             member_clip = member_track.get_clip_by_id(member.clip_id)
+            member_new_params = _member_params(member_clip)
             if self.freeze:
                 new_duration = max(1, int(self.duration_frames))
             else:
                 new_duration = timeline_duration_for_source(
-                    member_clip.source_duration, new_params,
+                    member_clip.source_duration, member_new_params,
                     member_clip._source_fps_num, member_clip._source_fps_den,
                     member_clip._timeline_fps_num or seq_fps_num,
                     member_clip._timeline_fps_den or seq_fps_den,
                 )
-            member_plans.append((member_track, member_clip, new_duration))
+            member_plans.append(
+                (member_track, member_clip, new_duration,
+                 member_new_params))
             snapshots.append(_member_snapshot(member_clip))
 
         # 无变化判定（速度参数、冻结态、时长都不变）→ no-op 同一实例
         primary_new = member_plans[0]
+        main_base = (clip.speed if isinstance(clip.speed, _SP)
+                     else _SP(speed=float(clip.speed)))
         no_change = (
-            new_params == base
+            primary_new[3] == main_base
             and primary_new[2] == clip.timeline_duration
             and (not self.freeze
                  or clip.freeze_source_frame == clip.source_start))
@@ -1810,10 +1833,11 @@ class SetClipSpeedSettingsCommand:
             return timeline
 
         result = timeline
-        for member_track, member_clip, new_duration in member_plans:
+        for member_track, member_clip, new_duration, member_new_params \
+                in member_plans:
             updated = replace(
                 member_clip,
-                speed=new_params,
+                speed=member_new_params,
                 timeline_duration=new_duration,
                 fade_in_duration=min(
                     member_clip.fade_in_duration, new_duration),
