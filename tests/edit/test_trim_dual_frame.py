@@ -203,9 +203,11 @@ class _FakeProviderHandle:
         self.stopped = False
 
     def request(self, left_path, left_frame, right_path, right_frame,
-                generation) -> None:
+                generation, request_id=None) -> None:
+        # R07：请求携带 request_id（同 generation 内的位置身份）
         self.requests.append(
-            (left_path, left_frame, right_path, right_frame, generation))
+            (left_path, left_frame, right_path, right_frame, generation,
+             request_id))
 
     def invalidate(self) -> None:
         self.invalidated += 1
@@ -237,7 +239,8 @@ class TestRollDualFrameWiring:
         view._on_roll_trim_dragged(10)
 
         assert len(fake.requests) >= 2  # started + dragged
-        left_path, left_frame, right_path, right_frame, gen = fake.requests[-1]
+        left_path, left_frame, right_path, right_frame, gen, _rid = \
+            fake.requests[-1]
         assert gen == 1
         # 无工程（素材缺失）→ 路径为 None，帧值仍按权威源窗计算
         from src.features.edit.core.timeline_v2 import ClipInstance  # noqa: F401

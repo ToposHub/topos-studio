@@ -4882,13 +4882,36 @@ class TimelineView(QGraphicsView):
         if provider is not None:
             provider.invalidate()
 
-    def _request_trim_dual_frames(self, left_clip, right_clip, delta: int) -> None:
-        """F2.3：请求左右片真实保留边界帧（素材源帧，与预览同源权威值）。
+    def _authoritative_boundary(self, clip, offset_from_clip_start: int):
+        """R07：clip 起点偏移 offset 个时间线 tick 处的**显示**源帧。
 
-        左 = 新 cut 前一帧 = ``with_right_edge_source_values`` 源窗末帧；
-        右 = 新 cut 处 = ``with_left_edge_source_values`` 源窗首帧——与
-        拖拽预览和提交命令后的源窗完全一致（"双画面对应真实保留边界，
-        单帧修剪与最终输出一致"）。素材缺失/映射失败侧传 None 保持占位。
+        走与播放/预览/导出相同的权威映射 ``timeline_to_source_frame``
+        （虚拟延伸几何覆盖越界 offset——roll/trim 拖拽查询会越过提交
+        几何）。恒速/混fps/相位、reverse、速度点曲线、冻结帧全部给出
+        与导出采样一致的帧；映射失败（ValueError）诚实退 None 保持
+        占位，不冒充。
+        """
+        from dataclasses import replace as _dc_replace
+        try:
+            virtual = _dc_replace(
+                clip, timeline_start=0,
+                timeline_duration=max(1, int(offset_from_clip_start) + 1))
+            return int(virtual.timeline_to_source_frame(
+                int(offset_from_clip_start)))
+        except (ValueError, ZeroDivisionError, OverflowError):
+            return None
+
+    def _request_trim_dual_frames(
+        self, left_clip, right_clip, delta: int,
+        *, left_offset: int | None = None, right_offset: int | None = None,
+    ) -> None:
+        """F2.3/R07：请求左右侧真实保留边界帧（权威映射 + 请求身份）。
+
+        roll：左 = 左片新 cut 前一帧（offset = duration+delta−1），
+        右 = 右片新 cut 处（offset = delta）；单边 trim/slip 由调用方
+        显式给 ``left_offset``/``right_offset``。每条请求携带单调递增
+        ``request_id``——同 generation 内慢请求迟到不得覆盖新位置。
+        素材缺失/映射失败侧传 None 保持占位。
         """
         if self._timeline is None:
             return
@@ -4901,27 +4924,11 @@ class TimelineView(QGraphicsView):
             asset = self._project.assets.get(clip.asset_id)
             return getattr(asset, "path", None) if asset is not None else None
 
-        def _display_boundary(clip, offset_from_clip_start):
-            """clip 起点偏移 offset 个时间线 tick 处的**显示**源帧。
-
-            用权威 source_frames_per_timeline_frame 比例（与命令提交后的
-            源窗数学同源）。反向/变速点片段的边界映射非恒定比例，诚实退
-            None（监视器保持占位）而非给错帧。
-            """
-            from src.features.edit.core.clip_params import SpeedParams
-            if clip.is_reverse_playback():
-                return None
-            if isinstance(clip.speed, SpeedParams) and clip.speed.speed_points:
-                return None
-            try:
-                ratio = float(clip.source_frames_per_timeline_frame())
-            except (ValueError, ZeroDivisionError):
-                return None
-            return int(round(clip.source_start + offset_from_clip_start * ratio))
-
-        left_frame = _display_boundary(
-            left_clip, left_clip.timeline_duration + delta - 1)
-        right_frame = _display_boundary(right_clip, delta)
+        left_frame = self._authoritative_boundary(
+            left_clip, left_clip.timeline_duration + delta - 1
+            if left_offset is None else left_offset)
+        right_frame = self._authoritative_boundary(
+            right_clip, delta if right_offset is None else right_offset)
 
         monitor.set_frames_pending()
         left_path = _asset_path(left_clip) if left_frame is not None else None
@@ -4930,25 +4937,40 @@ class TimelineView(QGraphicsView):
             monitor.set_frame_unavailable("left")
         if right_path is None:
             monitor.set_frame_unavailable("right")
+        request_id = getattr(self, "_trim_frame_request_seq", 0) + 1
+        self._trim_frame_request_seq = request_id
         provider.request(
             left_path,
             left_frame,
             right_path,
             right_frame,
-            self._trim_frame_generation)
+            self._trim_frame_generation,
+            request_id)
 
-    def _on_trim_frame_ready(self, side: str, frame: int, image, generation: int):
-        """双帧到达：generation 匹配才显示（旧帧不覆盖新会话）。"""
+    def _on_trim_frame_ready(
+        self, side: str, frame: int, image, generation: int,
+        request_id: int | None = None,
+    ):
+        """双帧到达：generation + request_id 双重校验（旧帧不覆盖新位置）。"""
         if generation != getattr(self, "_trim_frame_generation", 0):
+            return
+        if (request_id is not None
+                and request_id != getattr(self, "_trim_frame_request_seq", None)):
             return
         monitor = getattr(self, "_trim_monitor_dialog", None)
         if monitor is None or not monitor.isVisible():
             return
         monitor.update_frame(side, image)
 
-    def _on_trim_frame_failed(self, side: str, reason: str, generation: int) -> None:
+    def _on_trim_frame_failed(
+        self, side: str, reason: str, generation: int,
+        request_id: int | None = None,
+    ) -> None:
         """Keep a failed decoder from leaving the in-view panel loading forever."""
         if generation != getattr(self, "_trim_frame_generation", 0):
+            return
+        if (request_id is not None
+                and request_id != getattr(self, "_trim_frame_request_seq", None)):
             return
         monitor = getattr(self, "_trim_monitor_dialog", None)
         if monitor is not None and monitor.isVisible():
@@ -4976,6 +4998,120 @@ class TimelineView(QGraphicsView):
             self._request_trim_dual_frames(left_clip, right_clip, delta)
         except Exception as e:
             logger.debug("Trim monitor update skipped: %s", e)
+
+    def _show_single_trim_monitor(
+        self, clip, edge: str, new_edge: int,
+    ) -> None:
+        """R07①：单边 trim 监视器——被修边真实帧 + 邻片/空位。
+
+        模式定义（与 roll 的双邻片模式相对）：
+
+        - 左修（``edge="left"``，new_edge=新入点帧）：A 面板 = 被修片
+          新入点首帧；B 面板 = 覆盖 cut−1 帧的左邻片边界帧，无邻片
+          覆盖（空位）时显式占位；
+        - 右修（``edge="right"``，new_edge=新出点帧）：A 面板 = 被修片
+          最后保留帧（new_edge−1）；B 面板 = 覆盖 new_edge 的右邻片
+          首帧，空位显式占位。
+
+        边界帧经权威映射（``_authoritative_boundary``），与导出采样
+        一致；被修侧的源窗用方向感知的 ``with_*_edge_source_values``
+        （RI-07/R18 同源）。
+        """
+        from dataclasses import replace as _dc_replace
+        from src.features.edit.core.timeline_ops import clip_handle_headroom
+        if self._timeline is None:
+            return
+        track = self._timeline.get_track_by_id(clip.track_id)
+        if track is None:
+            return
+        if edge == "left":
+            delta = new_edge - clip.timeline_start
+            if delta == 0:
+                return
+            new_duration = clip.timeline_end - new_edge
+            if new_duration <= 0:
+                return
+            src_start, src_dur = clip.with_left_edge_source_values(new_edge)
+            edited = _dc_replace(
+                clip, timeline_start=0, timeline_duration=new_duration,
+                source_start=src_start, source_duration=src_dur)
+            left_offset = 0
+            neighbor = next((
+                c for c in track.clips
+                if c.clip_id != clip.clip_id
+                and c.timeline_start <= new_edge - 1 < c.timeline_end), None)
+            right_offset = (
+                new_edge - 1 - neighbor.timeline_start
+                if neighbor is not None else None)
+            tc = self._tc(new_edge)
+        else:
+            delta = new_edge - clip.timeline_end
+            if delta == 0:
+                return
+            new_duration = new_edge - clip.timeline_start
+            if new_duration <= 0:
+                return
+            src_start, src_dur = clip.with_right_edge_source_values(new_duration)
+            edited = _dc_replace(
+                clip, timeline_start=0, timeline_duration=new_duration,
+                source_start=src_start, source_duration=src_dur)
+            left_offset = new_duration - 1
+            neighbor = next((
+                c for c in track.clips
+                if c.clip_id != clip.clip_id
+                and c.timeline_start <= new_edge < c.timeline_end), None)
+            right_offset = (
+                new_edge - neighbor.timeline_start
+                if neighbor is not None else None)
+            tc = self._tc(new_edge - 1)
+        try:
+            monitor = self._trim_monitor()
+            item = self._items_map.get(clip.clip_id)
+            max_frames = getattr(item, "_max_source_frames", 0) or 0
+            head, tail = clip_handle_headroom(clip, max_frames)
+            monitor.update_trim(tc, delta, headroom=(head, tail))
+            self._last_trim_preview_frame = new_edge
+            if self._trim_monitor_host is not None and monitor.isHidden():
+                monitor.show()
+                monitor.raise_()
+            self._request_trim_dual_frames(
+                edited, neighbor if neighbor is not None else clip, delta,
+                left_offset=left_offset, right_offset=right_offset)
+        except Exception as e:
+            logger.debug("Trim monitor update skipped: %s", e)
+
+    def _show_slip_monitor(self, clip, delta: int) -> None:
+        """R07①：slip 监视器——新源窗首末帧（同片双画面）。
+
+        slip 只平移源窗（时间线几何不动）：A = 新窗口首帧、B = 新窗口
+        末帧，Δ = 源帧位移。滑出可用范围由 slip 边界预检在预览层拒绝，
+        这里不做第二次钳制。
+        """
+        from dataclasses import replace as _dc_replace
+        from src.features.edit.core.timeline_ops import clip_handle_headroom
+        if self._timeline is None or clip is None or delta == 0:
+            return
+        try:
+            slipped = _dc_replace(
+                clip, source_start=max(0, clip.source_start + delta))
+            monitor = self._trim_monitor()
+            item = self._items_map.get(clip.clip_id)
+            max_frames = getattr(item, "_max_source_frames", 0) or 0
+            head, tail = clip_handle_headroom(clip, max_frames)
+            last = max(0, slipped.source_start + slipped.source_duration - 1)
+            monitor.update_roll(
+                self._tc(slipped.source_start), self._tc(last),
+                delta, headroom=(head, tail))
+            self._last_trim_preview_frame = clip.timeline_end
+            if self._trim_monitor_host is not None and monitor.isHidden():
+                monitor.show()
+                monitor.raise_()
+            self._request_trim_dual_frames(
+                slipped, slipped, delta,
+                left_offset=0,
+                right_offset=clip.timeline_duration - 1)
+        except Exception as e:
+            logger.debug("Slip monitor update skipped: %s", e)
 
     def _on_clip_numeric_trim_requested(self, clip_id: str, track_id: str) -> None:
         """P1-04 数值 trim：对话框输入帧增量（含对齐标记），执行命令。"""
@@ -9522,6 +9658,9 @@ class TimelineView(QGraphicsView):
             item.setPos(x, item.y())
             item.update()
 
+            # R07①：单边 trim 监视器（被修边真实帧 + 邻片/空位）
+            self._show_single_trim_monitor(clip, "left", new_start)
+
             # Sync linked clip visual preview if applicable
             if self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
                 linked_item = self._items_map.get(clip.linked_clip_id)
@@ -9724,6 +9863,10 @@ class TimelineView(QGraphicsView):
                             )
                             linked_item._update_geometry()
                         linked_item.update()
+
+            # R07①：单边 trim 监视器（被修边真实帧 + 邻片/空位）
+            self._show_single_trim_monitor(
+                clip, "right", clip.timeline_start + new_duration)
 
     def _revert_trim_visuals_to_model(self, clip_id: str,
                                       include_linked: bool = True) -> None:
@@ -10275,6 +10418,9 @@ class TimelineView(QGraphicsView):
             item.setPos(self._layout_engine.frame_to_x(clip.timeline_start), item.y())
             item.update()
         self._items_map[clip_id]._slip_delta = delta
+        # R07①：slip 监视器——新源窗首末帧（slide 不改源窗，不进监视器）
+        if not slide:
+            self._show_slip_monitor(preview.get_clip_by_id(clip_id), delta)
 
     def _finish_source_edit(
         self, clip_id: str, track_id: str, delta_frames: int, *, slide: bool,
