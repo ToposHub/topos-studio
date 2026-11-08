@@ -1,0 +1,14 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 47 items
+
+tests/edit/test_audio_signature_completeness.py ........................ [ 51%]
+..                                                                       [ 55%]
+tests/edit/test_fade_preview_signature_regression.py .                   [ 57%]
+tests/edit/test_timeline_retime_controls.py ....................         [100%]
+
+============================== 47 passed in 6.56s ==============================

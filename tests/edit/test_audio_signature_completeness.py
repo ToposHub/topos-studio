@@ -334,3 +334,14 @@ class TestSignatureStability:
         sig_ab = _sig(edit_page, (t1, t2))
         sig_ab2 = _sig(edit_page, (t1, t2))
         assert sig_ab == sig_ab2
+
+
+def test_fade_curve_only_change_invalidates_realtime_audio_signature(edit_page):
+    """Changing the envelope shape must reach the live graph before next play."""
+    from dataclasses import replace
+    original = _base_track(clips=(_clip(fade_in_duration=20, fade_curve='linear'),))
+    changed = replace(original, clips=(replace(original.clips[0], fade_curve='smooth'),))
+    signature = _sig(edit_page, (original,))
+    assert _sig(edit_page, (changed,)) != signature
+    restored = replace(changed, clips=(original.clips[0],))
+    assert _sig(edit_page, (restored,)) == signature

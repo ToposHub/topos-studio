@@ -1113,6 +1113,9 @@ from .ripple_commands import (
 
 
 _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
+    "MoveSpeedPointCommand": MoveSpeedPointCommand.from_dict,
+    "SetClipSpeedSettingsCommand": SetClipSpeedSettingsCommand.from_dict,
+    "SetFadeCurveCommand": SetFadeCurveCommand.from_dict,
     "TimelineProjectTransactionCommand": TimelineProjectTransactionCommand.from_dict,
     "TimelineSettingsCommand": TimelineSettingsCommand.from_dict,
     "AddClipCommand": AddClipCommand.from_dict,

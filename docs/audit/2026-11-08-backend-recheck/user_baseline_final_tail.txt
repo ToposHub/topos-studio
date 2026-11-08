@@ -1,0 +1,26 @@
+HEAD is now at f1acf2b2 feat(edit): resolve timeline parity UI pass — edit affordances, clip speed dialog, embedded trim monitor
+    I18N.tr("tooltip.toggle_split", "Toggle Split View (\\\)"))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/edit/ai_editing/test_import_builder.py::test_build_online_and_offline_assets
+FAILED tests/edit/ai_editing/test_import_builder.py::test_otio_style_derives_assets_from_clips
+FAILED tests/edit/ai_editing/test_import_builder.py::test_collect_asset_rows_for_preview
+FAILED tests/edit/ai_editing/test_import_builder.py::test_corrupt_asset_probe_failure_degrades_not_aborts
+FAILED tests/edit/test_fix_ui2_aud3.py::test_retime_segment_speed_menu_builds_without_name_error
+FAILED tests/edit/test_fix_wd13g69_aud.py::TestApplyLutProjectRoot::test_relative_name_resolves_to_project_root_luts
+FAILED tests/edit/test_fix_wd13g69_aud.py::TestApplyLutProjectRoot::test_absolute_path_passthrough
+FAILED tests/edit/test_linked_ripple_revision_proxy_jobs.py::test_ripple_independent_when_linked_selection_off
+FAILED tests/edit/test_n03_grade_degrade_gate.py::TestKeyerDegradeHardGate::test_keyer_failure_refuses_by_default
+FAILED tests/edit/test_n03_grade_degrade_gate.py::TestKeyerDegradeHardGate::test_keyer_failure_allowed_when_declared
+FAILED tests/edit/test_n03_grade_degrade_gate.py::TestKeyerDegradeHardGate::test_postprocess_drop_refuses_by_default
+FAILED tests/edit/test_n03_grade_degrade_gate.py::TestKeyerDegradeHardGate::test_postprocess_drop_allowed_when_declared
+FAILED tests/edit/test_n03_grade_degrade_gate.py::TestKeyerDegradeHardGate::test_no_qualifier_unchanged
+FAILED tests/edit/test_n03_layers_mask_preflight.py::TestMaskConsumption::test_analytic_circle_mask_restricts_grade
+FAILED tests/edit/test_n03_layers_mask_preflight.py::TestMaskConsumption::test_unsupported_curve_mask_refuses_by_default
+FAILED tests/edit/test_n03_layers_mask_preflight.py::TestMaskConsumption::test_unsupported_mask_allowed_when_declared
+FAILED tests/edit/test_timeline_clip_affordance_gestures.py::test_a_short_clip_still_exposes_and_edits_its_fade_tab
+FAILED tests/edit/test_timeline_clip_affordance_gestures.py::test_fade_tab_is_rectangular_and_fade_does_not_cover_clip_name_strip
+FAILED tests/edit/test_timeline_disable_shortcut.py::test_plain_d_dispatches_the_selected_clip_enable_toggle
+FAILED tests/edit/test_timeline_pointer_and_chrome.py::test_clip_hover_does_not_write_arrow_before_the_item_hand_cursor
+==== 20 failed, 12073 passed, 117 skipped, 1 warning in 1506.78s (0:25:06) =====

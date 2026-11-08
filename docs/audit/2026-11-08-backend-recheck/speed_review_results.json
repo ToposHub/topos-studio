@@ -1,0 +1,91 @@
+{
+  "meaning": "OBSERVATIONS ONLY; exit 0 is not a correctness assertion",
+  "head": "7dee505cd2180f73dce7c276bc6a78e3b7a1f7b2",
+  "issues": [
+    {
+      "id": "S01",
+      "category": "backend",
+      "priority": "P1",
+      "problem": "B14 capability preflight omits reciprocal partner",
+      "expected": "Reject unsupported partner curves before editing any member",
+      "observed": {
+        "plan_executable": true,
+        "partner_points_before": [
+          {
+            "source_offset": 50,
+            "speed": 2.0,
+            "easing": "linear"
+          }
+        ],
+        "partner_points_after": []
+      }
+    },
+    {
+      "id": "S02a",
+      "category": "backend",
+      "priority": "P1",
+      "problem": "SetClipSpeedSettingsCommand undo omits transition snapshots",
+      "observed": {
+        "transition_duration_before": 80,
+        "transition_duration_after": 50,
+        "transition_duration_undo": 50,
+        "clip_duration_undo": 100
+      }
+    },
+    {
+      "id": "S02b",
+      "category": "backend",
+      "priority": "P1",
+      "problem": "MoveSpeedPointCommand undo omits transition snapshots",
+      "observed": {
+        "transition_duration_before": 70,
+        "transition_duration_after": 21,
+        "transition_duration_undo": 21,
+        "clip_duration_undo": 82
+      }
+    },
+    {
+      "id": "S03",
+      "category": "UI",
+      "priority": "P1",
+      "problem": "Clear-point UI branch lets linked lock rejection escape its Qt slot",
+      "observed": {
+        "escaped_exception": null,
+        "status_messages": [],
+        "model_unchanged": true
+      },
+      "note": "May close during this review as the parent fixes UI; use original committed baseline to reproduce historical finding"
+    },
+    {
+      "id": "S04",
+      "category": "UI",
+      "priority": "P2",
+      "problem": "Retime item projects full-curve coordinates into a window-relative menu API",
+      "expected_boundary_offset": 16,
+      "observed": {
+        "displayed_segment_offsets": [
+          0,
+          16
+        ],
+        "status_messages": [],
+        "remaining_points": []
+      },
+      "note": "May close during this review as the parent fixes UI; use original committed baseline to reproduce historical finding"
+    },
+    {
+      "id": "S05",
+      "category": "backend timing adapter",
+      "priority": "P2",
+      "problem": "B18 ratio uses an already-rounded original duration",
+      "observed": {
+        "source_duration": 5,
+        "original_speed": 3.0,
+        "original_duration": 2,
+        "requested_duration": 10,
+        "committed_speed": 0.6,
+        "committed_duration": 8
+      },
+      "expected": "The authoritative source/fps/phase integration solves requested duration directly; the committed edge matches preview"
+    }
+  ]
+}

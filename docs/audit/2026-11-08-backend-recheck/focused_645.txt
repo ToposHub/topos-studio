@@ -1,0 +1,56 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 645 items
+
+tests/edit/test_backend_review_command_roundtrip.py .....                [  0%]
+tests/edit/test_audio_signature_completeness.py ........................ [  4%]
+..                                                                       [  4%]
+tests/edit/test_fade_preview_signature_regression.py .                   [  4%]
+tests/edit/test_timeline_retime_controls.py ....................         [  8%]
+tests/edit/test_fade_curve.py .......                                    [  9%]
+tests/edit/test_move_speed_point.py .........                            [ 10%]
+tests/edit/test_speed_settings_reception.py ..............               [ 12%]
+tests/edit/test_alt_copy_group_plan.py .....                             [ 13%]
+tests/edit/test_linked_numeric_trim.py .......                           [ 14%]
+tests/edit/test_voiceover_completion.py ........                         [ 15%]
+tests/edit/test_replace_edit_and_voiceover.py .........................  [ 19%]
+tests/edit/test_rate_stretch.py ..........                               [ 21%]
+tests/edit/test_timeline_clip_speed.py ..................                [ 24%]
+tests/edit/test_presentation_state_and_levels.py .............           [ 26%]
+tests/edit/test_audio_playback.py ...................................... [ 31%]
+...................................................................      [ 42%]
+tests/edit/test_position_lock_policy.py ....................             [ 45%]
+tests/edit/test_clip_flags.py ................                           [ 47%]
+tests/edit/test_embedded_trim_monitor.py ...............                 [ 50%]
+tests/edit/test_timeline_playhead_style.py ......................        [ 53%]
+tests/edit/test_timeline_clip_affordance_gestures.py ................... [ 56%]
+..............                                                           [ 58%]
+tests/edit/test_timeline_view_layout.py ................................ [ 63%]
+......................................                                   [ 69%]
+tests/edit/test_resolve_timeline_interactions.py ................        [ 72%]
+tests/edit/test_timeline_host_drag_regression.py .....                   [ 72%]
+tests/edit/test_timeline_pointer_and_chrome.py .......................   [ 76%]
+tests/edit/test_change_clip_speed_dialog.py .............                [ 78%]
+tests/edit/test_timeline_resolve_ui_review.py OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+......OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+....OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+.OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+.OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+.........OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+...OpenCV: Couldn't read video stream from file "/tmp/resolve-ui-review-missing.mp4"
+.  [ 82%]
+tests/edit/test_trim_professional.py ..............................      [ 86%]
+tests/edit/test_round4_linked_roll.py ..........                         [ 88%]
+tests/edit/test_round3_a_roll_focus.py ....                              [ 89%]
+tests/edit/test_subtitle_layout_persistence.py .....                     [ 89%]
+tests/edit/test_trim_dual_frame.py ...............                       [ 92%]
+tests/edit/test_round4_interaction_commit.py ............                [ 94%]
+tests/edit/test_program_viewer_toolbar.py ...........                    [ 95%]
+tests/edit/test_edit_page_playback_preview.py .......................... [ 99%]
+.                                                                        [100%]
+
+============================= 645 passed in 25.41s =============================

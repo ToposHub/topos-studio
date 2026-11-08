@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 29 items
+
+tests/edit/test_fade_preview_signature_regression.py ..                  [  6%]
+tests/edit/test_edit_page_playback_preview.py .......................... [ 96%]
+.                                                                        [100%]
+
+============================== 29 passed in 6.97s ==============================

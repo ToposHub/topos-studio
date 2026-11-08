@@ -24,9 +24,9 @@ from PyQt6.QtWidgets import (
     QSlider, QFrame, QLineEdit, QDialog, QDialogButtonBox,
     QApplication, QTreeWidgetItem, QMenu, QWidgetAction, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QEvent
 import math
-from PyQt6.QtGui import QAction, QActionGroup, QShortcut, QKeySequence
+from PyQt6.QtGui import QAction, QActionGroup, QShortcut, QKeySequence, QKeyEvent
 
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.panel_divider import PanelDockWidget
@@ -1567,9 +1567,21 @@ class TimelinePanel(QWidget):
         # QLineEdit 内输入 j/k/l 不得触发变速（此前仅查窗口归属）。
         return shortcut_owner_window_active(self) and not text_input_focused()
 
+    def _route_dynamic_trim_shortcut(self, key: Qt.Key) -> bool:
+        """A window shortcut must honor an active cut edit before transport."""
+        from src.features.edit.ui.timeline_interaction import InteractionState
+        view = self.timeline_view
+        if (view._interaction.state != InteractionState.ROLLING
+                or view._roll_preview_state is None):
+            return False
+        view.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, key, QApplication.keyboardModifiers()))
+        return True
+
     def _on_j_pressed(self) -> None:
         """Handle J key press (backward shuttle)."""
         if not self._transport_context_active():
+            return
+        if self._route_dynamic_trim_shortcut(Qt.Key.Key_J):
             return
         self._playback_controller.jkl_backward_press()
         # Start timer to reset counts after idle
@@ -1579,11 +1591,15 @@ class TimelinePanel(QWidget):
         """Handle K key press (pause)."""
         if not self._transport_context_active():
             return
+        if self._route_dynamic_trim_shortcut(Qt.Key.Key_K):
+            return
         self._playback_controller.jkl_stop()
 
     def _on_l_pressed(self) -> None:
         """Handle L key press (forward shuttle)."""
         if not self._transport_context_active():
+            return
+        if self._route_dynamic_trim_shortcut(Qt.Key.Key_L):
             return
         self._playback_controller.jkl_forward_press()
         # Start timer to reset counts after idle

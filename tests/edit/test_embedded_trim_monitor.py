@@ -299,3 +299,27 @@ def test_decode_failure_is_visible_and_stale_failure_cannot_replace_frame(qtbot:
     assert 'left' not in monitor._images
     assert monitor._frame_a.text() != '…'
     assert monitor._frame_a.pixmap().isNull()
+
+
+def test_window_transport_shortcut_respects_active_roll_even_if_toolbar_has_focus(qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.features.edit.ui.timeline_panel import TimelinePanel
+    panel = TimelinePanel()
+    qtbot.addWidget(panel)
+    timeline = TimelineSequence('shortcut-roll', 'Shortcut roll', fps=24,
+        video_tracks=(EditTrack('v', 'V1', 'video', 0, clips=(
+            ClipInstance('left', 'asset', 'v', 0, 100, 0, 100),
+            ClipInstance('right', 'asset', 'v', 100, 100, 100, 100),
+        )),))
+    panel.load_timeline(timeline)
+    view = panel.get_timeline_view()
+    for item in view._items_map.values():
+        item._max_source_frames = 1000
+    monkeypatch.setattr(panel, '_transport_context_active', lambda: True)
+    view._on_roll_trim_started('left', 'right', 100)
+    panel._on_l_pressed()
+    assert view._roll_preview_state['delta'] == 1
+    panel._on_j_pressed()
+    panel._on_k_pressed()
+    assert view._roll_preview_state['delta'] == 0
+    assert panel._playback_controller.state.value != 'playing'
+    view._cancel_current_interaction()

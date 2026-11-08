@@ -811,6 +811,7 @@ class ClipItem(QGraphicsObject):
         # Phase 2: 片段徽章和标记属性
         self._speed = speed  # 播放速度倍率
         self._retime_points = tuple(retime_points)
+        self._retime_window_base_speed: float | None = None
         self._retime_menu_pending_x: float | None = None
         self._retime_reverse = False
         self._original_retime_speed: float = float(speed)
@@ -3675,6 +3676,24 @@ class ClipItem(QGraphicsObject):
 
         painter.restore()
 
+    def set_retime_presentation(self, speed: object) -> None:
+        """Project curve coordinates into this clip's visible source window."""
+        self._speed = float(speed) if isinstance(speed, (int, float)) else float(getattr(speed, "speed", 1.0))
+        self._retime_reverse = bool(getattr(speed, "reverse", False))
+        self._retime_preserve_pitch = bool(getattr(speed, "preserve_pitch", False))
+        origin = int(getattr(speed, "curve_offset", 0))
+        points = tuple(getattr(speed, "speed_points", ()))
+        base_speed = self._speed
+        for point in points:
+            if point.source_offset <= origin:
+                base_speed = point.speed
+        self._retime_window_base_speed = base_speed if points and origin else None
+        visible = tuple(point for point in points
+                        if origin < point.source_offset < origin + self._source_duration)
+        self._retime_points = tuple((point.source_offset - origin, point.speed) for point in visible)
+        self._retime_point_easings = tuple(
+            (point.source_offset - origin, point.speed, point.easing) for point in visible)
+
     def _retime_segments(self) -> tuple[tuple[int, int, float, int], ...]:
         """Return source and timeline geometry for the overlay's segments."""
         valid_points = tuple(
@@ -3684,7 +3703,8 @@ class ClipItem(QGraphicsObject):
         )
         starts = (0,) + tuple(offset for offset, _ in valid_points)
         ends = tuple(offset for offset, _ in valid_points) + (self._source_duration,)
-        speeds = (self._speed,) + tuple(speed for _, speed in valid_points)
+        initial = self._retime_window_base_speed if self._retime_window_base_speed is not None else self._speed
+        speeds = (initial,) + tuple(speed for _, speed in valid_points)
         timeline_start = 0
         segments: list[tuple[int, int, float, int]] = []
         for source_start, source_end, speed in zip(starts, ends, speeds):
@@ -5887,24 +5907,7 @@ class ClipItem(QGraphicsObject):
         # Update visual properties
         self._opacity = clip.opacity if hasattr(clip, 'opacity') else 1.0
 
-        # Handle speed (can be SpeedParams or float)
-        if hasattr(clip, 'speed'):
-            speed = clip.speed
-            self._retime_reverse = bool(getattr(speed, "reverse", False))
-            self._retime_preserve_pitch = bool(getattr(speed, "preserve_pitch", False))
-            if isinstance(speed, (int, float)):
-                self._speed = speed
-            else:
-                self._speed = getattr(speed, 'speed', 1.0)
-            self._retime_points = tuple(
-                (point.source_offset, point.speed)
-                for point in getattr(speed, 'speed_points', ())
-            )
-            # A3.1: 每速度点的 easing（Smooth Ramp 菜单状态）
-            self._retime_point_easings = tuple(
-                (point.source_offset, point.speed, point.easing)
-                for point in getattr(speed, 'speed_points', ())
-            )
+        self.set_retime_presentation(clip.speed)
 
         # Update effects
         self._effects = clip.effects if hasattr(clip, 'effects') else ()

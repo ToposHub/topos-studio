@@ -1,0 +1,43 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 5 items
+
+tests/edit/test_backend_review_command_roundtrip.py FFFF.                [100%]
+
+=================================== FAILURES ===================================
+_______ test_new_command_macro_can_roundtrip_before_execution[command0] ________
+tests/edit/test_backend_review_command_roundtrip.py:19: in test_new_command_macro_can_roundtrip_before_execution
+    restored = MacroCommand.from_dict(macro.to_dict())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/commands/__init__.py:867: in from_dict
+    raise ValueError(
+E   ValueError: MacroCommand.from_dict: 1 sub-command(s) have unknown command_type ['MoveSpeedPointCommand'] (macro '0d0171f6-73e1-40be-bc6c-a7dd96d97503'); refusing to load a partial macro
+_______ test_new_command_macro_can_roundtrip_before_execution[command1] ________
+tests/edit/test_backend_review_command_roundtrip.py:19: in test_new_command_macro_can_roundtrip_before_execution
+    restored = MacroCommand.from_dict(macro.to_dict())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/commands/__init__.py:867: in from_dict
+    raise ValueError(
+E   ValueError: MacroCommand.from_dict: 1 sub-command(s) have unknown command_type ['SetClipSpeedSettingsCommand'] (macro 'a72d192b-cbfc-4e63-b48b-93e812324393'); refusing to load a partial macro
+_______ test_new_command_macro_can_roundtrip_before_execution[command2] ________
+tests/edit/test_backend_review_command_roundtrip.py:19: in test_new_command_macro_can_roundtrip_before_execution
+    restored = MacroCommand.from_dict(macro.to_dict())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/features/edit/core/commands/__init__.py:867: in from_dict
+    raise ValueError(
+E   ValueError: MacroCommand.from_dict: 1 sub-command(s) have unknown command_type ['SetFadeCurveCommand'] (macro '342b290f-11ab-42ac-85a7-4a4efb01ff81'); refusing to load a partial macro
+______ test_unapplied_fade_command_roundtrip_cannot_undo_unrelated_curve _______
+tests/edit/test_backend_review_command_roundtrip.py:29: in test_unapplied_fade_command_roundtrip_cannot_undo_unrelated_curve
+    with pytest.raises(ValueError, match='never applied'):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ValueError
+=========================== short test summary info ============================
+FAILED tests/edit/test_backend_review_command_roundtrip.py::test_new_command_macro_can_roundtrip_before_execution[command0]
+FAILED tests/edit/test_backend_review_command_roundtrip.py::test_new_command_macro_can_roundtrip_before_execution[command1]
+FAILED tests/edit/test_backend_review_command_roundtrip.py::test_new_command_macro_can_roundtrip_before_execution[command2]
+FAILED tests/edit/test_backend_review_command_roundtrip.py::test_unapplied_fade_command_roundtrip_cannot_undo_unrelated_curve
+========================= 4 failed, 1 passed in 1.54s ==========================

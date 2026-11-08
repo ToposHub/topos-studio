@@ -1,0 +1,83 @@
+{
+  "scope": "Model + real TimelineView/controller UI adapters; no native input, microphone or decoder",
+  "findings": [
+    {
+      "id": "VO_PREROLL_ALIGNMENT",
+      "input": {
+        "anchor_frame": 240,
+        "pre_roll_seconds": 1,
+        "time_reference_samples": 432000,
+        "file_start_timeline_frame": 216,
+        "take_duration_seconds": 3
+      },
+      "actual": {
+        "timeline_start": 240,
+        "source_start": 0,
+        "timeline_duration": 72,
+        "anchor_marker_timeline_frame": 264
+      },
+      "expected": {
+        "anchor_marker_timeline_frame": 240,
+        "preserve_preroll_option": {
+          "timeline_start": 216,
+          "source_start": 0
+        },
+        "trim_preroll_option": {
+          "timeline_start": 240,
+          "source_start": 24
+        }
+      },
+      "defect": true
+    },
+    {
+      "id": "LINKED_COPY_TWO_AUTO_TRACKS",
+      "input": {
+        "targets": {
+          "vc": "__new_video_track_above__",
+          "ac": "__new_audio_track_below__"
+        },
+        "timeline_start": 220
+      },
+      "plan": {
+        "vc": [
+          "__new_video_track_above__",
+          220,
+          true
+        ],
+        "ac": [
+          "__new_audio_track_below__",
+          220,
+          true
+        ]
+      },
+      "actual": {
+        "video_tracks": 1,
+        "audio_tracks": 1,
+        "clip_count": 2,
+        "history": 0,
+        "unchanged": true,
+        "status": []
+      },
+      "expected": {
+        "video_tracks": 2,
+        "audio_tracks": 2,
+        "clip_count": 4,
+        "history": 1
+      },
+      "defect": true
+    }
+  ],
+  "b19_downstream_check": {
+    "delta": 10,
+    "starts": {
+      "vc": 100,
+      "ac": 100,
+      "v2c": 210,
+      "a2c": 210
+    },
+    "durations": {
+      "vc": 110,
+      "ac": 110
+    }
+  }
+}
