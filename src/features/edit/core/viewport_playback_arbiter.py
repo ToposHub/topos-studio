@@ -223,6 +223,16 @@ class ViewportPlaybackArbiter:
         if has_timeline is not None:
             self._has_timeline = bool(has_timeline)
 
+    def set_source_asset_id(self, asset_id: str | None) -> None:
+        """上下文同步：宿主在决策前读取真实 widget 的当前素材。
+
+        与 ``open_source_asset``（一次用户交互、递增 revision）不同，这是
+        反馈类输入：适配层在每个决策点把 widget 的 ``current_asset`` 同步
+        进快照，避免绕过宿主入口的打开路径（时间线双击 Match Frame、
+        程序内换源等）让 ``no_source_asset`` 门控失真。零命令、零递增。
+        """
+        self._source_asset_id = asset_id
+
     def set_ui_gates(self, *, text_input_active: bool | None = None,
                      menu_open: bool | None = None) -> None:
         """UI 门（文本框焦点/菜单展开）：只拦截"起播"，不拦截暂停。"""
@@ -311,6 +321,38 @@ class ViewportPlaybackArbiter:
         return self._accept(tuple(commands))
 
     # ── transport 请求 ──────────────────────────────────────────────
+
+    def authorize_play(self, monitor: str) -> "ArbiterDecision":
+        """入口自决起播授权：门控 + 暂停对侧，但**不发** Start 命令。
+
+        I01（复查计划）：真实入口链（按钮／Space／JKL／scrub 恢复）各自
+        带准备步骤（``_sync_playback_duration``、JKL 档位、音频桥、动态
+        trim），不能改成由仲裁器代发 ``play()``。仲裁器只裁决两件事：
+        "现在可以播吗"（门控）与"先把对方暂停"（PauseMonitor 命令照常走
+        sink 并校验）；起播由入口链本身完成，随后经
+        ``report_playback_state`` 回填。``accepted`` 即"入口可以继续"。
+
+        其余语义与 ``request_play`` 一致：同样恰好递增 revision 一次（含
+        拒绝），幂等短路（本侧已在播放 → 接受且零命令），对侧暂停失败 →
+        ``pause_failed``（本侧零写入）。
+        """
+        self._request_revision += 1
+        if monitor not in _MONITORS:
+            return self._reject(REASON_UNKNOWN_MONITOR)
+        if self._shutdown:
+            return self._reject(REASON_SHUTDOWN)
+        gate = self._transport_gate(monitor)
+        if gate is not None:
+            return self._reject(gate)
+        if self._states[monitor].playing:
+            return self._accept(())  # 幂等：已在播放，零命令
+        other = _opposite(monitor)
+        if self._states[other].playing:
+            pause = self._pause_side(other)
+            if pause is None:
+                return self._reject(REASON_PAUSE_FAILED)
+            return self._accept((pause,))
+        return self._accept(())
 
     def request_play(self, monitor: str) -> "ArbiterDecision":
         self._request_revision += 1

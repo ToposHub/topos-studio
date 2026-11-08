@@ -23,6 +23,9 @@ import pytest
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from src.features.edit.core.viewport_playback_arbiter import (
+    LAYOUT_DUAL,
+    PAGE_EDIT,
+    PAGE_OTHER,
     SOURCE,
     TIMELINE,
     ViewportPlaybackArbiter,
@@ -206,3 +209,180 @@ def test_b01_install_single_entry_wires_everything(qtbot):
     coordinator.request_play_source()
 
     assert source.is_playing and not timeline.is_playing
+
+
+# ── I01：诚实 sink、反馈广播、上下文同步、初始安装 ─────────────────
+
+
+class _LyingPauseSource(_FakeSourceWidget):
+    """pause() 声称成功但不翻转 is_playing（I01-5 静默拒绝场景）。"""
+
+    def pause(self) -> None:
+        self.calls.append(("pause", None))
+        # is_playing 故意保持 True
+
+
+class _LyingPlaySource(_FakeSourceWidget):
+    """play() 声称成功但不进入播放（无素材早退一类的静默拒绝）。"""
+
+    def play(self) -> None:
+        self.calls.append(("play", None))
+        # is_playing 故意保持 False
+
+
+class _FakeViewportWithProps(_FakeViewport):
+    """带 dual_view/active_monitor 属性的前端鸭子（安装同步用）。"""
+
+    def __init__(self, dual: bool = False, active: str = "source") -> None:
+        super().__init__()
+        self._dual = dual
+        self._active = active
+
+    @property
+    def dual_view(self) -> bool:
+        return self._dual
+
+
+def test_i01_sink_reports_silent_pause_failure(qtbot):
+    source = _LyingPauseSource()
+    timeline = _FakeTimelineController()
+    coordinator = ViewportPlaybackCoordinator(source, timeline)
+    coordinator.open_source_asset("asset-1", activate=False)
+    coordinator.request_play_source()  # Source 先播（无需暂停任何人）
+    assert source.is_playing
+
+    coordinator.request_play_timeline()  # 应在"暂停 Source"处被拒
+
+    snap = coordinator.snapshot()
+    assert snap.timeline_playback.playing is False  # 目标端零写入
+    assert timeline.is_playing is False
+    assert snap.source_playback.playing is True     # 快照如实：Source 仍在播
+    assert source.is_playing is True
+
+
+def test_i01_sink_reports_silent_start_failure(qtbot):
+    source = _LyingPlaySource()
+    timeline = _FakeTimelineController()
+    coordinator = ViewportPlaybackCoordinator(source, timeline)
+    coordinator.open_source_asset("asset-1", activate=False)
+    messages: list[str] = []
+    coordinator.status_message.connect(messages.append)
+
+    coordinator.request_play_source()
+
+    assert coordinator.snapshot().source_playback.playing is False
+    assert messages  # start_failed 回填宿主
+
+
+def test_i01_sink_logs_exceptions_without_raising(qtbot, monkeypatch):
+    source = _FakeSourceWidget()
+    timeline = _FakeTimelineController()
+    coordinator = ViewportPlaybackCoordinator(source, timeline)
+    coordinator.open_source_asset("asset-1", activate=False)
+    coordinator.request_play_source()
+    assert source.is_playing
+
+    def _boom() -> None:
+        raise RuntimeError("sink exploded")
+
+    monkeypatch.setattr(source, "pause", _boom)
+    coordinator.request_play_timeline()  # 暂停 Source 抛错：记录并拒绝
+
+    assert coordinator.snapshot().timeline_playback.playing is False
+    assert source.is_playing is True  # 异常不吞掉已生效的状态
+
+
+def test_i01_feedback_path_emits_snapshot_changed(qtbot):
+    source = _FakeSourceWidget()
+    timeline = _FakeTimelineController()
+    coordinator = ViewportPlaybackCoordinator(source, timeline)
+    coordinator.open_source_asset("asset-1", activate=False)
+    coordinator.request_play_timeline()
+    snapshots: list[Any] = []
+    coordinator.snapshot_changed.connect(snapshots.append)
+    snapshots.clear()  # 起播路径自身的广播不计入
+
+    timeline.pause()  # 控制器自发暂停（例如播放到末尾）
+
+    assert snapshots, "反馈路径必须广播快照（I01-5）"
+    assert snapshots[-1].timeline_playback.playing is False
+
+
+def test_i01_source_playback_state_signal_updates_snapshot(qtbot):
+    class _SignalingSource(_FakeSourceWidget):
+        playback_state_changed = pyqtSignal(bool)
+
+    source = _SignalingSource()
+    timeline = _FakeTimelineController()
+    coordinator = ViewportPlaybackCoordinator(source, timeline)
+    coordinator.open_source_asset("asset-1", activate=False)
+    coordinator.request_play_source()
+    assert coordinator.snapshot().source_playback.playing is True
+
+    source._playing = False  # 自然到尾一类的widget侧翻转
+    source.playback_state_changed.emit(False)
+
+    assert coordinator.snapshot().source_playback.playing is False
+
+
+def test_i01_authorize_refreshes_context_from_real_widgets(qtbot):
+    source = _FakeSourceWidget()
+    source._asset = type("A", (), {"asset_id": "real-asset"})()
+    timeline = _FakeTimelineController()
+
+    class _Panel:
+        def get_playback_controller(self):
+            return timeline
+
+        timeline_view = None
+
+    panel = _Panel()
+    panel.timeline_view = type("V", (), {"_timeline": object()})()
+    coordinator = ViewportPlaybackCoordinator(
+        source, timeline, timeline_panel=panel)
+
+    assert coordinator.authorize_source_play() is None  # 授权放行
+    assert coordinator.snapshot().source_asset_id == "real-asset"
+
+    # 无时间线 → timeline 授权被拒（上下文在决策点读取，不是安装快照）
+    panel.timeline_view = type("V", (), {"_timeline": None})()
+    reason = coordinator.authorize_timeline_play()
+    assert reason == "no_timeline"
+
+
+def test_i01_sync_initial_state_aligns_snapshot(qtbot):
+    source = _FakeSourceWidget()
+    source._asset = type("A", (), {"asset_id": "a1"})()
+    source._playing = True  # 安装时 Source 已在播（不能依赖"再点一次"）
+    timeline = _FakeTimelineController()
+    viewport = _FakeViewportWithProps(dual=True, active="source")
+    coordinator = ViewportPlaybackCoordinator(source, timeline)
+    coordinator.attach_viewport(viewport)
+
+    coordinator.sync_initial_state(page_mode=PAGE_OTHER)
+
+    snap = coordinator.snapshot()
+    assert snap.source_asset_id == "a1"
+    assert snap.source_playback.playing is True
+    assert snap.layout_mode == LAYOUT_DUAL
+    assert snap.active_monitor == SOURCE
+    assert snap.page_mode == PAGE_OTHER
+
+
+def test_i01_return_to_edit_restores_user_display_choice(qtbot):
+    source = _FakeSourceWidget()
+    source._asset = type("A", (), {"asset_id": "a1"})()
+    timeline = _FakeTimelineController()
+    viewport = _FakeViewportWithProps(dual=True, active="source")
+    coordinator = ViewportPlaybackCoordinator(source, timeline)
+    coordinator.attach_viewport(viewport)
+    coordinator.sync_initial_state()
+
+    coordinator.enter_deliver_page()  # 强制 active=timeline
+    assert coordinator.snapshot().active_monitor == TIMELINE
+
+    coordinator.return_to_edit_page()
+
+    # Viewport 的真实显示（用户原本选 Source）恢复为快照权威值
+    assert coordinator.snapshot().active_monitor == SOURCE
+    assert coordinator.snapshot().page_mode == PAGE_EDIT

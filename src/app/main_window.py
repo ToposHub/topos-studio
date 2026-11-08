@@ -2639,6 +2639,16 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         if getattr(self, "_pipeline_shutdown_done", False):
             return True
 
+        # 0. I01：播放仲裁器关门——此后一切播放请求被拒（不虚报成功），
+        #    入口门同步失效，后续各 owner 停机照常进行。
+        try:
+            coordinator = getattr(self, "_viewport_playback_coordinator", None)
+            if coordinator is not None:
+                coordinator.mark_shutdown()
+        except Exception:
+            logger.debug("shutdown: mark playback arbiter shutdown failed",
+                         exc_info=True)
+
         # 1. 走带停止（先停时钟，避免关闭过程中又派发新渲染请求）
         try:
             panel = getattr(self, "timeline_panel", None)

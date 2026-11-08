@@ -1653,6 +1653,10 @@ class SourceViewerWidget(QWidget):
     append_requested = pyqtSignal(str, int, int)  # asset_id, in_frame, out_frame
     # F2.1: Source Patch 设置入口（当前素材 V/A 流开关与源声道映射）
     source_patch_requested = pyqtSignal()
+    # I01-4：只读播放状态信号。play/pause/倒放/自然到尾（含循环暂停分支）
+    # /open 换源重置/close_source/prepare_for_shutdown 都会翻转它——协调
+    # 器据此把权威快照对齐（此前 Source 自然停止会让快照过期）。
+    playback_state_changed = pyqtSignal(bool)
 
     # How many frames behind the expected frame an async GPU result may be
     # and still get displayed (covers background-decode round-trip latency).
@@ -1672,6 +1676,8 @@ class SourceViewerWidget(QWidget):
         self._total_frames: int = 0
         self._fps: float = 24.0
         self._is_playing: bool = False
+        # I01-2：起播仲裁门（宿主协调器安装；None = 未安装，行为同旧）
+        self._playback_gate: Optional[Callable[[str], Optional[str]]] = None
 
         # Playback timer with monotonic clock for accurate frame pacing
         self._playback_timer = QTimer(self)
@@ -1984,7 +1990,10 @@ class SourceViewerWidget(QWidget):
         self._shutdown_prepared = True
 
         # 1) 停止新请求：播放/时钟/watchdog + 撤销会话 generation
+        was_playing = self._is_playing
         self._is_playing = False
+        if was_playing:
+            self.playback_state_changed.emit(False)
         self._playback_timer.stop()
         self._gpu_watchdog_timer.stop()
         self._gpu_pending_frame = -1
@@ -2005,7 +2014,10 @@ class SourceViewerWidget(QWidget):
         """Close the current source."""
         # Stop playback
         self._playback_timer.stop()
+        was_playing = self._is_playing
         self._is_playing = False
+        if was_playing:
+            self.playback_state_changed.emit(False)
 
         # AUD-20903: CPU 解码器由后台 worker 独占，丢弃动作投递给 worker
         # 线程执行（FFmpeg 句柄只能在其创建线程内关闭）。
@@ -2233,6 +2245,30 @@ class SourceViewerWidget(QWidget):
 
     # ==================== Playback Controls ====================
 
+    def set_playback_gate(
+            self, gate: Optional[Callable[[str], Optional[str]]]) -> None:
+        """I01-2：起播仲裁门（宿主协调器安装；None 清除）。
+
+        ``gate(via)`` 返回 None = 放行（对侧若在播已由仲裁器暂停），入口
+        链继续自己的起播准备；返回原因键 = 本次起播被拒（原因已由协调器
+        回填宿主状态栏），入口链立即中止。**暂停永不受门控**。门只在
+        入口层（toggle/scrub 恢复/倒放）询问；``play`` 是命令端点（协调
+        器 sink 也调它），不再二次询问。
+        """
+        self._playback_gate = gate
+
+    def _authorize_start(self, via: str) -> bool:
+        """走一次仲裁门；未安装门时行为与旧版一致（放行）。"""
+        if self._playback_gate is None:
+            return True
+        try:
+            reason = self._playback_gate(via)
+        except Exception:
+            # 门自身故障不得把走带变砖：记录后按未安装处理
+            logger.exception("playback gate raised; allowing start")
+            return True
+        return reason is None
+
     def play(self) -> None:
         """Start playback."""
         if self._shutdown_prepared:
@@ -2258,6 +2294,7 @@ class SourceViewerWidget(QWidget):
         # already has the asset wired as a track with the right fps/duration,
         # so play(start_frame) drives a continuous mix alongside the video.
         self._start_source_audio(self._current_frame)
+        self.playback_state_changed.emit(True)
         logger.debug("Playback started")
 
     def pause(self) -> None:
@@ -2268,6 +2305,7 @@ class SourceViewerWidget(QWidget):
         self.viewer.set_playback_state(False, self._fps)
         # Pause continuous audio to match the frozen playhead.
         self._pause_source_audio()
+        self.playback_state_changed.emit(False)
         logger.debug("Playback paused")
 
     def play_reverse(self) -> None:
@@ -2281,6 +2319,8 @@ class SourceViewerWidget(QWidget):
             return
         if not self._current_asset:
             return
+        if not self._authorize_start("reverse"):
+            return  # 仲裁拒绝（对侧暂停失败等）：倒放不起，状态如实
         # Forward playback may already own a continuous audio stream. Reverse
         # is video-only, so retire that stream before changing its clock.
         self._pause_source_audio()
@@ -2294,6 +2334,7 @@ class SourceViewerWidget(QWidget):
         self._playback_timer.start()
         self.toolbar.update_play_state(True)
         self.viewer.set_playback_state(True, self._fps)
+        self.playback_state_changed.emit(True)
         logger.debug("Reverse playback started (video only)")
 
     @property
@@ -2405,6 +2446,8 @@ class SourceViewerWidget(QWidget):
         if self._is_playing:
             self.pause()
         else:
+            if not self._authorize_start("toggle"):
+                return True  # 有素材但被仲裁拒绝（原因已回填），不起播
             self.play()
         return True
 
@@ -2446,8 +2489,9 @@ class SourceViewerWidget(QWidget):
         if self._scrub_was_playing:
             self._scrub_was_playing = False
             if self._scrub_was_reverse:
+                # 倒放恢复：play_reverse 入口自带仲裁门（含 scrub 场景）
                 self.play_reverse()
-            else:
+            elif self._authorize_start("scrub_resume"):
                 self.play()
         self._scrub_was_reverse = False
 

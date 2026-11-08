@@ -76,9 +76,12 @@ class _World:
         self.pause_calls: list[str] = []
         self.start_calls: list[str] = []
         self.fail_start = fail_start
+        self.fail_pause = False
 
     def sink(self, arbiter: ViewportPlaybackArbiter, command: Any) -> bool:
         if isinstance(command, PauseMonitor):
+            if self.fail_pause:
+                return False  # 控制器拒绝暂停（状态保持播放）
             self.playing[command.monitor] = False
             self.pause_calls.append(command.monitor)
             arbiter.report_playback_state(command.monitor, playing=False)
@@ -476,3 +479,94 @@ def test_b01_unknown_monitor_rejected():
     assert decision.reason == "unknown_monitor"
     with pytest.raises(ValueError):
         arb.report_playback_state("program", playing=True)
+
+
+# ── I01：入口自决起播授权（authorize_play） ─────────────────────────
+
+
+def test_i01_authorize_play_pauses_other_without_starting():
+    """入口链自带准备步骤：仲裁器只授权 + 暂停对侧，绝不代发起播。"""
+    world = _World()
+    arb, world = _arbiter(world)
+    arb.open_source_asset("asset-1", activate=False)
+    arb.request_play(SOURCE)
+    assert world.playing[SOURCE]
+
+    decision = arb.authorize_play(TIMELINE)
+
+    assert decision.accepted
+    assert [type(c) for c in decision.commands] == [PauseMonitor]
+    assert all(not isinstance(c, StartMonitor) for c in decision.commands)
+    assert world.playing[SOURCE] is False   # 对侧已被真实暂停
+    assert world.playing[TIMELINE] is False  # 入口自己起播，仲裁器不代发
+    assert world.playhead[SOURCE] == 12      # 播放头保留
+
+
+def test_i01_authorize_play_rejects_when_other_pause_fails():
+    world = _World()
+    arb, world = _arbiter(world)
+    arb.open_source_asset("asset-1", activate=False)
+    arb.request_play(SOURCE)
+    starts_before = list(world.start_calls)
+    world.fail_pause = True
+
+    decision = arb.authorize_play(TIMELINE)
+
+    assert not decision.accepted
+    assert decision.reason == REASON_PAUSE_FAILED
+    assert world.playing[SOURCE] is True       # 对侧暂停失败，原状保留
+    assert world.start_calls == starts_before  # 本侧零启动
+
+
+def test_i01_authorize_play_idempotent_when_already_playing():
+    world = _World()
+    arb, world = _arbiter(world)
+    arb.open_source_asset("asset-1", activate=False)
+    arb.request_play(TIMELINE)
+
+    decision = arb.authorize_play(TIMELINE)  # L 再按 = 变速，不是新起播
+
+    assert decision.accepted
+    assert decision.commands == ()
+    assert world.pause_calls == []  # 不重复打扰对侧
+
+
+def test_i01_authorize_play_honors_gates():
+    rec = _RecordingSink()
+    arb, rec = _arbiter(sink=rec)
+    # 无素材 → no_source_asset；文本框聚焦 → text_input_active
+    no_asset = arb.authorize_play(SOURCE)
+    assert not no_asset.accepted and no_asset.reason == REASON_NO_SOURCE_ASSET
+    arb.set_source_asset_id("asset-1")
+    arb.set_ui_gates(text_input_active=True)
+    gated = arb.authorize_play(SOURCE)
+    assert not gated.accepted and gated.reason == REASON_TEXT_INPUT_ACTIVE
+
+
+def test_i01_authorize_play_counts_as_one_request():
+    rec = _RecordingSink()
+    arb, rec = _arbiter(sink=rec)
+    arb.set_source_asset_id("asset-1")
+    before = arb.snapshot().request_revision
+
+    arb.authorize_play(SOURCE)
+    accepted_rev = arb.snapshot().request_revision
+    arb.set_ui_gates(menu_open=True)
+    arb.authorize_play(SOURCE)
+
+    assert accepted_rev - before == 1          # 接受也算一次请求
+    assert arb.snapshot().request_revision - accepted_rev == 1  # 拒绝也算
+
+
+def test_i01_set_source_asset_id_is_context_not_request():
+    """决策前上下文同步：零命令、零 revision（对照 open_source_asset）。"""
+    rec = _RecordingSink()
+    arb, rec = _arbiter(sink=rec)
+    arb.open_source_asset("asset-1", activate=False)
+    rev = arb.snapshot().request_revision
+
+    arb.set_source_asset_id(None)  # 绕过宿主入口的换源/关闭
+
+    assert arb.snapshot().request_revision == rev
+    assert rec.calls == []
+    assert arb.snapshot().source_asset_id is None

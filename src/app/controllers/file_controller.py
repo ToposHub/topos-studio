@@ -2237,6 +2237,18 @@ class FileOpsMixin:
 
         # Open in Source Viewer
         self.source_viewer_widget.open_asset(asset)
+        # I01（复查计划）：素材打开进入仲裁快照（内容同步；激活由
+        # show_source 的 viewport 信号单独产生一次领域请求——一次交互
+        # 恰好对应内容+激活两类请求，不重复）。
+        coordinator = getattr(self, "_viewport_playback_coordinator", None)
+        if coordinator is not None:
+            try:
+                coordinator.open_source_asset(
+                    asset.asset_id, activate=False,
+                    via="media_pool_double_click")
+            except Exception:
+                logger.debug("open_source_asset bookkeeping failed",
+                             exc_info=True)
 
         # Switch to Edit page if not already there
         if self.current_page != "Edit":
@@ -2287,6 +2299,17 @@ class FileOpsMixin:
             self.source_viewer_widget.open_asset(asset)
         except Exception:
             logger.exception("Failed to preview asset on select: %s", asset_id)
+            return
+        # I01：单击预览同样是内容入口——同步快照（不激活，不抢焦点）。
+        coordinator = getattr(self, "_viewport_playback_coordinator", None)
+        if coordinator is not None:
+            try:
+                coordinator.open_source_asset(
+                    asset.asset_id, activate=False,
+                    via="media_pool_single_click")
+            except Exception:
+                logger.debug("open_source_asset bookkeeping failed",
+                             exc_info=True)
 
     # ------------------------------------------------------------------
     # Timeline preview renderer

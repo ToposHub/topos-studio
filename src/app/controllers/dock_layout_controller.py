@@ -546,6 +546,48 @@ class DockLayoutMixin:
                     self.timeline_panel.get_timeline_view().get_timeline()
                 )
 
+            # I01（复查计划）：全入口播放仲裁。协调器一次性安装（所有权归
+            # 本宿主引用，重复创建走此守卫），随后立即同步初始状态（已打开
+            # 素材/时间线可用性/两路实际播放/布局/激活/页面），并把两路
+            # 入口仲裁门挂到真实 widget/panel 上。按钮/Space/JKL/scrub 的
+            # 原有准备链保持不变——门只在"起播"前裁决与暂停对侧。
+            if (self.edit_viewport is not None
+                    and self.timeline_panel is not None
+                    and self.source_viewer_widget is not None
+                    and getattr(self, "_viewport_playback_coordinator", None) is None):
+                from src.features.edit.ui.viewport_playback_coordinator import (
+                    install_viewport_playback_coordinator,
+                )
+                from src.features.edit.core.viewport_playback_arbiter import (
+                    PAGE_DELIVER, PAGE_EDIT, PAGE_OTHER,
+                )
+                coordinator = install_viewport_playback_coordinator(
+                    viewport=self.edit_viewport,
+                    source_widget=self.source_viewer_widget,
+                    timeline_panel=self.timeline_panel,
+                    parent=self)
+                self._viewport_playback_coordinator = coordinator
+                page = str(getattr(self, "current_page", "Edit") or "Edit")
+                coordinator.sync_initial_state(page_mode=(
+                    PAGE_EDIT if page == "Edit"
+                    else PAGE_DELIVER if page == "Deliver"
+                    else PAGE_OTHER))
+                self.source_viewer_widget.set_playback_gate(
+                    coordinator.authorize_source_play)
+                self.timeline_panel.set_playback_gate(
+                    coordinator.authorize_timeline_play)
+                # 文本输入焦点门：重命名/查找等输入框聚焦时起播静默
+                try:
+                    from src.shared.ui.shortcut_scope import text_input_focused
+                    app = QApplication.instance()
+                    if app is not None:
+                        app.focusChanged.connect(
+                            lambda *_a: coordinator.set_text_input_active(
+                                text_input_focused()))
+                except Exception:
+                    logger.debug("text-input gate feed unavailable",
+                                 exc_info=True)
+
         # Connect MediaPoolPanel double-click to Source Viewer (P3.1)
         if self._edit_available and self.media_pool_panel is not None:
             self.media_pool_panel.asset_double_clicked.connect(self._on_asset_double_clicked)
@@ -3285,6 +3327,11 @@ class DockLayoutMixin:
             None if viewport is not None else self.dock_program_viewer,
             self.dock_edit_timeline,
         )
+        # I01：Deliver 借出即进入 Deliver 页模式——强制 Timeline 监看、
+        # 暂停 Source（与 deliver_workspace.edit_panels_borrowed 同步触发）。
+        coordinator = getattr(self, "_viewport_playback_coordinator", None)
+        if coordinator is not None:
+            coordinator.enter_deliver_page()
 
     def _restore_edit_panels_from_deliver(self) -> None:
         """Put the shared viewer and timeline back into the Edit docks."""
@@ -3296,6 +3343,11 @@ class DockLayoutMixin:
         if viewport is not None:
             viewport.restore_program_viewer()
             viewport.set_deliver_mode(False)
+        # I01：归还后恢复 Edit 页模式，并把仲裁快照对齐回 Viewport 的真实
+        # 显示（用户单/双与激活选择在借还期间不被覆盖）。
+        coordinator = getattr(self, "_viewport_playback_coordinator", None)
+        if coordinator is not None:
+            coordinator.return_to_edit_page()
 
     def _sync_edit_viewport_timeline(self, timeline: object) -> None:
         """Keep the monitor's scrub range on the existing timeline timebase."""
