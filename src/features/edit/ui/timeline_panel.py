@@ -18,7 +18,7 @@ Toolbar Structure (single row):
 """
 
 import logging
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Callable
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolButton,
     QSlider, QFrame, QLineEdit, QDialog, QDialogButtonBox,
@@ -191,6 +191,8 @@ class TimelinePanel(QWidget):
         )
         # E06: playback_state_changed 桥接的去重状态（初始 False=未播放）
         self._last_emitted_playback_state: bool = False
+        # I01-2：起播仲裁门（宿主协调器安装；None = 未安装，行为同旧）
+        self._playback_gate: Optional[Callable[[str], Optional[str]]] = None
         self._preview_renderer: Optional[Any] = None
         self._scrubbing_playhead: bool = False
         self._project: Optional[Any] = None
@@ -1452,6 +1454,31 @@ class TimelinePanel(QWidget):
 
     # ==================== Playback Control ====================
 
+    def set_playback_gate(
+            self, gate: Optional[Callable[[str], Optional[str]]]) -> None:
+        """I01-2：起播仲裁门（宿主协调器安装；None 清除）。
+
+        ``gate(via)`` 返回 None = 放行（Source 若在播已由仲裁器暂停），
+        入口链继续原有准备步骤（时长同步、JKL 档位、动态 trim 语义保持
+        不变）；返回原因键 = 本次起播被拒，入口链立即中止。**暂停/步进/
+        seek 永不受门控**。门只在入口层（toggle/Space/J/L/start_playback）
+        询问；``EditPlaybackController.play`` 是命令端点（协调器 sink 也调
+        它），不再二次询问。
+        """
+        self._playback_gate = gate
+
+    def _authorize_transport_start(self, via: str) -> bool:
+        """走一次仲裁门；未安装门时行为与旧版一致（放行）。"""
+        if self._playback_gate is None:
+            return True
+        try:
+            reason = self._playback_gate(via)
+        except Exception:
+            # 门自身故障不得把走带变砖：记录后按未安装处理
+            logger.exception("playback gate raised; allowing start")
+            return True
+        return reason is None
+
     def start_playback(self, direction: int = 1, speed: float = 1.0) -> None:
         """
         Start playback with specified direction and speed.
@@ -1470,6 +1497,9 @@ class TimelinePanel(QWidget):
         if self._total_frames == 0:
             logger.warning("Cannot start playback: timeline is empty")
             playback_trace("timeline_panel.start_playback_blocked_empty")
+            return
+        if not self._authorize_transport_start("start_playback"):
+            playback_trace("timeline_panel.start_playback_blocked_gate")
             return
 
         # Use EditPlaybackController
@@ -1502,6 +1532,11 @@ class TimelinePanel(QWidget):
             playback_trace("timeline_panel.toggle_pause", current_frame=self._playback_controller.current_frame)
             self._playback_controller.pause()
         else:
+            # I01-2：起播前经仲裁门（Source 在播则先被暂停；拒绝则零写入）。
+            # 未安装门时行为与旧版一致。
+            if not self._authorize_transport_start("toggle"):
+                playback_trace("timeline_panel.toggle_play_blocked_gate")
+                return
             # 未缓存的 Motion Graphic 不再阻塞播放：播放中显示静帧，
             # 磁盘缓存由 EditController 的空闲调度器在后台补齐。
             reset_playback_trace(
@@ -1583,6 +1618,11 @@ class TimelinePanel(QWidget):
             return
         if self._route_dynamic_trim_shortcut(Qt.Key.Key_J):
             return
+        # I01-2：从暂停进入倒放是"起播"，先经仲裁门（已在播则仅变速，
+        # 门对已播放状态幂等放行，零命令）。
+        if not self._playback_controller.is_playing and \
+                not self._authorize_transport_start("jkl_backward"):
+            return
         self._playback_controller.jkl_backward_press()
         # Start timer to reset counts after idle
         self._jkl_timer.start(500)
@@ -1600,6 +1640,10 @@ class TimelinePanel(QWidget):
         if not self._transport_context_active():
             return
         if self._route_dynamic_trim_shortcut(Qt.Key.Key_L):
+            return
+        # I01-2：从暂停进入播放是"起播"，先经仲裁门（已在播则仅变速）。
+        if not self._playback_controller.is_playing and \
+                not self._authorize_transport_start("jkl_forward"):
             return
         self._playback_controller.jkl_forward_press()
         # Start timer to reset counts after idle

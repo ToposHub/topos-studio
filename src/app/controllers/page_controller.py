@@ -578,6 +578,15 @@ class PageManagementMixin:
         if page_name == "Edit":
             if self._edit_available and self.edit_page is not None:
                 self.edit_page.on_leave()
+            # I01（复查计划）：页面仲裁——离开 Edit（含经 Deliver 借还路径）
+            # 按政策暂停 Source；时间线由 edit_page.on_leave 自理。
+            coordinator = getattr(self, "_viewport_playback_coordinator", None)
+            if coordinator is not None:
+                try:
+                    coordinator.leave_edit_page()
+                except Exception:
+                    logger.debug("leave_page_hook: playback arbiter failed",
+                                 exc_info=True)
             return
 
         # Deliver temporarily hosts the same Program Viewer and TimelinePanel
@@ -586,6 +595,13 @@ class PageManagementMixin:
         if page_name == "Deliver":
             if self._edit_available and self.edit_page is not None:
                 self.edit_page.on_leave()
+            coordinator = getattr(self, "_viewport_playback_coordinator", None)
+            if coordinator is not None:
+                try:
+                    coordinator.leave_edit_page()
+                except Exception:
+                    logger.debug("leave_page_hook: playback arbiter failed",
+                                 exc_info=True)
             return
 
         # The Color page owns a separate source-video playback session.  It
@@ -673,6 +689,14 @@ class PageManagementMixin:
                         self._refresh_edit_preview_after_composite_change()
                     except Exception as e:
                         logger.warning(f"enter_page_hook: composite preview refresh failed: {e}")
+            # I01（复查计划）：回到 Edit 恢复页面仲裁模式与显示对齐。
+            coordinator = getattr(self, "_viewport_playback_coordinator", None)
+            if coordinator is not None:
+                try:
+                    coordinator.return_to_edit_page()
+                except Exception:
+                    logger.debug("enter_page_hook: playback arbiter failed",
+                                 exc_info=True)
             return
 
         if page_name == "Composite" and self._composite_available and self.composite_page is not None:
