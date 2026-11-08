@@ -100,6 +100,52 @@ def check_capability(clip: ClipInstance,
     return None
 
 
+def resolve_edit_group(
+    sequence: TimelineSequence, clip: ClipInstance,
+) -> tuple[ClipInstance, ...]:
+    """R01：互链编辑的统一成员解析——主片 + 双向有效链接的伙伴。
+
+    单向坏链（目标不存在/不回指/轨类型不配对）由
+    ``get_reciprocal_linked_clip`` 判 None，按单片处理，不当作组。
+    """
+    linked = sequence.get_reciprocal_linked_clip(clip)
+    if linked is None:
+        return (clip,)
+    return (clip, linked)
+
+
+def check_group_capability(
+    sequence: TimelineSequence,
+    clip: ClipInstance,
+    normalized: dict[str, Any] | None = None,
+) -> str | None:
+    """R01：组级能力预检（UI/服务共享）——主片 + 互链伙伴逐一检查。
+
+    互链 A/V 是一个编辑单元：伙伴带速度点曲线、已冻结、或任一成员
+    所在轨被锁，都必须在任何 apply 前**整组拒绝**，不允许只改主片
+    留下被静默清曲线/失步的伙伴。返回 None = 整组支持。
+    """
+    reason = check_capability(clip, normalized or {})
+    if reason is not None:
+        return reason
+
+    main_track = sequence.get_track_by_id(clip.track_id)
+    if main_track is not None and main_track.is_locked:
+        return ("The clip's track is locked; speed settings are "
+                "rejected and the group is unchanged.")
+
+    for member in resolve_edit_group(sequence, clip)[1:]:
+        member_track = sequence.get_track_by_id(member.track_id)
+        if member_track is not None and member_track.is_locked:
+            return ("The linked clip's track is locked; speed settings "
+                    "are rejected and the group is unchanged.")
+        reason = check_capability(member, normalized or {})
+        if reason is not None:
+            return ("The linked clip is outside the capability matrix: "
+                    + reason)
+    return None
+
+
 def _derived_duration(clip: ClipInstance, timeline: TimelineSequence,
                       normalized: dict[str, Any]) -> int:
     from src.features.edit.core.timeline_ops import (
@@ -140,7 +186,7 @@ def plan_speed_settings_edit(
         return SpeedSettingsPlan(
             error=f"Clip not found: {clip_id!r}")
 
-    unsupported = check_capability(clip, normalized)
+    unsupported = check_group_capability(sequence, clip, normalized)
     if unsupported is not None:
         return SpeedSettingsPlan(unsupported=unsupported)
 
