@@ -2132,6 +2132,117 @@ class SetFadeCurveCommand:
 
 
 # ================================================================
+# R09: SetFadeEndCurveCommand（两端独立淡化曲线）
+# ================================================================
+
+@dataclass(frozen=True)
+class SetFadeEndCurveCommand:
+    """R09：设置**单端**淡化曲线（另一端与共享 fade_curve 字段不动）。
+
+    Resolve 契约：In smooth / Out linear 可共存；单端修改不得改写另一
+    端。linked 政策：淡化是 clip 级属性，**不**随互链组传播（音频/
+    视频各自有默认曲线契约）。undo 快照含该端未支持原值（R05 语义）。
+    """
+
+    command_id: str
+    label: str
+    clip_id: str
+    track_id: str
+    end: str  # "in" | "out"
+    fade_curve: str | None
+    _previous: str | None = None
+    _had_value: bool = False
+    _previous_raw: Any = None
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self.end not in ("in", "out"):
+            raise ValueError(f"end must be 'in' or 'out': {self.end!r}")
+        if self.fade_curve is not None and self.fade_curve not in (
+                "linear", "equal_power", "smooth"):
+            raise ValueError(
+                f"Invalid fade curve: {self.fade_curve!r}; expected "
+                f"linear|equal_power|smooth or None")
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        assert_track_editable(
+            timeline, self.track_id, "Set fade end curve")
+        field_name = f"fade_curve_{self.end}"
+        current = getattr(clip, field_name)
+        # no-op：该端已知值相同且无待回写原值（apply 恒清原值）
+        if current == self.fade_curve and \
+                clip.fade_end_curve_raw(self.end) is None:
+            return timeline
+        object.__setattr__(self, "_previous", current)
+        object.__setattr__(
+            self, "_previous_raw", clip.fade_end_curve_raw(self.end))
+        object.__setattr__(self, "_had_value", True)
+        new_clip = clip.with_fade_end_curve(self.end, self.fade_curve)
+        new_track = track._rebuild(clips=tuple(
+            new_clip if c.clip_id == clip.clip_id else c for c in track.clips))
+        return timeline.with_track_updated(new_track)
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._previous is None and not self._had_value:
+            raise ValueError("Cannot undo: command was never applied")
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        restored = clip.with_fade_end_curve_state(
+            self.end, self._previous, self._previous_raw)
+        new_track = track._rebuild(clips=tuple(
+            restored if c.clip_id == clip.clip_id else c for c in track.clips))
+        return timeline.with_track_updated(new_track)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetFadeEndCurveCommand",
+            "label": self.label,
+            "clip_id": self.clip_id,
+            "track_id": self.track_id,
+            "end": self.end,
+            "fade_curve": self.fade_curve,
+            "_previous": self._previous,
+            "_had_value": self._had_value,
+            "_previous_raw": self._previous_raw,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetFadeEndCurveCommand":
+        return SetFadeEndCurveCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set fade end curve"),
+            clip_id=data.get("clip_id", ""),
+            track_id=data.get("track_id", ""),
+            end=data.get("end", "in"),
+            fade_curve=data.get("fade_curve"),
+            _previous=data.get("_previous"),
+            _had_value=bool(data.get("_had_value", "_previous" in data)),
+            _previous_raw=data.get("_previous_raw"),
+        )
+
+    @staticmethod
+    def create(
+        clip_id: str, track_id: str, end: str, fade_curve: "str | None",
+    ) -> "SetFadeEndCurveCommand":
+        return SetFadeEndCurveCommand(
+            command_id=str(uuid.uuid4()),
+            label=f"Fade {end} curve: {fade_curve or 'default'}",
+            clip_id=clip_id,
+            track_id=track_id,
+            end=end,
+            fade_curve=fade_curve,
+        )
+
+
+# ================================================================
 # A2: FreezeFrameAtPlayheadCommand（冻结帧，2026-09-07 优化计划）
 # ================================================================
 

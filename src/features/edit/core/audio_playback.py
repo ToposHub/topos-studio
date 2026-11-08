@@ -1052,7 +1052,9 @@ class AudioDecoder:
                  fade_out_samples: int | None = None,
                  audio_sample_offset: int = 0,
                  source_sample_offset: int = 0,
-                 fade_curve: str | None = None) -> None:
+                 fade_curve: str | None = None,
+                 fade_curve_in: str | None = None,
+                 fade_curve_out: str | None = None) -> None:
         """RMA-03/F3.3: 设置 clip 淡入淡出与采样级偏移元数据。
 
         F3.3 采样域：``fade_in/out_samples`` 覆盖帧域淡化（None=沿用帧）；
@@ -1085,8 +1087,10 @@ class AudioDecoder:
             "fade_out_samples": int(fade_out_samples)
             if fade_out_samples else None,
             "audio_sample_offset": int(audio_sample_offset or 0),
-            # B16：曲线形状（None=音频 legacy equal_power）
+            # B16：曲线形状（None=音频 legacy equal_power）；R09 两端独立
             "fade_curve": fade_curve,
+            "fade_curve_in": fade_curve_in,
+            "fade_curve_out": fade_curve_out,
         }
         self._timeline_skip = SampleSkipGate(audio_sample_offset)
         self._source_skip = SampleSkipGate(source_sample_offset)
@@ -2518,6 +2522,8 @@ class AudioMixer:
                                 audio_sample_offset=int(fade.get(
                                     "audio_sample_offset", 0) or 0),
                                 fade_curve=fade.get("fade_curve"),
+                                fade_curve_in=fade.get("fade_curve_in"),
+                                fade_curve_out=fade.get("fade_curve_out"),
                             )
                         except Exception as e:
                             logger.debug(f"clip fade apply failed: {e}")
@@ -4423,6 +4429,8 @@ class AudioPlaybackManager(QObject):
         audio_sample_offset: int = 0,
         source_sample_offset: int = 0,
         fade_curve: Optional[str] = None,
+        fade_curve_in: Optional[str] = None,
+        fade_curve_out: Optional[str] = None,
     ) -> bool:
         """
         添加音频轨道。
@@ -4447,6 +4455,7 @@ class AudioPlaybackManager(QObject):
                 （((src, dst), ...) 对，None=直通）。来自 EditProject
                 的 Source Patch 覆盖，mix_samples 解码后据此选道。
             fade_curve: B16 淡化曲线（None=legacy equal_power）。
+            fade_curve_in/out: R09 两端独立曲线（优先于 fade_curve）。
 
         Returns:
             是否成功添加
@@ -4490,13 +4499,17 @@ class AudioPlaybackManager(QObject):
                 audio_sample_offset=audio_sample_offset,
                 source_sample_offset=source_sample_offset,
                 fade_curve=fade_curve,
+                fade_curve_in=fade_curve_in,
+                fade_curve_out=fade_curve_out,
             )
         else:
             decoder.set_fade(timeline_start, timeline_duration,
                              fade_in_frames=fade_in_frames,
                              fade_out_frames=fade_out_frames,
                              fps=self._timeline_fps,
-                             fade_curve=fade_curve)
+                             fade_curve=fade_curve,
+                             fade_curve_in=fade_curve_in,
+                             fade_curve_out=fade_curve_out)
         # C3: 片段级增益
         decoder.set_gain_db(gain_db)
 

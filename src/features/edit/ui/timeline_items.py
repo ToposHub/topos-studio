@@ -626,6 +626,8 @@ class ClipItem(QGraphicsObject):
     change_speed_dialog_requested = pyqtSignal(str, str)
     speed_change_requested = pyqtSignal(str, str, float)  # clip_id, track_id, speed
     retime_controls_toggled = pyqtSignal(str, str, bool)
+    # R09：两端独立淡化曲线菜单（clip, track, end∈{in,out}, curve|None）
+    fade_end_curve_requested = pyqtSignal(str, str, str, object)
     # R08：速度点把手拖动（源窗口坐标；origin=按下时边界，preview/final=拖动）
     retime_point_dragged = pyqtSignal(str, str, int, int)
     retime_point_move_finished = pyqtSignal(str, str, int, int)
@@ -5128,6 +5130,26 @@ class ClipItem(QGraphicsObject):
 
         menu.addSeparator()
 
+        # R09：两端独立淡化曲线（In/Out 各自 Linear/Equal Power/Smooth/
+        # Default——自由 Bezier 无模型，明确不提供）
+        fade_menu = menu.addMenu(
+            I18N.tr("edit.clip.fade_curve_menu", "Fade Curve"))
+        fade_menu.setEnabled(not self._is_track_locked)
+        fade_end_actions: dict = {}
+        for end, end_label in (
+                ("in", I18N.tr("edit.clip.fade_in_curve", "Fade In")),
+                ("out", I18N.tr("edit.clip.fade_out_curve", "Fade Out"))):
+            end_menu = fade_menu.addMenu(end_label)
+            for curve_value, curve_label in (
+                    (None, I18N.tr("edit.clip.fade_curve_default", "Default")),
+                    ("linear", "Linear"),
+                    ("equal_power", "Equal Power"),
+                    ("smooth", "Smooth")):
+                curve_action = end_menu.addAction(curve_label)
+                fade_end_actions[curve_action] = (end, curve_value)
+
+        menu.addSeparator()
+
         # Resolve-style audio waveform display. Mono mixdown is the default
         # because it is compact and avoids building two painter paths for the
         # common case; stereo remains available per clip when channel detail
@@ -5217,6 +5239,12 @@ class ClipItem(QGraphicsObject):
         # Handle actions
         if action is change_speed_action:
             self.change_speed_dialog_requested.emit(self._clip_id, self._track_id)
+            return
+        # R09：两端独立淡化曲线（单端修改，另一端不动）
+        if action in fade_end_actions:
+            end, curve_value = fade_end_actions[action]
+            self.fade_end_curve_requested.emit(
+                self._clip_id, self._track_id, end, curve_value)
             return
         if self._media_type in ("video", "image", "comp_clip", "motion_graphic"):
             # Handle thumbnail mode change

@@ -48,8 +48,11 @@ class ClipNodeSnapshot:
     speed: float
     fade_in_frames: int
     fade_out_frames: int
-    # B16：淡化曲线形状（None=音频 legacy equal_power）
+    # B16：淡化曲线形状（None=音频 legacy equal_power）。R09：两端
+    # 独立曲线（生效值——共享字段变化同样触发重建）。
     fade_curve: Optional[str] = None
+    fade_curve_in: Optional[str] = None
+    fade_curve_out: Optional[str] = None
     effects_signature: Tuple = ()  # clip FX 摘要
 
 
@@ -120,7 +123,8 @@ class AudioGraphSnapshot:
             # clip: asset_id（换素材）、source_start（改源起点）都会改变声音
             "c": [(c.clip_id, c.asset_id, c.source_start, c.timeline_start,
                    c.timeline_duration, c.speed, c.fade_in_frames, c.fade_out_frames,
-                   c.fade_curve, c.effects_signature) for c in self.clips],
+                   c.fade_curve, c.fade_curve_in, c.fade_curve_out,
+                   c.effects_signature) for c in self.clips],
             # track: is_enabled（禁用轨不发声）
             "t": [(t.track_id, t.volume, t.pan, t.is_muted, t.is_solo, t.is_enabled,
                    t.output_bus_id, t.sends, t.strip_eq_signature,
@@ -232,6 +236,8 @@ def build_audio_graph_snapshot(
                 fade_in_frames=int(getattr(clip, "fade_in_duration", 0) or 0),
                 fade_out_frames=int(getattr(clip, "fade_out_duration", 0) or 0),
                 fade_curve=getattr(clip, "fade_curve", None),
+                fade_curve_in=getattr(clip, "effective_fade_curve_in", None),
+                fade_curve_out=getattr(clip, "effective_fade_curve_out", None),
                 effects_signature=_clip_effects_signature(clip),
             ))
 

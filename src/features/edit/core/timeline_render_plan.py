@@ -935,15 +935,16 @@ class TimelineRenderPlan:
         fade_opacity = 1.0
         clip_relative = sample_frame - clip.timeline_start
         clip_duration = clip.timeline_duration
+        # R09：两端独立曲线（None=共享 fade_curve → legacy linear）
         if clip.fade_in_duration > 0 and clip_relative < clip.fade_in_duration:
             fade_opacity = min(fade_opacity, fade_curve_factor(
-                clip.fade_curve,
+                clip.effective_fade_curve_in,
                 clip_relative / clip.fade_in_duration))
         if clip.fade_out_duration > 0:
             frames_from_end = clip_duration - clip_relative
             if frames_from_end < clip.fade_out_duration:
                 fade_opacity = min(fade_opacity, fade_curve_factor(
-                    clip.fade_curve,
+                    clip.effective_fade_curve_out,
                     frames_from_end / clip.fade_out_duration))
         fade_opacity = max(0.0, min(1.0, fade_opacity))
 
