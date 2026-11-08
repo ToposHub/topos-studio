@@ -1491,6 +1491,210 @@ class ChangeClipSpeedCommand:
 
 
 # ================================================================
+# B15: MoveSpeedPointCommand（速度点沿源坐标移动）
+# ================================================================
+
+@dataclass(frozen=True)
+class MoveSpeedPointCommand:
+    """B15：把既有速度点沿源坐标移动到新分界（窗口坐标输入）。
+
+    与 ``ChangeClipSpeedCommand`` 同族的提交语义：
+
+    - 命令在**源坐标**上定义（``source_offset``/``new_source_offset``
+      为 clip 窗口坐标）；UI 的 timeline 拖动由调用方换算后传入；
+    - 互链 A/V 是一个编辑单元：移动后的完整 SpeedParams 同步应用到
+      互链伙伴（与变速命令一致），各成员按自身源窗与 fps 元数据重算
+      ``timeline_duration``（``timeline_duration_for_source`` 统一时基，
+      混合帧率正确）；
+    - 曲线编辑不改采样相位：移动点之前的段映射逐帧不变，之后的段按
+      新分界重积分；窗口 ``curve_time_offset`` 由 SpeedParams 重锚；
+    - undo 用 apply 期完整快照直接还原（速度/时长/淡变/动画，
+      B17 语义——禁止反算）；fade 随新时长钳制，undo 恢复。
+
+    Attributes:
+        source_offset: 旧分界（clip 窗口坐标）
+        new_source_offset: 新分界（clip 窗口坐标；必须严格落在相邻
+            点位/域边界构成的开区间内）
+        _snapshots: ((speed_dict, duration, fade_in, fade_out, animation),
+                     linked 同构或 None)；animation 为 deepcopy 的
+            (animated_params, effects)，undo 直接还原
+    """
+
+    command_id: str
+    label: str
+    clip_id: str
+    track_id: str
+    source_offset: int
+    new_source_offset: int
+    _snapshots: tuple | None = None
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        assert_track_editable(
+            timeline, self.track_id, "Move speed point")
+        if not isinstance(clip.speed, SpeedParams):
+            raise ValueError("Clip has no retime speed points")
+        moved = clip.speed.with_speed_point_moved(
+            self.source_offset, self.new_source_offset, clip.source_duration)
+        if moved is clip.speed:
+            return timeline  # 同位移动 no-op（不入历史）
+
+        linked = timeline.get_reciprocal_linked_clip(clip)
+        if linked is not None:
+            assert_track_editable(
+                timeline, linked.track_id, "Move speed point")
+
+        from src.features.edit.core.timeline_ops import (
+            timeline_duration_for_source,
+        )
+
+        seq_fps = getattr(timeline, "fps", None)
+        seq_fps_num = seq_fps.num if hasattr(seq_fps, "num") else None
+        seq_fps_den = seq_fps.den if hasattr(seq_fps, "den") else 1
+
+        def _member_snapshot(member: ClipInstance) -> tuple:
+            return (
+                member.speed.to_dict(), member.timeline_duration,
+                member.fade_in_duration, member.fade_out_duration,
+                (_copy.deepcopy(member.animated_params),
+                 _copy.deepcopy(member.effects)),
+            )
+
+        snapshots: list[tuple] = [_member_snapshot(clip)]
+
+        result = timeline
+        members = [clip] + ([linked] if linked is not None else [])
+        for member in members:
+            member_track = result.get_track_by_id(member.track_id)
+            member_clip = member_track.get_clip_by_id(member.clip_id)
+            if member is linked:
+                snapshots.append(_member_snapshot(member_clip))
+            new_duration = timeline_duration_for_source(
+                member_clip.source_duration, moved,
+                member_clip._source_fps_num, member_clip._source_fps_den,
+                member_clip._timeline_fps_num or seq_fps_num,
+                member_clip._timeline_fps_den or seq_fps_den,
+            )
+            updated = replace(
+                member_clip,
+                speed=moved,
+                timeline_duration=new_duration,
+                fade_in_duration=min(
+                    member_clip.fade_in_duration, new_duration),
+                fade_out_duration=min(
+                    member_clip.fade_out_duration, new_duration),
+            ).with_animation_time_remapped(
+                member_clip.timeline_duration, new_duration)
+            result = result.with_track_updated(
+                member_track.with_clip_updated(updated))
+
+        object.__setattr__(self, "_snapshots", tuple(snapshots))
+        return result
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+
+        from src.features.edit.core.clip_params import SpeedParams as _SP
+
+        result = timeline
+        linked = timeline.get_reciprocal_linked_clip(clip)
+        targets = [clip] + ([linked] if linked is not None else [])
+        if self._snapshots:
+            for member, snapshot in zip(targets, self._snapshots):
+                (speed_dict, duration, fade_in, fade_out,
+                 (animated, effects)) = snapshot
+                member_track = result.get_track_by_id(member.track_id)
+                member_clip = member_track.get_clip_by_id(member.clip_id)
+                restored = replace(
+                    member_clip,
+                    speed=_SP.from_dict(speed_dict),
+                    timeline_duration=duration,
+                    fade_in_duration=fade_in,
+                    fade_out_duration=fade_out,
+                    animated_params=animated,
+                    effects=effects,
+                )
+                result = result.with_track_updated(
+                    member_track.with_clip_updated(restored))
+            return result
+
+        # 序列化恢复后无快照（to_dict 不携带动画/淡变）：降级为反向
+        # 移动 + 时长重算——曲线/时长可还原，动画停留当前锚（记录在案
+        # 的降级路径，非主路径）。
+        if not isinstance(clip.speed, _SP):
+            raise ValueError("Cannot undo: no snapshot and no speed points")
+        reverse = clip.speed.with_speed_point_moved(
+            self.new_source_offset, self.source_offset, clip.source_duration)
+        from src.features.edit.core.timeline_ops import (
+            timeline_duration_for_source,
+        )
+        seq_fps = getattr(timeline, "fps", None)
+        seq_fps_num = seq_fps.num if hasattr(seq_fps, "num") else None
+        seq_fps_den = seq_fps.den if hasattr(seq_fps, "den") else 1
+        for member in targets:
+            member_track = result.get_track_by_id(member.track_id)
+            member_clip = member_track.get_clip_by_id(member.clip_id)
+            new_duration = timeline_duration_for_source(
+                member_clip.source_duration, reverse,
+                member_clip._source_fps_num, member_clip._source_fps_den,
+                member_clip._timeline_fps_num or seq_fps_num,
+                member_clip._timeline_fps_den or seq_fps_den,
+            )
+            restored = replace(
+                member_clip, speed=reverse, timeline_duration=new_duration)
+            result = result.with_track_updated(
+                member_track.with_clip_updated(restored))
+        return result
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "MoveSpeedPointCommand",
+            "label": self.label,
+            "clip_id": self.clip_id,
+            "track_id": self.track_id,
+            "source_offset": self.source_offset,
+            "new_source_offset": self.new_source_offset,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "MoveSpeedPointCommand":
+        return MoveSpeedPointCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Move speed point"),
+            clip_id=data.get("clip_id", ""),
+            track_id=data.get("track_id", ""),
+            source_offset=int(data.get("source_offset", 0)),
+            new_source_offset=int(data.get("new_source_offset", 0)),
+        )
+
+    @staticmethod
+    def create(
+        clip_id: str, track_id: str,
+        source_offset: int, new_source_offset: int,
+    ) -> "MoveSpeedPointCommand":
+        return MoveSpeedPointCommand(
+            command_id=str(uuid.uuid4()),
+            label=(f"Move speed point {source_offset}"
+                   f"→{new_source_offset}"),
+            clip_id=clip_id,
+            track_id=track_id,
+            source_offset=int(source_offset),
+            new_source_offset=int(new_source_offset),
+        )
+
+
+# ================================================================
 # A2: FreezeFrameAtPlayheadCommand（冻结帧，2026-09-07 优化计划）
 # ================================================================
 
