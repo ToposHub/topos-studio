@@ -63,9 +63,10 @@ def test_b09_splitter_validation_matrix():
     assert prefs.splitter_sizes == (1, 100000)  # 边界含端点
 
 
-def test_b09_future_version_all_defaults():
+@pytest.mark.parametrize("version", [2, 0, -1, True])
+def test_b09_unknown_version_all_defaults(version: int | bool) -> None:
     prefs, diagnostics = parse_viewport_preferences({
-        "version": 2, "dual_view": True, "splitter_sizes": [5, 5]})
+        "version": version, "dual_view": True, "splitter_sizes": [5, 5]})
     assert prefs == ViewportPreferences()
     assert any("version" in d for d in diagnostics)
 

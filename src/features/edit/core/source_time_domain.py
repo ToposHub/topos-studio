@@ -139,6 +139,9 @@ class SourceTimeDomain:
             return SourceRangeCheck(False, REASON_NO_FRAMES)
         if in_frame is None or out_frame is None:
             return SourceRangeCheck(False, REASON_RANGE_EMPTY)
+        if (not isinstance(in_frame, int) or isinstance(in_frame, bool)
+                or not isinstance(out_frame, int) or isinstance(out_frame, bool)):
+            return SourceRangeCheck(False, REASON_RANGE_EMPTY)
         if in_frame < 0 or out_frame < 0:
             return SourceRangeCheck(False, REASON_NEGATIVE)
         if in_frame > out_frame:
@@ -146,8 +149,8 @@ class SourceTimeDomain:
         if out_frame >= self.total_frames:
             return SourceRangeCheck(False, REASON_PAST_END)
         return SourceRangeCheck(
-            True, None, start=int(in_frame), end=int(out_frame),
-            length=int(out_frame) - int(in_frame) + 1)
+            True, None, start=in_frame, end=out_frame,
+            length=out_frame - in_frame + 1)
 
 
 @dataclass(frozen=True)

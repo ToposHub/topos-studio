@@ -18,6 +18,34 @@ from src.shared.layout.profile import LayoutProfile, LAYOUT_PROFILE_SCHEMA_VERSI
 from src.shared.layout.store import LayoutStore
 
 
+@pytest.mark.parametrize("legacy_panels", [
+    ("edit.program_viewer",),
+    ("edit.source_viewer",),
+    ("edit.program_viewer", "edit.source_viewer", "edit.viewport"),
+])
+def test_legacy_edit_monitors_migrate_to_one_viewport(legacy_panels):
+    profile = LayoutProfile(
+        product_mode="studio", page_id="Edit",
+        visible_panels=legacy_panels + ("edit.timeline",),
+        qt_state_hex="00aabb",
+    )
+    migrated = LayoutStore().filter_panels(
+        profile, enabled_features={"edit"},
+        registered_panel_ids={"edit.viewport", "edit.timeline"},
+    )
+    assert migrated.visible_panels == ("edit.viewport", "edit.timeline")
+    assert migrated.qt_state_hex == profile.qt_state_hex
+    assert profile.visible_panels == legacy_panels + ("edit.timeline",)
+
+
+@pytest.mark.parametrize("product_mode", ["studio", "edit"])
+def test_default_edit_layout_has_one_viewport(product_mode):
+    profile = LayoutStore().get_default_profile(product_mode, "Edit")
+    assert "edit.viewport" in profile.visible_panels
+    assert "edit.program_viewer" not in profile.visible_panels
+    assert "edit.source_viewer" not in profile.visible_panels
+
+
 # ---------------------------------------------------------------------------
 # In-memory config stub (avoids touching the filesystem)
 # ---------------------------------------------------------------------------

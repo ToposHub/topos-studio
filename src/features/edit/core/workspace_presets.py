@@ -29,7 +29,6 @@ __all__ = [
 EDIT_WORKSPACE_MANAGED_DOCKS: Tuple[str, ...] = (
     "dockEditMediaPool",
     "dockProgramViewer",
-    "dockSourceViewer",
     "dockEditTimeline",
     "dockEditInfo",
     "dockEditEffects",
@@ -125,11 +124,10 @@ EDITING_PRESET = WorkspacePreset(
     preset_id="editing",
     label="剪辑",
     label_en="Editing",
-    description="默认剪辑布局：媒体池 + 节目/源监视器 + 时间线 + 右侧属性区",
+    description="默认剪辑布局：媒体池 + Viewport 单/双视图 + 时间线 + 右侧属性区",
     visible_docks=(
         "dockEditMediaPool",
         "dockProgramViewer",
-        "dockSourceViewer",
         "dockEditTimeline",
         "dockProperties",
         "dockEditEffects",
@@ -138,14 +136,12 @@ EDITING_PRESET = WorkspacePreset(
     dock_areas=(
         ("dockEditMediaPool", "left"),
         ("dockProgramViewer", "top"),
-        ("dockSourceViewer", "top"),
         ("dockEditTimeline", "bottom"),
         ("dockProperties", "right"),
         ("dockEditEffects", "right"),
         ("dockEditInfo", "right"),
     ),
     tabify_groups=(
-        ("dockProgramViewer", "dockSourceViewer"),
         ("dockProperties", "dockEditEffects", "dockEditInfo"),
     ),
     focus_dock="dockProgramViewer",

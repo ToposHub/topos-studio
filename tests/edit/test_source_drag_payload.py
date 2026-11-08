@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src.features.edit.core.source_drag_payload import (
@@ -81,3 +83,50 @@ def test_b08_decode_accepts_qbytearray_like():
     stub = decode_source_drag_payload(_QByteArrayLike())
     assert stub is not None and stub.asset_id == "a"
     assert decode_source_drag_payload(QByteArray(b"\xff\xfe")) is None
+
+
+@pytest.mark.parametrize("version", [True, False, 1.0, "1", None])
+def test_decode_rejects_coercible_or_missing_integer_version(version: object) -> None:
+    data = json.loads(build_source_drag_payload("a", 0, 9).encode())
+    data["version"] = version
+    assert decode_source_drag_payload(json.dumps(data)) is None
+
+
+@pytest.mark.parametrize("value", [True, False, 0.0, 1.5, "1", None, [], {}])
+@pytest.mark.parametrize("field", ["in_frame", "out_frame"])
+def test_builder_and_decoder_require_integer_frames(field: str, value: object) -> None:
+    data = {"asset_id": "a", "in_frame": 0, "out_frame": 9}
+    data[field] = value
+    assert build_source_drag_payload(**data) is None
+    assert decode_source_drag_payload(json.dumps({"version": 1, **data})) is None
+
+
+@pytest.mark.parametrize("asset_id", [True, 1, [], {}, None, "", "   "])
+def test_builder_and_decoder_require_nonempty_asset_string(asset_id: object) -> None:
+    assert build_source_drag_payload(asset_id, 0, 9) is None
+    assert decode_source_drag_payload(json.dumps({
+        "version": 1, "asset_id": asset_id, "in_frame": 0, "out_frame": 9,
+    })) is None
+
+
+@pytest.mark.parametrize("value", [True, False, 24.0, "24", None, 0, -1, [], {}])
+@pytest.mark.parametrize("field", ["source_fps_num", "source_fps_den"])
+def test_explicit_fps_requires_positive_integer_pair(field: str, value: object) -> None:
+    data = json.loads(build_source_drag_payload("a", 0, 9, source_fps=(24, 1)).encode())
+    data[field] = value
+    assert decode_source_drag_payload(json.dumps(data)) is None
+    assert build_source_drag_payload(
+        "a", 0, 9, source_fps=(data["source_fps_num"], data["source_fps_den"]),
+    ) is None
+
+
+@pytest.mark.parametrize("source_fps", [(), (24,), (24, 1, 1), "24/1", 24, True, {}])
+def test_malformed_builder_fps_returns_none_without_coercion(source_fps: object) -> None:
+    assert build_source_drag_payload("a", 0, 9, source_fps=source_fps) is None
+
+
+@pytest.mark.parametrize("field", ["source_fps_num", "source_fps_den"])
+def test_partial_fps_pair_rejects_payload(field: str) -> None:
+    data = json.loads(build_source_drag_payload("a", 0, 9).encode())
+    data[field] = 24
+    assert decode_source_drag_payload(json.dumps(data)) is None

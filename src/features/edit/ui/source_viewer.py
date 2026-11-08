@@ -53,7 +53,7 @@ import math
 import threading
 import time
 import numpy as np
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Callable
 
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import (
@@ -61,11 +61,11 @@ from PyQt6.QtWidgets import (
     QLabel, QSizePolicy, QSlider,
 )
 from PyQt6.QtCore import (
-    Qt, QObject, pyqtSignal, QPoint, QSize, QTimer,
+    Qt, QObject, pyqtSignal, QPoint, QSize, QTimer, QEvent,
 )
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QImage,
-    QKeySequence, QMouseEvent, QShortcut, QWheelEvent,
+    QKeySequence, QMouseEvent, QShortcut, QWheelEvent, QIcon,
 )
 
 from src.shared.i18n.i18n import I18N
@@ -236,6 +236,7 @@ class SourceViewerBar(QFrame):
         self.setAutoFillBackground(False)
 
         self._is_playing: bool = False
+        self._presentation_icon_provider: Optional[Callable[[str], QIcon]] = None
         self._in_point: Optional[int] = None
         self._out_point: Optional[int] = None
 
@@ -423,10 +424,17 @@ class SourceViewerBar(QFrame):
     def update_play_state(self, is_playing: bool) -> None:
         """Update play/pause button icon."""
         self._is_playing = is_playing
-        if is_playing:
+        if self._presentation_icon_provider is not None:
+            self.btn_play.setIcon(self._presentation_icon_provider("pause" if is_playing else "play"))
+        elif is_playing:
             self.btn_play.setIcon(icon_pause(IconColors.ORANGE))
         else:
             self.btn_play.setIcon(icon_play(IconColors.ORANGE))
+
+    def set_presentation_icon_provider(self, provider: Callable[[str], QIcon]) -> None:
+        """Apply monitor artwork while retaining the original playback routes."""
+        self._presentation_icon_provider = provider
+        self.update_play_state(self._is_playing)
 
     def update_in_out_state(self, in_point: Optional[int], out_point: Optional[int]) -> None:
         """Update In/Out button states."""
@@ -451,6 +459,7 @@ class SourceViewerBar(QFrame):
                 background-color: rgba(226, 146, 39, 120);
             }
         """
+        mark_active_style = getattr(self, "_monitor_mark_active_style", mark_active_style)
         if in_point is not None:
             self.btn_mark_in.setStyleSheet(mark_active_style)
         else:
@@ -507,8 +516,22 @@ class SourceSlider(QSlider):
         self._out_point = out_point
         self.update()
 
+    def event(self, event: QEvent) -> bool:
+        """End monitor gestures when visibility or enabled state cancels input."""
+        if self.property("resolveMonitorScrubber") and (
+            event.type() in (QEvent.Type.Hide, QEvent.Type.UngrabMouse)
+            or (event.type() == QEvent.Type.EnabledChange and not self.isEnabled())
+        ):
+            from src.features.edit.ui.viewport_scrubber import cancel_monitor_scrub
+            cancel_monitor_scrub(self)
+        return super().event(event)
+
     def paintEvent(self, event) -> None:
         """Custom paint to show In/Out markers."""
+        if self.property("resolveMonitorScrubber"):
+            from src.features.edit.ui.viewport_scrubber import paint_monitor_scrubber
+            paint_monitor_scrubber(self)
+            return
         super().paintEvent(event)
 
         painter = QPainter(self)
@@ -537,6 +560,28 @@ class SourceSlider(QSlider):
             painter.drawLine(out_x, 0, out_x, self.height())
 
         painter.end()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Keep the original slider signals for direct monitor scrubbing."""
+        if self.property("resolveMonitorScrubber"):
+            from src.features.edit.ui.viewport_scrubber import scrubber_mouse_press
+            if scrubber_mouse_press(self, event):
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self.property("resolveMonitorScrubber"):
+            from src.features.edit.ui.viewport_scrubber import scrubber_mouse_move
+            if scrubber_mouse_move(self, event):
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self.property("resolveMonitorScrubber"):
+            from src.features.edit.ui.viewport_scrubber import scrubber_mouse_release
+            if scrubber_mouse_release(self, event):
+                return
+        super().mouseReleaseEvent(event)
 
 
 # ================================================================
@@ -664,7 +709,7 @@ class SourceViewer(QOpenGLWidget):
             self._create_quad_vbo()
 
             # Set clear color
-            _gl.glClearColor(0.08, 0.08, 0.08, 1.0)
+            _gl.glClearColor(0.0980392157, 0.0980392157, 0.0980392157, 1.0)
 
             self._gl_initialized = True
             self._gl_paint_failed = False
@@ -1678,6 +1723,7 @@ class SourceViewerWidget(QWidget):
         self._loop_enabled: bool = False
         self._reverse_playback: bool = False
         self._scrub_was_playing: bool = False
+        self._scrub_was_reverse: bool = False
 
         # GPU timeout watchdog: if GPU async result doesn't arrive within
         # _gpu_timeout_ms, fall back to CPU decode for that frame
@@ -1884,6 +1930,7 @@ class SourceViewerWidget(QWidget):
 
         # Reset zoom/pan to fit mode for new asset
         self.viewer._view_transform.reset_fit()
+        self.viewer.zoom_changed.emit(self.viewer._view_transform.zoom)
 
         # Update playback timer interval.  The tick runs faster than the frame
         # period; actual frame selection comes from the monotonic clock in
@@ -2234,6 +2281,9 @@ class SourceViewerWidget(QWidget):
             return
         if not self._current_asset:
             return
+        # Forward playback may already own a continuous audio stream. Reverse
+        # is video-only, so retire that stream before changing its clock.
+        self._pause_source_audio()
         if self._current_frame <= 0:
             self._current_frame = self._total_frames - 1  # 末帧起倒
         self._reverse_playback = True
@@ -2372,6 +2422,7 @@ class SourceViewerWidget(QWidget):
         if not self._current_asset:
             return
         self._scrub_was_playing = self._is_playing  # VP-B05: 释放按此恢复
+        self._scrub_was_reverse = self._reverse_playback
         if self._is_playing:
             self.pause()
         self._scrub_active = True
@@ -2394,7 +2445,11 @@ class SourceViewerWidget(QWidget):
         # VP-B05: scrub 开始前在播 → 释放后恢复播放；此前已暂停 → 保持暂停
         if self._scrub_was_playing:
             self._scrub_was_playing = False
-            self.play()
+            if self._scrub_was_reverse:
+                self.play_reverse()
+            else:
+                self.play()
+        self._scrub_was_reverse = False
 
     def _on_slider_changed(self, value: int) -> None:
         """Handle slider value change."""
@@ -2598,7 +2653,7 @@ class SourceViewerWidget(QWidget):
         the tolerance, so ordinary 1-2 frame Qt scheduling jitter does not
         stall low-fps clips.
         """
-        if not self._is_playing:
+        if not self._is_playing or self._view_hidden:
             return False
         pending = self._gpu_pending_frame
         if pending < 0:
@@ -2638,7 +2693,7 @@ class SourceViewerWidget(QWidget):
         # VP-B05: loop-aware end limit (In/Out when looping, else media end)
         bounds = self._loop_bounds()
         limit = bounds[1] if bounds is not None else self._total_frames - 1
-        if not self._reverse_playback and self._current_frame >= limit:
+        if not self._reverse_playback and bounds is None and self._current_frame >= limit:
             self._handle_playback_end(bounds)
             return
 
@@ -2673,6 +2728,13 @@ class SourceViewerWidget(QWidget):
         # Calculate where we should be based on real time
         target_frame = self._playback_start_frame + int(elapsed * self._fps)
 
+        # Out is inclusive: present it before wrapping, then keep it until the
+        # next frame is due. This also gives a one-frame range its full period
+        # instead of repeatedly seeking its audio on every fast timer tick.
+        if bounds is not None and self._current_frame >= limit and target_frame > limit:
+            self._handle_playback_end(bounds)
+            return
+
         # Clamp to the loop-aware limit
         target_frame = min(target_frame, limit)
 
@@ -2691,12 +2753,6 @@ class SourceViewerWidget(QWidget):
 
         # Not yet due — wait for a later tick.
         if target_frame <= self._current_frame:
-            return
-
-        # VP-B05: looping playback wraps as soon as the limit is due
-        # (the limit frame itself is not presented twice).
-        if bounds is not None and target_frame >= limit:
-            self._handle_playback_end(bounds)
             return
 
         if target_frame > self._current_frame + 1:
@@ -2887,7 +2943,7 @@ class SourceViewerWidget(QWidget):
 
     def _on_gpu_timeout(self) -> None:
         """GPU watchdog: fall back to CPU decode when GPU result doesn't arrive in time."""
-        if self._shutdown_prepared:
+        if self._shutdown_prepared or self._view_hidden:
             return  # VP-B11: 关闭后超时不再拉起新解码
         timed_out_frame = self._gpu_pending_frame
         if timed_out_frame < 0:
@@ -2910,7 +2966,7 @@ class SourceViewerWidget(QWidget):
         the UI thread because it dispatches the decode request whose result
         is uploaded from the UI thread (paintGL deferred channel).
         """
-        if self._shutdown_prepared:
+        if self._shutdown_prepared or self._view_hidden:
             return  # VP-B11: 关闭 token
         if self._current_asset is None or not self._current_asset.is_video:
             return

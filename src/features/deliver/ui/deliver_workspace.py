@@ -354,9 +354,13 @@ class DeliverWorkspace(QWidget):
         # there would leave an empty fullscreen shell behind and a stale
         # _original_parent for Esc-to-return.  Borrow from a clean inline
         # state instead.
-        if program_viewer is not None and getattr(
-                program_viewer, "_is_fullscreen", False):
-            exit_fullscreen = getattr(program_viewer, "exit_fullscreen", None)
+        fullscreen_viewer = program_viewer
+        get_viewer = getattr(program_viewer, "get_viewer", None)
+        if callable(get_viewer):
+            fullscreen_viewer = get_viewer()
+        if fullscreen_viewer is not None and getattr(
+                fullscreen_viewer, "_is_fullscreen", False):
+            exit_fullscreen = getattr(fullscreen_viewer, "exit_fullscreen", None)
             if callable(exit_fullscreen):
                 exit_fullscreen()
 

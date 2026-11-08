@@ -70,6 +70,7 @@ class ViewerCapability:
 _REASONS = {
     "no_timeline": "No timeline is open.",
     "no_source_asset": "No source media is open in the viewer.",
+    "source_loop_unsupported": "Source loop playback is not supported.",
     "deliver_mode": "Deliver forces Timeline monitoring.",
     "proxy_generating": "A disk proxy is being generated for this asset.",
     "proxy_unavailable": "No usable proxy for this asset.",
@@ -127,7 +128,8 @@ def evaluate_viewer_capabilities(
                      "source_tape_undesigned"))
 
     # ── Source transport 能力位（对齐 B05 落地） ─────────────────────
-    caps.append(_cap("source.loop", context.source_loop_supported))
+    caps.append(_cap("source.loop", context.source_loop_supported,
+                     "source_loop_unsupported"))
     caps.append(_cap("source.reverse_play", context.source_asset_open,
                      "no_source_asset"))
     caps.append(_cap("source.reverse_play_audio",

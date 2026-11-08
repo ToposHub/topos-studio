@@ -191,6 +191,19 @@ def test_b04_range_rejection_reasons():
     assert audio_only.validate_range(0, 0).reason == REASON_NO_FRAMES
 
 
+@pytest.mark.parametrize("in_frame,out_frame", [
+    (1.8, 3.2), (True, True), (False, 3), (0, False),
+    (1.0, 3), (1, 3.0), ("1", 3), (1, "3"),
+    ([], 3), (1, {}), (float("nan"), 3), (1, float("inf")),
+])
+def test_range_rejects_noninteger_source_frames(
+        in_frame: object, out_frame: object) -> None:
+    check = _domain(FPS_24, total=240).validate_range(in_frame, out_frame)
+    assert not check.ok
+    assert check.reason == REASON_RANGE_EMPTY
+    assert (check.start, check.end, check.length) == (None, None, None)
+
+
 # ── 按资产状态存储：媒体版本校验 ───────────────────────────────────
 
 

@@ -132,6 +132,36 @@ def test_b10_borrow_exits_fullscreen_first(qapp):
     workspace.detach_edit_panels()
 
 
+def test_b10_real_program_wrapper_exits_canvas_fullscreen_before_borrow(qapp):
+    """The real wrapper owns chrome; its inner canvas owns fullscreen state."""
+    from unittest.mock import Mock
+    from src.features.edit.ui.program_viewer import ProgramViewerWidget
+
+    workspace = DeliverWorkspace()
+    program = ProgramViewerWidget()
+    canvas = program.get_viewer()
+    dock = _dock(program)
+    original_canvas_parent = canvas.parentWidget()
+    canvas._is_fullscreen = True
+
+    def exit_fullscreen() -> None:
+        assert program.parentWidget() is dock
+        canvas._is_fullscreen = False
+
+    canvas.exit_fullscreen = Mock(side_effect=exit_fullscreen)
+
+    workspace.attach_edit_panels(program, None, program_viewer_dock=dock)
+
+    canvas.exit_fullscreen.assert_called_once_with()
+    assert not canvas._is_fullscreen
+    assert program.parentWidget() is workspace._edit_preview_splitter
+    assert canvas.parentWidget() is original_canvas_parent
+    workspace.detach_edit_panels()
+    assert dock.widget() is program
+    dock.close()
+    workspace.close()
+
+
 # ── 占用 dock：不覆盖 + 诊断 ───────────────────────────────────────
 
 

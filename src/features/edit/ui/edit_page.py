@@ -13,7 +13,7 @@ The Program Viewer displays:
 Architecture:
     MainWindow (Dock Layout)
     ├── Media Pool Dock
-    ├── Program Viewer Dock (NEW)
+    ├── Viewport Dock (Source + Timeline, single/dual view)
     ├── Timeline Dock
     ├── Properties Dock
     └── Effects Dock
@@ -230,6 +230,7 @@ class EditPage(QWidget):
     timeline_scrub_frame_requested = pyqtSignal(int)  # frame number
     timeline_scrub_finished = pyqtSignal(int)  # frame number
     waveform_status_message = pyqtSignal(str, int)  # message, timeout_ms
+    timeline_display_changed = pyqtSignal(object)  # visible monitor timebase
 
     def _on_waveform_status_from_singleton(self, message: str,
                                            timeout_ms: int) -> None:
@@ -2826,6 +2827,7 @@ class EditPage(QWidget):
         preview_signature = self._build_timeline_preview_signature(timeline)
 
         self._current_timeline = timeline
+        self.timeline_display_changed.emit(timeline)
 
         # An empty timeline has no frame that can replace the previous
         # Program image. Clear it immediately instead of letting the viewer
@@ -3310,6 +3312,9 @@ class EditPage(QWidget):
                 audio_offset_seconds=_audio_offset,
             )
             self._source_viewer.seek(max(0, int(source_frame)))
+            viewport = getattr(self._main_window, "edit_viewport", None)
+            if viewport is not None:
+                viewport.show_source(focus=True)
         except Exception:  # noqa: BLE001 打开失败不阻断时间线交互
             logger.exception("Clip double-click: failed to open asset %s", asset_id)
 

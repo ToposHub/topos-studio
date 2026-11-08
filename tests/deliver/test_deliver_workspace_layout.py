@@ -144,6 +144,46 @@ def test_edit_viewer_and_timeline_can_be_reused_by_deliver(qapp):
     window.close()
 
 
+def test_deliver_returns_nested_program_without_replacing_viewport(qapp):
+    """Deliver borrows the canvas widget while the Edit dock retains its shell."""
+    from PyQt6.QtWidgets import QVBoxLayout
+    from src.app.controllers.dock_layout_controller import DockLayoutMixin
+
+    window = QMainWindow()
+    workspace = DeliverWorkspace()
+    window.setCentralWidget(workspace)
+    viewer = QWidget()
+    viewport = QWidget()
+    viewport_layout = QVBoxLayout(viewport)
+    viewport_layout.addWidget(viewer)
+    modes: list[bool] = []
+    viewport.set_deliver_mode = modes.append
+    viewport.restore_program_viewer = lambda: viewport_layout.addWidget(viewer)
+    timeline = _TimelinePanelStub()
+    viewer_dock = QDockWidget("Viewport", window)
+    viewer_dock.setWidget(viewport)
+    timeline_dock = QDockWidget("Timeline", window)
+    timeline_dock.setWidget(timeline)
+    window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, viewer_dock)
+    window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, timeline_dock)
+    host = SimpleNamespace(
+        deliver_page=workspace, edit_viewport=viewport,
+        program_viewer_widget=viewer, timeline_panel=timeline,
+        dock_program_viewer=viewer_dock, dock_edit_timeline=timeline_dock,
+    )
+
+    for _ in range(2):
+        DockLayoutMixin._attach_edit_panels_to_deliver(host)
+        assert viewer_dock.widget() is viewport
+        assert workspace.edit_preview_splitter.indexOf(viewer) == 0
+        DockLayoutMixin._restore_edit_panels_from_deliver(host)
+        assert viewer_dock.widget() is viewport
+        assert viewport_layout.indexOf(viewer) == 0
+        assert timeline_dock.widget() is timeline
+    assert modes == [True, False, True, False]
+    window.close()
+
+
 def test_video_settings_use_global_combos_and_mode_tabs(qapp):
     workspace = DeliverWorkspace()
     settings = workspace.settings_panel

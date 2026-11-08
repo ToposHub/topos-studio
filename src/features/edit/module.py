@@ -7,7 +7,7 @@ FeatureRegistry system, allowing Edit to be disabled via feature flags.
 Edit manages:
 - Media Pool (project media management)
 - Timeline (editing workspace)
-- Program Viewer (playhead preview)
+- Viewport (single/dual Source and Timeline previews)
 - Properties (selection properties)
 - Effects (effects library)
 
@@ -635,20 +635,9 @@ class EditModule:
             default_visible=True,
         ))
         panel_registry.register(PanelDescriptor(
-            panel_id="edit.source_viewer",
-            title_key="panel.source_viewer",
-            fallback_title="Source Viewer",
-            feature_id="edit",
-            category="Edit",
-            page_ids=("Edit",),
-            dock_attr="dock_source_viewer",
-            order=200,
-            default_visible=False,
-        ))
-        panel_registry.register(PanelDescriptor(
-            panel_id="edit.program_viewer",
-            title_key="panel.program_viewer",
-            fallback_title="Program Viewer",
+            panel_id="edit.viewport",
+            title_key="panel.edit_viewport",
+            fallback_title="Viewport",
             feature_id="edit",
             category="Edit",
             page_ids=("Edit",),
