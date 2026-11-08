@@ -4461,6 +4461,8 @@ class TimelineExporter:
                                     clip, "fade_out_samples", None),
                                 "audio_sample_offset": int(getattr(
                                     clip, "audio_sample_offset", 0) or 0),
+                                # B16：淡化曲线（预览/成片同键）
+                                "fade_curve": getattr(clip, "fade_curve", None),
                             }
                             # AT: 若该 clip 参与音频转场，附加 crossfade 参数供 renderer
                             # 在 clip fade 之后叠加。一个 clip 理论上可能在多个转场中

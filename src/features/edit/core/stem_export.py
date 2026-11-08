@@ -467,6 +467,8 @@ def _iter_stem_pcm_chunks(
                     "fade_in_frames": int(getattr(clip, "fade_in_duration", 0) or 0),
                     "fade_out_frames": int(getattr(clip, "fade_out_duration", 0) or 0),
                     "fps": fps,
+                    # B16：淡化曲线（预览/成片/Stem 同键）
+                    "fade_curve": getattr(clip, "fade_curve", None),
                 }
                 # D05：音频转场 crossfade 包络——与成片导出同一收集逻辑，
                 # Stem 此前完全缺失。

@@ -326,6 +326,7 @@ class AudioGraphRenderer:
                 fade_out_samples_override=clip_fade.get("fade_out_samples"),
                 audio_sample_offset=int(
                     clip_fade.get("audio_sample_offset", 0) or 0),
+                fade_curve=clip_fade.get("fade_curve"),
             )
             # AT: 音频转场 crossfade（与 clip fade 同级，source 电平调整）。
             # crossfade 是一个 list，每个元素描述该 clip 参与的一个转场。

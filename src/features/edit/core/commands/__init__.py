@@ -1093,6 +1093,7 @@ from .clip_props_commands import (
     ChangeClipSpeedCommand as ChangeClipSpeedCommand,
     MoveSpeedPointCommand,
     SetClipSpeedSettingsCommand,
+    SetFadeCurveCommand,
     FreezeFrameAtPlayheadCommand,
     SetClipBlendModeCommand,
     ReplaceClipAssetCommand,

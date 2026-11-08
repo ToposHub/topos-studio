@@ -1955,6 +1955,105 @@ class SetClipSpeedSettingsCommand:
 
 
 # ================================================================
+# B16: SetFadeCurveCommand（淡化曲线形状）
+# ================================================================
+
+@dataclass(frozen=True)
+class SetFadeCurveCommand:
+    """B16：设置 clip 淡化曲线形状（沿 fade_in/out_duration 归一进度）。
+
+    曲线在模型持久化（``ClipInstance.fade_curve``），视频预览/导出与
+    音频实时/离线消费者共同读取——不是只画 UI 曲线。``None`` = legacy
+    默认（视频 linear / 音频 equal_power，旧工程逐帧/逐样本不变）。
+    白名单外新写拒绝；undo 快照直接还原。
+
+    Attributes:
+        fade_curve: "linear" | "equal_power" | "smooth" | None（清除）
+        _previous: apply 期捕获的原值
+    """
+
+    command_id: str
+    label: str
+    clip_id: str
+    track_id: str
+    fade_curve: str | None
+    _previous: str | None = None
+    _had_value: bool = False
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self.fade_curve is not None and self.fade_curve not in (
+                "linear", "equal_power", "smooth"):
+            raise ValueError(
+                f"Invalid fade curve: {self.fade_curve!r}; expected "
+                f"linear|equal_power|smooth or None")
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        assert_track_editable(timeline, self.track_id, "Set fade curve")
+        if clip.fade_curve == self.fade_curve:
+            return timeline  # no-op 同一实例（不入历史）
+        object.__setattr__(self, "_previous", clip.fade_curve)
+        object.__setattr__(self, "_had_value", True)
+        new_clip = clip.with_fade_curve(self.fade_curve)
+        new_track = track._rebuild(clips=tuple(
+            new_clip if c.clip_id == clip.clip_id else c for c in track.clips))
+        return timeline.with_track_updated(new_track)
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._previous is None and not self._had_value:
+            raise ValueError("Cannot undo: command was never applied")
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        restored = clip.with_fade_curve(self._previous)
+        new_track = track._rebuild(clips=tuple(
+            restored if c.clip_id == clip.clip_id else c for c in track.clips))
+        return timeline.with_track_updated(new_track)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetFadeCurveCommand",
+            "label": self.label,
+            "clip_id": self.clip_id,
+            "track_id": self.track_id,
+            "fade_curve": self.fade_curve,
+            "_previous": self._previous,  # None 也写出：键存在 = 已 apply
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetFadeCurveCommand":
+        return SetFadeCurveCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set fade curve"),
+            clip_id=data.get("clip_id", ""),
+            track_id=data.get("track_id", ""),
+            fade_curve=data.get("fade_curve"),
+            _previous=data.get("_previous"),
+            # 序列化恢复：_previous 键存在 = 已 apply 过（含原值为 None）
+            _had_value="_previous" in data,
+        )
+
+    @staticmethod
+    def create(
+        clip_id: str, track_id: str, fade_curve: str | None,
+    ) -> "SetFadeCurveCommand":
+        return SetFadeCurveCommand(
+            command_id=str(uuid.uuid4()),
+            label=f"Fade curve: {fade_curve or 'default'}",
+            clip_id=clip_id,
+            track_id=track_id,
+            fade_curve=fade_curve,
+        )
+
+
+# ================================================================
 # A2: FreezeFrameAtPlayheadCommand（冻结帧，2026-09-07 优化计划）
 # ================================================================
 

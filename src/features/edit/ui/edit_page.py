@@ -1619,6 +1619,8 @@ class EditPage(QWidget):
                         clip, "audio_sample_offset", 0) or 0),
                     source_sample_offset=int(getattr(
                         clip, "source_sample_offset", 0) or 0),
+                    # B16：淡化曲线（None=音频 legacy equal_power）
+                    fade_curve=getattr(clip, "fade_curve", None),
                 ):
                     registered_any = True
                     # P-clip-FX: 把该 clip 的 audio 效果同步到引擎
