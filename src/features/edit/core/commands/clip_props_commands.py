@@ -2047,6 +2047,9 @@ class SetFadeCurveCommand:
     fade_curve: str | None
     _previous: str | None = None
     _had_value: bool = False
+    # R05：undo 与未支持原值一致——加载的 future 曲线经 extras 保留，
+    # 快照必须连同原值一起捕获/恢复，否则 set→undo 会把原值洗掉。
+    _previous_raw: Any = None
 
     def apply(self, timeline: TimelineSequence) -> TimelineSequence:
         if self.fade_curve is not None and self.fade_curve not in (
@@ -2061,9 +2064,12 @@ class SetFadeCurveCommand:
         if clip is None:
             raise ValueError(f"Clip not found: {self.clip_id}")
         assert_track_editable(timeline, self.track_id, "Set fade curve")
-        if clip.fade_curve == self.fade_curve:
+        # no-op：已知值相同**且**没有待回写的未支持原值（apply 恒清原值）
+        if clip.fade_curve == self.fade_curve and \
+                clip.fade_curve_raw is None:
             return timeline  # no-op 同一实例（不入历史）
         object.__setattr__(self, "_previous", clip.fade_curve)
+        object.__setattr__(self, "_previous_raw", clip.fade_curve_raw)
         object.__setattr__(self, "_had_value", True)
         new_clip = clip.with_fade_curve(self.fade_curve)
         new_track = track._rebuild(clips=tuple(
@@ -2079,7 +2085,8 @@ class SetFadeCurveCommand:
         clip = track.get_clip_by_id(self.clip_id)
         if clip is None:
             raise ValueError(f"Clip not found: {self.clip_id}")
-        restored = clip.with_fade_curve(self._previous)
+        restored = clip.with_fade_curve_state(
+            self._previous, self._previous_raw)
         new_track = track._rebuild(clips=tuple(
             restored if c.clip_id == clip.clip_id else c for c in track.clips))
         return timeline.with_track_updated(new_track)
@@ -2094,6 +2101,7 @@ class SetFadeCurveCommand:
             "fade_curve": self.fade_curve,
             "_previous": self._previous,
             "_had_value": self._had_value,
+            "_previous_raw": self._previous_raw,
         }
 
     @staticmethod
@@ -2107,6 +2115,7 @@ class SetFadeCurveCommand:
             _previous=data.get("_previous"),
             # 序列化恢复：_previous 键存在 = 已 apply 过（含原值为 None）
             _had_value=bool(data.get("_had_value", "_previous" in data)),
+            _previous_raw=data.get("_previous_raw"),
         )
 
     @staticmethod
