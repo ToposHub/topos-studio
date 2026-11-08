@@ -177,9 +177,12 @@ class EditProjectService:
         内核部分（解析→读取一致性→编译→纯数据模拟→domain 校验→原子提交）：
 
         1. 读取 sequence（含 key 一致性检查）。
-        2. 若提供 ``base_revision``，做乐观锁比较（TAEP §6.2）。
-        3. 在副本上 ``command.apply`` 得到 proposed sequence（不可变模型天然在
-           “副本”上操作）。
+        2. 若提供 ``base_revision``，做乐观锁比较（TAEP §6.2；B06：先于
+           命令级失败，stale revision 语义优先）。
+        3. 在副本上 ``command.apply`` **一次**得到 proposed sequence（不可变
+           模型天然在"副本"上操作；B06：命令异常归一为失败结果）。
+        3b. 若提供 ``position_locked_clip_ids``，对 before/proposed 快照做
+           footprint 判定（同一判定函数族；不再 dry-run 重复执行命令）。
         4. domain 校验：``validate_timeline``（引用完整性、transition 邻接）；
            overlap 在 ``EditTrack.__post_init__`` 与各 command.apply 内已强制。
         5. bump timeline revision（提交边界才 bump，preview/diff 不 bump）。
@@ -214,22 +217,8 @@ class EditProjectService:
                 error=str(exc),
             )
 
-        # W06：Position Lock 策略预检（与 UI 提交口同一 footprint 判定）。
-        if position_locked_clip_ids is not None:
-            from src.features.edit.core.position_lock import (
-                evaluate_command_footprint_safe,
-            )
-            allowed, reason = evaluate_command_footprint_safe(
-                command, sequence, position_locked_clip_ids)
-            if not allowed:
-                return CommitResult(
-                    applied=False,
-                    new_project=state.project,
-                    new_sequences=dict(state.sequences),
-                    error=reason or "Position lock: edit rejected",
-                )
-
-        # 乐观锁：AI/脚本路径必须传 base_revision，与当前 revision 比较。
+        # B06①：乐观锁**先验**——stale revision 优先于一切命令级失败，
+        # 调用方拿到的是 RevisionConflict 语义而不是 dry-run 的领域异常。
         # AUD-13406：冲突折叠进 ``CommitResult(applied=False)``，与 domain
         # 校验失败的错误通道统一（docstring 承诺"失败 → applied=False 且
         # error 描述原因"）。``RevisionConflict`` 仍导出供深层调用方编程式
@@ -246,7 +235,9 @@ class EditProjectService:
                 errors=(str(conflict),),
             )
 
-        # 编译 + 纯数据模拟（不可变模型在“副本”上 apply）。
+        # B06②：受控 apply **一次**得 proposed——命令非法（clip 不存在等）
+        # 与宏中后段失败都归一为 CommitResult，不再从锁预检的 dry-run
+        # 抛出原始 ValueError（不可变模型保证无半套状态泄漏）。
         try:
             proposed = command.apply(sequence)
             # 部分命令返回 (new_timeline, updated_command) 元组（如 MacroCommand，
@@ -260,6 +251,22 @@ class EditProjectService:
                 new_sequences=dict(state.sequences),
                 error=f"Command failed to apply: {exc}",
             )
+
+        # B06③：W06 Position Lock 策略判定基于 before/proposed 快照
+        # （同一判定函数族），命令不再被 dry-run 重复执行。
+        if position_locked_clip_ids is not None:
+            from src.features.edit.core.position_lock import (
+                evaluate_footprint_between_safe,
+            )
+            allowed, reason = evaluate_footprint_between_safe(
+                sequence, proposed, position_locked_clip_ids)
+            if not allowed:
+                return CommitResult(
+                    applied=False,
+                    new_project=state.project,
+                    new_sequences=dict(state.sequences),
+                    error=reason or "Position lock: edit rejected",
+                )
 
         # domain 校验：引用完整性 + transition 邻接（overlap 已在 apply 内强制）。
         if validate:
