@@ -1527,6 +1527,10 @@ class MoveSpeedPointCommand:
     source_offset: int
     new_source_offset: int
     _snapshots: tuple | None = None
+    # R02：成员轨转场快照（(track_id, transitions) 对）——apply 的
+    # with_clip_updated 会 reanchor 钳制转场，undo 只还原 clip 几何
+    # 再让 reanchor 从已丢失的时长继续推导。快照恢复整轨转场。
+    _before_transitions: tuple | None = None
 
     def apply(self, timeline: TimelineSequence) -> TimelineSequence:
         track = timeline.get_track_by_id(self.track_id)
@@ -1569,6 +1573,12 @@ class MoveSpeedPointCommand:
 
         result = timeline
         members = [clip] + ([linked] if linked is not None else [])
+        # R02：任何轨写入前快照成员轨转场（reanchor 钳制不可逆）
+        before_transitions = tuple(
+            (member.track_id,
+             tuple(timeline.get_track_by_id(member.track_id).transitions))
+            for member in members
+        )
         for member in members:
             member_track = result.get_track_by_id(member.track_id)
             member_clip = member_track.get_clip_by_id(member.clip_id)
@@ -1594,7 +1604,24 @@ class MoveSpeedPointCommand:
                 member_track.with_clip_updated(updated))
 
         object.__setattr__(self, "_snapshots", tuple(snapshots))
+        object.__setattr__(self, "_before_transitions", before_transitions)
         return result
+
+    def _restore_transitions(
+        self, timeline: TimelineSequence,
+    ) -> TimelineSequence:
+        """R02：clip 还原后按 apply 前快照恢复整轨转场。
+
+        ``with_clip_updated`` 的 reanchor 会从当前（可能已钳制）时长
+        继续推导；显式传 transitions 的 ``_rebuild`` 不做推导（C11
+        快照恢复语义）。
+        """
+        for track_id, transitions in self._before_transitions or ():
+            track = timeline.get_track_by_id(track_id)
+            if track is not None:
+                timeline = timeline.with_track_updated(
+                    track._rebuild(transitions=transitions))
+        return timeline
 
     def undo(self, timeline: TimelineSequence) -> TimelineSequence:
         track = timeline.get_track_by_id(self.track_id)
@@ -1626,7 +1653,7 @@ class MoveSpeedPointCommand:
                 )
                 result = result.with_track_updated(
                     member_track.with_clip_updated(restored))
-            return result
+            return self._restore_transitions(result)
 
         # 序列化恢复后无快照（to_dict 不携带动画/淡变）：降级为反向
         # 移动 + 时长重算——曲线/时长可还原，动画停留当前锚（记录在案
@@ -1735,6 +1762,9 @@ class SetClipSpeedSettingsCommand:
     duration_frames: int = 0
     ripple: bool = False
     _snapshots: tuple | None = None
+    # R02：受影响轨（成员轨，含 ripple 后继所在轨）的转场快照——
+    # 时长变化的轨重建会 reanchor 钳制转场，undo 必须整轨恢复。
+    _before_transitions: tuple | None = None
 
     def apply(self, timeline: TimelineSequence) -> TimelineSequence:
         if self.keyframe_timing not in ("stretch", "maintain"):
@@ -1832,6 +1862,12 @@ class SetClipSpeedSettingsCommand:
         if no_change:
             return timeline
 
+        # R02：任何轨写入前快照成员轨转场（reanchor 钳制不可逆）
+        before_transitions = tuple(
+            (member_track.track_id, tuple(member_track.transitions))
+            for member_track, _clip_, _dur, _params in member_plans
+        )
+
         result = timeline
         for member_track, member_clip, new_duration, member_new_params \
                 in member_plans:
@@ -1876,6 +1912,7 @@ class SetClipSpeedSettingsCommand:
                     member_track.with_clip_updated(updated))
 
         object.__setattr__(self, "_snapshots", tuple(snapshots))
+        object.__setattr__(self, "_before_transitions", before_transitions)
         return result
 
     def undo(self, timeline: TimelineSequence) -> TimelineSequence:
@@ -1925,6 +1962,13 @@ class SetClipSpeedSettingsCommand:
             result = result.with_track_updated(
                 track._rebuild(clips=tuple(sorted(
                     final_clips, key=lambda c: c.timeline_start))))
+        # R02：clip 还原后按快照恢复整轨转场（reanchor 只会从已钳制
+        # 的时长继续推导；显式传 transitions 的 _rebuild 不做推导）
+        for track_id, transitions in self._before_transitions or ():
+            track = result.get_track_by_id(track_id)
+            if track is not None:
+                result = result.with_track_updated(
+                    track._rebuild(transitions=transitions))
         return result
 
     def to_dict(self) -> dict[str, Any]:
