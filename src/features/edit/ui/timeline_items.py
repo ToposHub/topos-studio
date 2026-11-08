@@ -626,6 +626,9 @@ class ClipItem(QGraphicsObject):
     change_speed_dialog_requested = pyqtSignal(str, str)
     speed_change_requested = pyqtSignal(str, str, float)  # clip_id, track_id, speed
     retime_controls_toggled = pyqtSignal(str, str, bool)
+    # R08：速度点把手拖动（源窗口坐标；origin=按下时边界，preview/final=拖动）
+    retime_point_dragged = pyqtSignal(str, str, int, int)
+    retime_point_move_finished = pyqtSignal(str, str, int, int)
     retime_speed_point_requested = pyqtSignal(str, str)
     # A2: 在播放头处冻结（clip_id, track_id, playhead_frame）
     freeze_frame_requested = pyqtSignal(str, str, int)
@@ -813,6 +816,9 @@ class ClipItem(QGraphicsObject):
         self._retime_points = tuple(retime_points)
         self._retime_window_base_speed: float | None = None
         self._retime_menu_pending_x: float | None = None
+        # R08：速度点把手拖动状态（源窗口坐标；None=未拖动）
+        self._retime_point_drag_origin: int | None = None
+        self._retime_point_drag_offset: int | None = None
         self._retime_reverse = False
         self._original_retime_speed: float = float(speed)
         self._retime_controls_visible = retime_controls_visible
@@ -1189,6 +1195,9 @@ class ClipItem(QGraphicsObject):
         visible = bool(visible)
         if self._retime_controls_visible == visible:
             return
+        # R08：隐藏/换工具取消进行中的把手拖动（不发提交信号）
+        if not visible:
+            self._cancel_retime_point_drag()
         self._retime_controls_visible = visible
         self.update()
 
@@ -3713,6 +3722,110 @@ class ClipItem(QGraphicsObject):
             timeline_start += timeline_length
         return tuple(segments)
 
+    # ── R08：速度点把手（独立命中/拖动/取消） ──────────────────────
+
+    def _retime_total_ticks(self, segments=None) -> int:
+        """分段积分的总 timeline ticks（与绘制同源）。"""
+        segments = self._retime_segments() if segments is None else segments
+        if not segments:
+            return 1
+        last = segments[-1]
+        return last[3] + max(1, round((last[1] - last[0]) / last[2]))
+
+    def _retime_point_handle_at(self, pos) -> "int | None":
+        """速度点把手命中测试：返回边界源偏移（窗口坐标），未命中 None。"""
+        if not self._retime_controls_visible:
+            return None
+        if not (self._track_height - 24.0 <= pos.y() <= self._track_height):
+            return None
+        segments = self._retime_segments()
+        if len(segments) < 2:
+            return None
+        total = self._retime_total_ticks(segments)
+        for source_start, _end, _speed, timeline_start in segments[1:]:
+            x = self._width * timeline_start / total
+            if abs(pos.x() - x) <= 5.0:
+                return int(source_start)
+        return None
+
+    def _retime_point_offset_at_x(self, x: float) -> int:
+        """像素 x → 源窗口偏移（分段积分逆映射——与绘制几何互逆）。"""
+        segments = self._retime_segments()
+        if not segments:
+            return 0
+        total = self._retime_total_ticks(segments)
+        t = max(0.0, min(float(total), x / max(1e-9, self._width) * total))
+        for index, (source_start, source_end, speed, tstart) in \
+                enumerate(segments):
+            length = max(1, round((source_end - source_start) / speed))
+            if t <= tstart + length or index == len(segments) - 1:
+                return int(round(source_start + (t - tstart) * speed))
+        return int(segments[-1][1])
+
+    def _retime_point_x_for_offset(self, offset: int) -> float:
+        """源窗口偏移 → 像素 x（正向映射；预览线位置）。"""
+        segments = self._retime_segments()
+        if not segments:
+            return 0.0
+        total = self._retime_total_ticks(segments)
+        for source_start, source_end, speed, tstart in segments:
+            if source_start <= offset <= source_end:
+                t = tstart + (offset - source_start) / max(1e-9, speed)
+                return self._width * t / total
+        return self._width
+
+    def _retime_point_drag_bounds(self, origin: int) -> "tuple[int, int]":
+        """可移动闭区间 [lo, hi]（邻点/窗口边界的严格开区间整数近似）。"""
+        offsets = [0]
+        offsets.extend(
+            offset for offset, _speed in self._retime_points
+            if 0 < offset < self._source_duration)
+        offsets.append(self._source_duration)
+        if origin not in offsets:
+            return (origin, origin)
+        index = offsets.index(origin)
+        lo = offsets[index - 1] + 1 if index > 0 else 1
+        hi = (offsets[index + 1] - 1 if index + 1 < len(offsets)
+              else self._source_duration - 1)
+        return (max(1, lo), max(max(1, lo), hi))
+
+    def _begin_retime_point_drag(self, origin: int) -> None:
+        self._retime_point_drag_origin = int(origin)
+        self._retime_point_drag_offset = int(origin)
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.update()
+
+    def _update_retime_point_drag(self, x: float) -> None:
+        """拖动预览：整数源偏移 + 邻点不交叉钳制（阈值 = 1 源帧）。"""
+        origin = self._retime_point_drag_origin
+        if origin is None:
+            return
+        lo, hi = self._retime_point_drag_bounds(origin)
+        offset = int(max(lo, min(hi, self._retime_point_offset_at_x(x))))
+        if offset == self._retime_point_drag_offset:
+            return
+        self._retime_point_drag_offset = offset
+        self.retime_point_dragged.emit(
+            self._clip_id, self._track_id, origin, offset)
+        self.update()
+
+    def _finish_retime_point_drag(self) -> None:
+        origin = self._retime_point_drag_origin
+        offset = self._retime_point_drag_offset
+        self._cancel_retime_point_drag()
+        if origin is not None and offset is not None and offset != origin:
+            self.retime_point_move_finished.emit(
+                self._clip_id, self._track_id, origin, offset)
+
+    def _cancel_retime_point_drag(self) -> None:
+        """Esc/换工具/隐藏控件：清预览，不发提交信号。"""
+        if self._retime_point_drag_origin is None:
+            return
+        self._retime_point_drag_origin = None
+        self._retime_point_drag_offset = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
+
     def _draw_retime_controls(self, painter: QPainter, clip_rect: QRectF) -> None:
         """Render separate title, direction strip and bottom speed segments."""
         painter.save()
@@ -3757,7 +3870,31 @@ class ClipItem(QGraphicsObject):
             if index:
                 painter.setPen(QPen(QColor(get_color("accent")), 1))
                 painter.drawLine(QPointF(x1, 17), QPointF(x1, self._track_height-1))
-                painter.fillRect(QRectF(x1-3, self._track_height-19, 6, 5), QColor(get_color("accent")))
+                # R08：可拖动把手（命中区 10px，视觉 8px 宽的下压三角）
+                painter.setPen(Qt.PenStyle.NoPen)
+                handle_color = QColor(get_color("accent"))
+                if (self._retime_point_drag_origin is not None
+                        and segments[index][0]
+                        == self._retime_point_drag_origin):
+                    handle_color = handle_color.lighter(150)
+                painter.setBrush(handle_color)
+                cy = self._track_height - 16.5
+                painter.drawPolygon(QPolygonF([
+                    QPointF(x1 - 4.0, cy - 3.5),
+                    QPointF(x1 + 4.0, cy - 3.5),
+                    QPointF(x1, cy + 3.5),
+                ]))
+        # R08：拖动预览线——origin 边界画在当前拖动位置（虚线高亮）
+        if (self._retime_point_drag_origin is not None
+                and self._retime_point_drag_offset is not None
+                and self._retime_point_drag_offset
+                != self._retime_point_drag_origin):
+            preview_x = self._retime_point_x_for_offset(
+                self._retime_point_drag_offset)
+            pen = QPen(QColor(get_color("accent")).lighter(160), 2)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(preview_x, 17), QPointF(preview_x, self._track_height-1))
         painter.restore()
 
     def _draw_clip_type_icon(self, painter: QPainter, clip_rect: QRectF) -> None:
@@ -4410,6 +4547,19 @@ class ClipItem(QGraphicsObject):
                 self.retime_controls_toggled.emit(self._clip_id, self._track_id, False)
                 event.accept()
                 return
+
+            # R08：速度点把手优先于底部分段菜单——把手是独立拖动状态，
+            # 点击不落入分段速度菜单或片段移动。
+            if self._retime_controls_visible:
+                point_handle = self._retime_point_handle_at(pos)
+                if point_handle is not None:
+                    self._drag_mode = "retime_point_move"
+                    self._drag_pending = True
+                    self._is_dragging = False
+                    self._drag_start_pos = event.scenePos()
+                    self._begin_retime_point_drag(point_handle)
+                    event.accept()
+                    return
 
             # In Resolve the percentage label is itself the segment editor.
             # Keep this before clip drag handling so a click never turns into
@@ -5340,6 +5490,10 @@ class ClipItem(QGraphicsObject):
                 self._update_geometry()
                 self.update()
 
+            elif self._drag_mode == "retime_point_move":
+                # R08：把手拖动按像素 x 反解源偏移（本地预览 + 钳制）
+                self._update_retime_point_drag(event.pos().x())
+
             elif self._drag_mode == "move":
                 new_start = self._drag_start_frame + delta_frames
                 # Don't update geometry here - let the view handler apply snap
@@ -5472,6 +5626,13 @@ class ClipItem(QGraphicsObject):
                 if was_dragging and new_duration != self._original_duration:
                     self.retime_stretch_finished.emit(
                         self._clip_id, self._track_id, self._original_duration, new_duration)
+
+            # R08：速度点把手松手——单命令提交（MoveSpeedPointCommand）
+            elif self._drag_mode == "retime_point_move":
+                if was_dragging:
+                    self._finish_retime_point_drag()
+                else:
+                    self._cancel_retime_point_drag()
 
             # Send finished signals for command execution
             elif self._drag_mode == "move":
@@ -5703,6 +5864,15 @@ class ClipItem(QGraphicsObject):
 
     def keyPressEvent(self, event: Any) -> None:
         """Handle key press for deletion."""
+        # R08：Esc 取消进行中的速度点把手拖动（返回原位，不发提交）
+        if event.key() == Qt.Key.Key_Escape and \
+                self._retime_point_drag_origin is not None:
+            self._drag_mode = ""
+            self._is_dragging = False
+            self._drag_pending = False
+            self._cancel_retime_point_drag()
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Delete:
             self.clip_delete.emit(self._clip_id, self._track_id)
 
