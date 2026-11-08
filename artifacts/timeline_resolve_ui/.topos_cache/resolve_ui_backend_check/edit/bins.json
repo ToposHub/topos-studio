@@ -1,0 +1,12 @@
+{
+  "796f509b-721f-458c-a0c6-8ccbfc9c02b6": {
+    "bin_id": "796f509b-721f-458c-a0c6-8ccbfc9c02b6",
+    "name": "Root",
+    "parent_id": null,
+    "asset_ids": [
+      "2ac24d6d-2ac1-4c78-a4a9-2d3d538bf437",
+      "c71e4ed9-3423-4e31-96cb-93affd140d16"
+    ],
+    "timeline_ids": []
+  }
+}

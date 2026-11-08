@@ -1,0 +1,84 @@
+{
+  "project_id": "7c1fceb3-0384-4535-886e-184ec0e77379",
+  "name": "Resolve Timeline UI Review",
+  "project_mode": "edit_project",
+  "assets": {
+    "2ac24d6d-2ac1-4c78-a4a9-2d3d538bf437": {
+      "asset_id": "2ac24d6d-2ac1-4c78-a4a9-2d3d538bf437",
+      "path": "../../tests/test_videos/2K_h264.mp4",
+      "media_type": "video",
+      "display_name": "2K_h264.mp4",
+      "is_offline": false,
+      "path_relative": "../../tests/test_videos/2K_h264.mp4",
+      "path_original": "../../tests/test_videos/2K_h264.mp4"
+    },
+    "c71e4ed9-3423-4e31-96cb-93affd140d16": {
+      "asset_id": "c71e4ed9-3423-4e31-96cb-93affd140d16",
+      "path": "../../tests/test_videos/测试素材01.mov",
+      "media_type": "video",
+      "display_name": "测试素材01.mov",
+      "is_offline": false,
+      "path_relative": "../../tests/test_videos/测试素材01.mov",
+      "path_original": "../../tests/test_videos/测试素材01.mov"
+    }
+  },
+  "bins": {
+    "796f509b-721f-458c-a0c6-8ccbfc9c02b6": {
+      "bin_id": "796f509b-721f-458c-a0c6-8ccbfc9c02b6",
+      "name": "Root",
+      "parent_id": null,
+      "asset_count": 2
+    }
+  },
+  "timelines": {
+    "resolve-ui-review": {
+      "timeline_id": "resolve-ui-review",
+      "name": "Timeline UI Review",
+      "fps": 25.0,
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "color_stacks": {},
+  "compositions": {},
+  "deliver_presets": {},
+  "ui_state": {},
+  "settings": {
+    "root_bin_id": "796f509b-721f-458c-a0c6-8ccbfc9c02b6",
+    "active_comp_clip_id": null,
+    "project_sample_rate": 0,
+    "color_management": {
+      "color.preview.timeline_primaries": "bt709",
+      "color.preview.timeline_transfer": "bt709",
+      "color.preview.image_primaries": "bt709",
+      "color.preview.image_transfer": "iec61966_2_1",
+      "color.output.timeline_primaries": "bt709",
+      "color.output.timeline_transfer": "bt709",
+      "color.output.timeline_range": "limited",
+      "color.output.image_primaries": "bt709",
+      "color.output.image_transfer": "iec61966_2_1",
+      "color.preview.hdr_tonemap": 1,
+      "color.preview.hdr_target_peak": 100,
+      "color.output.hdr_metadata": true,
+      "color.smart_default": true
+    },
+    "render_cache_settings": null,
+    "proxy_policy": null,
+    "source_patch_overrides": {},
+    "color_groups": {},
+    "timeline_grade_stacks": {},
+    "color_stack_versions": {},
+    "interpretation_overrides": {},
+    "audio_sync_bindings": {},
+    "sync_diagnostics": {},
+    "render_cache_manifests": {},
+    "project_snapshots": {}
+  },
+  "primary_asset_id": null,
+  "primary_color_stack_id": null,
+  "active_timeline_id": "resolve-ui-review",
+  "active_composition_id": null,
+  "created_at": 1794112100.154785,
+  "modified_at": 1794112100.457692,
+  "revision": 0
+}

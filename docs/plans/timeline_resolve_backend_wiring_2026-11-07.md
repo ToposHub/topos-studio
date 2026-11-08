@@ -1,6 +1,6 @@
 # Resolve 风格剪辑时间线：后端逻辑与宿主接线计划
 
-日期：2026-11-07；收尾验证：2026-11-08。状态：待后续实施。本轮交付范围为时间线 UI 与交互；本文只是后续实现计划，不代表这些能力已经接通。
+日期：2026-11-07；收尾验证：2026-11-08。状态：W00–W09 后端接线已实施完毕（实施记录见 §11；W00 契约见 §3.1）。首轮交付为时间线 UI 与交互；后续实施批次补齐了全部宿主接线。
 
 ## 1. 范围与当前边界
 
@@ -248,6 +248,8 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/edit/test_resolve_
 
 2026-11-08 收尾记录：相关现有与新增回归共 334 项通过、1 项跳过；图标及文案更新后，两个新增测试文件共 31 项再次全部通过。已通过真实素材预览检查、Python 编译与 `git diff --check`，测试工程保存/加载往返验证为 2 个素材、1 条时间线、20 个片段，素材路径全部可解析。这些结果不代表五个 request-only 能力已经完成宿主接线。
 
+2026-11-08 后端接线收尾记录：W00–W09 全部实施（详见 §11）。新增 6 个测试文件共 90 项 focused tests 全部通过。全量回归（`tests/edit/` + `tests/app/`，13883 项）12 失败经与改动前基线（6120873）同组合对照甄别：8 项为 n03 色彩门预存失败（基线同样失败）、3 项为顺序型抖动（poster/strip-preview/recent-files 日志——单独与全量 `tests/app/` 重跑均通过，且基线组合失败更多：16 项）、1 项为测试替身缺新信号（DummyPanel，已补齐）；本次改动零净回归。真实素材验证（`artifacts/timeline_resolve_ui/resolve_ui_backend_check.topos`，经 `EditProjectIO` 加载 2 素材/4 轨/10 片段）覆盖 W01 替换、W05 旗标、W06 锁判定与 W07 payload 往返。
+
 参考：[Blackmagic Design 官方 Edit 页说明](https://www.blackmagicdesign.com/products/davinciresolve/edit/)，以及本机打开的 DaVinci Resolve Studio 20 剪辑页。颜色继续使用 Topos 既有设计令牌。
 
 ## 9. 手动验收与自动化矩阵
@@ -273,3 +275,22 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/edit/test_resolve_
 每个request从真实toolbar入口触发并由host消费；内容变更经过可撤销、revision一致的提交路径；成功后显示模型真值，失败/取消不留下局部状态；重开工程和切timeline恢复约定状态；音视频预览/导出语义一致。单纯连接signal或让按钮变色不能视为完成。
 
 后续实施前应把 W00 决策记录在本文并更新任务状态。涉及schema、领域策略和新增命令的任务单独审查和分批合并；本轮UI成果不依赖这些任务先落地。
+
+## 11. 实施状态（2026-11-08 后端接线收尾）
+
+W00–W09 全部实施并测试。两批提交：批次一（W00/W09/W02/W01/W04），批次二（W06/W03/W05/W07/W08）。
+
+| ID | 状态 | 实现落点 | 测试 |
+|---|---|---|---|
+| W00 | ✅ 已定稿 | 契约 D1–D5 见 §3.1 | — |
+| W09 | ✅ 已实施 | `EditPage._bind/_unbind_timeline_panel_requests`（generation 计数、换面板先断旧连新、8 个请求一次绑定一次执行；未接线能力回写按钮防"假成功"） | `test_source_destination_wiring.py`（4 项） |
+| W02 | ✅ 已实施 | `TimelineView.resolve_source_destination_track_id`/`source_destination_stream_disabled`（三态：显式选中/显式关闭/无条目回退红 target；陈旧路由惰性清理）；insert/overwrite/append 与 `_add_asset_as_clip` 音频配对统一消费；`_sync_source_edit_buttons` 纳入两流全关判定 | `test_source_destination_wiring.py`（11 项） |
+| W01 | ✅ 已实施 | `ReplaceClipWithSourceCommand`（契约 D1 保留项/变更项、fps 时基随新素材刷新、轨锁守卫）；`TimelineView.replace_clip_with_source`（唯一选中→播放头目的轨解析、混合帧率 source_duration 换算、源不足拒绝、linked 成对宏单步 undo）；EditPage 无参槽读最新快照 | `test_replace_edit_and_voiceover.py`（14 项） |
+| W04 | ✅ 已实施 | `EditPage._on_timeline_voiceover_requested`：目标音轨=有效音频目的轨（无轨走既有找/建链）、展示 ADR Take Sheet dock、同轨再触发=停止导入；录音时间码/防错投/take 事务全部复用既有 `_start_recording` 链 | `test_replace_edit_and_voiceover.py`（4 项）；真实设备回归另留 |
+| W06 | ✅ 已实施 | `core/position_lock.py` footprint dry-run 判定（既有 clip 的 track/start/duration 变化或移除即拒；新增不违规；no-op 放行）；接入 `TimelineView._execute_command`（覆盖全部 UI 编辑；undo/redo 豁免）与 `EditProjectService.commit_command`/`TransactionService.commit`（显式 `position_locked_clip_ids`，向后兼容 None） | `test_position_lock_policy.py`（15 项） |
+| W03 | ✅ 基础参数轨已实施 | `EditKeyframeTray`（TimelinePanel 托管于视图下方，惰性创建；clip 级 animated_params 泳道，timeline 帧域；投影零命令；添加/删除复用既有命令；时间拖动=Remove+Add 宏单步 undo；Esc 取消；host 回写按钮）；效果参数轨与曲线编辑按原计划另估 | `test_edit_keyframe_tray.py`（6 项） |
+| W05 | ✅ 已实施 | `ClipInstance.flag_color`（默认 None，旧包零迁移；未知色保留+绘制 fallback）；`CLIP_FLAG_COLORS` 白名单单一真值（模型/命令/菜单共用）；`SetClipFlagCommand`（批量单步 undo、no-op 同一性不入栈）；`TimelineView.set_clip_flags`（选中/播放头目标、"" 归一 None）；ClipItem 左上角旗标徽章（窄片段可见） | `test_clip_flags.py`（9 项） |
+| W07 | ✅ 已实施 | `UIState.timeline_presentation` 有版本 payload（缩略图/波形/position lock/zoom preset+自定义 ppf+scroll/Tray/源目的轨 UI）；`TimelineView.export/apply_presentation_state`（零命令零 revision、非法值回退、陈旧路由清理、徽章重投影）+ panel 层 zoom/Tray；FileController 收集（`_get_edit_ui_state`）与恢复（layout 之后） | `test_presentation_state_and_levels.py`（5 项） |
+| W08 | ✅ 已实施 | `EditPage._reconnect/_disconnect_timeline_level_meter`：电平订阅跟随当前面板（重附先断旧连新、停机断开、幂等单连接）；manager/panel 先后创建两种顺序均覆盖 | `test_presentation_state_and_levels.py`（3 项） |
+
+原表中标注"另估"的后续范围（W01 多选 Replace 策略扩展、W02 多源声道徽章、W03 效果参数轨与曲线编辑、W04 真实设备回归、W05 多色列表、W06 service 端策略宿主签名）保持另估，不在本次范围。
