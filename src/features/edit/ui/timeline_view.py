@@ -5081,24 +5081,27 @@ class TimelineView(QGraphicsView):
             )
         if command is None:
             return
-        # 审计修复：linked 联动（与键盘/鼠标一致；linked 钳制失败整体拒绝）
-        # P1-05：联动命令不施加跨轨 sync-lock（主命令已跟随一次）
+        # 审计修复：linked 联动走 B19 域级共同边界计划（UI/service 同一
+        # 语义）；linked 共同钳制失败整体拒绝
         if getattr(self, "_linked_selection_enabled", False):
             linked = self._timeline.get_reciprocal_linked_clip(clip_id)
             if linked is not None and mode != "roll":
-                linked_cmd, _lc = build_numeric_trim_command(
-                    self._timeline, linked.track_id, linked.clip_id,
-                    "left" if edge == "in" else "right", clamped,
-                    mode=mode,
-                    max_source_frames=self._get_asset_duration(linked.asset_id),
-                    apply_sync_lock=False,
+                from src.features.edit.core.timeline_ops import (
+                    build_linked_numeric_trim_command,
                 )
-                if linked_cmd is None or _lc != clamped:
+                linked_command, _common = build_linked_numeric_trim_command(
+                    self._timeline, track_id, clip_id,
+                    "left" if edge == "in" else "right", clamped,
+                    mode=mode, max_source_frames=max_frames,
+                    linked_max_source_frames=(
+                        self._get_asset_duration(linked.asset_id)),
+                    mismatch="reject",
+                )
+                if linked_command is None:
                     self.status_message_requested.emit(I18N.tr(
                         "timeline.linked_trim_limit", "Linked clips cannot be trimmed by the same amount."))
                     return
-                command = MacroCommand.create(
-                    f"Trim linked clips {clamped:+d}f", (command, linked_cmd))
+                command = linked_command
         self._execute_command(command)
 
     # ------------------------------------------------------------------
@@ -5214,8 +5217,9 @@ class TimelineView(QGraphicsView):
         if command is None:
             return False
 
-        # A/V 链接联动（审计修复：linked 片段钳制失败 → 整体拒绝，
-        # 与鼠标 trim 路径一致，不再静默单边执行造成 A/V 失步）
+        # A/V 链接联动走 B19 域级共同边界计划（审计修复：linked 片段
+        # 钳制失败 → 整体拒绝，与鼠标 trim 路径一致，不再静默单边执行
+        # 造成 A/V 失步）
         if self._effective_linked_selection():
             linked = self._timeline.get_reciprocal_linked_clip(clip.clip_id)
             if linked is not None:
@@ -5226,20 +5230,22 @@ class TimelineView(QGraphicsView):
                         break
                 if linked_track is None or self._is_track_locked(linked_track.track_id):
                     return False
-                linked_cmd, _linked_clamped = build_numeric_trim_command(
-                    self._timeline, linked.track_id, linked.clip_id,
-                    trim_side, clamped, mode=mode,
-                    max_source_frames=self._get_asset_duration(linked.asset_id),
-                    apply_sync_lock=False,
+                from src.features.edit.core.timeline_ops import (
+                    build_linked_numeric_trim_command,
                 )
-                if linked_cmd is None or _linked_clamped != clamped:
+                linked_command, _common = build_linked_numeric_trim_command(
+                    self._timeline, track.track_id, clip.clip_id,
+                    trim_side, clamped, mode=mode,
+                    max_source_frames=max_frames,
+                    linked_max_source_frames=(
+                        self._get_asset_duration(linked.asset_id)),
+                    mismatch="reject",
+                )
+                if linked_command is None:
                     self.status_message_requested.emit(I18N.tr(
                         "timeline.linked_trim_limit", "Linked clips cannot be trimmed by the same amount."))
                     return False
-                command = MacroCommand.create(
-                    f"Trim linked clips {clamped:+d}f",
-                    (command, linked_cmd),
-                )
+                command = linked_command
         self._execute_command(command)
         return True
 
