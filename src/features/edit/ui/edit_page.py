@@ -276,6 +276,13 @@ class EditPage(QWidget):
         self._media_pool_panel: Optional[Any] = None
         self._source_viewer: Optional[Any] = None  # P3.1: Source Viewer
 
+        # W09: centralized bind/unbind for Resolve-style toolbar requests.
+        # Every attach increments the generation; re-attaching a panel first
+        # disconnects the previous panel's request signals so stale panels
+        # can never trigger a second execution.
+        self._panel_request_connections: list[tuple[Any, Any]] = []
+        self._panel_request_generation: int = 0
+
         # Timeline data model
         self._current_timeline: Optional[Any] = None
         self._fps: float = 24.0
@@ -482,10 +489,10 @@ class EditPage(QWidget):
             # P1-01: Forward multicam angle key
             panel.multicam_angle_key_requested.connect(self.signal_hub.multicam_angle_key_requested.emit)
 
-            # Source edit toolbar buttons (Insert/Overwrite/Append moved from SourceViewerBar)
-            panel.source_insert_requested.connect(self._on_timeline_source_insert)
-            panel.source_overwrite_requested.connect(self._on_timeline_source_overwrite)
-            panel.source_append_requested.connect(self._on_timeline_source_append)
+            # Source edit toolbar buttons and Resolve-style toolbar requests
+            # (W09): bound through the centralized request binder so panel
+            # re-attachment disconnects stale connections first.
+            self._bind_timeline_panel_requests(panel)
 
             # Connect playback state to thumbnail scheduler
             self.signal_hub.playback_started.connect(
@@ -499,6 +506,140 @@ class EditPage(QWidget):
 
         # Connect transport bar (ProgramViewerWidget <-> TimelinePanel)
         self._connect_transport_to_timeline()
+
+    # ==================== W09: Centralized Toolbar Request Binding ====================
+
+    def _bind_timeline_panel_requests(self, panel: Any) -> None:
+        """Bind Resolve-style toolbar request signals from ``panel``.
+
+        Re-attaching first disconnects every signal bound by the previous
+        call, so a replaced panel can never trigger a stale execution and
+        each request fires exactly once per host generation.
+        """
+        self._unbind_timeline_panel_requests()
+        if panel is None:
+            return
+        self._panel_request_generation += 1
+        bindings = (
+            (panel.source_insert_requested, self._on_timeline_source_insert),
+            (panel.source_overwrite_requested, self._on_timeline_source_overwrite),
+            (panel.source_append_requested, self._on_timeline_source_append),
+            (panel.source_replace_requested, self._on_timeline_source_replace),
+            (panel.source_patch_changed, self._on_timeline_source_patch_changed),
+            (panel.keyframe_tray_requested, self._on_timeline_keyframe_tray_requested),
+            (panel.voiceover_requested, self._on_timeline_voiceover_requested),
+            (panel.flag_requested, self._on_timeline_flag_requested),
+        )
+        for signal, slot in bindings:
+            signal.connect(slot)
+            self._panel_request_connections.append((signal, slot))
+        logger.debug(
+            "TimelinePanel requests bound (generation %d)",
+            self._panel_request_generation)
+
+    def _unbind_timeline_panel_requests(self) -> None:
+        """Disconnect all toolbar request signals bound by the last attach."""
+        for signal, slot in self._panel_request_connections:
+            try:
+                signal.disconnect(slot)
+            except TypeError:
+                pass  # already disconnected (e.g. panel destroyed)
+        self._panel_request_connections = []
+
+    def _on_timeline_source_patch_changed(
+        self, track_type: str, track_id: str, enabled: bool) -> None:
+        """W02：宿主消费蓝徽章源目的轨请求。
+
+        路由真值已由 view 按 (timeline_id, track_type) 写入并验证轨存在；
+        宿主侧消费 = 校验当前上下文仍然有效（panel/view/timeline 在位），
+        然后按新的有效路由同步源编辑按钮可用性。红 target 不受影响。
+        """
+        panel = self._timeline_panel
+        view = panel.get_timeline_view() if panel is not None else None
+        if view is None or view.get_timeline() is None:
+            logger.debug(
+                "Source destination change ignored: no active timeline context")
+            return
+        logger.debug(
+            "Source destination changed: type=%s track=%s enabled=%s",
+            track_type, track_id, enabled)
+        self._sync_source_edit_buttons()
+
+    def _on_timeline_source_replace(self) -> None:
+        """W01：Replace Edit 入口（契约 D1）。
+
+        无参信号只表达"当前上下文执行 Replace"——接收时读取最新
+        Source Viewer 与时间线快照，不缓存 clip/source。目标解析、源
+        对齐、linked 配对与源不足预检都在 view 的
+        ``replace_clip_with_source`` 中按契约 D1 完成。
+        """
+        panel = self._timeline_panel
+        if panel is None:
+            logger.warning("Replace: no timeline panel")
+            return
+        asset_id, in_frame, out_frame = self._get_source_edit_params()
+        if asset_id is None:
+            return
+        view = panel.get_timeline_view()
+        if view is None or not hasattr(view, "replace_clip_with_source"):
+            logger.warning("Replace: timeline view cannot host replace edits")
+            return
+        view.replace_clip_with_source(asset_id, in_frame, out_frame)
+
+    def _on_timeline_keyframe_tray_requested(self, visible: bool) -> None:
+        """W03：Keyframe Tray 可见性请求（契约 D5；宿主实现见后续批次）。
+
+        宿主未提供 Tray 前回写按钮为未选中，避免"假打开"。
+        """
+        panel = self._timeline_panel
+        if panel is not None and hasattr(panel, "set_keyframe_tray_checked"):
+            panel.set_keyframe_tray_checked(False)
+        logger.debug("Keyframe tray requested=%s (host wiring pending W03)", visible)
+
+    def _on_timeline_voiceover_requested(self) -> None:
+        """W04：Voiceover——桥接既有 ADR/录音链（不做"立即采默认麦克风"）。
+
+        目标音轨 = 有效音频目的轨（W02 蓝路由，无显式路由回退红 target；
+        均无轨时经既有 AddTrackCommand 创建）。展示 ADR Take Sheet 面板
+        （设备/预卷/监听/电平的既有入口），启动复用 controller 的
+        ``_start_recording``（时间码打点 = 当前播放头帧）；再次触发同轨
+        → ``_stop_recording_and_import``（take 完成唯一事件源仍是
+        ``_on_take_recorded`` 回调，停止一次只导入一次）。录音会话的
+        project/timeline/track 绑定与跨工程防错投由既有链保证。
+        """
+        panel = self._timeline_panel
+        view = panel.get_timeline_view() if panel is not None else None
+        if view is None or view.get_timeline() is None:
+            logger.warning("Voiceover: no active timeline context")
+            return
+        main = self._main_window
+        if main is None or not hasattr(main, "_start_recording"):
+            logger.warning("Voiceover: host controller unavailable")
+            return
+        track_id = view.resolve_source_destination_track_id("audio")
+        if track_id is None:
+            # 蓝徽章显式关闭/时间线无音频轨：录音不是源插入路由，仍按
+            # 既有"找或建一条音频轨"链路给出明确目的地。
+            track = view.ensure_target_audio_track()
+            if track is None:
+                logger.warning("Voiceover: no audio destination track")
+                return
+            track_id = track.track_id
+        # 打开既有 ADR 入口（设备选择/监听/输入电平都在该面板）
+        dock = getattr(main, "dock_adr_take_sheet", None)
+        if dock is not None:
+            dock.setVisible(True)
+            dock.raise_()
+        managers = getattr(main, "_recording_managers", {})
+        active = managers.get(track_id)
+        if active is not None and getattr(active, "is_recording", False):
+            main._stop_recording_and_import(track_id)
+        else:
+            main._start_recording(track_id)
+
+    def _on_timeline_flag_requested(self, color: str) -> None:
+        """W05：彩色 Flag 入口（契约 D4；宿主实现见后续批次）。"""
+        logger.debug("Flag requested color=%r (host wiring pending W05)", color)
 
     def set_media_pool_panel(self, panel: Any) -> None:
         """
@@ -2900,7 +3041,12 @@ class EditPage(QWidget):
         return (asset.asset_id, in_point, out_point)
 
     def _sync_source_edit_buttons(self) -> None:
-        """Sync TimelinePanel source-edit button enabled state with SourceViewer In/Out."""
+        """Sync TimelinePanel source-edit button enabled state with SourceViewer In/Out.
+
+        W02: additionally requires at least one routable source stream —
+        when both the video and the audio source destinations are explicitly
+        disabled, insert/overwrite/append/replace have no stream to place.
+        """
         if self._timeline_panel is None or self._source_viewer is None:
             return
         can_edit = (
@@ -2908,6 +3054,15 @@ class EditPage(QWidget):
             and self._source_viewer.out_point is not None
             and self._source_viewer.in_point <= self._source_viewer.out_point
         )
+        if can_edit:
+            view = self._timeline_panel.get_timeline_view()
+            if view is not None:
+                both_disabled = (
+                    view.source_destination_stream_disabled("video")
+                    and view.source_destination_stream_disabled("audio")
+                )
+                if both_disabled:
+                    can_edit = False
         self._timeline_panel.set_source_edit_buttons_enabled(can_edit)
 
     # ==================== P9.2: Edit → Composite Page Linkage ====================

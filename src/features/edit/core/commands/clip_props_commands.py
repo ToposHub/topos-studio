@@ -38,6 +38,24 @@ from src.features.edit.core.clip_params import SpeedParams
 from ._support import assert_track_editable
 from .clip_commands import SplitClipCommand
 
+
+def _tuple_or_none(value: Any) -> Any:
+    """JSON 往返辅助：嵌套 tuple → list（None 透传），读取端再转回。"""
+    if value is None:
+        return None
+    if isinstance(value, tuple):
+        return [_tuple_or_none(v) for v in value]
+    return value
+
+
+def _nested_tuple_or_none(value: Any) -> Any:
+    """``_tuple_or_none`` 的逆：JSON list → 嵌套 tuple（None 透传）。"""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return tuple(_nested_tuple_or_none(v) for v in value)
+    return value
+
 logger = logging.getLogger(__name__)
 
 
@@ -1917,6 +1935,197 @@ class ReplaceClipAssetCommand:
             track_id=track_id,
             new_asset_id=new_asset_id,
             clamp_source_duration=clamp_source_duration,
+        )
+
+
+# ================================================================
+# W01: ReplaceClipWithSourceCommand（Resolve 风格 Replace Edit）
+# ================================================================
+
+@dataclass(frozen=True)
+class ReplaceClipWithSourceCommand:
+    """按源对齐帧替换片段素材（W01，接线计划契约 D1）。
+
+    与 ``ReplaceClipAssetCommand``（占位片段替换素材指针、可截短）职责
+    不同：本命令实现 Source Viewer/时间线定位帧对齐的 Replace Edit——
+    保留 clip_id、track、timeline_start/duration、speed、效果/动画/淡变/
+    label/链接等全部字段，仅变更：
+
+    - ``asset_id`` → 新素材；
+    - ``source_start`` → 源对齐帧（Source Viewer In，源 fps 域）；
+    - ``source_duration`` → 按目标 timeline_duration × 有效速度换算的
+      源帧数（含混合帧率 fps 比）；
+    - fps 时基元数据（``_source_fps_num/_den``、``_timeline_fps_num/_den``、
+      ``_source_pts_index``、``_source_frame_phase_*``）→ 新素材时基，避免
+      换素材后沿用旧素材帧率导致映射错位。
+
+    源不足预检（可用源帧 < new_source_duration）由调用方完成；命令层只
+    保证写入值非负且 source_duration > 0。undo 完整还原上述全部字段。
+
+    Attributes:
+        command_id: Unique identifier
+        label: Human-readable label
+        clip_id: 目标片段
+        track_id: 所在轨道
+        new_asset_id: 新素材 ID
+        new_source_start: 源对齐帧（inclusive，源 fps 域）
+        new_source_duration: 源侧消耗帧数
+        new_fps_meta: 新素材时基 (s_num, s_den, t_num, t_den, pts_index|None)
+        new_phase: CFR 采样相位 (num, den)，缺省 (0, 1)
+        _snapshot: apply 期捕获的 (asset_id, source_start, source_duration,
+            fps_meta, phase) 五元组，undo 还原
+    """
+
+    command_id: str
+    label: str
+    clip_id: str
+    track_id: str
+    new_asset_id: str
+    new_source_start: int
+    new_source_duration: int
+    new_fps_meta: tuple | None = None
+    new_phase: tuple = (0, 1)
+    _snapshot: tuple | None = None
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        assert_track_editable(
+            timeline, self.track_id, "Replace edit")
+        if self.new_source_start < 0:
+            raise ValueError(
+                f"Replace source start cannot be negative: "
+                f"{self.new_source_start}")
+        if self.new_source_duration <= 0:
+            raise ValueError(
+                f"Replace source duration must be positive: "
+                f"{self.new_source_duration}")
+
+        object.__setattr__(self, "_snapshot", (
+            clip.asset_id, clip.source_start, clip.source_duration,
+            (clip._source_fps_num, clip._source_fps_den,
+             clip._timeline_fps_num, clip._timeline_fps_den,
+             clip._source_pts_index),
+            (clip._source_frame_phase_num, clip._source_frame_phase_den),
+        ))
+
+        s_num, s_den, t_num, t_den, pts = self._resolved_fps_meta(clip)
+        phase_num, phase_den = self.new_phase
+        new_clip = replace(
+            clip,
+            asset_id=self.new_asset_id,
+            source_start=self.new_source_start,
+            source_duration=self.new_source_duration,
+            _source_fps_num=s_num,
+            _source_fps_den=s_den,
+            _timeline_fps_num=t_num,
+            _timeline_fps_den=t_den,
+            _source_pts_index=pts,
+            _source_frame_phase_num=phase_num,
+            _source_frame_phase_den=phase_den,
+        )
+        new_clips = tuple(
+            new_clip if c.clip_id == clip.clip_id else c for c in track.clips)
+        new_track = track._rebuild(clips=new_clips)
+        return timeline.with_track_updated(new_track)
+
+    def _resolved_fps_meta(self, clip: ClipInstance) -> tuple:
+        """Merge explicit new metadata with clip-local timeline fps fallbacks."""
+        if self.new_fps_meta is None:
+            return (
+                clip._source_fps_num, clip._source_fps_den,
+                clip._timeline_fps_num, clip._timeline_fps_den,
+                clip._source_pts_index,
+            )
+        s_num, s_den, t_num, t_den, pts = self.new_fps_meta
+        if t_num is None:
+            t_num, t_den = clip._timeline_fps_num, clip._timeline_fps_den
+        return (s_num, s_den, t_num, t_den, pts)
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._snapshot is None:
+            raise ValueError("Cannot undo: command was never applied")
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        (asset_id, source_start, source_duration, fps_meta, phase) = self._snapshot
+        s_num, s_den, t_num, t_den, pts = fps_meta
+        phase_num, phase_den = phase
+        restored = replace(
+            clip,
+            asset_id=asset_id,
+            source_start=source_start,
+            source_duration=source_duration,
+            _source_fps_num=s_num,
+            _source_fps_den=s_den,
+            _timeline_fps_num=t_num,
+            _timeline_fps_den=t_den,
+            _source_pts_index=pts,
+            _source_frame_phase_num=phase_num,
+            _source_frame_phase_den=phase_den,
+        )
+        new_clips = tuple(
+            restored if c.clip_id == clip.clip_id else c for c in track.clips)
+        new_track = track._rebuild(clips=new_clips)
+        return timeline.with_track_updated(new_track)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "ReplaceClipWithSourceCommand",
+            "label": self.label,
+            "clip_id": self.clip_id,
+            "track_id": self.track_id,
+            "new_asset_id": self.new_asset_id,
+            "new_source_start": self.new_source_start,
+            "new_source_duration": self.new_source_duration,
+            "new_fps_meta": _tuple_or_none(self.new_fps_meta),
+            "new_phase": self.new_phase,
+            "_snapshot": _tuple_or_none(self._snapshot),
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "ReplaceClipWithSourceCommand":
+        return ReplaceClipWithSourceCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Replace Clip With Source"),
+            clip_id=data.get("clip_id", ""),
+            track_id=data.get("track_id", ""),
+            new_asset_id=data.get("new_asset_id", ""),
+            new_source_start=data.get("new_source_start", 0),
+            new_source_duration=data.get("new_source_duration", 0),
+            new_fps_meta=_nested_tuple_or_none(data.get("new_fps_meta")),
+            new_phase=tuple(data.get("new_phase", (0, 1))),
+            _snapshot=_nested_tuple_or_none(data.get("_snapshot")),
+        )
+
+    @staticmethod
+    def create(
+        clip_id: str,
+        track_id: str,
+        new_asset_id: str,
+        new_source_start: int,
+        new_source_duration: int,
+        new_fps_meta: tuple | None = None,
+        new_phase: tuple = (0, 1),
+    ) -> "ReplaceClipWithSourceCommand":
+        return ReplaceClipWithSourceCommand(
+            command_id=str(uuid.uuid4()),
+            label=f"Replace edit: clip {clip_id} ← asset {new_asset_id}",
+            clip_id=clip_id,
+            track_id=track_id,
+            new_asset_id=new_asset_id,
+            new_source_start=new_source_start,
+            new_source_duration=new_source_duration,
+            new_fps_meta=new_fps_meta,
+            new_phase=new_phase,
         )
 
 

@@ -1093,6 +1093,7 @@ from .clip_props_commands import (
     FreezeFrameAtPlayheadCommand,
     SetClipBlendModeCommand,
     ReplaceClipAssetCommand,
+    ReplaceClipWithSourceCommand,
     SetClipAudioGainCommand,
     UpdateClipSampleFieldsCommand,
 )
@@ -1190,6 +1191,7 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "FreezeFrameAtPlayheadCommand": FreezeFrameAtPlayheadCommand.from_dict,
     "SetClipBlendModeCommand": SetClipBlendModeCommand.from_dict,
     "ReplaceClipAssetCommand": ReplaceClipAssetCommand.from_dict,
+    "ReplaceClipWithSourceCommand": ReplaceClipWithSourceCommand.from_dict,
     "SetClipAudioGainCommand": SetClipAudioGainCommand.from_dict,
     "MoveClipToExistingTrackCommand": MoveClipToExistingTrackCommand.from_dict,
     "RetimeMotionGraphicClipCommand": RetimeMotionGraphicClipCommand.from_dict,
