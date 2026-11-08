@@ -13327,21 +13327,28 @@ class TimelineView(QGraphicsView):
             self.status_message_requested.emit(str(exc))
 
     def _on_clip_double_clicked(self, clip_id: str, track_id: str) -> None:
-        """E09: 双击片段 → 发出在 Source Viewer 打开的请求。
+        """E09/VP-B06: 双击片段 → 发出在 Source Viewer 打开的请求。
 
-        源帧 = source_start + (播放头 − 片段起点)，夹在片段源窗口内。
-        标准的“在 Source 中打开”工作流此前因无人接收而不可用。
+        源帧走权威映射（``resolve_match_frame`` →
+        ``clip.timeline_to_source_frame``，覆盖 source_start/trim/retime
+        曲线/reverse/freeze/混合帧率）；此前的朴素公式
+        ``source_start + (播放头 − 片段起点)`` 对变速/倒放片段给出错帧。
+        转场覆盖剪辑点时双击侧即选中侧。Motion Graphic 等虚拟素材无源
+        媒体可开 → 状态栏回因、不发打开请求（零写入）。
         """
         if self._timeline is None:
             return
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip is None:
-            return
+        from src.features.edit.core.match_frame import (
+            describe_match_frame_reason,
+            resolve_match_frame,
+        )
         playhead = max(0, int(self._playhead_frame))
-        offset = max(0, playhead - int(clip.timeline_start))
-        source_duration = max(1, int(clip.source_duration))
-        source_frame = int(clip.source_start) + min(offset, source_duration - 1)
-        self.clip_open_in_source_requested.emit(clip_id, source_frame)
+        result = resolve_match_frame(self._timeline, clip_id, playhead)
+        if not result.ok:
+            self.status_message_requested.emit(
+                describe_match_frame_reason(result.reason or ""))
+            return
+        self.clip_open_in_source_requested.emit(clip_id, result.source_frame)
 
     def _on_add_transition_requested(
         self,
