@@ -311,6 +311,10 @@ class TakeInfo:
     # start_timecode = 文件首样本对应的 SMPTE 时间码字符串。
     in_point_frame: int = -1
     start_timecode: str = ""
+    # R03：文件首样本的时间线帧位（未钳制、可为负；None=未知）。
+    # time_reference_samples 在首样本位于零点前时被钳到 0，无法反推
+    # 零前内容长度；落 clip 用这个未钳制值对齐预卷。
+    first_sample_frame: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -327,6 +331,7 @@ class TakeInfo:
             "notes": self.notes,
             "in_point_frame": self.in_point_frame,
             "start_timecode": self.start_timecode,
+            "first_sample_frame": self.first_sample_frame,
         }
 
 
@@ -428,6 +433,29 @@ def is_drop_frame_rate(fps: Any) -> bool:
     return any(abs(value - rate) < 0.01 for rate in _NTSC_DF_RATES)
 
 
+def first_sample_timeline_frame(
+    in_point_frame: int,
+    fps: Any,
+    pre_roll_captured_seconds: float = 0.0,
+    latency_ms: float = 0.0,
+    sequence_start_frame: int = 0,
+) -> float:
+    """R03：文件首样本的时间线帧位（**未钳制**，可为负）。
+
+    与 ``compute_time_reference`` 同一公式，但不做 max(0, ·) 钳制：
+    预卷跨过时间线零点时，钳制会丢失"零前内容"的长度，落 clip
+    就无法正确裁掉头部。fps 非法时退回 in-point + 序列偏移。
+    """
+    fps_value = _fps_value(fps)
+    lead_seconds = (
+        max(0.0, pre_roll_captured_seconds) + max(0.0, latency_ms) / 1000.0
+    )
+    base = float(int(in_point_frame or 0)) + float(int(sequence_start_frame))
+    if fps_value <= 0:
+        return base
+    return base - lead_seconds * fps_value
+
+
 def compute_time_reference(
     in_point_frame: int,
     fps: Any,
@@ -450,9 +478,11 @@ def compute_time_reference(
         return 0, ""
     from src.features.edit.core.interchange import frames_to_timecode
 
-    lead_seconds = max(0.0, pre_roll_captured_seconds) + max(0.0, latency_ms) / 1000.0
-    first_frame = (
-        int(in_point_frame) + int(sequence_start_frame) - lead_seconds * fps_value
+    first_frame = first_sample_timeline_frame(
+        in_point_frame, fps,
+        pre_roll_captured_seconds=pre_roll_captured_seconds,
+        latency_ms=latency_ms,
+        sequence_start_frame=sequence_start_frame,
     )
     samples = max(0, int(round(first_frame / fps_value * sample_rate)))
     timecode = frames_to_timecode(
@@ -954,6 +984,14 @@ class RecordingManager:
                 latency_ms=latency_ms,
                 sequence_start_frame=self._config.sequence_start_frame,
             )
+            # R03：未钳制首样本帧位（预卷跨零点时 time_reference 被钳
+            # 到 0，零前内容长度从这里才可恢复）
+            take.first_sample_frame = int(round(first_sample_timeline_frame(
+                int(in_point_frame), self._config.fps,
+                pre_roll_captured_seconds=self._config.pre_roll_seconds,
+                latency_ms=latency_ms,
+                sequence_start_frame=self._config.sequence_start_frame,
+            )))
         self._current_take = take
 
         # PCM 缓冲（P0-07：分块 + 磁盘溢写，长录音内存有界）
@@ -1069,6 +1107,15 @@ class RecordingManager:
                             latency_ms=self._current_latency_ms,
                             sequence_start_frame=self._config.sequence_start_frame,
                         )
+                    # R03：实际并入量同步回修未钳制首样本帧位
+                    self._current_take.first_sample_frame = int(round(
+                        first_sample_timeline_frame(
+                            int(self._current_in_point_frame),
+                            self._config.fps,
+                            pre_roll_captured_seconds=actual_seconds,
+                            latency_ms=self._current_latency_ms,
+                            sequence_start_frame=self._config.sequence_start_frame,
+                        )))
 
         self._set_state(self.STATE_RECORDING)
         self._start_time = time.time()
