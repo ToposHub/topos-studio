@@ -12374,32 +12374,44 @@ class TimelineView(QGraphicsView):
         self, clip_id: str, track_id: str,
         original_duration: int, new_duration: int,
     ) -> None:
-        """B4: 比例拉伸结束——时长变化换算为速度并提交既有速度命令。
+        """B4/B18: 比例拉伸结束——时长变化换算为速度并提交既有速度命令。
 
-        speed = 源时长 / 新时间线时长，clamp 到 SpeedParams 允许的
-        0.1–8.0（计划 A2/B4 边界）。ChangeClipSpeedCommand 自带
-        linked 音频联动，A/V 同步变速。
+        B18：速度按**当前时长比**换算（s' = s × old/new）——混合帧率时
+        当前时长已含源/时间线 fps 比，不再用"源帧数/时间线帧数"把
+        fps 比再算一遍（48fps 源 200 帧在 24fps 时间线拉到 50 帧得
+        2x/50 帧，而非 4x/25 帧）。非目标字段（reverse/
+        preserve_pitch/插值等）经 ``params.with_speed`` 保留；复杂
+        curve/freeze/动画（含 linked 伙伴）预检不过时发高级请求并
+        明确反馈，不降级执行；零变化不入历史。
         """
-        from src.features.edit.core.commands import ChangeClipSpeedCommand
         from src.features.edit.core.timeline_v2 import MAX_SPEED, MIN_SPEED
 
-        if new_duration <= 0 or new_duration == original_duration:
-            return
         clip = self._timeline.get_clip_by_id(clip_id) if self._timeline else None
-        if clip is None:
+        if (clip is None or new_duration <= 0
+                or new_duration == original_duration
+                or clip.timeline_duration != original_duration
+                or self._position_lock_enabled
+                or self._is_track_locked(track_id)):
             return
-        source_duration = int(clip.source_duration)
-        if source_duration <= 0:
-            return
-        raw_speed = float(source_duration) / float(new_duration)
+        params = self._retime_speed_params_for_clip(clip)
+        raw_speed = params.speed * original_duration / new_duration
         speed = max(float(MIN_SPEED), min(float(MAX_SPEED), raw_speed))
-        clamped = speed != raw_speed
-        try:
-            self._execute_command(ChangeClipSpeedCommand.create(clip_id, track_id, speed))
-        except (RuntimeError, ValueError) as exc:
-            logger.warning("Rate stretch failed: %s", exc)
+        if speed == params.speed:
+            return  # 零变化：不入历史
+        if self._retime_controls_need_backend(clip):
+            self._request_advanced_retime(clip, "stretch", 0, {
+                "original_duration": original_duration,
+                "duration": new_duration,
+                "speed": speed,
+            })
             return
-        if clamped:
+        try:
+            self._commit_retime_params(
+                clip, params.with_speed(speed), "Rate stretch")
+        except (RuntimeError, ValueError) as exc:
+            self.status_message_requested.emit(str(exc))
+            return
+        if speed != raw_speed:
             logger.info(
                 "Rate stretch clamped to %.2fx (requested %.2fx)",
                 speed, raw_speed,
