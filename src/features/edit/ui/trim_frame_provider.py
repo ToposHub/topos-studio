@@ -31,13 +31,19 @@ _CLOSE = object()  # 关闭全部解码器的哨兵请求
 class TrimDualFrameSignals(QObject):
     """工作线程 → UI 线程的排队信号（跨线程自动排队投递）。"""
 
-    #: side ∈ {"left", "right"}；generation 不匹配时 UI 侧丢弃
-    frame_ready = pyqtSignal(str, int, QImage, int)
-    decode_failed = pyqtSignal(str, str, int)
+    #: side ∈ {"left", "right"}；generation/request_id 不匹配时 UI 侧丢弃
+    frame_ready = pyqtSignal(str, int, QImage, int, int)
+    decode_failed = pyqtSignal(str, str, int, int)
 
 
 class TrimDualFrameProvider:
-    """Trim Monitor 双帧 latest-wins 解码器（roll/trim 会话期间常驻）。"""
+    """Trim Monitor 双帧 latest-wins 解码器（roll/trim 会话期间常驻）。
+
+    R07 请求身份：每条请求携带 view 分配的 ``request_id``（单调递增）。
+    同一 generation 内快速拖动会连续换位——慢请求 A 解码期间新请求 B
+    到达时，A 的结果在**投递前**被丢弃（``_active_request_id`` 双重
+    校验），不再靠 generation 兜底（旧实现慢 A 迟到仍覆盖新位置 B）。
+    """
 
     def __init__(
         self,
@@ -47,12 +53,14 @@ class TrimDualFrameProvider:
         frame_converter: Optional[Callable[[Any], Optional[np.ndarray]]] = None,
     ) -> None:
         # AUD-20910 同型：signals 不挂 owner 父对象（owner 先销毁时 emit
-        # 抛 RuntimeError；无父对象由本对象持有引用，断连后 emit 为 no-op）。
+        # 抛 RuntimeError；无父对象由本对象持有引用，emit 断连后为 no-op）。
         self._signals = TrimDualFrameSignals()
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
-        # (left_path, left_frame, right_path, right_frame, generation) 或 _CLOSE
+        # (l_path, l_frame, r_path, r_frame, generation, request_id) 或 _CLOSE
         self._request: Optional[tuple] = None
+        # R07：最新已接收请求的身份（view 分配）；解码完成投递前校验
+        self._active_request_id: Optional[int] = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
         # {asset_path: decoder}——只在工作线程内创建/关闭；最多保留 2 个
@@ -78,6 +86,7 @@ class TrimDualFrameProvider:
         with self._cond:
             self._running = False
             self._request = None
+            self._active_request_id = None
             self._cond.notify()
 
     def request(
@@ -87,19 +96,23 @@ class TrimDualFrameProvider:
         right_path: Optional[str],
         right_frame: Optional[int],
         generation: int,
+        request_id: Optional[int] = None,
     ) -> None:
         """提交双帧解码请求（latest-wins：只保留最新一条）。"""
         with self._cond:
             if not self._running:
                 return
             self._request = (
-                left_path, left_frame, right_path, right_frame, int(generation))
+                left_path, left_frame, right_path, right_frame,
+                int(generation), request_id)
+            self._active_request_id = request_id
             self._cond.notify()
 
     def invalidate(self) -> None:
         """bump 前清空待处理请求（会话结束/取消时配合 generation 校验）。"""
         with self._cond:
             self._request = None
+            self._active_request_id = None
 
     def close_decoders(self) -> None:
         """请求丢弃全部解码器（源切换/关闭时由 UI 线程调用）。"""
@@ -140,8 +153,8 @@ class TrimDualFrameProvider:
                 if request is _CLOSE:
                     self._dispose_all()
                     continue
-                left_path, left_frame, right_path, right_frame, generation = \
-                    request
+                left_path, left_frame, right_path, right_frame, generation, \
+                    request_id = request
                 sides = (
                     ("left", left_path, left_frame),
                     ("right", right_path, right_frame),
@@ -149,12 +162,14 @@ class TrimDualFrameProvider:
                 for side, path, frame in sides:
                     if path is None or frame is None:
                         continue
-                    self._decode_side(side, str(path), int(frame), generation)
+                    self._decode_side(
+                        side, str(path), int(frame), generation, request_id)
         finally:
             self._dispose_all()
 
     def _decode_side(
         self, side: str, path: str, frame: int, generation: int,
+        request_id: Optional[int] = None,
     ) -> None:
         decoder = self._decoders.get(path)
         if decoder is None:
@@ -166,13 +181,19 @@ class TrimDualFrameProvider:
                 self._decoders[path] = decoder
             except Exception as exc:
                 logger.debug("TrimDualFrame: open failed for %s: %s", path, exc)
-                self._signals.decode_failed.emit(side, str(exc), generation)
+                self._stale_safe_emit(
+                    request_id,
+                    lambda: self._signals.decode_failed.emit(
+                        side, str(exc), generation, request_id))
                 return
         try:
             decoded = decoder.read_frame(frame)
             rgb = self._to_rgb(decoded)
             if rgb is None:
-                self._signals.decode_failed.emit(side, "empty_frame", generation)
+                self._stale_safe_emit(
+                    request_id,
+                    lambda: self._signals.decode_failed.emit(
+                        side, "empty_frame", generation, request_id))
                 return
             rgb = np.ascontiguousarray(rgb)
             height, width = rgb.shape[:2]
@@ -180,10 +201,33 @@ class TrimDualFrameProvider:
                 rgb.data, int(width), int(height), int(3 * width),
                 QImage.Format.Format_RGB888,
             ).copy()  # 独立持有数据（工作线程缓冲不复用）
-            self._signals.frame_ready.emit(side, frame, qimage, generation)
+            self._stale_safe_emit(
+                request_id,
+                lambda: self._signals.frame_ready.emit(
+                    side, frame, qimage, generation, request_id))
         except Exception as exc:
             logger.debug("TrimDualFrame: decode failed %s@%s: %s", path, frame, exc)
-            self._signals.decode_failed.emit(side, str(exc), generation)
+            self._stale_safe_emit(
+                request_id,
+                lambda: self._signals.decode_failed.emit(
+                    side, str(exc), generation, request_id))
+
+    def _stale_safe_emit(
+        self, request_id: Optional[int], emit: Callable[[], None],
+    ) -> None:
+        """R07：投递前校验请求身份——慢请求解码期间被新请求取代则丢弃。
+
+        ``request_id`` 为 None（旧调用方）时不做身份拦截，仅靠
+        generation（兼容语义）。
+        """
+        if request_id is not None:
+            with self._cond:
+                if self._active_request_id != request_id:
+                    logger.debug(
+                        "TrimDualFrame: dropped stale result (request %s)",
+                        request_id)
+                    return
+        emit()
 
     def _dispose_all(self) -> None:
         for path in list(self._decoders):
