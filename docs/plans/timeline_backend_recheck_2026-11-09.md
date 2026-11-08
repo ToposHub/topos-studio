@@ -29,7 +29,7 @@
 
 播放头共用设备像素中心、TrimMonitor嵌入节目画布、随全屏画布移动及销毁/隐藏清理等此前UI修复已在基准f1acf2b内；本次没有回退。原配色、电平表保留。
 
-## 新的后续计划表（未实施）
+## 新的后续计划表（R01–R10 已于 2026-11-09 全部实施，见文末实施记录）
 
 估时为熟悉项目的单人净工作量，包含focused tests，不含设备与评审排期。
 
@@ -73,3 +73,32 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python docs/audit/2026-11-08-backend-recheck
 ```
 
 这些探针重跑会反映当前工作树。UI小修对应观察可能不再复现，原始提交问题、回归断言与实际当前输出应分别读取。没有提交、部署或改写用户基线worktree；本轮修改留在当前工作树供review。
+
+## R01–R10 实施记录（2026-11-09，第二批）
+
+每项均按"反例先失败（git stash 对旧代码验证红灯）→ 修复 → focused 绿灯 → 提交"执行；提交按建议顺序 R01→R02→R03→R05→R04→R06→R07→R08→R09→R10。测试素材 tests/test_videos 未被需要——全部反例在模型/真实 UI 适配器层可复现。
+
+| ID | 提交 | 实施内容与边界 |
+|---|---|---|
+| R01 | `2e87431e` | `resolve_edit_group` + `check_group_capability`（UI/服务共享）：伙伴速度点/冻结/任一成员轨锁在**任何 apply 前**整组拒绝；命令层逐成员校验防绕过；逐成员从自身 base 派生新参数（伙伴曲线窗口等非目标字段不再被主片 base 覆盖）。测试 9 项：S01 反例、双主片方向字段级 undo、坏链单飞、混 span/fps |
+| R02 | `b54b2b26` | SetClipSpeedSettingsCommand 与 MoveSpeedPointCommand apply 前快照受影响轨整轨 transitions，undo 还原 clip 后显式恢复（C11 快照语义，不做二次推导）。测试 8 项逐字段断言（id/类型/clip/center/duration/对齐/params），覆盖 ripple 后继、宏单步、redo/undo 循环、no-op/锁零写入 |
+| R03 | `7e2b67e5` | 产品契约=保留预卷（素材不裁剪）：`first_sample_timeline_frame`（未钳制、可为负）随 take 记录，clip 从文件首样本真实帧位起放，锚点内容落锚点；零点前内容裁头、全零前跳过、冲突检查按真实区间；旧 take 无时基回退锚点对齐。测试 12 项含 29.97fps@96kHz impulse ≤1 帧、undo 保留素材 |
+| R05 | `7a51e55b` | `fade_curve_raw`/`with_fade_curve_state` + extras 不变式（未知原值保留/回写，已知值不入通道）；SetFadeCurveCommand 快照含原值（含序列化 `_previous_raw`），no-op 判定含原值。测试 11 项含字节级 JSON 工程包两轮往返、显式覆盖/重置语义 |
+| R04 | `52324ed9` | `solve_speed_for_timeline_duration`（全程 Fraction 反解 s=base/target，天然精确命中）+ 视图统一 planner（工具与 retime 顶部共用）；高级载荷携带 achievable/clamped；钳制时提交落可实时长（松手边缘=提交边缘）。测试 12 项含 S05 反例（5帧/3x→10）、48→24fps、23.976、双边界钳制 |
+| R06 | `3d55fad9` | 自动建轨副本按伪轨 ID 分桶，每桶一条 CopyClipsToNewTrackCommand 入同一宏（单步 undo 两轨齐还原）；提交前类型预检整次拒绝；模型拒绝路径补发 UI 诊断。测试 4 项：2V/2A/4clip/history1、单伪轨回归、类型错、锁轨混合目标 |
+| R07 | `13756158` | 请求身份：request_id 单调递增，worker 投递前+UI 消费双重校验（慢 A 迟到不再覆盖快 B）；边界帧改走权威 `timeline_to_source_frame`（reverse/曲线/冻结/混fps 与导出同源，失败显式占位）；单边 trim/slip 接入监视器（update_trim 首次被调用；邻片/空位契约）。测试 11 项 + 617 项 trim/slip/slide/roll 套件绿 |
+| R08 | `17eb31f0` | ClipItem 速度点把手独立命中（优先于分段菜单/移动）、分段积分逆映射（与绘制几何互逆）、邻点严格开区间钳制、本地预览（高亮把手+虚线预览线）、Esc/隐藏取消、松手单命令；冻结/锁轨/位置锁显式拒绝。测试 11 项含切片窗口投影、转场含括的一次 undo |
+| R09 | `0375e1f6` | `fade_curve_in/out` 独立字段（生效链：端→共享 B16 字段→legacy），SetFadeEndCurveCommand（单端修改不动另一端/共享字段；淡化 clip 级不传播互链）；视频 plan/音频 DSP/实时链/快照签名/导出字典全消费同一生效值；右键菜单 In/Out 子菜单（Bezier 明确不提供）；R05 原值保留扩展到两端。测试 13 项 |
+| R10 | `d819cb4c` | `reset_clip` 脱离能力门（复杂状态的出口，经 ChangeClipSpeedCommand 快照族单步还原，成功回写状态栏）；新 SetClipFreezeCommand（整片定格于权威映射源帧，曲线保留底层，undo 恢复）；逐项诊断（rewind 明确"非整片倒放、需负段速"；曲线 stretch/reverse 说明缺模型）零写入且意图仍转发。测试 11 项 |
+
+**验证方式**：每项 focused 新增回归共约 100 项全绿；相关既有套件（速度/淡变/录音/复制/锁/路由/trim/slip/retime 共 1500+ 项）分批全绿；`compileall`、`git diff --check` 通过。ui2_aud3 的 retime 菜单失败为上表"基线失败"已记录的预存项（stash 验证与本批改动无关）。
+
+**证据边界（未声明完成的部分）**：
+
+- R03 真实麦克风设备 smoke 未执行（链条以 RecordingManager 替身与 impulse 数学验证）；设备延迟校准的消费路径已接通但未实测。
+- R07 的"图像色彩/缩放按契约一致"限于 CPU RGB24 解码路径（与 Source Viewer 同源）；未验证真 HDR/调色合成一致性。slide 工具的监视器模式未接入（slip/单边已接）。
+- R08 "真实 viewport 手势"以真实 TimelineView+ClipItem 事件路径验证（press/move/release 状态机、Esc、菜单优先级）；未做人工鼠标操作录制。
+- R10 的 rewind/曲线分段 stretch/reverse 保持显式不支持（模型缺负段速/分段积分逆），诊断已逐项化；"0% 坡不被 MIN_SPEED 钳制"依赖后续负段速模型。
+- R09 自由 Bezier 曲线按计划明确不支持（菜单不提供）。
+
+**全量回归**：`tests/edit` 全量 **12458 passed / 14 failed / 43 skipped**（1497.61s，含并行 viewport 工作树中未提交的新测试文件）。14 项失败逐一比对上文"用户报告的预存项"清单：n03_grade×5、n03_mask×3、ui2_aud3、linked_ripple_revision_proxy、disable_shortcut（11 项稳定预存）与 affordance×2、pointer×1（负载敏感像素项）——全部在批前已记录的预存集合内；上轮双向抖动的 trim_dual_frame 本轮通过。**本批次 0 新增稳定失败**（批前同树基线为 12254 passed / 15 failed）。
