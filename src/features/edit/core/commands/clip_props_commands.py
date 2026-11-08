@@ -2243,6 +2243,100 @@ class SetFadeEndCurveCommand:
 
 
 # ================================================================
+# R10: SetClipFreezeCommand（retime 菜单整片定格）
+# ================================================================
+
+@dataclass(frozen=True)
+class SetClipFreezeCommand:
+    """R10：把整片定格在指定源帧（``freeze_source_frame``；None 解冻）。
+
+    retime 菜单 "freeze" 的提交边界（与 B14 stage-1 对话框 freeze 同一
+    模型字段，时长保留、速度参数不动）。边界规则：带速度点曲线的片段
+    冻结时**保留曲线参数在底层**（显示被定格覆盖），解冻/undo 恢复
+    曲线——不做分段定格（Resolve 的插入式冻结段是另一个事务）。
+    """
+
+    command_id: str
+    label: str
+    clip_id: str
+    track_id: str
+    source_frame: "int | None"
+    _previous: "int | None" = None
+    _had_value: bool = False
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        assert_track_editable(timeline, self.track_id, "Set clip freeze")
+        if self.source_frame is not None and self.source_frame < 0:
+            raise ValueError(
+                f"freeze source frame must be >= 0: {self.source_frame}")
+        if clip.freeze_source_frame == self.source_frame:
+            return timeline  # no-op 同一实例（不入历史）
+        object.__setattr__(self, "_previous", clip.freeze_source_frame)
+        object.__setattr__(self, "_had_value", True)
+        updated = clip.with_freeze_frame(self.source_frame)
+        new_track = track._rebuild(clips=tuple(
+            updated if c.clip_id == clip.clip_id else c for c in track.clips))
+        return timeline.with_track_updated(new_track)
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if not self._had_value:
+            raise ValueError("Cannot undo: command was never applied")
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        restored = clip.with_freeze_frame(self._previous)
+        new_track = track._rebuild(clips=tuple(
+            restored if c.clip_id == clip.clip_id else c for c in track.clips))
+        return timeline.with_track_updated(new_track)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetClipFreezeCommand",
+            "label": self.label,
+            "clip_id": self.clip_id,
+            "track_id": self.track_id,
+            "source_frame": self.source_frame,
+            "_previous": self._previous,
+            "_had_value": self._had_value,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetClipFreezeCommand":
+        return SetClipFreezeCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set clip freeze"),
+            clip_id=data.get("clip_id", ""),
+            track_id=data.get("track_id", ""),
+            source_frame=data.get("source_frame"),
+            _previous=data.get("_previous"),
+            _had_value=bool(data.get("_had_value", "_previous" in data)),
+        )
+
+    @staticmethod
+    def create(
+        clip_id: str, track_id: str, source_frame: "int | None",
+    ) -> "SetClipFreezeCommand":
+        return SetClipFreezeCommand(
+            command_id=str(uuid.uuid4()),
+            label=("Unfreeze clip" if source_frame is None
+                   else f"Freeze clip at source frame {source_frame}"),
+            clip_id=clip_id,
+            track_id=track_id,
+            source_frame=source_frame,
+        )
+
+
+# ================================================================
 # A2: FreezeFrameAtPlayheadCommand（冻结帧，2026-09-07 优化计划）
 # ================================================================
 

@@ -12713,17 +12713,44 @@ class TimelineView(QGraphicsView):
         )
 
     def _request_advanced_retime(
-        self, clip: ClipInstance, action: str, source_offset: int, value: object,
+        self, clip: ClipInstance, action: str, source_offset: int,
+        value: object, reason: "str | None" = None,
     ) -> None:
-        """Expose the full menu intent without silently changing its meaning."""
+        """Expose the full menu intent without silently changing its meaning.
+
+        R10：逐项诊断——每个不支持的动作给出**具体**原因（Rewind 不是
+        整片倒放、曲线分段事务缺模型等），不再一律"not supported yet"。
+        """
         from src.shared.i18n.i18n import I18N
+        if reason is None:
+            reasons = {
+                "rewind": I18N.tr(
+                    "edit.retime.rewind_unsupported",
+                    "Rewind needs negative segment speeds, which the retime "
+                    "model does not support yet — it is not whole-clip "
+                    "reverse; the clip is unchanged."),
+                "stretch": I18N.tr(
+                    "edit.retime.stretch_curves_unsupported",
+                    "Stretching across speed-point curves or animated clips "
+                    "is not supported yet; the clip is unchanged."),
+                "reverse": I18N.tr(
+                    "edit.retime.reverse_curves_unsupported",
+                    "Reversing a clip with speed-point curves is not "
+                    "supported yet; the clip is unchanged."),
+                "freeze": I18N.tr(
+                    "edit.retime.freeze_segment_unsupported",
+                    "Inserting a frozen segment is a separate transaction; "
+                    "whole-clip freeze is available from the speed dialog."),
+            }
+            reason = reasons.get(action) or I18N.tr(
+                "edit.speed_dialog.unsupported",
+                "The selected speed options are not supported yet. The "
+                "clip is unchanged.")
         self.clip_speed_settings_requested.emit(clip.clip_id, clip.track_id, {
             "operation": "retime_controls", "action": action,
             "source_offset": source_offset, "value": value,
         })
-        self.status_message_requested.emit(I18N.tr(
-            "edit.speed_dialog.unsupported",
-            "The selected speed options are not supported yet. The clip is unchanged."))
+        self.status_message_requested.emit(reason)
 
     def _on_retime_stretch_finished(
         self, clip_id: str, track_id: str, original_duration: int, new_duration: int,
@@ -12811,7 +12838,18 @@ class TimelineView(QGraphicsView):
     def _on_retime_action_requested(
         self, clip_id: str, track_id: str, action: str, source_offset: int, value: object,
     ) -> None:
-        """Dispatch supported settings; retain advanced segment intent for B14."""
+        """Dispatch supported settings; retain advanced segment intent for B14.
+
+        R10 收编的事务（stage-2/4/5 中模型可承接的部分）：
+
+        - ``reset_clip``：**不**走能力门——重置正是复杂状态的出口；
+          曲线/动画/互链经 ``ChangeClipSpeedCommand`` 的 B17/R05/R02
+          快照语义单步还原到 1x；
+        - ``freeze``：整片定格在 source_offset 映射到的源帧
+          （``SetClipFreezeCommand``；曲线参数保留在底层，解冻恢复）；
+        - 其余（曲线上的分段 stretch/reverse、rewind、曲线 ramp）保持
+          **显式不支持 + 逐项诊断**（``_request_advanced_retime``）。
+        """
         clip = self._timeline.get_clip_by_id(clip_id) if self._timeline else None
         if clip is None or self._is_track_locked(track_id):
             return
@@ -12833,15 +12871,61 @@ class TimelineView(QGraphicsView):
                 return
             self._retime_control_clip_ids.add(clip_id)
             return
-        if action not in {"reverse", "pitch", "reset_clip"} or self._retime_controls_need_backend(clip):
+        # R10：重置不受能力门限制（复杂状态的出口）
+        if action == "reset_clip":
+            updated = params.with_speed(1.0).with_reverse(False)
+            if isinstance(updated, SpeedParams) and updated.speed_points:
+                updated = SpeedParams(speed=1.0)  # 清空全部曲线意图
+            if params == updated:
+                return
+            try:
+                self._commit_retime_params(clip, updated, "Reset clip speed")
+            except (ValueError, RuntimeError) as exc:
+                self.status_message_requested.emit(str(exc))
+                return
+            self._retime_control_clip_ids.add(clip_id)
+            self.status_message_requested.emit(I18N.tr(
+                "edit.retime.reset_done",
+                "Clip speed reset to 100% (single undo)"))
+            return
+        # R10：整片定格（源帧 = source_offset 的权威映射；时长保留）
+        if action == "freeze":
+            if clip.freeze_source_frame is not None:
+                self._request_advanced_retime(
+                    clip, action, source_offset, value,
+                    reason=I18N.tr(
+                        "edit.retime.already_frozen",
+                        "The clip is already frozen; unfreeze first"))
+                return
+            from src.features.edit.core.commands import SetClipFreezeCommand
+            source_frame = self._authoritative_boundary(clip, source_offset)
+            if source_frame is None:
+                self._request_advanced_retime(
+                    clip, action, source_offset, value,
+                    reason=I18N.tr(
+                        "edit.retime.freeze_unmapped",
+                        "Freeze point could not be mapped to a source "
+                        "frame; the clip is unchanged"))
+                return
+            try:
+                self._execute_command(SetClipFreezeCommand.create(
+                    clip_id, track_id, int(source_frame)))
+            except (ValueError, RuntimeError) as exc:
+                self.status_message_requested.emit(str(exc))
+                return
+            self._retime_control_clip_ids.add(clip_id)
+            self.status_message_requested.emit(I18N.tr(
+                "edit.retime.freeze_done",
+                "Froze the clip at source frame {frame} (single undo)"
+            ).format(frame=int(source_frame)))
+            return
+        if action not in {"reverse", "pitch"} or self._retime_controls_need_backend(clip):
             self._request_advanced_retime(clip, action, source_offset, value)
             return
         if action == "reverse":
             updated = params.with_reverse(not params.reverse)
-        elif action == "pitch":
-            updated = params.with_preserve_pitch(bool(value))
         else:
-            updated = params.with_speed(1.0).with_reverse(False)
+            updated = params.with_preserve_pitch(bool(value))
         if params == updated:
             return
         try:
