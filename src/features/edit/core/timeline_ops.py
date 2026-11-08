@@ -909,6 +909,58 @@ def reapply_sync_lock_shifts(
     return sequence
 
 
+def solve_speed_for_timeline_duration(
+    source_duration: int,
+    target_duration: int,
+    source_fps_num: "int | None" = None,
+    source_fps_den: "int | None" = None,
+    timeline_fps_num: "int | None" = None,
+    timeline_fps_den: "int | None" = None,
+    min_speed: float = 0.1,
+    max_speed: float = 8.0,
+) -> "tuple[float, int, str | None]":
+    """R04：反解常速 s，使 ``timeline_duration_for_source`` 命中目标时长。
+
+    旧换算 ``s' = s × old_duration / new_duration`` 用**已舍入**的旧时长
+    推速（源 5 帧、3x、时间线 2 帧，拉到 10 帧得 0.6x → 实际只有 8
+    帧）。权威解：s = base_ticks / target，其中 base_ticks = 源帧数 ×
+    时间线fps/源fps（全程 Fraction，无舍入），目标时长天然可精确命中。
+
+    Returns:
+        ``(speed, achievable_duration, clamp_reason)``：speed 已钳到
+        [min, max]；achievable = 该 speed 的权威时长（未钳时 == target，
+        钳制时为实际可实现值）；clamp_reason 为 None | "min" | "max"。
+        target ≤ 0 抛 ``ValueError``。
+    """
+    from fractions import Fraction
+
+    if target_duration <= 0:
+        raise ValueError(f"target duration must be positive: {target_duration}")
+    has_fps = bool(source_fps_num and timeline_fps_num)
+    if has_fps:
+        source_fps = Fraction(source_fps_num, source_fps_den or 1)
+        timeline_fps = Fraction(timeline_fps_num, timeline_fps_den or 1)
+        base_ticks = Fraction(source_duration) * timeline_fps / source_fps
+    else:
+        base_ticks = Fraction(source_duration)
+
+    exact = float(base_ticks / target_duration)
+    speed = max(float(min_speed), min(float(max_speed), exact))
+    reason = None
+    if exact < float(min_speed):
+        reason = "min"
+    elif exact > float(max_speed):
+        reason = "max"
+
+    from src.features.edit.core.clip_params import SpeedParams
+    achievable = timeline_duration_for_source(
+        source_duration, SpeedParams(speed=speed),
+        source_fps_num, source_fps_den,
+        timeline_fps_num, timeline_fps_den,
+    )
+    return speed, achievable, reason
+
+
 def timeline_duration_for_source(
     source_duration: int,
     speed: "float | Any",
