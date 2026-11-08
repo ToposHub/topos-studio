@@ -45,6 +45,14 @@ class DeliverWorkspace(QWidget):
     export_started = pyqtSignal()
     export_completed = pyqtSignal(bool)
     export_cancelled = pyqtSignal()
+    # VP-B10: borrow/return hooks for the host.  ``edit_panels_borrowed``
+    # fires once the shared widgets live in Deliver (host pauses Source and
+    # forces Timeline monitoring via the B01 arbiter, flips the EditViewport
+    # into deliver mode); ``edit_panels_returned(fully_restored)`` fires on
+    # return — False means an original dock was occupied by another panel and
+    # the widget stayed in a safe alive host instead of overwriting it.
+    edit_panels_borrowed = pyqtSignal()
+    edit_panels_returned = pyqtSignal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -341,6 +349,17 @@ class DeliverWorkspace(QWidget):
         self._program_viewer_dock = program_viewer_dock
         self._timeline_dock = timeline_dock
 
+        # VP-B10: exit Program fullscreen before borrowing.  A fullscreen
+        # viewer lives in a standalone top-level window; reparenting from
+        # there would leave an empty fullscreen shell behind and a stale
+        # _original_parent for Esc-to-return.  Borrow from a clean inline
+        # state instead.
+        if program_viewer is not None and getattr(
+                program_viewer, "_is_fullscreen", False):
+            exit_fullscreen = getattr(program_viewer, "exit_fullscreen", None)
+            if callable(exit_fullscreen):
+                exit_fullscreen()
+
         if self._edit_preview_placeholder is not None:
             self._edit_preview_placeholder.setParent(None)
             self._edit_preview_placeholder.deleteLater()
@@ -394,15 +413,36 @@ class DeliverWorkspace(QWidget):
             timeline_changed.connect(self._on_shared_timeline_changed)
         self._on_range_type_changed(self._settings_panel.current_range_type())
         self.ensure_deliver_layout()
+        self.edit_panels_borrowed.emit()
 
     def detach_edit_panels(self) -> None:
-        """Return the shared viewer/timeline to their original Edit docks."""
+        """Return the shared viewer/timeline to their original Edit docks.
+
+        VP-B10: an original dock that was occupied by *another* panel while
+        the widgets were borrowed is never overwritten (setWidget would
+        evict that panel); the widget stays in its current alive host (the
+        Deliver splitter) and the return is reported as partial via
+        ``edit_panels_returned(False)``.
+        """
         if not self._edit_panels_attached:
             return
+        fully_restored = True
         if self._shared_program_viewer is not None:
-            self._shared_program_viewer.setParent(None)
-            if self._program_viewer_dock is not None:
-                self._program_viewer_dock.setWidget(self._shared_program_viewer)
+            dock = self._program_viewer_dock
+            dock_free = (
+                dock is None
+                or dock.widget() is None
+                or dock.widget() is self._shared_program_viewer
+            )
+            if dock is not None and not dock_free:
+                logger.warning(
+                    "detach_edit_panels: program dock occupied by another "
+                    "panel; keeping the viewer in the Deliver splitter")
+                fully_restored = False
+            else:
+                self._shared_program_viewer.setParent(None)
+                if dock is not None:
+                    dock.setWidget(self._shared_program_viewer)
                 self._shared_program_viewer.show()
 
         if self._shared_timeline_panel is not None:
@@ -412,9 +452,21 @@ class DeliverWorkspace(QWidget):
                     timeline_changed.disconnect(self._on_shared_timeline_changed)
                 except (TypeError, RuntimeError):
                     pass
-            self._shared_timeline_panel.setParent(None)
-            if self._timeline_dock is not None:
-                self._timeline_dock.setWidget(self._shared_timeline_panel)
+            dock = self._timeline_dock
+            dock_free = (
+                dock is None
+                or dock.widget() is None
+                or dock.widget() is self._shared_timeline_panel
+            )
+            if dock is not None and not dock_free:
+                logger.warning(
+                    "detach_edit_panels: timeline dock occupied by another "
+                    "panel; keeping the timeline in the Deliver splitter")
+                fully_restored = False
+            else:
+                self._shared_timeline_panel.setParent(None)
+                if dock is not None:
+                    dock.setWidget(self._shared_timeline_panel)
             set_display_mode = getattr(self._shared_timeline_panel, "set_display_mode", None)
             if callable(set_display_mode):
                 set_display_mode("edit")
@@ -438,6 +490,7 @@ class DeliverWorkspace(QWidget):
         self._edit_preview_splitter.setSizes([1, 0])
         self._right_splitter.setSizes([1, 0])
         self._edit_panels_attached = False
+        self.edit_panels_returned.emit(fully_restored)
 
     def _on_shared_timeline_changed(self, timeline: Any) -> None:
         """Keep Deliver's draft context current while its shared timeline is live."""
