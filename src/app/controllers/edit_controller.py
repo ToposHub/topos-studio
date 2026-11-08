@@ -3485,8 +3485,12 @@ class EditControllerMixin:
         - 删轨/锁轨：目标轨不存在或被锁；
         - 锚点冲突：目标轨 [anchor, anchor+duration) 已有 clip。
 
-        落点与时长：anchor = 会话捕获时的播放头帧；duration =
-        take.duration_seconds × 时间线 fps（四舍五入，≥1）。
+        落点与时长（R03）：clip 从**文件首样本的时间线帧位**起放——
+        take 文件包含已采集的预卷与输入延迟 PCM（素材不裁剪），锚点
+        内容必须落在锚点上：``first_sample_frame = in_point −
+        (预卷+延迟)×fps``（未钳制，可为负）；首样本在零点前时裁掉
+        零前内容、clip 从 0 起放。无时间基准的旧 take 回退锚点对齐。
+        duration = take.duration_seconds × 时间线 fps（四舍五入，≥1）。
         """
         def _notify(message: str) -> None:
             status_bar = getattr(self, 'status_bar', None)
@@ -3542,13 +3546,41 @@ class EditControllerMixin:
             duration_frames = max(
                 1, int(round(float(getattr(take, 'duration_seconds', 0.0) or 0.0) * fps)))
             anchor = max(0, int(session.get("anchor_frame") or 0))
-            if any(anchor < c.timeline_end and anchor + duration_frames > c.timeline_start
+            # R03：按文件首样本的真实时间线帧位落 clip。预卷/输入延迟
+            # 的 PCM **保留在文件里**（素材不裁剪），因此 clip 必须从
+            # 首样本帧位起放，锚点内容才落在锚点上——旧实现把文件头
+            # （预卷）对到锚点，锚点事件晚（预卷+延迟）帧。
+            first_frame = getattr(take, "first_sample_frame", None)
+            if first_frame is None:
+                time_ref = int(getattr(take, "time_reference_samples", 0) or 0)
+                take_sr = int(getattr(take, "sample_rate", 48000) or 48000)
+                if time_ref > 0 and take_sr > 0:
+                    first_frame = int(round(time_ref / float(take_sr) * fps))
+            if first_frame is None:
+                # 无时间基准（旧 take/无打点）：维持锚点对齐回退
+                clip_start, source_start = anchor, 0
+            elif first_frame >= 0:
+                clip_start, source_start = int(first_frame), 0
+            else:
+                # 首样本在时间线零点之前：裁掉零前内容（素材文件保留
+                # 完整预卷），clip 从 0 起放
+                head_frames = -int(first_frame)
+                if head_frames >= duration_frames:
+                    _notify("Voiceover: recording lies before the timeline "
+                            "start — take imported to the media pool only")
+                    logger.info(
+                        "Voiceover clip skipped: first sample %d with only "
+                        "%d frames of content", first_frame, duration_frames)
+                    return
+                clip_start, source_start = 0, head_frames
+                duration_frames -= head_frames
+            if any(clip_start < c.timeline_end and clip_start + duration_frames > c.timeline_start
                    for c in track.clips):
                 _notify("Voiceover: destination range occupied — take "
                         "imported to the media pool only")
                 logger.info(
                     "Voiceover clip skipped: range [%d, %d) occupied on %s",
-                    anchor, anchor + duration_frames, track.track_id)
+                    clip_start, clip_start + duration_frames, track.track_id)
                 return
 
             from src.features.edit.core.commands import AddClipCommand
@@ -3558,9 +3590,9 @@ class EditControllerMixin:
                 clip_id=str(uuid.uuid4()),
                 asset_id=asset.asset_id,
                 track_id=track.track_id,
-                timeline_start=anchor,
+                timeline_start=clip_start,
                 timeline_duration=duration_frames,
-                source_start=0,
+                source_start=source_start,
                 source_duration=duration_frames,
                 speed=1.0,
             )
@@ -3569,8 +3601,9 @@ class EditControllerMixin:
             # 一次会话一 take：落 clip 后消费会话
             sessions.pop(session["track_id"], None)
             logger.info(
-                "Voiceover clip placed on %s at frame %d (%d frames)",
-                track.track_id, anchor, duration_frames)
+                "Voiceover clip placed on %s at frame %d (%d frames, "
+                "first sample at %s)",
+                track.track_id, clip_start, duration_frames, first_frame)
         except Exception as e:
             logger.warning("Voiceover clip placement failed: %s", e)
 
