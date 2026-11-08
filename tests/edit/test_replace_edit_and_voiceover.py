@@ -313,6 +313,98 @@ def test_voiceover_without_controller_is_noop(
     page._on_timeline_voiceover_requested()  # 不抛异常
 
 
+# ── B02：Voiceover 返回契约与边界分支 ────────────────────────────────
+
+
+def _sequence_without_audio() -> TimelineSequence:
+    video_clip = ClipInstance(
+        clip_id="vc1", asset_id="old", track_id="v1",
+        timeline_start=0, timeline_duration=48,
+        source_start=0, source_duration=48,
+    )
+    return TimelineSequence(
+        timeline_id="voiceover-b02", name="VO", width=64, height=48,
+        fps=Rational(24, 1),
+        video_tracks=(EditTrack(
+            "v1", "V1", "video", 0, clips=(video_clip,)),),
+        audio_tracks=(),
+    )
+
+
+def _attach_no_audio(qtbot: Any, page: Any) -> Any:
+    from src.features.edit.ui.timeline_panel import TimelinePanel
+
+    panel = TimelinePanel()
+    qtbot.addWidget(panel)
+    panel.load_timeline(_sequence_without_audio())
+    panel.get_timeline_view().set_project(EditProject(
+        "p", "P", assets={"old": _asset("old", frames=200)}))
+    page.set_timeline_panel(panel)
+    return panel
+
+
+def test_b02_creates_track_by_id_contract_and_starts(
+        qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """B01 反例修复验收：无音频轨时按 track ID 契约消费，无异常。
+
+    原缺陷：ensure_target_audio_track 返回 str 却被读 .track_id，
+    AttributeError 后留下新建轨 + history 的半状态。
+    """
+    page = _page(qtbot, monkeypatch)
+    panel = _attach_no_audio(qtbot, page)
+    main = _FakeRecordingMain()
+    page._main_window = main
+
+    page._on_timeline_voiceover_requested()  # 原代码在此抛 AttributeError
+
+    assert len(main.started) == 1
+    created_id = main.started[0]
+    view = panel.get_timeline_view()
+    timeline = view.get_timeline()
+    assert timeline.get_track_by_id(created_id) is not None
+    assert timeline.get_track_by_id(created_id).track_type == "audio"
+    # 建轨本身是一条可撤销命令（半状态已成完整可撤销事务）
+    assert len(view._command_stack._undo_stack) == 1
+    view.undo()
+    assert view.get_timeline().get_track_by_id(created_id) is None
+
+
+def test_b02_start_failure_rolls_back_created_track(
+        qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """B02③：启动失败不留下不明轨——本次手势创建的轨被撤销。"""
+    page = _page(qtbot, monkeypatch)
+    panel = _attach_no_audio(qtbot, page)
+
+    class _FailingMain(_FakeRecordingMain):
+        def _start_recording(self, track_id: str) -> None:
+            raise OSError("device unavailable")
+
+    page._main_window = _FailingMain()
+    with pytest.raises(OSError):
+        page._on_timeline_voiceover_requested()
+    view = panel.get_timeline_view()
+    assert not view.get_timeline().audio_tracks
+    assert not view._command_stack._undo_stack
+
+
+def test_b02_locked_destination_track_refused(
+        qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """B02④：锁定的音频目的轨明确拒绝，不进入录音会话。"""
+    page = _page(qtbot, monkeypatch)
+    panel = _attach(qtbot, page)
+    view = panel.get_timeline_view()
+    locked = replace(panel.get_timeline_view().get_timeline()
+                     .get_track_by_id("a1"), is_locked=True)
+    view._timeline = view.get_timeline().with_track_updated(locked)
+    main = _FakeRecordingMain()
+    page._main_window = main
+
+    page._on_timeline_voiceover_requested()
+
+    assert main.started == []
+    assert len(view._command_stack._undo_stack) == 0
+
+
 def test_replace_requested_from_toolbar_reaches_view(
         qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """W09+W01：工具栏 Replace 按钮 → EditPage → view.replace。"""

@@ -649,14 +649,24 @@ class EditPage(QWidget):
             logger.warning("Voiceover: host controller unavailable")
             return
         track_id = view.resolve_source_destination_track_id("audio")
+        if track_id is not None and view.is_track_locked(track_id):
+            # B02④：锁定的目的轨明确拒绝，不进入录音会话。
+            logger.warning("Voiceover: destination track %s is locked", track_id)
+            self.waveform_status_message.emit(self.tr(
+                "Voiceover destination track is locked"), 4000)
+            return
+        created_track = False
         if track_id is None:
-            # 蓝徽章显式关闭/时间线无音频轨：录音不是源插入路由，仍按
-            # 既有"找或建一条音频轨"链路给出明确目的地。
-            track = view.ensure_target_audio_track()
-            if track is None:
+            # 蓝徽章显式关闭/时间线无音频轨：B02② 录音上下文（宿主
+            # controller）已在上方确认可用，此时才允许建轨；B02① 按
+            # track ID 契约消费 ensure_target_audio_track 的返回值。
+            track_id = view.ensure_target_audio_track()
+            if track_id is None:
                 logger.warning("Voiceover: no audio destination track")
+                self.waveform_status_message.emit(self.tr(
+                    "Voiceover: no audio destination track"), 4000)
                 return
-            track_id = track.track_id
+            created_track = True
         # 打开既有 ADR 入口（设备选择/监听/输入电平都在该面板）
         dock = getattr(main, "dock_adr_take_sheet", None)
         if dock is not None:
@@ -667,7 +677,18 @@ class EditPage(QWidget):
         if active is not None and getattr(active, "is_recording", False):
             main._stop_recording_and_import(track_id)
         else:
-            main._start_recording(track_id)
+            try:
+                main._start_recording(track_id)
+            except Exception:
+                # B02③：启动失败不留下"不明轨"——仅撤销本次手势创建的
+                # 轨道，反馈后重新抛出让宿主继续处理真实设备错误。
+                if created_track and view.can_undo():
+                    try:
+                        view.undo()
+                    except Exception:
+                        logger.exception(
+                            "Voiceover: failed to roll back created track")
+                raise
 
     def _on_timeline_flag_requested(self, color: str) -> None:
         """W05：彩色 Flag 入口（契约 D4）。
