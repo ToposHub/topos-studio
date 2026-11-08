@@ -106,6 +106,120 @@ def test_set_flag_command_rejects_malformed_color() -> None:
             (("v1", "c0"),), "red").apply(timeline)
 
 
+# ── B01/B08 回归：undo 快照与命令校验 ─────────────────────────────────
+
+
+def _timeline_with_blue_c0() -> TimelineSequence:
+    """c1 已蓝、c0 无色的多选基线（B01 反例前置态）。"""
+    timeline = _timeline()
+    flagged = timeline.get_clip_by_id("c1").with_flag_color(
+        CLIP_FLAG_COLORS[0])
+    return timeline.with_track_updated(
+        timeline.video_tracks[0]._rebuild(clips=(
+            timeline.get_clip_by_id("c0"), flagged)))
+
+
+def test_b01_mixed_noop_batch_undo_restores_original_colors() -> None:
+    """B01 反例：c1 已蓝、c0 无色，批量设蓝后 undo 必须回到 [None, 蓝]。
+
+    原缺陷：undo 遍历全部 targets，快照缺 c1 的原色导致被清成 None。
+    """
+    timeline = _timeline_with_blue_c0()
+    cmd = SetClipFlagCommand.create(
+        (("v1", "c0"), ("v1", "c1")), CLIP_FLAG_COLORS[0])
+    applied = cmd.apply(timeline)
+    assert applied.get_clip_by_id("c0").flag_color == CLIP_FLAG_COLORS[0]
+    assert applied.get_clip_by_id("c1").flag_color == CLIP_FLAG_COLORS[0]
+    restored = cmd.undo(applied)
+    assert restored.get_clip_by_id("c0").flag_color is None
+    assert restored.get_clip_by_id("c1").flag_color == CLIP_FLAG_COLORS[0]
+
+
+def test_b01_snapshot_identity_uses_track_and_clip() -> None:
+    """B01②：快照身份用 track+clip；跨轨 undo 恢复各自原色。"""
+    timeline = _timeline()
+    partner = ClipInstance(
+        "ac0", "a", "a1", 0, 40, 0, 100, flag_color=CLIP_FLAG_COLORS[2])
+    timeline = timeline.with_track_updated(
+        timeline.audio_tracks[0]._rebuild(clips=(partner,)))
+    cmd = SetClipFlagCommand.create(
+        (("v1", "c0"), ("a1", "ac0")), CLIP_FLAG_COLORS[0])
+    applied = cmd.apply(timeline)
+    restored = cmd.undo(applied)
+    assert restored.get_clip_by_id("c0").flag_color is None
+    assert restored.get_clip_by_id("ac0").flag_color == CLIP_FLAG_COLORS[2]
+
+
+def test_b01_redo_and_serialization_keep_snapshot() -> None:
+    """B01③：redo 重放全部 targets；序列化往返保留 track+clip 快照。"""
+    timeline = _timeline_with_blue_c0()
+    cmd = SetClipFlagCommand.create(
+        (("v1", "c0"), ("v1", "c1")), CLIP_FLAG_COLORS[0])
+    applied = cmd.apply(timeline)
+    restored = cmd.undo(applied)
+    assert restored.get_clip_by_id("c1").flag_color == CLIP_FLAG_COLORS[0]
+    redone = cmd.apply(restored)
+    assert redone.get_clip_by_id("c0").flag_color == CLIP_FLAG_COLORS[0]
+    assert redone.get_clip_by_id("c1").flag_color == CLIP_FLAG_COLORS[0]
+
+    revived = SetClipFlagCommand.from_dict(cmd.to_dict())
+    assert revived._previous == cmd._previous
+    again = revived.undo(redone)
+    assert again.get_clip_by_id("c0").flag_color is None
+    assert again.get_clip_by_id("c1").flag_color == CLIP_FLAG_COLORS[0]
+
+
+def test_b01_legacy_two_field_snapshot_still_undoes() -> None:
+    """旧序列化格式（无 track_id 的快照）恢复后仍可 undo。"""
+    timeline = _timeline_with_blue_c0()
+    cmd = SetClipFlagCommand.create(
+        (("v1", "c0"), ("v1", "c1")), CLIP_FLAG_COLORS[0])
+    applied = cmd.apply(timeline)
+    legacy = SetClipFlagCommand(
+        command_id=cmd.command_id, label=cmd.label, targets=cmd.targets,
+        flag_color=cmd.flag_color,
+        _previous=tuple(
+            (clip_id, color) for _track_id, clip_id, color in cmd._previous))
+    restored = legacy.undo(applied)
+    assert restored.get_clip_by_id("c0").flag_color is None
+    assert restored.get_clip_by_id("c1").flag_color == CLIP_FLAG_COLORS[0]
+
+
+def test_b08_command_rejects_non_whitelist_hex() -> None:
+    """B08 反例：格式合法但不在白名单的 #zzzzzz 必须拒绝。"""
+    timeline = _timeline()
+    with pytest.raises(ValueError):
+        SetClipFlagCommand.create(
+            (("v1", "c0"),), "#zzzzzz").apply(timeline)
+    with pytest.raises(ValueError):
+        SetClipFlagCommand((("x",)), "l", (("v1", "c0"),), "#123456").apply(
+            timeline)
+    # None（清除）与白名单色不受影响
+    cleared = SetClipFlagCommand.create(
+        (("v1", "c0"),), None).apply(timeline)
+    assert cleared.get_clip_by_id("c0").flag_color is None
+
+
+def test_b08_from_dict_validates_flag_color() -> None:
+    with pytest.raises(ValueError):
+        SetClipFlagCommand.from_dict({
+            "command_id": "x", "label": "l",
+            "targets": [{"track_id": "v1", "clip_id": "c0"}],
+            "flag_color": "#zzzzzz",
+        })
+
+
+def test_b08_model_reading_keeps_unknown_history_value() -> None:
+    """未知历史值读取保留（模型层），不经命令重写。"""
+    clip = ClipInstance.from_dict({
+        "clip_id": "x", "asset_id": "a", "track_id": "v1",
+        "timeline_start": 0, "timeline_duration": 10,
+        "source_start": 0, "source_duration": 10,
+        "flag_color": "#9ZZ9ZZ",
+    })
+    assert clip.flag_color == "#9ZZ9ZZ"
+
+
 def test_flag_noop_does_not_enter_history() -> None:
     from src.features.edit.core.commands import CommandStack
 
