@@ -558,6 +558,8 @@ class EditPage(QWidget):
             (panel.keyframe_tray_requested, self._on_timeline_keyframe_tray_requested),
             (panel.voiceover_requested, self._on_timeline_voiceover_requested),
             (panel.flag_requested, self._on_timeline_flag_requested),
+            (panel.clip_speed_settings_requested,
+             self._on_timeline_clip_speed_settings),
         )
         for signal, slot in bindings:
             signal.connect(slot)
@@ -691,6 +693,34 @@ class EditPage(QWidget):
                         logger.exception(
                             "Voiceover: failed to roll back created track")
                 raise
+
+    def _on_timeline_clip_speed_settings(
+        self, clip_id: str, track_id: str, settings: object) -> None:
+        """B14：高级速度 draft 的宿主接收链。
+
+        EditPage 读取最新上下文（panel/view 宿主在位），编排交给
+        ``EditControllerMixin.apply_clip_speed_settings``：契约校验/
+        能力预检通过则**单事务**执行全部设置（单步 undo）；不支持或
+        校验失败由编排层给出明确诊断，clip/history/revision 零变化。
+        宿主缺少编排入口（旧宿主/独立预览窗）时保持"不支持"反馈，
+        不假装完成。
+        """
+        from src.shared.i18n.i18n import I18N
+
+        panel = self._timeline_panel
+        view = panel.get_timeline_view() if panel is not None else None
+        if view is None or view.get_timeline() is None:
+            logger.warning("Speed settings: no active timeline context")
+            return
+        main = self._main_window
+        apply_settings = getattr(main, "apply_clip_speed_settings", None)
+        if not callable(apply_settings):
+            view.status_message_requested.emit(I18N.tr(
+                "edit.speed_dialog.unsupported",
+                "The selected speed options are not supported yet. "
+                "The clip is unchanged."))
+            return
+        apply_settings(clip_id, track_id, settings)
 
     def _on_timeline_flag_requested(self, color: str) -> None:
         """W05：彩色 Flag 入口（契约 D4）。

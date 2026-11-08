@@ -1695,6 +1695,266 @@ class MoveSpeedPointCommand:
 
 
 # ================================================================
+# B14: SetClipSpeedSettingsCommand（速度对话框全部意图的单事务提交）
+# ================================================================
+
+@dataclass(frozen=True)
+class SetClipSpeedSettingsCommand:
+    """B14：一次提交速度对话框的**全部**设置（不静默丢字段）。
+
+    支持意图（stage-1 矩阵）：
+
+    - ``speed``/``reverse``/``preserve_pitch``：基础变速（互链伙伴
+      同步，与 ChangeClipSpeedCommand 同语义）；
+    - ``keyframe_timing``：``"stretch"`` 按新旧时长比例重锚 clip/
+      effect 动画（既有 F2.4 语义）；``"maintain"`` 关键帧保持绝对
+      时间线帧位不动；
+    - ``duration_frames``：请求时长仅作一致性校验（由接收层完成），
+      命令内时长以完整速度积分（统一混合帧率 helper）为准；
+    - ``freeze``：整段定格在当前源 In 帧（``freeze_source_frame``），
+      时长 = 请求时长；速度参数仍写入（解冻后生效）；
+    - ``ripple``：时长变化时，主片轨与互链伙伴轨上其后继片段整体
+      平移闭合/让位（同一 delta，单步 undo）。
+
+    undo 用 apply 期完整快照直接还原（B17 语义）。任何字段非法/
+    前提不满足抛 ``ValueError``——由接收层转为明确诊断，零写入。
+
+    Attributes:
+        _snapshots: [member] + [follower] 的还原快照元组列表
+    """
+
+    command_id: str
+    label: str
+    clip_id: str
+    track_id: str
+    speed: float
+    reverse: bool = False
+    preserve_pitch: bool = False
+    freeze: bool = False
+    keyframe_timing: str = "stretch"
+    duration_frames: int = 0
+    ripple: bool = False
+    _snapshots: tuple | None = None
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self.keyframe_timing not in ("stretch", "maintain"):
+            raise ValueError(
+                f"Invalid keyframe_timing: {self.keyframe_timing!r}")
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        assert_track_editable(
+            timeline, self.track_id, "Apply speed settings")
+        linked = timeline.get_reciprocal_linked_clip(clip)
+        if linked is not None:
+            assert_track_editable(
+                timeline, linked.track_id, "Apply speed settings")
+
+        from src.features.edit.core.clip_params import SpeedParams as _SP
+        from src.features.edit.core.timeline_ops import (
+            timeline_duration_for_source,
+        )
+
+        base = (clip.speed if isinstance(clip.speed, _SP)
+                else _SP(speed=float(clip.speed)))
+        new_params = (base.with_speed(float(self.speed))
+                      .with_reverse(bool(self.reverse))
+                      .with_preserve_pitch(bool(self.preserve_pitch)))
+
+        seq_fps = getattr(timeline, "fps", None)
+        seq_fps_num = seq_fps.num if hasattr(seq_fps, "num") else None
+        seq_fps_den = seq_fps.den if hasattr(seq_fps, "den") else 1
+
+        snapshots: list[tuple] = []
+
+        def _member_snapshot(member: ClipInstance) -> tuple:
+            return (
+                member.clip_id, member.track_id,
+                member.speed.to_dict()
+                if isinstance(member.speed, _SP)
+                else {"speed": float(member.speed)},
+                member.timeline_duration, member.fade_in_duration,
+                member.fade_out_duration, member.freeze_source_frame,
+                (_copy.deepcopy(member.animated_params),
+                 _copy.deepcopy(member.effects)),
+            )
+
+        members = [clip] + ([linked] if linked is not None else [])
+        member_plans: list[tuple[ClipInstance, ClipInstance, int]] = []
+        for member in members:
+            member_track = timeline.get_track_by_id(member.track_id)
+            member_clip = member_track.get_clip_by_id(member.clip_id)
+            if self.freeze:
+                new_duration = max(1, int(self.duration_frames))
+            else:
+                new_duration = timeline_duration_for_source(
+                    member_clip.source_duration, new_params,
+                    member_clip._source_fps_num, member_clip._source_fps_den,
+                    member_clip._timeline_fps_num or seq_fps_num,
+                    member_clip._timeline_fps_den or seq_fps_den,
+                )
+            member_plans.append((member_track, member_clip, new_duration))
+            snapshots.append(_member_snapshot(member_clip))
+
+        # 无变化判定（速度参数、冻结态、时长都不变）→ no-op 同一实例
+        primary_new = member_plans[0]
+        no_change = (
+            new_params == base
+            and primary_new[2] == clip.timeline_duration
+            and (not self.freeze
+                 or clip.freeze_source_frame == clip.source_start))
+        if no_change:
+            return timeline
+
+        result = timeline
+        for member_track, member_clip, new_duration in member_plans:
+            updated = replace(
+                member_clip,
+                speed=new_params,
+                timeline_duration=new_duration,
+                fade_in_duration=min(
+                    member_clip.fade_in_duration, new_duration),
+                fade_out_duration=min(
+                    member_clip.fade_out_duration, new_duration),
+            )
+            if self.freeze:
+                updated = updated.with_freeze_frame(member_clip.source_start)
+            if self.keyframe_timing == "stretch" and not self.freeze:
+                updated = updated.with_animation_time_remapped(
+                    member_clip.timeline_duration, new_duration)
+
+            # ripple：同轨后继按时长 delta 平移。成员更新与后继平移必须
+            # 在**同一次轨重建**里落盘——先更新成员会在增长方向与未移的
+            # 后继形成重叠中间态，EditTrack 校验会拒绝。
+            if self.ripple and new_duration != member_clip.timeline_duration:
+                delta = new_duration - member_clip.timeline_duration
+                old_end = member_clip.timeline_end
+                final_clips: list[ClipInstance] = []
+                for c in member_track.clips:
+                    if c.clip_id == member_clip.clip_id:
+                        final_clips.append(updated)
+                    elif c.timeline_start >= old_end:
+                        snapshots.append(
+                            (c.clip_id, c.track_id, c.timeline_start))
+                        final_clips.append(
+                            replace(c, timeline_start=c.timeline_start + delta))
+                    else:
+                        final_clips.append(c)
+                result = result.with_track_updated(
+                    member_track._rebuild(
+                        clips=tuple(sorted(
+                            final_clips, key=lambda c: c.timeline_start))))
+            else:
+                result = result.with_track_updated(
+                    member_track.with_clip_updated(updated))
+
+        object.__setattr__(self, "_snapshots", tuple(snapshots))
+        return result
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if not self._snapshots:
+            raise ValueError("Cannot undo: command was never applied")
+        from src.features.edit.core.clip_params import SpeedParams as _SP
+
+        # 按轨分组一次重建：逐个 with_clip_updated 会产生"成员还原但
+        # 后继未回位"的 overlaps 中间态（apply 的镜像问题）。
+        by_track: dict[str, dict[str, Any]] = {}
+        for snapshot in self._snapshots:
+            if len(snapshot) == 3:
+                clip_id, track_id, start = snapshot
+                entry = {"kind": "start", "start": start}
+            else:
+                (clip_id, track_id, speed_dict, duration, fade_in, fade_out,
+                 freeze, (animated, effects)) = snapshot
+                entry = {
+                    "kind": "full", "speed_dict": speed_dict,
+                    "duration": duration, "fade_in": fade_in,
+                    "fade_out": fade_out, "freeze": freeze,
+                    "animated": animated, "effects": effects,
+                }
+            by_track.setdefault(track_id, {})[clip_id] = entry
+
+        result = timeline
+        for track_id, entries in by_track.items():
+            track = result.get_track_by_id(track_id)
+            final_clips: list[ClipInstance] = []
+            for c in track.clips:
+                entry = entries.get(c.clip_id)
+                if entry is None:
+                    final_clips.append(c)
+                elif entry["kind"] == "start":
+                    final_clips.append(
+                        replace(c, timeline_start=entry["start"]))
+                else:
+                    final_clips.append(replace(
+                        c,
+                        speed=_SP.from_dict(entry["speed_dict"]),
+                        timeline_duration=entry["duration"],
+                        fade_in_duration=entry["fade_in"],
+                        fade_out_duration=entry["fade_out"],
+                        animated_params=entry["animated"],
+                        effects=entry["effects"],
+                    ).with_freeze_frame(entry["freeze"]))
+            result = result.with_track_updated(
+                track._rebuild(clips=tuple(sorted(
+                    final_clips, key=lambda c: c.timeline_start))))
+        return result
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetClipSpeedSettingsCommand",
+            "label": self.label,
+            "clip_id": self.clip_id,
+            "track_id": self.track_id,
+            "speed": self.speed,
+            "reverse": self.reverse,
+            "preserve_pitch": self.preserve_pitch,
+            "freeze": self.freeze,
+            "keyframe_timing": self.keyframe_timing,
+            "duration_frames": self.duration_frames,
+            "ripple": self.ripple,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetClipSpeedSettingsCommand":
+        return SetClipSpeedSettingsCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Apply speed settings"),
+            clip_id=data.get("clip_id", ""),
+            track_id=data.get("track_id", ""),
+            speed=float(data.get("speed", 1.0)),
+            reverse=bool(data.get("reverse", False)),
+            preserve_pitch=bool(data.get("preserve_pitch", False)),
+            freeze=bool(data.get("freeze", False)),
+            keyframe_timing=data.get("keyframe_timing", "stretch"),
+            duration_frames=int(data.get("duration_frames", 0)),
+            ripple=bool(data.get("ripple", False)),
+        )
+
+    @staticmethod
+    def create(
+        clip_id: str, track_id: str, settings: dict[str, Any],
+    ) -> "SetClipSpeedSettingsCommand":
+        return SetClipSpeedSettingsCommand(
+            command_id=str(uuid.uuid4()),
+            label=f"Change clip speed ({settings.get('speed', 1.0):g}x)",
+            clip_id=clip_id,
+            track_id=track_id,
+            speed=float(settings.get("speed", 1.0)),
+            reverse=bool(settings.get("reverse", False)),
+            preserve_pitch=bool(settings.get("preserve_pitch", False)),
+            freeze=bool(settings.get("freeze", False)),
+            keyframe_timing=str(settings.get("keyframe_timing", "stretch")),
+            duration_frames=int(settings.get("duration_frames", 0) or 0),
+            ripple=bool(settings.get("ripple", False)),
+        )
+
+
+# ================================================================
 # A2: FreezeFrameAtPlayheadCommand（冻结帧，2026-09-07 优化计划）
 # ================================================================
 

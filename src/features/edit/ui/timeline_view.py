@@ -12402,11 +12402,21 @@ class TimelineView(QGraphicsView):
         settings = dialog.settings()
         animated = bool(clip.animated_params) or any(
             bool(getattr(effect, "animated_params", None)) for effect in clip.effects)
-        unsupported = (settings["ripple"] or settings["freeze"]
-                       or clip.freeze_source_frame is not None or params.speed_points or animated)
-        if unsupported:
+        # B14：高级意图（ripple/freeze/maintain/既有冻结/速度点/动画）
+        # 走宿主接收链——契约校验/能力预检/单事务执行或明确诊断都在
+        # 接收层完成；无消费者的独立预览场景保持"不支持"反馈。
+        advanced = (settings["ripple"] or settings["freeze"]
+                    or settings["keyframe_timing"] == "maintain"
+                    or clip.freeze_source_frame is not None
+                    or params.speed_points or animated)
+        if advanced:
+            if not self.clip_speed_settings_requested.receivers():
+                self.status_message_requested.emit(I18N.tr(
+                    "edit.speed_dialog.unsupported",
+                    "The selected speed options are not supported yet. "
+                    "The clip is unchanged."))
+                return
             self.clip_speed_settings_requested.emit(clip_id, track_id, settings)
-            self.status_message_requested.emit(I18N.tr("edit.speed_dialog.unsupported", "The selected speed options are not supported yet. The clip is unchanged."))
             return
         new_params = params.with_speed(settings["speed"]).with_reverse(settings["reverse"]).with_preserve_pitch(settings["preserve_pitch"])
         if new_params == params:
@@ -12538,6 +12548,19 @@ class TimelineView(QGraphicsView):
         if clip is None or self._is_track_locked(track_id):
             return
         params = self._retime_speed_params_for_clip(clip)
+        # B14 stage-3：单点删除——被删段的边界点移除后并入前段速度，
+        # 不是抹平整条曲线（without_speed_points 禁止冒充）。
+        if action == "clear_point":
+            try:
+                updated = params.with_speed_point_removed(source_offset)
+            except ValueError as exc:
+                self.status_message_requested.emit(str(exc))
+                return
+            if updated is params:
+                return
+            self._retime_control_clip_ids.add(clip_id)
+            self._commit_retime_params(clip, updated, "Clear speed point")
+            return
         if action not in {"reverse", "pitch", "reset_clip"} or self._retime_controls_need_backend(clip):
             self._request_advanced_retime(clip, action, source_offset, value)
             return

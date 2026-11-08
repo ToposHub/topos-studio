@@ -1296,6 +1296,34 @@ class SpeedParams:
             preserve_pitch=self.preserve_pitch,
         )
 
+    def with_speed_point_removed(self, source_offset: int) -> "SpeedParams":
+        """B14 stage-3：删除单个速度点分界（窗口坐标输入）。
+
+        语义：被删点起始的段并入**前一段**（前段速度延伸覆盖到下一点/
+        域尾）——不是把整条曲线抹平（``without_speed_points`` 是另一
+        个操作，禁止冒充单点删除）。首段左边界是隐式 clip 起点（无
+        点可删），``source_offset == 0`` 抛错；点不存在抛错。
+        """
+        offset = int(source_offset)
+        if offset <= 0 and self.curve_offset == 0:
+            raise ValueError(
+                "the first segment's left boundary is the clip start; "
+                "no speed point to clear")
+        curve_pos = self.curve_offset + offset
+        remaining = [
+            point for point in self.speed_points
+            if point.source_offset != curve_pos]
+        if len(remaining) == len(self.speed_points):
+            raise ValueError("speed point does not exist")
+        return self._reanchor_edited_curve(SpeedParams(
+            self.speed, self.reverse, self.interpolation,
+            tuple(remaining),
+            curve_offset=self.curve_offset,
+            curve_length=self.curve_length,
+            curve_time_offset=self.curve_time_offset,
+            preserve_pitch=self.preserve_pitch,
+        ))
+
     def with_speed_point_moved(
         self, source_offset: int, new_source_offset: int,
         source_duration: int,
