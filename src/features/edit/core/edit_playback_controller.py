@@ -564,6 +564,16 @@ class EditPlaybackController(QObject):
         )
         logger.debug(f"Paused at frame={self._state.current_frame}")
 
+    def stop_in_place(self) -> None:
+        """
+        VP-B05: 原位停止——暂停并复位 JKL 档位，播放头保留。
+
+        Viewer 的 Stop 按钮语义（"停止于当前位置"）；回到起点仍由
+        Home/stop() 显式负责。``pause()`` 已覆盖"未播放时 no-op"。
+        """
+        self.pause()
+        self.jkl_reset()
+
     def stop(self) -> None:
         """
         停止播放。
