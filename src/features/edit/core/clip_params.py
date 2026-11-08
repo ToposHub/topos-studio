@@ -1296,6 +1296,52 @@ class SpeedParams:
             preserve_pitch=self.preserve_pitch,
         )
 
+    def with_speed_point_moved(
+        self, source_offset: int, new_source_offset: int,
+        source_duration: int,
+    ) -> "SpeedParams":
+        """B15：把既有速度点沿**源坐标**移到新位置（窗口坐标输入）。
+
+        边界/碰撞：新曲线位置必须严格位于（前一点或 0，后一点或域长）
+        的开区间内，保持点位严格有序；移动点之前的段映射不变，之后
+        的段按新分界重积分（积分时基重锚与其它曲线编辑器一致）。
+        同位移动返回原实例（no-op）。
+        """
+        old_curve = self.curve_offset + int(source_offset)
+        new_curve = self.curve_offset + int(new_source_offset)
+        matched: SpeedPoint | None = None
+        others: list[SpeedPoint] = []
+        for point in self.speed_points:
+            if point.source_offset == old_curve:
+                matched = point
+            else:
+                others.append(point)
+        if matched is None:
+            raise ValueError("speed point does not exist")
+        if new_curve == old_curve:
+            return self
+        domain_end = self._curve_length(source_duration)
+        lower = max(
+            [p.source_offset for p in others if p.source_offset < old_curve]
+            + [0])
+        upper = min(
+            [p.source_offset for p in others if p.source_offset > old_curve]
+            + [domain_end])
+        if not lower < new_curve < upper:
+            raise ValueError(
+                f"speed point move out of order: must stay in "
+                f"({lower}, {upper})")
+        moved = SpeedPoint(new_curve, matched.speed, matched.easing)
+        points = tuple(
+            sorted((*others, moved), key=lambda p: p.source_offset))
+        return self._reanchor_edited_curve(SpeedParams(
+            self.speed, self.reverse, self.interpolation, points,
+            curve_offset=self.curve_offset,
+            curve_length=self.curve_length,
+            curve_time_offset=self.curve_time_offset,
+            preserve_pitch=self.preserve_pitch,
+        ))
+
     # ==================== 序列化 ====================
 
     def to_dict(self) -> dict[str, Any]:
