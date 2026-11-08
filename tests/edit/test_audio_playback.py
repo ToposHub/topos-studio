@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.features.edit.core import audio_playback
 
 from src.features.edit.core.audio_playback import (
+    LEVEL_SILENT_DB,
     AudioTrackState,
     AudioClock,
     AudioClockState,
@@ -1586,3 +1587,72 @@ pytestmark = pytest.mark.edit_core
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestLevelLifecycleB13:
+    """B13：pause/stop/EOF 后瞬时电平归静音；迟到回调不回亮。"""
+
+    def _manager(self) -> AudioPlaybackManager:
+        manager = AudioPlaybackManager()
+        # 让时钟进入播放态，模拟真实播放中（时钟状态由 mutex 保护）
+        manager._clock._state.state = AudioPlaybackState.PLAYING
+        return manager
+
+    def test_stop_emits_silent_master_and_track_levels(self) -> None:
+        manager = self._manager()
+        master: list[list[float]] = []
+        per_track: list[dict] = []
+        manager.audio_level_changed.connect(master.append)
+        manager.audio_track_levels_changed.connect(per_track.append)
+        # 播放中正常 feed：master -6dB，per-track 两轨
+        manager._on_audio_level([-6.0, -6.0])
+        manager._on_audio_track_levels(
+            {"a1": [-6.0, -6.0], "a2": [-8.0, -8.0]})
+        assert master[-1] == [-6.0, -6.0]
+
+        manager.stop()
+
+        # B13：stop 后 master/per-track 瞬时值归静音地板
+        assert master[-1] == [LEVEL_SILENT_DB, LEVEL_SILENT_DB]
+        assert per_track[-1] == {
+            "a1": [LEVEL_SILENT_DB, LEVEL_SILENT_DB],
+            "a2": [LEVEL_SILENT_DB, LEVEL_SILENT_DB]}
+
+    def test_pause_emits_silent_levels(self) -> None:
+        manager = self._manager()
+        master: list[list[float]] = []
+        manager.audio_level_changed.connect(master.append)
+        manager._on_audio_level([-6.0, -6.0])
+
+        manager.pause()
+
+        assert master[-1] == [LEVEL_SILENT_DB, LEVEL_SILENT_DB]
+        assert manager.get_state() != AudioPlaybackState.PLAYING
+
+    def test_late_thread_callback_does_not_relight(self) -> None:
+        """stop/pause 后排队中的迟到线程回调被丢弃。"""
+        manager = self._manager()
+        master: list[list[float]] = []
+        manager.audio_level_changed.connect(master.append)
+        per_track: list[dict] = []
+        manager.audio_track_levels_changed.connect(per_track.append)
+        manager._on_audio_level([-6.0, -6.0])
+        manager._on_audio_track_levels({"a1": [-6.0, -6.0]})
+        manager.stop()
+        count_after_stop = len(master)
+
+        # 迟到回调（跨线程队列中滞留的旧事件）
+        manager._on_audio_level([-3.0, -3.0])
+        manager._on_audio_track_levels({"a1": [-3.0, -3.0]})
+
+        assert len(master) == count_after_stop  # 不回亮
+        assert len(per_track) == 2  # 只有播放 feed 与静音广播两条
+
+    def test_mono_silent_feed_shape(self) -> None:
+        """单/多声道统一：静音广播始终双声道值，轨集合与最近 feed 一致。"""
+        manager = self._manager()
+        per_track: list[dict] = []
+        manager.audio_track_levels_changed.connect(per_track.append)
+        manager._on_audio_track_levels({"mono": [-12.0, -12.0]})
+        manager.stop()
+        assert per_track[-1] == {"mono": [LEVEL_SILENT_DB, LEVEL_SILENT_DB]}

@@ -118,6 +118,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# B13：电平静音地板——与播放线程 dB 钳制（-100dB）同源。stop/pause
+# 广播静音与迟到回调丢弃共用该值，不引入第二套"无声"语义。
+LEVEL_SILENT_DB = -100.0
+
 
 # =============================================================================
 # Constants
@@ -4996,6 +5000,9 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.PAUSED.value)
+        # B13：暂停的瞬时电平 = 静音（与播放线程 -100dB 钳制地板一致）；
+        # peak-hold 衰减由各电平表自行处理，这里只提供真实状态 feed
+        self._emit_silent_levels()
         playback_trace("audio_manager.pause", frame=self.get_current_frame())
 
         logger.debug("Audio playback paused")
@@ -5056,10 +5063,28 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.STOPPED.value)
+        # B13：停止（含 EOF→stop）后瞬时电平归静音——不伪造音频、不改
+        # 表控件，只把真实生命周期状态 feed 给订阅者；迟到的线程回调
+        # 由 _on_audio_* 的播放态守卫丢弃
+        self._emit_silent_levels()
         self.frame_changed.emit(0)
         playback_trace("audio_manager.stop")
 
         logger.debug("Audio playback stopped")
+
+    def _emit_silent_levels(self) -> None:
+        """B13：向全部电平订阅者广播静音（master + per-track）。
+
+        master 用双声道 [silent, silent]；per-track 用最近一次 feed 出现
+        的轨集合（各表按既有衰减/peak-hold 规则回落）。静音地板与播放
+        线程的 dB 钳制一致（-100dB），不引入第二套"无声"语义。
+        """
+        silent = [LEVEL_SILENT_DB, LEVEL_SILENT_DB]
+        self.audio_level_changed.emit(list(silent))
+        track_ids = getattr(self, "_last_track_level_ids", None) or ()
+        if track_ids:
+            self.audio_track_levels_changed.emit({
+                track_id: list(silent) for track_id in track_ids})
 
     def seek(self, frame: int) -> None:
         """
@@ -5212,7 +5237,12 @@ class AudioPlaybackManager(QObject):
 
         Args:
             levels: [left_db, right_db] 电平值
+
+        B13③：stop/pause 已广播静音后，跨线程排队中的迟到线程回调
+        不得把表"回亮"——非播放态一律丢弃。
         """
+        if not self._clock.is_playing:
+            return
         self.audio_level_changed.emit(levels)
 
     def _on_audio_track_levels(self, levels: dict) -> None:
@@ -5221,7 +5251,14 @@ class AudioPlaybackManager(QObject):
 
         Args:
             levels: {track_id: [left_db, right_db]} 每轨电平
+
+        B13：记录最近出现的轨集合（stop/pause 广播静音时按同一集合
+        逐轨归零）；非播放态丢弃迟到回调（见 _on_audio_level）。
         """
+        if not self._clock.is_playing:
+            return
+        if levels:
+            self._last_track_level_ids = list(levels.keys())
         self.audio_track_levels_changed.emit(levels)
 
     def _on_video_frame_changed(self, frame: int) -> None:
