@@ -1672,6 +1672,13 @@ class SourceViewerWidget(QWidget):
         # rejected (no new requests after the shutdown sequence starts).
         self._shutdown_prepared: bool = False
 
+        # VP-B05: source loop (whole media or effective In/Out) and reverse
+        # playback (video only at 1x — reverse audio is NOT supported and the
+        # capability says so honestly).
+        self._loop_enabled: bool = False
+        self._reverse_playback: bool = False
+        self._scrub_was_playing: bool = False
+
         # GPU timeout watchdog: if GPU async result doesn't arrive within
         # _gpu_timeout_ms, fall back to CPU decode for that frame
         self._gpu_timeout_ms: int = 100  # 100ms timeout
@@ -2185,6 +2192,7 @@ class SourceViewerWidget(QWidget):
             return  # VP-B11: 关闭序列后不再起播
         if not self._current_asset:
             return
+        self._reverse_playback = False  # VP-B05: 正向播放清除倒放模式
 
         if self._current_frame >= self._total_frames - 1:
             # Restart from beginning if at end
@@ -2214,6 +2222,74 @@ class SourceViewerWidget(QWidget):
         # Pause continuous audio to match the frozen playhead.
         self._pause_source_audio()
         logger.debug("Playback paused")
+
+    def play_reverse(self) -> None:
+        """VP-B05: 反向播放（仅视频，1x 初版限速）。
+
+        音频反向不支持：本方法**不**启动源音频，能力经
+        ``source_audio_reverse_supported`` 如实声明为 False——不假装正常
+        反向音频。倒放到帧 0 暂停（初版不做反向循环）。
+        """
+        if self._shutdown_prepared:
+            return
+        if not self._current_asset:
+            return
+        if self._current_frame <= 0:
+            self._current_frame = self._total_frames - 1  # 末帧起倒
+        self._reverse_playback = True
+        self._is_playing = True
+        import time as _time
+        self._playback_start_time = _time.perf_counter()
+        self._playback_start_frame = self._current_frame
+        self._playback_timer.start()
+        self.toolbar.update_play_state(True)
+        self.viewer.set_playback_state(True, self._fps)
+        logger.debug("Reverse playback started (video only)")
+
+    @property
+    def source_audio_reverse_supported(self) -> bool:
+        """VP-B05: 源音频反向能力（如实声明，UI 据此禁用/提示）。"""
+        return False
+
+    def set_loop(self, enabled: bool) -> None:
+        """VP-B05: 源循环开关（素材全段或有效 In/Out 循环）。"""
+        self._loop_enabled = bool(enabled)
+
+    @property
+    def loop_enabled(self) -> bool:
+        return self._loop_enabled
+
+    def stop_in_place(self) -> None:
+        """VP-B05: 原位停止——暂停，播放头保留（不归零）。
+
+        Viewer 的 Stop 语义；回起点仍由 Home/stop() 显式负责。
+        """
+        self.pause()
+
+    def _loop_bounds(self) -> Optional[tuple[int, int]]:
+        """循环边界：In（缺省 0）→ Out（缺省末帧）；未开循环为 None。"""
+        if not self._loop_enabled:
+            return None
+        start = self._in_point if self._in_point is not None else 0
+        end = (self._out_point if self._out_point is not None
+               else self._total_frames - 1)
+        return (start, end)
+
+    def _handle_playback_end(self, bounds: Optional[tuple[int, int]]) -> None:
+        """播放到达循环边界/末尾：循环回卷（含音频重定位）或暂停。"""
+        if bounds is not None and self._total_frames > 0:
+            import time as _time
+            start = bounds[0]
+            self._current_frame = start
+            self._playback_start_frame = start
+            self._playback_start_time = _time.perf_counter()
+            self.slider.setValue(start)
+            self._update_timecode()
+            self._seek_source_audio(start)  # 边界音频重定位
+            if not self._view_hidden:
+                self._load_frame(start)
+            return
+        self.pause()
 
     def stop(self) -> None:
         """Stop playback and reset to beginning."""
@@ -2295,6 +2371,7 @@ class SourceViewerWidget(QWidget):
         """Start lightweight source scrub preview."""
         if not self._current_asset:
             return
+        self._scrub_was_playing = self._is_playing  # VP-B05: 释放按此恢复
         if self._is_playing:
             self.pause()
         self._scrub_active = True
@@ -2314,6 +2391,10 @@ class SourceViewerWidget(QWidget):
         self._scrub_pending_frame = None
         self._scrub_timer_pending = False
         self.seek(frame, force=True)
+        # VP-B05: scrub 开始前在播 → 释放后恢复播放；此前已暂停 → 保持暂停
+        if self._scrub_was_playing:
+            self._scrub_was_playing = False
+            self.play()
 
     def _on_slider_changed(self, value: int) -> None:
         """Handle slider value change."""
@@ -2550,8 +2631,15 @@ class SourceViewerWidget(QWidget):
         decode lands.  This keeps the slider and the picture locked together
         instead of the picture freezing while the slider keeps moving.
         """
-        if not self._current_asset or self._current_frame >= self._total_frames - 1:
+        if not self._current_asset:
             self.pause()
+            return
+
+        # VP-B05: loop-aware end limit (In/Out when looping, else media end)
+        bounds = self._loop_bounds()
+        limit = bounds[1] if bounds is not None else self._total_frames - 1
+        if not self._reverse_playback and self._current_frame >= limit:
+            self._handle_playback_end(bounds)
             return
 
         if self._shutdown_prepared:
@@ -2560,11 +2648,33 @@ class SourceViewerWidget(QWidget):
         import time as _time
         now = _time.perf_counter()
         elapsed = now - self._playback_start_time
+
+        if self._reverse_playback:
+            # VP-B05: 反向步进（1x）；到帧 0 暂停（初版不做反向循环）
+            target_frame = self._playback_start_frame - int(
+                elapsed * self._fps)
+            if target_frame <= 0:
+                self._current_frame = 0
+                self.slider.setValue(0)
+                self._update_timecode()
+                if not self._view_hidden:
+                    self._load_frame(0)
+                self.pause()
+                return
+            if target_frame >= self._current_frame:
+                return  # 未到下一帧
+            self._current_frame = target_frame
+            self.slider.setValue(target_frame)
+            self._update_timecode()
+            if not self._view_hidden:
+                self._load_frame(target_frame)
+            return
+
         # Calculate where we should be based on real time
         target_frame = self._playback_start_frame + int(elapsed * self._fps)
 
-        # Clamp to valid range
-        target_frame = min(target_frame, self._total_frames - 1)
+        # Clamp to the loop-aware limit
+        target_frame = min(target_frame, limit)
 
         # Backpressure: don't let the playhead outrun the decoder.  If a GPU
         # decode is still in flight and wall-clock has run far enough ahead
@@ -2581,6 +2691,12 @@ class SourceViewerWidget(QWidget):
 
         # Not yet due — wait for a later tick.
         if target_frame <= self._current_frame:
+            return
+
+        # VP-B05: looping playback wraps as soon as the limit is due
+        # (the limit frame itself is not presented twice).
+        if bounds is not None and target_frame >= limit:
+            self._handle_playback_end(bounds)
             return
 
         if target_frame > self._current_frame + 1:
