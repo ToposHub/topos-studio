@@ -66,6 +66,53 @@
 
 W00 为实施前的契约确认，建议 0.5–1 日：确认 Replace 对齐规则、蓝徽章路由归属、Position Lock 的允许/拒绝矩阵及彩色 Flag 的作用域。建议顺序：W00/W09 → W02 → W01/W04 → W06 → W03/W05 → W07/W08 → 集成回归。可先将 W06 最小语义定稿，再让其他任务实施，避免事后改变写入边界。
 
+## 3.1 W00 契约决策（2026-11-08 定稿，后续实施按此执行）
+
+### D1 Replace Edit 对齐规则（W01 依据）
+
+1. **目标解析顺序**：恰好一个选中 clip → 用它；无选中 → 播放头帧下、位于"有效视频目的轨"（W02 蓝路由，无显式路由时退红 target）上的 clip；两者都无 → 拒绝并在状态栏报告。多选（>1）不隐式批量替换，先拒绝并提示。
+2. **源区间**：Source Viewer 的 In/Out 有效时，源对齐帧 = In（inclusive）；In/Out 缺失时 Replace 按钮不可用（与 Insert/Overwrite/Append 同一 enabled 判定）。Out 不决定目标时长。
+3. **保留项**（Replace 不改）：`clip_id`、`track_id`、`timeline_start`、`timeline_duration`、`speed`、效果/grade/动画/淡变/`label_color`/链接关系/增益/混合模式等其余字段。**变更项**：`asset_id`、`source_start`（= 源对齐帧经 fps 映射）、`source_duration`（按目标 timeline_duration × 有效速度换算，混合帧率沿用统一时长 helper）。
+4. **源不足预检**：素材可用源帧（源时长 − 源对齐帧）< 所需 source_duration → 整次拒绝并报告，不截短目标。
+5. **Linked A/V 配对**：目标 clip 存在 `linked_clip_id` 伙伴、伙伴仍存在、且新源为有声视频时，两个 clip 在一个宏事务中一起替换（同一源对齐帧，单步 undo）；否则只替换目标 clip（伙伴保持），状态栏说明。任一伙伴锁轨、源不足或素材缺失 → 整次拒绝。
+6. **提交**：新增领域命令 `ReplaceClipWithSourceCommand`（成对时包 `MacroCommand`），经 `TimelineView._execute_command` 提交（revision 在提交边界推进）；既有 `ReplaceClipAssetCommand`（占位替换）保持原职责不变。
+
+### D2 蓝徽章路由归属（W02 依据）
+
+1. 蓝徽章是**时间线范围的源目的轨 UI 上下文**：按 `(timeline_id, track_type)` 记录 `track_id`（显式选中）、`None`（显式关闭该流）或"无条目"（从未设置，旧工程）。不写入 `SourcePatchSpec`（那是素材级流开关/声道映射），两者互补。
+2. **有效目的轨解析**（`resolve_source_destination_track_id(type)`）：显式选中且轨仍存在 → 该轨；显式关闭 → `None`（该流不落）；无条目或轨已删（陈旧条目即清理）→ 回退红 target 语义（现有 `get_target_track_id()/get_target_audio_track_id()`）。红 target 逻辑不动。
+3. **消费入口**：源 Insert/Overwrite/Append、媒体池拖放（`_add_asset_as_clip` 与 insert-mode drop）统一经上述解析器取落轨；素材级 SourcePatch 流开关判定保持不变，任一层关闭该流即不落。
+4. **持久化**：经 W07 的 UIState presentation payload（`source_destination_ui`）保存/恢复；因不是领域状态，undo/redo 不影响蓝路由。
+5. 轨删除/undo 后：解析器按轨存在性回退，`load_timeline` 重建时徽章重投影（既有行为），不产生悬空 ID。
+
+### D3 Position Lock 允许/拒绝矩阵（W06 依据，最小语义定稿）
+
+锁 = 冻结 clip 的时间线足迹 `(track_id, timeline_start, timeline_duration)`；开启后对所有 clip 生效（会话级防误操作，非持久权限、非协作权限）。
+
+| 操作族 | 锁开启语义 |
+|---|---|
+| Move/Slide/跨轨移动/Alt-copy 放置 | 拒绝（足迹变化） |
+| 常规 trim（左/右）、roll | 拒绝（trim 改 start/duration，roll 改两边界） |
+| Slip、效果/音量/gain/颜色/label/flag/enabled/重命名 | 允许（足迹不变） |
+| Delete/Cut、ripple delete/insert、paste/overwrite/外部拖放到锁 clip 范围 | 拒绝（移除锁 clip、推动其足迹、或拆分缩短锁 clip） |
+| 纯新增 clip（不触碰既有 clip 足迹） | 允许 |
+| Undo/Redo | 允许（恢复用户历史优先，跳过预检） |
+
+**判定机制**：提交预检基于内容变更 footprint——命令先对当前时间线 dry-run `apply`（命令纯数据、apply 返回新实例不原地改），diff 前后所有既有 clip 的足迹；任一 clip 足迹变化或被移除 → 拒绝；新增 clip 不算违规。命令套件的 apply 快照在输入不变时幂等，dry-run 后的正式 apply 不改变结果。
+**接入点**：`TimelineView._execute_command`（覆盖鼠标/键盘/菜单/拖放全部 UI 编辑）与 `EditProjectService.commit_command`（AI/service，显式传入锁定策略）。拒绝时零 revision、零 history、状态栏反馈。
+
+### D4 彩色 Flag 作用域（W05 依据）
+
+1. **clip 级单色旗标**：`ClipInstance.flag_color: str | None`（`"#RRGGBB"` 白名单 7 色或 None=无旗标）。独立于 `MediaAsset.flag`（none/reject 素材级）与 `ClipInstance.label_color`（片段配色）。
+2. 多选 → 全部选中 clip 设同一色（宏事务单步 undo）；无选中 → 播放头下 clip；都无 → 状态栏提示、零写入。清除（`""`）→ 置 None。
+3. 不随 linked 伙伴传播；复制/split/Replace 经字段保留契约自动继承。
+4. **schema**：带默认 `None` 的新字段，旧工程缺字段 → None（零迁移）；`to_dict` 仅非默认时写出；未知颜色值读取保留、UI 绘制 fallback 默认色。UI 旗标徽章与筛选从提交后的模型读取。
+5. 写入采用新命令 `SetClipFlagCommand`（clip_ids 元组 + 颜色，快照 undo）。
+
+### D5 Keyframe Tray 宿主归属（W03 依据）
+
+EditPage 是隐形协调者（实际面板都挂在 dock 上），Tray 由 **TimelinePanel 持有并托管在时间线视图下方**（惰性创建、默认隐藏），EditPage 绑定 `keyframe_tray_requested` → `panel.set_keyframe_tray_visible(bool)`，实际可见性/当前 clip 由 host 回写工具栏按钮。参数轨首版覆盖 clip 级 `animated_params`（效果参数轨留待后续）；命令复用既有 Add/Remove/Update/Interpolation keyframe 命令，拖动释放合并为一次 Update，Esc/切换选区取消。
+
 ## 4. 五个请求的详细契约
 
 ### W01：Replace Edit

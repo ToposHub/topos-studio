@@ -2696,6 +2696,21 @@ class TimelinePanel(QWidget):
         self.btn_append.setEnabled(enabled)
         self.btn_replace.setEnabled(enabled)
 
+    def set_keyframe_tray_checked(self, checked: bool) -> None:
+        """Write back the actual keyframe-tray host state to the toolbar button.
+
+        W03/W09: the button must reflect what the host really shows, not the
+        user's last click. Uses a signal blocker so the programmatic check
+        does not re-emit ``keyframe_tray_requested``.
+        """
+        if self.btn_keyframe_tray.isChecked() == bool(checked):
+            return
+        self.btn_keyframe_tray.blockSignals(True)
+        try:
+            self.btn_keyframe_tray.setChecked(bool(checked))
+        finally:
+            self.btn_keyframe_tray.blockSignals(False)
+
     def clear(self) -> None:
         """Clear the timeline content."""
         self.stop_playback()

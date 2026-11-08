@@ -722,6 +722,10 @@ class _NormalizeGainWorker(QObject):
             decoder.close()
 
 
+# W02：蓝徽章源目的轨三态判别哨兵——区分"无条目"与"显式关闭 (None)"。
+_UNSET = object()
+
+
 class TimelineView(QGraphicsView):
     """
     Main timeline view widget using QGraphicsView.
@@ -4494,6 +4498,42 @@ class TimelineView(QGraphicsView):
             if selected is None or any(track.track_id == selected for track in tracks):
                 return selected
         return tracks[0].track_id if tracks else None
+
+    def source_destination_stream_disabled(self, track_type: str) -> bool:
+        """W02：该流类型是否被蓝徽章显式关闭。
+
+        区分三种状态：显式关闭（True）、显式选中/无条目（False）。
+        "无条目"（旧工程/从未设置）不是关闭——回退红 target 语义。
+        """
+        if self._timeline is None or track_type not in {"video", "audio"}:
+            return False
+        return self._source_patch_routes.get(
+            (self._timeline.timeline_id, track_type), _UNSET) is None
+
+    def resolve_source_destination_track_id(self, track_type: str) -> Optional[str]:
+        """W02：解析源编辑（Insert/Overwrite/Append/拖放配对）的有效目的轨。
+
+        显式蓝徽章选中且轨仍存在 → 该轨；显式关闭 → None（该流不落，
+        配合 ``source_destination_stream_disabled`` 区分"关闭"与"无轨"）；
+        无条目或轨已删（陈旧条目清除）→ 回退红 target 语义
+        （``get_target_track_id``/``get_target_audio_track_id``）。
+        红 target 逻辑不受蓝徽章影响（契约 D2）。
+        """
+        if self._timeline is None or track_type not in {"video", "audio"}:
+            return None
+        key = (self._timeline.timeline_id, track_type)
+        if key in self._source_patch_routes:
+            selected = self._source_patch_routes[key]
+            if selected is None:
+                return None
+            tracks = getattr(self._timeline, f"{track_type}_tracks")
+            if any(track.track_id == selected for track in tracks):
+                return selected
+            # 陈旧条目（轨已删除）：清除后回退红 target，不留悬空 ID。
+            del self._source_patch_routes[key]
+        if track_type == "video":
+            return self.get_target_track_id()
+        return self.get_target_audio_track_id()
 
     def _configure_source_patch_header(self, header: TrackHeaderItem) -> None:
         header.set_source_patch_enabled(self.source_patch_track_id(header.track_type) == header.track_id)
@@ -16695,15 +16735,24 @@ class TimelineView(QGraphicsView):
             and asset.audio_channels is not None
             and asset.audio_channels > 0
         )
-        if has_audio and not patch.audio_enabled and not patch.video_enabled:
+        # W02：蓝徽章显式关闭与素材级流开关同语义（契约 D2）——拖放的
+        # 视频落点尊重鼠标显式轨道，音频配对侧走源目的轨解析。
+        video_off = (
+            not patch.video_enabled
+            or self.source_destination_stream_disabled("video"))
+        audio_off = (
+            not patch.audio_enabled
+            or self.source_destination_stream_disabled("audio"))
+        audio_destination = self.resolve_source_destination_track_id("audio")
+        if has_audio and audio_off and video_off:
             logger.warning(
                 "_add_asset_as_clip: both source patch streams off for %s",
                 asset.asset_id)
             return False
-        effective_has_audio = has_audio and patch.audio_enabled
+        effective_has_audio = has_audio and patch.audio_enabled and not audio_off
         if (
             asset.media_type == "video"
-            and not patch.video_enabled
+            and video_off
             and not effective_has_audio
         ):
             # 视频源关 video 且无有效音频（无声源或 audio 也关）——无流可落
@@ -16714,8 +16763,8 @@ class TimelineView(QGraphicsView):
 
         # F2.1：video patch 关闭的有声源按 audio-only 落音频目标轨
         # （与源监视器插入/覆盖的 audio-only 语义一致）。
-        if has_audio and patch.audio_enabled and not patch.video_enabled:
-            audio_track_id = self.get_target_audio_track_id()
+        if has_audio and not audio_off and video_off:
+            audio_track_id = audio_destination
             if not audio_track_id:
                 logger.warning(
                     "_add_asset_as_clip: audio-only patch but no audio "
@@ -16766,7 +16815,8 @@ class TimelineView(QGraphicsView):
             # Both video and audio clips will start at the same timeline_start.
             # If audio track has overlap, a new track is auto-created (no desync).
             # If the command fails, no clips are added (no half-finished state).
-            audio_track_id = self.get_target_audio_track_id()
+            # W02：音频配对落轨走源目的轨（None 时命令原子自建轨）。
+            audio_track_id = audio_destination
             audio_clip = ClipInstance(
                 clip_id=audio_clip_id,
                 asset_id=asset.asset_id,
@@ -17152,11 +17202,11 @@ class TimelineView(QGraphicsView):
         # Use defaults if not provided
         if playhead is None:
             playhead = self._playhead_frame
+        # W02：源编辑默认落轨走蓝徽章源目的轨（无显式路由时回退红 target）。
+        video_destination = self.resolve_source_destination_track_id("video")
+        audio_destination = self.resolve_source_destination_track_id("audio")
         if track_id is None:
-            track_id = self.get_target_track_id()
-            if track_id is None:
-                logger.warning("Cannot insert: no target track")
-                return False
+            track_id = video_destination
 
         # Create and execute command
         # Auto-detect fps metadata if not explicitly provided
@@ -17195,10 +17245,18 @@ class TimelineView(QGraphicsView):
         # F2.1：Source Patch 并入判定——audio_enabled=False 的有声源按
         # video-only 落轨；video_enabled=False 按 audio-only 重定向音频
         # 目标轨；双关则拒绝插入（无流可落）。
+        # W02：蓝徽章显式关闭与素材级流开关同语义（契约 D2——任一层
+        # 关闭该流即不落）；成对落轨的音频侧也走源目的轨解析。
         asset = self._project.assets.get(asset_id) if self._project else None
         if asset is not None:
             patch = self._source_patch_for(asset_id)
-            if not patch.video_enabled and not patch.audio_enabled:
+            video_off = (
+                not patch.video_enabled
+                or self.source_destination_stream_disabled("video"))
+            audio_off = (
+                not patch.audio_enabled
+                or self.source_destination_stream_disabled("audio"))
+            if video_off and audio_off:
                 logger.warning(
                     "Insert clip blocked: both source patch streams off "
                     "for asset %s", asset_id)
@@ -17207,7 +17265,7 @@ class TimelineView(QGraphicsView):
                 asset.media_type == "video"
                 and getattr(asset, "audio_channels", None)
             )
-            if has_audio and patch.audio_enabled and patch.video_enabled:
+            if has_audio and not video_off and not audio_off:
                 from src.features.edit.core.commands import (
                     InsertLinkedAssetRippleCommand,
                 )
@@ -17218,7 +17276,7 @@ class TimelineView(QGraphicsView):
                     out_frame=out_frame,
                     playhead=playhead,
                     video_track_id=track_id,
-                    audio_track_id=self.get_target_audio_track_id(),
+                    audio_track_id=audio_destination,
                     speed=speed,
                     source_fps_num=source_fps_num,
                     source_fps_den=source_fps_den,
@@ -17235,18 +17293,33 @@ class TimelineView(QGraphicsView):
                     f"out={out_frame}, playhead={playhead}"
                 )
                 return True
-            if asset.media_type == "audio" or (
-                    has_audio and not patch.video_enabled):
-                audio_target = self.get_target_audio_track_id()
+            if asset.media_type == "audio" or (has_audio and video_off):
+                if asset.media_type == "audio" and audio_off:
+                    # 纯音频源且音频流被关：无流可落，拒绝
+                    logger.warning(
+                        "Insert clip blocked: audio stream off for audio "
+                        "asset %s", asset_id)
+                    return False
+                audio_target = audio_destination
                 if audio_target:
                     track_id = audio_target
-                elif has_audio and not patch.video_enabled:
-                    # audio-only patch 但无音频目标轨：明确拒绝而非悄悄
+                elif has_audio and video_off:
+                    # audio-only 路由但无音频目的轨：明确拒绝而非悄悄
                     # 落到视频轨（与双关拒绝同语义）
                     logger.warning(
-                        "Insert clip blocked: audio-only patch but no "
-                        "audio target track for asset %s", asset_id)
+                        "Insert clip blocked: audio-only routing but no "
+                        "audio destination track for asset %s", asset_id)
                     return False
+            elif asset.media_type == "video" and not has_audio and video_off:
+                # 无声视频源且视频流被关：无流可落，拒绝（与
+                # _add_asset_as_clip 的 F2.1 判定对齐）
+                logger.warning(
+                    "Insert clip blocked: video stream off for silent "
+                    "video asset %s", asset_id)
+                return False
+        elif track_id is None:
+            logger.warning("Cannot insert: no target track")
+            return False
 
         # F5.4：VFR 生产绑定——导入时抽取并存于素材 metadata 的 PTS 秒表
         # （仅 VFR 素材携带；CFR 缺省 None 走既有数学零开销）
@@ -17257,6 +17330,9 @@ class TimelineView(QGraphicsView):
                 "pts_index") if _asset is not None else None
             if _pts_raw:
                 _pts_index = tuple(float(v) for v in _pts_raw)
+        if track_id is None:
+            logger.warning("Cannot insert: no destination track")
+            return False
         cmd = InsertClipCommand.create(
             asset_id=asset_id,
             in_frame=in_frame,
@@ -17311,11 +17387,11 @@ class TimelineView(QGraphicsView):
         # Use defaults if not provided
         if playhead is None:
             playhead = self._playhead_frame
+        # W02：源编辑默认落轨走蓝徽章源目的轨（无显式路由时回退红 target）。
+        video_destination = self.resolve_source_destination_track_id("video")
+        audio_destination = self.resolve_source_destination_track_id("audio")
         if track_id is None:
-            track_id = self.get_target_track_id()
-            if track_id is None:
-                logger.warning("Cannot overwrite: no target track")
-                return False
+            track_id = video_destination
 
         # F2.2：三/四点/backtime 判定（读时间线 In/Out range；显式变速
         # 调用保持既有落点语义）
@@ -17331,10 +17407,17 @@ class TimelineView(QGraphicsView):
         # playhead），宏内单步 Undo 移除 V/A；纯音频落到音频目标轨。
         # F2.1：Source Patch 并入判定（语义同 insert_clip——audio off =
         # video-only 单轨覆盖；video off = audio-only 重定向；双关拒绝）。
+        # W02：蓝徽章显式关闭与素材级流开关同语义（契约 D2）。
         asset = self._project.assets.get(asset_id) if self._project else None
         if asset is not None:
             patch = self._source_patch_for(asset_id)
-            if not patch.video_enabled and not patch.audio_enabled:
+            video_off = (
+                not patch.video_enabled
+                or self.source_destination_stream_disabled("video"))
+            audio_off = (
+                not patch.audio_enabled
+                or self.source_destination_stream_disabled("audio"))
+            if video_off and audio_off:
                 logger.warning(
                     "Overwrite clip blocked: both source patch streams off "
                     "for asset %s", asset_id)
@@ -17342,28 +17425,46 @@ class TimelineView(QGraphicsView):
             if asset.media_type == "audio" or (
                     asset.media_type == "video"
                     and getattr(asset, "audio_channels", None)
-                    and not patch.video_enabled
+                    and video_off
             ):
-                audio_target = self.get_target_audio_track_id()
+                if asset.media_type == "audio" and audio_off:
+                    logger.warning(
+                        "Overwrite clip blocked: audio stream off for audio "
+                        "asset %s", asset_id)
+                    return False
+                audio_target = audio_destination
                 if audio_target:
                     track_id = audio_target
                 elif asset.media_type == "video":
                     logger.warning(
-                        "Overwrite clip blocked: audio-only patch but no "
-                        "audio target track for asset %s", asset_id)
+                        "Overwrite clip blocked: audio-only routing but no "
+                        "audio destination track for asset %s", asset_id)
                     return False
+                elif asset.media_type == "audio":
+                    # 无音频轨的纯音频源：保持既有回退（视频 target 落轨）
+                    pass
+            elif (asset.media_type == "video"
+                    and not getattr(asset, "audio_channels", None)
+                    and video_off):
+                logger.warning(
+                    "Overwrite clip blocked: video stream off for silent "
+                    "video asset %s", asset_id)
+                return False
             asset_has_audio_for_pair = (
                 asset.media_type == "video"
                 and getattr(asset, "audio_channels", None)
-                and patch.audio_enabled
-                and patch.video_enabled
+                and not audio_off
+                and not video_off
             )
         else:
             asset_has_audio_for_pair = False
+        if track_id is None:
+            logger.warning("Cannot overwrite: no destination track")
+            return False
         if asset is not None and asset_has_audio_for_pair:
             from src.features.edit.core.commands import MacroCommand
 
-            audio_track_id = self.get_target_audio_track_id()
+            audio_track_id = audio_destination
             # R22/F-R03：音频侧同样用覆盖命令（切分/修剪既有音床片段），
             # 此前 AddClip 在音床占用位置抛 ValueError 使正常覆盖失败。
             # fps 元数据两侧一致，混合帧率覆盖时长统一。
@@ -17422,10 +17523,8 @@ class TimelineView(QGraphicsView):
                 f"out={out_frame}, playhead={playhead}"
             )
             return True
-        if asset is not None and asset.media_type == "audio":
-            audio_target = self.get_target_audio_track_id()
-            if audio_target:
-                track_id = audio_target
+        # 纯音频源的落轨重定向已在上方 W02 资产块完成（蓝路由优先），
+        # 此处不再用红 target 二次覆盖。
 
         # N18/RF02：非 A/V 分支（无声视频/纯音频）同样带完整 fps 时基
         # ——此前 create 不传 fps，48fps 无声源 24fps 序列 duration 48
@@ -17485,21 +17584,28 @@ class TimelineView(QGraphicsView):
             return False
 
         # Use default if not provided
+        # W02：源编辑默认落轨走蓝徽章源目的轨（无显式路由时回退红 target）。
+        video_destination = self.resolve_source_destination_track_id("video")
+        audio_destination = self.resolve_source_destination_track_id("audio")
         if track_id is None:
-            track_id = self.get_target_track_id()
-            if track_id is None:
-                logger.warning("Cannot append: no target track")
-                return False
+            track_id = video_destination
 
         # R22/F-R03：有声视频的追加在 V/A **共同落点**放置链接片段——
         # L = max(V 轨尾, A 轨尾)。此前各轨各用自身末尾，错开的轨尾使
         # 双向链接的两片立即错位（审计实测 V 尾 96/A 尾 48 差 48 帧）。
         # 时长经统一 helper（混合帧率一致）。纯音频落到音频目标轨。
         # F2.1：Source Patch 并入判定（语义同 insert/overwrite）。
+        # W02：蓝徽章显式关闭与素材级流开关同语义（契约 D2）。
         asset = self._project.assets.get(asset_id) if self._project else None
         if asset is not None:
             patch = self._source_patch_for(asset_id)
-            if not patch.video_enabled and not patch.audio_enabled:
+            video_off = (
+                not patch.video_enabled
+                or self.source_destination_stream_disabled("video"))
+            audio_off = (
+                not patch.audio_enabled
+                or self.source_destination_stream_disabled("audio"))
+            if video_off and audio_off:
                 logger.warning(
                     "Append clip blocked: both source patch streams off "
                     "for asset %s", asset_id)
@@ -17507,24 +17613,39 @@ class TimelineView(QGraphicsView):
             asset_has_audio_for_pair = (
                 asset.media_type == "video"
                 and getattr(asset, "audio_channels", None)
-                and patch.audio_enabled
-                and patch.video_enabled
+                and not audio_off
+                and not video_off
             )
             if asset.media_type == "audio" or (
                     asset.media_type == "video"
                     and getattr(asset, "audio_channels", None)
-                    and not patch.video_enabled
+                    and video_off
             ):
-                audio_target = self.get_target_audio_track_id()
+                if asset.media_type == "audio" and audio_off:
+                    logger.warning(
+                        "Append clip blocked: audio stream off for audio "
+                        "asset %s", asset_id)
+                    return False
+                audio_target = audio_destination
                 if audio_target:
                     track_id = audio_target
                 elif asset.media_type == "video":
                     logger.warning(
-                        "Append clip blocked: audio-only patch but no "
-                        "audio target track for asset %s", asset_id)
+                        "Append clip blocked: audio-only routing but no "
+                        "audio destination track for asset %s", asset_id)
                     return False
+            elif (asset.media_type == "video"
+                    and not getattr(asset, "audio_channels", None)
+                    and video_off):
+                logger.warning(
+                    "Append clip blocked: video stream off for silent "
+                    "video asset %s", asset_id)
+                return False
         else:
             asset_has_audio_for_pair = False
+        if track_id is None:
+            logger.warning("Cannot append: no destination track")
+            return False
         if asset is not None and asset_has_audio_for_pair:
             from src.features.edit.core.commands import AddClipCommand, MacroCommand
             from src.features.edit.core.timeline_ops import (
@@ -17537,7 +17658,7 @@ class TimelineView(QGraphicsView):
                 timeline_fps_num,
                 timeline_fps_den,
             ) = self._resolve_source_fps_metadata(asset_id)
-            audio_track_id = self.get_target_audio_track_id()
+            audio_track_id = audio_destination
 
             video_track = self._timeline.get_track_by_id(track_id)
             video_end = max(
@@ -17619,10 +17740,8 @@ class TimelineView(QGraphicsView):
                 f"Append clip (A/V): asset={asset_id}, in={in_frame}, out={out_frame}"
             )
             return True
-        if asset is not None and asset.media_type == "audio":
-            audio_target = self.get_target_audio_track_id()
-            if audio_target:
-                track_id = audio_target
+        # 纯音频源的落轨重定向已在上方 W02 资产块完成（蓝路由优先），
+        # 此处不再用红 target 二次覆盖。
 
         # N18/RF02：非 A/V 分支同样带完整 fps 时基（同 Overwrite 兜底）
         (
@@ -17646,6 +17765,157 @@ class TimelineView(QGraphicsView):
         self._execute_command(cmd)
         logger.debug(f"Append clip: asset={asset_id}, in={in_frame}, out={out_frame}")
         return True
+
+    # ==================== W01: Replace Edit (wiring plan D1) ====================
+
+    def replace_clip_with_source(
+        self,
+        asset_id: str,
+        in_frame: int,
+        out_frame: int,
+    ) -> bool:
+        """Resolve 风格 Replace Edit（接线计划 W01 / 契约 D1）。
+
+        读取最新时间线与选区快照：目标 = 唯一选中 clip，否则播放头下
+        有效视频目的轨上的 clip；源对齐帧 = ``in_frame``（inclusive，
+        Out 不决定时长）；保留目标足迹/速度/效果/链接，仅换素材与源窗。
+        linked 伙伴存在且新源为有声视频时成对替换（宏事务、单步 undo）。
+        源不足/多选/无目标 → 明确拒绝，零写入。
+
+        Returns:
+            True if a replace transaction was committed, False otherwise.
+        """
+        from src.features.edit.core.commands import (
+            MacroCommand, ReplaceClipWithSourceCommand,
+        )
+
+        if self._timeline is None:
+            logger.warning("Cannot replace: no timeline loaded")
+            return False
+        asset = self._project.assets.get(asset_id) if self._project else None
+        if asset is None:
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.replace.asset_missing",
+                "Replace: source asset is not in the project"))
+            logger.warning("Replace blocked: asset %s not in project", asset_id)
+            return False
+
+        target = self._resolve_replace_target_clip()
+        if target is None:
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.replace.no_target",
+                "Replace: select a clip or park the playhead over one"))
+            return False
+        track_id, clip = target
+
+        # 源侧所需帧数：timeline_duration × |speed| × (源fps/时间线fps)
+        (s_num, s_den, t_num, t_den) = self._resolve_source_fps_metadata(asset_id)
+        speed = abs(clip.effective_speed()) or 1.0
+        factor = Fraction(speed).limit_denominator(100000)
+        if s_num and t_num:
+            source_fps = Fraction(s_num, s_den or 1)
+            timeline_fps = Fraction(t_num, t_den or 1)
+            if source_fps > 0 and timeline_fps > 0:
+                factor *= source_fps / timeline_fps
+        needed_source_frames = max(1, int(round(clip.timeline_duration * factor)))
+
+        available = self._get_asset_source_duration_frames(asset) - int(in_frame)
+        if available < needed_source_frames:
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.replace.source_too_short",
+                "Replace: source range is shorter than the target clip"))
+            logger.warning(
+                "Replace blocked: source %s has %d frames from %d, needs %d",
+                asset_id, max(available, 0), in_frame, needed_source_frames)
+            return False
+
+        # VFR 生产绑定的 PTS 表随新素材刷新
+        pts_raw = (getattr(asset, "metadata", None) or {}).get("pts_index")
+        pts_index = tuple(float(v) for v in pts_raw) if pts_raw else None
+        fps_meta = (s_num, s_den, t_num, t_den, pts_index)
+
+        commands = [ReplaceClipWithSourceCommand.create(
+            clip_id=clip.clip_id,
+            track_id=track_id,
+            new_asset_id=asset_id,
+            new_source_start=int(in_frame),
+            new_source_duration=needed_source_frames,
+            new_fps_meta=fps_meta,
+        )]
+
+        # 契约 D1-5：linked 伙伴存在且新源为有声视频 → 成对替换
+        partner = self._find_linked_partner(clip)
+        if partner is not None and (
+                asset.media_type == "video"
+                and getattr(asset, "audio_channels", None)):
+            p_track_id, p_clip = partner
+            commands.append(ReplaceClipWithSourceCommand.create(
+                clip_id=p_clip.clip_id,
+                track_id=p_track_id,
+                new_asset_id=asset_id,
+                new_source_start=int(in_frame),
+                new_source_duration=needed_source_frames,
+                new_fps_meta=fps_meta,
+            ))
+            command = MacroCommand.create("Replace edit (A/V)", commands)
+        else:
+            command = commands[0]
+            if clip.linked_clip_id:
+                logger.debug(
+                    "Replace: linked partner kept (partner missing or "
+                    "source has no audio)")
+
+        try:
+            self._execute_command(command)
+        except ValueError as exc:
+            self.status_message_requested.emit(str(exc))
+            return False
+        logger.debug(
+            "Replace edit: clip=%s asset=%s source_start=%d source_duration=%d",
+            clip.clip_id, asset_id, in_frame, needed_source_frames)
+        return True
+
+    def _resolve_replace_target_clip(self) -> Optional[tuple[str, Any]]:
+        """契约 D1-1：唯一选中 clip → 播放头下有效视频目的轨 clip → None。"""
+        if self._timeline is None:
+            return None
+        selected = list(getattr(self._selection, "selected_clip_ids", ()) or ())
+        if len(selected) > 1:
+            # 多选不隐式批量替换（契约 D1-1）——按无目标处理并在上层提示
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.replace.multi_selection",
+                "Replace: select exactly one clip"))
+            return None
+        all_tracks = list(self._timeline.video_tracks) + list(self._timeline.audio_tracks)
+        if len(selected) == 1:
+            for track in all_tracks:
+                clip = track.get_clip_by_id(selected[0])
+                if clip is not None:
+                    return (track.track_id, clip)
+            return None
+        # 无选中：播放头下、有效视频目的轨上的 clip
+        destination = self.resolve_source_destination_track_id("video")
+        if destination is None:
+            return None
+        track = self._timeline.get_track_by_id(destination)
+        if track is None:
+            return None
+        frame = self._playhead_frame
+        for clip in track.clips:
+            if clip.timeline_start <= frame < clip.timeline_start + clip.timeline_duration:
+                return (track.track_id, clip)
+        return None
+
+    def _find_linked_partner(self, clip: Any) -> Optional[tuple[str, Any]]:
+        """返回 (track_id, partner_clip)；链接不存在或伙伴缺失返回 None。"""
+        if self._timeline is None or not clip.linked_clip_id:
+            return None
+        for track in (list(self._timeline.video_tracks)
+                      + list(self._timeline.audio_tracks)):
+            partner = track.get_clip_by_id(clip.linked_clip_id)
+            if partner is not None and partner.clip_id != clip.clip_id:
+                return (track.track_id, partner)
+        return None
 
     # ==================== Gap Indicators (Phase 3.3) ====================
 

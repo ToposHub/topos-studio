@@ -524,7 +524,15 @@
       "red": "Red",
       "pink": "Pink",
       "purple": "Purple"
-    }
+    },
+    "replace": {
+      "asset_missing": "Replace: source asset is not in the project",
+      "no_target": "Replace: select a clip or park the playhead over one",
+      "source_too_short": "Replace: source range is shorter than the target clip",
+      "multi_selection": "Replace: select exactly one clip"
+    },
+    "replace_edit": "Replace Edit",
+    "replace_edit_av": "Replace Edit (A/V)"
   },
   "ai_composer": {
     "scope_tooltip": "Choose the assets included in this conversation",
