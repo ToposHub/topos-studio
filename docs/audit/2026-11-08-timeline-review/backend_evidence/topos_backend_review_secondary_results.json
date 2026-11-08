@@ -1,0 +1,34 @@
+{
+  "service_None": {
+    "applied": false,
+    "error": "Revision conflict timeline='lock': plan was built against revision 999 but current is 0. Refresh the snapshot and regenerate the plan."
+  },
+  "service_{'c1'}": {
+    "exception": "ValueError('Clip not found: missing')"
+  },
+  "delete_keypress": {
+    "exception": "PositionLockViolation('Position lock: edit rejected (clip c1: removed v1@0+40 -> gone); 1 locked clip(s) would move, resize or vanish')",
+    "history": 0,
+    "clip_remaining": true
+  },
+  "presentation_export": {
+    "thumbnail_mode": "none",
+    "waveforms_visible": true,
+    "position_lock": false,
+    "source_destination_ui": {
+      "lock": {
+        "video": "v2"
+      }
+    },
+    "zoom_preset": "custom",
+    "custom_pixels_per_frame": 5.0,
+    "custom_scroll": 0,
+    "keyframe_tray_visible": false
+  },
+  "invalid_presentation": {
+    "exception": "ValueError(\"invalid literal for int() with base 10: 'garbage'\")"
+  },
+  "new_project_same_timeline_route": {
+    "disabled_after_clear": true
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "requested_timeline_duration": 50,
+  "actual_timeline_duration": 25,
+  "expected_speed": 2.0,
+  "actual_speed": 4.0,
+  "reverse_before": true,
+  "reverse_after": false,
+  "pitch_before": true,
+  "pitch_after": false
+}

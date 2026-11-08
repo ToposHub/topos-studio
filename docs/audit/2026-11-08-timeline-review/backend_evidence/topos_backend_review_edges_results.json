@@ -1,0 +1,47 @@
+{
+  "blue_default": {
+    "painted_source": "v1",
+    "effective_source": "v2",
+    "headers": {
+      "v1": true,
+      "v2": false
+    }
+  },
+  "replace_freeze": {
+    "ok": true,
+    "source_start": 200,
+    "source_end": 247,
+    "freeze": 5,
+    "mapped_first": 5
+  },
+  "replace_ramp": {
+    "ok": true,
+    "before": [
+      0,
+      16,
+      32,
+      48,
+      64,
+      78
+    ],
+    "after": [
+      0,
+      16,
+      32,
+      47,
+      47,
+      47
+    ],
+    "source_duration_before": 80,
+    "source_duration_after": 48
+  },
+  "replace_audio_into_video": {
+    "ok": true,
+    "track_type": "video",
+    "asset_type": "audio",
+    "asset_id": "new"
+  },
+  "flag_nonhex_command": {
+    "accepted": "#zzzzzz"
+  }
+}

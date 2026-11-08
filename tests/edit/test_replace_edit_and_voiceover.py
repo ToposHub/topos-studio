@@ -179,8 +179,14 @@ def test_replace_source_insufficient_rejected(qtbot: Any) -> None:
 
 
 def test_replace_multi_selection_rejected(qtbot: Any) -> None:
-    view = _view(qtbot)
-    view.set_selection(_selection_with("vc1", "ac1"))
+    # Two independent editing units; a reciprocal A/V pair is one unit in
+    # the Resolve-style selection UI and remains a valid Replace target.
+    timeline = _sequence_with_clip()
+    other = replace(timeline.get_clip_by_id("vc1"), clip_id="vc2",
+                    timeline_start=180, linked_clip_id=None)
+    timeline = timeline.with_clip_added("v1", other)
+    view = _view(qtbot, timeline)
+    view.set_selection(_selection_with("vc1", "vc2"))
     assert view.replace_clip_with_source("new", 0, 47) is False
     assert not view._command_stack._undo_stack
 

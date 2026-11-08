@@ -81,15 +81,18 @@ def main() -> int:
     parser.add_argument("media", nargs="*", type=Path)
     parser.add_argument("--save-project", type=Path)
     parser.add_argument("--project-only", action="store_true")
+    parser.add_argument("--speed-dialog", action="store_true", help="Open the real speed dialog for visual review")
+    parser.add_argument("--viewer", action="store_true", help="Include the real Program Viewer and an isolated trim-preview trigger")
     args = parser.parse_args()
     media = args.media or [ROOT / "tests/test_videos/2K_h264.mp4", ROOT / "tests/test_videos/测试素材01.mov"]
     from PyQt6.QtWidgets import QApplication, QMainWindow
     from PyQt6.QtCore import QTimer
     from src.features.edit.ui.timeline_panel import TimelinePanel
-    from src.features.edit.ui.edit_style import timeline_style
+    from src.shared.ui.style_sheet import DARK_THEME
 
     app = QApplication(sys.argv[:1])
     app.setStyle("Fusion")
+    app.setStyleSheet(DARK_THEME)
     project, sequence = build_review_project(media)
     if args.save_project:
         from src.features.edit.core.edit_project_io import EditProjectIO
@@ -114,13 +117,37 @@ def main() -> int:
     window.setWindowTitle("Topos — Resolve Timeline UI Review")
     window.resize(1420, 660)
     panel = TimelinePanel()
-    panel.setStyleSheet(timeline_style())
     panel.set_project(project)
     panel.load_timeline(sequence)
-    window.setCentralWidget(panel)
+    if args.viewer:
+        from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton
+        from src.features.edit.ui.program_viewer import ProgramViewerWidget
+        central = QWidget(window)
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        viewer = ProgramViewerWidget(central)
+        panel.timeline_view.set_trim_monitor_host(viewer)
+        trigger = QPushButton("Trim preview", central)
+        trigger.setMaximumWidth(120)
+        def begin_trim_preview() -> None:
+            view = panel.timeline_view
+            view.setFocus()
+            clip = view.get_timeline().get_clip_by_id("v1-0")
+            view._on_roll_trim_started("v1-0", "v1-1", clip.timeline_end)
+        trigger.clicked.connect(begin_trim_preview)
+        column.addWidget(trigger)
+        column.addWidget(viewer, stretch=4)
+        column.addWidget(panel, stretch=5)
+        window.resize(1420, 980)
+        window.setCentralWidget(central)
+    else:
+        window.setCentralWidget(panel)
     window.show()
     QTimer.singleShot(100, panel.timeline_view.zoom_fit_all)
     QTimer.singleShot(200, lambda: panel.set_playhead_frame(round(float(sequence.fps) * 4)))
+    if args.speed_dialog:
+        QTimer.singleShot(300, lambda: panel.timeline_view._on_change_clip_speed_dialog_requested("v1-0", "v1"))
     return app.exec()
 
 

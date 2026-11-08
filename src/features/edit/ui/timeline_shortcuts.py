@@ -43,6 +43,9 @@ class TimelineKeyAction:
 
 #: B5 盘点产出：TimelineView.keyPressEvent 的可迁移编辑键（工具/标记/IO）
 TIMELINE_KEY_ACTIONS: Tuple[TimelineKeyAction, ...] = (
+    TimelineKeyAction("edit.timeline.retime_controls", "Ctrl+R", "Retime Controls"),
+    TimelineKeyAction("edit.timeline.linked_selection", "Ctrl+Shift+L", "Linked Selection"),
+    TimelineKeyAction("edit.timeline.link_clips", "Ctrl+Alt+L", "Link Clips"),
     TimelineKeyAction("edit.timeline.tool.select", "A", "Select Tool"),
     TimelineKeyAction("edit.timeline.tool.trim", "T", "Trim Tool"),
     TimelineKeyAction("edit.timeline.tool.blade", "B", "Blade Tool"),

@@ -29,7 +29,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.features.edit.ui.trim_monitor_dialog import TrimMonitorDialog
+    from src.features.edit.ui.trim_numeric_dialog import TrimMonitorDialog
+    from src.features.edit.ui.program_viewer import ProgramViewerWidget
 
 import logging
 import json
@@ -52,6 +53,7 @@ from PyQt6.QtWidgets import (
     QLabel,
 )
 from PyQt6.QtCore import (
+    QEvent,
     Qt,
     pyqtSignal,
     pyqtSlot,
@@ -97,6 +99,7 @@ from src.features.edit.core.timeline_v2 import (
 from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.core.project import MediaAsset, get_media_type
 from src.features.edit.core.clip_params import SpeedParams
+from src.features.edit.ui.timeline_edit_affordances import edit_cursor
 from src.features.edit.core.render_cache_status import build_cache_indicator_segments
 from src.features.edit.core.transition_catalog import TRANSITION_LABELS
 from src.features.edit.core.audio_transition_catalog import is_audio_transition
@@ -765,12 +768,14 @@ class TimelineView(QGraphicsView):
     selection_changed = pyqtSignal(object)  # TimelineSelection
     tool_changed = pyqtSignal(str)  # tool name
     snap_changed = pyqtSignal(bool)  # enabled
+    linked_selection_changed = pyqtSignal(bool)
     position_lock_changed = pyqtSignal(bool)
     source_patch_changed = pyqtSignal(str, str, bool)  # type, destination track, enabled; UI request
     # E22: command_executed 已删除（1 个 emit、0 个 connect 的死信号；
     # timeline_changed 是宿主消费的活链路）
     # 操作失败等状态栏提示（如冻结帧失败）——面板/主窗口接到状态栏展示。
     status_message_requested = pyqtSignal(str)
+    clip_speed_settings_requested = pyqtSignal(str, str, object)  # advanced speed edit draft for host
     zoom_changed = pyqtSignal(float)  # pixels_per_frame
     effect_added = pyqtSignal(str, str)  # clip_id, effect_id (pre-generated so the panel can scroll to it)
     # E09: 双击片段 → 在 Source Viewer 打开（clip_id, 源帧号）
@@ -877,10 +882,12 @@ class TimelineView(QGraphicsView):
         QApplication.instance().applicationStateChanged.connect(
             self._on_application_state_changed)
         self._selection = TimelineSelection()
+        self._selected_edit_edges: dict[str, str] = {}
         self._playhead_frame = 0
         # Retime controls are transient presentation state, just as in
         # Resolve.  The speed points themselves are persisted in SpeedParams.
         self._retime_control_clip_ids: set[str] = set()
+        self._trim_monitor_host: Optional[ProgramViewerWidget] = None
         self._corner_timecode_text: str = "00:00:00:00"
         self._pixels_per_frame = DEFAULT_ZOOM
         self._active_tool = EditTool.SELECT
@@ -891,6 +898,7 @@ class TimelineView(QGraphicsView):
         self._snap_enabled = True
         self._interaction = InteractionSession()  # Interaction state machine
         self._current_drag_session: Optional[ClipDragSession] = None  # P2-2: Clip drag session
+        self._independent_selection: bool = False
         self._linked_selection_enabled: bool = True  # P3: Toggle linked A/V selection (on by default)
         self._playhead_follow_enabled = PLAYHEAD_FOLLOW_ENABLED  # Playhead centering during playback
         self._target_track_id: Optional[str] = None  # UI-09: Target track for insert operations (video)
@@ -1027,6 +1035,17 @@ class TimelineView(QGraphicsView):
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.horizontalScrollBar().setStyleSheet(f"""
+            QScrollBar:horizontal {{ height: 8px; margin: 0; border: none;
+                background: {get_color('bg_app')}; }}
+            QScrollBar::handle:horizontal {{ min-width: 40px; margin: 1px;
+                border: none; border-radius: 3px; background: {get_color('border')}; }}
+            QScrollBar::handle:horizontal:hover {{ background: {get_color('accent')}; }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0; border: none; background: transparent; }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+                border: none; background: transparent; }}
+        """)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)  # We handle drag manually
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -1361,6 +1380,18 @@ class TimelineView(QGraphicsView):
                 track_type=t.track_type,
                 default_height=self._default_track_height(t),
             ))
+        # Retime title unfolds upward; keep the saved track sizes untouched.
+        expanded_tracks = {
+            track.track_id for track in self._timeline.all_tracks
+            if track.track_type in {"video", "audio"}
+            and self._retime_control_clip_ids
+            and any(clip.clip_id in self._retime_control_clip_ids for clip in track.clips)
+        } if self._timeline is not None else set()
+        effective_heights = dict(self._layout_state.track_heights)
+        for track in tracks:
+            if track.track_id in expanded_tracks:
+                effective_heights[track.track_id] = effective_heights.get(track.track_id, track.default_height) + 24
+        layout_state = replace(self._layout_state, track_heights=effective_heights)
         vp = self.viewport()
         w = float(vp.width()) if vp else 800.0
         h = float(vp.height()) if vp else 400.0
@@ -1374,14 +1405,14 @@ class TimelineView(QGraphicsView):
             int(self._layout_state.video_scroll_offset),
             int(self._layout_state.audio_scroll_offset),
             int(self._layout_state.subtitle_scroll_offset),
-            tuple(sorted((str(k), int(v)) for k, v in self._layout_state.track_heights.items())),
+            tuple(sorted((str(k), int(v)) for k, v in effective_heights.items())),
         )
         if signature == self._layout_config_signature:
             return
         self._layout_config_signature = signature
         self._layout_engine.configure(
             tracks=tracks,
-            state=self._layout_state,
+            state=layout_state,
             viewport_width=w,
             viewport_height=h,
             pixels_per_frame=self._pixels_per_frame,
@@ -1398,15 +1429,7 @@ class TimelineView(QGraphicsView):
 
     def _track_height_for(self, track: EditTrack) -> int:
         """Return current visual height for a track."""
-        # Prefer layout engine (single source of truth)
-        h = self._layout_engine.track_height(track.track_id)
-        if h != self._layout_engine._height_for(TrackInfo(track.track_id, track.track_type)):
-            return h  # Custom height set
-        # Fallback: check header (for compatibility during migration)
-        header = self._track_headers.get(track.track_id)
-        if header is not None:
-            return int(header.track_height)
-        return self._default_track_height(track)
+        return self._layout_engine.track_height(track.track_id)
 
     def _track_top_for_index(self, target_index: int) -> float:
         """Return cumulative top y for the visual track index."""
@@ -1504,10 +1527,22 @@ class TimelineView(QGraphicsView):
                 header._is_topmost = (track_id == topmost_video_id or track_id == topmost_audio_id)
 
             # Position clips (skip clips being actively dragged OR linked clips in active drag)
+            expanded = any(c.clip_id in self._retime_control_clip_ids for c in track.clips)
+            base_height = self._layout_state.track_heights.get(track_id, self._default_track_height(track))
+            if expanded:
+                from src.features.edit.ui.timeline_layout import (
+                    MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT,
+                    MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT,
+                )
+                lo, hi = ((MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT)
+                          if track.track_type == "video" else (MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT))
+                base_height = max(lo, min(hi, base_height))
+            expansion = max(0, track_h - base_height) if expanded else 0
             for clip in track.clips:
                 clip_item = self._items_map.get(clip.clip_id)
                 if clip_item and isinstance(clip_item, ClipItem):
-                    clip_item.set_track_height(track_h)
+                    extra = expansion if clip.clip_id not in self._retime_control_clip_ids else 0
+                    clip_item.set_track_height(track_h - extra)
                     clip_item.update_track_index(track_index)
                     # Don't reset position of clips being dragged
                     if clip_item._drag_pending or clip_item._is_dragging:
@@ -1517,7 +1552,7 @@ class TimelineView(QGraphicsView):
                             clip.clip_id in self._current_drag_session.original_positions):
                         continue
                     x = engine.frame_to_x(clip.timeline_start)
-                    clip_item.setPos(x, track_top)
+                    clip_item.setPos(x, track_top + extra)
 
             # A cut between adjacent pieces of one source is visually softer
             # than a cut between different media.  Resolve expresses this as
@@ -1709,7 +1744,19 @@ class TimelineView(QGraphicsView):
 
             handle.update_zoom(self._pixels_per_frame)
             handle.set_active_tool(self._active_tool)
+            handle._is_selected = (
+                self._selected_edit_edges.get(left_clip.clip_id) == "right"
+                and self._selected_edit_edges.get(right_clip.clip_id) == "left"
+            )
             handle.set_track_height(track_height)
+            neighbors = [self._items_map.get(c.clip_id) for c in (left_clip, right_clip)]
+            top_inset = max(
+                (26.0 if getattr(item, "_retime_controls_visible", False) else 13.0)
+                + max(0.0, getattr(item, "y", lambda: track_top)() - track_top)
+                for item in neighbors
+            )
+            bottom_inset = 20.0 if any(getattr(item, "_retime_controls_visible", False) for item in neighbors) else 0.0
+            handle.set_hit_insets(top_inset, bottom_inset)
             handle.update_track_index(track_index)
             handle.update_cut_frame(left_clip.timeline_end)
             handle.set_track_locked(bool(getattr(track, "is_locked", False)))
@@ -1852,6 +1899,9 @@ class TimelineView(QGraphicsView):
         previous_id = getattr(self._project, "project_id", None)
         next_id = getattr(project, "project_id", None)
         if previous_id is not None and previous_id != next_id:
+            if not self._interaction.is_idle:
+                self._cancel_current_interaction()
+            self._hide_trim_monitor()
             self._timeline_command_stacks.clear()
             self._timeline_history_snapshots.clear()
             self._project_transaction_sequences.clear()
@@ -1918,14 +1968,18 @@ class TimelineView(QGraphicsView):
 
         # F2.3：切换序列——旧素材双帧解码器不跨序列复用（切源不显示旧
         # generation：bump + 关解码器，线程保留待下次会话）。
+        if not self._interaction.is_idle:
+            self._cancel_current_interaction()
+        self._hide_trim_monitor()
         provider = getattr(self, "_trim_frame_provider_instance", None)
         if provider is not None:
-            self._invalidate_trim_frame_requests()
             provider.close_decoders()
 
         self._updating = True
         try:
             previous_id = getattr(self._timeline, "timeline_id", None)
+            if previous_id != timeline.timeline_id:
+                self._selected_edit_edges.clear()
             known_snapshot = (
                 self._timeline if previous_id == timeline.timeline_id
                 else self._timeline_history_snapshots.get(timeline.timeline_id)
@@ -2207,6 +2261,8 @@ class TimelineView(QGraphicsView):
                     item.trim_left_finished.connect(self._on_trim_left_finished)
                     item.trim_right_finished.connect(self._on_trim_right_finished)
                     item.rate_stretch_finished.connect(self._on_rate_stretch_finished)
+                    item.retime_stretch_finished.connect(self._on_retime_stretch_finished)
+                    item.retime_action_requested.connect(self._on_retime_action_requested)
 
                     # Slip signals (P4.4)
                     item.clip_slip.connect(self._on_clip_slip)
@@ -2255,6 +2311,7 @@ class TimelineView(QGraphicsView):
                         self._on_create_nested_menu_requested)
                     item.enter_nested_sequence_requested.connect(
                         self._on_enter_nested_clip_requested)
+                    item.change_speed_dialog_requested.connect(self._on_change_clip_speed_dialog_requested)
                     item.speed_change_requested.connect(self._on_clip_speed_change)
                     item.retime_controls_toggled.connect(self._on_retime_controls_toggled)
                     item.retime_speed_point_requested.connect(self._on_retime_speed_point_requested)
@@ -3361,6 +3418,9 @@ class TimelineView(QGraphicsView):
         if self._updating:
             return
 
+        if not selection.items:
+            self._set_selected_edit_edges({})
+
         # P10.3: SubtitleClipItem is also a selectable timeline item
         # (imported at module top)
 
@@ -3396,11 +3456,12 @@ class TimelineView(QGraphicsView):
                 partner = (
                     self._get_reciprocal_linked_clip(clip) if clip is not None else None
                 )
-                if partner is None:
+                if partner is None or not self._effective_linked_selection():
                     continue
                 for member_id in (clip.clip_id, partner.clip_id):
                     item = self._items_map.get(member_id)
                     if isinstance(item, ClipItem):
+                        item.set_selected(True)
                         item.set_linked_to_selection(True)
 
             for trans_id in selection.selected_transition_ids:
@@ -3449,45 +3510,54 @@ class TimelineView(QGraphicsView):
             linked_selection_enabled=self._linked_selection_enabled,
         )
 
+    def _effective_linked_selection(self) -> bool:
+        """Option-click selects/edits one side without altering the global toggle."""
+        return self._linked_selection_enabled and not self._independent_selection
+
+    def _set_selected_edit_edges(self, edges: Mapping[str, str]) -> None:
+        """Project selected edit points independently of whole-clip selection."""
+        self._selected_edit_edges = dict(edges)
+        for clip_id, item in self._items_map.items():
+            if isinstance(item, ClipItem):
+                item._selected_edit_edge = edges.get(clip_id)
+                item.update()
+        for handle in self._roll_handles.values():
+            handle._is_selected = (
+                edges.get(handle.left_clip_id) == "right"
+                and edges.get(handle.right_clip_id) == "left"
+            )
+            handle.update()
+
     def _on_clip_clicked(self, clip_id: str, track_id: str) -> None:
-        """Handle clip click from ClipItem.
-
-        Supports:
-        - Normal click: Replace selection with clicked clip
-        - Shift+click: Toggle clip in selection (multi-select)
-        - Ctrl+click: Add/remove clip from selection (same as Shift)
-        """
-        if self._updating:
+        """Select a linked editing unit; Option-click temporarily isolates a side."""
+        if self._updating or self._timeline is None:
             return
-
-        if self._timeline is None:
-            return
-
-        # Get current keyboard modifiers
+        if not (self._interaction.is_dragging and self._interaction.primary_clip_id == clip_id):
+            self._set_selected_edit_edges({})
         modifiers = QApplication.keyboardModifiers()
-
-        if modifiers & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier):
-            # Shift+click or Ctrl+click: Toggle selection (multi-select)
-            new_selection = self._selection.toggle_clip(
-                clip_id,
-                track_id,
-                self._timeline.timeline_id
-            )
-        elif self._selection.is_multi and self._selection.contains_clip(clip_id):
-            # Pressing a clip that is already part of a multi-selection keeps
-            # the group intact (NLE convention) so box-selected clips can be
-            # moved / Alt-drag copied together. Clicking empty space or an
-            # unselected clip collapses the selection as usual.
-            return
+        self._independent_selection = bool(modifiers & Qt.KeyboardModifier.AltModifier)
+        clip = self._timeline.get_clip_by_id(clip_id)
+        partner = self._get_reciprocal_linked_clip(clip)
+        members = [(clip_id, track_id)]
+        if self._effective_linked_selection() and partner is not None:
+            members.append((partner.clip_id, partner.track_id))
+        additive = bool(modifiers & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier))
+        if additive:
+            selection = self._selection
+            remove = all(selection.contains_clip(cid) for cid, _tid in members)
+            for cid, tid in members:
+                if remove or not selection.contains_clip(cid):
+                    selection = selection.toggle_clip(cid, tid, self._timeline.timeline_id)
+        elif (not self._independent_selection and self._selection.is_multi
+              and self._selection.contains_clip(clip_id)):
+            selection = self._selection
         else:
-            # Normal click: Replace selection
-            new_selection = self._selection.with_clip_selected(
-                clip_id,
-                track_id,
-                self._timeline.timeline_id,
-                replace=True  # Single selection
-            )
-        self.set_selection(new_selection)
+            selection = TimelineSelection()
+            for cid, tid in members:
+                selection = selection.with_clip_selected(cid, tid, self._timeline.timeline_id, replace=False)
+        if selection.contains_clip(clip_id):
+            selection = selection.with_clip_selected(clip_id, track_id, self._timeline.timeline_id, replace=False)
+        self.set_selection(selection)
 
     # ==================== P10.3: Subtitle Clip Handlers ====================
 
@@ -4409,6 +4479,11 @@ class TimelineView(QGraphicsView):
         item._thumbnail_display_mode = self._thumbnail_display_mode
         item._waveforms_visible = self._waveforms_visible
         item._position_lock_enabled = self._position_lock_enabled
+        item._selected_edit_edge = self._selected_edit_edges.get(item.clip_id)
+        item._timeline_display_fps = float(self._timeline.fps) if self._timeline is not None else EMPTY_TIMELINE_FPS
+        clip = self._timeline.get_clip_by_id(item.clip_id) if self._timeline is not None else None
+        item._retime_reverse = bool(getattr(clip.speed, "reverse", False)) if clip is not None else False
+        item._retime_preserve_pitch = bool(getattr(clip.speed, "preserve_pitch", False)) if clip is not None else False
 
     def thumbnail_display_mode(self) -> str:
         return self._thumbnail_display_mode
@@ -4544,16 +4619,8 @@ class TimelineView(QGraphicsView):
         self.viewport().update()
 
     def source_patch_track_id(self, track_type: str) -> Optional[str]:
-        """Read the UI source destination, independently of the edit target."""
-        if self._timeline is None or track_type not in {"video", "audio"}:
-            return None
-        key = (self._timeline.timeline_id, track_type)
-        tracks = getattr(self._timeline, f"{track_type}_tracks")
-        if key in self._source_patch_routes:
-            selected = self._source_patch_routes[key]
-            if selected is None or any(track.track_id == selected for track in tracks):
-                return selected
-        return tracks[0].track_id if tracks else None
+        """Paint the same effective destination the source-edit resolver uses."""
+        return self.resolve_source_destination_track_id(track_type)
 
     def source_destination_stream_disabled(self, track_type: str) -> bool:
         """W02：该流类型是否被蓝徽章显式关闭。
@@ -4659,25 +4726,75 @@ class TimelineView(QGraphicsView):
         except (TypeError, ValueError):
             return str(frame)
 
+    def set_trim_monitor_host(self, host: Optional[ProgramViewerWidget]) -> None:
+        """Bind a viewer presentation host; a timeline alone never opens a window."""
+        if host is self._trim_monitor_host:
+            return
+        if not self._interaction.is_idle:
+            self._cancel_current_interaction()
+        self._hide_trim_monitor()
+        old = self._trim_monitor_host
+        if old is not None:
+            old.set_trim_monitor(None)
+            old.destroyed.disconnect(self._on_trim_monitor_host_destroyed)
+        monitor = getattr(self, "_trim_monitor_dialog", None)
+        if monitor is not None:
+            monitor.setParent(self)
+        self._trim_monitor_host = host
+        if host is not None:
+            host.destroyed.connect(self._on_trim_monitor_host_destroyed)
+            if monitor is not None:
+                host.set_trim_monitor(monitor)
+
+    def _on_trim_monitor_host_destroyed(self) -> None:
+        """A host's children are being deleted; never invoke it during teardown."""
+        from PyQt6 import sip
+        monitor = getattr(self, "_trim_monitor_dialog", None)
+        if monitor is not None and not sip.isdeleted(monitor):
+            # The canvas may currently live in a fullscreen window, outside
+            # the host's child tree. Retire that overlay explicitly as well.
+            monitor.hide()
+            # Retired overlays must not clear the cache of a replacement
+            # attached before this deferred deletion reaches the event loop.
+            monitor.destroyed.disconnect(self._on_trim_monitor_destroyed)
+            monitor.deleteLater()
+        self._trim_monitor_host = None
+        self._trim_monitor_dialog = None
+        if not self._interaction.is_idle:
+            self._cancel_current_interaction()
+        self._hide_trim_monitor()
+
+    def _on_trim_monitor_destroyed(self) -> None:
+        self._trim_monitor_dialog = None
+
     def _trim_monitor(self) -> "TrimMonitorDialog":
-        """惰性创建 Trim Monitor（Qt Tool 窗口）。"""
+        """Lazily create a viewer child, hidden when no viewer is attached."""
         monitor = getattr(self, "_trim_monitor_dialog", None)
         if monitor is None:
-            from src.features.edit.ui.trim_numeric_dialog import TrimMonitorDialog
-            monitor = TrimMonitorDialog(self.window())
+            from src.features.edit.ui.trim_numeric_dialog import TrimMonitorWidget
+            monitor = TrimMonitorWidget(self)
+            monitor.hide()
+            monitor.destroyed.connect(self._on_trim_monitor_destroyed)
+            # Delete an externally parented overlay when its timeline is gone.
+            self.destroyed.connect(monitor.deleteLater)
             self._trim_monitor_dialog = monitor
+            if self._trim_monitor_host is not None:
+                self._trim_monitor_host.set_trim_monitor(monitor)
         return monitor
 
     def _hide_trim_monitor(self) -> None:
         monitor = getattr(self, "_trim_monitor_dialog", None)
-        if monitor is not None and monitor.isVisible():
+        if monitor is not None:
             monitor.hide()
         # F2.3：会话结束——bump generation 丢弃在途双帧请求与迟到投递；
         # 并通知 scrub 管线 finish（清除快速拖拽量化步长）。
         self._invalidate_trim_frame_requests()
         last_frame = getattr(self, "_last_trim_preview_frame", None)
         if last_frame is not None:
-            self.trim_frame_preview_finished.emit(int(last_frame))
+            self._last_trim_preview_frame = None
+            # Trim previews do not move the playhead. Restore its actual
+            # program frame through the existing exact scrub-finish path.
+            self.trim_frame_preview_finished.emit(int(self._playhead_frame))
 
     def _trim_frame_provider(self):
         """F2.3：惰性启动双帧供应器（会话期间常驻，close 时 stop）。"""
@@ -4688,6 +4805,7 @@ class TimelineView(QGraphicsView):
             )
             provider = TrimDualFrameProvider()
             provider.signals.frame_ready.connect(self._on_trim_frame_ready)
+            provider.signals.decode_failed.connect(self._on_trim_frame_failed)
             provider.start()
             # 视图销毁时停线程（daemon 线程持有 self 引用，不 stop 会
             # 随视图实例泄漏常驻轮询）
@@ -4746,10 +4864,16 @@ class TimelineView(QGraphicsView):
         right_frame = _display_boundary(right_clip, delta)
 
         monitor.set_frames_pending()
+        left_path = _asset_path(left_clip) if left_frame is not None else None
+        right_path = _asset_path(right_clip) if right_frame is not None else None
+        if left_path is None:
+            monitor.set_frame_unavailable("left")
+        if right_path is None:
+            monitor.set_frame_unavailable("right")
         provider.request(
-            _asset_path(left_clip) if left_frame is not None else None,
+            left_path,
             left_frame,
-            _asset_path(right_clip) if right_frame is not None else None,
+            right_path,
             right_frame,
             self._trim_frame_generation)
 
@@ -4761,6 +4885,15 @@ class TimelineView(QGraphicsView):
         if monitor is None or not monitor.isVisible():
             return
         monitor.update_frame(side, image)
+
+    def _on_trim_frame_failed(self, side: str, reason: str, generation: int) -> None:
+        """Keep a failed decoder from leaving the in-view panel loading forever."""
+        if generation != getattr(self, "_trim_frame_generation", 0):
+            return
+        monitor = getattr(self, "_trim_monitor_dialog", None)
+        if monitor is not None and monitor.isVisible():
+            logger.debug("Trim preview unavailable (%s): %s", side, reason)
+            monitor.set_frame_unavailable(side)
 
     def _show_roll_trim_monitor(self, left_clip, right_clip,
                                 cut_frame: int, delta: int) -> None:
@@ -4776,8 +4909,9 @@ class TimelineView(QGraphicsView):
                 self._tc(cut_frame - 1), self._tc(cut_frame + max(0, delta)),
                 delta, headroom=(left_tail, right_head))
             self._last_trim_preview_frame = cut_frame + max(0, delta)
-            if not monitor.isVisible():
+            if self._trim_monitor_host is not None and monitor.isHidden():
                 monitor.show()
+                monitor.raise_()
             # F2.3：请求双画面真实边界帧（latest-wins，generation 校验）
             self._request_trim_dual_frames(left_clip, right_clip, delta)
         except Exception as e:
@@ -4899,7 +5033,9 @@ class TimelineView(QGraphicsView):
                     max_source_frames=self._get_asset_duration(linked.asset_id),
                     apply_sync_lock=False,
                 )
-                if linked_cmd is None:
+                if linked_cmd is None or _lc != clamped:
+                    self.status_message_requested.emit(I18N.tr(
+                        "timeline.linked_trim_limit", "Linked clips cannot be trimmed by the same amount."))
                     return
                 command = MacroCommand.create(
                     f"Trim linked clips {clamped:+d}f", (command, linked_cmd))
@@ -4966,7 +5102,10 @@ class TimelineView(QGraphicsView):
     # P1-04: 键盘步进 trim（,/. 单帧步进 + 修饰键组合）
     # ------------------------------------------------------------------
 
-    def _apply_step_trim(self, edge: str, delta_frames: int) -> bool:
+    def _apply_step_trim(
+        self, edge: str, delta_frames: int, *, clip_id: str | None = None,
+        mode: str | None = None,
+    ) -> bool:
         """键盘步进 trim：唯一选中媒体片段的入/出边缘移动 ±N 帧。
 
         Trim 工具 → TrimClipCommand（邻居/手柄钳制）；
@@ -4983,9 +5122,15 @@ class TimelineView(QGraphicsView):
             return False
         selection = getattr(self, "_selection", None)
         selected = list(getattr(selection, "selected_clip_ids", ()) or ())
-        if len(selected) != 1:
+        if clip_id is None and len(selected) == 2:
+            first = self._timeline.get_clip_by_id(selected[0])
+            partner = self._get_reciprocal_linked_clip(first)
+            if partner is not None and partner.clip_id in selected:
+                primary = selection.primary_item
+                selected = [primary.item_id if primary is not None else first.clip_id]
+        if clip_id is None and len(selected) != 1:
             return False
-        clip = self._timeline.get_clip_by_id(selected[0])
+        clip = self._timeline.get_clip_by_id(clip_id if clip_id is not None else selected[0])
         if clip is None:
             return False
         track = None
@@ -4998,7 +5143,7 @@ class TimelineView(QGraphicsView):
 
         if self._is_track_locked(track.track_id):  # 审计修复：锁轨不绕过
             return False
-        mode = ("ripple" if self._active_tool == EditTool.RIPPLE else "trim")
+        mode = mode or ("ripple" if self._active_tool == EditTool.RIPPLE else "trim")
         trim_side = "left" if edge == "in" else "right"
         max_frames = self._get_asset_duration(clip.asset_id)
 
@@ -5011,7 +5156,7 @@ class TimelineView(QGraphicsView):
 
         # A/V 链接联动（审计修复：linked 片段钳制失败 → 整体拒绝，
         # 与鼠标 trim 路径一致，不再静默单边执行造成 A/V 失步）
-        if getattr(self, "_linked_selection_enabled", False):
+        if self._effective_linked_selection():
             linked = self._timeline.get_reciprocal_linked_clip(clip.clip_id)
             if linked is not None:
                 linked_track = None
@@ -5027,7 +5172,9 @@ class TimelineView(QGraphicsView):
                     max_source_frames=self._get_asset_duration(linked.asset_id),
                     apply_sync_lock=False,
                 )
-                if linked_cmd is None:
+                if linked_cmd is None or _linked_clamped != clamped:
+                    self.status_message_requested.emit(I18N.tr(
+                        "timeline.linked_trim_limit", "Linked clips cannot be trimmed by the same amount."))
                     return False
                 command = MacroCommand.create(
                     f"Trim linked clips {clamped:+d}f",
@@ -5036,7 +5183,54 @@ class TimelineView(QGraphicsView):
         self._execute_command(command)
         return True
 
+    def _nudge_selected_edit_point(self, delta_frames: int) -> None:
+        """Route a selected end or cut through the existing trim commands."""
+        if self._timeline is None or not self._selected_edit_edges:
+            return
+        from src.features.edit.core.linked_roll import build_linked_roll_command
+        try:
+            for track in self._timeline.all_tracks:
+                clips = sorted(track.clips, key=lambda clip: clip.timeline_start)
+                for left, right in zip(clips, clips[1:]):
+                    if (left.timeline_end == right.timeline_start
+                            and self._selected_edit_edges.get(left.clip_id) == "right"
+                            and self._selected_edit_edges.get(right.clip_id) == "left"):
+                        command, _ = build_linked_roll_command(
+                            self._timeline, left.clip_id, right.clip_id, delta_frames,
+                            self._roll_clip_limit, self._effective_linked_selection())
+                        if command is not None:
+                            self._execute_command(command)
+                        return
+            clip_id, edge = next(iter(self._selected_edit_edges.items()))
+            self._apply_step_trim(
+                "in" if edge == "left" else "out", delta_frames, clip_id=clip_id,
+                mode="ripple" if self._active_tool in {EditTool.TRIM, EditTool.RIPPLE} else "trim",
+            )
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
+
+    def event(self, event: QEvent) -> bool:
+        """Keep dynamic-trim keys ahead of the parent transport QShortcuts."""
+        interaction = getattr(self, "_interaction", None)
+        if (event.type() == QEvent.Type.ShortcutOverride and isinstance(event, QKeyEvent)
+                and interaction is not None and interaction.state == InteractionState.ROLLING
+                and getattr(self, "_roll_preview_state", None) is not None
+                and event.key() in {Qt.Key.Key_J, Qt.Key.Key_K, Qt.Key.Key_L,
+                                    Qt.Key.Key_Return, Qt.Key.Key_Enter}
+                and event.modifiers() in {Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier}):
+            event.accept()
+            return True
+        return super().event(event)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        from src.features.edit.core.position_lock import PositionLockViolation
+        try:
+            self._handle_timeline_key_press(event)
+        except PositionLockViolation:
+            # _execute_command already publishes the rejection to the status bar.
+            event.accept()
+
+    def _handle_timeline_key_press(self, event: QKeyEvent) -> None:
         """Handle keyboard shortcuts for tools and navigation.
 
         Navigation:
@@ -5069,6 +5263,42 @@ class TimelineView(QGraphicsView):
         """
         key = event.key()
         modifiers = event.modifiers()
+        # macOS delivers the shifted punctuation symbol (< or >) as the Qt
+        # key; QTest and some layouts deliver comma/period plus Shift.
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            key = {Qt.Key.Key_Less: Qt.Key.Key_Comma,
+                   Qt.Key.Key_Greater: Qt.Key.Key_Period}.get(key, key)
+        from src.features.edit.ui.timeline_shortcuts import matches_key_event
+        if (key in {Qt.Key.Key_Comma, Qt.Key.Key_Period}
+                and self._selected_edit_edges
+                and self._active_tool in {EditTool.SELECT, EditTool.TRIM, EditTool.RIPPLE, EditTool.ROLL}
+                and modifiers in {Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier}):
+            step = 5 if modifiers & Qt.KeyboardModifier.ShiftModifier else 1
+            if self._interaction.is_idle:
+                self._nudge_selected_edit_point(-step if key == Qt.Key.Key_Comma else step)
+            event.accept()
+            return
+        if matches_key_event(event, "edit.timeline.linked_selection", "Ctrl+Shift+L"):
+            self.set_linked_selection_enabled(not self._linked_selection_enabled)
+            event.accept()
+            return
+        primary = self._selection.primary_item
+        primary_clip = (self._timeline.get_clip_by_id(primary.item_id)
+                        if self._timeline is not None and primary is not None else None)
+        if matches_key_event(event, "edit.timeline.retime_controls", "Ctrl+R"):
+            if primary_clip is not None:
+                self._on_retime_controls_toggled(primary_clip.clip_id, primary_clip.track_id,
+                    primary_clip.clip_id not in self._retime_control_clip_ids)
+            event.accept()
+            return
+        if matches_key_event(event, "edit.timeline.link_clips", "Ctrl+Alt+L"):
+            if primary_clip is not None:
+                if self._get_reciprocal_linked_clip(primary_clip) is not None:
+                    self._on_clip_unlink(primary_clip.clip_id, primary_clip.track_id)
+                else:
+                    self._on_clip_link(primary_clip.clip_id, primary_clip.track_id)
+            event.accept()
+            return
 
         # F2.3：ROLLING 会话中的 JKL 动态修剪（键盘步进形态）。
         # L/J = cut 右/左步进（Shift ×10），K = 暂停（停留），Enter = 以
@@ -5291,21 +5521,9 @@ class TimelineView(QGraphicsView):
         当前片段交互并恢复预览，避免 release 时提交一个已被中断的操作。
         只处理片段级拖拽状态，不影响选框/播放头等轻量交互。
         INT-03：平移会话同样在此收尾并恢复光标。
-        N15/T3-07：自身被动显示的 Trim Monitor（不激活 Tool 窗）不应
-        算作"外部窗口激活"——按 ActiveWindowFocusReason + 当前
-        activeWindow 是否就是该监视器精确区分，只有真正的外部激活/
-        失焦才取消；不笼统忽略 FocusOut，保留原取消保护。
+        Trim Monitor 是不接收焦点的 viewer 子控件；真正失焦继续取消。
         """
         if self._interaction.is_dragging:
-            reason = getattr(event, "reason", None)
-            focus_reason = reason() if callable(reason) else None
-            if (focus_reason == Qt.FocusReason.ActiveWindowFocusReason
-                    and self._focus_lost_to_own_trim_monitor()):
-                logger.debug(
-                    "focusOut to own passive Trim Monitor ignored; "
-                    "interaction continues")
-                super().focusOutEvent(event)
-                return
             self._cancel_current_interaction()
         elif self._interaction.state == InteractionState.PANNING:
             if self._pan_prev_cursor is not None:
@@ -5314,36 +5532,11 @@ class TimelineView(QGraphicsView):
             self._interaction.finish()
         super().focusOutEvent(event)
 
-    def _focus_lost_to_own_trim_monitor(self) -> bool:
-        """失焦目标是否是本视图自己被动显示的 Trim Monitor。
-
-        只做精确身份判定：当前 activeWindow（含其 parent 链，覆盖嵌套
-        窗口宿主）就是本视图的 `_trim_monitor_dialog`。activeWindow 为
-        None/其他窗口（真实切窗）一律不算，保留原取消保护。
-        """
-        monitor = getattr(self, "_trim_monitor_dialog", None)
-        if monitor is None or not monitor.isVisible():
-            return False
-        try:
-            from PyQt6.QtWidgets import QApplication
-
-            active = QApplication.activeWindow()
-        except Exception:  # pragma: no cover - 无 QApplication 环境
-            return False
-        while active is not None:
-            if active is monitor:
-                return True
-            active = getattr(active, "parentWidget", lambda: None)()
-        return False
-
     def _on_application_focus_window_changed(self, window: Any) -> None:
         """Cancel a clip gesture when another real window becomes active."""
         if window is None or not self._interaction.is_dragging:
             return
-        monitor = getattr(self, "_trim_monitor_dialog", None)
         if window is self.window().windowHandle():
-            return
-        if monitor is not None and window is monitor.windowHandle():
             return
         self._cancel_current_interaction()
 
@@ -5507,6 +5700,8 @@ class TimelineView(QGraphicsView):
 
     def _start_rubber_band_selection(self, event: QMouseEvent) -> None:
         """Start rubber band selection in empty area."""
+        self._independent_selection = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        self._set_selected_edit_edges({})
         # Create rubber band if not exists
         if self._rubber_band is None:
             self._rubber_band = _TimelineRubberBand(QRubberBand.Shape.Rectangle, self.viewport())
@@ -5606,15 +5801,11 @@ class TimelineView(QGraphicsView):
         if drag_mode == "trim_right":
             self.setCursor(_trim_cursor("right"))
             return True
-        if drag_mode in {
-            "fade_in",
-            "fade_out",
-            "ripple_trim_left",
-            "ripple_trim_right",
-            "roll_trim_left",
-            "roll_trim_right",
-        }:
-            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        kind = {"fade_in": "fade", "fade_out": "fade",
+                "ripple_trim_left": "ripple_left", "ripple_trim_right": "ripple_right",
+                "roll_trim_left": "roll", "roll_trim_right": "roll"}.get(drag_mode)
+        if kind is not None:
+            self.setCursor(edit_cursor(kind))
             return True
         return False
 
@@ -5880,6 +6071,10 @@ class TimelineView(QGraphicsView):
 
     def _update_cursor_for_position(self, scene_pos: QPointF) -> None:
         """Update cursor based on position (splitter hover, track boundary, etc.)."""
+        if scene_pos.x() >= TRACK_HEADER_WIDTH and self._active_tool in {EditTool.HAND, EditTool.ZOOM}:
+            self.setCursor(Qt.CursorShape.OpenHandCursor if self._active_tool == EditTool.HAND
+                           else Qt.CursorShape.CrossCursor)
+            return
         if self._timeline is not None:
             self._configure_layout_engine()
 
@@ -5905,7 +6100,20 @@ class TimelineView(QGraphicsView):
                     if track is not None and track.track_type != "subtitle":
                         self.setCursor(Qt.CursorShape.SizeVerCursor)
                         return
-        self.setCursor(Qt.CursorShape.ArrowCursor)
+        # Scene items own their hover cursor. Setting Arrow here before
+        # dispatching every move fights the item's hand/trim cursor and can
+        # leave the viewport showing a stale shape when the item skips an
+        # unchanged setCursor call.
+        item = self.itemAt(self.mapFromScene(scene_pos))
+        while item is not None:
+            if (isinstance(item, (ClipItem, SubtitleClipItem, TrackHeaderItem, TransitionItem))
+                    or item.hasCursor()):
+                if self.testAttribute(Qt.WidgetAttribute.WA_SetCursor):
+                    self.unsetCursor()
+                return
+            item = item.parentItem()
+        if self.cursor().shape() != Qt.CursorShape.ArrowCursor:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """Handle mouse move for rubber band selection, playhead drag, and splitter drag."""
@@ -6071,6 +6279,13 @@ class TimelineView(QGraphicsView):
                 if selection_rect.intersects(item_rect):
                     selected_clip_ids.append(clip_id)
                     selected_track_ids.append(item.track_id)
+
+        if self._effective_linked_selection():
+            for clip_id in tuple(selected_clip_ids):
+                partner = self._get_reciprocal_linked_clip(self._timeline.get_clip_by_id(clip_id))
+                if partner is not None and partner.clip_id not in selected_clip_ids:
+                    selected_clip_ids.append(partner.clip_id)
+                    selected_track_ids.append(partner.track_id)
 
         # UI-12: Check for Shift/Ctrl modifiers for additive selection
         modifiers = event.modifiers()
@@ -7366,6 +7581,8 @@ class TimelineView(QGraphicsView):
         item.trim_left_finished.connect(self._on_trim_left_finished)
         item.trim_right_finished.connect(self._on_trim_right_finished)
         item.rate_stretch_finished.connect(self._on_rate_stretch_finished)
+        item.retime_stretch_finished.connect(self._on_retime_stretch_finished)
+        item.retime_action_requested.connect(self._on_retime_action_requested)
         item.clip_slip.connect(self._on_clip_slip)
         item.slip_finished.connect(self._on_slip_finished)
         item.clip_slide.connect(self._on_clip_slide)
@@ -7413,6 +7630,7 @@ class TimelineView(QGraphicsView):
             self._on_create_nested_menu_requested)
         item.enter_nested_sequence_requested.connect(
             self._on_enter_nested_clip_requested)
+        item.change_speed_dialog_requested.connect(self._on_change_clip_speed_dialog_requested)
         item.speed_change_requested.connect(self._on_clip_speed_change)
         item.retime_controls_toggled.connect(self._on_retime_controls_toggled)
         item.retime_speed_point_requested.connect(self._on_retime_speed_point_requested)
@@ -7903,7 +8121,8 @@ class TimelineView(QGraphicsView):
 
             # Collect linked clip (if linked selection is enabled)
             linked_clip_obj = self._get_reciprocal_linked_clip(clip)
-            if linked_clip_obj is not None and self._linked_selection_enabled:
+            if linked_clip_obj is not None and (
+                    self._linked_selection_enabled if item._copy_mode else self._effective_linked_selection()):
                 linked_ids.append(linked_clip_obj.clip_id)
                 linked_item = self._items_map.get(linked_clip_obj.clip_id)
                 if linked_item and isinstance(linked_item, ClipItem):
@@ -8076,6 +8295,7 @@ class TimelineView(QGraphicsView):
         # Update ALL members' preview positions simultaneously.
         # In copy_mode, update ghosts instead of actual items so originals stay put.
         use_ghosts = session.copy_mode and self._alt_copy_ghosts
+        copy_reserved: dict[str, list[tuple[int, int]]] = {}
         for member in session.move_group.members:
             if use_ghosts:
                 m_item = self._alt_copy_ghosts.get(member.clip_id)
@@ -8093,8 +8313,16 @@ class TimelineView(QGraphicsView):
             # Moving cached graphics items can leave their old device-pixel
             # edges behind. Render directly for the duration of the drag.
             m_item.set_drag_cache_mode(True)
-            m_item._start_frame = member.new_start
-            m_x = self._layout_engine.frame_to_x(member.new_start)
+            preview_start = member.new_start
+            target_id = member.new_track_id or member.track_id
+            if use_ghosts and not target_id.startswith("__new_"):
+                target = self._timeline.get_track_by_id(target_id)
+                if target is not None:
+                    occupied = copy_reserved.setdefault(target_id, [])
+                    preview_start = self._resolve_copy_start(target, preview_start, m_item._duration_frames, occupied=occupied)
+                    occupied.append((preview_start, preview_start+m_item._duration_frames))
+            m_item._start_frame = preview_start
+            m_x = self._layout_engine.frame_to_x(preview_start)
             # Use new_track_id if track changed, otherwise original track_id
             display_track_id = member.new_track_id if member.new_track_id else member.track_id
             # Calculate Y position — use each member's own media type
@@ -8103,6 +8331,7 @@ class TimelineView(QGraphicsView):
                 m_y = self._compute_new_track_preview_y(display_track_id, m_type)
             else:
                 m_y = self._layout_engine.track_top(display_track_id)
+                m_item.set_track_height(self._layout_engine.track_height(display_track_id))
             # Guard against invalid positions
             if m_y != m_y:  # NaN check
                 m_y = 0.0
@@ -8609,7 +8838,7 @@ class TimelineView(QGraphicsView):
                 ]
                 clip = self._timeline.get_clip_by_id(clip_id)
                 linked_clip = self._get_reciprocal_linked_clip(clip)
-                if linked_clip is not None and self._linked_selection_enabled:
+                if linked_clip is not None and self._effective_linked_selection():
                     members.append(MoveGroupMember(
                         clip_id=linked_clip.clip_id,
                         track_id=linked_clip.track_id,
@@ -8747,7 +8976,7 @@ class TimelineView(QGraphicsView):
             # Collect linked clip if applicable
             clip = self._timeline.get_clip_by_id(clip_id)
             linked_clip = self._get_reciprocal_linked_clip(clip)
-            if linked_clip is not None and self._linked_selection_enabled:
+            if linked_clip is not None and self._effective_linked_selection():
                 members.append(MoveGroupMember(
                     clip_id=linked_clip.clip_id,
                     track_id=linked_clip.track_id,
@@ -9149,7 +9378,7 @@ class TimelineView(QGraphicsView):
             item.update()
 
             # Sync linked clip visual preview if applicable
-            if self._get_reciprocal_linked_clip(clip) is not None and self._linked_selection_enabled:
+            if self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
                 linked_item = self._items_map.get(clip.linked_clip_id)
                 linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
                 if linked_item and linked_clip:
@@ -9330,7 +9559,7 @@ class TimelineView(QGraphicsView):
             item.update()
 
             # Sync linked clip visual preview if applicable
-            if self._get_reciprocal_linked_clip(clip) is not None and self._linked_selection_enabled:
+            if self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
                 linked_item = self._items_map.get(clip.linked_clip_id)
                 linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
                 if linked_item and linked_clip:
@@ -9363,7 +9592,7 @@ class TimelineView(QGraphicsView):
             clip = self._timeline.get_clip_by_id(clip_id)
             if (clip is not None and clip.linked_clip_id
                     and self._get_reciprocal_linked_clip(clip) is not None
-                    and self._linked_selection_enabled):
+                    and self._effective_linked_selection()):
                 revert_ids.append(clip.linked_clip_id)
         for target_id in revert_ids:
             model_clip = (self._timeline.get_clip_by_id(target_id)
@@ -9437,7 +9666,7 @@ class TimelineView(QGraphicsView):
                 item.update()
             # Also revert linked clip if applicable
             clip = self._timeline.get_clip_by_id(clip_id)
-            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._linked_selection_enabled:
+            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
                 linked_item = self._items_map.get(clip.linked_clip_id)
                 linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
                 if linked_item and linked_clip:
@@ -9463,7 +9692,7 @@ class TimelineView(QGraphicsView):
                 item.update()
             # Also revert linked clip if applicable
             clip = self._timeline.get_clip_by_id(clip_id)
-            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._linked_selection_enabled:
+            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
                 linked_item = self._items_map.get(clip.linked_clip_id)
                 linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
                 if linked_item and linked_clip:
@@ -9489,7 +9718,7 @@ class TimelineView(QGraphicsView):
                 item.update()
             # Also revert linked clip if applicable
             clip = self._timeline.get_clip_by_id(clip_id)
-            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._linked_selection_enabled:
+            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
                 linked_item = self._items_map.get(clip.linked_clip_id)
                 linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
                 if linked_item and linked_clip:
@@ -9523,7 +9752,7 @@ class TimelineView(QGraphicsView):
 
         # Sync linked clip if applicable
         clip = self._timeline.get_clip_by_id(clip_id)
-        if clip and self._get_reciprocal_linked_clip(clip) is not None and self._linked_selection_enabled:
+        if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
             linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
             linked_item = self._items_map.get(clip.linked_clip_id)
             if linked_clip and linked_item:
@@ -9665,7 +9894,7 @@ class TimelineView(QGraphicsView):
                 item.update()
                 # Also revert linked clip if applicable
                 clip = self._timeline.get_clip_by_id(clip_id)
-                if clip and self._get_reciprocal_linked_clip(clip) is not None and self._linked_selection_enabled:
+                if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
                     linked_item = self._items_map.get(clip.linked_clip_id)
                     linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
                     if linked_item and linked_clip:
@@ -9689,7 +9918,7 @@ class TimelineView(QGraphicsView):
                 item.update()
             # Also revert linked clip if applicable
             clip = self._timeline.get_clip_by_id(clip_id)
-            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._linked_selection_enabled:
+            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
                 linked_item = self._items_map.get(clip.linked_clip_id)
                 linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
                 if linked_item and linked_clip:
@@ -9725,7 +9954,7 @@ class TimelineView(QGraphicsView):
 
         # Sync linked clip if applicable
         clip = self._timeline.get_clip_by_id(clip_id)
-        if clip and self._get_reciprocal_linked_clip(clip) is not None and self._linked_selection_enabled:
+        if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
             linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
             linked_item = self._items_map.get(clip.linked_clip_id)
             if linked_clip and linked_item:
@@ -9810,10 +10039,10 @@ class TimelineView(QGraphicsView):
         clip = sequence.get_clip_by_id(clip_id)
         if clip is None or clip.track_id != track_id:
             raise ValueError("Slip/Slide clip no longer exists on this track")
-        if self._source_edit_linked_at_press != self._linked_selection_enabled:
+        if self._source_edit_linked_at_press != self._effective_linked_selection():
             raise ValueError("Linked selection changed during the gesture")
         clips = [clip]
-        if self._linked_selection_enabled and clip.linked_clip_id:
+        if self._effective_linked_selection() and clip.linked_clip_id:
             partner = sequence.get_reciprocal_linked_clip(clip_id)
             if (partner is None or partner.track_id == track_id
                     or (partner.timeline_start, partner.timeline_end)
@@ -9952,6 +10181,7 @@ class TimelineView(QGraphicsView):
         """
         if self._timeline is None:
             return
+        self._independent_selection = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier)
 
         left_clip = self._timeline.get_clip_by_id(left_clip_id)
         right_clip = self._timeline.get_clip_by_id(right_clip_id)
@@ -9967,11 +10197,19 @@ class TimelineView(QGraphicsView):
         try:
             pairs = linked_roll_pairs(
                 self._timeline, left_clip_id, right_clip_id,
-                self._linked_selection_enabled)
+                self._effective_linked_selection())
         except ValueError as exc:
             logger.warning("Roll rejected: %s", exc)
             self.status_message_requested.emit(str(exc))
             return
+        # Selecting an edit point replaces the former body selection. Keep
+        # the two edges as the UI target, rather than leaving another clip
+        # looking selected while the pointer edits this seam.
+        self.set_selection(TimelineSelection())
+        self._set_selected_edit_edges({
+            clip.clip_id: edge for pair in pairs
+            for clip, edge in ((pair[0], "right"), (pair[1], "left"))
+        })
         for pair in pairs:
             for clip in pair:
                 item = self._items_map.get(clip.clip_id)
@@ -10048,7 +10286,7 @@ class TimelineView(QGraphicsView):
         try:
             pairs = linked_roll_pairs(
                 self._timeline, left_clip.clip_id, right_clip.clip_id,
-                self._linked_selection_enabled)
+                self._effective_linked_selection())
             min_delta, max_delta = linked_roll_bounds(pairs, self._roll_clip_limit)
         except ValueError as exc:
             logger.warning("Roll preview rejected: %s", exc)
@@ -10222,7 +10460,7 @@ class TimelineView(QGraphicsView):
             from src.features.edit.core.linked_roll import build_linked_roll_command
             cmd, _ = build_linked_roll_command(
                 self._timeline, left_clip_id, right_clip_id, delta_frames,
-                self._roll_clip_limit, self._linked_selection_enabled)
+                self._roll_clip_limit, self._effective_linked_selection())
             if cmd is not None:
                 self._execute_command(cmd)
         except (TimelineOperationError, ValueError) as exc:
@@ -10434,7 +10672,7 @@ class TimelineView(QGraphicsView):
         ]
         linked = (
             self._timeline.get_reciprocal_linked_clip(clip)
-            if self._linked_selection_enabled
+            if self._effective_linked_selection()
             else None
         )
         if linked is not None and not self._is_track_locked(linked.track_id):
@@ -10556,7 +10794,7 @@ class TimelineView(QGraphicsView):
         ]
         linked = (
             self._timeline.get_reciprocal_linked_clip(clip)
-            if self._linked_selection_enabled
+            if self._effective_linked_selection()
             else None
         )
         if linked is not None and not self._is_track_locked(linked.track_id):
@@ -10832,14 +11070,26 @@ class TimelineView(QGraphicsView):
         "rate_stretch_left": InteractionState.TRIMMING_LEFT,
         "rate_stretch_right": InteractionState.TRIMMING_RIGHT,
         "motion_graphic_duration": InteractionState.TRIMMING_RIGHT,
+        "retime_stretch": InteractionState.TRIMMING_RIGHT,
     }
 
     def _on_item_interaction_started(
         self, clip_id: str, track_id: str, drag_mode: str
     ) -> None:
         """ClipItem press 已确定 drag_mode 时登记 InteractionSession。"""
+        self._independent_selection = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier)
+        edges: dict[str, str] = {}
+        if drag_mode in {"trim_left", "trim_right", "ripple_trim_left", "ripple_trim_right",
+                         "roll_trim_left", "roll_trim_right", "rate_stretch_left", "rate_stretch_right"}:
+            edge = "left" if drag_mode.endswith("left") else "right"
+            edges[clip_id] = edge
+            clip = self._timeline.get_clip_by_id(clip_id) if self._timeline is not None else None
+            partner = self._get_reciprocal_linked_clip(clip)
+            if partner is not None and self._effective_linked_selection():
+                edges[partner.clip_id] = edge
+        self._set_selected_edit_edges(edges)
         if drag_mode in {"slip", "slide"}:
-            self._source_edit_linked_at_press = self._linked_selection_enabled
+            self._source_edit_linked_at_press = self._effective_linked_selection()
             self._source_edit_timeline_at_press = self._timeline
         state = self._ITEM_DRAG_MODE_TO_STATE.get(drag_mode)
         if state is None:
@@ -10912,6 +11162,7 @@ class TimelineView(QGraphicsView):
                     orig_tid = self._current_drag_session.original_track_ids.get(clip_id, "")
                     if orig_tid:
                         y = self._layout_engine.track_top(orig_tid)
+                        item.set_track_height(self._layout_engine.track_height(orig_tid))
                     else:
                         y = item.y()
                     item.setPos(x, y)
@@ -12006,6 +12257,46 @@ class TimelineView(QGraphicsView):
         except ValueError as exc:
             logger.warning("Cannot link selected clips: %s", exc)
 
+    def _on_change_clip_speed_dialog_requested(self, clip_id: str, track_id: str) -> None:
+        """Edit speed in a Resolve-style dialog using the existing command adapter.
+
+        Options whose semantics are absent from the current command remain
+        explicit host requests. Never silently drop ripple/freeze/timing intent.
+        """
+        from src.features.edit.ui.change_clip_speed_dialog import ChangeClipSpeedDialog
+        from src.shared.i18n.i18n import I18N
+        from PyQt6.QtWidgets import QDialog
+        if self._timeline is None:
+            return
+        clip = self._timeline.get_clip_by_id(clip_id)
+        if clip is None or self._is_track_locked(track_id):
+            return
+        params = self._retime_speed_params_for_clip(clip)
+        dialog = ChangeClipSpeedDialog(
+            speed=params.speed, source_fps=float(self._get_asset_fps(clip.asset_id)),
+            timeline_fps=float(self._timeline.fps), duration_frames=clip.timeline_duration,
+            reverse=params.reverse, preserve_pitch=params.preserve_pitch, parent=self,
+            freeze=clip.freeze_source_frame is not None,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        settings = dialog.settings()
+        animated = bool(clip.animated_params) or any(
+            bool(getattr(effect, "animated_params", None)) for effect in clip.effects)
+        unsupported = (settings["ripple"] or settings["freeze"]
+                       or clip.freeze_source_frame is not None or params.speed_points or animated)
+        if unsupported:
+            self.clip_speed_settings_requested.emit(clip_id, track_id, settings)
+            self.status_message_requested.emit(I18N.tr("edit.speed_dialog.unsupported", "The selected speed options are not supported yet. The clip is unchanged."))
+            return
+        new_params = params.with_speed(settings["speed"]).with_reverse(settings["reverse"]).with_preserve_pitch(settings["preserve_pitch"])
+        if new_params == params:
+            return
+        try:
+            self._commit_retime_params(clip, new_params, "Change clip speed")
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
+
     def _on_clip_speed_change(self, clip_id: str, track_id: str, speed: float) -> None:
         """Handle clip speed change from context menu."""
         from src.features.edit.core.commands import ChangeClipSpeedCommand
@@ -12015,7 +12306,11 @@ class TimelineView(QGraphicsView):
                 self.tr("轨道已锁定，无法变速")
             )
             return
-        cmd = ChangeClipSpeedCommand.create(clip_id, track_id, speed)
+        clip = self._timeline.get_clip_by_id(clip_id) if self._timeline is not None else None
+        if clip is None:
+            return
+        params = self._retime_speed_params_for_clip(clip).with_speed(speed)
+        cmd = ChangeClipSpeedCommand.create(clip_id, track_id, params)
         try:
             self._execute_command(cmd)
         except ValueError as exc:
@@ -12057,11 +12352,85 @@ class TimelineView(QGraphicsView):
                 speed, raw_speed,
             )
 
+    def _retime_controls_need_backend(self, clip: ClipInstance) -> bool:
+        """Keep unsafe advanced timing edits out of the basic UI adapter."""
+        members = [clip]
+        partner = self._get_reciprocal_linked_clip(clip)
+        if partner is not None:
+            members.append(partner)
+        return any(
+            self._retime_speed_params_for_clip(member).speed_points
+            or member.freeze_source_frame is not None
+            or member.animated_params
+            or any(getattr(effect, "animated_params", None) for effect in member.effects)
+            for member in members
+        )
+
+    def _request_advanced_retime(
+        self, clip: ClipInstance, action: str, source_offset: int, value: object,
+    ) -> None:
+        """Expose the full menu intent without silently changing its meaning."""
+        from src.shared.i18n.i18n import I18N
+        self.clip_speed_settings_requested.emit(clip.clip_id, clip.track_id, {
+            "operation": "retime_controls", "action": action,
+            "source_offset": source_offset, "value": value,
+        })
+        self.status_message_requested.emit(I18N.tr(
+            "edit.speed_dialog.unsupported",
+            "The selected speed options are not supported yet. The clip is unchanged."))
+
+    def _on_retime_stretch_finished(
+        self, clip_id: str, track_id: str, original_duration: int, new_duration: int,
+    ) -> None:
+        """Translate header geometry to a basic speed request in timeline units."""
+        clip = self._timeline.get_clip_by_id(clip_id) if self._timeline else None
+        if (clip is None or new_duration <= 0 or new_duration == original_duration
+                or clip.timeline_duration != original_duration
+                or self._position_lock_enabled or self._is_track_locked(track_id)):
+            return
+        params = self._retime_speed_params_for_clip(clip)
+        speed = max(0.1, min(8.0, params.speed * original_duration / new_duration))
+        if self._retime_controls_need_backend(clip):
+            self._request_advanced_retime(clip, "stretch", 0, {
+                "original_duration": original_duration, "duration": new_duration, "speed": speed})
+            return
+        try:
+            self._commit_retime_params(clip, params.with_speed(speed), "Change clip speed")
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
+
+    def _on_retime_action_requested(
+        self, clip_id: str, track_id: str, action: str, source_offset: int, value: object,
+    ) -> None:
+        """Dispatch supported settings; retain advanced segment intent for B14."""
+        clip = self._timeline.get_clip_by_id(clip_id) if self._timeline else None
+        if clip is None or self._is_track_locked(track_id):
+            return
+        params = self._retime_speed_params_for_clip(clip)
+        if action not in {"reverse", "pitch", "reset_clip"} or self._retime_controls_need_backend(clip):
+            self._request_advanced_retime(clip, action, source_offset, value)
+            return
+        if action == "reverse":
+            updated = params.with_reverse(not params.reverse)
+        elif action == "pitch":
+            updated = params.with_preserve_pitch(bool(value))
+        else:
+            updated = params.with_speed(1.0).with_reverse(False)
+        if params == updated:
+            return
+        try:
+            self._commit_retime_params(clip, updated, "Change clip speed")
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
+
     def _on_retime_controls_toggled(
         self, clip_id: str, track_id: str, visible: bool,
     ) -> None:
         """Toggle the transient Resolve-style retime strip for one clip."""
         _ = track_id
+        if self._interaction.primary_clip_id == clip_id:
+            self._cancel_current_interaction()
+        keep_video_bottom = self._is_video_stack_aligned_to_splitter()
         if visible:
             self._retime_control_clip_ids.add(clip_id)
         else:
@@ -12069,6 +12438,10 @@ class TimelineView(QGraphicsView):
         item = self._items_map.get(clip_id)
         if isinstance(item, ClipItem):
             item.set_retime_controls_visible(visible)
+        if keep_video_bottom:
+            self._align_video_stack_to_splitter()
+        self._layout_track_items()
+        self.viewport().update()
 
     def _retime_speed_params_for_clip(self, clip: ClipInstance) -> SpeedParams:
         """Normalize legacy numeric speed before a retime-control edit."""
@@ -12434,7 +12807,14 @@ class TimelineView(QGraphicsView):
             old_fade_in=old_fade_in,
             old_fade_out=old_fade_out,
         )
-        self._execute_command(cmd)
+        try:
+            self._execute_command(cmd)
+        except (ValueError, RuntimeError) as exc:
+            clip = self._timeline.get_clip_by_id(clip_id) if self._timeline is not None else None
+            item = self._items_map.get(clip_id)
+            if clip is not None and isinstance(item, ClipItem):
+                item.update_clip_properties(clip)
+            self.status_message_requested.emit(str(exc))
 
     def _on_clip_double_clicked(self, clip_id: str, track_id: str) -> None:
         """E09: 双击片段 → 发出在 Source Viewer 打开的请求。
@@ -12913,11 +13293,14 @@ class TimelineView(QGraphicsView):
                 {InteractionState.SLIPPING, InteractionState.SLIDING}):
             self._cancel_current_interaction()
         self._linked_selection_enabled = enabled
+        self._independent_selection = False
+        self.set_selection(self._selection)
         # Sync all ClipItems so their visual indicators reflect the current state
         for item in self._items_map.values():
             if isinstance(item, ClipItem):
                 item._linked_selection_enabled = enabled
                 item.update()
+        self.linked_selection_changed.emit(enabled)
 
     def _get_reciprocal_linked_clip(self, clip: Optional[ClipInstance]) -> Optional[ClipInstance]:
         """Return linked clip only when the link is a valid two-way relationship."""
@@ -13201,7 +13584,7 @@ class TimelineView(QGraphicsView):
         vp = self.viewport()
         if playhead is None or vp is None:
             return
-        half_w = 80.0 if getattr(playhead, "_is_dragging", False) else 16.0
+        half_w = 16.0
         top = playhead.y()
         height = playhead.boundingRect().height()
         for x in {old_scene_x, new_scene_x}:
@@ -13209,7 +13592,7 @@ class TimelineView(QGraphicsView):
             vp.update(self.mapFromScene(scene_rect).boundingRect())
 
     def _refresh_playhead_visual(self) -> None:
-        """Repaint the playhead strip after a visual-state change (drag label...)."""
+        """Repaint the playhead strip after a visual-state change."""
         playhead = self._playhead_item
         if playhead is None:
             return
@@ -13496,6 +13879,9 @@ class TimelineView(QGraphicsView):
 
     def clear(self) -> None:
         """Clear the timeline view."""
+        if not self._interaction.is_idle:
+            self._cancel_current_interaction()
+        self._hide_trim_monitor()
         self._clear_items()
         self._remove_persistent_items()
         self._timeline = None
@@ -13509,8 +13895,16 @@ class TimelineView(QGraphicsView):
         self._timeline_command_stacks.clear()
         self._timeline_history_snapshots.clear()
         self._project_transaction_sequences.clear()
+        self._source_patch_routes.clear()
+        self._selected_edit_edges.clear()
+        self._independent_selection = False
+        self._target_track_id = None
+        self._target_audio_track_id = None
+        self._retime_control_clip_ids.clear()
+        self.set_position_lock_enabled(False)
         self._command_stack = CommandStack()
         self._initialize_scene()
+        self.selection_changed.emit(self._selection)
 
     # ==================== Track Management ====================
 
@@ -13886,6 +14280,11 @@ class TimelineView(QGraphicsView):
             new_header._is_target = True
             new_header.update()
 
+        for header in self._track_headers.values():
+            if header.track_type in {"video", "audio"}:
+                header.set_source_patch_enabled(
+                    self.source_patch_track_id(header.track_type) == header.track_id)
+
         logger.debug(f"Target {track.track_type} track changed to {track_id}")
 
     def _update_track_clip_states(self, track_id: str) -> None:
@@ -14108,6 +14507,12 @@ class TimelineView(QGraphicsView):
         clip_id: str | None = None
         track_id: str | None = None
         selected_clip_ids = self._selection.selected_clip_ids
+        if len(selected_clip_ids) == 2:
+            first = self._timeline.get_clip_by_id(selected_clip_ids[0])
+            partner = self._get_reciprocal_linked_clip(first)
+            if partner is not None and partner.clip_id in selected_clip_ids:
+                primary = self._selection.primary_item
+                selected_clip_ids = [primary.item_id if primary is not None else first.clip_id]
         if len(selected_clip_ids) == 1:
             selected_clip = self._timeline.get_clip_by_id(selected_clip_ids[0])
             if (
@@ -17955,6 +18360,12 @@ class TimelineView(QGraphicsView):
         if self._timeline is None:
             return None
         selected = list(getattr(self._selection, "selected_clip_ids", ()) or ())
+        if len(selected) == 2:
+            first = self._timeline.get_clip_by_id(selected[0])
+            partner = self._get_reciprocal_linked_clip(first)
+            if partner is not None and partner.clip_id in selected:
+                primary = self._selection.primary_item
+                selected = [primary.item_id if primary is not None else first.clip_id]
         if len(selected) > 1:
             # 多选不隐式批量替换（契约 D1-1）——按无目标处理并在上层提示
             self.status_message_requested.emit(I18N.tr(

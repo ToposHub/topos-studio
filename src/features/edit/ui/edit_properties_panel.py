@@ -1214,7 +1214,10 @@ class EditPropertiesPanel(QWidget):
     def _make_numeric_slider(self, is_int: bool, mn: float, mx: float,
                              step: float, value: float) -> ToposClickableSlider:
         """数值滑块（ToposClickableSlider，stretch=1 自适应宽度）。"""
-        slider = ToposClickableSlider(Qt.Orientation.Horizontal)
+        # Selection rebuilds these controls synchronously during a timeline
+        # mouse press. A parentless slider shown before layout insertion is
+        # a real top-level window on macOS and steals the timeline's grab.
+        slider = ToposClickableSlider(Qt.Orientation.Horizontal, parent=self)
         slider.enable_velocity_drag = True
         if is_int:
             slider.setRange(int(mn), int(mx))
@@ -1226,7 +1229,6 @@ class EditPropertiesPanel(QWidget):
         # Sliders are always visible — they stretch to fill the row's middle so
         # the value box stays pinned to the right edge (composite parity).  An
         # earlier version hid them on narrow docks, which left-aligned every row.
-        slider.setVisible(True)
         return slider
 
     def _build_numeric_row(self, section: EditSectionWidget, key: str,
@@ -4576,7 +4578,7 @@ def _create_effect_xy_row(
         return m
 
     def build_axis(pd: ParamDef, val: Any, is_int: bool, letter: str):
-        slider = ToposClickableSlider(Qt.Orientation.Horizontal)
+        slider = ToposClickableSlider(Qt.Orientation.Horizontal, parent=row)
         slider.enable_velocity_drag = True
         if is_int:
             slider.setRange(int(pd.min_val), int(pd.max_val))
@@ -4953,7 +4955,7 @@ def _create_effect_param_widget(self: EditPropertiesPanel, param_name: str,
         label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         h.addWidget(label)
         clip = self._current_clips[0] if self._current_clips else None
-        slider = ToposClickableSlider(Qt.Orientation.Horizontal)
+        slider = ToposClickableSlider(Qt.Orientation.Horizontal, parent=row)
         slider.enable_velocity_drag = True
         if is_int:
             slider.setRange(int(pdef.min_val), int(pdef.max_val))
