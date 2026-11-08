@@ -394,6 +394,52 @@ def equal_power_fade_envelope(num_samples: int, fade_in_samples: int = 0,
     return env
 
 
+def smooth_fade_envelope(num_samples: int, fade_in_samples: int = 0,
+                         fade_out_samples: int = 0) -> np.ndarray:
+    """B16：smoothstep 淡化包络（两端切线水平，过渡更柔和）。
+
+    淡入 gain = 3t²-2t³（t∈[0,1]）；淡出为其镜像 1-(3t²-2t³)。
+    与 linear/equal_power 同一签名，可互换注入 ``apply_clip_fade``。
+    """
+    env = np.ones(num_samples, dtype=np.float64)
+    fi = max(0, min(int(fade_in_samples), num_samples))
+    fo = max(0, min(int(fade_out_samples), num_samples))
+    if fi > 0:
+        t = np.linspace(0.0, 1.0, fi, dtype=np.float64)
+        env[:fi] = 3.0 * t * t - 2.0 * t * t * t
+    if fo > 0:
+        t = np.linspace(0.0, 1.0, fo, dtype=np.float64)
+        env[-fo:] = 1.0 - (3.0 * t * t - 2.0 * t * t * t)
+    return env
+
+
+# B16：FadeCurve 形状 → 包络函数。None/未知 = 既有 equal_power（音频
+# legacy 默认，保证旧工程逐样本不变）；"linear" 视听统一线性。
+FADE_CURVE_ENVELOPES = {
+    "linear": linear_fade_envelope,
+    "equal_power": equal_power_fade_envelope,
+    "smooth": smooth_fade_envelope,
+}
+
+
+def fade_curve_factor(shape: str | None, progress: float) -> float:
+    """B16：归一化进度（0..1）→ 淡化增益（0..1），视频/音频共用定义。
+
+    曲线沿各自 duration 的归一化进度定义（计划 B16）；``None`` 由
+    调用方决定 legacy 默认（视频 linear / 音频 equal_power）——默认
+    曲线保留旧结果，不引入隐式第二语义。增益值域 [0,1]，对 HDR
+    像素只做透明度系数、无理由不 clamp 颜色数据。
+    """
+    p = 0.0 if progress < 0.0 else (1.0 if progress > 1.0 else progress)
+    if shape == "equal_power":
+        import math
+        return math.sin(math.pi / 2.0 * p)
+    if shape == "smooth":
+        return 3.0 * p * p - 2.0 * p * p * p
+    # "linear" 与 None 的视频默认
+    return p
+
+
 def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
                     clip_timeline_duration: int, current_frame: int,
                     fade_in_frames: int, fade_out_frames: int,
@@ -401,7 +447,8 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
                     envelope_fn=equal_power_fade_envelope,
                     fade_in_samples_override: int | None = None,
                     fade_out_samples_override: int | None = None,
-                    audio_sample_offset: int = 0) -> np.ndarray:
+                    audio_sample_offset: int = 0,
+                    fade_curve: str | None = None) -> np.ndarray:
     """对一块样本应用 clip 淡入/淡出包络（AM-06）。
 
     根据当前块在 clip 时间线范围内的绝对采样位置生成包络并逐样本相乘。
@@ -485,16 +532,20 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
     def curve_values(t: np.ndarray, fade_in: bool) -> np.ndarray:
         """Evaluate the selected curve without restarting it per audio block."""
         t = np.clip(t, 0.0, 1.0)
-        if envelope_fn is equal_power_fade_envelope:
+        # B16：显式 fade_curve 优先（与视频同一形状定义）；缺省回落
+        # envelope_fn（实时路径 legacy equal_power / 显式注入的 linear）
+        selected = (FADE_CURVE_ENVELOPES.get(fade_curve)
+                    if fade_curve is not None else None)
+        if selected is smooth_fade_envelope:
+            s = 3.0 * t * t - 2.0 * t * t * t
+            return s if fade_in else 1.0 - s
+        if (selected is equal_power_fade_envelope
+                or (selected is None
+                    and envelope_fn is equal_power_fade_envelope)):
             if fade_in:
                 return np.sin(np.pi / 2.0 * t)
             return np.cos(np.pi / 2.0 * t)
-        if envelope_fn is linear_fade_envelope:
-            return t if fade_in else 1.0 - t
-
-        # Custom curves are not safe to evaluate on a local block because that
-        # would reintroduce the old per-block reset.  Keep a predictable linear
-        # fallback until a custom curve API carries an explicit sample offset.
+        # linear（显式或缺省注入）与未知自定义曲线：可预测的线性回退
         return t if fade_in else 1.0 - t
 
     if has_in:

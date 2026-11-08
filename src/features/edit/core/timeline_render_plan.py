@@ -927,16 +927,24 @@ class TimelineRenderPlan:
             crop.feather
         )
 
-        # Calculate fade opacity factor based on clip's fade in/out
+        # Calculate fade opacity factor based on clip's fade in/out.
+        # B16：曲线形状沿各自 duration 的归一化进度取值（视频默认
+        # linear = 旧结果逐帧不变）；因子只乘透明度，不 clamp 颜色数据。
+        from src.features.edit.core.audio_dsp import fade_curve_factor
+
         fade_opacity = 1.0
         clip_relative = sample_frame - clip.timeline_start
         clip_duration = clip.timeline_duration
         if clip.fade_in_duration > 0 and clip_relative < clip.fade_in_duration:
-            fade_opacity = min(fade_opacity, clip_relative / clip.fade_in_duration)
+            fade_opacity = min(fade_opacity, fade_curve_factor(
+                clip.fade_curve,
+                clip_relative / clip.fade_in_duration))
         if clip.fade_out_duration > 0:
             frames_from_end = clip_duration - clip_relative
             if frames_from_end < clip.fade_out_duration:
-                fade_opacity = min(fade_opacity, frames_from_end / clip.fade_out_duration)
+                fade_opacity = min(fade_opacity, fade_curve_factor(
+                    clip.fade_curve,
+                    frames_from_end / clip.fade_out_duration))
         fade_opacity = max(0.0, min(1.0, fade_opacity))
 
         # opacity 评估关键帧动画，再乘以 fade 因子

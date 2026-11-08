@@ -311,6 +311,12 @@ class ClipInstance:
     # Phase 1.2: Fade in/out duration (frames)
     fade_in_duration: int = 0  # 淡入时长（帧）
     fade_out_duration: int = 0  # 淡出时长（帧）
+    # B16：淡化曲线形状（沿 fade_in/out_duration 的归一化进度定义）。
+    # None = legacy 默认（视频 linear / 音频 equal_power，旧工程逐帧/
+    # 逐样本不变）；显式 "linear" | "equal_power" | "smooth" 视听统一。
+    # split/复制经 replace 自动继承；序列化非默认才写出，未知历史值
+    # 读取保留（消费者按 legacy 默认解释，不丢字段）。
+    fade_curve: str | None = None
     # F3.3 · 采样级音频语义（有理数时钟见 core/sample_time.py）：
     # - audio_sample_offset: 时间线侧子帧偏移（clip 帧起点后延迟的样本数
     #   @48k 参考率，r ≥ 0；不做帧进位归一化——非整数帧率下任何进位都
@@ -409,6 +415,13 @@ class ClipInstance:
                 raise ValueError(f"{_name} out of range: {_v}")
         if self.fade_out_duration < 0:
             raise ValueError(f"fade_out_duration cannot be negative: {self.fade_out_duration}")
+        # B16：fade_curve 白名单（None=legacy 默认；未知历史值读取保留
+        # 由 from_dict 负责，构造路径严格校验新写）
+        if self.fade_curve is not None and self.fade_curve not in (
+                "linear", "equal_power", "smooth"):
+            raise ValueError(
+                f"fade_curve must be linear|equal_power|smooth or None: "
+                f"{self.fade_curve!r}")
         # fade duration cannot exceed clip duration
         if self.fade_in_duration > self.timeline_duration:
             raise ValueError(f"fade_in_duration ({self.fade_in_duration}) exceeds clip duration ({self.timeline_duration})")
@@ -964,6 +977,10 @@ class ClipInstance:
         resolved = _parse_blend_mode(mode)
         return replace(self, blend_mode=resolved)
 
+    def with_fade_curve(self, curve: "str | None") -> ClipInstance:
+        """B16：设置淡化曲线形状（None=legacy 默认；白名单校验）。"""
+        return replace(self, fade_curve=curve)
+
     def with_audio_gain_db(self, gain_db: float) -> ClipInstance:
         """C3: 返回设置片段级音频增益的新实例（clamp [-48, +12] dB）。"""
         clamped = max(-48.0, min(12.0, float(gain_db)))
@@ -1437,6 +1454,8 @@ class ClipInstance:
             # Phase 1.2: Fade in/out
             "fade_in_duration": self.fade_in_duration,
             "fade_out_duration": self.fade_out_duration,
+            # B16：淡化曲线——非默认才写出（旧工程序列化字节不变）
+            "fade_curve": self.fade_curve,
             # F3.3：采样级字段——非默认才写出（旧工程序列化字节不变；
             # 字段语义声明见 sample_time.py；旧版读新工程保留于 _extra_fields）
             "audio_sample_offset": self.audio_sample_offset or None,
@@ -1543,6 +1562,13 @@ class ClipInstance:
             # Phase 1.2: Fade in/out
             fade_in_duration=data.get("fade_in_duration", 0),
             fade_out_duration=data.get("fade_out_duration", 0),
+            # B16：曲线缺键 → None（legacy）。构造校验拒绝未知新写；
+            # 损坏/未来值清洗为 None（freeze_source_frame 同先例），
+            # 不让坏字段阻断整个工程加载
+            fade_curve=(
+                data.get("fade_curve")
+                if data.get("fade_curve") in (
+                    "linear", "equal_power", "smooth") else None),
             # F3.3：采样级字段（缺省=旧工程；负值/非 int 防御回退默认，
             # 不静默舍入语义——非法载荷回退 0/None 并保持可检测）
             audio_sample_offset=_int_or_default(
