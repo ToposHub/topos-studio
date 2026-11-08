@@ -2796,6 +2796,12 @@ class SourceViewerWidget(QWidget):
     # ==================== Properties ====================
 
     @property
+    def is_playing(self) -> bool:
+        """VP-B01: public playback state (read-only feed for the viewer
+        arbiter's state feedback and monitor snapshots)."""
+        return self._is_playing
+
+    @property
     def current_frame(self) -> int:
         """Get the current frame."""
         return self._current_frame
