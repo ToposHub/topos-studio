@@ -678,7 +678,9 @@ class EditPage(QWidget):
             main._stop_recording_and_import(track_id)
         else:
             try:
-                main._start_recording(track_id)
+                # B10：时间线 Voiceover 入口——capture 会话，take 完成后
+                # 落 clip 到该轨锚点（ADR 素材采集路径不受影响）
+                main._start_recording(track_id, voiceover=True)
             except Exception:
                 # B02③：启动失败不留下"不明轨"——仅撤销本次手势创建的
                 # 轨道，反馈后重新抛出让宿主继续处理真实设备错误。

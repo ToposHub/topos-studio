@@ -429,8 +429,8 @@ class _FakeRecordingMain(QObject):
         self._recording_managers: dict[str, Any] = {}
         self.dock_adr_take_sheet = None
 
-    def _start_recording(self, track_id: str) -> None:
-        self.started.append(track_id)
+    def _start_recording(self, track_id: str, *, voiceover: bool = False) -> None:
+        self.started.append((track_id, voiceover))
         self._recording_managers[track_id] = _FakeManager()
 
     def _stop_recording_and_import(self, track_id: str) -> None:
@@ -476,11 +476,11 @@ def test_voiceover_starts_on_effective_audio_track(
     panel.get_timeline_view()._on_source_patch_requested("a1", True)
 
     page._on_timeline_voiceover_requested()
-    assert main.started == ["a1"]
+    assert main.started == [("a1", True)]
     # 同轨再触发 = 停止导入
     page._on_timeline_voiceover_requested()
     assert main.stopped == ["a1"]
-    assert main.started == ["a1"]
+    assert main.started == [("a1", True)]
 
 
 def test_voiceover_without_context_is_noop(
@@ -546,7 +546,7 @@ def test_b02_creates_track_by_id_contract_and_starts(
     page._on_timeline_voiceover_requested()  # 原代码在此抛 AttributeError
 
     assert len(main.started) == 1
-    created_id = main.started[0]
+    created_id = main.started[0][0]
     view = panel.get_timeline_view()
     timeline = view.get_timeline()
     assert timeline.get_track_by_id(created_id) is not None
@@ -564,7 +564,8 @@ def test_b02_start_failure_rolls_back_created_track(
     panel = _attach_no_audio(qtbot, page)
 
     class _FailingMain(_FakeRecordingMain):
-        def _start_recording(self, track_id: str) -> None:
+        def _start_recording(self, track_id: str,
+                             *, voiceover: bool = False) -> None:
             raise OSError("device unavailable")
 
     page._main_window = _FailingMain()

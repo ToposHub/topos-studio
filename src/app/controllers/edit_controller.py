@@ -3161,7 +3161,7 @@ class EditControllerMixin:
         else:
             self._stop_recording_and_import(track_id)
 
-    def _start_recording(self, track_id: str) -> None:
+    def _start_recording(self, track_id: str, *, voiceover: bool = False) -> None:
         """启动录音（§4.4 / P1-10：input patch、时间码对齐、监听、电平）。
 
         P1-10 增强：
@@ -3171,6 +3171,11 @@ class EditControllerMixin:
           time_reference_samples / start_timecode（bext TimeReference）；
         - 输入监听（QAudioSink 回放）与输入电平表接到面板；
         - 延迟校准结果（已"校准"过）应用到时间基准。
+
+        B10：``voiceover=True``（时间线 Voiceover 入口）时捕获会话
+        （project/timeline/track/anchor/generation），take 完成后按
+        会话在目标轨锚点落 clip；ADR 面板/混音器 R 的素材采集路径
+        （默认 False）行为不变，只导入素材。
         """
         from src.features.edit.core.recording_manager import (
             RecordingManager, RecordingConfig,
@@ -3219,8 +3224,26 @@ class EditControllerMixin:
         mgr.enable_live_post_roll = True  # 停止后采集 post-roll 尾巴再落盘
         # 状态回调（携带录音时的工程标识：post-roll 秒内切工程防错投）
         project_id = getattr(project, 'project_id', None)
+        # B10②：voiceover 会话快照（capture 时的 project/timeline/track/
+        # anchor/generation）随闭包冻结——完成时按快照校验，迟到/换代
+        # take 不落 clip
+        voiceover_session = None
+        if voiceover:
+            self._voiceover_generation = (
+                getattr(self, '_voiceover_generation', 0) + 1)
+            voiceover_session = {
+                "project_id": project_id,
+                "timeline_id": getattr(timeline, 'timeline_id', None),
+                "track_id": track_id,
+                "anchor_frame": int(in_point_frame or 0),
+                "generation": self._voiceover_generation,
+            }
+            if not hasattr(self, '_voiceover_sessions'):
+                self._voiceover_sessions = {}
+            self._voiceover_sessions[track_id] = voiceover_session
         mgr.on_take_completed = (
-            lambda take, _pid=project_id: self._on_take_recorded(track_id, take, _pid))
+            lambda take, _pid=project_id, _vs=voiceover_session:
+            self._on_take_recorded(track_id, take, _pid, _vs))
         mgr.on_error = lambda msg: logger.error("Recording error: %s", msg)
         panel = self._adr_panel()
         if panel is not None:
@@ -3283,16 +3306,30 @@ class EditControllerMixin:
         mgr.stop_recording()
 
     def _on_take_recorded(self, track_id: str, take,
-                          recorded_project_id=None) -> None:
+                          recorded_project_id=None,
+                          voiceover_session=None) -> None:
         """录音 take 完成 → 导入为新 asset（§4.4 / RMA-11）。
 
         将录制的 WAV 文件作为 audio asset 导入工程，并把 `import_asset` 返回的
         新 EditProject 回写到会话（之前 new_project 被丢弃，take 无法可靠进入工程）。
         回写走与 media_pool 单文件导入一致的三步：import → set_project →
         project_changed.emit，确保 bin/timeline/renderer 同步刷新。
+
+        B10：``voiceover_session`` 非空（时间线 Voiceover 入口）时，导入
+        成功后按会话快照在目标轨锚点落 clip（单步 undo）；迟到/换代/
+        切 timeline/删轨/锁轨/锚点冲突都明确跳过落 clip，素材保留在
+        媒体池不丢文件。
         """
         if take is None or take.status not in ("completed", "completed_partial"):
             logger.info("Take discarded (status=%s)", getattr(take, 'status', 'unknown'))
+            # B10④：取消/失败 take 清掉该轨 voiceover 会话（一次会话一 take）
+            if voiceover_session is not None:
+                sessions = getattr(self, '_voiceover_sessions', None) or {}
+                latest = sessions.get(track_id)
+                if (latest is not None
+                        and latest.get("generation")
+                        == voiceover_session.get("generation")):
+                    sessions.pop(track_id, None)
             return
         try:
             # 工程引用真源是 self._current_edit_project。
@@ -3365,6 +3402,11 @@ class EditControllerMixin:
                     track_id=track_id,
                 )
 
+            # B10③：voiceover 会话 → 目标轨锚点落 clip（asset 导入已成功；
+            # 守卫不通过时素材保留在池，明确反馈）
+            if voiceover_session is not None and asset is not None:
+                self._place_voiceover_clip(voiceover_session, asset, take)
+
             # P1-10 loop record：In/Out 截止的 take 在完成回调后同打点
             # 续录。disarm（pop manager / 清 _adr_loop_tracks）自然停止；
             # 审计修复：身份+在录守卫防 post-roll 秒内 disarm→再 arm 时
@@ -3388,6 +3430,104 @@ class EditControllerMixin:
                         logger.warning("Loop restart failed: %s", e)
         except Exception as e:
             logger.warning("Failed to import take %s: %s", take.file_path, e)
+
+    def _place_voiceover_clip(self, session: dict, asset, take) -> None:
+        """B10③：voiceover take 完成 → 会话目标轨锚点落 clip（单步 undo）。
+
+        守卫（任一不满足 → 跳过落 clip，素材已导入不丢）：
+        - 迟到/换代：当前会话 generation 与快照不一致（同轨又开新会话）；
+        - 切 timeline：当前时间线 ID ≠ 快照；
+        - 删轨/锁轨：目标轨不存在或被锁；
+        - 锚点冲突：目标轨 [anchor, anchor+duration) 已有 clip。
+
+        落点与时长：anchor = 会话捕获时的播放头帧；duration =
+        take.duration_seconds × 时间线 fps（四舍五入，≥1）。
+        """
+        def _notify(message: str) -> None:
+            status_bar = getattr(self, 'status_bar', None)
+            if status_bar is not None:
+                status_bar.showMessage(message, 4000)
+
+        try:
+            # ④ 迟到/换代守卫
+            sessions = getattr(self, '_voiceover_sessions', None) or {}
+            latest = sessions.get(session["track_id"])
+            if (latest is None
+                    or latest.get("generation") != session.get("generation")):
+                logger.info(
+                    "Voiceover take late (session replaced on %s); "
+                    "asset imported only", session["track_id"])
+                return
+            panel = getattr(self, 'timeline_panel', None)
+            view_getter = getattr(panel, 'get_timeline_view', None)
+            timeline_view = view_getter() if callable(view_getter) else None
+            timeline = (timeline_view.get_timeline()
+                        if timeline_view is not None else None)
+            # ④ 切 timeline 守卫（双层：宿主当前时间线与写入边界一致时
+            # 才落 clip；任一指向别的 timeline 都跳过）
+            edit_page = getattr(self, 'edit_page', None)
+            host_timeline = (getattr(edit_page, '_current_timeline', None)
+                             if edit_page is not None else None)
+            if (timeline is None
+                    or timeline.timeline_id != session.get("timeline_id")
+                    or (host_timeline is not None
+                        and getattr(host_timeline, 'timeline_id', None)
+                        != session.get("timeline_id"))):
+                logger.warning(
+                    "Voiceover: timeline changed during recording "
+                    "(session=%s current=%s); clip not placed",
+                    session.get("timeline_id"),
+                    getattr(timeline, 'timeline_id', None))
+                _notify("Voiceover: timeline changed — take imported to the "
+                        "media pool only")
+                return
+            track = timeline.get_track_by_id(session["track_id"])
+            if track is None or track.track_type != "audio":
+                logger.warning(
+                    "Voiceover: track %s missing during recording; "
+                    "clip not placed", session["track_id"])
+                _notify("Voiceover: destination track removed — take "
+                        "imported to the media pool only")
+                return
+            if timeline_view.is_track_locked(track.track_id):
+                _notify("Voiceover: destination track locked — take "
+                        "imported to the media pool only")
+                return
+            fps = float(timeline.fps)
+            duration_frames = max(
+                1, int(round(float(getattr(take, 'duration_seconds', 0.0) or 0.0) * fps)))
+            anchor = max(0, int(session.get("anchor_frame") or 0))
+            if any(anchor < c.timeline_end and anchor + duration_frames > c.timeline_start
+                   for c in track.clips):
+                _notify("Voiceover: destination range occupied — take "
+                        "imported to the media pool only")
+                logger.info(
+                    "Voiceover clip skipped: range [%d, %d) occupied on %s",
+                    anchor, anchor + duration_frames, track.track_id)
+                return
+
+            from src.features.edit.core.commands import AddClipCommand
+            from src.features.edit.core.timeline_v2 import ClipInstance
+
+            clip = ClipInstance(
+                clip_id=str(uuid.uuid4()),
+                asset_id=asset.asset_id,
+                track_id=track.track_id,
+                timeline_start=anchor,
+                timeline_duration=duration_frames,
+                source_start=0,
+                source_duration=duration_frames,
+                speed=1.0,
+            )
+            timeline_view.execute_command(
+                AddClipCommand.create(track.track_id, clip))
+            # 一次会话一 take：落 clip 后消费会话
+            sessions.pop(session["track_id"], None)
+            logger.info(
+                "Voiceover clip placed on %s at frame %d (%d frames)",
+                track.track_id, anchor, duration_frames)
+        except Exception as e:
+            logger.warning("Voiceover clip placement failed: %s", e)
 
     # ------------------------------------------------------------------
     # P1-10: ADR take sheet / input patch / 延迟校准 接线
