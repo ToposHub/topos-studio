@@ -9298,11 +9298,12 @@ class TimelineView(QGraphicsView):
         project_before_copy = self._project
 
         commands = []
-        # Copies headed for the auto-created track (one command creates the
-        # track and places all of them, regardless of how many there are).
-        new_track_clips: list = []
-        new_track_binding_commands: list = []
-        new_track_pseudo_id = ""
+        # R06：自动建轨副本**按目标伪轨 ID 分桶**——互链 A/V 对可能同时
+        # 目标 __new_video_track_above__ 与 __new_audio_track_below__，
+        # 各建一条轨各自放片（旧实现单一列表 + 最后伪 ID 把两副本挤进
+        # 同一条轨，重叠拒绝且无诊断）。
+        new_track_buckets: dict[str, list] = {}
+        new_track_binding_commands: dict[str, list] = {}
         for cid, orig_start in session.original_positions.items():
             clip = self._timeline.get_clip_by_id(cid)
             if clip is None:
@@ -9312,7 +9313,24 @@ class TimelineView(QGraphicsView):
                 continue
             target_tid, resolved_start, goes_to_new_track = planned
             if goes_to_new_track:
-                new_track_pseudo_id = target_tid
+                # 类型预检（整次拒绝）：伪轨类型必须与成员源轨类型一致
+                pseudo_type = (
+                    "video" if "video" in target_tid else "audio")
+                source_track = self._timeline.get_track_by_id(clip.track_id)
+                if (source_track is None
+                        or source_track.track_type != pseudo_type):
+                    self._project = project_before_copy
+                    message = I18N.tr(
+                        "timeline.copy.track_type_mismatch",
+                        "Copy: clip and target track types do not match; "
+                        "nothing was copied")
+                    self.status_message_requested.emit(message)
+                    logger.warning(
+                        "Alt-drag copy rejected: clip %s (%s) cannot go to "
+                        "new %s track", cid,
+                        getattr(source_track, "track_type", "?"),
+                        pseudo_type)
+                    return
 
             clip_dict = clip.to_dict()
             new_clip_id = old_to_new[cid]
@@ -9391,28 +9409,31 @@ class TimelineView(QGraphicsView):
                 binding_command = AddCaptionGraphicBindingCommand.create(
                     copied_binding)
             if goes_to_new_track:
-                new_track_clips.append(new_clip)
+                new_track_buckets.setdefault(target_tid, []).append(new_clip)
                 if binding_command is not None:
-                    new_track_binding_commands.append(binding_command)
+                    new_track_binding_commands.setdefault(
+                        target_tid, []).append(binding_command)
             else:
                 cmd = AddClipCommand.create(target_tid, new_clip)
                 commands.append(cmd)
                 if binding_command is not None:
                     commands.append(binding_command)
 
-        # One command creates the new track and places every copy headed there.
-        if new_track_clips:
-            nt_type = "video" if "video" in new_track_pseudo_id else "audio"
-            nt_position = "above" if "above" in new_track_pseudo_id else "below"
-            nt_role = (
-                "graphics" if new_track_binding_commands else "standard"
-            )
-            commands.insert(
-                0,
-                CopyClipsToNewTrackCommand.create(
-                    nt_type, nt_position, new_track_clips, track_role=nt_role),
-            )
-            commands[1:1] = new_track_binding_commands
+        # One command per pseudo track: creates that track and places every
+        # copy headed there (V/A 双轨 = 两条子命令，同一宏 = 单步 undo).
+        if new_track_buckets:
+            for pseudo_id, bucket_clips in new_track_buckets.items():
+                nt_type = "video" if "video" in pseudo_id else "audio"
+                nt_position = "above" if "above" in pseudo_id else "below"
+                bindings = new_track_binding_commands.get(pseudo_id, [])
+                nt_role = "graphics" if bindings else "standard"
+                commands.insert(
+                    0,
+                    CopyClipsToNewTrackCommand.create(
+                        nt_type, nt_position, bucket_clips,
+                        track_role=nt_role),
+                )
+                commands[1:1] = bindings
 
         if not commands:
             return
@@ -9425,6 +9446,11 @@ class TimelineView(QGraphicsView):
                 self._execute_command(macro)
         except ValueError as exc:
             logger.warning(f"Alt-drag copy rejected: {exc}")
+            # R06：拒绝必须发 UI 诊断——静默失败让"松手后没有副本"无法
+            # 与成功区分（双自动轨反例即在此路径无提示丢失整次操作）。
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.copy.rejected",
+                "Copy rejected: {reason}").format(reason=exc))
             # AUD-21404: 回滚执行前项目引用——见上方 project_before_copy
             # 注释；回滚后状态与失败前一致，无需（也不应）广播
             # project_changed。
