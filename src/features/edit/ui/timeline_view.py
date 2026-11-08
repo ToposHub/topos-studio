@@ -99,6 +99,10 @@ from src.features.edit.core.timeline_v2 import (
 from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.core.project import MediaAsset, get_media_type
 from src.features.edit.core.clip_params import SpeedParams
+from src.features.edit.core.source_drag_payload import (
+    MIME_TYPE_SOURCE_CLIP,
+    decode_source_drag_payload,
+)
 from src.features.edit.ui.timeline_edit_affordances import edit_cursor
 from src.features.edit.core.render_cache_status import build_cache_indicator_segments
 from src.features.edit.core.transition_catalog import TRANSITION_LABELS
@@ -967,6 +971,9 @@ class TimelineView(QGraphicsView):
         self._alt_copy_ghosts: dict[str, ClipItem] = {}
         self._drag_asset_ids: list[str] = []
         self._drag_assets: list[MediaAsset] = []
+        # VP-B08: Source 拖放载荷（viewer 源区间 + 流意图），优先于通用
+        # media-pool asset MIME 解析。
+        self._drag_source_payload = None
         self._drag_render_mode_active: bool = False
         self._drag_transition_type: Optional[str] = None  # For transition drag
         self._drag_effect_type: Optional[str] = None  # For effect drag (NEW)
@@ -15826,6 +15833,34 @@ class TimelineView(QGraphicsView):
                 event.ignore()
             return
 
+        # VP-B08: Source 拖放载荷（viewer 源区间 + 流意图）——契约比通用
+        # asset MIME 更严格（显式源窗口 + stream intent），优先解析。
+        if mime_data.hasFormat(MIME_TYPE_SOURCE_CLIP):
+            payload = decode_source_drag_payload(
+                mime_data.data(MIME_TYPE_SOURCE_CLIP))
+            asset = (
+                self._project.assets.get(payload.asset_id)
+                if payload is not None and self._project is not None
+                else None
+            )
+            if payload is None or asset is None:
+                event.ignore()
+                return
+            self._drag_source_payload = payload
+            self._drag_asset_ids = [payload.asset_id]
+            self._drag_assets = [asset]
+            self._drag_file_paths = []
+            self._drag_transition_type = None
+            self._drag_effect_type = None
+            self._drag_generator_type = None
+            self.dragMoveEvent(event)
+            event.acceptProposedAction()
+            logger.info(
+                "Drag enter accepted: source clip %s [%d..%d] intent=%s",
+                payload.asset_id, payload.in_frame, payload.out_frame,
+                payload.stream_intent)
+            return
+
         # Check for media pool assets MIME type (JSON format)
         if mime_data.hasFormat(MIME_TYPE_MEDIA_POOL_ASSETS):
             # Parse asset IDs from JSON
@@ -16269,6 +16304,7 @@ class TimelineView(QGraphicsView):
         self._hide_drag_preview()
         self._drag_asset_ids = []
         self._drag_assets = []
+        self._drag_source_payload = None
         self._drag_file_paths = []
         self._drag_file_previews = []
         self._drag_transition_type = None
@@ -16291,6 +16327,84 @@ class TimelineView(QGraphicsView):
         finally:
             self._clear_drop_drag()
 
+    def _handle_source_clip_drop(self, event: QDropEvent) -> None:
+        """VP-B08: Source 拖放（viewer 源区间 + 流意图）→ 单次既有编辑链。
+
+        - 源区间是 **Out 包含**语义（in..out），走与 Source 监视器插入相
+          同的 planner/命令链（insert 模式直连 ``insert_clip``）；
+        - stream intent：av（默认配对）/ video（只视频）/ audio（只音频，
+          落音频目标轨）；
+        - 锁轨 / 无可用目标轨 / 素材不在本项目 → 状态栏回因并拒绝
+          （零写入，不留半条 clip）。
+        """
+        payload = self._drag_source_payload
+        if payload is None or not self._drag_assets:
+            event.ignore()
+            return
+        asset = self._drag_assets[0]
+        timeline_was_missing = (
+            self._timeline is None or self._provisional_timeline)
+        if not self._ensure_first_asset_timeline_settings(asset):
+            event.ignore()
+            return
+        media_type = ("audio" if payload.stream_intent == "audio"
+                      else asset.media_type)
+        drop = self._resolve_media_drop_target(
+            event.position(), media_type, timeline_was_missing)
+        if not drop.is_valid and not drop.create_track:
+            self.status_message_requested.emit(
+                f"Source drop rejected: {drop.reason or 'invalid target'}")
+            event.ignore()
+            return
+        target_track_type = (
+            "audio" if media_type == "audio"
+            else "video" if media_type in (
+                "video", "image", "comp_clip", "motion_graphic")
+            else "video")
+        target_track = None
+        if drop.track_id and self._timeline is not None:
+            target_track = self._timeline.get_track_by_id(drop.track_id)
+        if target_track is None and drop.create_track and \
+                self._timeline is not None:
+            add_track_cmd = AddTrackCommand.create(target_track_type)
+            self._execute_command(add_track_cmd)
+            if add_track_cmd._created_track_id:
+                target_track = self._get_track_by_id(
+                    add_track_cmd._created_track_id)
+        if target_track is None:
+            self.status_message_requested.emit(
+                "Source drop rejected: no target track")
+            event.ignore()
+            return
+        if getattr(target_track, "is_locked", False):
+            self.status_message_requested.emit(
+                "Source drop rejected: target track is locked")
+            event.ignore()
+            return
+        insert_frame = self._calculate_insert_frame(drop.frame)
+        source_range = (int(payload.in_frame), int(payload.out_frame))
+        try:
+            if self._edit_mode == "insert":
+                success = self.insert_clip(
+                    asset_id=asset.asset_id,
+                    in_frame=source_range[0],
+                    out_frame=source_range[1],
+                    playhead=insert_frame,
+                    track_id=target_track.track_id,
+                )
+            else:
+                success = self._add_asset_as_clip(
+                    asset, target_track, insert_frame,
+                    source_range=source_range,
+                    stream_intent=payload.stream_intent)
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(f"Source drop rejected: {exc}")
+            success = False
+        if success:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
     def _commit_drop(self, event: QDropEvent) -> None:
         # Clear feedback before a drop opens dialogs or runs the import path.
         self._hide_drag_preview()
@@ -16309,6 +16423,11 @@ class TimelineView(QGraphicsView):
         # Handle transition drop
         if self._drag_transition_type:
             self._handle_transition_drop(event)
+            return
+
+        # VP-B08: Source 拖放（viewer 源区间 + 流意图）优先于通用资产拖放
+        if self._drag_source_payload is not None:
+            self._handle_source_clip_drop(event)
             return
 
         # Handle external file drop (import and add)
@@ -17622,7 +17741,9 @@ class TimelineView(QGraphicsView):
         del asset, timeline_duration, source_duration
         return 1.0
 
-    def _add_asset_as_clip(self, asset: MediaAsset, track: Optional[EditTrack], frame: int) -> bool:
+    def _add_asset_as_clip(self, asset: MediaAsset, track: Optional[EditTrack], frame: int,
+                           *, source_range: Optional[tuple[int, int]] = None,
+                           stream_intent: str = "av") -> bool:
         """
         Add asset as clip to timeline.
 
@@ -17631,6 +17752,11 @@ class TimelineView(QGraphicsView):
         InsertLinkedAssetCommand.  This guarantees:
         - No A/V desync (audio never silently moved to a different frame).
         - No half-finished state (either both succeed or neither changes timeline).
+
+        VP-B08: ``source_range`` (Out-inclusive) restricts the insert to the
+        viewer's current source window — it rides the same subclip time-domain
+        conversion (cross-fps timeline duration).  ``stream_intent`` ("av" /
+        "video" / "audio") forces the stream gating for source-monitor drags.
 
         Args:
             asset: MediaAsset to add
@@ -17683,14 +17809,24 @@ class TimelineView(QGraphicsView):
 
         # Check if asset is a subclip (scene cut sub-clip from media pool)
         is_subclip = bool(asset.metadata.get("is_subclip", False))
-        if is_subclip:
+        if source_range is not None:
+            # VP-B08: Source 拖放的显式源窗口走 subclip 同款时间域换算
+            is_subclip = True
+            subclip_source_start = int(source_range[0])
+            source_duration_frames = (
+                int(source_range[1]) - int(source_range[0]) + 1)  # Out 包含
+        elif is_subclip:
             subclip_source_start = int(asset.metadata.get("source_start", 0))
             subclip_source_duration = int(asset.metadata.get("source_duration", 0))
             source_duration_frames = (
                 subclip_source_duration if subclip_source_duration > 0
                 else self._get_asset_source_duration_frames(asset)
             )
-            # Timeline duration: subclip's source range mapped to timeline fps
+        else:
+            subclip_source_start = 0
+            source_duration_frames = self._get_asset_source_duration_frames(asset)
+        if is_subclip:
+            # Timeline duration: source range mapped to timeline fps
             if self._timeline is not None:
                 tl_fps = float(self._timeline.fps) if hasattr(self._timeline.fps, 'num') else self._timeline.fps
                 asset_fps = asset.fps or tl_fps
@@ -17701,7 +17837,6 @@ class TimelineView(QGraphicsView):
             else:
                 duration_frames = source_duration_frames
         else:
-            subclip_source_start = 0
             duration_frames = self._get_asset_duration_frames(asset)
             source_duration_frames = self._get_asset_source_duration_frames(asset)
 
@@ -17744,6 +17879,10 @@ class TimelineView(QGraphicsView):
         audio_off = (
             not patch.audio_enabled
             or self.source_destination_stream_disabled("audio"))
+        if stream_intent == "video":
+            audio_off = True   # VP-B08: Source 拖放只视频
+        elif stream_intent == "audio":
+            video_off = True   # VP-B08: Source 拖放只音频
         audio_destination = self.resolve_source_destination_track_id("audio")
         if has_audio and audio_off and video_off:
             logger.warning(
