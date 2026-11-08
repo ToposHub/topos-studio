@@ -21,6 +21,7 @@ from PyQt6.QtCore import QByteArray, QTimer, QObject, QEvent, QRunnable, QThread
 
 from src.features.color.core.layer import Layer
 from src.features.edit.core.playback_debug import playback_trace
+from src.features.edit.core.source_present_gate import SourcePresentGate
 from src.shared.diagnostics import flash_diag as _flash_diag
 from src.shared.io.file_io import FileIO
 from src.shared.i18n.i18n import I18N
@@ -2693,7 +2694,12 @@ class FileOpsMixin:
             source_renderer.present_frame_ready.connect(
                 self._on_source_present_frame_ready
             )
-            self._source_pending_present = None
+            # VP-B02: present pairing goes through SourcePresentGate so every
+            # dropped/displaced/mismatched descriptor reaches an explicit ack
+            # (an unacked slot is never reused by the pool).
+            self._source_present_gate = SourcePresentGate(
+                ack_slot=source_renderer.ack_present_slot
+            )
 
             # Start the render thread
             source_renderer.start()
@@ -2714,27 +2720,38 @@ class FileOpsMixin:
         The renderer emits present_frame_ready immediately before
         frame_ready for the same task on the same thread, so queued delivery
         preserves the pairing; the slot_id is matched by frame+generation.
+        VP-B02: the gate releases (acks) any pending descriptor this one
+        displaces — a dropped pending must never strand its slot.
         """
-        self._source_pending_present = present
+        gate = getattr(self, '_source_present_gate', None)
+        if gate is None:  # renderer created before this wiring existed
+            self._source_pending_present = present
+            return
+        gate.stash(present)
 
     def _on_source_gpu_frame_ready(self, frame: int, generation: int, tex_id: int, w: int, h: int) -> None:
         """Handle GPU-rendered frame for Source Viewer."""
-        if self.source_viewer_widget is None:
+        gate = getattr(self, '_source_present_gate', None)
+        if gate is None:
             return
         # Resolve the present slot backing this frame (if any) so the widget
         # can ack superseded/discarded slots back to the renderer's pool.
-        present = getattr(self, '_source_pending_present', None)
-        self._source_pending_present = None
-        slot_id = -1
-        if (
-            present is not None
-            and getattr(present, 'frame', -1) == frame
-            and getattr(present, 'generation_id', -1) == generation
-        ):
-            slot_id = getattr(present, 'slot_id', -1)
-        self.source_viewer_widget.set_gpu_frame(
-            tex_id, w, h, frame=frame, generation=generation, slot_id=slot_id
-        )
+        # Mismatched/late descriptors are acked inside the gate (VP-B02).
+        present = gate.take(frame=frame, generation=generation)
+        widget = self.source_viewer_widget
+        if widget is None:
+            if present is not None:
+                gate.release(present)  # host gone: orphan slot still returns
+            return
+        slot_id = getattr(present, 'slot_id', -1) if present is not None else -1
+        try:
+            widget.set_gpu_frame(
+                tex_id, w, h, frame=frame, generation=generation, slot_id=slot_id
+            )
+        except RuntimeError:
+            # Widget's C++ side already destroyed (window-close race): give
+            # the slot back instead of stranding it in the pool.
+            gate.release_slot(slot_id)
 
     def _setup_source_gpu_provider(self, gpu_decode_manager: object, source_gpu_renderer: object) -> None:
         """
