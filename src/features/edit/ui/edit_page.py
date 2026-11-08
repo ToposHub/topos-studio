@@ -549,18 +549,26 @@ class EditPage(QWidget):
         if panel is None:
             return
         self._panel_request_generation += 1
-        bindings = (
-            (panel.source_insert_requested, self._on_timeline_source_insert),
-            (panel.source_overwrite_requested, self._on_timeline_source_overwrite),
-            (panel.source_append_requested, self._on_timeline_source_append),
-            (panel.source_replace_requested, self._on_timeline_source_replace),
-            (panel.source_patch_changed, self._on_timeline_source_patch_changed),
-            (panel.keyframe_tray_requested, self._on_timeline_keyframe_tray_requested),
-            (panel.voiceover_requested, self._on_timeline_voiceover_requested),
-            (panel.flag_requested, self._on_timeline_flag_requested),
-            (panel.clip_speed_settings_requested,
+        # B14：clip_speed_settings_requested 为可选请求——测试替身/旧
+        # 宿主面板可能尚未提供该信号，缺席时跳过该绑定（其余请求不受
+        # 影响），不因单一新请求阻断整个绑定批。
+        requested_bindings = (
+            ("source_insert_requested", self._on_timeline_source_insert),
+            ("source_overwrite_requested", self._on_timeline_source_overwrite),
+            ("source_append_requested", self._on_timeline_source_append),
+            ("source_replace_requested", self._on_timeline_source_replace),
+            ("source_patch_changed", self._on_timeline_source_patch_changed),
+            ("keyframe_tray_requested", self._on_timeline_keyframe_tray_requested),
+            ("voiceover_requested", self._on_timeline_voiceover_requested),
+            ("flag_requested", self._on_timeline_flag_requested),
+            ("clip_speed_settings_requested",
              self._on_timeline_clip_speed_settings),
         )
+        bindings = [
+            (getattr(panel, name), slot)
+            for name, slot in requested_bindings
+            if getattr(panel, name, None) is not None
+        ]
         for signal, slot in bindings:
             signal.connect(slot)
             self._panel_request_connections.append((signal, slot))

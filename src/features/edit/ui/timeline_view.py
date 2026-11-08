@@ -12410,7 +12410,7 @@ class TimelineView(QGraphicsView):
                     or clip.freeze_source_frame is not None
                     or params.speed_points or animated)
         if advanced:
-            if not self.clip_speed_settings_requested.receivers():
+            if not self.receivers(self.clip_speed_settings_requested):
                 self.status_message_requested.emit(I18N.tr(
                     "edit.speed_dialog.unsupported",
                     "The selected speed options are not supported yet. "
