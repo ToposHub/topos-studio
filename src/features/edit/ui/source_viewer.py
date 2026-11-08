@@ -1552,6 +1552,22 @@ class _CpuFallbackDecodeWorker:
                 logger.debug(f"SourceViewerWidget: CPU fallback decoder close failed: {exc}")
 
 
+def _release_displayed_slot_on_destroy(state: dict) -> None:
+    """VP-B02: 归还 widget 销毁时仍在显示的 present slot。
+
+    ``destroyed`` 在 C++ 析构期发出，处理器不得触碰 widget 自身（同
+    AUD-20910 教训）：只读普通 dict 里的渲染器回调与最新 slot id。
+    """
+    ack = state.get("ack")
+    slot_id = state.get("slot_id", -1)
+    if ack is None or slot_id is None or slot_id < 0:
+        return
+    try:
+        ack(int(slot_id))
+    except Exception:
+        pass  # 渲染器可能已先行释放（迟到 ack 属已知竞态）
+
+
 class SourceViewerWidget(QWidget):
     """
     Main Source Viewer container widget.
@@ -1635,6 +1651,22 @@ class SourceViewerWidget(QWidget):
         self._gpu_displayed_slot_id: int = -1
         self._gpu_slot_ack_callback: Optional[Any] = None  # Callable[[int], None]
 
+        # VP-B02: hidden-view policy + slot lifecycle diagnostics.  The
+        # visibility revision is deliberately separate from the media
+        # generation (_gpu_generation): repeated show/hide must never
+        # invalidate the current asset's in-flight results.
+        self._view_hidden: bool = False
+        self._view_visibility_revision: int = 0
+        self._gpu_stats: dict[str, int] = {
+            "decode_submitted": 0,
+            "display_accepted": 0,
+            "results_discarded": 0,
+            "slots_acked": 0,
+        }
+        # destroyed 回调不得触碰 widget：slot 归还状态放普通 dict，
+        # 只携带渲染器回调与最新显示 slot id（VP-B02 销毁兜底）。
+        self._slot_release_state: dict = {"slot_id": -1, "ack": None}
+
         # GPU timeout watchdog: if GPU async result doesn't arrive within
         # _gpu_timeout_ms, fall back to CPU decode for that frame
         self._gpu_timeout_ms: int = 100  # 100ms timeout
@@ -1671,6 +1703,12 @@ class SourceViewerWidget(QWidget):
         # 器不得触碰 widget 自身，只捕获 worker）。
         _cpu_worker_ref = self._cpu_worker
         self.destroyed.connect(lambda _obj=None: _cpu_worker_ref.stop())
+        # VP-B02: widget 销毁时归还仍在显示的 present slot（池不变量：
+        # 未 ack 的 slot 永不复用）；处理器只读普通 dict，不碰 widget。
+        _slot_release_state = self._slot_release_state
+        self.destroyed.connect(
+            lambda _obj=None: _release_displayed_slot_on_destroy(
+                _slot_release_state))
 
         # GPU frame provider callback: callable(asset_path, frame) -> (tex_id, w, h) | None
         # When set, the Source Viewer will attempt GPU path first before CPU fallback.
@@ -1896,6 +1934,7 @@ class SourceViewerWidget(QWidget):
         # it back to the pool so the next source starts with a full pool.
         self._ack_gpu_slot(self._gpu_displayed_slot_id)
         self._gpu_displayed_slot_id = -1
+        self._slot_release_state["slot_id"] = -1
         self._last_good_qimage = None
         self._last_good_frame = -1
         self._error_message = None
@@ -1963,6 +2002,9 @@ class SourceViewerWidget(QWidget):
             callback: Callable[[int], None] (typically renderer.ack_present_slot)
         """
         self._gpu_slot_ack_callback = callback
+        # VP-B02: keep the destroy-path release state in sync (plain dict,
+        # readable from the destroyed handler without touching the widget).
+        self._slot_release_state["ack"] = callback
 
     def _ack_gpu_slot(self, slot_id: int) -> None:
         """Ack a present slot if it is valid and an ack callback is set."""
@@ -1970,6 +2012,7 @@ class SourceViewerWidget(QWidget):
             return
         try:
             self._gpu_slot_ack_callback(slot_id)
+            self._gpu_stats["slots_acked"] += 1
         except Exception as e:
             logger.debug(f"SourceViewerWidget: slot ack failed for {slot_id}: {e}")
 
@@ -2006,6 +2049,7 @@ class SourceViewerWidget(QWidget):
         # Generation guard: discard results from previous asset/seek
         if generation >= 0 and generation != self._gpu_generation:
             logger.debug(f"SourceViewerWidget: discarding GPU frame from old generation {generation} (current {self._gpu_generation})")
+            self._gpu_stats["results_discarded"] += 1
             self._ack_gpu_slot(slot_id)
             return False
 
@@ -2019,6 +2063,7 @@ class SourceViewerWidget(QWidget):
                  or frame < self._gpu_expected_frame - self._GPU_STALE_WINDOW)
         ):
             logger.debug(f"SourceViewerWidget: discarding stale GPU frame {frame} (expected {self._gpu_expected_frame})")
+            self._gpu_stats["results_discarded"] += 1
             self._ack_gpu_slot(slot_id)
             return False
 
@@ -2034,9 +2079,34 @@ class SourceViewerWidget(QWidget):
         # (its content is no longer referenced), so ack it for recycling.
         previous_slot = self._gpu_displayed_slot_id
         self._gpu_displayed_slot_id = slot_id
+        self._slot_release_state["slot_id"] = slot_id
+        self._gpu_stats["display_accepted"] += 1
         if previous_slot >= 0 and previous_slot != slot_id:
             self._ack_gpu_slot(previous_slot)
         return True
+
+    def hideEvent(self, event) -> None:
+        """VP-B02: hidden view policy — stop periodic decode/readback.
+
+        Display-only switch (single/dual layout toggle, dock hide, page
+        switch): keep the last presented frame and the playhead; stop
+        issuing periodic preview requests and stop the GPU watchdog so a
+        hidden view never spins up new (CPU fallback) decodes.  The media
+        generation is untouched — visibility has its own revision.
+        """
+        self._view_hidden = True
+        self._view_visibility_revision += 1
+        self._gpu_watchdog_timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self, event) -> None:
+        """VP-B02: re-shown — exactly one refresh request for the current frame."""
+        was_hidden = self._view_hidden
+        self._view_hidden = False
+        self._view_visibility_revision += 1
+        super().showEvent(event)
+        if was_hidden and self._current_asset is not None:
+            self._load_frame(self._current_frame)
 
     # ==================== Mark In/Out ====================
 
@@ -2479,6 +2549,11 @@ class SourceViewerWidget(QWidget):
 
         self.slider.setValue(self._current_frame)
         self._update_timecode()
+        if self._view_hidden:
+            # VP-B02: hidden view issues no periodic decode/readback; the
+            # clock and playhead keep running and the single refresh in
+            # showEvent picks the picture back up.
+            return
         self._load_frame(self._current_frame)
 
     def _on_insert(self) -> None:
@@ -2613,6 +2688,7 @@ class SourceViewerWidget(QWidget):
                         # GPU task submitted — start watchdog timer for fallback
                         self._gpu_pending_frame = frame
                         self._gpu_watchdog_timer.start(self._gpu_timeout_ms)
+                        self._gpu_stats["decode_submitted"] += 1
                         trace.decode_path = 'gpu_async_submitted'
                         trace.render_path = 'gpu_async_pending'
                         trace.total_ms = (_time.perf_counter() - t0) * 1000
@@ -2800,6 +2876,21 @@ class SourceViewerWidget(QWidget):
         """VP-B01: public playback state (read-only feed for the viewer
         arbiter's state feedback and monitor snapshots)."""
         return self._is_playing
+
+    @property
+    def view_visibility_revision(self) -> int:
+        """VP-B02: visibility revision (independent of media generation).
+
+        Bumped on every hide/show so hidden-view scheduling can invalidate
+        visibility-scoped state without ever treating the current asset's
+        media generation as stale.
+        """
+        return self._view_visibility_revision
+
+    @property
+    def gpu_slot_stats(self) -> dict[str, int]:
+        """VP-B02: decode/discard/ack counters for leak & starvation triage."""
+        return dict(self._gpu_stats)
 
     @property
     def current_frame(self) -> int:
