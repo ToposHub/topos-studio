@@ -2279,6 +2279,8 @@ class TimelineView(QGraphicsView):
                     item.rate_stretch_finished.connect(self._on_rate_stretch_finished)
                     item.retime_stretch_finished.connect(self._on_retime_stretch_finished)
                     item.retime_action_requested.connect(self._on_retime_action_requested)
+                    item.retime_point_dragged.connect(self._on_retime_point_dragged)
+                    item.retime_point_move_finished.connect(self._on_retime_point_move_finished)
 
                     # Slip signals (P4.4)
                     item.clip_slip.connect(self._on_clip_slip)
@@ -7785,6 +7787,8 @@ class TimelineView(QGraphicsView):
         item.rate_stretch_finished.connect(self._on_rate_stretch_finished)
         item.retime_stretch_finished.connect(self._on_retime_stretch_finished)
         item.retime_action_requested.connect(self._on_retime_action_requested)
+        item.retime_point_dragged.connect(self._on_retime_point_dragged)
+        item.retime_point_move_finished.connect(self._on_retime_point_move_finished)
         item.clip_slip.connect(self._on_clip_slip)
         item.slip_finished.connect(self._on_slip_finished)
         item.clip_slide.connect(self._on_clip_slide)
@@ -12741,6 +12745,49 @@ class TimelineView(QGraphicsView):
         params = self._retime_speed_params_for_clip(clip)
         try:
             self._commit_retime_params(clip, params.with_speed(speed), "Change clip speed")
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
+
+    def _on_retime_point_dragged(
+        self, clip_id: str, track_id: str,
+        origin_offset: int, preview_offset: int,
+    ) -> None:
+        """R08：把手拖动预览反馈（本地几何预览在 item 内，这里只报状态）。"""
+        self.status_message_requested.emit(I18N.tr(
+            "edit.retime.point_drag",
+            "Speed point: {origin} → {preview} (source frames)"
+        ).format(origin=origin_offset, preview=preview_offset))
+
+    def _on_retime_point_move_finished(
+        self, clip_id: str, track_id: str,
+        origin_offset: int, new_offset: int,
+    ) -> None:
+        """R08：松手 → 单命令提交（MoveSpeedPointCommand，B15/R02 语义）。
+
+        冻结片段明确拒绝并提示（能力矩阵外零写入）；邻点交叉等非法
+        落点由命令的严格开区间校验抛错 → 状态栏诊断。
+        """
+        if self._timeline is None:
+            return
+        clip = self._timeline.get_clip_by_id(clip_id)
+        if clip is None:
+            return
+        if self._is_track_locked(track_id):
+            return
+        if self._position_lock_enabled:
+            self.status_message_requested.emit(I18N.tr(
+                "edit.retime.point_lock_blocked",
+                "Position lock is on; speed point unchanged"))
+            return
+        if clip.freeze_source_frame is not None:
+            self.status_message_requested.emit(I18N.tr(
+                "edit.retime.point_frozen",
+                "The clip is frozen; speed points cannot be moved"))
+            return
+        from src.features.edit.core.commands import MoveSpeedPointCommand
+        try:
+            self._execute_command(MoveSpeedPointCommand.create(
+                clip_id, track_id, int(origin_offset), int(new_offset)))
         except (ValueError, RuntimeError) as exc:
             self.status_message_requested.emit(str(exc))
 
