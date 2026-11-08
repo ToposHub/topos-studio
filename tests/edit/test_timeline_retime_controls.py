@@ -103,8 +103,10 @@ def test_segment_menu_is_grouped_and_cancel_is_noop(qtbot: Any, monkeypatch: pyt
     assert not view._command_stack._undo_stack
 
 
-@pytest.mark.parametrize('key', ['freeze', 'rewind', 'ramp_up'])
+@pytest.mark.parametrize('key', ['rewind', 'ramp_up'])
 def test_advanced_segment_menu_request_preserves_intent(qtbot: Any, key: str) -> None:
+    """freeze 自 R10 起是已支持事务（SetClipFreezeCommand），不再转发——
+    见 test_retime_stage_advanced。"""
     view = _view(qtbot)
     before = view.get_timeline()
     requests = []
