@@ -228,3 +228,89 @@ def test_no_double_connect_when_manager_created_after_panel(
     page._reconnect_timeline_level_meter()  # 重复触发（防御）
     manager.audio_level_changed.emit([-9.0, -9.0])
     assert feed == [[-9.0, -9.0]]
+
+
+# ── B07/B09：未知字段/版本保留 + 跨工程上下文隔离 ─────────────────────
+
+
+def test_b07_unknown_fields_and_version_roundtrip(qtbot: Any) -> None:
+    """B07 反例：含 future 字段/version=2 的 payload apply→export 不丢。"""
+    view = _view(qtbot)
+    payload = {
+        "version": 2,
+        "thumbnail_mode": "filmstrip",
+        "future_field": {"keep": True},
+        "source_destination_ui": {
+            "pres": {"video": "v2", "future_stream": "v9"},
+        },
+    }
+    view.apply_presentation_state(payload)
+    # 已知键按当前语义解释
+    assert view._thumbnail_display_mode == "filmstrip"
+    exported = view.export_presentation_state()
+    # 未知顶层字段与未来版本号原样回写
+    assert exported["future_field"] == {"keep": True}
+    assert exported["version"] == 2
+    # 路由嵌套未知键保留，已知路由不丢
+    routes = exported["source_destination_ui"]
+    assert routes["pres"]["future_stream"] == "v9"
+    assert routes["pres"]["video"] == "v2"
+    # 再次 apply→export 往返稳定
+    fresh = _view(qtbot)
+    fresh.apply_presentation_state(exported)
+    assert fresh.export_presentation_state() == exported
+
+
+def test_b07_legacy_payload_exports_current_version(qtbot: Any) -> None:
+    """旧包无 version：export 写当前版本 1，其他未知键仍保留。"""
+    view = _view(qtbot)
+    view.apply_presentation_state({
+        "thumbnail_mode": "auto", "legacy_extra": 7,
+    })
+    exported = view.export_presentation_state()
+    assert exported["version"] == 1
+    assert exported["legacy_extra"] == 7
+
+
+def test_b09_project_switch_isolates_routes_and_extras(qtbot: Any) -> None:
+    """B09 反例：同 timeline ID 不同 project——旧工程禁用路由不得继承。"""
+    from src.features.edit.core.project import EditProject
+
+    view = _view(qtbot)
+    project_a = EditProject("pa", "A")
+    project_b = EditProject("pb", "B")
+    view.set_project(project_a)
+    view._on_source_patch_requested("v1", False)  # 关闭蓝视频路由
+    view.apply_presentation_state({"future_field": {"a": 1}})
+    assert view.source_destination_stream_disabled("video") is True
+
+    view.set_project(project_b)  # 同 timeline_id="pres" 的另一工程
+    assert view.source_destination_stream_disabled("video") is False
+    assert view.export_presentation_state().get("future_field") is None
+    # 无任何显式条目（含嵌套扩展）——路由表整体为空
+    assert view.export_presentation_state()["source_destination_ui"] == {}
+
+
+def test_b09_same_project_refresh_keeps_routes(qtbot: Any) -> None:
+    """同工程刷新（asset 更新等触发的 set_project）不丢路由与扩展。"""
+    from src.features.edit.core.project import EditProject
+
+    view = _view(qtbot)
+    project_a = EditProject("pa", "A")
+    view.set_project(project_a)
+    view._on_source_patch_requested("v2", True)
+    view.apply_presentation_state({"future_field": {"a": 1}})
+
+    view.set_project(EditProject("pa", "A refreshed"))
+
+    assert view.resolve_source_destination_track_id("video") == "v2"
+    assert view.export_presentation_state()["future_field"] == {"a": 1}
+
+
+def test_b09_clear_resets_extras(qtbot: Any) -> None:
+    view = _view(qtbot)
+    view.apply_presentation_state({"future_field": {"a": 1}})
+    view.clear()
+    exported = view.export_presentation_state()
+    assert "future_field" not in exported
+    assert exported["version"] == 1

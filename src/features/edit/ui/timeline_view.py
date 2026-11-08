@@ -728,6 +728,10 @@ class _NormalizeGainWorker(QObject):
 # W02：蓝徽章源目的轨三态判别哨兵——区分"无条目"与"显式关闭 (None)"。
 _UNSET = object()
 
+# B07：presentation payload 版本。export 写当前版本；apply 遇到其他
+# 版本（未来/历史）时保留原值回写，已知键按当前语义尽力解释。
+PRESENTATION_STATE_VERSION = 1
+
 
 class TimelineView(QGraphicsView):
     """
@@ -895,6 +899,11 @@ class TimelineView(QGraphicsView):
         self._thumbnail_display_mode: str = ClipItem._thumbnail_display_mode
         self._waveforms_visible: bool = True
         self._source_patch_routes: dict[tuple[str, str], Optional[str]] = {}
+        # B07：presentation 原始 payload 的未知字段原样保留（apply 捕获、
+        # export 回写），未来工程重存不丢扩展配置；路由嵌套层的未知
+        # 流类型键同样保留。
+        self._presentation_extras: dict[str, Any] = {}
+        self._presentation_route_extras: dict[str, dict[str, Any]] = {}
         self._snap_enabled = True
         self._interaction = InteractionSession()  # Interaction state machine
         self._current_drag_session: Optional[ClipDragSession] = None  # P2-2: Clip drag session
@@ -1906,6 +1915,13 @@ class TimelineView(QGraphicsView):
             self._timeline_history_snapshots.clear()
             self._project_transaction_sequences.clear()
             self._command_stack = CommandStack()
+            # B09：源目的轨路由与 presentation 扩展字段按 project 上下文
+            # 隔离——timeline ID 只在工程内唯一，跨工程沿用会把旧工程的
+            # 禁用路由/偏好带进新工程（新工程自己的 payload 存在时由
+            # 宿主 apply 完整替换）。
+            self._source_patch_routes.clear()
+            self._presentation_extras = {}
+            self._presentation_route_extras = {}
         self._project = project
         self._update_cache_indicator()
 
@@ -4542,31 +4558,67 @@ class TimelineView(QGraphicsView):
     # ==================== W07: Presentation state (no commands) ====================
 
     def export_presentation_state(self) -> dict:
-        """W07：导出 view 级展示偏好（保存/恢复用；零命令副作用）。
+        """W07/B07：导出 view 级展示偏好（保存/恢复用；零命令副作用）。
 
         ``source_destination_ui``：{timeline_id: {track_type: track_id|None}}；
         值为 None 表示蓝徽章显式关闭该流，键缺席 = 无显式条目（回退
-        红 target）。未知字段由 UIState 原样往返保留。
+        红 target）。B07：写入 ``version``；apply 捕获的未知顶层字段与
+        路由嵌套未知键原样回写，未来工程经旧版本重存不丢扩展配置。
         """
+        import copy as _copy
+
+        route_extras = self._presentation_route_extras
+        timeline_ids: set[str] = {str(tid) for (tid, _t) in
+                                  self._source_patch_routes}
+        timeline_ids.update(route_extras)
         routes: dict[str, dict[str, Any]] = {}
-        for (timeline_id, track_type), track_id in self._source_patch_routes.items():
-            routes.setdefault(str(timeline_id), {})[track_type] = track_id
-        return {
+        for tid in sorted(timeline_ids):
+            entry = dict(_copy.deepcopy(route_extras.get(tid, {})))
+            for (timeline_id, track_type), track_id in (
+                    self._source_patch_routes.items()):
+                if str(timeline_id) == tid:
+                    entry[track_type] = track_id
+            routes[tid] = entry
+        result: dict[str, Any] = {
+            "version": PRESENTATION_STATE_VERSION,
             "thumbnail_mode": self._thumbnail_display_mode,
             "waveforms_visible": self._waveforms_visible,
             "position_lock": self._position_lock_enabled,
             "source_destination_ui": routes,
         }
+        result.update(_copy.deepcopy(self._presentation_extras))
+        # 未来版本号优先于本地版本（载荷身份属于原作者）
+        if "version" in self._presentation_extras:
+            result["version"] = self._presentation_extras["version"]
+        return result
 
     def apply_presentation_state(self, state: dict) -> None:
         """恢复展示偏好（零命令、零 revision；非法值安全回退）。
 
         恢复顺序遵循计划 §6：先展示开关，后源目的轨（徽章重投影）。
         不触发内容命令、不推进 revision；轨删除后的陈旧路由由
-        ``resolve_source_destination_track_id`` 惰性清理。
+        ``resolve_source_destination_track_id`` 惰性清理。B07：未知的
+        顶层字段与路由嵌套未知键捕获保留（export 原样回写）；高于
+        当前版本的 version 标记同样保留，已知键按当前语义尽力解释。
         """
+        import copy as _copy
+
         if not isinstance(state, dict):
             return
+        known = {
+            "version", "thumbnail_mode", "waveforms_visible",
+            "position_lock", "source_destination_ui",
+        }
+        extras: dict[str, Any] = {}
+        for key, value in state.items():
+            if key == "version":
+                if value != PRESENTATION_STATE_VERSION:
+                    extras["version"] = value
+                continue
+            if key not in known:
+                extras[key] = _copy.deepcopy(value)
+        self._presentation_extras = extras
+        self._presentation_route_extras = {}
         mode = state.get("thumbnail_mode")
         if isinstance(mode, str) and mode in {
                 "auto", "filmstrip", "start_end", "none"}:
@@ -4582,6 +4634,14 @@ class TimelineView(QGraphicsView):
             for timeline_id, per_type in routes.items():
                 if not isinstance(per_type, dict):
                     continue
+                nested_extras = {
+                    key: _copy.deepcopy(value)
+                    for key, value in per_type.items()
+                    if key not in {"video", "audio"}
+                }
+                if nested_extras:
+                    self._presentation_route_extras[str(timeline_id)] = (
+                        nested_extras)
                 for track_type, track_id in per_type.items():
                     if track_type not in {"video", "audio"}:
                         continue
@@ -13961,6 +14021,10 @@ class TimelineView(QGraphicsView):
         self._timeline_history_snapshots.clear()
         self._project_transaction_sequences.clear()
         self._source_patch_routes.clear()
+        # B07/B09：clear 同步丢弃 presentation 未知字段缓存（完整卸载，
+        # 不跨 clear 继承旧 payload 的扩展键）
+        self._presentation_extras = {}
+        self._presentation_route_extras = {}
         self._selected_edit_edges.clear()
         self._independent_selection = False
         self._target_track_id = None
