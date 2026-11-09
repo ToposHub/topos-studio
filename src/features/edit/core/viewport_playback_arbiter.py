@@ -245,6 +245,10 @@ class ViewportPlaybackArbiter:
         """B11 关闭序列第一步：拒绝一切新请求。"""
         self._shutdown = True
 
+    def is_shutdown(self) -> bool:
+        """是否已进入关闭序列（延迟回调据此放弃重启播放）。"""
+        return self._shutdown
+
     # ── 查询 ────────────────────────────────────────────────────────
 
     def snapshot(self) -> MonitorSnapshot:

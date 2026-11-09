@@ -35,6 +35,7 @@ import copy as copy_mod
 import logging
 import os
 import time
+import weakref
 
 from typing import Any, Optional
 
@@ -653,6 +654,12 @@ class LayerOpsMixin:
         is deliberately not passed to ``SaveRouter`` because standalone video
         projects are rejected by the project schema; applying the preset still
         uses the serialized layers and works for the whole video.
+
+        R01（2026-11-09 复查）：保存改为多文件事务（staging → 备份 →
+        统一提交）。旧实现先把 sidecar 写到最终目标再保存本体，失败按
+        固定目标名删除——覆盖保存失败时旧集合被破坏，留下不完整的旧
+        ``.topos``。现在失败/取消/提交中断都把旧文件集合按字节原样
+        恢复（见 ``still_capture_transaction``）。
         """
         is_video_mode = bool(getattr(self, 'current_file_is_video', False))
         was_playing = False
@@ -671,111 +678,224 @@ class LayerOpsMixin:
             if was_playing:
                 video_controller.stop_playback()
 
-            rendered, current_frame = self._render_current_video_frame_for_grading()
-            if not rendered:
+        # R01：抓帧期间的所有退出路径共用一个收尾回调——仅当抓帧前确实
+        # 在播才恢复，且恢复回调在触发时校验 generation（换源/换 clip/
+        # 关闭序列已启动时不重新起播旧源）。
+        finish_capture = self._make_capture_playback_restorer(was_playing)
+
+        name = ""
+        try:
+            if is_video_mode:
+                rendered, current_frame = (
+                    self._render_current_video_frame_for_grading())
+                if not rendered:
+                    self.status_bar.showMessage(
+                        f"Capture failed: could not render video frame "
+                        f"{current_frame}",
+                        3000,
+                    )
+                    return
+            elif self.engine.img_high is None:
                 self.status_bar.showMessage(
-                    f"Capture failed: could not render video frame {current_frame}",
-                    3000,
+                    I18N.tr("status.no_image_loaded", "请先打开一张图片或视频"), 3000)
+                return
+
+            # 渲染当前调色后的图像
+            rendered_img = self.engine.grab_viewport_image()
+            if rendered_img is None:
+                self.status_bar.showMessage(
+                    "Capture failed: could not render image", 3000)
+                return
+
+            name = self._new_still_name()
+            current_folder = self.presets_panel.get_current_folder()
+            topos_path = os.path.join(current_folder, f"{name}.topos")
+
+            if os.path.exists(topos_path):
+                reply = QMessageBox.question(
+                    self,
+                    I18N.tr("presets.overwrite_title", "Overwrite"),
+                    I18N.tr("presets.overwrite_msg",
+                            f"Preset '{name}' already exists. Overwrite?"),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
-                if was_playing:
-                    QTimer.singleShot(100, video_controller.start_playback)
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+
+            if not self._commit_still_capture(topos_path, rendered_img,
+                                              is_video_mode):
                 return
-        elif self.engine.img_high is None:
-            self.status_bar.showMessage(
-                I18N.tr("status.no_image_loaded", "请先打开一张图片或视频"), 3000)
-            return
+        finally:
+            finish_capture()
 
-        # 渲染当前调色后的图像
-        rendered_img = self.engine.grab_viewport_image()
-        if rendered_img is None:
-            self.status_bar.showMessage("Capture failed: could not render image", 3000)
-            if was_playing:
-                QTimer.singleShot(100, self.video_controller.start_playback)
-            return
+        self.presets_panel.scan_presets()
+        self.status_bar.showMessage(
+            I18N.tr("presets.captured", f"静帧已抓取: {name}"), 3000)
 
+    def _new_still_name(self) -> str:
+        """静帧名（时间戳；抽成方法便于确定性测试）。"""
         from datetime import datetime as dt
-        name = dt.now().strftime("Still_%Y%m%d_%H%M%S")
+        return dt.now().strftime("Still_%Y%m%d_%H%M%S")
 
-        current_folder = self.presets_panel.get_current_folder()
-        topos_path = os.path.join(current_folder, f"{name}.topos")
-        thumb_path = os.path.join(current_folder, f"{name}.thumb.jpg")
+    def _commit_still_capture(self, topos_path: str, rendered_img: Any,
+                              is_video_mode: bool) -> bool:
+        """R01：staging → 备份 → 统一提交一次静帧的多文件集合。
 
-        if os.path.exists(topos_path):
-            reply = QMessageBox.question(
-                self,
-                I18N.tr("presets.overwrite_title", "Overwrite"),
-                I18N.tr("presets.overwrite_msg", f"Preset '{name}' already exists. Overwrite?"),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                if was_playing:
-                    QTimer.singleShot(100, self.video_controller.start_playback)
-                return
+        新集合（.topos／缩略图／参考帧 JPEG／可选 EXR＋声明／meta）全部
+        先写入目标目录内的隐藏 staging，再经
+        :class:`StillCaptureTransaction` 一次性替换旧集合。任何失败
+        （JPEG 写失败／SaveRouter 拒绝或抛异常／提交中断）回滚整个旧
+        集合，返回 False；EXR 写失败按 M09.2 语义降级为纯 JPEG（不阻断
+        保存，过期旧 EXR 不保留）。
+        """
+        from src.features.color.core.preset_meta import (
+            STILL_IMAGE_MAX,
+            PresetMeta,
+            meta_path_for,
+            now_iso,
+            save_preset_meta,
+            still_exr_path_for,
+            still_path_for,
+            thumb_path_for,
+            write_still_images,
+        )
+        from src.features.color.core.still_capture_transaction import (
+            StillCaptureTransaction,
+            StillCaptureTransactionError,
+        )
 
         # 缩略图 + 全分辨率参考帧 sidecar（P1-COLOR-04：参考 wipe 用）。
         # M09.2（S12）：float 抓帧链闭合——FBO f4 回读的 float 帧写入
         # .still.exr 侧车（HDR 值保留，JPEG 仍写供低精度消费方）；回读
         # 失败降级纯 JPEG（不阻断保存）。
-        from src.features.color.core.preset_meta import (
-            STILL_IMAGE_MAX,
-            still_exr_path_for,
-            still_path_for,
-            write_still_images,
-        )
         hdr_frame = None
         try:
             hdr_frame = self.engine.render_full_image_for_scope(
                 max_dim=max(STILL_IMAGE_MAX, 4096))
         except Exception:
             hdr_frame = None
-        written_thumb, written_still = write_still_images(
-            topos_path, rendered_img, hdr_image=hdr_frame)
 
-        # 保存为 .topos 项目文件（完整调色数据）
-        # Video presets must reference an image because standalone video
-        # projects are intentionally rejected by the project schema.
-        image_path = (
-            thumb_path if is_video_mode
-            else getattr(self, 'current_file_path', '') or ''
-        )
-        saved = self.save_router._save_single_asset_project(
-            topos_path, image_path, self.engine,
-            composite_graph_data=self._get_composite_graph_data(),
-            composite_viewer_state=self._get_composite_state_data(),
-        )
+        final_thumb = thumb_path_for(topos_path)
+        final_still = still_path_for(topos_path)
+        final_exr = still_exr_path_for(topos_path)
+        final_exr_decl = final_exr + ".json"
+        final_meta = meta_path_for(topos_path)
+        current_folder = os.path.dirname(topos_path)
 
-        if saved:
-            # Gallery 元数据 sidecar：来源 clip / 帧号 / source tag / 时间
-            from src.features.color.core.preset_meta import (
-                PresetMeta, now_iso, save_preset_meta,
-            )
-            save_preset_meta(
-                topos_path,
-                PresetMeta(created_at=now_iso(),
-                           **self._collect_still_capture_meta()))
-
-        if was_playing:
-            QTimer.singleShot(100, self.video_controller.start_playback)
-
-        if not saved:
-            # CV-B07：失败不留下半份 preset——清掉本次已写盘的 sidecar
-            # （.topos 本体由 SaveRouter 自理），Gallery 不出现孤儿缩略图。
-            for sidecar in (written_thumb, written_still,
-                            still_path_for(topos_path),
-                            still_exr_path_for(topos_path)):
-                if not sidecar:
-                    continue
-                try:
-                    os.remove(sidecar)
-                except OSError:
-                    pass
+        try:
+            txn = StillCaptureTransaction(current_folder)
+        except Exception:
+            logger.exception("still capture: staging setup failed (%s)",
+                             topos_path)
             self.status_bar.showMessage(
                 I18N.tr("presets.capture_failed", "静帧保存失败"), 3000)
-            return
+            return False
 
-        self.presets_panel.scan_presets()
-        self.status_bar.showMessage(
-            I18N.tr("presets.captured", f"静帧已抓取: {name}"), 3000)
+        staged_topos = txn.staged_path(topos_path)
+        try:
+            written_thumb, written_still = write_still_images(
+                staged_topos, rendered_img, hdr_image=hdr_frame)
+            # JPEG（缩略图/参考帧）写失败 → 放弃本次抓帧（旧集合不动）。
+            if not written_thumb or not written_still:
+                raise StillCaptureTransactionError(
+                    "still image write failed")
+            txn.add(final_thumb)
+            txn.add(final_still)
+            if os.path.isfile(txn.staged_path(final_exr)):
+                txn.add(final_exr)
+                if os.path.isfile(txn.staged_path(final_exr_decl)):
+                    txn.add(final_exr_decl)
+            else:
+                # 本次集合没有 EXR：提交后不保留过期副本（回滚照常恢复）。
+                txn.drop(final_exr)
+                txn.drop(final_exr_decl)
+
+            # SaveRouter 把 .topos 写进 staging（与 sidecar 同一提交点）；
+            # 工程引用的资产路径用最终位置——提交后即为真实路径。
+            image_path = (
+                final_thumb if is_video_mode
+                else getattr(self, 'current_file_path', '') or ''
+            )
+            saved = self.save_router._save_single_asset_project(
+                staged_topos, image_path, self.engine,
+                composite_graph_data=self._get_composite_graph_data(),
+                composite_viewer_state=self._get_composite_state_data(),
+            )
+            if not saved:
+                raise StillCaptureTransactionError(
+                    "SaveRouter rejected project save")
+            txn.add(topos_path)
+
+            # Gallery 元数据 sidecar：来源 clip / 帧号 / source tag / 时间
+            if save_preset_meta(
+                    staged_topos,
+                    PresetMeta(created_at=now_iso(),
+                               **self._collect_still_capture_meta())):
+                txn.add(final_meta)
+            elif os.path.exists(final_meta):
+                # 元数据写失败：不留描述旧帧的过期 meta。
+                txn.drop(final_meta)
+
+            txn.commit()
+        except Exception:
+            logger.exception("still capture transaction failed (%s)",
+                             topos_path)
+            txn.rollback()
+            self.status_bar.showMessage(
+                I18N.tr("presets.capture_failed", "静帧保存失败"), 3000)
+            return False
+        return True
+
+    # ── 抓帧播放恢复（R01：finally 收束＋generation 守卫） ───────────
+
+    def _make_capture_playback_restorer(self, was_playing: bool):
+        """返回抓帧收尾回调：仅抓帧前确实在播才延迟恢复（带守卫）。"""
+        token = self._capture_playback_token()
+
+        def _finish() -> None:
+            if not was_playing:
+                return
+            weak_self = weakref.ref(self)
+
+            def _fire() -> None:
+                ctrl = weak_self()
+                if ctrl is None:
+                    return
+                ctrl._restore_capture_playback(token)
+
+            QTimer.singleShot(100, _fire)
+
+        return _finish
+
+    def _capture_playback_token(self) -> tuple:
+        """抓帧起点的播放代际（换源/换 clip 后恢复回调不得起播旧源）。"""
+        ctx = None
+        mgr = getattr(self, '_page_context_manager', None)
+        if mgr is not None:
+            try:
+                ctx = mgr.get_current_context()
+            except Exception:
+                ctx = None
+        return (
+            id(getattr(self, 'video_controller', None)),
+            getattr(self, 'current_file_path', None),
+            getattr(ctx, 'clip_id', None) if ctx is not None else None,
+        )
+
+    def _restore_capture_playback(self, token: tuple) -> None:
+        """延迟恢复点：generation 已变或关闭序列已启动时直接放弃。"""
+        if self._capture_playback_token() != token:
+            return
+        if getattr(self, '_pipeline_shutdown_done', False):
+            return
+        arbiter = getattr(self, '_viewport_playback_coordinator', None)
+        if arbiter is not None and getattr(
+                arbiter, 'is_shutdown', lambda: False)():
+            return
+        video_controller = getattr(self, 'video_controller', None)
+        if video_controller is None or not video_controller.is_video_loaded():
+            return
+        video_controller.start_playback()
 
     # ------------------------------------------------------------------
     # Gallery in Presets (P1-COLOR-04)
