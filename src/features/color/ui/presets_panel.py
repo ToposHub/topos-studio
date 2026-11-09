@@ -353,12 +353,22 @@ class PresetsPanel(QWidget):
         if not save_preferences(self.presets_root, prefs):
             logger.warning("Presets: gallery preferences save failed")
 
-    # --- G11: 外部变化同步（可见性驱动＋索引复用，不轮询磁盘） ---
+    # --- G11: 外部变化同步（可见性驱动＋mtime 失效，不轮询磁盘） ---
 
     def showEvent(self, event) -> None:
-        """面板重新可见时同步外部变化（索引未变则零磁盘成本）。"""
+        """面板重新可见时同步外部变化。
+
+        只有当前目录 mtime 与上次扫描不同才重扫（外部增删/改名必然
+        改目录 mtime）——未变化时零成本，也不重建视图（保留当前项与
+        选中）。"""
         super().showEvent(event)
-        if getattr(self, "_gallery", None) is not None:
+        if getattr(self, "_gallery", None) is None:
+            return
+        try:
+            mtime = os.stat(self._current_folder).st_mtime_ns
+        except OSError:
+            return
+        if mtime != getattr(self, "_last_scan_folder_mtime", None):
             self.scan_presets()
 
     def _selected_paths(self):
@@ -409,6 +419,10 @@ class PresetsPanel(QWidget):
         from src.features.color.core.preset_meta import matches_query
         # G11：重扫保留仍在场的选中（外部删除的条目自然清出选择）
         selected_paths = self._selected_paths()
+        try:
+            self._last_scan_folder_mtime = os.stat(folder).st_mtime_ns
+        except OSError:
+            self._last_scan_folder_mtime = None
         self.list_widget.clear()
         self._preset_meta_cache.clear()
         # AUD-25513：缩略图 QPixmap 缓存随目录重扫失效（重命名/删除/新增

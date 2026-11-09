@@ -33,7 +33,7 @@ class TestPreferencesService:
         with open(path, "w") as fh:
             fh.write("{ broken")
         prefs = load_preferences(str(tmp_path))
-        assert prefs.thumbnail_width == 160
+        assert prefs.thumbnail_width == 108
         # 用户文件保持原样（回退不等于清除）
         assert "broken" in open(path).read()
 
@@ -42,14 +42,14 @@ class TestPreferencesService:
         with open(path, "w") as fh:
             json.dump({"schema": 99, "thumbnail_width": 120}, fh)
         prefs = load_preferences(str(tmp_path))
-        assert prefs.schema == 1 and prefs.thumbnail_width == 160
+        assert prefs.schema == 1 and prefs.thumbnail_width == 108
         assert json.load(open(path))["schema"] == 99   # 未被覆盖
 
     def test_legacy_columns_migration_never_2px(self):
         assert migrate_legacy_columns(2) == 192
         assert migrate_legacy_columns(6) == 112
-        assert migrate_legacy_columns("garbage") == 160
-        assert migrate_legacy_columns(None) == 160
+        assert migrate_legacy_columns("garbage") == 108
+        assert migrate_legacy_columns(None) == 108
         for columns in range(2, 7):
             width = migrate_legacy_columns(columns)
             assert 108 <= width <= 256
