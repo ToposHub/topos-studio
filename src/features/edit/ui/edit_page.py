@@ -1258,6 +1258,24 @@ class EditPage(QWidget):
         if self._audio_manager is not None:
             self._audio_manager.pause()
 
+    def set_monitor_master_muted(self, muted: bool) -> bool:
+        """Monitor-scoped master-bus mute for external transports (CV-B06).
+
+        Color 页的监看静音走 Master 总线（设备输出无声、视频照常推进），
+        不触碰任何轨道/片段 volume——用户在 Edit 混音器里静音的轨道在
+        解除监看静音后保持原状。音频服务未就绪时返回 False（不虚报）。
+        """
+        if self._audio_manager is None:
+            return False
+        self._audio_manager.set_master_muted(bool(muted))
+        return True
+
+    def monitor_master_muted(self) -> bool | None:
+        """Master 总线静音的真实状态；音频服务缺席返回 None。"""
+        if self._audio_manager is None:
+            return None
+        return bool(self._audio_manager.is_master_muted())
+
     def reanchor_timeline_audio(self, frame: int, threshold_frames: int = 5) -> None:
         """Re-seek timeline audio after the external transport drifted away.
 

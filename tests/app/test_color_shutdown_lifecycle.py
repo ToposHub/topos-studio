@@ -194,5 +194,17 @@ def test_shutdown_pipeline_marks_color_host_and_deactivates_preview(qapp):
         assert marked == [True]
         assert deactivated == [True]
     finally:
-        window.deleteLater()
-        qapp.processEvents()
+        # 与 gap027 相同的收尾契约：真实 close（含引擎线程停机）再
+        # deleteLater——只 deleteLater 不停线程时 C++ 析构会与存活的
+        # AsyncRenderer/ImageEngineRawWorker 线程相撞（组合跑后续 Qt
+        # abort，正是本测试此前在组合配置下崩溃的根因）。
+        from PyQt6.QtTest import QTest
+        try:
+            window.close()
+        except Exception:
+            pass
+        try:
+            window.deleteLater()
+        except Exception:
+            pass
+        QTest.qWait(50)

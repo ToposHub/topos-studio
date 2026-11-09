@@ -128,6 +128,8 @@ class ColorViewportChrome(QObject):
 
     # CV-B01：chrome 请求宿主重新评估能力（菜单打开／上下文变化时）。
     capability_refresh_requested = pyqtSignal()
+    # CV-B06：监看静音请求（宿主路由到 EditPage Master 总线服务）。
+    monitor_mute_toggled = pyqtSignal(bool)
 
     def __init__(self, canvas: Canvas) -> None:
         super().__init__(canvas)
@@ -456,7 +458,11 @@ class ColorViewportChrome(QObject):
         self.power_window_button.toggled.connect(
             self._toggle_power_window_overlays)
         self.unmix_button = _button(self.left_tools, "unmix", I18N.tr("viewport.unmix", "Unmix"), False)
-        self.mute_button = _button(self.left_tools, "mute", I18N.tr("viewport.mute", "Mute"), False)
+        self.mute_button = _button(self.left_tools, "mute", I18N.tr("viewport.mute", "Mute"))
+        # CV-B06：监看静音（Master 总线）。请求经宿主路由到 EditPage 的
+        # set_monitor_master_muted；checked 由能力回填按真实状态写入。
+        self.mute_button.setCheckable(True)
+        self.mute_button.toggled.connect(self.monitor_mute_toggled.emit)
         for button in (self.power_window_button, self.unmix_button, self.mute_button):
             tools.addWidget(button)
         tools.addStretch(1)

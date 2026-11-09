@@ -2697,6 +2697,16 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             logger.debug("shutdown: deactivate color timeline preview failed",
                          exc_info=True)
 
+        # 3.6 CV-B06：恢复 Color 监看静音（页面作用域状态不带入关闭后
+        #     的全局音频配置）。
+        try:
+            restore_mute = getattr(self, "_restore_color_monitor_mute", None)
+            if callable(restore_mute):
+                restore_mute()
+        except Exception:
+            logger.debug("shutdown: restore color monitor mute failed",
+                         exc_info=True)
+
         # 4. 时间线预览渲染器（内部依次 join worker 与 GPU 渲染线程）
         try:
             renderer = getattr(self, "timeline_preview_renderer", None)
