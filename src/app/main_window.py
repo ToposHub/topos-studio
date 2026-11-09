@@ -1416,6 +1416,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
 
         # Presets Panel
         self.presets_panel = PresetsPanel()
+        # G01：Gallery 能力宿主（无素材 Capture 禁用／只读 album／grade
+        # 不可加载等如实回填；面板缺席时安静跳过）。
+        from src.app.controllers.gallery_capability_host import (
+            install_gallery_capability_host,
+        )
+        install_gallery_capability_host(self)
 
         # P9.1: Timeline Clip Strip (Color page)
         from src.features.color.ui.timeline_clip_strip import TimelineClipStrip

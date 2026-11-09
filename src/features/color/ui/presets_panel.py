@@ -79,6 +79,13 @@ class PresetsPanel(QWidget):
         self._current_folder = os.path.join(self.presets_root, "User")
         self._preset_meta_cache = {}  # path -> dict (project.json data cache)
         self._search_query = ""       # 当前搜索词（扫描后重放过滤）
+        # G01：磁盘读取统一走 repository 查询（与能力宿主共用事实源）；
+        # 能力宿主由 app 层安装（未安装时菜单保持旧的恒启用行为）。
+        from src.features.color.core.gallery_repository import (
+            GalleryFolderRepository,
+        )
+        self._repository = GalleryFolderRepository(self.presets_root)
+        self._gallery_capability_host = None
         self._init_ui()
         self.scan_presets()
 
@@ -285,11 +292,39 @@ class PresetsPanel(QWidget):
         """Return the currently active folder path."""
         return self._current_folder
 
+    # --- G01: 能力宿主接入（未安装时保持旧的恒启用行为） ---
+
+    def set_gallery_capability_host(self, host) -> None:
+        """由 ``GalleryCapabilityHost`` 安装／解除（None 清除）。"""
+        self._gallery_capability_host = host
+
+    def gallery_action_caps(self):
+        """当前能力快照；宿主未安装时返回 None（菜单不门控）。"""
+        host = self._gallery_capability_host
+        return getattr(host, "last_capabilities", None) if host else None
+
+    def _apply_action_capability(self, action_key: str, action) -> None:
+        """按能力注册表回填 QAction 的 enabled／tooltip（无宿主跳过）。"""
+        caps = self.gallery_action_caps()
+        if not caps:
+            return
+        cap = caps.get(action_key)
+        if cap is None:
+            return
+        action.setEnabled(cap.supported)
+        if not cap.supported and cap.reason:
+            action.setToolTip(cap.reason)
+
     def scan_presets(self) -> None:
-        """Scan current folder for .topos preset files and populate the grid."""
-        from src.features.color.core.preset_meta import (
-            load_preset_meta, matches_query,
-        )
+        """Scan current folder for .topos preset files and populate the grid.
+
+        G01：磁盘读取经 ``GalleryFolderRepository.query``（与能力宿主共用
+        同一查询事实源）；条目构建／UserRole／tooltip／搜索隐藏重放与旧
+        实现逐项一致（条目全部入列后按 matches_query 置 hidden——不把不
+        匹配条目从模型中剔除，重扫后过滤状态可回放）。
+        """
+        from src.features.color.core.gallery_contracts import GalleryQuery
+        from src.features.color.core.preset_meta import matches_query
         self.list_widget.clear()
         self._preset_meta_cache.clear()
         # AUD-25513：缩略图 QPixmap 缓存随目录重扫失效（重命名/删除/新增
@@ -299,20 +334,18 @@ class PresetsPanel(QWidget):
         if not os.path.isdir(folder):
             return
 
-        for name in sorted(os.listdir(folder)):
-            if name.startswith('.'):
-                continue
-            topos_path = os.path.join(folder, name)
-            if not os.path.isfile(topos_path) or not name.endswith('.topos'):
-                continue
-
-            preset_name = os.path.splitext(name)[0]
+        result = self._repository.query(GalleryQuery(
+            album_id=self._repository.album_id_for_folder(folder),
+        ))
+        for still in result.stills:
+            topos_path = os.path.join(folder, still.bundle.topos_name)
+            preset_name = still.display_name
 
             item = QListWidgetItem(preset_name)
             item.setData(Qt.ItemDataRole.UserRole, topos_path)
 
             # P1-COLOR-04: Gallery 元数据 sidecar → tooltip + 搜索过滤
-            meta = load_preset_meta(topos_path)
+            meta = still.meta
             item.setData(Qt.ItemDataRole.UserRole + 1, meta)
             if meta is not None:
                 summary = meta.describe()
@@ -512,7 +545,15 @@ class PresetsPanel(QWidget):
     # --- Context Menu ---
 
     def _show_context_menu(self, pos) -> None:
-        """Show right-click context menu."""
+        """Show right-click context menu.
+
+        G01：菜单打开前先让能力宿主做一次新鲜评估（媒体在场／album 可
+        写／选中项 grade 探测），逐项回填 enabled／原因 tooltip；宿主未
+        安装时保持旧的恒启用行为。
+        """
+        host = self._gallery_capability_host
+        if host is not None:
+            host.refresh()
         item = self.list_widget.itemAt(pos)
         menu = QMenu(self)
 
@@ -521,47 +562,57 @@ class PresetsPanel(QWidget):
 
             apply_act = menu.addAction(I18N.tr("presets.apply_grade", "Apply Grade"))
             apply_act.triggered.connect(lambda: self.grade_applied.emit(topos_path))
+            self._apply_action_capability("apply.grade", apply_act)
 
             # P1-COLOR-04: 分类应用（Paste Attributes）与参考帧对比
             apply_cats_act = menu.addAction(
                 I18N.tr("presets.apply_categories", "Apply Grade (Categories)…"))
             apply_cats_act.triggered.connect(
                 lambda: self.apply_categories_requested.emit(topos_path))
+            self._apply_action_capability("apply.categories", apply_cats_act)
 
             reference_act = menu.addAction(
                 I18N.tr("presets.load_reference", "Load as Reference Wipe"))
             reference_act.triggered.connect(
                 lambda: self.reference_requested.emit(topos_path))
+            self._apply_action_capability("reference.load", reference_act)
 
             compare_act = menu.addAction(
                 I18N.tr("gallery.split_screen", "Split Screen") + "…")
             compare_act.triggered.connect(lambda: self.open_comparison("split"))
+            self._apply_action_capability("compare.split", compare_act)
 
             # P1-COLOR-21: Color Match（增量建议 + 可撤销应用）
             match_act = menu.addAction(
                 I18N.tr("presets.match_to_still", "Color Match to This Still"))
             match_act.triggered.connect(
                 lambda: self.match_requested.emit(topos_path))
+            self._apply_action_capability("match.color", match_act)
 
             menu.addSeparator()
 
             rename_act = menu.addAction(I18N.tr("presets.rename", "Rename"))
             rename_act.triggered.connect(lambda: self._rename_preset(item))
+            self._apply_action_capability("rename.bundle", rename_act)
 
             export_act = menu.addAction(I18N.tr("presets.export_thumb", "Export Thumbnail"))
             export_act.triggered.connect(lambda: self._export_thumbnail(topos_path))
+            self._apply_action_capability("export.thumbnail", export_act)
 
             menu.addSeparator()
 
             delete_act = menu.addAction(I18N.tr("presets.delete", "Delete"))
             delete_act.triggered.connect(lambda: self._delete_item(item))
+            self._apply_action_capability("delete.bundle", delete_act)
         else:
             # Blank area menu
             new_folder_act = menu.addAction(I18N.tr("presets.new_folder", "New Folder"))
             new_folder_act.triggered.connect(self.create_folder)
+            self._apply_action_capability("album.create", new_folder_act)
 
             capture_act = menu.addAction(I18N.tr("presets.capture_still", "Capture Still"))
             capture_act.triggered.connect(lambda: self.capture_requested.emit())
+            self._apply_action_capability("capture.still", capture_act)
 
             menu.addSeparator()
 
