@@ -425,18 +425,21 @@ class TestAud25515PresetNameValidation:
         monkeypatch.setattr(
             QMessageBox, "critical",
             staticmethod(lambda *a, **k: criticals.append(a)))
-        real_rename = os.rename
+        # G03：rename 走 GalleryBundleService 的 os.replace 事务（不再
+        # 逐文件 os.rename）。注入点＝安装阶段把 sidecar 搬到新名的那一
+        # 步（journal 的 manifest 写入用 *.json.tmp 源，不受影响）。
+        real_replace = os.replace
 
-        def failing_rename(src, dst):
-            if str(src).endswith(".thumb.jpg"):
+        def failing_replace(src, dst, *a, **k):
+            if str(dst).endswith("New.thumb.jpg"):
                 raise OSError(5, "Input/output error", str(src))
-            return real_rename(src, dst)
+            return real_replace(src, dst, *a, **k)
 
-        monkeypatch.setattr(pr.os, "rename", failing_rename)
+        monkeypatch.setattr(pr.os, "replace", failing_replace)
         try:
             panel._rename_preset(item)  # 不得从槽内抛出
         finally:
-            monkeypatch.setattr(pr.os, "rename", real_rename)
+            monkeypatch.setattr(pr.os, "replace", real_replace)
 
         assert criticals, "改名失败必须弹窗报告"
         # 回滚：.topos 回到旧名，没有半新半旧的残局
