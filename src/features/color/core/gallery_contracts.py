@@ -126,6 +126,9 @@ class GalleryAlbum:
     project_id: Optional[str] = None
     timeline_id: Optional[str] = None
     revision: int = 0
+    # G04：虚拟 timeline 集合的来源 timeline 已从当前工程删除（快照仍
+    # 可展示，来源标离线——不静默吞掉已删来源）
+    offline: bool = False
 
     def __post_init__(self) -> None:
         if not self.album_id:
@@ -150,6 +153,7 @@ class GalleryAlbum:
             "project_id": self.project_id,
             "timeline_id": self.timeline_id,
             "revision": self.revision,
+            "offline": self.offline,
         }
 
 
@@ -508,7 +512,10 @@ class GalleryCapabilityContext:
     import_service_available: bool = False    # G08
     label_service_available: bool = False     # G02
     split_service_available: bool = False     # G13
-    collection_service_available: bool = False  # G04
+    collection_service_available: bool = False  # G04：PowerGrade 真实存储在场
+    # G04：虚拟 Timelines 集合可只读聚合（服务真实；宿主未接线 UI 时
+    # 保持 False——能力位描述的是“该动作此刻可不可用”）
+    timeline_collections_available: bool = False
 
 
 _REASONS = {
@@ -604,7 +611,8 @@ def evaluate_gallery_capabilities(
                      "split_service_missing"))
     caps.append(_cap("album.powergrade", context.collection_service_available,
                      "collection_service_missing"))
-    caps.append(_cap("album.timelines", context.collection_service_available,
+    caps.append(_cap("album.timelines",
+                     context.timeline_collections_available,
                      "collection_service_missing"))
     caps.append(_cap("album.memories", False, "memories_unavailable"))
 

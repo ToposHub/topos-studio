@@ -185,8 +185,6 @@ class GalleryFolderRepository:
     def query(self, query: GalleryQuery, *,
               probe_grades: bool = False) -> GalleryQueryResult:
         """平铺扫描 + 过滤 + 排序；失败原因进 ``scan_error`` 不抛异常。"""
-        from src.features.color.core.preset_meta import matches_query
-
         # 先按 ID 找 album（不认识的身份 → album_missing，不猜路径）；
         # 认识但目录缺失/不可读 → folder_missing。
         album = self._find_album_by_id(query.album_id)
@@ -195,6 +193,19 @@ class GalleryFolderRepository:
             return GalleryQueryResult(
                 album=album, stills=(), request_revision=query.request_revision,
                 scan_error=SCAN_ERROR_ALBUM_MISSING)
+        return self.query_folder(folder, query, album=album,
+                                 probe_grades=probe_grades)
+
+    def query_folder(self, folder: str, query: GalleryQuery, *,
+                     album: Optional[GalleryAlbum] = None,
+                     album_id: Optional[str] = None,
+                     probe_grades: bool = False) -> GalleryQueryResult:
+        """直接对目录平铺扫描（G04：集合 scope 服务供 PowerGrade 等非
+        legacy 目录复用同一读取口径）。"""
+        from src.features.color.core.preset_meta import matches_query
+
+        if album is None:
+            album = self.album_for_folder(folder)
         if not os.path.isdir(folder):
             return GalleryQueryResult(
                 album=album, stills=(), request_revision=query.request_revision,
@@ -207,6 +218,7 @@ class GalleryFolderRepository:
                 album=album, stills=(), request_revision=query.request_revision,
                 scan_error=SCAN_ERROR_FOLDER_MISSING)
 
+        effective_album_id = album_id or query.album_id
         existing = {name for name in names
                     if os.path.isfile(os.path.join(folder, name))}
         stills: list[GalleryStill] = []
@@ -216,7 +228,7 @@ class GalleryFolderRepository:
             if name not in existing:
                 continue
             still = self._still_from_name(
-                folder, name, query.album_id, existing,
+                folder, name, effective_album_id, existing,
                 probe_grade=probe_grades)
             if not matches_query(still.display_name, still.meta,
                                  query.search_text):
