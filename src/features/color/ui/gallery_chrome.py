@@ -453,12 +453,31 @@ def paint_gallery_item(painter: QPainter, option: object, index: object, delegat
     selected = bool(option.state & QStyle.StateFlag.State_Selected)
     view = delegate.panel.list_widget
     if delegate.panel._gallery.grid.list_mode:
+        # G02：三列 = Still ID／Label／Timeline Name。身份来自 meta 的
+        # 稳定 still_id（未补齐的旧条目显示 "—"，不把文件名当 ID）；
+        # Label 独立于文件名（未设置时退回文件主名显示）；timeline 名是
+        # 抓帧时的快照，缺失留空——不推断成当前 timeline。
         row = option.rect
         painter.fillRect(row, QColor("#454044" if selected else "#25252a" if index.row() % 2 == 0 else "#28282e"))
-        painter.setPen(QColor("#e0e0e3"))
-        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
-        rect = QRect(row.left() + 10, row.top(), max(0, int(row.width() * 0.4) - 18), 27)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter, painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, rect.width()))
+        meta = index.data(Qt.ItemDataRole.UserRole + 1)
+        still_id = getattr(meta, "still_id", None)
+        label = getattr(meta, "label", None)
+        timeline_name = getattr(meta, "timeline_name", None)
+        file_name = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        columns = (
+            (still_id if still_id else "—", 0.40, QColor("#e0e0e3")),
+            (label if label else file_name, 0.30, QColor("#e0e0e3")),
+            (timeline_name if timeline_name else "", 0.30, QColor("#9a9aa2")),
+        )
+        left = row.left() + 10
+        for text, fraction, color in columns:
+            width = max(0, int(row.width() * fraction) - 18)
+            painter.setPen(color)
+            rect = QRect(left, row.top(), width, 27)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter,
+                             painter.fontMetrics().elidedText(
+                                 text, Qt.TextElideMode.ElideRight, width))
+            left += width + 18
         if selected:
             painter.setPen(QPen(QColor("#e86351"), 1))
             painter.drawLine(row.left(), row.top(), row.left(), row.bottom())
