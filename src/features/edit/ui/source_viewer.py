@@ -2429,11 +2429,16 @@ class SourceViewerWidget(QWidget):
         self._playback_gate = gate
 
     def _authorize_start(self, via: str) -> bool:
-        """走一次仲裁门；未安装门时行为与旧版一致（放行）。"""
-        if self._playback_gate is None:
+        """走一次仲裁门；未安装门时行为与旧版一致（放行）。
+
+        经 ``__dict__`` 读门（未初始化 QObject 替身上缺失属性的常规查找
+        会抛 RuntimeError 而非 AttributeError）。
+        """
+        gate = self.__dict__.get("_playback_gate")
+        if gate is None:
             return True
         try:
-            reason = self._playback_gate(via)
+            reason = gate(via)
         except Exception:
             # 门自身故障不得把走带变砖：记录后按未安装处理
             logger.exception("playback gate raised; allowing start")
@@ -3293,6 +3298,7 @@ class SourceViewerWidget(QWidget):
         if asset is None or not asset.is_video:
             return
         self._gpu_pending_frame = frame
+        self._gpu_stats["decode_submitted"] += 1  # CPU 提交同样计入（I06 计数器口径统一）
         self._cpu_worker.request(
             asset.path,
             frame,

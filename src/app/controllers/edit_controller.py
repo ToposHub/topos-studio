@@ -7535,7 +7535,11 @@ class EditControllerMixin:
         # 工程确实要关闭；取消保存/取消关闭在上面已 return False）。
         # 暂停音频/关解码器/清 asset 与标记/归还显示 slot/清监看状态；
         # 不用永久 shutdown token——新工程 open_asset 复用同一 widget。
-        self._release_edit_source_viewer()
+        # 经 getattr 调用：既有测试用 SimpleNamespace 宿主直接调本 mixin
+        # 方法，可能未携带该 helper——此时跳过释放，不砖化关闭链。
+        release = getattr(self, "_release_edit_source_viewer", None)
+        if callable(release):
+            release()
 
         # Closing a project is an explicit decision to leave it. Its recovery
         # snapshot must not survive into a later open, otherwise a user who

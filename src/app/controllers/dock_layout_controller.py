@@ -567,6 +567,9 @@ class DockLayoutMixin:
                     timeline_panel=self.timeline_panel,
                     parent=self)
                 self._viewport_playback_coordinator = coordinator
+                # I01-5：拒绝原因回填宿主状态栏（不静默吞掉仲裁拒绝）
+                coordinator.status_message.connect(
+                    lambda message: self.statusBar().showMessage(message, 4000))
                 page = str(getattr(self, "current_page", "Edit") or "Edit")
                 coordinator.sync_initial_state(page_mode=(
                     PAGE_EDIT if page == "Edit"
