@@ -173,6 +173,11 @@ _REASONS = {
                          "semantics yet.",
     "reverse_unsupported": "Reverse playback is not implemented for "
                            "Color's source or timeline paths.",
+    "viewer_fullscreen_undesigned": "A dedicated viewer-only fullscreen "
+                                    "scope is not designed; F11 keeps "
+                                    "toggling the viewer's top-level "
+                                    "window (main window, or the "
+                                    "floating dock window).",
 }
 
 
@@ -202,7 +207,13 @@ def evaluate_color_viewer_capabilities(
     caps.append(_cap("view.fit", True))
     caps.append(_cap("view.actual_size", True))
     caps.append(_cap("view.guides", True))
+    # CV-B08：全屏/浮动作用域如实声明。F11 保持既有行为——toggle 的
+    # 是视口的顶层 window（dock 时主窗、浮动时浮动 dock 窗）；独立的
+    # viewer-only 全屏作用域未设计，不冒充。
     caps.append(_cap("view.fullscreen", True))
+    caps.append(_cap("view.fullscreen.viewer_only", False,
+                     "viewer_fullscreen_undesigned"))
+    caps.append(_cap("view.dock_float", True))
     caps.append(_cap("view.focus_mode", context.focus_host_available,
                      "no_focus_host"))
 
