@@ -86,6 +86,29 @@ def make_gallery_request_id() -> str:
     return uuid.uuid4().hex
 
 
+def is_safe_bundle_stem(name: str) -> bool:
+    """校验 bundle 主名（文件操作的安全名；G03 单一来源）。
+
+    拒绝空／纯空白、``.``/``..``、路径分隔符（含 Windows 反斜杠）与
+    控制字符——防止 ``../x`` 之类把文件写出集合目录。与 UI 旧
+    ``_is_safe_preset_name`` 语义一致（中缀点合法）。
+    """
+    import os as _os
+    if not name or not name.strip():
+        return False
+    name = name.strip()
+    if name in {".", ".."}:
+        return False
+    seps = {"/", "\\", _os.sep}
+    if _os.altsep:
+        seps.add(_os.altsep)
+    if any(sep in name for sep in seps):
+        return False
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in name):
+        return False
+    return True
+
+
 @dataclass(frozen=True)
 class GalleryAlbum:
     """Gallery 集合：G01 只描述既有 User/System 平铺目录（legacy-folder）。
