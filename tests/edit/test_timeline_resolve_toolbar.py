@@ -210,6 +210,30 @@ def test_mouse_press_opens_and_closes_toolbar_popup(
     assert not menu.isVisible()
 
 
+@pytest.mark.parametrize("name", ["btn_marker", "btn_flag"])
+def test_small_split_arrow_opens_menu_without_running_primary_action(
+    panel: TimelinePanel, qapp: Any, name: str,
+) -> None:
+    from PyQt6.QtCore import QPoint
+
+    button = getattr(panel, name)
+    menu = button.menu()
+    primary_clicks: list[bool] = []
+    opened: list[bool] = []
+    button.clicked.connect(primary_clicks.append)
+
+    def inspect_and_close() -> None:
+        opened.append(menu.isVisible())
+        menu.close()
+
+    QTimer.singleShot(0, inspect_and_close)
+    QTest.mouseClick(button, Qt.MouseButton.LeftButton,
+                     pos=QPoint(button.width() - 6, button.height() // 2))
+    qapp.processEvents()
+    assert opened == [True]
+    assert primary_clicks == []
+
+
 @pytest.mark.parametrize("edit_width,deliver_width", [(1200, 400), (400, 1200)])
 def test_edit_restores_responsive_layout_after_deliver_resize(
     panel: TimelinePanel, qapp: Any, edit_width: int, deliver_width: int,

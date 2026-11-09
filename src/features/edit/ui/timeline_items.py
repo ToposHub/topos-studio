@@ -703,8 +703,11 @@ class ClipItem(QGraphicsObject):
         self._track_index = track_index
         self._is_selected = False
         self._is_enabled = is_enabled
+        self._is_track_output_enabled = True
         self._is_track_locked = is_track_locked
         self._hover_edge: Optional[str] = None  # 'left', 'right', 'fade_in', 'fade_out', or None
+        self._last_pointer_scene_pos: Optional[QPointF] = None
+        self._pointer_inside: bool = False
         self._track_height = track_height
         self._media_type = media_type
         self._linked_clip_id = linked_clip_id
@@ -1537,6 +1540,10 @@ class ClipItem(QGraphicsObject):
         border_color = CLIP_SELECTED_BORDER
         border_width = CLIP_SELECTED_BORDER_WIDTH
 
+        if not self._is_track_output_enabled:
+            gradient_start = QColor("#55585E")
+            gradient_end = QColor("#35383E")
+
         # Check for disabled/muted/locked states
         is_disabled = not self._is_enabled
         is_locked = self._is_track_locked
@@ -1621,7 +1628,11 @@ class ClipItem(QGraphicsObject):
             and thumbnail_mode != THUMBNAIL_MODE_NONE
             and not is_adjustment and not is_solid and not is_motion_graphic
         ):
+            painter.save()
+            if not self._is_track_output_enabled:
+                painter.setOpacity(painter.opacity() * 0.28)
             self._draw_video_thumbnails(painter, clip_rect, thumbnail_mode)
+            painter.restore()
 
         # Keep the source thumbnail, but tint it very lightly so a Comp Clip
         # still reads as a different timeline object instead of only relying
@@ -1662,7 +1673,11 @@ class ClipItem(QGraphicsObject):
                 painter.drawRoundedRect(waveform_panel, 2.0, 2.0)
             # Own the value across nested Qt/cache paints; option's rect is a
             # borrowed SIP wrapper whose owner can be recycled by Qt.
+            painter.save()
+            if not self._is_track_output_enabled:
+                painter.setOpacity(painter.opacity() * 0.4)
             self._draw_waveform(painter, QRectF(option.exposedRect))
+            painter.restore()
 
         # Draw asset name with text protection bar (DaVinci-like label bar)
         if not hide_details or is_wide:
@@ -1678,6 +1693,9 @@ class ClipItem(QGraphicsObject):
                 label_bar_bg = CLIP_COMP_LABEL_BAR
             else:
                 label_bar_bg = CLIP_VIDEO_LABEL_BAR
+
+            if not self._is_track_output_enabled:
+                label_bar_bg = QColor("#3B3E43")
 
             # Both media types use a shared bottom information strip.  This
             # gives the waveform the same clear main area as video thumbnails
@@ -1807,7 +1825,8 @@ class ClipItem(QGraphicsObject):
         """Paint the minimal visual needed while a clip is being moved."""
         label_rect = QRectF(0.5, clip_rect.height() - 19, self._width - 1.0, 18)
         label_color = QColor(
-            CLIP_AUDIO_LABEL_BAR if is_audio else CLIP_VIDEO_LABEL_BAR
+            (CLIP_AUDIO_LABEL_BAR if is_audio else CLIP_VIDEO_LABEL_BAR)
+            if self._is_track_output_enabled else "#3B3E43"
         )
         label_color.setAlpha(220)
         painter.setBrush(QBrush(label_color))
@@ -4315,6 +4334,15 @@ class ClipItem(QGraphicsObject):
 
     # ==================== Interaction ====================
 
+    def _trim_edge_at(self, pos: QPointF) -> Optional[str]:
+        """Share edge targets between hover and press, leaving a narrow body usable."""
+        edge_width = min(float(HANDLE_SIZE), max(0.0, self._width * 0.22))
+        if pos.x() < edge_width:
+            return "left"
+        if pos.x() > self._width - edge_width:
+            return "right"
+        return None
+
     def _smart_trim_mode_at(self, pos: QPointF) -> str:
         """Resolve T-mode: ripple edges, slip picture, slide name strip.
 
@@ -4322,10 +4350,10 @@ class ClipItem(QGraphicsObject):
         reachable even when the timeline is zoomed out. The shared cut-point
         handle supplies roll editing at the exact junction.
         """
-        edge_width = min(float(HANDLE_SIZE), max(1.0, self._width * 0.22))
-        if pos.x() < edge_width:
+        edge = self._trim_edge_at(pos)
+        if edge == "left":
             return "ripple_trim_left"
-        if pos.x() > self._width - edge_width:
+        if edge == "right":
             return "ripple_trim_right"
         label_height = min(19.0, self._track_height * 0.4)
         return "slide" if pos.y() >= self._track_height - label_height else "slip"
@@ -4342,6 +4370,12 @@ class ClipItem(QGraphicsObject):
         }
 
     def hoverMoveEvent(self, event: Any) -> None:
+        """Refresh pointer feedback only when its target actually changes."""
+        self._last_pointer_scene_pos = event.scenePos()
+        self._update_hover_feedback(event.pos())
+        super().hoverMoveEvent(event)
+
+    def _update_hover_feedback(self, pos: QPointF) -> None:
         """Handle hover move to detect edge proximity and set cursor.
 
         AUD-21103: 先把新的 hover 状态（edge/fade/tooltip/cursor）算入局部
@@ -4351,8 +4385,6 @@ class ClipItem(QGraphicsObject):
         无条件 update 曾造成持续掉帧。写法参照 TrackHeaderItem.hoverMoveEvent
         的差异检测。
         """
-        pos = event.pos()
-
         old_edge = self._hover_edge
         old_fade = self._hover_fade_handle
 
@@ -4361,18 +4393,23 @@ class ClipItem(QGraphicsObject):
         new_tooltip: str
         new_cursor: Any  # Qt.CursorShape 或 QCursor（_trim_cursor 为自定义位标）
 
-        # If track is locked, show forbidden cursor and don't allow editing
-        if self._is_track_locked:
+        # Panning and zooming change only the view, including on locked media.
+        if self._active_tool in {EditTool.HAND, EditTool.ZOOM}:
+            new_edge = new_fade = None
+            new_tooltip = self._asset_name
+            new_cursor = (Qt.CursorShape.OpenHandCursor if self._active_tool == EditTool.HAND
+                          else Qt.CursorShape.CrossCursor)
+
+        elif self._is_track_locked:
             new_edge = None
             new_fade = None
             new_tooltip = f"{self._asset_name}\nFrame: {self._start_frame}\n(Track Locked)"
             new_cursor = Qt.CursorShape.ForbiddenCursor
 
-        elif self._active_tool in {EditTool.BLADE, EditTool.HAND, EditTool.ZOOM}:
+        elif self._active_tool == EditTool.BLADE:
             new_edge = new_fade = None
             new_tooltip = self._asset_name
-            new_cursor = (Qt.CursorShape.OpenHandCursor if self._active_tool == EditTool.HAND
-                          else Qt.CursorShape.CrossCursor)
+            new_cursor = Qt.CursorShape.CrossCursor
 
         elif self._retime_controls_visible and (QRectF(1, 1, 15, 16).contains(pos)
                                                or pos.y() >= self._track_height - 20.0):
@@ -4425,50 +4462,50 @@ class ClipItem(QGraphicsObject):
 
         # Ripple tool (P4.2): edges become ripple trim handles
         elif self._active_tool == EditTool.RIPPLE:
-            if pos.x() < HANDLE_SIZE:
+            if self._trim_edge_at(pos) == "left":
                 new_edge = "ripple_left"
                 new_tooltip = "Ripple Trim In (drag to adjust, shifts subsequent clips)"
                 new_cursor = edit_cursor("ripple_left")
-            elif pos.x() > self._width - HANDLE_SIZE:
+            elif self._trim_edge_at(pos) == "right":
                 new_edge = "ripple_right"
                 new_tooltip = "Ripple Trim Out (drag to adjust, shifts subsequent clips)"
                 new_cursor = edit_cursor("ripple_right")
             else:
                 new_edge = None
                 new_tooltip = f"{self._asset_name}\nFrame: {self._start_frame}"
-                new_cursor = Qt.CursorShape.OpenHandCursor
+                new_cursor = Qt.CursorShape.ArrowCursor
             new_fade = None
 
         # Roll tool (P4.3): edges become roll trim handles (only at cut points)
         elif self._active_tool == EditTool.ROLL:
-            if pos.x() < HANDLE_SIZE:
+            if self._trim_edge_at(pos) == "left":
                 new_edge = "roll_left"
                 new_tooltip = "Roll Trim: adjust cut point between this and previous clip"
                 new_cursor = edit_cursor("roll")
-            elif pos.x() > self._width - HANDLE_SIZE:
+            elif self._trim_edge_at(pos) == "right":
                 new_edge = "roll_right"
                 new_tooltip = "Roll Trim: adjust cut point between this and next clip"
                 new_cursor = edit_cursor("roll")
             else:
                 new_edge = None
                 new_tooltip = f"{self._asset_name}\nFrame: {self._start_frame}"
-                new_cursor = Qt.CursorShape.OpenHandCursor
+                new_cursor = Qt.CursorShape.ArrowCursor
             new_fade = None
 
         else:
             new_fade = None
-            if pos.x() < HANDLE_SIZE:
+            if self._trim_edge_at(pos) == "left":
                 new_edge = "left"
                 new_tooltip = I18N.tr("timeline.trim_in_hint", "Trim In")
                 new_cursor = _trim_cursor("left")
-            elif pos.x() > self._width - HANDLE_SIZE:
+            elif self._trim_edge_at(pos) == "right":
                 new_edge = "right"
                 new_tooltip = I18N.tr("timeline.trim_out_hint", "Trim Out")
                 new_cursor = _trim_cursor("right")
             else:
                 new_edge = None
                 new_tooltip = f"{self._asset_name}\nFrame: {self._start_frame}"
-                new_cursor = Qt.CursorShape.OpenHandCursor
+                new_cursor = Qt.CursorShape.ArrowCursor
 
         lock_mode = {"ripple_left": "ripple_trim_left", "ripple_right": "ripple_trim_right"}.get(new_edge, new_edge or "move")
         if self._active_tool == EditTool.RATE_STRETCH and new_edge in {"left", "right"}:
@@ -4491,7 +4528,18 @@ class ClipItem(QGraphicsObject):
         elif self.cursor() != new_cursor:
             self.setCursor(new_cursor)
 
-        super().hoverMoveEvent(event)
+    def _restore_pointer_feedback(self) -> None:
+        """Restore the current tool's cursor after geometry or gesture changes."""
+        if self._last_pointer_scene_pos is None:
+            self.unsetCursor()
+            return
+        pos = self.mapFromScene(self._last_pointer_scene_pos)
+        self._pointer_inside = self.boundingRect().contains(pos)
+        if self._pointer_inside:
+            self._update_hover_feedback(pos)
+        else:
+            self._hover_edge = self._hover_fade_handle = None
+            self.unsetCursor()
 
     def hoverEnterEvent(self, event: Any) -> None:
         """
@@ -4500,6 +4548,8 @@ class ClipItem(QGraphicsObject):
         参考 Kdenlive: hover 一个 clip 时，同组的所有 clip 边框同时高亮。
         """
         self._pointer_inside = True
+        self._last_pointer_scene_pos = event.scenePos()
+        self._update_hover_feedback(event.pos())
         self.update()
         # Phase 6.1: Emit linked group hover signal to highlight linked clip
         if self._linked_clip_id:
@@ -4517,6 +4567,7 @@ class ClipItem(QGraphicsObject):
         参考 Kdenlive: hover 离开 clip 时，同组的所有 clip 边框取消高亮。
         """
         self._pointer_inside = False
+        self._last_pointer_scene_pos = event.scenePos()
         self._hover_edge = None
         self._hover_fade_handle = None  # Phase 1.2: Clear fade hover state
         # Reset cursor (P2-7: back to default)
@@ -4534,6 +4585,7 @@ class ClipItem(QGraphicsObject):
 
     def mousePressEvent(self, event: Any) -> None:
         """Handle mouse press for selection and interaction."""
+        self._last_pointer_scene_pos = event.scenePos()
         if event.button() == Qt.MouseButton.LeftButton:
             # Always allow selection, but check lock for editing operations
             pos = event.pos()
@@ -4597,7 +4649,7 @@ class ClipItem(QGraphicsObject):
             motion_graphic_retime = (
                 self._media_type == "motion_graphic"
                 and bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-                and pos.x() > self._width - HANDLE_SIZE
+                and self._trim_edge_at(pos) == "right"
             )
             # Phase 1.2: Check the moving fade endpoint before the other
             # tool-specific edge handling.  This is intentionally larger than
@@ -4633,10 +4685,10 @@ class ClipItem(QGraphicsObject):
                 self._drag_start_frame = self._start_frame  # Store original start for delta calculation
             # Ripple tool (P4.2): edges are ripple trim handles
             elif self._active_tool == EditTool.RIPPLE:
-                if pos.x() < HANDLE_SIZE:
+                if self._trim_edge_at(pos) == "left":
                     self._drag_mode = "ripple_trim_left"
                     self._drag_start_frame = self._start_frame
-                elif pos.x() > self._width - HANDLE_SIZE:
+                elif self._trim_edge_at(pos) == "right":
                     self._drag_mode = "ripple_trim_right"
                     self._drag_start_frame = self._start_frame + self._duration_frames  # Store end frame
                 else:
@@ -4644,10 +4696,10 @@ class ClipItem(QGraphicsObject):
                     self._drag_start_frame = self._start_frame
             # Roll tool (P4.3): edges are roll trim handles
             elif self._active_tool == EditTool.ROLL:
-                if pos.x() < HANDLE_SIZE:
+                if self._trim_edge_at(pos) == "left":
                     self._drag_mode = "roll_trim_left"
                     self._drag_start_frame = self._start_frame
-                elif pos.x() > self._width - HANDLE_SIZE:
+                elif self._trim_edge_at(pos) == "right":
                     self._drag_mode = "roll_trim_right"
                     self._drag_start_frame = self._start_frame + self._duration_frames
                 else:
@@ -4656,20 +4708,20 @@ class ClipItem(QGraphicsObject):
             # Rate stretch (B4): edges resize duration; speed is derived on
             # release (source_duration / new_duration, clamped 0.1-8.0)
             elif self._active_tool == EditTool.RATE_STRETCH:
-                if pos.x() < HANDLE_SIZE:
+                if self._trim_edge_at(pos) == "left":
                     self._drag_mode = "rate_stretch_left"
                     self._drag_start_frame = self._start_frame
-                elif pos.x() > self._width - HANDLE_SIZE:
+                elif self._trim_edge_at(pos) == "right":
                     self._drag_mode = "rate_stretch_right"
                     self._drag_start_frame = self._start_frame + self._duration_frames
                 else:
                     self._drag_mode = "move"
                     self._drag_start_frame = self._start_frame
             # Standard trim or select tool
-            elif pos.x() < HANDLE_SIZE:
+            elif self._trim_edge_at(pos) == "left":
                 self._drag_mode = "trim_left"
                 self._drag_start_frame = self._start_frame
-            elif pos.x() > self._width - HANDLE_SIZE:
+            elif self._trim_edge_at(pos) == "right":
                 self._drag_mode = "trim_right"
                 self._drag_start_frame = self._duration_frames
             else:
@@ -5488,6 +5540,7 @@ class ClipItem(QGraphicsObject):
         P2-6: Enforces a drag threshold before entering drag mode.
         Mouse must move > DRAG_THRESHOLD_PX pixels before drag signals are emitted.
         """
+        self._last_pointer_scene_pos = event.scenePos()
         if self._drag_pending and not self._is_dragging:
             # P2-6: Check if threshold has been passed
             delta = event.scenePos() - self._drag_start_pos
@@ -5630,6 +5683,7 @@ class ClipItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event: Any) -> None:
         """Handle mouse release to finish interaction and emit command signals."""
+        self._last_pointer_scene_pos = event.scenePos()
         if event.button() == Qt.MouseButton.LeftButton:
             if self._retime_menu_pending_x is not None:
                 x = self._retime_menu_pending_x
@@ -5842,6 +5896,7 @@ class ClipItem(QGraphicsObject):
             self.update()
             # INT-02：正常 release 结束 view 侧 InteractionSession
             self.interaction_finished.emit(self._clip_id)
+            self._restore_pointer_feedback()
 
         super().mouseReleaseEvent(event)
 
@@ -5881,6 +5936,7 @@ class ClipItem(QGraphicsObject):
         self._drag_mode = None
         self.setZValue(0)
         self._update_geometry()
+        self._restore_pointer_feedback()
         self.update()
 
     def mouseDoubleClickEvent(self, event: Any) -> None:
@@ -5918,6 +5974,12 @@ class ClipItem(QGraphicsObject):
         """Set enabled state."""
         self._is_enabled = enabled
         self.update()
+
+    def set_track_output_enabled(self, enabled: bool) -> None:
+        """Keep output-disabled clips visible and editable as muted gray cards."""
+        if self._is_track_output_enabled != enabled:
+            self._is_track_output_enabled = enabled
+            self.update()
 
     def update_zoom(self, pixels_per_frame: float) -> None:
         """Update zoom scale."""
@@ -6005,6 +6067,8 @@ class ClipItem(QGraphicsObject):
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         else:
             self.unsetCursor()
+        if self._pointer_inside:
+            self._restore_pointer_feedback()
         self.update()
 
     def update_source_range(self, source_start: int, source_duration: int) -> None:
@@ -7647,8 +7711,12 @@ class TrackHeaderItem(QGraphicsObject):
         """Draw a single button with crisp vector icons."""
         # Resolve uses letter buttons for audio Solo/Mute and an auto-select glyph.
         if button_type in {"solo", "mute", "sync_lock"}:
-            if is_active or self._hover_button == button_type:
-                painter.fillRect(rect.adjusted(1, 1, -1, -1), active_color if is_active else QColor(255, 255, 255, 18))
+            if button_type != "sync_lock" or is_active or self._hover_button == button_type:
+                background = (active_color if is_active else
+                              QColor(255, 255, 255, 28 if self._hover_button == button_type else 12))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(background)
+                painter.drawRoundedRect(rect, 3.0, 3.0)
             painter.setPen(QPen(TEXT_COLOR if is_active else TEXT_MUTED_COLOR))
             if button_type == "sync_lock":
                 cx, cy = rect.center().x(), rect.center().y()
@@ -7659,7 +7727,11 @@ class TrackHeaderItem(QGraphicsObject):
                     painter.drawLine(QPointF(cx + direction * 3, cy - 3), tip)
                     painter.drawLine(tip, QPointF(cx + direction * 3, cy + 3))
                 return
-            painter.setFont(QFont("Arial", 8, QFont.Weight.DemiBold))
+            font = QFont("Arial")
+            font.setPixelSize(14)
+            font.setWeight(QFont.Weight.Normal)
+            painter.setFont(font)
+            painter.setPen(QPen(TEXT_COLOR if is_active else QColor("#B8BDC5")))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, fallback_text)
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -7931,10 +8003,10 @@ class TrackHeaderItem(QGraphicsObject):
             self.setCursor(Qt.CursorShape.SizeVerCursor)
         elif button == "resize":
             self.setCursor(Qt.CursorShape.SizeVerCursor)
-        elif button == "name":
-            self.setCursor(Qt.CursorShape.IBeamCursor)
         elif button:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            # Resolve keeps the desktop arrow over track controls and names;
+            # a text cursor belongs only to an actual rename editor.
+            self.setCursor(Qt.CursorShape.ArrowCursor)
         else:
             self.unsetCursor()
 

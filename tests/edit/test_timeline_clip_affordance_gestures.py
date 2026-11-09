@@ -376,3 +376,83 @@ def test_non_trim_tools_do_not_advertise_a_fade_action_at_top_corners(qtbot: Any
     item = view._items_map["v0"]
     assert item._hover_fade_handle is None
     assert item.cursor().shape() == shape
+
+
+@pytest.mark.parametrize("tool", [EditTool.SELECT, EditTool.RIPPLE, EditTool.ROLL])
+def test_clip_body_uses_selection_arrow_before_a_move(qtbot: Any, tool: EditTool) -> None:
+    view = _view(qtbot, tool)
+    item = view._items_map["v1"]
+    QTest.mouseMove(view.viewport(), _point(view, "v1", item._width / 2, 32))
+    assert item.cursor().shape() == Qt.CursorShape.ArrowCursor
+    assert view.viewport().cursor().shape() == Qt.CursorShape.ArrowCursor
+
+
+@pytest.mark.parametrize("cancel", [False, True], ids=["release", "escape"])
+def test_move_restores_selection_arrow_immediately_after_finishing(qtbot: Any, cancel: bool) -> None:
+    view = _view(qtbot)
+    item = view._items_map["v2"]
+    start = _point(view, "v2", item._width / 2, 32)
+    end = start + QPoint(30, 0)
+    QTest.mouseMove(view.viewport(), start)
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(view.viewport(), end, 10)
+    assert item.cursor().shape() == Qt.CursorShape.ClosedHandCursor
+    if cancel:
+        QTest.keyClick(view, Qt.Key.Key_Escape)
+        assert item.cursor().shape() == Qt.CursorShape.ArrowCursor
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+    assert view._items_map["v2"].cursor().shape() == Qt.CursorShape.ArrowCursor
+    assert view.viewport().cursor().shape() == Qt.CursorShape.ArrowCursor
+
+
+def test_switching_tools_refreshes_the_cursor_without_moving_the_pointer(qtbot: Any) -> None:
+    view = _view(qtbot)
+    item = view._items_map["v1"]
+    QTest.mouseMove(view.viewport(), _point(view, "v1", item._width / 2, 32))
+    view.set_tool(EditTool.HAND)
+    assert item.cursor().shape() == Qt.CursorShape.OpenHandCursor
+    view.set_tool(EditTool.TRIM)
+    assert item.cursor().shape() == Qt.CursorShape.BitmapCursor
+    assert item._hover_edge == "slip"
+    view.set_tool(EditTool.SELECT)
+    assert item.cursor().shape() == Qt.CursorShape.ArrowCursor
+
+
+@pytest.mark.parametrize("tool,shape", [(EditTool.HAND, Qt.CursorShape.OpenHandCursor),
+                                      (EditTool.ZOOM, Qt.CursorShape.CrossCursor)])
+def test_view_tools_keep_their_cursor_over_locked_clips(qtbot: Any, tool: EditTool, shape: Qt.CursorShape) -> None:
+    view = _view(qtbot, tool)
+    item = view._items_map["v1"]
+    item.set_track_locked(True)
+    QTest.mouseMove(view.viewport(), _point(view, "v1", item._width / 2, 32))
+    assert item.cursor().shape() == shape
+
+
+@pytest.mark.parametrize("tool", [EditTool.SELECT, EditTool.RIPPLE, EditTool.ROLL])
+@pytest.mark.parametrize("target,fraction", [("left", 0.1), ("body", 0.5), ("right", 0.9)])
+def test_narrow_clip_hover_and_press_agree(qtbot: Any, tool: EditTool, target: str, fraction: float) -> None:
+    view = _view(qtbot, tool, zoom=0.15)
+    # Exercise the clip's targets independently of an explicit Roll tool's
+    # intentionally wider target at a shared cut.
+    view.load_timeline(TimelineSequence(
+        "narrow-pointer", "Narrow pointer", fps=Rational(24, 1),
+        video_tracks=(EditTrack("video", "V1", "video", 0, clips=(
+            ClipInstance("v1", "source", "video", 100, 100, 100, 100),
+        )),),
+    ))
+    view.set_zoom(0.15)
+    view.set_tool(tool)
+    item = view._items_map["v1"]
+    assert item._width < 20
+    point = _point(view, "v1", item._width * fraction, 32)
+    QTest.mouseMove(view.viewport(), QPoint(500, 100))
+    QTest.mouseMove(view.viewport(), point)
+    hover_prefix = {EditTool.SELECT: "", EditTool.RIPPLE: "ripple_", EditTool.ROLL: "roll_"}[tool]
+    expected_hover = None if target == "body" else hover_prefix + target
+    assert item._hover_edge == expected_hover
+    assert item.cursor().shape() == (Qt.CursorShape.ArrowCursor if target == "body" else Qt.CursorShape.BitmapCursor)
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert view.scene().mouseGrabberItem() is item
+    mode_prefix = {EditTool.SELECT: "trim_", EditTool.RIPPLE: "ripple_trim_", EditTool.ROLL: "roll_trim_"}[tool]
+    assert item._drag_mode == ("move" if target == "body" else mode_prefix + target)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=point)

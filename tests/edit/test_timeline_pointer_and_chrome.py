@@ -62,7 +62,7 @@ def panel(qtbot: Any, qapp: Any) -> Any:
     qapp.setStyleSheet(previous)
 
 
-def test_clip_hover_does_not_write_arrow_before_the_item_hand_cursor(panel: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_clip_hover_preserves_the_items_selection_arrow(panel: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     view = panel.timeline_view
     item = view._items_map["clip"]
     start = view.mapFromScene(item.mapToScene(QPointF(80, 32)))
@@ -78,7 +78,7 @@ def test_clip_hover_does_not_write_arrow_before_the_item_hand_cursor(panel: Any,
     for offset in range(1, 12):
         point = view.mapFromScene(item.mapToScene(QPointF(80 + offset, 32)))
         QTest.mouseMove(view.viewport(), point)
-        assert view.viewport().cursor().shape() == Qt.CursorShape.OpenHandCursor
+        assert view.viewport().cursor().shape() == Qt.CursorShape.ArrowCursor
     assert Qt.CursorShape.ArrowCursor not in calls
 
 
@@ -87,6 +87,23 @@ def test_toolbar_separators_are_one_pixel_without_native_bevel(panel: Any) -> No
 
     assert all(line.width() == 1 for line in panel._toolbar_separators)
     assert all(line.frameShape() == QFrame.Shape.NoFrame for line in panel._toolbar_separators)
+
+
+@pytest.mark.parametrize("rect_method,shape", [
+    ("_get_lock_button_rect", Qt.CursorShape.ArrowCursor),
+    ("_get_mute_button_rect", Qt.CursorShape.ArrowCursor),
+    ("_get_name_rect", Qt.CursorShape.ArrowCursor),
+    ("_get_resize_handle_rect", Qt.CursorShape.SizeVerCursor),
+])
+def test_track_header_hover_matches_resolve_controls(
+    panel: Any, rect_method: str, shape: Qt.CursorShape,
+) -> None:
+    view = panel.timeline_view
+    header = view._track_headers["v1"]
+    target = view.mapFromScene(header.mapToScene(getattr(header, rect_method)().center()))
+    QTest.mouseMove(view.viewport(), view.mapFromScene(QPointF(600, 100)))
+    QTest.mouseMove(view.viewport(), target)
+    assert view.viewport().cursor().shape() == shape
 
 
 def test_zoom_slider_overrides_all_host_theme_subcontrols(panel: Any) -> None:

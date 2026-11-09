@@ -122,11 +122,12 @@ def test_new_empty_timeline_starts_at_slider_minimum(qapp: Any) -> None:
     )
 
 
-def test_deliver_mode_hides_edit_tools_but_keeps_zoom_controls(qapp: Any) -> None:
+def test_deliver_mode_hides_edit_tools_but_keeps_zoom_controls(qapp: Any, qtbot: Any) -> None:
     """Deliver may compact the shared panel without changing Edit state."""
     from src.features.edit.ui.timeline_panel import TimelinePanel
 
     panel = TimelinePanel()
+    qtbot.addWidget(panel)
     panel.resize(900, 400)
     panel.show()
     qapp.processEvents()
