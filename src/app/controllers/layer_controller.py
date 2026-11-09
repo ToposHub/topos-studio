@@ -977,7 +977,8 @@ class LayerOpsMixin:
                     "still image write failed")
             txn.add(final_thumb)
             txn.add(final_still)
-            if os.path.isfile(txn.staged_path(final_exr)):
+            exr_in_bundle = os.path.isfile(txn.staged_path(final_exr))
+            if exr_in_bundle:
                 txn.add(final_exr)
                 if os.path.isfile(txn.staged_path(final_exr_decl)):
                     txn.add(final_exr_decl)
@@ -1005,11 +1006,16 @@ class LayerOpsMixin:
             # Gallery 元数据 sidecar：来源 clip / 帧号 / source tag / 时间
             # G02：抓帧即分配稳定 still_id（随 bundle 搬移不再变），并写入
             # timeline／工程来源快照与目标集合快照。
+            # G09：still_precision 只按 EXR **实际写成功**记录（不因“本次
+            # 尝试过 EXR”标 HDR）；降级纯 JPEG 时显式 None（描述口径＝
+            # 精度受限参考）。working/display 域引擎侧无可信来源，不猜写。
             from src.features.color.core.preset_meta import allocate_still_id
             if save_preset_meta(
                     staged_topos,
                     PresetMeta(created_at=now_iso(),
                                still_id=allocate_still_id(),
+                               still_precision="float32" if exr_in_bundle
+                               else None,
                                **self._collect_still_capture_meta())):
                 txn.add(final_meta)
             elif os.path.exists(final_meta):
@@ -1319,9 +1325,29 @@ class LayerOpsMixin:
         M09（S12）：EXR float32 优先——HDR 值直接进参考纹理与 scope
         消费；仅存 JPEG 时明示精度降级（此前恒走 8-bit JPEG，float
         抓帧链在参考侧断开）。
+
+        G09：四通道参考走 alpha 声明合同——undeclared 不猜语义（拒绝加
+        载并明示），straight/premultiplied 显式对齐到引擎参考域
+        （premultiplied），避免透明边缘按错误域解释。
         """
-        from src.features.color.core.preset_meta import load_still_best
+        from src.features.color.core.preset_meta import (
+            align_alpha_domain,
+            load_still_best,
+            still_alpha_declaration,
+        )
         img, precision = load_still_best(topos_path)
+        if img is not None and getattr(img, "ndim", 0) == 3 \
+                and img.shape[2] == 4:
+            semantics = still_alpha_declaration(topos_path)
+            try:
+                img = align_alpha_domain(img, semantics,
+                                         target="premultiplied")
+            except ValueError:
+                self.status_bar.showMessage(
+                    I18N.tr("presets.reference_alpha_undeclared",
+                            "参考帧 alpha 语义未声明——请先在声明中"
+                            "指定 straight/premultiplied"), 3000)
+                return
         if img is None or not self.engine.load_reference_still(img):
             self.status_bar.showMessage(
                 I18N.tr("presets.reference_failed", "预设没有可用的参考帧"), 3000)
