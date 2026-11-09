@@ -63,10 +63,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QObject, pyqtSignal, QPoint, QSize, QTimer, QEvent,
+    QByteArray, QMimeData,
 )
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QImage,
-    QKeySequence, QMouseEvent, QShortcut, QWheelEvent, QIcon,
+    QKeySequence, QMouseEvent, QShortcut, QWheelEvent, QIcon, QDrag,
 )
 
 from src.shared.i18n.i18n import I18N
@@ -81,6 +82,10 @@ from src.features.edit.core.source_time_domain import (
     SourceTimeDomain,
     media_fingerprint_for_path,
     rational_from_float_fps,
+)
+from src.features.edit.core.source_drag_payload import (
+    MIME_TYPE_SOURCE_CLIP,
+    build_source_drag_payload,
 )
 from src.shared.media.timecode import Timecode
 from src.features.edit.ui.preview_view_transform import PreviewViewTransform
@@ -655,11 +660,16 @@ class SourceViewer(QOpenGLWidget):
     seek_requested = pyqtSignal(int)
     zoom_changed = pyqtSignal(float)
     gl_initialized = pyqtSignal(object)  # QOpenGLContext (for GPU pipeline)
+    # I04-1：左键拖出阈值到达时请求发起 Source 剪辑拖拽（容器负责构造
+    # 载荷与 QDrag——canvas 不持有素材/In/Out 状态）。平移仍归中键。
+    source_drag_requested = pyqtSignal()
+    _SOURCE_DRAG_THRESHOLD_PX = 10
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("SourceViewer")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._clip_drag_press = None
         self._fps_indicator = RealtimeFpsIndicator(self)
 
         # Texture state
@@ -1418,6 +1428,11 @@ class SourceViewer(QOpenGLWidget):
             self._pan_start_px = (self._view_transform.pan_x_px, self._view_transform.pan_y_px)
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
+        elif event.button() == Qt.MouseButton.LeftButton:
+            # I04-1：左键按下记账拖出起点（真正拖拽在阈值到达的
+            # mouseMoveEvent 里发起；单击/释放不产生拖拽）。
+            self._clip_drag_press = event.pos()
+            event.accept()
         else:
             super().mousePressEvent(event)
 
@@ -1433,6 +1448,12 @@ class SourceViewer(QOpenGLWidget):
 
             self.update()
             event.accept()
+        elif (self._clip_drag_press is not None
+              and (event.pos() - self._clip_drag_press).manhattanLength()
+              >= self._SOURCE_DRAG_THRESHOLD_PX):
+            self._clip_drag_press = None  # 一次按下只发起一次
+            self.source_drag_requested.emit()
+            event.accept()
         else:
             super().mouseMoveEvent(event)
 
@@ -1441,6 +1462,9 @@ class SourceViewer(QOpenGLWidget):
         if event.button() == Qt.MouseButton.MiddleButton:
             self._is_panning = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+        elif event.button() == Qt.MouseButton.LeftButton:
+            self._clip_drag_press = None
             event.accept()
         else:
             super().mouseReleaseEvent(event)
@@ -1889,6 +1913,9 @@ class SourceViewerWidget(QWidget):
 
         # OpenGL viewer (top)
         self.viewer = SourceViewer(self)
+        # I04-1：画面左键拖出（阈值在 canvas 内判定）→ 统一生产端
+        self.viewer.source_drag_requested.connect(
+            lambda: self.start_source_clip_drag("av"))
         self.viewer.setMinimumSize(320, 180)
         self.viewer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self.viewer, stretch=1)
@@ -3016,6 +3043,68 @@ class SourceViewerWidget(QWidget):
             return
         self._time_domain = replace(self._time_domain,
                                     time_index=time_index)
+
+    # ==================== Source Clip Drag (I04-1) ====================
+
+    def source_drag_payload_for_intent(
+            self, stream_intent: str) -> tuple[Optional[bytes], Optional[str]]:
+        """构造 Source 剪辑拖拽载荷（版本 MIME 字节 + 拒绝原因）。
+
+        政策：
+
+        - 无 In/Out → **全段**（0..末帧，Out 包含）；
+        - 有 In/Out → 拖出当前源窗口；
+        - 流不存在（无声素材拖 Audio Only 等）→ 返回原因，不起拖；
+        - 身份/帧率取自当前素材的**可信 metadata**（时间域指纹与
+          Rational fps），不信任调用方注入。
+        """
+        asset = self._current_asset
+        if asset is None:
+            return None, "no_source_asset"
+        total = int(self._total_frames or 0)
+        if total <= 0:
+            return None, "no_frames"
+        has_video = asset.media_type != "audio"
+        has_audio = (asset.media_type == "audio"
+                     or bool(getattr(asset, "audio_channels", None)))
+        if stream_intent == "video" and not has_video:
+            return None, "video_stream_unavailable"
+        if stream_intent == "audio" and not has_audio:
+            return None, "audio_stream_unavailable"
+        in_frame = self._in_point if self._in_point is not None else 0
+        out_frame = (self._out_point if self._out_point is not None
+                     else total - 1)
+        source_fps = None
+        fingerprint = None
+        if self._time_domain is not None:
+            source_fps = (self._time_domain.fps.num, self._time_domain.fps.den)
+            fingerprint = self._time_domain.media_fingerprint
+        payload = build_source_drag_payload(
+            asset.asset_id, in_frame, out_frame, stream_intent,
+            source_fps=source_fps, media_fingerprint=fingerprint)
+        if payload is None:
+            return None, "invalid_range"
+        return payload.encode(), None
+
+    def start_source_clip_drag(self, stream_intent: str,
+                               parent: Optional[Any] = None
+                               ) -> Optional[str]:
+        """I04-1：发起版本 MIME 拖拽（画面/图标拖出的统一生产端）。
+
+        返回 None = 拖拽已发起；返回原因键 = 拒绝（无素材/无流/坏区间），
+        不产生任何拖拽。``QDrag.exec`` 阻塞至放下，由 Qt 派发到 Timeline
+        的 dragEnter/drop（消费端见 ``timeline_view``）。
+        """
+        encoded, reason = self.source_drag_payload_for_intent(stream_intent)
+        if encoded is None:
+            logger.debug("Source clip drag refused (%s)", reason)
+            return reason
+        mime = QMimeData()
+        mime.setData(MIME_TYPE_SOURCE_CLIP, QByteArray(encoded))
+        drag = QDrag(parent or self)
+        drag.setMimeData(mime)
+        drag.exec(Qt.CopyAction)
+        return None
 
     def _load_frame(self, frame: int) -> None:
         """Load and display a specific frame."""

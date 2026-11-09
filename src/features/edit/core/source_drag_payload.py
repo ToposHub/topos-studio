@@ -47,6 +47,10 @@ class SourceDragPayload:
     stream_intent: str = STREAM_INTENT_AV
     source_fps_num: Optional[int] = None
     source_fps_den: Optional[int] = None
+    # I04-2：可选媒体指纹（path|size|mtime 截断 sha）。接收端与当前项目
+    # 素材指纹比对——同 ID 不同媒体（跨工程载荷/素材换版）整单拒绝；
+    # 缺失 = 载荷不声明身份，接收端只按 ID 找（旧载荷兼容）。
+    media_fingerprint: Optional[str] = None
 
     @property
     def source_length(self) -> int:
@@ -64,6 +68,8 @@ class SourceDragPayload:
         if self.source_fps_num is not None and self.source_fps_den:
             data["source_fps_num"] = int(self.source_fps_num)
             data["source_fps_den"] = int(self.source_fps_den)
+        if self.media_fingerprint:
+            data["media_fingerprint"] = self.media_fingerprint
         return data
 
     def encode(self) -> bytes:
@@ -74,6 +80,7 @@ def build_source_drag_payload(
         asset_id: str, in_frame: int, out_frame: int,
         stream_intent: str = STREAM_INTENT_AV,
         source_fps: Optional[Tuple[int, int]] = None,
+        media_fingerprint: Optional[str] = None,
 ) -> Optional[SourceDragPayload]:
     """构造载荷；非法参数（空资产/坏区间/坏意图）返回 None 而非抛错。"""
     if not isinstance(asset_id, str) or not asset_id.strip():
@@ -92,10 +99,15 @@ def build_source_drag_payload(
         if (not _is_integer(fps_num) or not _is_integer(fps_den)
                 or fps_num <= 0 or fps_den <= 0):
             return None  # 坏帧率整单拒绝（调用方 bug 信号）
+    if media_fingerprint is not None:
+        if not isinstance(media_fingerprint, str) or not media_fingerprint.strip():
+            return None  # 坏指纹整单拒绝（调用方 bug 信号）
+        media_fingerprint = media_fingerprint.strip()
     return SourceDragPayload(
         asset_id=asset_id, in_frame=in_frame, out_frame=out_frame,
         stream_intent=stream_intent,
-        source_fps_num=fps_num, source_fps_den=fps_den)
+        source_fps_num=fps_num, source_fps_den=fps_den,
+        media_fingerprint=media_fingerprint)
 
 
 def decode_source_drag_payload(raw: Any) -> Optional[SourceDragPayload]:
@@ -140,7 +152,12 @@ def decode_source_drag_payload(raw: Any) -> Optional[SourceDragPayload]:
         if (not _is_integer(fps_num) or not _is_integer(fps_den)
                 or fps_num <= 0 or fps_den <= 0):
             return None
+    fingerprint = None
+    if "media_fingerprint" in data:
+        fingerprint = data.get("media_fingerprint")
+        if not isinstance(fingerprint, str) or not fingerprint.strip():
+            return None  # 声明了指纹就必须是可读非空字符串
     return SourceDragPayload(
         asset_id=asset_id, in_frame=in_frame, out_frame=out_frame,
         stream_intent=intent, source_fps_num=fps_num,
-        source_fps_den=fps_den)
+        source_fps_den=fps_den, media_fingerprint=fingerprint)

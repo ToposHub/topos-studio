@@ -72,6 +72,34 @@ def _tool(icon: str, tooltip: str, parent: QWidget, width: int = 32) -> QToolBut
     return button
 
 
+class _DragSourceButton(QToolButton):
+    """I04-1：Video Only／Audio Only 图标拖出源（按下即起拖，无点击动作）。"""
+
+    def __init__(self, icon: str, tooltip: str, intent: str,
+                 starter: Callable[[str], object], parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setIcon(viewer_icon(icon))
+        self.setIconSize(QSize(20, 20))
+        self.setFixedSize(32, 28)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setToolTip(tooltip)
+        self.setAccessibleName(tooltip)
+        self.setStyleSheet(_BUTTON_STYLE)
+        self.setCursor(Qt.CursorShape.DragCopyCursor)
+        self._intent = intent
+        self._starter = starter
+
+    def mousePressEvent(self, event: QEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            try:
+                self._starter(self._intent)
+            except Exception:
+                logger.exception("source clip drag failed to start")
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class _DropdownTool(QToolButton):
     """A platform-independent icon/text menu with a fine, inset chevron."""
 
@@ -435,8 +463,21 @@ class EditViewport(QWidget):
         header.options_button.setMenu(options)
         footer, left, center, right = self._footer(viewer)
         _adopt(left, bar.btn_source_patch, "source_patch", 40)
-        for glyph, label in (("video_only", "Video Only"), ("audio_only", "Audio Only")):
-            left.addWidget(self._pending_button(footer, glyph, I18N.tr("edit.viewport." + glyph, label)))
+        # I04-1：流意图拖出源（真实 handler：按下起拖；拖拽可行性由
+        # 生产端按素材流如实裁决，不虚设禁用态）。
+        def _start_source_drag(intent: str) -> object:
+            starter = getattr(self.source_viewer, "start_source_clip_drag",
+                              None)
+            return starter(intent) if callable(starter) else None
+
+        for glyph, intent, label in (
+                ("video_only", "video", "Video Only"),
+                ("audio_only", "audio", "Audio Only")):
+            button = _DragSourceButton(
+                glyph, I18N.tr("edit.viewport." + glyph, label), intent,
+                _start_source_drag, footer)
+            footer.optional_controls.append(button)
+            left.addWidget(button)
         self.source_stop_button = self._stop_button(viewer.stop_in_place, footer)
         self.source_stop_button.hide()
         options.addAction(I18N.tr("edit.viewport.stop", "Stop"), self.source_stop_button.click)
