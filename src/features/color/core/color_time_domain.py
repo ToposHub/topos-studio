@@ -215,7 +215,13 @@ def vfr_seconds_for_frame(index, source_frame: int) -> Optional[float]:
 
 def vfr_frame_for_seconds(index, seconds: float) -> Optional[int]:
     """VFR：秒 → 帧。对 ``index.points``（按 source_frame 升序）二分，
-    不做全片线性扫描。"""
+    不做全片线性扫描。
+
+    R04（2026-11-09 复查）：秒列优先走 ``index.seconds_column()``
+    （``SourceFrameTimeIndex`` 的懒缓存面——单次查询 O(log n)，不再
+    每次遍历全部 points 构造秒列）；无该面的 duck 对象退回每次现建，
+    行为不变。
+    """
     if index is None:
         return None
     points = getattr(index, "points", None)
@@ -224,13 +230,21 @@ def vfr_frame_for_seconds(index, seconds: float) -> Optional[int]:
     seconds = float(seconds)
     if seconds < 0.0:
         return None
-    # 预取秒序列（Points 是 tuple，通常已按帧序即时间序）。
-    times: list[float] = []
-    for point in points:
-        value = getattr(point, "seconds", None)
-        if value is None:
-            return None
-        times.append(float(value))
+    times: Optional[tuple[float, ...]] = None
+    column_getter = getattr(index, "seconds_column", None)
+    if callable(column_getter):
+        try:
+            times = tuple(column_getter())
+        except Exception:
+            times = None
+    if not times:
+        built: list[float] = []
+        for point in points:
+            value = getattr(point, "seconds", None)
+            if value is None:
+                return None
+            built.append(float(value))
+        times = tuple(built)
     position = bisect_left(times, seconds)
     if position >= len(times):
         return int(points[-1].source_frame)

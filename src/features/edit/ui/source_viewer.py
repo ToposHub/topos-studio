@@ -105,8 +105,11 @@ def _build_time_domain(asset: MediaAsset) -> Optional[SourceTimeDomain]:
       映射到最近常见帧率（23.976 → 24000/1001）；
     - 起始时间码 / DF 类型：``metadata["timecode"]``（兼容 ``start_timecode``，SMPTE 字符串，
       DF 由其分隔符决定）；缺失 = 从 00:00:00:00 起；
-    - VFR PTS 索引：异步分析产物，**不在打开时探测**——经
-      ``set_source_time_index`` 在拿到后注入（不阻塞 UI）；
+    - VFR PTS 索引：R04（2026-11-09 复查）——导入器已保存的
+      ``metadata["pts_index"]``（逐帧秒表，仅 VFR 素材携带）在打开时
+      **直接消费**（纯 metadata 读取，零探测/解码）；异步分析产物仍经
+      ``set_source_time_index`` 注入（带身份校验，迟到索引不误注）；
+      无索引 = 显式 CFR 回退（``source_time_mode`` 如实报告）；
     - 指纹：path+size+mtime（``media_fingerprint_for_path``），素材换版
       即失效。
     """
@@ -131,11 +134,25 @@ def _build_time_domain(asset: MediaAsset) -> Optional[SourceTimeDomain]:
         except ValueError:
             logger.debug("Ignoring unparsable start_timecode %r for %s",
                          raw_tc, asset.asset_id)
+    fingerprint = media_fingerprint_for_path(
+        str(getattr(asset, "path", "") or ""))
+    time_index = None
+    pts_raw = metadata.get("pts_index")
+    if pts_raw:
+        from src.features.edit.core.scene_cut.models import (
+            SourceFrameTimeIndex,
+        )
+        time_index = SourceFrameTimeIndex.from_pts_seconds(
+            asset.asset_id, fingerprint, pts_raw)
+        if time_index is None:
+            logger.debug(
+                "pts_index for %s sanitized to <2 monotonic points; "
+                "falling back to CFR math", asset.asset_id)
     return SourceTimeDomain(
         asset_id=asset.asset_id,
-        media_fingerprint=media_fingerprint_for_path(
-            str(getattr(asset, "path", "") or "")),
-        fps=fps, total_frames=total, start_timecode=start_tc)
+        media_fingerprint=fingerprint,
+        fps=fps, total_frames=total, start_timecode=start_tc,
+        time_index=time_index)
 
 
 # ── OpenGL bindings via PyOpenGL ──────────────────────────────────────────────
@@ -2824,7 +2841,8 @@ class SourceViewerWidget(QWidget):
         self._scrub_audio_last_emit_ms = now_ms
         try:
             manager.preview_scrub_audio(
-                self._clamp_source_frame(frame),
+                # R04：VFR 源的音频预览同样经秒域换算到音频帧钟
+                self._audio_position_frame(self._clamp_source_frame(frame)),
                 duration_ms=self._scrub_audio_preview_duration_ms,
             )
         except Exception as exc:
@@ -2843,14 +2861,17 @@ class SourceViewerWidget(QWidget):
 
     def _start_source_audio(self, start_frame: int) -> None:
         """Begin continuous audio playback from ``start_frame`` (no-op if the
-        asset has no audio graph or isn't video)."""
+        asset has no audio graph or isn't video).
+
+        R04：VFR 源的起播位置经时间域秒域换算（视频/音频同一秒轴）。
+        """
         if self._current_asset is None or not getattr(self._current_asset, "is_video", False):
             return
         manager = self._audio_playback_manager()
         if manager is None:
             return
         try:
-            manager.play(start_frame=start_frame)
+            manager.play(start_frame=self._audio_position_frame(start_frame))
         except Exception as exc:
             logger.debug("Source playback audio start failed: %s", exc)
 
@@ -2865,12 +2886,16 @@ class SourceViewerWidget(QWidget):
             logger.debug("Source playback audio pause failed: %s", exc)
 
     def _seek_source_audio(self, frame: int) -> None:
-        """Reposition continuous audio to ``frame`` during playback."""
+        """Reposition continuous audio to ``frame`` during playback.
+
+        R04：VFR 源经秒域换算（循环回卷/播放中 seek 与视频同一秒轴）。
+        """
         manager = self._audio_playback_manager()
         if manager is None:
             return
         try:
-            manager.seek(self._clamp_source_frame(frame))
+            manager.seek(
+                self._audio_position_frame(self._clamp_source_frame(frame)))
         except Exception as exc:
             logger.debug("Source playback audio seek failed: %s", exc)
 
@@ -2937,8 +2962,9 @@ class SourceViewerWidget(QWidget):
 
         if self._reverse_playback:
             # VP-B05: 反向步进（1x）；到帧 0 暂停（初版不做反向循环）
-            target_frame = self._playback_start_frame - int(
-                elapsed * self._fps)
+            # R04：VFR 素材倒放同样按 PTS 秒域回退（与正放同一时间轴）
+            target_frame = self._frame_after_elapsed(
+                self._playback_start_frame, elapsed, reverse=True)
             if target_frame <= 0:
                 self._current_frame = 0
                 self.slider.setValue(0)
@@ -2957,7 +2983,9 @@ class SourceViewerWidget(QWidget):
             return
 
         # Calculate where we should be based on real time
-        target_frame = self._playback_start_frame + int(elapsed * self._fps)
+        # R04：VFR 素材经 PTS 秒域求目标帧（CFR 保持原 fps 数学）
+        target_frame = self._frame_after_elapsed(
+            self._playback_start_frame, elapsed)
 
         # Out is inclusive: present it before wrapping, then keep it until the
         # next frame is due. This also gives a one-frame range its full period
@@ -3076,16 +3104,83 @@ class SourceViewerWidget(QWidget):
         """I02-2：当前素材的时间域权威（宿主经此消费帧/秒/TC/校验）。"""
         return self._time_domain
 
-    def set_source_time_index(self, time_index: Any) -> None:
-        """I02-1：VFR PTS 索引注入（异步取得后调用；打开时不探测）。
+    @property
+    def source_time_mode(self) -> str:
+        """R04：当前源的时间基准（如实报告，供宿主/诊断消费）。
 
-        场景切割分析等后台产物到位后注入；本方法只重建时间域，不触发
-        seek/解码，UI 线程零阻塞。
+        ``"vfr_pts"``：PTS 索引在场，播放/音频/TC 换算走秒域；
+        ``"cfr"``：无索引（CFR 素材或索引清洗失败），显式回退 fps 数学
+        ——不伪称精确 VFR。
+        """
+        domain = self._time_domain
+        if domain is not None and domain.time_index is not None:
+            return "vfr_pts"
+        return "cfr"
+
+    def set_source_time_index(self, time_index: Any) -> None:
+        """I02-1+R04：VFR PTS 索引注入（异步取得后调用；打开时不探测）。
+
+        身份校验（R04）：索引的 ``asset_id``／``media_fingerprint`` 必须
+        与当前时间域一致——换源后迟到的旧素材索引不再误注入新域。本
+        方法只重建时间域，不触发 seek/解码，UI 线程零阻塞。
         """
         if self._time_domain is None or self._current_asset is None:
             return
+        if time_index is not None:
+            if (getattr(time_index, "asset_id", None)
+                    != self._time_domain.asset_id
+                    or getattr(time_index, "media_fingerprint", None)
+                    != self._time_domain.media_fingerprint):
+                logger.warning(
+                    "Rejecting stale time index for asset %s (current %s)",
+                    getattr(time_index, "asset_id", None),
+                    self._time_domain.asset_id)
+                return
         self._time_domain = replace(self._time_domain,
                                     time_index=time_index)
+
+    # ── R04：PTS 秒域播放/音频换算 ──────────────────────────────────
+
+    def _frame_after_elapsed(self, start_frame: int, elapsed: float,
+                             *, reverse: bool = False) -> int:
+        """起播帧＋流逝秒 → 目标帧（VFR 走 PTS 秒域，CFR 回退 fps 数学）。
+
+        播放时钟统一以秒推进：VFR 素材经时间域精确帧↔秒映射（O(log n)
+        最近邻），正放/倒放共用同一秒域；无索引时保持既有 CFR 数学。
+        """
+        domain = self._time_domain
+        if domain is not None and domain.time_index is not None:
+            try:
+                start_seconds = domain.frame_to_seconds(int(start_frame))
+                seconds = (start_seconds - float(elapsed) if reverse
+                           else start_seconds + float(elapsed))
+                if seconds <= 0.0:
+                    return 0
+                return domain.seconds_to_frame(seconds)
+            except ValueError:
+                logger.debug(
+                    "VFR seconds mapping unavailable; using CFR math")
+        stepped = -float(elapsed) if reverse else float(elapsed)
+        return int(start_frame) + int(stepped * self._fps)
+
+    def _audio_position_frame(self, frame: int) -> int:
+        """R04：源帧 → 音频管理器帧位（VFR 经域秒域换算，CFR 恒等）。
+
+        音频管理器按 CFR 帧钟走；VFR 源先把帧换算成 PTS 秒，再映射到
+        音频帧钟（round(seconds × fps)）——视频/音频/循环回卷共用同一
+        秒域，不再各按各的平均 fps。
+        """
+        domain = self._time_domain
+        if domain is None or domain.time_index is None:
+            return int(frame)
+        try:
+            seconds = domain.frame_to_seconds(int(frame))
+        except ValueError:
+            return int(frame)
+        fps = float(self._fps or 24.0)
+        if fps <= 0.0:
+            return int(frame)
+        return max(0, int(round(seconds * fps)))
 
     # ==================== Source Clip Drag (I04-1) ====================
 
