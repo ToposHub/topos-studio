@@ -64,6 +64,8 @@ class PresetsPanel(QWidget):
     reference_requested = pyqtSignal(str)         # 加载为参考帧 wipe
     # P1-COLOR-21: Color Match（把当前调色结果匹配到此静帧）
     match_requested = pyqtSignal(str)
+    # G13：分屏比较设置窗的预留协议（presenter 未实现——宿主如实拒绝）
+    split_comparison_requested = pyqtSignal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -180,6 +182,9 @@ class PresetsPanel(QWidget):
                     for item in self.list_widget.selectedItems()]
         dialog = GalleryCompareDialog(entries, selected, mode, self)
         dialog.wipe_requested.connect(self.reference_requested.emit)
+        # G13：split 协议转发给宿主（接受/拒绝由宿主如实回填）
+        dialog.split_requested.connect(
+            self.split_comparison_requested.emit)
         dialog.exec()
 
     def _find_dock_widget(self):

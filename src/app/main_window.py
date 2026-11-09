@@ -1891,6 +1891,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             self.on_apply_preset_categories_requested)
         self.presets_panel.reference_requested.connect(
             self.on_preset_reference_requested)
+        # G13：split 协议闭环（宿主如实拒绝，直到 presenter 落地）；清除
+        # 参考时结束 wipe 会话（菜单路径）。
+        self.presets_panel.split_comparison_requested.connect(
+            self.on_split_compare_requested)
+        self.canvas.viewport_menu.clear_reference_requested.connect(
+            self.end_gallery_compare_session)
         self.canvas.color_viewport_chrome.gallery_compare_requested.connect(
             self.presets_panel.open_comparison)
         # P1-COLOR-21: Auto Color / Color Match
