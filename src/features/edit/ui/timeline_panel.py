@@ -1468,11 +1468,16 @@ class TimelinePanel(QWidget):
         self._playback_gate = gate
 
     def _authorize_transport_start(self, via: str) -> bool:
-        """走一次仲裁门；未安装门时行为与旧版一致（放行）。"""
-        if self._playback_gate is None:
+        """走一次仲裁门；未安装门时行为与旧版一致（放行）。
+
+        经 ``__dict__`` 读门：既有测试有绕过 ``__init__`` 构造的面板替身
+        （``__new__``），未初始化 QObject 上缺失属性的常规查找会抛
+        RuntimeError 而非 AttributeError——按未安装处理，不砖化。
+        """
+        if self.__dict__.get("_playback_gate") is None:
             return True
         try:
-            reason = self._playback_gate(via)
+            reason = self.__dict__.get("_playback_gate")(via)
         except Exception:
             # 门自身故障不得把走带变砖：记录后按未安装处理
             logger.exception("playback gate raised; allowing start")
@@ -1620,7 +1625,7 @@ class TimelinePanel(QWidget):
             return
         # I01-2：从暂停进入倒放是"起播"，先经仲裁门（已在播则仅变速，
         # 门对已播放状态幂等放行，零命令）。
-        if not self._playback_controller.is_playing and \
+        if not getattr(self._playback_controller, "is_playing", False) and \
                 not self._authorize_transport_start("jkl_backward"):
             return
         self._playback_controller.jkl_backward_press()
@@ -1642,7 +1647,7 @@ class TimelinePanel(QWidget):
         if self._route_dynamic_trim_shortcut(Qt.Key.Key_L):
             return
         # I01-2：从暂停进入播放是"起播"，先经仲裁门（已在播则仅变速）。
-        if not self._playback_controller.is_playing and \
+        if not getattr(self._playback_controller, "is_playing", False) and \
                 not self._authorize_transport_start("jkl_forward"):
             return
         self._playback_controller.jkl_forward_press()

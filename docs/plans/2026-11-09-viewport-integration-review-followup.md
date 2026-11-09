@@ -123,3 +123,35 @@ Edit 已交付一批可复用的领域组件、Source 播放／资源修正及 T
 4. Color 继续按单独 CV-B01–B11 实施。新的共用能力放 shared／facade，避免 Color 直接依赖 Edit UI 内部控件或复制一套播放时钟。
 
 **退出条件**：每个启用的动作都能从 UI 追踪到真实服务和成功／失败回填；无 handler 的动作保持禁用；本表每项有可复现证据后才关闭。
+
+## I01–I07 实施记录（2026-11-09，复查修复批次）
+
+全部 7 项已实施并按批提交；详细验收（含提交表、状态三栏口径、用户素材
+证据与聚焦测试命令）见
+[validation/viewport_followup_i01_i07_20261109.md](../validation/viewport_followup_i01_i07_20261109.md)。
+
+| 任务 | Commit | 状态 |
+|---|---|---|
+| I01 全入口播放仲裁/真实反馈/页面生命周期 | `9ebd8ba6` | 域件+宿主接线完成；真机手感边界如实 |
+| I02 Source 时间域/范围校验/换源状态 | `5e68d625` | 域件+宿主接线完成；含真实素材冒烟 |
+| I03 capability/Match Frame 宿主与菜单 | `8177cf00` | 域件+宿主接线完成；F 键维持既有绑定 |
+| I04 Source 拖出生产端/身份校验/事务（P1/P2） | `0a868c2a` | P1/P2 修复有复现用例；三意图×两模式×跨帧率×锁轨/新轨矩阵 |
+| I05 工程关闭 Source 释放边界 | `53bf31ab` | 可复用边界全测；整机 Cmd+W 真机复核 |
+| I06 双视图预算执行 | `8e64c4ab` | 执行器接真实质量档+结构核验+诊断；4K/HDR 吞吐真机边界 |
+| I07 整页验收与记录闭环 | 见 validation 记录 | 组合宿主集成+用户素材冒烟+本记录 |
+
+要点：
+
+- 每个启用的动作均可从 UI 入口追踪到真实服务与成功/失败回填（入口门→
+  仲裁器→真实控制器→状态信号→快照/状态栏/菜单回填）；无 handler 的
+  动作（Proxy 切换/bypass/Source Tape/markers/timeline mark）保持禁用
+  并带注册表原因。
+- 复查复现的 P1（insert 丢流意图）与 P2（先建轨后失败留孤立轨+Undo）
+  均已修复并有针对性用例。
+- 全量回归（tests/edit + tests/app + tests/deliver，offscreen）最终
+  数字与失败归属见
+  [validation 记录 §4](../validation/viewport_followup_i01_i07_20261109.md)。
+- 真机证据边界（不填通过）：跨页/全屏/浮动/单双/工程切换整机循环与
+  音频听感、4K/HDR 双视图吞吐与 10 分钟内存、拖拽阈值手感、HDR 监看
+  一致性；`tests/benchmark/drive_real_app_*` 可作后续专项驱动。
+- Color 后端维持单独 CV-B01–B11 计划推进（本批未实施 Color 侧）。

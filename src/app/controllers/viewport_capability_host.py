@@ -55,13 +55,20 @@ class ViewportCapabilityHost(QObject):
         super().__init__(parent)
         self._window = window
         self._candidate_menu: Optional[QMenu] = None
+        self._last_page_mode: Optional[str] = None
         viewport = window.edit_viewport
         viewport.capability_action_requested.connect(self._on_action)
         viewport.capabilities_context_requested.connect(self.refresh)
         coordinator = getattr(window, "_viewport_playback_coordinator", None)
         if coordinator is not None:
-            # I01 快照变化（素材/页面/播放）→ 即时回填菜单状态
-            coordinator.snapshot_changed.connect(lambda _snap: self.refresh())
+            # I01 快照变化（素材/页面/播放）→ 即时回填菜单状态；页面
+            # 模式取**快照**（单一事实源）而非窗口字符串，避免两处状态
+            # 分叉。
+            coordinator.snapshot_changed.connect(self._on_snapshot)
+        self.refresh()
+
+    def _on_snapshot(self, snapshot: Any) -> None:
+        self._last_page_mode = getattr(snapshot, "page_mode", None)
         self.refresh()
 
     # ── 状态收集与回填 ──────────────────────────────────────────────
@@ -70,7 +77,13 @@ class ViewportCapabilityHost(QObject):
         window = self._window
         sequence = self._timeline_sequence()
         source = getattr(window, "source_viewer_widget", None)
-        in_deliver = str(getattr(window, "current_page", "") or "") == "Deliver"
+        # Deliver 判定优先用仲裁器快照（页面生命周期的单一事实源）；
+        # 无协调器时回落窗口 current_page。
+        if self._last_page_mode is not None:
+            in_deliver = self._last_page_mode == "deliver"
+        else:
+            in_deliver = (str(getattr(window, "current_page", "") or "")
+                          == "Deliver")
         # GPU 可用性：目前无全局探针；Source 侧 CPU 回退是临时路径而非
         # 永久能力缺失，注册表的 gpu 门（fullscreen）保持默认可用，等
         # B02 计数接入宿主后由真实信号驱动。

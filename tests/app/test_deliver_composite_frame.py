@@ -16,7 +16,11 @@ from unittest.mock import Mock
 import pytest
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# 仓库根已由 tests/conftest.py 放入 sys.path；此处不再重复插入。此前把
+# ``tests/`` 插到 sys.path[0] 会让后续 ``import shared...`` 命中
+# ``tests/shared``（测试替身包）而不是 ``src/shared``——组合跑
+# （edit+app+deliver）时按收集序导入本模块后，
+# test_media_pool_finder_phase1 的 ``from shared.media...`` 即被遮蔽。
 
 from src.app.controllers.deliver_controller import DeliverControllerMixin
 
