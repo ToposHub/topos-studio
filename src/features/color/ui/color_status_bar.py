@@ -95,6 +95,8 @@ class ColorMonitorStatusBar(QWidget):
         self._decode_path = ''
         self._denoise_quality_provider = None
         self._denoise_quality: Optional[str] = None
+        # CV-B09：已应用的折叠宽度（apply_available_width 去重用）。
+        self._applied_width: Optional[int] = None
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         layout = QHBoxLayout(self)
@@ -107,14 +109,20 @@ class ColorMonitorStatusBar(QWidget):
         self._provider_label = QLabel('')
         self._denoise_label = QLabel('')
 
+        # SRC→WORK→OUT 链路段（含箭头）：窄视口折叠整段到 tooltip。
+        self._chain_widgets: list[QWidget] = [self._src_label]
         layout.addWidget(self._src_label)
-        layout.addWidget(self._make_arrow())
-        layout.addWidget(self._work_label)
-        layout.addWidget(self._make_arrow())
-        layout.addWidget(self._out_label)
-        layout.addWidget(self._make_sep())
+        for arrow, label in ((self._make_arrow(), self._work_label),
+                             (self._make_arrow(), self._out_label)):
+            self._chain_widgets.append(arrow)
+            layout.addWidget(arrow)
+            self._chain_widgets.append(label)
+            layout.addWidget(label)
+        self._chain_sep = self._make_sep()
+        layout.addWidget(self._chain_sep)
         layout.addWidget(self._denoise_label)
-        layout.addWidget(self._make_sep())
+        self._denoise_sep = self._make_sep()
+        layout.addWidget(self._denoise_sep)
 
         base = ("QLabel { background: transparent; border: none;"
                 " font-size: 11px; padding: 0 3px; }")
@@ -132,6 +140,10 @@ class ColorMonitorStatusBar(QWidget):
         from src.shared.ui.effect_degradation_indicator import (
             EffectDegradationIndicator,
         )
+        # provider 徽标（OCIO/builtin ＋ fallback 警示）：初始提交起一直
+        # 只设置样式、从未加入布局——从未真正可见（CV-B09 安全区回归
+        # 抓出）。补挂到链路段之后；窄窗折叠只折叠链路文字，徽标保留。
+        layout.addWidget(self._provider_label)
         self.degradation_indicator = EffectDegradationIndicator()
         layout.addWidget(self.degradation_indicator)
 
@@ -223,6 +235,42 @@ class ColorMonitorStatusBar(QWidget):
         self._decode_path = path or ''
         self._refresh()
 
+    # ---- CV-B09：窄视口折叠 ----
+
+    def _chain_text(self) -> str:
+        """完整链路单行文本（折叠时的 tooltip 内容）。"""
+        return " → ".join(filter(None, (
+            self._src_label.text(), self._work_label.text(),
+            self._out_label.text())))
+
+    def apply_available_width(self, width: int) -> None:
+        """按可用宽度折叠：链路文字让位，provider/HDR 诊断保留。
+
+        窄视口（<380px）隐藏 SRC→WORK→OUT 链路段、整段进 tooltip；
+        极窄（<220px）连降噪档位一起折叠。provider 徽标（含 fallback
+        警示）与降级指示器始终保留——它们是监看诊断的核心，不允许为
+        视觉精简而丢失。
+        """
+        try:
+            width = int(width)
+        except (TypeError, ValueError):
+            return
+        if width == self._applied_width:
+            return
+        self._applied_width = width
+        compact = width < 380
+        tiny = width < 220
+        for widget in self._chain_widgets:
+            widget.setVisible(not compact)
+        self._chain_sep.setVisible(not compact)
+        self._denoise_label.setVisible(not tiny and bool(self._denoise_quality))
+        self._denoise_sep.setVisible(not tiny and bool(self._denoise_quality))
+        tooltip = self._chain_text() if compact else ""
+        if tooltip:
+            self.setToolTip(tooltip)
+        else:
+            self.setToolTip("")
+
     # ---- 渲染 ----
 
     def _make_arrow(self) -> QLabel:
@@ -251,9 +299,15 @@ class ColorMonitorStatusBar(QWidget):
             'OUT ' + (self._display or 'sRGB'))
         if self._denoise_quality:
             self._denoise_label.setText(f'DN·{self._denoise_quality}')
-            self._denoise_label.show()
+            # 尊重 CV-B09 极窄折叠状态（apply_available_width 已折叠时
+            # 不因数据刷新重新展开）。
+            tiny = (self._applied_width is not None
+                    and self._applied_width < 220)
+            self._denoise_label.setVisible(not tiny)
+            self._denoise_sep.setVisible(not tiny)
         else:
             self._denoise_label.hide()
+            self._denoise_sep.hide()
         text, warning, tooltip = format_provider_badge(self._provider_diag)
         if self._decode_path:
             text = f"{text} · {self._decode_path}"

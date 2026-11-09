@@ -6,9 +6,9 @@ their layout changes; Composite's shared transport can restore its own row.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping, Optional
 
-from PyQt6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt
+from PyQt6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QIconEngine, QPaintEvent, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSlider, QToolButton, QWidget
 
@@ -16,6 +16,9 @@ from src.shared.i18n.i18n import I18N
 from src.shared.ui.viewport_icons import viewer_icon
 
 if TYPE_CHECKING:
+    from PyQt6.QtGui import QAction
+
+    from src.features.color.core.color_viewer_capabilities import ColorViewerCapability
     from src.features.color.ui.canvas import Canvas, VideoControlBar, ViewportMenuBar
 
 
@@ -123,6 +126,9 @@ def paint_color_scrubber(slider: QSlider) -> None:
 class ColorViewportChrome(QObject):
     """Install Color-specific chrome on existing presentation widgets."""
 
+    # CV-B01：chrome 请求宿主重新评估能力（菜单打开／上下文变化时）。
+    capability_refresh_requested = pyqtSignal()
+
     def __init__(self, canvas: Canvas) -> None:
         super().__init__(canvas)
         self.canvas = canvas
@@ -130,6 +136,7 @@ class ColorViewportChrome(QObject):
         self.transport = canvas.video_control_bar
         self._color_transport_active = False
         self._original_row: list[tuple[QWidget, int]] = []
+        self._options_stub_actions: dict[str, QAction] = {}
         self._install_header()
         self._prepare_transport()
         self.transport._color_chrome = self
@@ -215,15 +222,22 @@ class ColorViewportChrome(QObject):
         self.options_button = _button(self.header_right, "more", I18N.tr("viewport.options", "Viewer Options"))
         options = QMenu(self.options_button)
         options.aboutToShow.connect(self._sync_focus_capability)
+        options.aboutToShow.connect(self.capability_refresh_requested.emit)
         options.addMenu(toolbar.view_menu).setText(I18N.tr("viewport.view", "View"))
         timeline_menu = options.addMenu(I18N.tr("viewport.timeline", "Timeline"))
         timeline_menu.aboutToShow.connect(lambda: self._populate_timeline_menu(timeline_menu))
         options.addSeparator()
         options.setToolTipsVisible(True)
-        for button in (self.split_screen_button, self.proxy_button, self.resolution_button, self.bypass_button):
+        for button, key in (
+            (self.split_screen_button, "compare.split_screen"),
+            (self.proxy_button, "monitor.proxy"),
+            (self.resolution_button, "monitor.resolution"),
+            (self.bypass_button, "monitor.bypass"),
+        ):
             action = options.addAction(button.accessibleName())
             action.setEnabled(False)
             action.setToolTip(button.toolTip())
+            self._options_stub_actions[key] = action
         self.options_button.setMenu(options)
         self.options_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         for button in (self.proxy_button, self.resolution_button, self.bypass_button, self.enhanced_button, self.options_button):
@@ -268,6 +282,116 @@ class ColorViewportChrome(QObject):
             self.enhanced_button.accessibleName() + " — " + I18N.tr("viewport.unavailable", "此版本暂不支持"))
         self.toolbar.focus_act.setToolTip(self.enhanced_button.toolTip())
 
+    # ── CV-B01：能力注册表回填（enabled/checked/reason 单一来源） ──────
+
+    @staticmethod
+    def _cap_tooltip(label: str, cap: Optional[ColorViewerCapability]) -> str:
+        if cap is None or cap.supported or not cap.reason:
+            return label
+        return f"{label} — {cap.reason}"
+
+    def _apply_button_capability(
+            self, button: QWidget,
+            cap: Optional[ColorViewerCapability]) -> None:
+        if cap is None:
+            return
+        button.setEnabled(bool(cap.supported))
+        label = button.accessibleName() or button.toolTip()
+        button.setToolTip(self._cap_tooltip(label, cap))
+        is_checkable = getattr(button, "isCheckable", None)
+        if (callable(is_checkable) and is_checkable()
+                and cap.checked is not None):
+            # 状态锁：程序化回填 checked 不回发 toggled。
+            button.blockSignals(True)
+            button.setChecked(bool(cap.checked))
+            button.blockSignals(False)
+
+    def _apply_action_capability(
+            self, action: QAction,
+            cap: Optional[ColorViewerCapability]) -> None:
+        if cap is None:
+            return
+        action.setEnabled(bool(cap.supported))
+        label = action.text()
+        action.setToolTip(self._cap_tooltip(label, cap))
+        if action.isCheckable() and cap.checked is not None:
+            action.blockSignals(True)
+            action.setChecked(bool(cap.checked))
+            action.blockSignals(False)
+
+    def refresh_capabilities(
+            self,
+            caps_by_action: Mapping[str, ColorViewerCapability]) -> None:
+        """Apply ``{action: ColorViewerCapability}`` to registered controls.
+
+        CV-B01 契约：只做回填（enabled/tooltip/checked），不发命令；
+        checked 一律经 blockSignals 状态锁，旧回填不触发二次 toggle。
+        """
+        def cap(key: str) -> Optional[ColorViewerCapability]:
+            return caps_by_action.get(key)
+
+        for button, key in (
+            (self.split_screen_button, "compare.split_screen"),
+            (self.proxy_button, "monitor.proxy"),
+            (self.resolution_button, "monitor.resolution"),
+            (self.bypass_button, "monitor.bypass"),
+            (self.unmix_button, "monitor.unmix"),
+            (self.mute_button, "monitor.mute"),
+            (self.power_window_button, "overlay.power_windows"),
+        ):
+            self._apply_button_capability(button, cap(key))
+            action = self._options_stub_actions.get(key)
+            if action is not None:
+                self._apply_action_capability(action, cap(key))
+
+        toolbar = self.toolbar
+        self._apply_checkable_capability(
+            cap("view.highlight"), (toolbar.mask_btn, toolbar.mask_act))
+        self._apply_checkable_capability(
+            cap("view.split_wipe"), (toolbar.split_btn, toolbar.split_act))
+        for key, actions in (
+            ("view.ab_toggle", (toolbar.ab_toggle_act,)),
+            ("view.capture_reference", (toolbar.capture_reference_act,)),
+            ("view.clear_reference", (toolbar.clear_reference_act,)),
+            ("view.capture_still", (toolbar.capture_still_act,)),
+            ("view.auto_color", (toolbar.auto_color_act,)),
+            ("view.focus_mode", (toolbar.focus_act,)),
+        ):
+            for action in actions:
+                self._apply_action_capability(action, cap(key))
+        self._apply_button_capability(self.enhanced_button, cap("view.focus_mode"))
+
+        selector_cap = cap("timeline.switch")
+        if selector_cap is not None:
+            toolbar._timeline_selector.setEnabled(bool(selector_cap.supported))
+
+        bar = self.transport
+        for button, key in (
+            (bar.btn_first, "transport.first"),
+            (bar.btn_prev, "transport.prev"),
+            (bar.btn_play, "transport.play"),
+            (bar.btn_next, "transport.next"),
+            (bar.btn_last, "transport.last"),
+        ):
+            self._apply_button_capability(button, cap(key))
+        self._apply_button_capability(bar.btn_loop, cap("transport.loop"))
+        self._apply_button_capability(bar.slider, cap("transport.scrub"))
+
+    def _apply_checkable_capability(
+            self,
+            cap: Optional[ColorViewerCapability],
+            widgets) -> None:
+        if cap is None:
+            return
+        for widget in widgets:
+            if widget is None:
+                continue
+            widget.setEnabled(bool(cap.supported))
+            if cap.checked is not None:
+                widget.blockSignals(True)
+                widget.setChecked(bool(cap.checked))
+                widget.blockSignals(False)
+
     def position_title(self) -> None:
         """Keep exact centering, while protecting functional controls first."""
         if not hasattr(self, "header_right"):
@@ -309,8 +433,11 @@ class ColorViewportChrome(QObject):
         tools = QHBoxLayout(self.left_tools)
         tools.setContentsMargins(4, 0, 0, 0)
         tools.setSpacing(1)
-        for icon, key, label in (("power_window", "power_window", "Power Window"), ("unmix", "unmix", "Unmix"), ("mute", "mute", "Mute")):
-            tools.addWidget(_button(self.left_tools, icon, I18N.tr("viewport." + key, label), False))
+        self.power_window_button = _button(self.left_tools, "power_window", I18N.tr("viewport.power_window", "Power Window"), False)
+        self.unmix_button = _button(self.left_tools, "unmix", I18N.tr("viewport.unmix", "Unmix"), False)
+        self.mute_button = _button(self.left_tools, "mute", I18N.tr("viewport.mute", "Mute"), False)
+        for button in (self.power_window_button, self.unmix_button, self.mute_button):
+            tools.addWidget(button)
         tools.addStretch(1)
         self.transport_center = QWidget(self.row)
         self.transport_center.setObjectName("colorTransportCenter")

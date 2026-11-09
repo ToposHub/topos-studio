@@ -624,6 +624,21 @@ class DockLayoutMixin:
                     logger.exception("Failed to install budget executor")
                     self._viewport_budget_executor = None
 
+        # CV-B01（Color 后端计划）：Color 视口能力宿主——聚合页面/呈现
+        # 路径/引擎事实喂注册表，chrome 按钮与 View 菜单按 supported/
+        # reason 回填；无 handler 的动作保持禁用（诚实禁用不虚亮）。
+        if getattr(self, "_color_viewport_capability_host", None) is None:
+            try:
+                from src.app.controllers.color_viewport_capability_host import (
+                    install_color_viewport_capability_host,
+                )
+                self._color_viewport_capability_host = (
+                    install_color_viewport_capability_host(self))
+            except Exception:
+                logger.exception("Failed to install color viewport "
+                                 "capability host")
+                self._color_viewport_capability_host = None
+
         # Connect MediaPoolPanel double-click to Source Viewer (P3.1)
         if self._edit_available and self.media_pool_panel is not None:
             self.media_pool_panel.asset_double_clicked.connect(self._on_asset_double_clicked)

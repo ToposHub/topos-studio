@@ -493,6 +493,17 @@ class PageManagementMixin:
         self._page_switch_from_page = from_page
         self.enter_page_hook(page_name)
 
+        # CV-B01：页面切换后刷新 Color 视口能力回填（页面是呈现路径的
+        # 输入之一；宿主未安装时静默跳过）。
+        try:
+            from src.app.controllers.color_viewport_capability_host import (
+                refresh_color_viewer_capabilities,
+            )
+            refresh_color_viewer_capabilities(self)
+        except Exception:
+            logger.debug("color viewer capability refresh on page switch "
+                         "failed", exc_info=True)
+
         elapsed_ms = (time.monotonic() - t0) * 1000
         logger.info(f"[PAGE-SWITCH] {from_page} -> {page_name} completed in {elapsed_ms:.1f}ms")
 
