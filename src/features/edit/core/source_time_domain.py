@@ -53,6 +53,24 @@ def rational_from_float_fps(fps: float) -> Rational:
     return Rational(frac.numerator, frac.denominator)
 
 
+def media_fingerprint_for_path(path: str) -> str:
+    """稳定媒体指纹：path + 文件大小 + mtime（文件不可达时仅 path）。
+
+    I02-3：跨项目可重名的 ``asset_id`` 不能作为状态命中键；同一 asset_id
+    下文件换版（大小/mtime 变化）指纹即变，旧监看状态自动作废。与
+    scene_cut 的指纹算法保持一致的语义（path|size|mtime 截断 sha256）。
+    """
+    import hashlib
+    import os
+
+    try:
+        stat = os.stat(path)
+        data = f"{path}|{stat.st_size}|{stat.st_mtime_ns}"
+    except OSError:
+        data = path
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+
 @dataclass(frozen=True)
 class SourceRangeCheck:
     """In/Out 区间校验结果（Out 为包含语义）。"""

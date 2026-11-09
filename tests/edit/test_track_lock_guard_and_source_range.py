@@ -122,10 +122,18 @@ def test_undo_not_blocked_by_current_lock() -> None:
 # ------------------------------------------------------------- FE-B05
 
 def test_source_range_changed_emitted_on_all_paths(qtbot) -> None:
+    from src.features.edit.core.project import MediaAsset
     from src.features.edit.ui.source_viewer import SourceViewerWidget
 
     widget = SourceViewerWidget()
     qtbot.addWidget(widget)
+    widget._sync_scrub_audio_for_asset = lambda: None  # type: ignore[method-assign]
+    # I02：mark 点经时间域校验——真实打开素材（合法帧 0..119）后再标记
+    widget.open_asset(MediaAsset(
+        asset_id="feb05", path="/tmp/feb05.mov", media_type="video",
+        display_name="feb05.mov",
+        metadata={"fps": 24.0, "total_frames": 120, "width": 640,
+                  "height": 480}))
     events: list[tuple] = []
     widget.range_changed.connect(lambda i, o: events.append((i, o)))
 
