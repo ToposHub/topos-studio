@@ -580,6 +580,44 @@ def test_switch_from_deliver_restores_edit_panels() -> None:
     restore.assert_called_once()
 
 
+@pytest.mark.parametrize("target,expected_mode", [
+    ("Color", "other"), ("Composite", "other"), ("Edit", "edit"),
+])
+def test_deliver_return_preserves_destination_playback_mode(
+    target: str, expected_mode: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Returning the borrowed widgets must not force other pages into Edit."""
+    from src.app.controllers.dock_layout_controller import DockLayoutMixin
+    from src.features.edit.ui.viewport_playback_coordinator import (
+        ViewportPlaybackCoordinator,
+    )
+
+    monkeypatch.setattr(pc, "QTimer", _SingleShotRecorder())
+    host = _PageHost(current_page="Deliver")
+    source = SimpleNamespace(current_asset=None, is_playing=False)
+    controller = SimpleNamespace(is_playing=False)
+    coordinator = ViewportPlaybackCoordinator(source, controller, parent=host)
+    viewport = SimpleNamespace(
+        dual_view=False, active_monitor="source",
+        restore_program_viewer=MagicMock(), set_deliver_mode=MagicMock(),
+    )
+    coordinator.attach_viewport(viewport)
+    coordinator.enter_deliver_page()
+    host._viewport_playback_coordinator = coordinator
+    host.edit_viewport = viewport
+    host.deliver_page = SimpleNamespace(detach_edit_panels=MagicMock())
+    host._restore_edit_panels_from_deliver = lambda: (
+        DockLayoutMixin._restore_edit_panels_from_deliver(host)
+    )
+
+    host.switch_to_page(target)
+
+    assert host.current_page == target
+    assert coordinator.snapshot().page_mode == expected_mode
+    viewport.restore_program_viewer.assert_called_once()
+    host.deliver_page.detach_edit_panels.assert_called_once()
+
+
 def test_switch_to_deliver_attaches_edit_panels() -> None:
     host = _PageHost(current_page="Library")
     attach = MagicMock()

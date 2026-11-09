@@ -63,6 +63,21 @@ def test_i02_explicit_rational_metadata_wins(qapp):
     assert widget.source_time_domain.fps == Rational(24000, 1001)
 
 
+def test_importer_rational_keys_take_precedence_over_legacy_aliases(qapp: Any) -> None:
+    widget = _widget(qapp)
+    widget.open_asset(_asset(
+        fps=25.0, fps_num=24000, fps_den=1001,
+        fps_rational_num=30, fps_rational_den=1))
+    assert widget.source_time_domain.fps == Rational(24000, 1001)
+
+
+def test_importer_timecode_key_is_used_before_legacy_alias(qapp: Any) -> None:
+    widget = _widget(qapp)
+    widget.open_asset(_asset(
+        timecode="01:00:00:00", start_timecode="02:00:00:00"))
+    assert widget._frame_to_timecode(0) == "01:00:00:00"
+
+
 # ── 时间码显示（起始 TC / DF） ─────────────────────────────────────
 
 
@@ -157,6 +172,64 @@ def test_i02_asset_roundtrip_restores_frame_and_marks(qapp):
     assert widget._current_frame == 42
     assert (widget._in_point, widget._out_point) == (10, 49)
     assert (10, 49) in ranges    # 恢复的范围随状态信号广播（按钮同步）
+
+
+@pytest.mark.parametrize("endpoint", ["in", "out"])
+def test_asset_roundtrip_restores_single_mark(qapp: Any, endpoint: str) -> None:
+    widget = _widget(qapp)
+    asset_a = _asset("a", total=100)
+    widget.open_asset(asset_a)
+    setter = widget.set_in_point if endpoint == "in" else widget.set_out_point
+    setter(10)
+    widget.open_asset(_asset("b"))
+    widget.open_asset(asset_a)
+    assert (widget.in_point, widget.out_point) == (
+        (10, None) if endpoint == "in" else (None, 10))
+
+
+@pytest.mark.parametrize("endpoint", ["in", "out"])
+@pytest.mark.parametrize("value", [-1, 100])
+def test_invalid_stored_single_mark_is_discarded(
+        qapp: Any, endpoint: str, value: int) -> None:
+    widget = _widget(qapp)
+    asset_a = _asset("a", total=100)
+    widget.open_asset(asset_a)
+    domain = widget.source_time_domain
+    widget.open_asset(_asset("b"))
+    widget._monitor_state_store.save(
+        asset_a.asset_id, domain.media_fingerprint, 100, frame=5,
+        in_point=value if endpoint == "in" else None,
+        out_point=value if endpoint == "out" else None)
+    widget.open_asset(asset_a)
+    assert widget.current_frame == 5
+    assert widget.in_point is None and widget.out_point is None
+
+
+@pytest.mark.parametrize("total,expected", [
+    (1, "00:00:00:01"), (240, "00:00:10:00"),
+])
+def test_duration_counts_all_frames_without_start_timecode_offset(
+        qapp: Any, total: int, expected: str) -> None:
+    widget = _widget(qapp)
+    widget.open_asset(_asset(total=total, timecode="01:00:00:00"))
+    assert widget.toolbar.timecode_label.text() == "01:00:00:00"
+    assert widget.toolbar.duration_label.text() == expected
+
+
+@pytest.mark.parametrize("release", ["close_source", "release_for_project_close"])
+def test_source_release_clears_time_domain_and_ignores_late_index(
+        qapp: Any, release: str) -> None:
+    widget = _widget(qapp)
+    widget.open_asset(_asset("a"))
+    widget.set_source_time_index(object())
+    getattr(widget, release)()
+    assert widget.current_asset is None
+    assert widget.source_time_domain is None
+    widget.set_source_time_index(object())
+    assert widget.source_time_domain is None
+    widget.open_asset(_asset("b"))
+    assert widget.source_time_domain.asset_id == "b"
+    assert widget.source_time_domain.time_index is None
 
 
 def test_i02_media_version_change_invalidates_state(qapp):

@@ -16,6 +16,7 @@ class _CanvasHost(QGraphicsView):
     """Native QWidget viewport: no GL context, renderer or decoder in UI QA."""
 
     update_video_control_bar_position = Canvas.update_video_control_bar_position
+    _on_color_monitor_toggled = Canvas._on_color_monitor_toggled
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -190,6 +191,7 @@ def test_status_bar_stays_above_color_footer(chrome, qapp) -> None:
     bar = chrome.transport
     status = chrome.canvas.color_status_bar
     bar.show_for_video()
+    chrome.toolbar.color_monitor_act.setChecked(True)
     status.show()
     qapp.processEvents()
     chrome.canvas.update_video_control_bar_position()

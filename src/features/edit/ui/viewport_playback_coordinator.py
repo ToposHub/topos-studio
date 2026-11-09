@@ -284,11 +284,11 @@ class ViewportPlaybackCoordinator(QObject):
                 continue  # 宿主对象尚未暴露公开播放状态（见 B04 快照）
             speed = getattr(obj, "playback_speed", None)
             direction = getattr(obj, "playback_direction", None)
-            direction_name = getattr(direction, "name", None)
+            direction_value = getattr(direction, "value", direction)
             self._arbiter.report_playback_state(
                 monitor,
                 playing=bool(is_playing),
-                direction=str(direction_name or direction or "forward"),
+                direction=str(direction_value or "forward"),
                 speed=float(speed) if speed is not None else 1.0)
         return self._arbiter.snapshot() != before
 

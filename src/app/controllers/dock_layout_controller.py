@@ -3394,11 +3394,10 @@ class DockLayoutMixin:
         if viewport is not None:
             viewport.restore_program_viewer()
             viewport.set_deliver_mode(False)
-        # I01：归还后恢复 Edit 页模式，并把仲裁快照对齐回 Viewport 的真实
-        # 显示（用户单/双与激活选择在借还期间不被覆盖）。
-        coordinator = getattr(self, "_viewport_playback_coordinator", None)
-        if coordinator is not None:
-            coordinator.return_to_edit_page()
+        # Returning the widgets does not imply entering Edit. switch_to_page
+        # invokes this while current_page is still Deliver; its leave hook has
+        # already set PAGE_OTHER. Only the destination Edit enter hook should
+        # restore Edit mode and synchronize the saved monitor selection.
 
     def _sync_edit_viewport_timeline(self, timeline: object) -> None:
         """Keep the monitor's scrub range on the existing timeline timebase."""

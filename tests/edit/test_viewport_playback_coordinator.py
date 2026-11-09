@@ -386,3 +386,20 @@ def test_i01_return_to_edit_restores_user_display_choice(qtbot):
     # Viewport 的真实显示（用户原本选 Source）恢复为快照权威值
     assert coordinator.snapshot().active_monitor == SOURCE
     assert coordinator.snapshot().page_mode == PAGE_EDIT
+
+
+@pytest.mark.parametrize("direction", ["forward", "backward"])
+def test_real_timeline_feedback_uses_domain_direction_values(qapp, direction: str) -> None:
+    from src.features.edit.core.edit_playback_controller import (
+        EditPlaybackController, PlaybackDirection,
+    )
+
+    timeline = EditPlaybackController()
+    timeline.set_timeline_duration(100)
+    coordinator = ViewportPlaybackCoordinator(_FakeSourceWidget(), timeline)
+    timeline.seek(50)
+    timeline.play_with_speed(PlaybackDirection(direction), 1.0)
+    try:
+        assert coordinator.snapshot().timeline_playback.direction == direction
+    finally:
+        timeline.pause()

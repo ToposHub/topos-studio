@@ -100,10 +100,10 @@ def _build_time_domain(asset: MediaAsset) -> Optional[SourceTimeDomain]:
 
     权威来源约定：
 
-    - Rational fps：``metadata["fps_rational_num"/"fps_rational_den"]``
-      显式给出时最优先；否则由浮点 ``fps`` 经 ``rational_from_float_fps``
+    - Rational fps：导入元数据 ``fps_num``/``fps_den`` 优先，兼容旧别名
+      ``fps_rational_num``/``fps_rational_den``；否则由浮点 ``fps`` 经 ``rational_from_float_fps``
       映射到最近常见帧率（23.976 → 24000/1001）；
-    - 起始时间码 / DF 类型：``metadata["start_timecode"]``（SMPTE 字符串，
+    - 起始时间码 / DF 类型：``metadata["timecode"]``（兼容 ``start_timecode``，SMPTE 字符串，
       DF 由其分隔符决定）；缺失 = 从 00:00:00:00 起；
     - VFR PTS 索引：异步分析产物，**不在打开时探测**——经
       ``set_source_time_index`` 在拿到后注入（不阻塞 UI）；
@@ -115,8 +115,8 @@ def _build_time_domain(asset: MediaAsset) -> Optional[SourceTimeDomain]:
     except (TypeError, ValueError):
         fps_value = 24.0
     metadata = getattr(asset, "metadata", None) or {}
-    num = metadata.get("fps_rational_num")
-    den = metadata.get("fps_rational_den")
+    num = metadata.get("fps_num", metadata.get("fps_rational_num"))
+    den = metadata.get("fps_den", metadata.get("fps_rational_den"))
     if (isinstance(num, int) and not isinstance(num, bool) and num > 0
             and isinstance(den, int) and not isinstance(den, bool) and den > 0):
         fps = Rational(num, den)
@@ -124,7 +124,7 @@ def _build_time_domain(asset: MediaAsset) -> Optional[SourceTimeDomain]:
         fps = rational_from_float_fps(fps_value)
     total = int(asset.total_frames or 1)
     start_tc: Optional[Timecode] = None
-    raw_tc = metadata.get("start_timecode")
+    raw_tc = metadata.get("timecode") or metadata.get("start_timecode")
     if isinstance(raw_tc, str) and raw_tc:
         try:
             start_tc = Timecode.from_string(raw_tc, fps)
@@ -2029,6 +2029,14 @@ class SourceViewerWidget(QWidget):
                     if check.ok:
                         self._in_point = restored.in_point
                         self._out_point = restored.out_point
+                elif restored.in_point is not None:
+                    if self._time_domain.validate_range(
+                            restored.in_point, restored.in_point).ok:
+                        self._in_point = restored.in_point
+                elif restored.out_point is not None:
+                    if self._time_domain.validate_range(
+                            restored.out_point, restored.out_point).ok:
+                        self._out_point = restored.out_point
 
         # Bump generation on asset change to invalidate all pending GPU results
         self._gpu_generation += 1
@@ -2071,7 +2079,7 @@ class SourceViewerWidget(QWidget):
 
         # Update timecode
         timecode = self._frame_to_timecode(self._current_frame)
-        duration_tc = self._frame_to_timecode(self._total_frames - 1)
+        duration_tc = self._duration_timecode()
         self.toolbar.set_timecode(timecode, self._fps)
         self.toolbar.set_frame_number(self._current_frame)
         self.toolbar.set_duration(duration_tc)
@@ -2183,6 +2191,7 @@ class SourceViewerWidget(QWidget):
 
         # Reset state
         self._current_asset = None
+        self._time_domain = None
         self._current_frame = 0
         self._media_display_width = None
         self._media_display_height = None
@@ -2440,9 +2449,11 @@ class SourceViewerWidget(QWidget):
         try:
             reason = gate(via)
         except Exception:
-            # 门自身故障不得把走带变砖：记录后按未安装处理
-            logger.exception("playback gate raised; allowing start")
-            return True
+            from src.features.edit.core.viewport_playback_arbiter import (
+                REASON_START_FAILED,
+            )
+            reason = REASON_START_FAILED
+            logger.exception("playback gate raised; rejecting start (%s)", reason)
         return reason is None
 
     def play(self) -> None:
@@ -3047,6 +3058,19 @@ class SourceViewerWidget(QWidget):
 
         return frames_to_timecode(int(frame), float(self._fps))
 
+    def _duration_timecode(self) -> str:
+        """Format the full frame count as a duration without the source TC offset."""
+        if self._time_domain is not None:
+            try:
+                return Timecode.from_frame_number(
+                    self._total_frames, self._time_domain.fps,
+                    self._time_domain.tc_type).to_string()
+            except ValueError:
+                logger.debug("Source duration outside SMPTE domain; falling back")
+        from src.features.edit.core.interchange import frames_to_timecode
+
+        return frames_to_timecode(self._total_frames, float(self._fps))
+
     @property
     def source_time_domain(self) -> Optional[SourceTimeDomain]:
         """I02-2：当前素材的时间域权威（宿主经此消费帧/秒/TC/校验）。"""
@@ -3408,6 +3432,16 @@ class SourceViewerWidget(QWidget):
         """VP-B01: public playback state (read-only feed for the viewer
         arbiter's state feedback and monitor snapshots)."""
         return self._is_playing
+
+    @property
+    def playback_direction(self) -> str:
+        """Expose Source's actual direction using the arbiter's domain values."""
+        return "backward" if self._reverse_playback else "forward"
+
+    @property
+    def playback_speed(self) -> float:
+        """Source currently plays at one times speed in either direction."""
+        return 1.0
 
     @property
     def view_visibility_revision(self) -> int:

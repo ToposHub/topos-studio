@@ -178,6 +178,15 @@ def test_df_separator_in_start_tc_forces_drop_frame() -> None:
     assert context.tc_type == TimecodeType.DROP_FRAME
 
 
+@pytest.mark.parametrize("drop_flag", [None, True, False])
+def test_explicit_ndf_start_code_keeps_ndf_domain_at_ntsc_rate(drop_flag) -> None:
+    context = SourceTimecodeContext.from_metadata(
+        _metadata(FPS_2997, timecode="01:00:00:00", drop=drop_flag))
+    assert context.tc_type == TimecodeType.NON_DROP_FRAME
+    assert context.format_frame(0) == "01:00:00:00"
+    assert context.parse_to_frame(context.format_frame(100)) == 100
+
+
 def test_invalid_start_tc_falls_back_to_relative() -> None:
     context = SourceTimecodeContext.from_metadata(
         _metadata(FPS_25, timecode="not-a-timecode"))

@@ -101,6 +101,7 @@ def test_monitor_mute_preserves_users_previous_master_state() -> None:
     # 解除后恢复用户先前的静音（不擅自打开用户静着的总线）。
     assert edit_page.master_muted is True
     assert controller._color_monitor_mute_is_active() is False
+    assert edit_page.mute_calls == [True, True]  # 原master静音绝不短暂打开
 
 
 def test_monitor_mute_unmute_restores_unmuted_default() -> None:
@@ -142,6 +143,44 @@ def test_audio_bridge_does_not_start_audio_while_monitor_muted() -> None:
     controller._color_monitor_muted = False
     controller._on_color_video_play_state_for_audio(True)
     assert len(edit_page.audio_starts) == 1  # 解除后正常起声
+
+
+def test_unmute_resumes_bridge_that_was_skipped_when_video_started_muted() -> None:
+    edit_page = _FakeEditPage()
+    controller = _Controller(edit_page)
+    controller.video_controller.is_playing = True
+    controller._set_color_monitor_mute(True)
+    controller._on_color_video_play_state_for_audio(True)
+    assert edit_page.audio_starts == []
+    controller._set_color_monitor_mute(False)
+    assert len(edit_page.audio_starts) == 1
+    assert edit_page.audio_starts[0][1] == 10
+
+
+@pytest.mark.parametrize("state", ["paused", "no_context", "timeline_preview"])
+def test_unmute_never_starts_an_unowned_audio_clock(state: str) -> None:
+    edit_page = _FakeEditPage()
+    controller = _Controller(edit_page)
+    controller.video_controller.is_playing = True
+    controller._set_color_monitor_mute(True)
+    controller._on_color_video_play_state_for_audio(True)
+    if state == "paused":
+        controller.video_controller.is_playing = False
+    elif state == "no_context":
+        controller._color_timeline_clip_playback_context = None
+    else:
+        controller._color_timeline_preview_renderer = object()
+    controller._set_color_monitor_mute(False)
+    assert edit_page.audio_starts == []
+
+
+def test_failed_unmute_keeps_color_mute_owned_for_truthful_checked_and_retry() -> None:
+    edit_page = _FakeEditPage()
+    controller = _Controller(edit_page)
+    assert controller._set_color_monitor_mute(True)
+    edit_page.set_monitor_master_muted = lambda value: False
+    assert not controller._set_color_monitor_mute(False)
+    assert controller._color_monitor_mute_is_active()
 
 
 # ── UI 层：chrome 按钮 → 宿主 → 服务 → checked 回填 ──────────────────

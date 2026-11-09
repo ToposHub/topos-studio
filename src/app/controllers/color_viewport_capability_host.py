@@ -84,6 +84,11 @@ class ColorViewportCapabilityHost(QObject):
                 chrome.capability_refresh_requested.disconnect(self.refresh)
             except TypeError:
                 pass
+            try:
+                chrome.monitor_mute_toggled.disconnect(
+                    self._on_monitor_mute_requested)
+            except TypeError:
+                pass
         toolbar = self._toolbar
         if toolbar is not None:
             try:
@@ -117,6 +122,8 @@ class ColorViewportCapabilityHost(QObject):
 
     def _on_monitor_mute_requested(self, muted: bool) -> None:
         """chrome 静音按钮 → 真实服务；失败如实（不虚报 checked）。"""
+        if self._shutdown:
+            return
         setter = getattr(self._window, "_set_color_monitor_mute", None)
         if not callable(setter):
             return
@@ -183,10 +190,16 @@ class ColorViewportCapabilityHost(QObject):
             playing = bool(getattr(bar, "is_playing", False))
             loop_enabled = bool(getattr(bar.btn_loop, "isChecked", lambda: False)())
 
-        current_frame = int(getattr(video_controller, "current_frame", None)
-                            or getattr(bar, "current_frame", 0) or 0)
-        total_frames = int(getattr(video_controller, "total_frames", None)
-                           or getattr(bar, "total_frames", 0) or 0)
+        current_frame = getattr(video_controller, "current_frame", None)
+        total_frames = getattr(video_controller, "total_frames", None)
+        # Zero is an authoritative controller value (start / unloaded source),
+        # not a reason to reuse a previous transport position or duration.
+        if current_frame is None:
+            current_frame = getattr(bar, "current_frame", 0)
+        if total_frames is None:
+            total_frames = getattr(bar, "total_frames", 0)
+        current_frame = int(current_frame or 0)
+        total_frames = int(total_frames or 0)
         frame_rate = float(getattr(bar, "_fps", 24.0) or 24.0)
 
         return ColorViewerState(

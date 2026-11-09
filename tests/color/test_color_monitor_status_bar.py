@@ -73,6 +73,18 @@ class TestFormatProviderBadge:
 
 
 class TestStatusBarWidget:
+    def test_compact_tooltip_refreshes_without_a_width_change(self, qtbot):
+        bar = ColorMonitorStatusBar()
+        qtbot.addWidget(bar)
+        bar.apply_available_width(300)
+        previous = bar.toolTip()
+        bar.set_source_state('smpte2084', 'bt2020', 'limited')
+        bar.set_display_space('Rec.2020')
+        bar.apply_available_width(300)
+        assert bar.toolTip() != previous
+        assert 'SRC BT.2020 PQ lim' in bar.toolTip()
+        assert 'OUT Rec.2020' in bar.toolTip()
+
     def test_segments_displayed(self, qtbot):
         bar = ColorMonitorStatusBar()
         qtbot.addWidget(bar)
@@ -105,7 +117,7 @@ class TestStatusBarWidget:
 
 
 class TestCanvasIntegration:
-    def test_update_color_monitor_shows_bar(self, qtbot):
+    def test_update_color_monitor_respects_view_toggle(self, qtbot):
         from src.features.color.ui.canvas import Canvas
         canvas = Canvas()
         qtbot.addWidget(canvas)
@@ -113,8 +125,15 @@ class TestCanvasIntegration:
         assert canvas.color_status_bar.isHidden()
         canvas.update_color_monitor(
             source={'transfer': 'pq', 'primaries': 'bt2020', 'range': 'limited'})
-        assert not canvas.color_status_bar.isHidden()
+        assert canvas.color_status_bar.isHidden()
         assert canvas.color_status_bar._src_label.text() == 'SRC BT.2020 PQ lim'
+        canvas.viewport_menu.color_monitor_act.trigger()
+        assert not canvas.color_status_bar.isHidden()
+        canvas.update_color_monitor(display='Rec.2020')
+        assert not canvas.color_status_bar.isHidden()
+        canvas.viewport_menu.color_monitor_act.trigger()
+        canvas.update_color_monitor(display='sRGB')
+        assert canvas.color_status_bar.isHidden()
 
 
 class TestControllerHook:

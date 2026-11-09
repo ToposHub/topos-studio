@@ -7,6 +7,7 @@ audio 三种意图分别落成对/只视频/只音频；源区间 Out 包含并�
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -346,6 +347,31 @@ def test_i04_matching_fingerprint_accepted(qtbot, qapp):
         "src-1", 0, 9, media_fingerprint=media_fingerprint_for_path(
             "/tmp/src-1.mov"))
     assert _enter(view, _mime(payload.encode())).isAccepted()
+
+
+@pytest.mark.parametrize("remove_asset", [False, True])
+def test_source_drop_revalidates_current_asset_after_drag_enter(
+        qtbot: Any, qapp: Any, remove_asset: bool) -> None:
+    from src.features.edit.core.source_time_domain import media_fingerprint_for_path
+
+    view, project = _setup(qtbot, qapp)
+    asset = project.assets["src-1"]
+    payload = build_source_drag_payload(
+        asset.asset_id, 0, 9, "video",
+        media_fingerprint=media_fingerprint_for_path(asset.path))
+    mime = _mime(payload.encode())
+    assert _enter(view, mime).isAccepted()
+    before = view.get_timeline()
+    if remove_asset:
+        del project.assets[asset.asset_id]
+    else:
+        project.assets[asset.asset_id] = replace(
+            asset, path="/tmp/replaced-during-drag.mov")
+    event = _drop(view, mime)
+    assert not event.isAccepted()
+    assert view.get_timeline() is before
+    assert not view._command_stack._undo_stack
+    assert not view._command_stack._redo_stack
 
 
 def test_i04_range_past_end_rejected(qtbot, qapp):

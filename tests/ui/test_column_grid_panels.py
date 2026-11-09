@@ -157,7 +157,10 @@ def test_lut_gallery_column_zoom(qapp, clean_column_settings):
 
 def test_presets_panel_column_zoom(qapp, monkeypatch, tmp_path,
                                    clean_column_settings):
-    monkeypatch.chdir(tmp_path)  # presets_root = cwd/Presets stays in tmp
+    monkeypatch.chdir(tmp_path)
+    from src.features.color.ui import presets_panel
+    monkeypatch.setattr(presets_panel, "_resolve_presets_root",
+                        lambda: str(tmp_path / "Presets"))
     from src.features.color.ui.presets_panel import PresetsPanel
     panel = PresetsPanel()
     for index in range(12):
@@ -167,13 +170,13 @@ def test_presets_panel_column_zoom(qapp, monkeypatch, tmp_path,
     panel.show()
     _process_ui(qapp)
     try:
-        panel.zoom_slider.setValue(2)
+        panel.zoom_slider.setValue(160)
         _process_ui(qapp, rounds=3)
-        _assert_flush(panel.list_widget, 2)
         assert _row_zero_count(panel.list_widget) == 2
-        # Square cards: the delegate paints the caption inside the card.
         icon = panel.list_widget.iconSize()
-        assert icon.width() == icon.height()
+        assert icon.width() == 160
+        assert icon.height() == 90
+        assert panel.list_widget.gridSize().height() > icon.height()
     finally:
         panel.hide()
         panel.deleteLater()

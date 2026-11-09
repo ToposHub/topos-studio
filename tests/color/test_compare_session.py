@@ -165,3 +165,24 @@ def test_release_callback_failure_does_not_break_session() -> None:
     assert accepted == ["v1"]
     session.release()  # 异常被记录，不向上传播
     assert session.slots == []
+
+
+def test_release_marks_session_inactive_and_is_idempotent() -> None:
+    released: list[str] = []
+    session = ColorCompareSession()
+    session.begin([_item("v1")], on_release=released.append)
+    assert session.active
+    session.release()
+    assert not session.active
+    session.release()
+    assert len(released) == 1
+
+
+def test_different_gallery_stills_do_not_alias_without_clip_provenance() -> None:
+    items = [CompareItem(item_id=name, label=name, kind="gallery_still",
+                         width=1920, height=1080, fidelity="hdr_exr")
+             for name in ("still-1", "still-2")]
+    session = ColorCompareSession()
+    accepted, rejected = session.begin(items)
+    assert accepted == ["still-1", "still-2"]
+    assert rejected == []

@@ -2430,6 +2430,7 @@ class ViewportMenuBar(ViewportToolBarBase):
     workspace_selected = pyqtSignal(str)
     save_workspace_requested = pyqtSignal()
     delete_workspace_requested = pyqtSignal()
+    color_monitor_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__("viewportMenuBar", parent)
@@ -2546,6 +2547,11 @@ class ViewportMenuBar(ViewportToolBarBase):
         self.split_act.setCheckable(True)
         self.split_act.setShortcut("\\")
         self.split_act.toggled.connect(lambda checked: self.split_toggled.emit(checked))
+
+        self.color_monitor_act = menu.addAction(
+            I18N.tr("viewport.color_monitor", "Color Pipeline Diagnostics"))
+        self.color_monitor_act.setCheckable(True)
+        self.color_monitor_act.toggled.connect(self.color_monitor_toggled.emit)
 
         # P1-COLOR-05: A/B 比较 / 参考 wipe
         self.ab_toggle_act = menu.addAction(
@@ -4055,6 +4061,8 @@ class Canvas(QGraphicsView):
             self.color_workspace_delete_requested.emit)
         self.viewport_menu.fit_requested.connect(self.fit_to_window)
         self.viewport_menu.guide_changed.connect(self._on_guide_changed)
+        self.viewport_menu.color_monitor_toggled.connect(
+            self._on_color_monitor_toggled)
         
         # DEPRECATED: Keep for backward compatibility, but hide by default
         self.controls = ViewportControls(self)
@@ -4077,7 +4085,7 @@ class Canvas(QGraphicsView):
         self.color_inspector = ColorInspectorOverlay(self.viewport())
         self.color_inspector.hide()
 
-        # P1-COLOR-22: 色彩监看状态栏（viewer 底部常驻）
+        # Optional color-pipeline diagnostics; hidden until enabled in View.
         from src.features.color.ui.color_status_bar import ColorMonitorStatusBar
         self.color_status_bar = ColorMonitorStatusBar(self.viewport())
         self.color_status_bar.hide()
@@ -4504,7 +4512,7 @@ class Canvas(QGraphicsView):
                              display: str | None = None,
                              provider_diag: dict | None = None,
                              decode_path: str | None = None) -> None:
-        """更新并显示色彩监看状态栏（P1-COLOR-22）。"""
+        """Refresh diagnostic data while respecting the user's View toggle."""
         bar = getattr(self, 'color_status_bar', None)
         if bar is None:
             return
@@ -4521,9 +4529,15 @@ class Canvas(QGraphicsView):
             bar.set_provider_diagnostics(provider_diag)
         if decode_path is not None:
             bar.set_decode_path(decode_path)
-        bar.show()
-        self.update_video_control_bar_position()
-        bar.raise_()
+        self._on_color_monitor_toggled(
+            self.viewport_menu.color_monitor_act.isChecked())
+
+    def _on_color_monitor_toggled(self, visible: bool) -> None:
+        """Show optional diagnostics without changing color or degradation policy."""
+        self.color_status_bar.setVisible(visible)
+        if visible:
+            self.update_video_control_bar_position()
+            self.color_status_bar.raise_()
 
     def _probe_denoise_quality(self) -> str | None:
         """P1-COLOR-13: 读取 renderer 最近一次降噪档位（供状态栏轮询）。"""
