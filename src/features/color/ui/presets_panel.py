@@ -14,6 +14,7 @@ from PyQt6.QtGui import (QPainter, QColor, QBrush, QPen, QPixmap, QLinearGradien
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.assets.icon_manager import get_icon
+from src.features.color.core.gallery_contracts import BUNDLE_SUFFIX_BY_ROLE
 
 logger = logging.getLogger(__name__)
 
@@ -37,19 +38,12 @@ def _resolve_presets_root() -> str:
 def _is_safe_preset_name(name: str) -> bool:
     """校验用户输入的预设/文件夹名（AUD-25515）。
 
-    拒绝路径分隔符、``.``/``..``、纯点名与控制字符，防止
+    G03：实现移至领域层 ``is_safe_bundle_stem``（单一来源）；本别名保留
+    供既有调用方／测试。拒绝路径分隔符、``.``/``..`` 与控制字符，防止
     ``create_folder("../x")`` 之类的路径注入把文件写出预设区。
     """
-    if not name or not name.strip():
-        return False
-    name = name.strip()
-    if name in {".", ".."}:
-        return False
-    if "/" in name or "\\" in name or os.sep in name:
-        return False
-    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in name):
-        return False
-    return True
+    from src.features.color.core.gallery_contracts import is_safe_bundle_stem
+    return is_safe_bundle_stem(name)
 
 
 class PresetsPanel(QWidget):
@@ -85,6 +79,11 @@ class PresetsPanel(QWidget):
             GalleryFolderRepository,
         )
         self._repository = GalleryFolderRepository(self.presets_root)
+        # G03：rename/delete 统一走 bundle 事务服务（不再面板内逐文件操作）
+        from src.features.color.core.gallery_bundle_service import (
+            GalleryBundleService,
+        )
+        self._bundle_service = GalleryBundleService(self.presets_root)
         self._gallery_capability_host = None
         self._init_ui()
         self.scan_presets()
@@ -422,26 +421,32 @@ class PresetsPanel(QWidget):
             self._populate_folder_combo()
             self.scan_presets()
 
-    # --- Sidecar file management (P1-COLOR-04: thumb / still / meta) ---
+    # --- Sidecar file management (P1-COLOR-04；G03 起走 bundle 服务) ---
 
-    _SIDECAR_SUFFIXES = (".thumb.jpg", ".still.jpg", ".meta.json", ".still.exr")
+    # 单一 manifest 来源（gallery_contracts）：含旧清单遗漏的 .still.exr.json
+    _SIDECAR_SUFFIXES = tuple(
+        suffix for suffix in BUNDLE_SUFFIX_BY_ROLE.values()
+        if suffix != ".topos")
 
     @classmethod
     def _sibling_paths(cls, topos_path: str):
         base = os.path.splitext(topos_path)[0]
         return [f"{base}{s}" for s in cls._SIDECAR_SUFFIXES]
 
-    def _delete_preset_files(self, topos_path: str) -> None:
-        """删除 .topos 及其全部 sidecar。"""
-        for path in [topos_path, *self._sibling_paths(topos_path)]:
-            try:
-                if os.path.isfile(path):
-                    os.remove(path)
-            except OSError:
-                pass
+    def _delete_preset_files(self, topos_path: str, *,
+                             permanent: bool = False):
+        """删除 bundle：默认移入可恢复 trash；``permanent`` 为显式直删。
+
+        G03：不再面板内逐文件 ``os.remove`` 吞 OSError；结果带逐文件
+        失败（``partial``），调用方据此如实回填。
+        """
+        folder = os.path.dirname(topos_path)
+        stem = os.path.splitext(os.path.basename(topos_path))[0]
+        return self._bundle_service.delete_bundle(
+            folder, stem, permanent=permanent)
 
     def _delete_selected(self) -> None:
-        """Delete the selected preset(s)."""
+        """Delete the selected preset(s)（G03：移入可恢复 trash）。"""
         items = self.list_widget.selectedItems()
         if not items:
             return
@@ -453,19 +458,34 @@ class PresetsPanel(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            for item in items:
-                topos_path = item.data(Qt.ItemDataRole.UserRole)
-                if topos_path and os.path.isfile(topos_path):
-                    self._delete_preset_files(topos_path)
+            failures = self._delete_items_to_trash(items)
             self.scan_presets()
+            if failures:
+                # G03 门槛：删除后刷新不假称全部成功。
+                QMessageBox.warning(
+                    self,
+                    I18N.tr("presets.delete_partial_title",
+                            "Deleted with Errors"),
+                    I18N.tr("presets.delete_partial",
+                            "Some files could not be moved to the "
+                            "recoverable trash:\n") + "\n".join(failures))
+
+    def _delete_items_to_trash(self, items) -> list:
+        failures: list = []
+        for item in items:
+            topos_path = item.data(Qt.ItemDataRole.UserRole)
+            if not (topos_path and os.path.isfile(topos_path)):
+                continue
+            result = self._delete_preset_files(topos_path)
+            if result is not None and result.status != "success":
+                failures.extend(result.warnings or (result.reason or "",))
+        return failures
 
     def _rename_preset(self, item) -> None:
-        """Rename a preset.
+        """Rename a preset（整个 bundle 单事务，见 GalleryBundleService）。
 
-        AUD-25515：新名称先做安全校验；改名按事务推进——任一 sidecar
-        改名失败时回滚已完成的改名（含 .topos 本体），OSError 以弹窗
-        报告而不是从槽内抛出，避免留下 .topos 与 sidecar 不同名的
-        残局。
+        AUD-25515：新名称先做安全校验；G03 起改名经统一 bundle 事务——
+        前置冲突验证先于文件动作，journal 可恢复，失败按稳定 reason 回填。
         """
         old_name = item.text()
         new_name, ok = QInputDialog.getText(
@@ -492,54 +512,25 @@ class PresetsPanel(QWidget):
         if not topos_path:
             return
         folder = os.path.dirname(topos_path)
+
+        # G03：整个 bundle（.topos + 全部 sidecar，含 .still.exr.json）经
+        # GalleryBundleService 单事务改名——前置验证（同名/大小写变体/孤立
+        # sidecar/只读/symlink）先于任何文件动作；中断可由 journal 恢复，
+        # 失败按稳定 reason 如实回填。
+        result = self._bundle_service.rename_bundle(
+            folder, old_name, new_name)
+        if not result.succeeded:
+            detail = "; ".join(result.warnings) if result.warnings else ""
+            logger.warning("Presets: rename '%s' -> '%s' rejected (%s): %s",
+                           old_name, new_name, result.reason, detail)
+            QMessageBox.critical(
+                self,
+                I18N.tr("presets.rename_failed_title", "Rename Failed"),
+                I18N.tr("presets.rename_failed_structured",
+                        f"Could not rename preset ({result.reason})."
+                        + (f"\n{detail}" if detail else "")))
+            return
         new_topos = os.path.join(folder, f"{new_name}.topos")
-
-        if os.path.exists(new_topos):
-            QMessageBox.warning(self, "Error", I18N.tr("presets.name_exists", "A preset with this name already exists."))
-            return
-
-        try:
-            os.rename(topos_path, new_topos)
-        except OSError as exc:
-            logger.warning("Presets: rename %s failed: %s", topos_path, exc)
-            QMessageBox.critical(
-                self,
-                I18N.tr("presets.rename_failed_title", "Rename Failed"),
-                I18N.tr("presets.rename_failed", f"Could not rename preset: {exc}"))
-            return
-
-        # sidecar（缩略图/参考帧/元数据）跟随改名；失败则整体回滚
-        renamed_sidecars: list[tuple[str, str]] = []  # (new, old)
-        try:
-            for suffix in self._SIDECAR_SUFFIXES:
-                old_side = os.path.join(folder, f"{old_name}{suffix}")
-                new_side = os.path.join(folder, f"{new_name}{suffix}")
-                if os.path.exists(old_side):
-                    os.rename(old_side, new_side)
-                    renamed_sidecars.append((new_side, old_side))
-        except OSError as exc:
-            logger.warning(
-                "Presets: sidecar rename during '%s' -> '%s' failed: %s; "
-                "rolling back", old_name, new_name, exc)
-            rollback_ok = True
-            for new_side, old_side in reversed(renamed_sidecars):
-                try:
-                    os.rename(new_side, old_side)
-                except OSError:
-                    rollback_ok = False
-            try:
-                os.rename(new_topos, topos_path)
-            except OSError:
-                rollback_ok = False
-            if not rollback_ok:
-                logger.error(
-                    "Presets: rollback incomplete for '%s' -> '%s'; "
-                    "manual cleanup may be required", old_name, new_name)
-            QMessageBox.critical(
-                self,
-                I18N.tr("presets.rename_failed_title", "Rename Failed"),
-                I18N.tr("presets.rename_failed", f"Could not rename preset: {exc}"))
-            return
         # G02：rename 是对旧条目的首次写入——原子补齐稳定 still_id（旧
         # 条目从此跨改名身份不变）。补写失败不回滚文件改名（那是用户刚
         # 确认过的动作），但必须如实告知，不假装已保存。
@@ -639,7 +630,7 @@ class PresetsPanel(QWidget):
         menu.exec(self.list_widget.mapToGlobal(pos))
 
     def _delete_item(self, item) -> None:
-        """Delete a single preset item."""
+        """Delete a single preset item（G03：移入可恢复 trash）。"""
         name = item.text()
         reply = QMessageBox.question(
             self,
@@ -648,10 +639,16 @@ class PresetsPanel(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            topos_path = item.data(Qt.ItemDataRole.UserRole)
-            if topos_path and os.path.isfile(topos_path):
-                self._delete_preset_files(topos_path)
+            failures = self._delete_items_to_trash([item])
             self.scan_presets()
+            if failures:
+                QMessageBox.warning(
+                    self,
+                    I18N.tr("presets.delete_partial_title",
+                            "Deleted with Errors"),
+                    I18N.tr("presets.delete_partial",
+                            "Some files could not be moved to the "
+                            "recoverable trash:\n") + "\n".join(failures))
 
     def _export_thumbnail(self, topos_path) -> None:
         """Export the thumbnail image to a user-selected location."""
