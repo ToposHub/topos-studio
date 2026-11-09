@@ -598,6 +598,16 @@ class PageManagementMixin:
                 except Exception:
                     logger.debug("leave_page_hook: playback arbiter failed",
                                  exc_info=True)
+            # R03（复查计划）：离开 Edit 解除监看域预算——用户预览质量偏
+            # 好从未被预算改动，解除即复位；Deliver 借还后 pane 重新可见
+            # 时由执行器 watcher→refresh 重评。
+            budget_executor = getattr(self, "_viewport_budget_executor", None)
+            if budget_executor is not None:
+                try:
+                    budget_executor.mark_page_left()
+                except Exception:
+                    logger.debug("leave_page_hook: budget release failed",
+                                 exc_info=True)
             return
 
         # Deliver temporarily hosts the same Program Viewer and TimelinePanel

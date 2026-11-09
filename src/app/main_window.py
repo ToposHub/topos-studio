@@ -2700,13 +2700,24 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                          exc_info=True)
 
         # 3.6 CV-B06：恢复 Color 监看静音（页面作用域状态不带入关闭后
-        #     的全局音频配置）。
+        # 的全局音频配置）。
         try:
             restore_mute = getattr(self, "_restore_color_monitor_mute", None)
             if callable(restore_mute):
                 restore_mute()
         except Exception:
             logger.debug("shutdown: restore color monitor mute failed",
+                         exc_info=True)
+
+        # 3.7 R03：双视图预算执行器关门——停更新/摘 watcher/解除监看域
+        #     预算（用户预览质量偏好从未被预算改动，无需恢复动作）。
+        try:
+            budget_executor = getattr(self, "_viewport_budget_executor", None)
+            if budget_executor is not None and hasattr(
+                    budget_executor, "mark_shutdown"):
+                budget_executor.mark_shutdown()
+        except Exception:
+            logger.debug("shutdown: budget executor close failed",
                          exc_info=True)
 
         # 4. 时间线预览渲染器（内部依次 join worker 与 GPU 渲染线程）

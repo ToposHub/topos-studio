@@ -65,11 +65,23 @@ class _DuckViewport(QObject):
 
 
 class _QualityRecorder:
+    """R03：渲染器双打——预算面（set_budget_size_cap）替代旧用户质量面。"""
+
     def __init__(self) -> None:
-        self.quality_calls: list[float] = []
+        self.quality_calls: list[tuple | None] = []
+        self.user_quality_calls: list[float] = []
+
+    def set_budget_size_cap(self, cap) -> None:
+        self.quality_calls.append(None if cap is None else tuple(cap))
 
     def set_preview_quality(self, scale: float) -> None:
-        self.quality_calls.append(float(scale))
+        self.user_quality_calls.append(float(scale))
+
+    def preview_quality_preference(self) -> float:
+        return 0.0
+
+    def budget_size_cap_status(self) -> dict:
+        return {"cap": None, "actual": None, "satisfied": None}
 
 
 def _asset() -> MediaAsset:
@@ -151,7 +163,8 @@ def test_i07_full_host_play_flow_is_consistent_across_layers(qtbot, qapp):
     assert not widget.is_playing
     snap = coordinator.snapshot()
     assert snap.timeline_playback.playing and not snap.source_playback.playing
-    assert world.quality.quality_calls  # 预算执行器随快照重评过时间线质量档
+    assert world.quality.quality_calls  # 预算执行器随快照重评过预算面
+    assert not world.quality.user_quality_calls  # 用户质量选择器零写入
 
 
 def test_i07_full_host_deliver_policy_and_return(qtbot, qapp):
