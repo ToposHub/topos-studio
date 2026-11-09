@@ -420,7 +420,8 @@ class PresetsPanel(QWidget):
         # G11：重扫保留仍在场的选中（外部删除的条目自然清出选择）
         selected_paths = self._selected_paths()
         try:
-            self._last_scan_folder_mtime = os.stat(folder).st_mtime_ns
+            self._last_scan_folder_mtime = \
+                os.stat(self._current_folder).st_mtime_ns
         except OSError:
             self._last_scan_folder_mtime = None
         self.list_widget.clear()
