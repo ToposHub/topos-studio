@@ -30,7 +30,8 @@ SORT_KEYS = ("name", "label", "created_at")
 
 #: 旧 presets_columns（列数）→ 合理默认缩略图宽度
 _LEGACY_COLUMNS_TO_WIDTH = {2: 192, 3: 168, 4: 148, 5: 128, 6: 112}
-_DEFAULT_WIDTH = 160
+#: 默认宽度＝chrome 既有默认（108）：无偏好文件时行为与旧版逐项一致
+_DEFAULT_WIDTH = 108
 
 
 @dataclass
