@@ -1428,6 +1428,10 @@ class LayerOpsMixin:
             self.status_bar.showMessage(
                 I18N.tr("presets.reference_failed", "预设没有可用的参考帧"), 3000)
             return
+        # G13：wipe 参考会话 provenance——记录 still 身份／bundle revision／
+        # 实际加载精度（加载失败时上面已 return，上一张有效参考的会话
+        # 原样保留）。
+        self._begin_gallery_compare_session(topos_path, precision, img)
         if precision == "jpeg8":
             self.status_bar.showMessage(
                 I18N.tr("presets.reference_jpeg_fallback",
@@ -1442,6 +1446,90 @@ class LayerOpsMixin:
         self.status_bar.showMessage(
             I18N.tr("presets.reference_loaded",
                     "预设已加载为参考帧（拖动分割线对比）"), 3000)
+
+    # ── G13：wipe 参考会话 provenance ＋ split 协议如实回填 ────────────
+
+    def _begin_gallery_compare_session(self, topos_path: str,
+                                       precision: str, img) -> None:
+        """以真实加载的参考开一个 wipe 会话（still 身份/revision/精度）。"""
+        from src.features.color.core.compare_session import (
+            ColorCompareSession,
+            CompareItem,
+        )
+        from src.features.color.core.preset_meta import load_preset_meta
+        meta = load_preset_meta(topos_path)
+        stem = os.path.splitext(os.path.basename(topos_path))[0]
+        still_id = getattr(meta, "still_id", None) or topos_path
+        try:
+            revision = os.stat(topos_path).st_mtime_ns
+        except OSError:
+            revision = 0
+        fidelity = "hdr_exr" if precision == "exr_float32" else "uint8_still"
+        item = CompareItem(
+            item_id=still_id,
+            label=getattr(meta, "label", None) or stem,
+            kind="gallery_still",
+            revision=revision,
+            source_frame=getattr(meta, "source_frame", None),
+            width=int(getattr(img, "shape", [0])[1]),
+            height=int(getattr(img, "shape", [0])[0]),
+            fidelity=fidelity,
+            approx_bytes=int(getattr(img, "nbytes", 0)),
+        )
+        released = []
+        session = ColorCompareSession(max_items=2)
+        accepted, rejected = session.begin(
+            [item], "single",
+            anchor_clip_id=getattr(meta, "clip_id", None),
+            anchor_source_frame=getattr(meta, "source_frame", None),
+            color_context=fidelity,
+            on_release=released.append)
+        if not accepted:
+            return
+        # 换参考＝换会话：旧会话释放（旧参考图由引擎侧 load_reference_still
+        # 覆盖；这里释放的是会话资源/缓存身份）
+        previous = getattr(self, "_gallery_compare_session", None)
+        if previous is not None:
+            previous.release()
+        self._gallery_compare_session = session
+        self._gallery_compare_released = released
+
+    def end_gallery_compare_session(self) -> None:
+        """清除参考时结束会话（menu clear-reference 路径调用）。"""
+        session = getattr(self, "_gallery_compare_session", None)
+        if session is not None:
+            session.end()
+            session.release()
+        self._gallery_compare_session = None
+
+    def gallery_compare_snapshot(self) -> dict:
+        """当前 wipe 会话快照（诊断/能力同步；无会话如实为空）。"""
+        session = getattr(self, "_gallery_compare_session", None)
+        if session is None or not session.active:
+            return {"active": False}
+        return {
+            "active": True,
+            "layout": session.layout,
+            "color_context": session.color_context,
+            "slots": [
+                {"item_id": slot.item.item_id, "label": slot.item.label,
+                 "kind": slot.item.kind, "fidelity": slot.item.fidelity,
+                 "revision": slot.item.revision}
+                for slot in session.slots
+            ],
+        }
+
+    def on_split_compare_requested(self, payload=None) -> None:
+        """G13：``split_requested`` UI 协议的如实回填。
+
+        分屏 presenter（真实渲染队列消费者）未实现——接受请求只会把
+        disabled 改 True 的假启用。这里显式拒绝并说明原因，不改变
+        工程状态／当前 wipe 会话。
+        """
+        self.status_bar.showMessage(
+            I18N.tr("gallery.split_backend_missing",
+                    "分屏比较后端（presenter）未实现——本次请求已拒绝；"
+                    "划像参考仍可用"), 5000)
 
     # ------------------------------------------------------------------
     # Auto Color / Color Match (P1-COLOR-21)
