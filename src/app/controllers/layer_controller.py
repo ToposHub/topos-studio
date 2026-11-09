@@ -716,14 +716,20 @@ class LayerOpsMixin:
         # M09.2（S12）：float 抓帧链闭合——FBO f4 回读的 float 帧写入
         # .still.exr 侧车（HDR 值保留，JPEG 仍写供低精度消费方）；回读
         # 失败降级纯 JPEG（不阻断保存）。
-        from src.features.color.core.preset_meta import STILL_IMAGE_MAX, write_still_images
+        from src.features.color.core.preset_meta import (
+            STILL_IMAGE_MAX,
+            still_exr_path_for,
+            still_path_for,
+            write_still_images,
+        )
         hdr_frame = None
         try:
             hdr_frame = self.engine.render_full_image_for_scope(
                 max_dim=max(STILL_IMAGE_MAX, 4096))
         except Exception:
             hdr_frame = None
-        write_still_images(topos_path, rendered_img, hdr_image=hdr_frame)
+        written_thumb, written_still = write_still_images(
+            topos_path, rendered_img, hdr_image=hdr_frame)
 
         # 保存为 .topos 项目文件（完整调色数据）
         # Video presets must reference an image because standalone video
@@ -752,6 +758,17 @@ class LayerOpsMixin:
             QTimer.singleShot(100, self.video_controller.start_playback)
 
         if not saved:
+            # CV-B07：失败不留下半份 preset——清掉本次已写盘的 sidecar
+            # （.topos 本体由 SaveRouter 自理），Gallery 不出现孤儿缩略图。
+            for sidecar in (written_thumb, written_still,
+                            still_path_for(topos_path),
+                            still_exr_path_for(topos_path)):
+                if not sidecar:
+                    continue
+                try:
+                    os.remove(sidecar)
+                except OSError:
+                    pass
             self.status_bar.showMessage(
                 I18N.tr("presets.capture_failed", "静帧保存失败"), 3000)
             return
