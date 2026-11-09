@@ -1703,6 +1703,241 @@ class UpdateAssetLogCommand:
 
 
 @dataclass(frozen=True)
+class SetAssetInOutCommand:
+    """P0-2: 设置/清除素材级 In/Out（源文件帧域，含端点）。
+
+    项目域命令：apply/undo 收 EditProject；帧域校验由
+    asset_source_range.set_asset_in_out 承担（倒置/负数/越界抛
+    SourceRangeError，apply 失败不留半状态）。Undo 恢复首次 apply
+    时快照的旧 In/Out（含"未设置"）。
+    """
+
+    command_id: str
+    label: str
+    asset_id: str
+    new_in: int | None = None
+    new_out: int | None = None
+    _old_in: int | None = None
+    _old_out: int | None = None
+    _applied: bool = False
+
+    def apply(self, project: EditProject) -> EditProject:
+        from src.features.edit.core.asset_source_range import (
+            get_asset_in_out, set_asset_in_out,
+        )
+        if not self._applied:
+            old_in, old_out = get_asset_in_out(project.assets[self.asset_id])
+            object.__setattr__(self, "_old_in", old_in)
+            object.__setattr__(self, "_old_out", old_out)
+            object.__setattr__(self, "_applied", True)
+        return set_asset_in_out(project, self.asset_id, self.new_in, self.new_out)
+
+    def undo(self, project: EditProject) -> EditProject:
+        from src.features.edit.core.asset_source_range import set_asset_in_out
+        if not self._applied:
+            logger.warning("SetAssetInOutCommand undo before apply")
+            return project
+        return set_asset_in_out(
+            project, self.asset_id, self._old_in, self._old_out)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetAssetInOutCommand",
+            "label": self.label,
+            "asset_id": self.asset_id,
+            "new_in": self.new_in,
+            "new_out": self.new_out,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetAssetInOutCommand":
+        return SetAssetInOutCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Clip In/Out"),
+            asset_id=data.get("asset_id", ""),
+            new_in=data.get("new_in"),
+            new_out=data.get("new_out"),
+        )
+
+    @staticmethod
+    def create(
+        asset_id: str,
+        in_frame: int | None,
+        out_frame: int | None,
+        *,
+        label: str = "Set Clip In/Out",
+    ) -> "SetAssetInOutCommand":
+        return SetAssetInOutCommand(
+            command_id=str(uuid.uuid4()),
+            label=label,
+            asset_id=asset_id,
+            new_in=in_frame,
+            new_out=out_frame,
+        )
+
+
+@dataclass(frozen=True)
+class SetAssetMarkersCommand:
+    """P0-2: 整体替换素材级标记列表。
+
+    标记 schema/帧域校验由 asset_source_range.set_asset_markers 承担；
+    undo 恢复首次 apply 时快照的旧列表。
+    """
+
+    command_id: str
+    label: str
+    asset_id: str
+    new_markers: tuple[dict[str, Any], ...] = ()
+    _old_markers: tuple[dict[str, Any], ...] = ()
+    _applied: bool = False
+
+    def apply(self, project: EditProject) -> EditProject:
+        from src.features.edit.core.asset_source_range import (
+            list_asset_markers, set_asset_markers,
+        )
+        if not self._applied:
+            object.__setattr__(
+                self, "_old_markers",
+                list_asset_markers(project.assets[self.asset_id]))
+            object.__setattr__(self, "_applied", True)
+        return set_asset_markers(
+            project, self.asset_id, list(self.new_markers))
+
+    def undo(self, project: EditProject) -> EditProject:
+        from src.features.edit.core.asset_source_range import set_asset_markers
+        if not self._applied:
+            logger.warning("SetAssetMarkersCommand undo before apply")
+            return project
+        return set_asset_markers(
+            project, self.asset_id, list(self._old_markers))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetAssetMarkersCommand",
+            "label": self.label,
+            "asset_id": self.asset_id,
+            "new_markers": [dict(m) for m in self.new_markers],
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetAssetMarkersCommand":
+        raw = data.get("new_markers") or []
+        return SetAssetMarkersCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Asset Markers"),
+            asset_id=data.get("asset_id", ""),
+            new_markers=tuple(dict(m) for m in raw if isinstance(m, dict)),
+        )
+
+    @staticmethod
+    def create(
+        asset_id: str,
+        markers: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+        *,
+        label: str = "Set Asset Markers",
+    ) -> "SetAssetMarkersCommand":
+        return SetAssetMarkersCommand(
+            command_id=str(uuid.uuid4()),
+            label=label,
+            asset_id=asset_id,
+            new_markers=tuple(dict(m) for m in markers),
+        )
+
+
+@dataclass(frozen=True)
+class CreateSubclipCommand:
+    """P0-2: 从素材创建手工子片段（单个 Ctrl+Z 单元）。
+
+    apply = 建子片段资产并挂入目标素材箱（None=root）；undo = 移除该
+    子片段（remove_asset 会同步清理所有 bin 引用）。范围校验失败抛
+    SourceRangeError，apply 不留半状态。
+    """
+
+    command_id: str
+    label: str
+    asset_id: str
+    start_frame: int
+    end_frame: int
+    display_name: str | None = None
+    target_bin_id: str | None = None
+    _created_subclip_id: str | None = None
+    _applied: bool = False
+
+    def apply(self, project: EditProject) -> EditProject:
+        from src.features.edit.core.asset_source_range import create_manual_subclip
+        # redo 重放时复用首次 apply 的稳定 ID：undo/redo 后 bin 引用与
+        # 时间线引用（若有）按 asset_id 恢复一致。
+        new_project, subclip = create_manual_subclip(
+            project,
+            self.asset_id,
+            self.start_frame,
+            self.end_frame,
+            display_name=self.display_name,
+            target_bin_id=self.target_bin_id,
+            subclip_asset_id=self._created_subclip_id,
+        )
+        object.__setattr__(self, "_created_subclip_id", subclip.asset_id)
+        object.__setattr__(self, "_applied", True)
+        return new_project
+
+    def undo(self, project: EditProject) -> EditProject:
+        if not self._applied or self._created_subclip_id is None:
+            logger.warning("CreateSubclipCommand undo before apply")
+            return project
+        if self._created_subclip_id not in project.assets:
+            logger.warning(
+                f"CreateSubclipCommand undo: subclip {self._created_subclip_id} gone")
+            return project
+        return project.remove_asset(self._created_subclip_id)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "CreateSubclipCommand",
+            "label": self.label,
+            "asset_id": self.asset_id,
+            "start_frame": self.start_frame,
+            "end_frame": self.end_frame,
+            "display_name": self.display_name,
+            "target_bin_id": self.target_bin_id,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "CreateSubclipCommand":
+        return CreateSubclipCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Create Subclip"),
+            asset_id=data.get("asset_id", ""),
+            start_frame=int(data.get("start_frame", 0)),
+            end_frame=int(data.get("end_frame", 0)),
+            display_name=data.get("display_name"),
+            target_bin_id=data.get("target_bin_id"),
+        )
+
+    @staticmethod
+    def create(
+        asset_id: str,
+        start_frame: int,
+        end_frame: int,
+        *,
+        display_name: str | None = None,
+        target_bin_id: str | None = None,
+        label: str = "Create Subclip",
+    ) -> "CreateSubclipCommand":
+        return CreateSubclipCommand(
+            command_id=str(uuid.uuid4()),
+            label=label,
+            asset_id=asset_id,
+            start_frame=start_frame,
+            end_frame=end_frame,
+            display_name=display_name,
+            target_bin_id=target_bin_id,
+        )
+
+
+@dataclass(frozen=True)
 class UpdateSourcePatchCommand:
     """F2.1: 设置/清除素材级 Source Patch 覆盖（V/A 流开关 + 源声道映射）。
 
