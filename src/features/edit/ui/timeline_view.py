@@ -16401,14 +16401,19 @@ class TimelineView(QGraphicsView):
         return None
 
     def _handle_source_clip_drop(self, event: QDropEvent) -> None:
-        """VP-B08: Source 拖放（viewer 源区间 + 流意图）→ 单次既有编辑链。
+        """VP-B08/R02: Source 拖放（viewer 源区间 + 流意图）→ 单宏命令。
 
         - 源区间是 **Out 包含**语义（in..out），走与 Source 监视器插入相
           同的 planner/命令链（insert 模式直连 ``insert_clip``）；
         - stream intent：av（默认配对）/ video（只视频）/ audio（只音频，
           落音频目标轨）；
         - 锁轨 / 无可用目标轨 / 素材不在本项目 → 状态栏回因并拒绝
-          （零写入，不留半条 clip）。
+          （零写入，不留半条 clip）；
+        - R02（2026-11-09 复查）：建轨与插入（含配对音频、ripple）合并
+          为一个 MacroCommand 提交——不再"先建轨、失败再公开 undo"。
+          失败（验证拒绝/命令构造失败/宏应用抛异常）零 revision、零
+          Undo/Redo 改动、既有 Redo 历史保持；成功只新增一条历史，
+          单步 undo/redo 覆盖建轨＋全部片段。
         """
         payload = self._drag_source_payload
         if payload is None or not self._drag_assets:
@@ -16449,61 +16454,90 @@ class TimelineView(QGraphicsView):
         target_track = None
         if drop.track_id and self._timeline is not None:
             target_track = self._timeline.get_track_by_id(drop.track_id)
-        track_created_here = False
-        if target_track is None and drop.create_track and \
-                self._timeline is not None:
-            add_track_cmd = AddTrackCommand.create(target_track_type)
-            self._execute_command(add_track_cmd)
-            if add_track_cmd._created_track_id:
-                target_track = self._get_track_by_id(
-                    add_track_cmd._created_track_id)
-                track_created_here = True
-        if target_track is None:
-            self.status_message_requested.emit(
-                "Source drop rejected: no target track")
-            event.ignore()
-            return
-        if getattr(target_track, "is_locked", False):
+        if target_track is not None and getattr(target_track, "is_locked",
+                                                False):
             self.status_message_requested.emit(
                 "Source drop rejected: target track is locked")
             event.ignore()
             return
+        # R02：新轨走确定性 track_id——建轨命令与插入命令在同一个宏内
+        # 对同一地址生效。为了让插入 planner（如 insert 模式的音频显式
+        # 目标轨判定）读到"建轨后"的状态，AddTrackCommand 先应用到本地
+        # 暂存时间线（纯对象图副本，不提交、不动历史/视图），宏提交时
+        # 对真实时间线再应用同一确定性命令。
+        new_track_id: str | None = None
+        add_track_cmd = None
+        staging_timeline = None
+        if target_track is None:
+            if not (drop.create_track and self._timeline is not None):
+                self.status_message_requested.emit(
+                    "Source drop rejected: no target track")
+                event.ignore()
+                return
+            new_track_id = str(uuid.uuid4())
+            add_track_cmd = AddTrackCommand.create(
+                target_track_type, track_id=new_track_id)
+            staged = add_track_cmd.apply(self._timeline)
+            if isinstance(staged, tuple):  # (timeline, updated_command)
+                staged = staged[0]
+            staging_timeline = staged
+            target_track = staging_timeline.get_track_by_id(new_track_id)
+            if target_track is None:  # 理论不可达：防御性拒绝
+                self.status_message_requested.emit(
+                    "Source drop rejected: track staging failed")
+                event.ignore()
+                return
         insert_frame = self._calculate_insert_frame(drop.frame)
         source_range = (int(payload.in_frame), int(payload.out_frame))
+        # R02：批量收集（AddTrack + insert/linked/ripple 命令）→ 单宏提交
+        batch_commands: list[Any] = []
+        real_timeline = self._timeline
+        if staging_timeline is not None:
+            self._timeline = staging_timeline
+        self._batch_drop_commands = batch_commands
         try:
-            if self._edit_mode == "insert":
-                # I04-3：insert 分支同样消费流意图（此前直连 insert_clip
-                # 丢掉 intent，video 意图插出配对、audio 意图插出两条）
-                success = self.insert_clip(
-                    asset_id=asset.asset_id,
-                    in_frame=source_range[0],
-                    out_frame=source_range[1],
-                    playhead=insert_frame,
-                    track_id=target_track.track_id,
-                    stream_intent=payload.stream_intent,
-                )
-            else:
-                success = self._add_asset_as_clip(
-                    asset, target_track, insert_frame,
-                    source_range=source_range,
-                    stream_intent=payload.stream_intent)
-        except (ValueError, RuntimeError) as exc:
-            self.status_message_requested.emit(f"Source drop rejected: {exc}")
-            success = False
-        if not success and track_created_here:
-            # I04-4：建轨后插入失败 → 回滚本次建轨（不留孤立轨与 Undo
-            # 垃圾；此时插入未产生任何命令，栈顶必为建轨命令）
+            if add_track_cmd is not None:
+                batch_commands.append(add_track_cmd)
             try:
-                self.undo()
+                if self._edit_mode == "insert":
+                    # I04-3：insert 分支同样消费流意图（此前直连
+                    # insert_clip 丢掉 intent，video 意图插出配对、
+                    # audio 意图插出两条）
+                    success = self.insert_clip(
+                        asset_id=asset.asset_id,
+                        in_frame=source_range[0],
+                        out_frame=source_range[1],
+                        playhead=insert_frame,
+                        track_id=target_track.track_id,
+                        stream_intent=payload.stream_intent,
+                    )
+                else:
+                    success = self._add_asset_as_clip(
+                        asset, target_track, insert_frame,
+                        source_range=source_range,
+                        stream_intent=payload.stream_intent)
+            except (ValueError, RuntimeError) as exc:
                 self.status_message_requested.emit(
-                    "Source drop rejected: insert failed; created track "
-                    "was rolled back")
-            except Exception:
-                logger.exception("Failed to roll back created track")
-        if success:
-            event.acceptProposedAction()
-        else:
+                    f"Source drop rejected: {exc}")
+                success = False
+        finally:
+            self._batch_drop_commands = None
+            self._timeline = real_timeline
+        if not success:
+            # 零命令落历史：命令只被收集、从未提交（构造阶段即失败）。
             event.ignore()
+            return
+        try:
+            self._execute_command(MacroCommand.create(
+                f"Source drop: {asset.display_name or asset.asset_id}",
+                batch_commands))
+        except (ValueError, RuntimeError) as exc:
+            # MacroCommand.apply 内部已逆序回滚已应用的子命令（含建轨），
+            # CommandStack 未入栈、redo 未清——工程与历史快照不变。
+            self.status_message_requested.emit(f"Source drop rejected: {exc}")
+            event.ignore()
+            return
+        event.acceptProposedAction()
 
     def _commit_drop(self, event: QDropEvent) -> None:
         # Clear feedback before a drop opens dialogs or runs the import path.
