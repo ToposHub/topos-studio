@@ -204,3 +204,80 @@ def test_i01_pause_failure_aborts_start_honestly(qtbot, qapp, monkeypatch):
     assert panel.get_playback_controller().is_playing is False
     assert widget.is_playing is True
     assert any("pause" in m.lower() for m in messages)
+
+
+@pytest.mark.parametrize("entry", ["toggle_playback", "play_reverse"])
+def test_source_gate_exception_refuses_start(
+        qtbot: Any, qapp: Any, caplog: pytest.LogCaptureFixture, entry: str) -> None:
+    widget, panel, _coordinator = _world(qtbot, qapp)
+    panel._on_play_clicked()
+
+    def failing_gate(via: str) -> str | None:
+        raise RuntimeError("coordinator unavailable")
+
+    widget.set_playback_gate(failing_gate)
+    getattr(widget, entry)()
+    assert not widget.is_playing
+    assert not widget._playback_timer.isActive()
+    assert panel.get_playback_controller().is_playing
+    assert "start_failed" in caplog.text
+
+
+def test_source_reverse_direction_reaches_real_coordinator_snapshot(
+        qtbot: Any, qapp: Any) -> None:
+    widget, _panel, coordinator = _world(qtbot, qapp)
+    widget.seek(100)
+    widget.play_reverse()
+    state = coordinator.snapshot().source_playback
+    assert state.playing
+    assert state.direction == "backward"
+    assert state.speed == 1.0
+    assert widget.playback_direction == "backward"
+    widget.pause()
+    widget.toggle_playback()
+    state = coordinator.snapshot().source_playback
+    assert state.playing
+    assert state.direction == "forward"
+    assert state.speed == 1.0
+
+
+@pytest.mark.parametrize("entry", ["button", "j", "l", "start"])
+def test_timeline_gate_exception_rejects_start_and_preserves_source(
+    qtbot: Any, qapp: Any, monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture, entry: str,
+) -> None:
+    widget, panel, _coordinator = _world(qtbot, qapp)
+    widget.toggle_playback()
+    assert widget.is_playing
+
+    def broken_gate(via: str) -> None:
+        raise RuntimeError("coordinator unavailable")
+
+    panel.set_playback_gate(broken_gate)
+    monkeypatch.setattr(panel, "_transport_context_active", lambda: True)
+    starts = {
+        "button": panel._on_play_clicked,
+        "j": panel._on_j_pressed,
+        "l": panel._on_l_pressed,
+        "start": panel.start_playback,
+    }
+    starts[entry]()
+
+    assert not panel.get_playback_controller().is_playing
+    assert widget.is_playing
+    assert "rejecting start" in caplog.text
+
+
+def test_timeline_pause_remains_available_when_gate_is_broken(
+    qtbot: Any, qapp: Any,
+) -> None:
+    _widget, panel, _coordinator = _world(qtbot, qapp)
+    panel._on_play_clicked()
+    assert panel.get_playback_controller().is_playing
+
+    def broken_gate(via: str) -> None:
+        raise RuntimeError("coordinator unavailable")
+
+    panel.set_playback_gate(broken_gate)
+    panel.toggle_playback()
+    assert not panel.get_playback_controller().is_playing

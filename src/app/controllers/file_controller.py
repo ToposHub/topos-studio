@@ -5578,28 +5578,40 @@ class FileOpsMixin:
         setter = getattr(edit_page, "set_monitor_master_muted", None)
         if not callable(setter):
             return False
+        was_muted = bool(getattr(self, "_color_monitor_muted", False))
+        if not muted and not was_muted:
+            return True  # 不持有 Color 静音时，不打开用户自己的 master mute。
         try:
-            if muted and not getattr(self, "_color_monitor_muted", False):
+            if muted and not was_muted:
                 previous = getattr(edit_page, "monitor_master_muted", None)
                 self._color_monitor_mute_previous = (
                     previous() if callable(previous) else False)
-            applied = setter(bool(muted))
+            # 一次写入目标状态：原 master 已静音时绝不 False→True 短暂出声。
+            target_muted = (True if muted else bool(getattr(
+                self, "_color_monitor_mute_previous", False)))
+            applied = setter(target_muted)
         except Exception:
             logger.warning("color monitor mute apply failed", exc_info=True)
             return False
-        self._color_monitor_muted = bool(muted) if applied else False
         if not applied:
+            # 失败时仍持有原静音状态，checked 与离页重试不能虚报成功。
             return False
+        self._color_monitor_muted = bool(muted)
         if not muted:
-            # 恢复静音前的 master 状态（默认 False）。
-            previous = getattr(self, "_color_monitor_mute_previous", False)
-            try:
-                if previous:
-                    setter(True)
-            except Exception:
-                logger.debug("color monitor mute previous-state restore failed",
-                             exc_info=True)
             self._color_monitor_mute_previous = False
+            deferred = bool(getattr(self, "_color_monitor_audio_start_deferred", False))
+            self._color_monitor_audio_start_deferred = False
+            # Source-GL 路径曾因静音跳过起播，需要在解除时恢复其真实音频桥。
+            # TimelinePreview 已有共享时间线时钟，恢复 Master 即可，不再起一条。
+            controller = getattr(self, "video_controller", None)
+            playing = getattr(controller, "is_playing", False)
+            if callable(playing):
+                playing = playing()
+            if (deferred and bool(playing)
+                    and getattr(self, "current_page", None) == "Color"
+                    and self._active_color_timeline_clip_playback_context() is not None
+                    and not self._color_timeline_preview_is_active()):
+                self._on_color_video_play_state_for_audio(True)
         return True
 
     def _restore_color_monitor_mute(self) -> None:
@@ -6200,11 +6212,13 @@ class FileOpsMixin:
         if edit_page is None:
             return
         if not is_playing:
+            self._color_monitor_audio_start_deferred = False
             edit_page.pause_timeline_audio_playback()
             return
         # CV-B06：监看静音时不再起声（视频照常；已有桥音频由 master 总线
-        # 静音压住，静音解除后由当前播放状态自然续接）。
+        # 静音压住，被延后的起播由解除静音时的当前上下文恢复）。
         if getattr(self, "_color_monitor_muted", False):
+            self._color_monitor_audio_start_deferred = True
             return
         start_frame = self._color_video_timeline_frame_for_audio()
         if start_frame is None:
@@ -6213,6 +6227,7 @@ class FileOpsMixin:
             context.get("timeline_id")
         ) or getattr(edit_page, "_current_timeline", None)
         edit_page.start_timeline_audio_playback(timeline, start_frame)
+        self._color_monitor_audio_start_deferred = False
 
     def _color_video_timeline_frame_for_audio(self) -> int | None:
         """Map the Color video engine's current source frame to a timeline frame."""

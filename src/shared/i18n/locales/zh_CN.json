@@ -1984,6 +1984,7 @@
     "filter_all": "所有文件 (*)"
   },
   "viewport": {
+    "color_monitor": "色彩管线诊断",
     "zoom_in": "放大",
     "zoom_out": "缩小",
     "fit": "适合窗口",
@@ -2891,5 +2892,44 @@
       "crop_limited": " · 补偿受裁切限制",
       "mode_changed": "模式已改变，点击稳定重新分析"
     }
+  },
+  "gallery": {
+    "still_id": "静帧编号",
+    "label": "标签",
+    "timeline_name": "时间线名称",
+    "sidebar": "显示相册",
+    "import": "导入静帧",
+    "import_unavailable": "导入静帧 — 此版本暂不支持",
+    "thumbnail_size": "缩略图大小",
+    "sort": "静帧排序",
+    "grid": "缩略图视图",
+    "list": "列表视图",
+    "search": "搜索静帧",
+    "expand": "画廊视图",
+    "more": "画廊选项",
+    "sort_name_ascending": "名称：升序",
+    "sort_name_descending": "名称：降序",
+    "stills_one": "静帧 1",
+    "album_unavailable": "此版本暂不支持",
+    "albums": "相册",
+    "powergrade": "PowerGrade",
+    "timelines": "时间线",
+    "memories": "记忆",
+    "compare_title": "画廊对比",
+    "image_wipe": "划像",
+    "split_screen": "分屏",
+    "layout": "布局",
+    "side_by_side": "并排对比",
+    "grid_2x2": "2 × 2 网格",
+    "compare_start": "开始对比",
+    "use_reference": "设为划像参考",
+    "compare_split_description": "将当前画面与选中的画廊静帧对比（最多三张参考图）。",
+    "compare_wipe_description": "选择一张画廊静帧作为视图的划像参考。",
+    "compare_backend_pending": "分屏画面尚未接通。此处可选择参考静帧与布局，接通后才能开始对比。",
+    "compare_limit": "当前画面之外，最多选择三张参考静帧。",
+    "split_setup": "设置画廊分屏对比…",
+    "choose_wipe": "选择画廊划像参考…",
+    "current_image": "当前画面",
+    "compare_side_limit": "并排对比使用一张参考静帧；多张静帧请选择 2 × 2 网格。"
   }
 }

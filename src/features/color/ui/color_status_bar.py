@@ -322,6 +322,8 @@ class ColorMonitorStatusBar(QWidget):
             'colorbar.source_tooltip',
             '源媒体容器 tag（primaries / transfer / range）')
         self._src_label.setToolTip(src_tip)
+        if self._applied_width is not None and self._applied_width < 380:
+            self.setToolTip(self._chain_text())
         self.adjustSize()
         self.update()
 

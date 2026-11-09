@@ -160,9 +160,10 @@ class SourceTimecodeContext:
             try:
                 parsed = Timecode.from_string(str(tc_text), fps)
                 start_frames = int(parsed.to_frame_number())
-                # 字符串里的 ';' 分隔符是 DF 的权威信号（优先于旗标）。
-                if ";" in str(tc_text):
-                    tc_type = TimecodeType.DROP_FRAME
+                # 起始码分隔符是域的权威：';' 为 DF，':' 为 NDF。
+                # 偏移的解析域与后续显示域必须一致，避免 NTSC NDF 起码被
+                # 自动 DF 推断改成另一时间码（如 01:00:00:00→01:00:03;18）。
+                tc_type = parsed.tc_type
             except (ValueError, TypeError):
                 start_frames = 0  # 非法起始码 → 相对 TC，不伪造绝对码
         total = int(getattr(metadata, "total_frames", 0) or 0)

@@ -128,6 +128,17 @@ def test_mark_shutdown_disconnects_menu_refresh_requests(canvas_host) -> None:
     assert host.last_state.presentation_path == "none"
 
 
+def test_mark_shutdown_rejects_late_mute_signal_and_queued_handler(canvas_host) -> None:
+    host = _make_host(canvas_host)
+    mute_calls: list[bool] = []
+    host._window._set_color_monitor_mute = mute_calls.append
+    host.mark_shutdown()
+    host.mark_shutdown()
+    host._chrome.monitor_mute_toggled.emit(True)
+    host._on_monitor_mute_requested(True)
+    assert mute_calls == []
+
+
 # ── Color 私有预览渲染器停用 ──────────────────────────────────────────
 
 

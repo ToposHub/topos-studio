@@ -1479,9 +1479,10 @@ class TimelinePanel(QWidget):
         try:
             reason = self.__dict__.get("_playback_gate")(via)
         except Exception:
-            # 门自身故障不得把走带变砖：记录后按未安装处理
-            logger.exception("playback gate raised; allowing start")
-            return True
+            # 已安装的门故障时无法保证对侧已暂停，拒绝本次起播。
+            # 暂停入口不经过此门，用户仍能停止已有播放。
+            logger.exception("playback gate raised; rejecting start via=%s", via)
+            return False
         return reason is None
 
     def start_playback(self, direction: int = 1, speed: float = 1.0) -> None:

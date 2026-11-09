@@ -62,6 +62,10 @@ class CompareItem:
     def cache_key(self) -> str:
         """缓存键：内容身份的稳定摘要（含 revision/frame/尺寸/色彩）。"""
         identity = {
+            "kind": self.kind,
+            # Gallery stills have their own stable identity; unlike versions,
+            # they may have no clip/asset provenance at all.
+            "gallery_item_id": self.item_id if self.kind == "gallery_still" else None,
             "project_id": self.project_id,
             "asset_id": self.asset_id,
             "clip_id": self.clip_id,
@@ -205,6 +209,7 @@ class ColorCompareSession:
         self.released_keys = tuple(released)
         self.slots = []
         self._cache_bytes = 0
+        self.active = False
 
     # ── 失效与诊断 ────────────────────────────────────────────────────
 

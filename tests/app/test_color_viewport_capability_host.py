@@ -94,7 +94,7 @@ def test_no_media_disables_monitor_actions_and_transport(host) -> None:
     assert not toolbar.split_btn.isEnabled()
     assert not chrome.transport.btn_play.isEnabled()
     assert not chrome.transport.slider.isEnabled()
-    assert "not wired" in chrome.split_screen_button.toolTip()
+    assert chrome.split_screen_button.isEnabled()  # setup remains available
     assert host.last_capabilities["view.highlight"].reason
 
 
@@ -128,6 +128,15 @@ def test_video_media_enables_transport_and_backfills_loop(host) -> None:
     assert emitted == []
 
 
+def test_source_controller_zero_is_authoritative_over_stale_transport(host) -> None:
+    _open_video(host._window, current_frame=0, total_frames=0)
+    host._chrome.transport.set_total_frames(250)
+    host._chrome.transport.set_current_frame(48)
+    host.refresh()
+    assert host.last_state.current_frame == 0
+    assert host.last_state.total_frames == 0
+
+
 def test_checked_backfill_does_not_emit_display_toggles(host) -> None:
     _open_image(host._window)
     host._canvas.engine.show_mask_mode = True
@@ -158,8 +167,8 @@ def test_unsupported_actions_carry_reason_tooltips(host) -> None:
 
     host._gather_context = _patched
     host.refresh()
-    assert chrome.split_screen_button.isEnabled() is False
-    assert chrome.split_screen_button.toolTip().endswith(_NO_HANDLER_REASON)
+    assert chrome.split_screen_button.isEnabled() is True
+    assert chrome._options_stub_actions["compare.split_screen"].toolTip().endswith(_NO_HANDLER_REASON)
 
 
 def test_bump_context_revision_drops_stale_apply(host) -> None:

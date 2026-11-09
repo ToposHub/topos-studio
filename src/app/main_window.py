@@ -1885,6 +1885,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             self.on_apply_preset_categories_requested)
         self.presets_panel.reference_requested.connect(
             self.on_preset_reference_requested)
+        self.canvas.color_viewport_chrome.gallery_compare_requested.connect(
+            self.presets_panel.open_comparison)
         # P1-COLOR-21: Auto Color / Color Match
         self.presets_panel.match_requested.connect(
             self.on_match_to_still_requested)

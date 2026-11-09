@@ -141,121 +141,32 @@ class PresetsPanel(QWidget):
                     legacy_sub, new_sub, exc)
 
     def _init_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        """Install the Gallery presentation while retaining the existing services."""
+        from src.features.color.ui.gallery_chrome import GalleryChrome
 
-        self.setStyleSheet("""
-            QWidget { background: #27272b; color: #cccccc; font-size: 11px; }
-            QFrame#Header { background: #2f2f33; border-bottom: 1px solid #222; }
-            QFrame#Footer { background: #2f2f33; border-top: 1px solid #222; }
-            QToolButton {
-                background: transparent; border: none; border-radius: 4px; padding: 4px; color: #888;
-            }
-            QToolButton:hover { background: #444; color: #eee; }
-            /* QComboBox uses global DARK_THEME style */
-        """)
-
-        # --- Header ---
-        header = QFrame()
-        header.setObjectName("Header")
-        header.setFixedHeight(38)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(10, 0, 10, 0)
-        header_layout.setSpacing(8)
-
-        up_btn = QToolButton()
-        up_btn.setIcon(get_icon('fa5s.arrow-up', color='#aaaaaa'))
-        up_btn.setIconSize(QSize(14, 14))
-        up_btn.setToolTip(I18N.tr("presets.go_up", "Go Up"))
-        up_btn.clicked.connect(self._go_up)
-        header_layout.addWidget(up_btn)
-
-        self.folder_combo = ChevronComboBox()
-        self.folder_combo.currentTextChanged.connect(self._on_folder_changed)
-        header_layout.addWidget(self.folder_combo, 1)
-
-        layout.addWidget(header)
-
-        # --- Toolbar ---
-        toolbar = QFrame()
-        toolbar.setObjectName("Header")
-        toolbar.setFixedHeight(32)
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(10, 0, 10, 0)
-        toolbar_layout.setSpacing(4)
-
-        new_folder_btn = QToolButton()
-        new_folder_btn.setIcon(get_icon('fa5s.folder-plus', color='#aaaaaa'))
-        new_folder_btn.setIconSize(QSize(14, 14))
-        new_folder_btn.setToolTip(I18N.tr("presets.new_folder", "New Folder"))
-        new_folder_btn.clicked.connect(self.create_folder)
-        toolbar_layout.addWidget(new_folder_btn)
-
-        capture_btn = QToolButton()
-        capture_btn.setIcon(get_icon('fa5s.camera', color='#aaaaaa'))
-        capture_btn.setIconSize(QSize(14, 14))
-        capture_btn.setToolTip(I18N.tr("presets.capture_still", "Capture Still"))
-        capture_btn.clicked.connect(lambda: self.capture_requested.emit())
-        toolbar_layout.addWidget(capture_btn)
-
-        self.delete_btn = QToolButton()
-        self.delete_btn.setIcon(get_icon('fa5s.trash', color='#aaaaaa'))
-        self.delete_btn.setIconSize(QSize(14, 14))
-        self.delete_btn.setToolTip(I18N.tr("presets.delete", "Delete"))
-        self.delete_btn.clicked.connect(self._delete_selected)
-        toolbar_layout.addWidget(self.delete_btn)
-
-        # P1-COLOR-04: 搜索（预设名 / 来源片段 / source tag）
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText(
-            I18N.tr("presets.search", "搜索预设 / 来源片段…"))
-        self.search_edit.setFixedWidth(130)
-        self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.textChanged.connect(self._on_search_changed)
-        toolbar_layout.addWidget(self.search_edit)
-
-        toolbar_layout.addStretch()
-
-        zoom_lbl = QLabel(I18N.tr("presets.columns", "Columns"))
-        zoom_lbl.setStyleSheet("color: #888; font-size: 10px; font-weight: bold;")
-        toolbar_layout.addWidget(zoom_lbl)
-
-        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self.zoom_slider.setFixedWidth(80)
-        toolbar_layout.addWidget(self.zoom_slider)
-
-        layout.addWidget(toolbar)
-
-        # --- Preset Grid ---
-        self.list_widget = QListWidget()
-        self.list_widget.setViewMode(QListWidget.ViewMode.IconMode)
-        self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.list_widget.setMovement(QListWidget.Movement.Static)
-        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
-        self.list_widget.setStyleSheet("QListWidget { background: #27272b; border: none; padding: 10px; }")
-        layout.addWidget(self.list_widget)
-
+        self._gallery = GalleryChrome(self)
+        self._column_grid = self._gallery.grid
         self.delegate = PresetDelegate(self)
         self.list_widget.setItemDelegate(self.delegate)
-
-        # Column-count zoom: cards are square (the delegate paints the name
-        # inside the card), width follows the live viewport so rows tile
-        # flush with the right edge.
-        from src.shared.ui.column_grid import ColumnGridController
-        self._column_grid = ColumnGridController(
-            self.list_widget, slider=self.zoom_slider,
-            settings_key="presets_columns", columns_default=4,
-            gap=6, aspect=1.0, extra_height=0)
-
         self._populate_folder_combo()
-
-        # Panel context menu (Float / Dock)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_panel_context_menu)
 
     # --- Panel Float / Dock ---
+
+    def open_comparison(self, mode: str = "wipe") -> None:
+        """Open reference setup; only the existing wipe service is executable."""
+        from src.features.color.ui.gallery_compare import GalleryCompareDialog
+
+        entries = [(self.list_widget.item(i).text(),
+                    self.list_widget.item(i).data(Qt.ItemDataRole.UserRole))
+                   for i in range(self.list_widget.count())
+                   if not self.list_widget.item(i).isHidden()]
+        selected = [item.data(Qt.ItemDataRole.UserRole)
+                    for item in self.list_widget.selectedItems()]
+        dialog = GalleryCompareDialog(entries, selected, mode, self)
+        dialog.wipe_requested.connect(self.reference_requested.emit)
+        dialog.exec()
 
     def _find_dock_widget(self):
         """Walk up the widget hierarchy to find the parent QDockWidget."""
@@ -418,7 +329,7 @@ class PresetsPanel(QWidget):
                 not matches_query(preset_name, meta, self._search_query))
         # Fresh items carry no sizeHint — pin them to the current column
         # cell so the grid stays flush after a rescan.
-        self._column_grid.pin_items()
+        self._gallery.after_scan()
 
     def _on_search_changed(self, text: str) -> None:
         """搜索词变化：对现有条目重放过滤（不重扫磁盘）。"""
@@ -429,6 +340,8 @@ class PresetsPanel(QWidget):
             meta = item.data(Qt.ItemDataRole.UserRole + 1)
             item.setHidden(
                 not matches_query(item.text(), meta, self._search_query))
+
+        self._column_grid.pin_items()
 
     # --- Actions ---
 
@@ -620,6 +533,10 @@ class PresetsPanel(QWidget):
             reference_act.triggered.connect(
                 lambda: self.reference_requested.emit(topos_path))
 
+            compare_act = menu.addAction(
+                I18N.tr("gallery.split_screen", "Split Screen") + "…")
+            compare_act.triggered.connect(lambda: self.open_comparison("split"))
+
             # P1-COLOR-21: Color Match（增量建议 + 可撤销应用）
             match_act = menu.addAction(
                 I18N.tr("presets.match_to_still", "Color Match to This Still"))
@@ -741,128 +658,10 @@ class PresetDelegate(QStyledItemDelegate):
             self._thumb_cache.popitem(last=False)
         return pixmap
 
-    def paint(self, painter, option, index) -> None:
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    def paint(self, painter: QPainter, option: object, index: object) -> None:
+        from src.features.color.ui.gallery_chrome import paint_gallery_item
 
-        # Background rect with margins
-        margin = 4
-        bg_rect = option.rect.adjusted(margin, margin, -margin, -margin)
-
-        # Selection / hover background
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.setBrush(QBrush(QColor(255, 136, 0, 80)))
-        elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.setBrush(QBrush(QColor(255, 255, 255, 15)))
-        else:
-            painter.setBrush(QBrush(QColor(35, 35, 39)))
-        painter.setPen(QPen(QColor(60, 60, 60), 1))
-        painter.drawRoundedRect(bg_rect, 8, 8)
-
-        # Thumbnail area
-        thumb_margin = 4
-        thumb_rect = QRect(
-            bg_rect.left() + thumb_margin,
-            bg_rect.top() + thumb_margin,
-            bg_rect.width() - 2 * thumb_margin,
-            bg_rect.height() - 24
-        )
-
-        # Draw thumbnail
-        topos_path = index.data(Qt.ItemDataRole.UserRole)
-        if topos_path:
-            pixmap = self._thumbnail_pixmap(topos_path)
-            if pixmap is not None:
-                pw, ph = pixmap.width(), pixmap.height()
-                tw, th = thumb_rect.width(), thumb_rect.height()
-                aspect_p = pw / ph if ph > 0 else 1
-                aspect_t = tw / th if th > 0 else 1
-                if aspect_p > aspect_t:
-                    src_h = ph
-                    src_w = int(ph * aspect_t)
-                    src_x = (pw - src_w) // 2
-                    src_y = 0
-                else:
-                    src_w = pw
-                    src_h = int(pw / aspect_t) if aspect_t > 0 else ph
-                    src_x = 0
-                    src_y = (ph - src_h) // 2
-                painter.drawPixmap(thumb_rect, pixmap, QRect(src_x, src_y, src_w, src_h))
-            else:
-                self._draw_placeholder(painter, thumb_rect)
-
-            # Check for grading effects from .topos project data
-            meta = self.panel._get_preset_meta(topos_path)
-            layers = meta.get("layers", [])
-            if layers:
-                has_grading = False
-                has_plugins = False
-                for layer_data in layers:
-                    gp = layer_data.get("grading_params", {})
-                    has_effect = any(
-                        gp.get(k) != 0 and gp.get(k) != [0, 0, 0] and gp.get(k) != (0, 0, 0)
-                        for k in ["exposure", "contrast", "saturation", "temp", "tint",
-                                   "shadow", "highlights", "vibrance", "hue_shift"]
-                    )
-                    if has_effect or layer_data.get("curves_data") or layer_data.get("warper_params"):
-                        has_grading = True
-                    if layer_data.get("plugins"):
-                        has_plugins = True
-
-                # Draw indicator dots above filename (horizontal: orange, purple, cyan)
-                dot_y = bg_rect.bottom() - 26
-                dot_x = bg_rect.left() + 8
-                dot_size = 6
-                dot_gap = 10
-                painter.setPen(Qt.PenStyle.NoPen)
-                if has_grading:
-                    painter.setBrush(QBrush(QColor(255, 136, 0)))
-                    painter.drawEllipse(QRect(dot_x, dot_y, dot_size, dot_size))
-                    dot_x += dot_gap
-                if len(layers) > 1:
-                    painter.setBrush(QBrush(QColor(180, 120, 255)))
-                    painter.drawEllipse(QRect(dot_x, dot_y, dot_size, dot_size))
-                    dot_x += dot_gap
-                if has_plugins:
-                    painter.setBrush(QBrush(QColor(0, 180, 255)))
-                    painter.drawEllipse(QRect(dot_x, dot_y, dot_size, dot_size))
-
-        # Bottom gradient overlay
-        overlay_height = 22
-        overlay_rect = QRect(
-            bg_rect.left() + thumb_margin,
-            bg_rect.bottom() - overlay_height,
-            bg_rect.width() - 2 * thumb_margin,
-            overlay_height
-        )
-        gradient = QLinearGradient(
-            float(overlay_rect.left()), float(overlay_rect.top()),
-            float(overlay_rect.left()), float(overlay_rect.bottom())
-        )
-        gradient.setColorAt(0, QColor(0, 0, 0, 0))
-        gradient.setColorAt(0.4, QColor(0, 0, 0, 80))
-        gradient.setColorAt(1, QColor(0, 0, 0, 160))
-        painter.setBrush(QBrush(gradient))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRect(overlay_rect)
-
-        # Preset name
-        name = index.data(Qt.ItemDataRole.DisplayRole)
-        name_rect = QRect(
-            bg_rect.left() + 8,
-            bg_rect.bottom() - 18,
-            bg_rect.width() - 16,
-            14
-        )
-        painter.setPen(QColor(255, 255, 255, 210))
-        font = painter.font()
-        font.setPointSize(8)
-        font.setBold(False)
-        painter.setFont(font)
-        elided = painter.fontMetrics().elidedText(name, Qt.TextElideMode.ElideMiddle, name_rect.width())
-        painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
-
-        painter.restore()
+        paint_gallery_item(painter, option, index, self)
 
     def _draw_placeholder(self, painter, rect) -> None:
         """Draw a placeholder for missing thumbnails."""
@@ -875,15 +674,11 @@ class PresetDelegate(QStyledItemDelegate):
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "📷")
 
-    def sizeHint(self, option, index):
-        # Follow the view's gridSize (the column-grid controller keeps it
-        # in sync with the viewport width); the fixed 128x128 predates the
-        # column-count zoom and left cards stranded in oversized cells.
-        view = option.widget
-        grid = view.gridSize() if view is not None else QSize()
-        if grid.isValid() and grid.width() > 0:
-            return grid
-        return QSize(128, 128)
+    def sizeHint(self, option: object, index: object) -> QSize:
+        hint = index.data(Qt.ItemDataRole.SizeHintRole)
+        if isinstance(hint, QSize) and hint.isValid():
+            return hint
+        return QSize(108, 27 if self.panel._gallery.grid.list_mode else 98)
 
     def editorEvent(self, event, model, option, index):
         """Handle middle-click to apply grade."""

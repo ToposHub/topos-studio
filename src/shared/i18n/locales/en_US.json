@@ -1984,6 +1984,7 @@
     "dialog_title": "Relink Media"
   },
   "viewport": {
+    "color_monitor": "Color Pipeline Diagnostics",
     "zoom_in": "Zoom In",
     "zoom_out": "Zoom Out",
     "fit": "Fit to Window",
@@ -2891,5 +2892,44 @@
       "title": "Tracker - Stabilizer",
       "zoom": "Zoom"
     }
+  },
+  "gallery": {
+    "compare_title": "Gallery Comparison",
+    "image_wipe": "Image Wipe",
+    "split_screen": "Split Screen",
+    "layout": "Layout",
+    "side_by_side": "Side by Side",
+    "grid_2x2": "2 × 2 Grid",
+    "compare_split_description": "Compare the current image with selected Gallery stills (up to three references).",
+    "compare_wipe_description": "Choose a Gallery still as the viewer's Image Wipe reference.",
+    "compare_start": "Start Comparison",
+    "use_reference": "Use as Wipe Reference",
+    "compare_backend_pending": "Split Screen rendering is not connected yet. Your layout and reference selection can be reviewed here.",
+    "compare_limit": "Select at most three references alongside the current image.",
+    "still_id": "Still ID",
+    "label": "Label",
+    "timeline_name": "Timeline Name",
+    "sidebar": "Show Albums",
+    "import": "Import Still",
+    "import_unavailable": "Import Still — not available in this version",
+    "thumbnail_size": "Thumbnail Size",
+    "sort": "Sort Stills",
+    "grid": "Thumbnail View",
+    "list": "List View",
+    "search": "Search Stills",
+    "expand": "Gallery View",
+    "more": "Gallery Options",
+    "sort_name_ascending": "Name: A–Z",
+    "sort_name_descending": "Name: Z–A",
+    "stills_one": "Stills 1",
+    "album_unavailable": "Not available in this version",
+    "albums": "Albums",
+    "split_setup": "Set Up Gallery Split Screen…",
+    "choose_wipe": "Choose Gallery Wipe Reference…",
+    "powergrade": "PowerGrade",
+    "timelines": "Timelines",
+    "memories": "Memories",
+    "current_image": "Current Image",
+    "compare_side_limit": "Side by Side uses one reference. Choose 2 × 2 Grid for multiple stills."
   }
 }

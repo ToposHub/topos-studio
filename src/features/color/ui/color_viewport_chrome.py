@@ -130,6 +130,7 @@ class ColorViewportChrome(QObject):
     capability_refresh_requested = pyqtSignal()
     # CV-B06：监看静音请求（宿主路由到 EditPage Master 总线服务）。
     monitor_mute_toggled = pyqtSignal(bool)
+    gallery_compare_requested = pyqtSignal(str)
 
     def __init__(self, canvas: Canvas) -> None:
         super().__init__(canvas)
@@ -189,7 +190,10 @@ class ColorViewportChrome(QObject):
         toolbar.split_btn.toggled.connect(lambda checked: toolbar.split_btn.setIcon(viewer_icon("image_wipe")))
         toolbar.split_btn.setToolTip(I18N.tr("viewport.image_wipe", "Image Wipe"))
         self._adopt_header(left, toolbar.split_btn)
-        self.split_screen_button = _button(self.header_left, "split_screen", I18N.tr("viewport.split_screen", "Split Screen"), False)
+        self.split_screen_button = _button(self.header_left, "split_screen", I18N.tr("viewport.split_screen", "Split Screen"))
+        self.split_screen_button.setToolTip(I18N.tr("gallery.split_setup", "Set Up Gallery Split Screen…"))
+        self.split_screen_button.clicked.connect(
+            lambda: self.gallery_compare_requested.emit("split"))
         left.addWidget(self.split_screen_button)
         toolbar.mask_btn.setIcon(viewer_icon("highlight"))
         toolbar.mask_btn.toggled.connect(lambda checked: toolbar.mask_btn.setIcon(viewer_icon("highlight")))
@@ -226,6 +230,8 @@ class ColorViewportChrome(QObject):
         options.aboutToShow.connect(self._sync_focus_capability)
         options.aboutToShow.connect(self.capability_refresh_requested.emit)
         options.addMenu(toolbar.view_menu).setText(I18N.tr("viewport.view", "View"))
+        options.addAction(I18N.tr("gallery.choose_wipe", "Choose Gallery Wipe Reference…"),
+                          lambda: self.gallery_compare_requested.emit("wipe"))
         timeline_menu = options.addMenu(I18N.tr("viewport.timeline", "Timeline"))
         timeline_menu.aboutToShow.connect(lambda: self._populate_timeline_menu(timeline_menu))
         options.addSeparator()
@@ -347,7 +353,6 @@ class ColorViewportChrome(QObject):
             return caps_by_action.get(key)
 
         for button, key in (
-            (self.split_screen_button, "compare.split_screen"),
             (self.proxy_button, "monitor.proxy"),
             (self.resolution_button, "monitor.resolution"),
             (self.bypass_button, "monitor.bypass"),
@@ -359,6 +364,11 @@ class ColorViewportChrome(QObject):
             action = self._options_stub_actions.get(key)
             if action is not None:
                 self._apply_action_capability(action, cap(key))
+
+        # Setup is a UI action; it does not enable an unavailable grid renderer.
+        split_action = self._options_stub_actions.get("compare.split_screen")
+        if split_action is not None:
+            self._apply_action_capability(split_action, cap("compare.split_screen"))
 
         toolbar = self.toolbar
         self._apply_checkable_capability(

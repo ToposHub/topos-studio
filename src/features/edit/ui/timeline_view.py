@@ -16382,7 +16382,13 @@ class TimelineView(QGraphicsView):
         if payload is None or not self._drag_assets:
             event.ignore()
             return
-        asset = self._drag_assets[0]
+        asset = (self._project.assets.get(payload.asset_id)
+                 if self._project is not None else None)
+        if asset is None:
+            self.status_message_requested.emit(
+                "Source drop rejected: asset is no longer in the project")
+            event.ignore()
+            return
         # I04-2：drop 处复验（enter 后工程/素材可能变化；零写入前置）
         reason = self._validate_source_drag_payload(payload, asset)
         if reason is not None:
