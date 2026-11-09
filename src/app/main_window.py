@@ -2649,6 +2649,16 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             logger.debug("shutdown: mark playback arbiter shutdown failed",
                          exc_info=True)
 
+        # 0.5 CV-B10：Color 视口能力宿主关门——关闭后晚到的刷新请求
+        #     不再触碰销毁中的 chrome/菜单控件。
+        try:
+            color_host = getattr(self, "_color_viewport_capability_host", None)
+            if color_host is not None:
+                color_host.mark_shutdown()
+        except Exception:
+            logger.debug("shutdown: mark color capability host failed",
+                         exc_info=True)
+
         # 1. 走带停止（先停时钟，避免关闭过程中又派发新渲染请求）
         try:
             panel = getattr(self, "timeline_panel", None)
@@ -2673,6 +2683,19 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 video_controller.stop_playback()
         except Exception:
             logger.debug("shutdown: video controller failed", exc_info=True)
+
+        # 3.5 CV-B10：Color 私有时间线预览渲染器（自有 worker）。离开
+        #     Color 页走 leave hook，但停在 Color 页直接关窗时不会经过
+        #     它——在停掉视频控制器后同样断开/停用，避免 worker 在关闭
+        #     过程中把晚到帧投递给正在销毁的 canvas。
+        try:
+            deactivate_preview = getattr(
+                self, "_deactivate_color_timeline_preview", None)
+            if callable(deactivate_preview):
+                deactivate_preview()
+        except Exception:
+            logger.debug("shutdown: deactivate color timeline preview failed",
+                         exc_info=True)
 
         # 4. 时间线预览渲染器（内部依次 join worker 与 GPU 渲染线程）
         try:

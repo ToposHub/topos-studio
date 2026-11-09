@@ -63,14 +63,35 @@ class ColorViewportCapabilityHost(QObject):
         self._chrome = None
         self._toolbar = None
         self._connected = False
+        # CV-B10：关闭后一切刷新请求失效（晚到回调不再触碰销毁中的
+        # chrome/控件）。
+        self._shutdown = False
         # 最近一次成功回填的状态快照（诊断/测试用；可序列化）。
         self.last_state: ColorViewerState | None = None
         self.last_capabilities: dict[str, ColorViewerCapability] = {}
+
+    def mark_shutdown(self) -> None:
+        """关门：断开刷新请求，此后 refresh()/install() 均为 no-op。"""
+        self._shutdown = True
+        chrome = self._chrome
+        if chrome is not None:
+            try:
+                chrome.capability_refresh_requested.disconnect(self.refresh)
+            except TypeError:
+                pass
+        toolbar = self._toolbar
+        if toolbar is not None:
+            try:
+                toolbar.view_menu.aboutToShow.disconnect(self.refresh)
+            except TypeError:
+                pass
 
     # ── 安装与上下文 ───────────────────────────────────────────────────
 
     def install(self) -> bool:
         """绑定 canvas chrome；失败返回 False（宿主缺席时不假装可用）。"""
+        if self._shutdown:
+            return False
         canvas = getattr(self._window, "canvas", None)
         chrome = getattr(canvas, "color_viewport_chrome", None)
         toolbar = getattr(canvas, "viewport_menu", None)
@@ -199,6 +220,8 @@ class ColorViewportCapabilityHost(QObject):
 
     def refresh(self) -> None:
         """聚合 → 评估 → 回填；评估期间 revision 变化则丢弃结果。"""
+        if self._shutdown:
+            return
         chrome = self._chrome
         if chrome is None:
             return
