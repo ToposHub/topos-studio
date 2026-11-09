@@ -269,6 +269,13 @@ def test_i02_time_index_adoption(qapp):
     assert widget.source_time_domain is None
 
     widget.open_asset(_asset("a"))
-    sentinel = object()
+    # R04：注入需带匹配身份（asset_id + 指纹）——迟到/异素材索引拒绝
+    from src.features.edit.core.scene_cut.models import (
+        SourceFrameTimeIndex,
+    )
+
+    domain = widget.source_time_domain
+    sentinel = SourceFrameTimeIndex.from_pts_seconds(
+        "a", domain.media_fingerprint, [0.0, 0.04, 0.09])
     widget.set_source_time_index(sentinel)
     assert widget.source_time_domain.time_index is sentinel

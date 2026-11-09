@@ -337,6 +337,63 @@ class SourceFrameTimeIndex:
             raise ValueError("asset_id cannot be empty")
         if self.average_fps is not None and self.average_fps <= 0.0:
             raise ValueError(f"average_fps must be > 0.0, got {self.average_fps}")
+
+    # ── R04（2026-11-09 复查）：导入 PTS 秒表 → 索引 ──────────────────
+
+    @staticmethod
+    def from_pts_seconds(asset_id: str, media_fingerprint: str,
+                         seconds_list: Any) -> "SourceFrameTimeIndex | None":
+        """由导入器保存的逐帧 PTS 秒表（``metadata["pts_index"]``）构建。
+
+        清洗政策（显式、可诊断，不静默接受异常时间轴）：
+
+        - 非有限值（NaN/±inf）与非数值条目：该点丢弃（帧经插值访问）；
+        - 秒列必须严格递增：重复/回退时间戳只保留首个（VFR 异常包）；
+        - 清洗后不足 2 点 → 返回 ``None``（调用方显式回退 CFR，不伪称
+          精确 VFR）。
+
+        ``average_fps`` 由保留点的首末秒距推导（外推 fallback 用）。
+        """
+        import math
+
+        points: list[FrameTimePoint] = []
+        last_seconds: float | None = None
+        try:
+            iterator = list(seconds_list)
+        except TypeError:
+            return None
+        for frame, raw in enumerate(iterator):
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(value) or value < 0.0:
+                continue
+            if last_seconds is not None and value <= last_seconds:
+                continue  # 重复/回退 PTS：保留首个
+            points.append(FrameTimePoint(
+                source_frame=frame, pts=None, seconds=value))
+            last_seconds = value
+        if len(points) < 2:
+            return None
+        span = points[-1].seconds - points[0].seconds
+        average_fps = ((len(points) - 1) / span if span > 0.0 else None)
+        return SourceFrameTimeIndex(
+            asset_id=asset_id, media_fingerprint=media_fingerprint,
+            points=tuple(points), average_fps=average_fps)
+
+    def seconds_column(self) -> tuple[float, ...]:
+        """预计算秒列（懒缓存；供 O(log n) 二分，不逐点属性访问）。
+
+        反查（秒→帧）复用本列：单次查询 O(log n)，不随全片长度线性
+        增长（R04 之前 Color 侧反查每次遍历全部 points 构造秒列）。
+        """
+        cached = self.__dict__.get("_seconds_column_cache")
+        if cached is None:
+            cached = tuple(float(p.seconds) for p in self.points)
+            object.__setattr__(self, "_seconds_column_cache", cached)
+        return cached
+
     
     def source_frame_to_seconds(self, source_frame: int) -> float:
         """
@@ -397,13 +454,16 @@ class SourceFrameTimeIndex:
     def seconds_to_nearest_source_frame(self, seconds: float) -> int:
         """
         Convert seconds to nearest source frame index.
-        
+
+        R04：在缓存的秒列（:meth:`seconds_column`）上二分——单次查询
+        O(log n)，不逐点属性访问，不随全片长度线性增长。
+
         Args:
             seconds: Time in seconds from media start.
-            
+
         Returns:
             Zero-based frame index closest to the given time.
-            
+
         Raises:
             ValueError: If no time points available and no average_fps fallback.
         """
@@ -412,31 +472,27 @@ class SourceFrameTimeIndex:
             if self.average_fps is not None:
                 return max(0, int(seconds * self.average_fps + 0.5))
             raise ValueError("No time points available and no average_fps fallback")
-        
-        # Binary search for nearest frame
-        low, high = 0, len(points) - 1
-        while low < high:
-            mid = (low + high) // 2
-            if points[mid].seconds < seconds:
-                low = mid + 1
-            else:
-                high = mid
-        
-        # Check neighbors for closest
-        best_idx = low
-        best_diff = abs(points[low].seconds - seconds)
-        
-        if low > 0:
-            prev_diff = abs(points[low - 1].seconds - seconds)
+
+        from bisect import bisect_left
+
+        times = self.seconds_column()
+        low = bisect_left(times, seconds)  # 首个 >= seconds 的点
+
+        # Check neighbors for closest（与旧实现同语义，含边界外推）
+        best_idx = min(low, len(points) - 1)
+        best_diff = abs(times[best_idx] - seconds)
+
+        if best_idx > 0:
+            prev_diff = abs(times[best_idx - 1] - seconds)
             if prev_diff < best_diff:
-                best_idx = low - 1
+                best_idx -= 1
                 best_diff = prev_diff
-        
-        if low < len(points) - 1:
-            next_diff = abs(points[low + 1].seconds - seconds)
+
+        if best_idx < len(points) - 1:
+            next_diff = abs(times[best_idx + 1] - seconds)
             if next_diff < best_diff:
-                best_idx = low + 1
-        
+                best_idx += 1
+
         return points[best_idx].source_frame
     
     def get_point_for_frame(self, source_frame: int) -> FrameTimePoint | None:

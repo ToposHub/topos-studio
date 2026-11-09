@@ -1516,7 +1516,7 @@ class PreviewRenderWorker(QThread):
             smooth_edge = min(max_edge, _SMOOTH_PREVIEW_EDGE)
             scale = max(0.125, min(1.0, smooth_edge / longest))
         return _budget_constrained_scale(
-            getattr(self, "_budget_size_cap", None), scale, base_w, base_h)
+            self.__dict__.get("_budget_size_cap"), scale, base_w, base_h)
 
     def set_budget_size_cap(self, cap: Optional[Tuple[int, int]]) -> None:
         """R03：设置监看域临时预算上限（None 解除；同值 no-op）。
@@ -1526,7 +1526,7 @@ class PreviewRenderWorker(QThread):
         """
         normalized = (None if cap is None else
                       (max(1, int(cap[0])), max(1, int(cap[1]))))
-        if normalized == getattr(self, "_budget_size_cap", None):
+        if normalized == self.__dict__.get("_budget_size_cap"):
             return
         self._budget_size_cap = normalized
         self._clear_direct_preview_sources()
@@ -6690,7 +6690,7 @@ class TimelinePreviewRenderer(QObject):
                     else self._get_sequence_resolution())
             # R03：暂停 FULL 刷新同样受监看域预算约束（不因档位名义超 cap）。
             return _budget_constrained_size(
-                getattr(self, "_budget_size_cap", None), base)
+                self.__dict__.get("_budget_size_cap"), base)
         auto2k_target = getattr(self, "_auto2k_decode_target_size", None)
         if callable(auto2k_target):
             return auto2k_target()
@@ -6758,7 +6758,7 @@ class TimelinePreviewRenderer(QObject):
         if scale >= 1.0:
             # R03：scrub 独立档同样不得越过监看域预算。
             return _budget_constrained_size(
-                getattr(self, "_budget_size_cap", None), (base_w, base_h))
+                self.__dict__.get("_budget_size_cap"), (base_w, base_h))
         dw = max(64, int(round(base_w * scale)))
         dh = max(64, int(round(base_h * scale)))
         if dw % 2:
@@ -6767,7 +6767,7 @@ class TimelinePreviewRenderer(QObject):
             dh += 1
         # R03：scrub 缩小档也受预算封顶。
         return _budget_constrained_size(
-            getattr(self, "_budget_size_cap", None), (dw, dh))
+            self.__dict__.get("_budget_size_cap"), (dw, dh))
 
     def _scrub_render_decode_target_size(self) -> Tuple[int, int]:
         """
@@ -6882,7 +6882,7 @@ class TimelinePreviewRenderer(QObject):
             smooth_edge = min(max_edge, _SMOOTH_PREVIEW_EDGE)
             scale = max(0.125, min(1.0, smooth_edge / longest))
         return _budget_constrained_scale(
-            getattr(self, "_budget_size_cap", None), scale, base_w, base_h)
+            self.__dict__.get("_budget_size_cap"), scale, base_w, base_h)
 
     def _invalidate_render_generation_for_quality(self, reason: str) -> None:
         """Invalidate queued/in-flight work when decode quality changes."""
