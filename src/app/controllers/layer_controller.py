@@ -827,9 +827,13 @@ class LayerOpsMixin:
             txn.add(topos_path)
 
             # Gallery 元数据 sidecar：来源 clip / 帧号 / source tag / 时间
+            # G02：抓帧即分配稳定 still_id（随 bundle 搬移不再变），并写入
+            # timeline／工程来源快照与目标集合快照。
+            from src.features.color.core.preset_meta import allocate_still_id
             if save_preset_meta(
                     staged_topos,
                     PresetMeta(created_at=now_iso(),
+                               still_id=allocate_still_id(),
                                **self._collect_still_capture_meta())):
                 txn.add(final_meta)
             elif os.path.exists(final_meta):
@@ -902,7 +906,12 @@ class LayerOpsMixin:
     # ------------------------------------------------------------------
 
     def _collect_still_capture_meta(self) -> dict:
-        """静帧抓取元数据：PageContext 帧号/clip + asset 名与 source tag。"""
+        """静帧抓取元数据：PageContext 帧号/clip + asset 名与 source tag。
+
+        G02：新增 timeline_id/timeline_name/project_id 来源快照与目标
+        album_id 快照（timeline 显示名是**快照**，timeline 改名后旧静帧
+        仍显示当时名称，不靠名字反查串联）。
+        """
         from src.features.color.core.preset_meta import PresetMeta
 
         fields: dict = {}
@@ -914,11 +923,26 @@ class LayerOpsMixin:
             except Exception:
                 ctx = None
         if ctx is not None:
-            for key in ("clip_id", "asset_id", "timeline_frame", "source_frame"):
+            for key in ("clip_id", "asset_id", "timeline_frame", "source_frame",
+                        "timeline_id"):
                 value = getattr(ctx, key, None)
                 if value is not None:
                     fields[key] = value
         project = getattr(self, '_current_edit_project', None)
+        if project is not None:
+            project_id = getattr(project, 'project_id', None)
+            if isinstance(project_id, str) and project_id:
+                fields.setdefault("project_id", project_id)
+            timeline_id = fields.get("timeline_id")
+            if isinstance(timeline_id, str) and timeline_id:
+                try:
+                    timeline = project.get_timeline_by_id(timeline_id)
+                except Exception:
+                    timeline = None
+                timeline_name = getattr(timeline, 'name', None) or \
+                    getattr(timeline, 'display_name', None)
+                if isinstance(timeline_name, str) and timeline_name:
+                    fields.setdefault("timeline_name", timeline_name)
         assets = getattr(project, 'assets', None) or {}
         asset = assets.get(fields.get("asset_id")) if assets else None
         if asset is not None:
@@ -930,6 +954,18 @@ class LayerOpsMixin:
                                       ("color_range", "source_range")):
                 if asset_meta.get(src_key):
                     fields.setdefault(meta_key, asset_meta[src_key])
+        # 目标集合快照（抓帧写入的当前 Gallery 目录）；只有真实 repository
+        # 解析出的字符串 album_id 才入快照——不把任何占位对象写进 meta。
+        panel = getattr(self, 'presets_panel', None)
+        repository = getattr(panel, '_repository', None)
+        if repository is not None:
+            try:
+                album_id = repository.album_id_for_folder(
+                    panel.get_current_folder())
+            except Exception:
+                album_id = None
+            if isinstance(album_id, str) and album_id:
+                fields.setdefault("album_id", album_id)
         # 只保留 PresetMeta 认识的字段
         valid = set(PresetMeta.__dataclass_fields__)
         return {k: v for k, v in fields.items() if k in valid}

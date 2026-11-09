@@ -13,8 +13,9 @@ User/System 平铺行为"）：
 - grade 可加载性**不**在查询路径探测（大库逐条开 zip 的成本留给 G05
   异步索引）；宿主对当前选中项用 ``still_at(..., probe_grade=True)``
   单独探测，探测实现可注入（app 层可换成 SaveRouter 口径）。
-- ``still_id`` 为文件名派生临时身份（见 gallery_contracts 模块头注释），
-  G02 落盘稳定身份后在此替换分配来源。
+- ``still_id``：meta 携带稳定身份（G02 schema 2，抓帧时分配、rename/move
+  不变）时直接使用；无 meta 的旧条目退化为文件名派生临时身份（首次写入
+  时 ``ensure_still_identity`` 原子补齐）。
 """
 
 from __future__ import annotations
@@ -330,11 +331,15 @@ class GalleryFolderRepository:
         if probe_grade:
             grade_loadable = self._grade_probe(topos_path)
         return GalleryStill(
-            still_id=_provisional_still_id(album_id, stem),
+            # G02：meta 携带稳定身份/label 时优先（跨 rename 不变）；
+            # 无 meta 的旧条目退化为文件名派生临时身份（首次写入时由
+            # ensure_still_identity 原子补齐）。
+            still_id=(meta.still_id if meta is not None and meta.still_id
+                      else _provisional_still_id(album_id, stem)),
             album_id=album_id,
             bundle=GalleryBundleRef(topos_name=topos_name),
             display_name=stem,
-            label=None,               # 独立 label 属 G02；当前无来源
+            label=(meta.label if meta is not None else None),
             provenance=GalleryStillProvenance.from_preset_meta(meta),
             created_at=getattr(meta, "created_at", None),
             content_revision=content_revision,

@@ -540,6 +540,23 @@ class PresetsPanel(QWidget):
                 I18N.tr("presets.rename_failed_title", "Rename Failed"),
                 I18N.tr("presets.rename_failed", f"Could not rename preset: {exc}"))
             return
+        # G02：rename 是对旧条目的首次写入——原子补齐稳定 still_id（旧
+        # 条目从此跨改名身份不变）。补写失败不回滚文件改名（那是用户刚
+        # 确认过的动作），但必须如实告知，不假装已保存。
+        from src.features.color.core.preset_meta import ensure_still_identity
+        still_id, backfilled = ensure_still_identity(new_topos)
+        if still_id is None:
+            logger.warning(
+                "Presets: identity backfill after rename '%s' -> '%s' "
+                "failed; still metadata not saved", old_name, new_name)
+            QMessageBox.warning(
+                self,
+                I18N.tr("presets.rename_done_with_warnings_title",
+                        "Renamed with a Warning"),
+                I18N.tr("presets.identity_backfill_failed",
+                        "Renamed, but saving the still's stable ID failed. "
+                        "The still keeps working; its identity may change "
+                        "on the next rename."))
         self.scan_presets()
 
     # --- Context Menu ---

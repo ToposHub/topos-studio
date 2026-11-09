@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
@@ -34,7 +34,15 @@ _META_FIELDS = (
     "source_frame", "source_transfer", "source_primaries",
     "still_precision", "working_space", "display_transform", "source_range",
     "created_at",
+    # G02（schema 2）：稳定身份／独立 label／集合与 timeline 来源快照
+    "still_id", "label", "album_id", "project_id", "timeline_id",
+    "timeline_name",
 )
+
+#: 当前写盘 schema。磁盘事实：旧 writer 全部输出 1；G02 起写 2（新增
+#: still_id/label/album_id/project_id/timeline_id/timeline_name，未知字段
+#: 原样保留）。读取按字段存在性兼容 1 与未来版本，不凭注释跳版本。
+STILL_META_SCHEMA = 2
 
 
 def _jsonify(obj: Any) -> Any:
@@ -56,7 +64,11 @@ def _jsonify(obj: Any) -> Any:
 
 @dataclass
 class PresetMeta:
-    """一条预设的 Gallery 元数据（sidecar {name}.meta.json）。"""
+    """一条预设的 Gallery 元数据（sidecar {name}.meta.json）。
+
+    G02（schema 2）新增稳定身份与来源快照字段；``extra_fields`` 原样保留
+    未知字段（含未来 schema 的字段），重写时随盘写回——不因读写往返丢数据。
+    """
     display_name: Optional[str] = None      # 来源片段名（如 A001_C001.mov）
     clip_id: Optional[str] = None
     asset_id: Optional[str] = None
@@ -70,19 +82,35 @@ class PresetMeta:
     still_precision: Optional[str] = None   # "float32" / "half" / None=legacy
     working_space: Optional[str] = None     # 如 "scene-linear bt709"
     display_transform: Optional[dict] = None  # 锁定的 ODT 描述（锁定显示变换）
+    # G02（schema 2）：
+    still_id: Optional[str] = None          # 稳定身份（allocate_still_id）
+    label: Optional[str] = None             # 独立 label（≠ 文件名）
+    album_id: Optional[str] = None          # 写入时所在集合快照
+    project_id: Optional[str] = None        # 来源工程 ID
+    timeline_id: Optional[str] = None       # 来源 timeline ID
+    timeline_name: Optional[str] = None     # 来源 timeline 显示名快照
+    # 未知字段原样保留（前向兼容）；"schema" 为 writer 信封键不算数据
+    extra_fields: Dict[str, Any] = field(default_factory=dict,
+                                         compare=True, repr=False)
 
     def describe(self) -> str:
-        """工具提示摘要：名称 + 来源 clip + 帧号 + source tag。"""
+        """工具提示摘要：label/名称 + 来源 clip + 帧号 + source tag。"""
         parts = []
+        if self.label:
+            parts.append(f"{self.label}")
         if self.display_name:
             parts.append(str(self.display_name))
         if self.source_frame is not None:
             parts.append(f"frame {self.source_frame}")
+        if self.timeline_name:
+            parts.append(f"timeline: {self.timeline_name}")
         if self.source_primaries or self.source_transfer:
             parts.append(f"{self.source_primaries or ''} "
                          f"{self.source_transfer or ''}".strip())
         if self.created_at:
             parts.append(self.created_at)
+        if self.still_id:
+            parts.append(f"ID {self.still_id}")
         if self.still_precision:
             parts.append(f"HDR still ({self.still_precision})")
         else:
@@ -90,12 +118,21 @@ class PresetMeta:
         return " | ".join(parts)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {k: v for k, v in asdict(self).items() if v is not None}
+        data = {k: v for k, v in asdict(self).items() if v is not None}
+        extra = data.pop("extra_fields", None)
+        if extra:
+            data.update(extra)
+        return data
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "PresetMeta":
-        kwargs = {k: v for k, v in (data or {}).items() if k in _META_FIELDS}
-        return PresetMeta(**kwargs)
+        known = {k: v for k, v in (data or {}).items() if k in _META_FIELDS}
+        extra = {k: v for k, v in (data or {}).items()
+                 if k not in _META_FIELDS and k != "schema"}
+        meta = PresetMeta(**known)
+        if extra:
+            meta.extra_fields = extra
+        return meta
 
 
 # ── 路径约定 ─────────────────────────────────────────────────────────
@@ -125,14 +162,56 @@ def still_exr_path_for(topos_path: str) -> str:
 # ── 元数据 sidecar ───────────────────────────────────────────────────
 
 def save_preset_meta(topos_path: str, meta: PresetMeta) -> bool:
-    """写 {name}.meta.json；失败不抛（静帧抓取不因此中断）。"""
+    """原子写 {name}.meta.json（schema 2）；失败不抛、返回 False。
+
+    G02：先写同目录临时文件再 ``os.replace``（同卷原子），中途失败不留
+    半份 sidecar；未知字段经 ``meta.extra_fields`` 原样写回。
+    """
+    path = meta_path_for(topos_path)
+    tmp_path = f"{path}.tmp-{os.getpid()}"
     try:
-        payload = {"schema": 1, **_jsonify(meta.to_dict())}
-        with open(meta_path_for(topos_path), "w", encoding="utf-8") as f:
+        payload = {"schema": STILL_META_SCHEMA, **_jsonify(meta.to_dict())}
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=1)
+        os.replace(tmp_path, path)
         return True
     except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
         return False
+
+
+def allocate_still_id() -> str:
+    """分配稳定 Still ID（``S-`` + 128bit 随机 hex 前 16 位）。
+
+    分配政策（计划 §5 G02.2）：随机 128 位、无中心计数器——并发抓帧/
+    复制互不协调也不冲突，删除后**永不复用**（不依赖排序重算）。首次
+    落盘后跨 rename／move 不变（身份存于 .meta.json，随 bundle 搬移）。
+    """
+    import uuid
+    return "S-" + uuid.uuid4().hex[:16]
+
+
+def ensure_still_identity(topos_path: str) -> Tuple[Optional[str], bool]:
+    """确保该 bundle 的 .meta.json 携带稳定 still_id。
+
+    - 已有 still_id → ``(id, False)`` 原样返回；
+    - 缺失（旧条目无 meta，或 schema 1 无身份）→ 分配并**原子**补写
+      （保留既有字段与未知字段），成功返回 ``(id, True)``；
+    - 写失败 → ``(None, False)``——调用方不得把未落盘的分配当作身份。
+    """
+    meta = load_preset_meta(topos_path)
+    if meta is not None and meta.still_id:
+        return meta.still_id, False
+    if meta is None:
+        meta = PresetMeta(created_at=now_iso())
+    meta.still_id = allocate_still_id()
+    if not save_preset_meta(topos_path, meta):
+        return None, False
+    return meta.still_id, True
 
 
 def load_preset_meta(topos_path: str) -> Optional[PresetMeta]:

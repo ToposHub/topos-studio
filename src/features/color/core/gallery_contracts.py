@@ -10,9 +10,10 @@ repository（读侧）与 app 层 adapter／宿主消费。
 - 本模块不 import PyQt／ModernGL／cv2／线程对象，不携带机器绝对路径；
   路径解析由 ``GalleryFolderRepository`` 与 app 层 adapter 负责，DTO 里
   只放 album 相对引用（``GalleryBundleRef.topos_name``）。
-- **身份**：G01 的 ``still_id`` 是文件名派生的临时身份（album_id ＋
-  文件主名的 sha256 前 16 位），rename 即变。G02 落盘稳定身份后由
-  repository 替换分配来源；本阶段消费方不得假设"跨 rename 不变"。
+- **身份**：``still_id`` 优先取 .meta.json 里的稳定身份（G02 schema 2：
+  抓帧时随机分配、跨 rename/move 不变）；无 meta 的旧条目退化为文件名
+  派生临时身份（album_id ＋ 文件主名的 sha256 前 16 位），首次写入
+  （rename／改 label）时由 ``ensure_still_identity`` 原子补齐。
 - 未实现服务（import／独立 label／split presenter／集合 scope）能力位
   如实 False ＋ 稳定 reason，不冒充已接线。
 """
@@ -220,7 +221,7 @@ class GalleryStill:
     album_id: str
     bundle: GalleryBundleRef
     display_name: str                 # 文件主名（现有 UI 显示口径）
-    label: Optional[str] = None       # 独立 label（G02 前恒 None）
+    label: Optional[str] = None       # 独立 label（meta schema 2 起可携带）
     provenance: GalleryStillProvenance = field(
         default_factory=GalleryStillProvenance)
     created_at: Optional[str] = None
