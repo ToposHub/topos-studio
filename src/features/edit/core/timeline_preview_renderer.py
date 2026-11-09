@@ -122,6 +122,38 @@ if TYPE_CHECKING:
 _SMOOTH_PREVIEW_EDGE = 1920
 
 
+def _budget_constrained_scale(cap: Optional[Tuple[int, int]], scale: float,
+                              base_w: int, base_h: int) -> float:
+    """R03：监看域预算上限只降不升（两轴）；档位下限 0.125 仍兜底。
+
+    cap 小于 0.125×序列时维持下限（解码器契约），是否达标由
+    ``budget_size_cap_status`` 如实报告（unsatisfied 不谎报）。
+    模块级函数：轻量 shell（无预算属性）经 getattr 回落 None 原样通过。
+    """
+    if cap is None:
+        return scale
+    budget_scale = min(int(cap[0]) / max(1, int(base_w)),
+                       int(cap[1]) / max(1, int(base_h)), 1.0)
+    return max(0.125, min(1.0, min(scale, budget_scale)))
+
+
+def _budget_constrained_size(cap: Optional[Tuple[int, int]],
+                             size: Tuple[int, int]) -> Tuple[int, int]:
+    """把一个既成目标尺寸压回预算内（full/scrub 等旁路档共用）。"""
+    if cap is None:
+        return size
+    s = _budget_constrained_scale(cap, 1.0, int(size[0]), int(size[1]))
+    if s >= 1.0:
+        return size
+    dw = max(64, int(round(int(size[0]) * s)))
+    dh = max(64, int(round(int(size[1]) * s)))
+    if dw % 2:
+        dw += 1
+    if dh % 2:
+        dh += 1
+    return (dw, dh)
+
+
 # ================================================================
 # AssetResolver - 素材路径解析器
 # ================================================================
@@ -560,6 +592,10 @@ class PreviewRenderWorker(QThread):
         self._render_trace_hook = None
         self._max_preview_edge = max(64, int(max_preview_edge))
         self._preview_quality: float = 0.0
+        # R03（2026-11-09 复查）：监看域临时预算上限（两轴像素上限）。
+        # 与用户预览质量偏好（_preview_quality，持久菜单选择）分离：
+        # 预算只做"不高于"约束，解除后用户偏好原样生效，绝不写回。
+        self._budget_size_cap: Optional[Tuple[int, int]] = None
         # 预览跳过输出去块（用户偏好 video_preview_no_deblock）：只作用于预览
         # 解码 request，不动交付/导出路径（见 ToposMediaSource.no_deblock）。
         self._no_deblock: bool = False
@@ -1473,12 +1509,27 @@ class PreviewRenderWorker(QThread):
             # Explicit choices are relative to the sequence resolution.
             # Full quality is capped at the 4K preview ceiling only for 6K/8K
             # timelines; it must always be at least as large as Smooth.
-            return max(0.125, min(1.0, explicit, max_edge / longest))
+            scale = max(0.125, min(1.0, explicit, max_edge / longest))
+        else:
+            # Smooth mode targets 1920x1080 for high-resolution material while
+            # preserving the native size of low-resolution material.
+            smooth_edge = min(max_edge, _SMOOTH_PREVIEW_EDGE)
+            scale = max(0.125, min(1.0, smooth_edge / longest))
+        return _budget_constrained_scale(
+            getattr(self, "_budget_size_cap", None), scale, base_w, base_h)
 
-        # Smooth mode targets 1920x1080 for high-resolution material while
-        # preserving the native size of low-resolution material.
-        smooth_edge = min(max_edge, _SMOOTH_PREVIEW_EDGE)
-        return max(0.125, min(1.0, smooth_edge / longest))
+    def set_budget_size_cap(self, cap: Optional[Tuple[int, int]]) -> None:
+        """R03：设置监看域临时预算上限（None 解除；同值 no-op）。
+
+        与用户预览质量偏好分离：不触碰 ``_preview_quality``。上限变化
+        时作废排队/在飞任务（旧目标尺寸已过期）。
+        """
+        normalized = (None if cap is None else
+                      (max(1, int(cap[0])), max(1, int(cap[1]))))
+        if normalized == getattr(self, "_budget_size_cap", None):
+            return
+        self._budget_size_cap = normalized
+        self._clear_direct_preview_sources()
 
     def set_generation_id(self, gen_id: int) -> None:
         """设置 generation ID（用于判断任务是否过期）"""
@@ -6335,6 +6386,10 @@ class TimelinePreviewRenderer(QObject):
         # still-detailed 4K preview. The viewer itself may render smaller than
         # this texture, but it should not force a low-resolution decode.
         self._preview_quality: float = 0.0
+        # R03（2026-11-09 复查）：监看域临时预算上限（两轴像素）——与用户
+        # 预览质量偏好（_preview_quality，菜单持久选择）分离。预算只做
+        # "不高于"约束：解除后用户偏好原样生效，绝不写回用户档位。
+        self._budget_size_cap: Optional[Tuple[int, int]] = None
         # 预览跳过输出去块（用户偏好 video_preview_no_deblock）：只作用于预览
         # 解码 request，交付/导出保持滤波。
         self._no_deblock: bool = False
@@ -6631,9 +6686,11 @@ class TimelinePreviewRenderer(QObject):
             and float(getattr(self, "_preview_quality", 0.0)) <= 0.0
         ):
             full_target = getattr(self, "_full_decode_target_size", None)
-            if callable(full_target):
-                return full_target()
-            return self._get_sequence_resolution()
+            base = (full_target() if callable(full_target)
+                    else self._get_sequence_resolution())
+            # R03：暂停 FULL 刷新同样受监看域预算约束（不因档位名义超 cap）。
+            return _budget_constrained_size(
+                getattr(self, "_budget_size_cap", None), base)
         auto2k_target = getattr(self, "_auto2k_decode_target_size", None)
         if callable(auto2k_target):
             return auto2k_target()
@@ -6699,14 +6756,18 @@ class TimelinePreviewRenderer(QObject):
         longest = max(1, int(base_w), int(base_h))
         scale = min(1.0, self._scrub_preview_edge / longest)
         if scale >= 1.0:
-            return (base_w, base_h)
+            # R03：scrub 独立档同样不得越过监看域预算。
+            return _budget_constrained_size(
+                getattr(self, "_budget_size_cap", None), (base_w, base_h))
         dw = max(64, int(round(base_w * scale)))
         dh = max(64, int(round(base_h * scale)))
         if dw % 2:
             dw += 1
         if dh % 2:
             dh += 1
-        return (dw, dh)
+        # R03：scrub 缩小档也受预算封顶。
+        return _budget_constrained_size(
+            getattr(self, "_budget_size_cap", None), (dw, dh))
 
     def _scrub_render_decode_target_size(self) -> Tuple[int, int]:
         """
@@ -6808,15 +6869,20 @@ class TimelinePreviewRenderer(QObject):
         Full/explicit output remains bounded by ``_max_preview_edge`` so a
         deliberate choice cannot accidentally decode an 8K master in the
         live Program viewer.
+
+        R03：合成后再受监看域临时预算（``_budget_size_cap``，两轴"不高
+        于"）约束；预算只降不升，且绝不改动用户显式档位本身。
         """
         explicit = float(getattr(self, "_preview_quality", 0.0))
         longest = max(1, int(base_w), int(base_h))
         max_edge = max(64, int(getattr(self, "_max_preview_edge", 3840)))
         if explicit > 0.0:
-            return max(0.125, min(1.0, explicit, max_edge / longest))
-
-        smooth_edge = min(max_edge, _SMOOTH_PREVIEW_EDGE)
-        return max(0.125, min(1.0, smooth_edge / longest))
+            scale = max(0.125, min(1.0, explicit, max_edge / longest))
+        else:
+            smooth_edge = min(max_edge, _SMOOTH_PREVIEW_EDGE)
+            scale = max(0.125, min(1.0, smooth_edge / longest))
+        return _budget_constrained_scale(
+            getattr(self, "_budget_size_cap", None), scale, base_w, base_h)
 
     def _invalidate_render_generation_for_quality(self, reason: str) -> None:
         """Invalidate queued/in-flight work when decode quality changes."""
@@ -6999,6 +7065,56 @@ class TimelinePreviewRenderer(QObject):
 
         # Request current frame re-render
         self._schedule_current_frame_warmup()
+
+    # ── R03：监看域临时预算（与用户预览质量偏好分离） ─────────────────
+
+    def set_budget_size_cap(self, cap: Optional[Tuple[int, int]]) -> None:
+        """设置监看域临时预算上限（两轴像素；None 解除；同值 no-op）。
+
+        与 :meth:`set_preview_quality`（用户菜单持久选择）严格分离：预算
+        只在有效缩放上做"不高于"约束，解除后用户偏好原样生效，本方法
+        绝不写 ``_preview_quality``。上限变化时作废排队/在飞任务与按
+        target_size 冻结的解码 source，并重渲当前帧。
+        """
+        normalized = (None if cap is None else
+                      (max(1, int(cap[0])), max(1, int(cap[1]))))
+        if normalized == self._budget_size_cap:
+            return
+        self._budget_size_cap = normalized
+        logger.info(
+            "TimelinePreviewRenderer: monitor budget size cap = %s"
+            "（临时约束；用户预览质量偏好 %s 不变）",
+            normalized, self._preview_quality,
+        )
+        self._invalidate_preview_frame_caches()
+        self._clear_prebuffer_state()
+        if self._worker:
+            self._worker.set_budget_size_cap(normalized)
+            if getattr(self._worker, "_gpu_decode_manager", None):
+                self._worker._gpu_decode_manager.invalidate_all_sources()
+        self._reset_emitted_frame_guard()
+        self._render_in_flight = False
+        self._schedule_current_frame_warmup()
+
+    def preview_quality_preference(self) -> float:
+        """用户预览质量偏好（0=auto/smooth；预算不改动此值）。"""
+        return float(getattr(self, "_preview_quality", 0.0))
+
+    def preview_decode_target_size(self) -> Tuple[int, int]:
+        """当前用户偏好＋预算合成后的实际解码目标像素（诊断口径）。"""
+        return self._decode_target_size
+
+    def budget_size_cap_status(self) -> dict:
+        """预算真实生效状态：实际目标像素 vs cap（不满足时如实 False）。"""
+        cap = self._budget_size_cap
+        if cap is None:
+            return {"cap": None, "actual": None, "satisfied": None}
+        target = self._decode_target_size
+        return {
+            "cap": [int(cap[0]), int(cap[1])],
+            "actual": [int(target[0]), int(target[1])],
+            "satisfied": (target[0] <= cap[0] and target[1] <= cap[1]),
+        }
 
     def set_no_deblock(self, enabled: bool) -> None:
         """预览关闭输出去块（P6 v2.1 后续，2026-09-22）。
