@@ -262,3 +262,34 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/app/test_color_timeli
 4. **最终报告**：列清已实现、仍禁用、硬件未测、性能受限项；完成的定义是“已启用功能通过正确性和失败门槛”，不是所有Resolve图标都可点击。
 
 遵循`.clinerules`：新函数完整类型注解、外部数据验证、信号回填锁、工程变更走command/service、GPU任务走既有线程队列、临时预览不污染导出语义。修改核心渲染前先分析调用方和数据流，实施后审查资源、取消及兼容路径。
+
+## CV-B01–CV-B11 实施记录（2026-11-09）
+
+全部 11 项已按批次实施并提交；详细验收（提交表、落地要点、真机素材
+证据、聚焦命令与真机边界）见
+[validation/color_viewport_backend_cv_b01_b11_20261109.md](../validation/color_viewport_backend_cv_b01_b11_20261109.md)。
+
+| 任务 | Commit | 状态 |
+|---|---|---|
+| CV-B01 状态／能力快照与模式路由 | `382da75e` | 域件+宿主接线完成；无 handler 动作诚实禁用 |
+| CV-B02 时间域／源 TC／DF-NDF／VFR | `74178007` | 精确域注入 transport；真机素材冒烟通过 |
+| CV-B03 播放／Loop／跨 clip／音频 | `0ae38a19` | 活路径 Loop 复位补齐；范围政策全测 |
+| CV-B04 Wipe／多版本比较隔离 | `83fdd04e` | 比较会话后端交付（有界只读）；grid presenter 未接线如实禁用 |
+| CV-B05 Highlight／Matte／Alpha／overlay | `c6675e59` | overlay 接真实后端；alpha 两级归因 |
+| CV-B06 Proxy/Resolution/Bypass/Unmix/Mute | `8100805f` | Mute 接 Master 总线（保留先前状态）；其余如实禁用 |
+| CV-B07 Freeze／stills／抓帧 | `715eb9e9` | 失败零残留＋播放政策全测；Freeze 维持未设计 |
+| CV-B08 Enhanced Viewer／浮动／全屏 | `2d165095` | 作用域如实声明；F11 既有行为保持 |
+| CV-B09 共享控制栏／图片模式／安全区 | `382da75e` | 回归全绿＋provider 徽标先存 bug 修复＋窄窗折叠 |
+| CV-B10 关闭／取消／资源生命周期 | `9bef1610` | 宿主关门＋管线停用预览渲染器；晚到结果守卫 |
+| CV-B11 HDR／性能／smoke 与报告 | 见 validation 记录 | 七验证组 339＋新套件 183 全绿；真机边界如实 |
+
+要点：
+
+- 每个启用的动作均从 UI 追踪到真实服务与成功/失败回填（注册表→宿主
+  二道门→原信号链/公共 API→实际状态回填 checked/tooltip）；无 handler
+  的动作（Split Screen 多图、Unmix、Freeze、viewer-only 全屏、Alpha
+  显示、Proxy/Resolution/Bypass）保持禁用并带稳定原因。
+- 先存 bug 修复 1 项（provider 徽标从未加入布局）；本批自伤 1 项
+  （shutdown 测试收尾契约）当批修复。
+- 真机证据边界（不填通过）：4K60/HDR 吞吐、外屏监看、听感、50/30 次
+  整机循环、偏好持久化、比较 grid presenter——详见 validation §3/§5。
