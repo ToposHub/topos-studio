@@ -127,7 +127,7 @@ def test_clear_reference_requires_loaded_still() -> None:
 def test_undesigned_services_report_stable_reasons() -> None:
     caps = _caps()
     expected = {
-        "compare.split_screen": "not designed",
+        "compare.split_screen": "presenter is not wired",
         "monitor.proxy": "not wired",
         "monitor.resolution": "not wired",
         "monitor.bypass": "not wired",
