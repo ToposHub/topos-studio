@@ -1450,74 +1450,35 @@ class ToposAPI:
     def capture_still(self, name: str = None) -> str:
         """Capture a still from the current viewport and save as a preset.
 
+        G10：与面板走**同一抓帧事务**（staging→统一提交、G06 会话一致
+        性），产出 Gallery 可见的 .topos bundle；不再写旧
+        ``<name>/grade.json`` 子目录格式。
+
         Args:
             name: Optional preset name. Auto-generated from datetime if None.
+                An existing name is rejected (returns None) — no overwrite.
 
         Returns:
-            The preset folder path.
+            The captured ``.topos`` path, or None on failure (no media /
+            render failure / save failure / name conflict).
         """
         def _do():
-            from datetime import datetime as dt
-            if name is None:
-                preset_name = dt.now().strftime("Still_%Y%m%d_%H%M%S")
-            else:
-                preset_name = name
-
             mw = self._find_main_window()
             if mw is None:
                 raise RuntimeError("Main window not found")
-
-            if self._engine.img_high is None:
-                raise RuntimeError("No image loaded")
-
-            rendered_img = self._engine.grab_viewport_image()
-            if rendered_img is None:
-                raise RuntimeError("Failed to render image")
-
-            current_folder = mw.presets_panel.get_current_folder()
-            preset_folder = os.path.join(current_folder, preset_name)
-            os.makedirs(preset_folder, exist_ok=True)
-
-            # Save thumbnail
-            import cv2
-            import numpy as np
-            if rendered_img.dtype == np.float32:
-                save_img = (np.clip(rendered_img, 0.0, 1.0) * 255.0).astype(np.uint8)
-            else:
-                save_img = rendered_img.copy()
-
-            h, w = save_img.shape[:2]
-            max_thumb = 512
-            if max(h, w) > max_thumb:
-                scale = max_thumb / max(h, w)
-                save_img = cv2.resize(save_img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-
-            thumbnail_path = os.path.join(preset_folder, "thumbnail.jpg")
-            success, encoded = cv2.imencode('.jpg', save_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-            if success:
-                encoded.tofile(thumbnail_path)
-
-            # Save grade.json with ALL layers including plugins
-            import json
-            grade_data = {
-                "version": "1.0",
-                "layers": [l.to_dict(assets_dir=None) for l in self._engine.layers],
-                "active_layer_index": self._engine.active_layer_index
-            }
-            grade_path = os.path.join(preset_folder, "grade.json")
-            with open(grade_path, 'w', encoding='utf-8') as f:
-                json.dump(grade_data, f, indent=2, ensure_ascii=False)
-
-            mw.presets_panel.scan_presets()
-            return preset_folder
+            return mw.script_capture_still(name)
 
         return self._bridge.call_sync(_do)
 
     def apply_preset(self, preset_name: str, folder: str = "User") -> None:
-        """Apply a preset grade by name.
+        """Apply a preset grade by name (Gallery .topos bundle).
+
+        G10：路径协议与 Gallery 一致——按 ``folder`` album 解析
+        ``<name>.topos``（也接受绝对 .topos 路径）。旧脚本子目录
+        ``grade.json`` 格式不再被静默套用：检测到时给出显式迁移指引。
 
         Args:
-            preset_name: Name of the preset to apply.
+            preset_name: Preset name (or absolute .topos path).
             folder: "User" or "System" (default: "User").
         """
         def _do():
@@ -1525,42 +1486,93 @@ class ToposAPI:
             if mw is None:
                 raise RuntimeError("Main window not found")
 
-            presets_root = os.path.join(os.getcwd(), "Presets")
-            grade_path = os.path.join(presets_root, folder, preset_name, "grade.json")
-            if not os.path.exists(grade_path):
-                raise FileNotFoundError(f"Preset not found: {grade_path}")
+            if os.path.isabs(preset_name) and preset_name.endswith(".topos"):
+                if os.path.isfile(preset_name):
+                    mw.on_apply_grade_from_preset(preset_name)
+                    return
+                raise FileNotFoundError(f"Preset not found: {preset_name}")
 
-            mw.on_apply_grade_from_preset(grade_path)
+            presets_root = getattr(mw.presets_panel, "presets_root", None)
+            scan_root = presets_root if isinstance(presets_root, str) \
+                else os.path.join(os.getcwd(), "Presets")
+            topos = os.path.join(scan_root, folder, f"{preset_name}.topos")
+            if os.path.isfile(topos):
+                mw.on_apply_grade_from_preset(topos)
+                return
+            legacy = os.path.join(scan_root, folder, preset_name,
+                                  "grade.json")
+            if os.path.isfile(legacy):
+                raise RuntimeError(
+                    f"Preset '{preset_name}' is the legacy script format "
+                    f"(grade.json). Run migrate_legacy_presets() first, "
+                    f"then apply the migrated .topos bundle.")
+            raise FileNotFoundError(f"Preset not found: {topos}")
 
         self._bridge.call_sync(_do)
 
     def list_presets(self, folder: str = None) -> list:
-        """List available presets.
+        """List available presets (Gallery .topos bundles).
 
-        Args:
-            folder: Optional folder path to scan. Defaults to User folder.
-
-        Returns:
-            List of preset names.
+        G10：从 Gallery 的稳定根目录扫描（不再跟随 cwd）；当前 album
+        为默认。返回 bundle 主名列表。
         """
         def _do():
-            presets_root = os.path.join(os.getcwd(), "Presets")
-            if folder is None:
-                scan_dir = os.path.join(presets_root, "User")
-            else:
-                scan_dir = os.path.join(presets_root, folder)
-
-            if not os.path.isdir(scan_dir):
+            mw = self._find_main_window()
+            if mw is None:
+                raise RuntimeError("Main window not found")
+            repository = getattr(mw.presets_panel, "_repository", None)
+            if repository is None:
                 return []
+            from src.features.color.core.gallery_contracts import GalleryQuery
+            target_folder = folder
+            if target_folder is None:
+                target_folder = mw.presets_panel.get_current_folder()
+            album_id = repository.album_id_for_folder(target_folder)
+            result = repository.query(GalleryQuery(album_id=album_id))
+            return [still.display_name for still in result.stills]
 
-            presets = []
-            for name in sorted(os.listdir(scan_dir)):
-                preset_dir = os.path.join(scan_dir, name)
-                if os.path.isdir(preset_dir) and not name.startswith('.'):
-                    grade_path = os.path.join(preset_dir, "grade.json")
-                    if os.path.exists(grade_path):
-                        presets.append(name)
-            return presets
+        return self._bridge.call_sync(_do)
+
+    def migrate_legacy_presets(self, source_root: str = None,
+                               folder: str = "User") -> dict:
+        """把旧脚本格式（<name>/grade.json＋thumbnail.jpg）迁入 Gallery。
+
+        迁移为复制/转换（**不删除来源**），journal 可恢复、可重跑不重复。
+        迁移后 ``list_presets`` 可见、``apply_preset`` 可用同一资源。
+
+        Args:
+            source_root: 旧库根目录；缺省 ``<cwd>/Presets/<folder>``。
+            folder: 目标 album（"User"/"System"）。
+
+        Returns:
+            {"status": ..., "planned": [...], "warnings": [...]} 概要。
+        """
+        def _do():
+            mw = self._find_main_window()
+            if mw is None:
+                raise RuntimeError("Main window not found")
+            repository = getattr(mw.presets_panel, "_repository", None)
+            if repository is None:
+                raise RuntimeError("Gallery repository unavailable")
+            presets_root = getattr(mw.presets_panel, "presets_root", None)
+            scan_root = presets_root if isinstance(presets_root, str) \
+                else os.path.join(os.getcwd(), "Presets")
+            legacy_root = source_root or os.path.join(scan_root, folder)
+            from src.features.color.core.gallery_legacy_migration import (
+                GalleryLegacyMigration,
+            )
+            migration = GalleryLegacyMigration(repository)
+            plan = migration.scan(legacy_root,
+                                  f"legacy:{folder}")
+            result = migration.migrate(legacy_root, f"legacy:{folder}")
+            mw.presets_panel.scan_presets()
+            return {
+                "status": result.status,
+                "reason": result.reason,
+                "planned": [item.to_dict() for item in plan],
+                "affected": list(result.affected_still_ids),
+                "warnings": list(result.warnings),
+            }
 
         return self._bridge.call_sync(_do)
 

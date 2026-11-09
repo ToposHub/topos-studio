@@ -913,6 +913,82 @@ class LayerOpsMixin:
         from datetime import datetime as dt
         return dt.now().strftime("Still_%Y%m%d_%H%M%S")
 
+    def script_capture_still(self, name: Optional[str] = None) -> Optional[str]:
+        """脚本抓帧入口（G10）：与面板同一抓帧事务，无对话框。
+
+        返回 ``.topos`` 路径；失败（无媒体／渲染失败／保存失败／重名）
+        返回 None 并把原因写状态栏——不再产出 Gallery 不可见的
+        ``grade.json`` 子目录格式。
+        """
+        is_video_mode = bool(getattr(self, 'current_file_is_video', False))
+        if is_video_mode:
+            video_controller = getattr(self, 'video_controller', None)
+            if video_controller is None or \
+                    not video_controller.is_video_loaded():
+                self.status_bar.showMessage(
+                    I18N.tr("status.no_image_loaded", "请先打开一张图片或视频"),
+                    3000)
+                return None
+        elif self.engine.img_high is None:
+            self.status_bar.showMessage(
+                I18N.tr("status.no_image_loaded", "请先打开一张图片或视频"),
+                3000)
+            return None
+
+        built = self._build_gallery_capture_request(is_video_mode)
+        if built is None:
+            return None
+        request, facts = built
+        session = GalleryCaptureSession(
+            request, facts,
+            context_probe=lambda: self._probe_gallery_capture_facts(
+                is_video_mode))
+        captured: dict = {}
+        result = session.run(
+            prepare_frame=lambda: self._prepare_capture_image(is_video_mode),
+            persist_bundle=lambda img: self._script_persist_still(
+                img, is_video_mode, name, captured))
+        if not result.succeeded or not captured.get("topos"):
+            if result.reason:
+                self.status_bar.showMessage(
+                    f"script capture failed ({result.reason})", 3000)
+            return None
+        self._refresh_gallery_after_capture(captured["folder"])
+        return captured["topos"]
+
+    def _script_persist_still(self, rendered_img, is_video_mode: bool,
+                              name: Optional[str], captured: dict
+                              ) -> GalleryOperationResult:
+        """脚本 persist：显式名（重名拒绝，不弹对话框）。"""
+        if rendered_img is None:
+            return GalleryOperationResult(
+                request_id=make_gallery_request_id(), status="rejected",
+                reason="render_failed")
+        stem = (name or self._new_still_name()).strip()
+        from src.features.color.core.gallery_contracts import (
+            is_safe_bundle_stem,
+        )
+        if not is_safe_bundle_stem(stem):
+            return GalleryOperationResult(
+                request_id=make_gallery_request_id(), status="rejected",
+                reason="unsafe_name")
+        folder = self.presets_panel.get_current_folder()
+        topos_path = os.path.join(folder, f"{stem}.topos")
+        if os.path.exists(topos_path):
+            return GalleryOperationResult(
+                request_id=make_gallery_request_id(), status="rejected",
+                reason="name_conflict",
+                warnings=(f"{stem}.topos exists",))
+        if self._commit_still_capture(topos_path, rendered_img, is_video_mode):
+            captured.update({"topos": topos_path, "folder": folder,
+                             "name": stem})
+            return GalleryOperationResult(
+                request_id=make_gallery_request_id(), status="success",
+                affected_still_ids=(stem,))
+        return GalleryOperationResult(
+            request_id=make_gallery_request_id(), status="rejected",
+            reason="save_failed")
+
     def _commit_still_capture(self, topos_path: str, rendered_img: Any,
                               is_video_mode: bool) -> bool:
         """R01：staging → 备份 → 统一提交一次静帧的多文件集合。
