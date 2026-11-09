@@ -164,6 +164,8 @@ _REASONS = {
     "alpha_unavailable": "Input alpha channel preview is not available.",
     "freeze_undesigned": "Grade Freeze has no independent snapshot "
                          "semantics yet.",
+    "reverse_unsupported": "Reverse playback is not implemented for "
+                           "Color's source or timeline paths.",
 }
 
 
@@ -247,6 +249,14 @@ def evaluate_color_viewer_capabilities(
                      checked=state.loop_enabled))
     caps.append(_cap("transport.timecode", is_video,
                      "not_video_presentation"))
+    # CV-B03：停止原位（两路径真实：video_controller.stop_playback /
+    # timeline stop_in_place）与倒放（两路径均未实现——timeline 侧仅
+    # JKL 逐帧回退的视觉近似）。声明先于按钮：无 handler 保持禁用。
+    caps.append(_cap("transport.stop_in_place", transport_ready,
+                     "no_video_controller" if is_video
+                     else "not_video_presentation"))
+    caps.append(_cap("transport.reverse_play", False,
+                     "reverse_unsupported"))
 
     # ── 未设计／未接线（如实 False ＋ 稳定原因） ────────────────────────
     caps.append(_cap("compare.split_screen", context.compare_grid_designed,

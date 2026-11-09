@@ -5860,6 +5860,18 @@ class FileOpsMixin:
             "clip": clip,
             "effective_source_start": effective_source_start,
         }
+        # CV-B03：切 clip 按既有规则复位 Loop（默认跨 clip 连续播放，
+        # 循环仅在用户显式请求时开启；不与 Composite 共享默认值）。此前
+        # 复位只存在于已停用的 preview 激活路径，活路径换 clip 会带着上
+        # 一支的 Loop 状态。仅 checked 时写，避免多余 loop_toggled。
+        try:
+            loop_button = getattr(
+                getattr(self.canvas, "video_control_bar", None),
+                "btn_loop", None)
+            if loop_button is not None and loop_button.isChecked():
+                loop_button.setChecked(False)
+        except (AttributeError, RuntimeError):
+            pass
         self._sync_color_timeline_clip_video_controls()
         # CV-B01：切片段＝换呈现上下文，推进 revision 并刷新能力回填。
         try:
