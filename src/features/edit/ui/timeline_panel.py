@@ -24,9 +24,12 @@ from PyQt6.QtWidgets import (
     QSlider, QFrame, QLineEdit, QDialog, QDialogButtonBox,
     QApplication, QTreeWidgetItem, QMenu, QWidgetAction, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QEvent, QPointF, QRect
 import math
-from PyQt6.QtGui import QAction, QActionGroup, QShortcut, QKeySequence, QKeyEvent
+from PyQt6.QtGui import (
+    QAction, QActionGroup, QShortcut, QKeySequence, QKeyEvent,
+    QPaintEvent, QPainter, QPen, QColor, QIcon,
+)
 
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.panel_divider import PanelDockWidget
@@ -76,6 +79,38 @@ DEFAULT_FPS = 25.0
 # the user has room to navigate around it.  This is measured against the
 # timeline content area (excluding the fixed track-header column).
 MIN_ZOOM_CONTENT_FILL_RATIO = 0.10
+
+
+class _TimelineToolButton(QToolButton):
+    """Keep toolbar glyphs and menu indicators independent of the host style."""
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.isEnabled() and (self.isDown() or self.underMouse()):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 10 if self.isDown() else 18))
+            painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 4.0, 4.0)
+
+        # Ellipsis already conveys the overflow menu; every other menu gets
+        # a dedicated 10px column, never an arrow overlaid on its instrument.
+        has_indicator = self.menu() is not None and self.objectName() != "timelineToolbarOverflow"
+        content_width = self.width() - (10 if has_indicator else 0)
+        size = self.iconSize()
+        icon_rect = QRect((content_width - size.width()) // 2,
+                          (self.height() - size.height()) // 2, size.width(), size.height())
+        mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
+        self.icon().paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter, mode)
+        if has_indicator:
+            color = QColor(EDIT_COLORS["text_muted"])
+            if not self.isEnabled():
+                color.setAlpha(90)
+            painter.setPen(QPen(color, 1.1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
+                                Qt.PenJoinStyle.RoundJoin))
+            cx, cy = self.width() - 6.0, self.height() / 2.0
+            painter.drawPolyline(QPointF(cx - 2.5, cy - 1.0), QPointF(cx, cy + 1.5),
+                                 QPointF(cx + 2.5, cy - 1.0))
+        painter.end()
 
 
 # =============================================================================
@@ -270,7 +305,7 @@ class TimelinePanel(QWidget):
         # Tool order: Select(A) Trim(T) Blade(B) Ripple(R) Roll(W) Slip(Y) Slide(U) Hand(H) Zoom(Z)
         
         # Select tool
-        self.btn_select = QToolButton()
+        self.btn_select = _TimelineToolButton()
         self.btn_select.setToolTip(I18N.tr("edit.timeline_tools.select_tooltip", "Select Tool (A)"))
         self.btn_select.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_select.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -281,7 +316,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_select)
 
         # Trim tool
-        self.btn_trim = QToolButton()
+        self.btn_trim = _TimelineToolButton()
         self.btn_trim.setToolTip(I18N.tr("edit.timeline_tools.trim_tooltip", "Trim Tool (T)"))
         self.btn_trim.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_trim.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -291,7 +326,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_trim)
 
         # Blade tool
-        self.btn_blade = QToolButton()
+        self.btn_blade = _TimelineToolButton()
         self.btn_blade.setToolTip(I18N.tr("edit.timeline_tools.blade_tooltip", "Blade Tool (B)"))
         self.btn_blade.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_blade.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -301,7 +336,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_blade)
 
         # Ripple tool
-        self.btn_ripple = QToolButton()
+        self.btn_ripple = _TimelineToolButton()
         self.btn_ripple.setToolTip(I18N.tr("edit.timeline_tools.ripple_tooltip", "Ripple Tool (R)"))
         self.btn_ripple.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_ripple.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -311,7 +346,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_ripple)
 
         # B4: Rate Stretch 工具（拖边缘改时长 → 速度换算，Shift+R）
-        self.btn_rate_stretch = QToolButton()
+        self.btn_rate_stretch = _TimelineToolButton()
         self.btn_rate_stretch.setToolTip(I18N.tr(
             "edit.timeline_tools.rate_stretch_tooltip",
             "Rate Stretch Tool (Shift+R) — 拖动片段边缘改变时长，速度按比例换算",
@@ -325,7 +360,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_rate_stretch)
 
         # Roll tool
-        self.btn_roll = QToolButton()
+        self.btn_roll = _TimelineToolButton()
         self.btn_roll.setToolTip(I18N.tr("edit.timeline_tools.roll_tooltip", "Roll Tool (W)"))
         self.btn_roll.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_roll.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -335,7 +370,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_roll)
 
         # Slip tool
-        self.btn_slip = QToolButton()
+        self.btn_slip = _TimelineToolButton()
         self.btn_slip.setToolTip(I18N.tr("edit.timeline_tools.slip_tooltip", "Slip Tool (Y)"))
         self.btn_slip.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_slip.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -345,7 +380,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_slip)
 
         # Slide tool
-        self.btn_slide = QToolButton()
+        self.btn_slide = _TimelineToolButton()
         self.btn_slide.setToolTip(I18N.tr("edit.timeline_tools.slide_tooltip", "Slide Tool (U)"))
         self.btn_slide.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_slide.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -355,7 +390,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_slide)
 
         # Hand tool
-        self.btn_hand = QToolButton()
+        self.btn_hand = _TimelineToolButton()
         self.btn_hand.setToolTip(I18N.tr("edit.timeline_tools.hand_tooltip", "Hand Tool (H)"))
         self.btn_hand.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_hand.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -365,7 +400,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_hand)
 
         # Zoom tool
-        self.btn_zoom = QToolButton()
+        self.btn_zoom = _TimelineToolButton()
         self.btn_zoom.setToolTip(I18N.tr("edit.timeline_tools.zoom_tooltip", "Zoom Tool (Z)"))
         self.btn_zoom.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_zoom.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -383,7 +418,7 @@ class TimelinePanel(QWidget):
 
         # --- Toggle Group ---
         # Snap toggle
-        self.btn_snap = QToolButton()
+        self.btn_snap = _TimelineToolButton()
         self.btn_snap.setToolTip(I18N.tr("edit.timeline_tools.snap_tooltip", "Snap (N)"))
         self.btn_snap.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_snap.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -394,7 +429,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_snap)
 
         # Linked selection toggle
-        self.btn_linked_selection = QToolButton()
+        self.btn_linked_selection = _TimelineToolButton()
         self.btn_linked_selection.setToolTip(I18N.tr("tooltip.linked_selection", "Linked Selection — toggles linked A/V clip drag"))
         self.btn_linked_selection.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_linked_selection.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -405,7 +440,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_linked_selection)
 
         # Marker toggle — toggles marker list panel
-        self.btn_marker = QToolButton()
+        self.btn_marker = _TimelineToolButton()
         self.btn_marker.setToolTip(I18N.tr("tooltip.show_markers", "Show Marker List"))
         self.btn_marker.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_marker.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -422,7 +457,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(separator3)
 
         # --- Source Edit Buttons (Insert / Overwrite / Append) ---
-        self.btn_insert = QToolButton()
+        self.btn_insert = _TimelineToolButton()
         self.btn_insert.setToolTip(I18N.tr("edit.source_viewer.insert_tooltip", "Insert clip at playhead"))
         self.btn_insert.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_insert.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -431,7 +466,7 @@ class TimelinePanel(QWidget):
         self.btn_insert.clicked.connect(self.source_insert_requested.emit)
         tools_bar.addWidget(self.btn_insert)
 
-        self.btn_overwrite = QToolButton()
+        self.btn_overwrite = _TimelineToolButton()
         self.btn_overwrite.setToolTip(I18N.tr("edit.source_viewer.overwrite_tooltip", "Overwrite clip at playhead"))
         self.btn_overwrite.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_overwrite.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -440,7 +475,7 @@ class TimelinePanel(QWidget):
         self.btn_overwrite.clicked.connect(self.source_overwrite_requested.emit)
         tools_bar.addWidget(self.btn_overwrite)
 
-        self.btn_append = QToolButton()
+        self.btn_append = _TimelineToolButton()
         self.btn_append.setToolTip(I18N.tr("edit.source_viewer.append_tooltip", "Append clip at end of timeline"))
         self.btn_append.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_append.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -485,7 +520,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(separator_audio)
 
         # --- Mixer Toggle Button ---
-        self.btn_mixer = QToolButton()
+        self.btn_mixer = _TimelineToolButton()
         self.btn_mixer.setToolTip(I18N.tr("edit.timeline_tools.audio_mixer", "Audio Mixer"))
         self.btn_mixer.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_mixer.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -503,7 +538,7 @@ class TimelinePanel(QWidget):
 
         # --- Zoom Controls (right side) ---
         # Zoom out
-        self.btn_zoom_out = QToolButton()
+        self.btn_zoom_out = _TimelineToolButton()
         self.btn_zoom_out.setToolTip(I18N.tr("edit.timeline_tools.zoom_out", "Zoom Out"))
         self.btn_zoom_out.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_zoom_out.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -526,7 +561,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.zoom_slider)
 
         # Zoom in
-        self.btn_zoom_in = QToolButton()
+        self.btn_zoom_in = _TimelineToolButton()
         self.btn_zoom_in.setToolTip(I18N.tr("edit.timeline_tools.zoom_in", "Zoom In"))
         self.btn_zoom_in.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_zoom_in.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -535,7 +570,7 @@ class TimelinePanel(QWidget):
         tools_bar.addWidget(self.btn_zoom_in)
 
         # Fit to view
-        self.btn_zoom_fit = QToolButton()
+        self.btn_zoom_fit = _TimelineToolButton()
         self.btn_zoom_fit.setToolTip(I18N.tr("edit.timeline_tools.zoom_fit", "Fit to View (F)"))
         self.btn_zoom_fit.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_zoom_fit.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -589,6 +624,9 @@ class TimelinePanel(QWidget):
                 border-radius: 4px;
                 padding: 3px;
                 margin: 1px;
+            }
+            QToolButton::menu-button {
+                width: 10px; border: none; background: transparent;
             }
             QToolButton:hover {
                 background-color: rgba(255, 255, 255, 18);
@@ -719,7 +757,7 @@ class TimelinePanel(QWidget):
             widget.hide()
 
         def button(name: str, tooltip: str, icon: Any, checkable: bool = False) -> QToolButton:
-            btn = QToolButton(toolbar)
+            btn = _TimelineToolButton(toolbar)
             btn.setObjectName(name)
             btn.setToolTip(tooltip)
             btn.setAccessibleName(tooltip)
@@ -767,11 +805,12 @@ class TimelinePanel(QWidget):
         self.btn_zoom_fit.setIcon(timeline_icon("zoom_full"))
         self.btn_zoom_detail.clicked.connect(lambda: self._set_zoom_preset("detail"))
         self.btn_zoom_custom.clicked.connect(lambda: self._set_zoom_preset("custom"))
-        self.btn_zoom_out.setIcon(get_icon("fa5s.minus", IconColors.DEFAULT))
-        self.btn_zoom_in.setIcon(get_icon("fa5s.plus", IconColors.DEFAULT))
+        self.btn_zoom_out.setIcon(timeline_icon("zoom_out"))
+        self.btn_zoom_in.setIcon(timeline_icon("zoom_in"))
+        self.btn_mixer.setIcon(timeline_icon("mixer"))
         self.btn_overflow = button("timelineToolbarOverflow",
             I18N.tr("timeline.more_actions", "More Timeline Actions"),
-            get_icon("fa5s.ellipsis-h", IconColors.DEFAULT))
+            timeline_icon("more"))
         self._secondary_tool_buttons = [
             self.btn_ripple, self.btn_rate_stretch, self.btn_roll,
             self.btn_slip, self.btn_slide, self.btn_hand, self.btn_zoom,
@@ -833,8 +872,8 @@ class TimelinePanel(QWidget):
             QSlider::handle:horizontal {{ width: 9px; height: 9px; margin: -3px 0;
                 border: none; background: {EDIT_COLORS['text_muted']}; border-radius: 4px; }}
         """)
-        self.btn_flag.setFixedWidth(36)
-        self.btn_marker.setFixedWidth(36)
+        for button in (self.btn_view_options, self.btn_advanced_tools, self.btn_flag, self.btn_marker):
+            button.setFixedWidth(38)
         self._timeline_zoom_widgets = {
             self.btn_zoom_out, self.zoom_slider, self.btn_zoom_in, self.btn_zoom_fit,
             self.btn_zoom_detail, self.btn_zoom_custom,

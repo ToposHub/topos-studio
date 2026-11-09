@@ -71,6 +71,8 @@ from PyQt6.QtGui import (
     QPen,
     QBrush,
     QFont,
+    QFontDatabase,
+    QFontMetricsF,
     QWheelEvent,
     QResizeEvent,
     QKeyEvent,
@@ -434,13 +436,32 @@ class _TimelineTimecodeLabel(QLabel):
     directly instead of relying on that backend-specific auto-fill behavior.
     """
 
+    def __init__(self, text: str, parent: QWidget) -> None:
+        super().__init__(text, parent)
+        # Match the desktop's UI typography while fixing digit positions.
+        # The theme may override QLabel.font(), so paint with this font
+        # explicitly rather than the label's inherited proportional metrics.
+        self._display_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+        self._display_font.setStyle(QFont.Style.StyleNormal)
+        self._display_font.setPixelSize(22)
+        self._display_font.setWeight(QFont.Weight.Medium)
+        metrics = QFontMetricsF(self._display_font)
+        self._digit_width = math.ceil(max(metrics.horizontalAdvance(ch) for ch in "0123456789"))
+        self._separator_width = math.ceil(max(metrics.horizontalAdvance(ch) for ch in ":;"))
+
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt API
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.fillRect(self.rect(), QColor(get_color("ruler_bg")))
         painter.setPen(QPen(QColor(get_color("timecode_panel_text"))))
-        painter.setFont(self.font())
-        painter.drawText(self.rect(), self.alignment(), self.text())
+        painter.setFont(self._display_font)
+        text = self.text()
+        widths = [self._separator_width if ch in ":;" else self._digit_width for ch in text]
+        left = math.floor((self.width() - sum(widths)) / 2.0)
+        for character, width in zip(text, widths):
+            cell = QRectF(left, 0, width, self.height())
+            painter.drawText(cell, Qt.AlignmentFlag.AlignCenter, character)
+            left += width
         painter.setPen(QPen(QColor(get_color("timecode_panel_bottom_line")), 1))
         painter.drawLine(0, self.height() - 1, self.width() - 1, self.height() - 1)
         painter.end()
@@ -1131,11 +1152,6 @@ class TimelineView(QGraphicsView):
         # 到播放头位置的全高大区域（实测 478×932px、~26ms/次，25fps 播放
         # 下 UI 线程被时间线重绘饱和）。独立 widget 的重绘只涉及自身。
         self._corner_timecode_widget = _TimelineTimecodeLabel("00:00:00:00", self)
-        _tc_font = QFont(
-            "SF Mono, Menlo, Consolas, Courier New, monospace", 17,
-            QFont.Weight.DemiBold)
-        _tc_font.setStyleHint(QFont.StyleHint.Monospace)
-        self._corner_timecode_widget.setFont(_tc_font)
         self._corner_timecode_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._corner_timecode_widget.setStyleSheet(
             f"background-color: {get_color('timecode_panel_bg')};"
@@ -2428,6 +2444,7 @@ class TimelineView(QGraphicsView):
                     )
                     self._scene.addItem(item)
                     self._items_map[trans.transition_id] = item
+                    item.setOpacity(1.0 if track.is_visible and track.is_enabled else 0.4)
 
                     # Connect transition signals
                     item.transition_clicked.connect(self._on_transition_clicked)
@@ -2860,6 +2877,13 @@ class TimelineView(QGraphicsView):
         # visible frame range.
         self._update_clip_visibility()
 
+        # The foreground playhead is deliberately outside the scene. Its
+        # update_zoom() cannot invalidate the old pixels, and item dirty
+        # regions leave its stem behind in empty track areas. Zoom changes
+        # the whole layout, so repaint it once, including those empty areas.
+        # Ordinary playback still uses only the old/new narrow strips.
+        self.viewport().update()
+
         # Debounce thumbnail schedule after zoom change
         self._debounce_thumbnail_schedule()
 
@@ -3059,15 +3083,17 @@ class TimelineView(QGraphicsView):
         # 更新所有片段和转场的可见性
         for item in self._items_map.values():
             if isinstance(item, ClipItem):
-                # Viewport culling must not override the track-level eye
-                # control.  The old order made a hidden video track visible
-                # again on the next scroll/zoom refresh.
+                # Output-disabled tracks stay editable on the timeline.
+                # Only viewport culling hides graphics; the model still
+                # excludes these tracks from preview and export.
                 track = self._timeline.get_track_by_id(item.track_id) if self._timeline else None
-                if track is not None and not track.is_visible:
-                    item.setVisible(False)
-                else:
-                    item.update_visibility(visible_start, visible_end)
+                if track is not None:
+                    item.set_track_output_enabled(track.is_visible and track.is_enabled)
+                item.update_visibility(visible_start, visible_end)
             elif isinstance(item, TransitionItem):
+                track = self._timeline.get_track_by_id(item.track_id) if self._timeline else None
+                if track is not None:
+                    item.setOpacity(1.0 if track.is_visible and track.is_enabled else 0.4)
                 item.update_visibility(visible_start, visible_end)
 
         # 更新间隙指示器可见性 (Phase 3.3)
@@ -4507,6 +4533,9 @@ class TimelineView(QGraphicsView):
         item._position_lock_enabled = self._position_lock_enabled
         item._selected_edit_edge = self._selected_edit_edges.get(item.clip_id)
         item._timeline_display_fps = float(self._timeline.fps) if self._timeline is not None else EMPTY_TIMELINE_FPS
+        track = self._timeline.get_track_by_id(item.track_id) if self._timeline is not None else None
+        if track is not None:
+            item.set_track_output_enabled(track.is_visible and track.is_enabled)
         clip = self._timeline.get_clip_by_id(item.clip_id) if self._timeline is not None else None
         if clip is not None:
             item.set_retime_presentation(clip.speed)
@@ -7065,6 +7094,8 @@ class TimelineView(QGraphicsView):
                     changes['is_locked'] = new_track.is_locked
                 if old_track.is_visible != new_track.is_visible:
                     changes['is_visible'] = new_track.is_visible
+                if old_track.is_enabled != new_track.is_enabled:
+                    changes['is_enabled'] = new_track.is_enabled
                 # 审计修复：sync-lock 纳入增量 diff（undo/另一视图切换后
                 # 表头勾选态与模型失步，直到全量 reload 才恢复）
                 if (hasattr(old_track, 'is_sync_locked')
@@ -7523,6 +7554,9 @@ class TimelineView(QGraphicsView):
                         item.update_clip_properties(
                             clip.with_linked_clip_id(self._get_valid_linked_clip_id(clip))
                         )
+                        track = self._timeline.get_track_by_id(item.track_id)
+                        if track is not None:
+                            item.set_track_output_enabled(track.is_visible and track.is_enabled)
                         logger.debug(f"Incremental update: modified clip {clip.clip_id}")
 
             # SUB-P1-02: Update modified subtitle cues in place. update_clip_data
@@ -7585,6 +7619,14 @@ class TimelineView(QGraphicsView):
 
             # Update track headers
             for track_id, track_changes in changes.track_changes.items():
+                if 'is_visible' in track_changes or 'is_enabled' in track_changes:
+                    track = self._timeline.get_track_by_id(track_id)
+                    if track is not None:
+                        for item in self._items_map.values():
+                            if isinstance(item, ClipItem) and item.track_id == track_id:
+                                item.set_track_output_enabled(track.is_visible and track.is_enabled)
+                            elif isinstance(item, TransitionItem) and item.track_id == track_id:
+                                item.setOpacity(1.0 if track.is_visible and track.is_enabled else 0.4)
                 # AUD-21102: 锁轨变化同步到该轨的片段与转场 item
                 if 'is_locked' in track_changes:
                     lock_state = bool(track_changes['is_locked'])
@@ -7999,6 +8041,8 @@ class TimelineView(QGraphicsView):
 
         self._scene.addItem(item)
         self._items_map[trans.transition_id] = item
+        if track is not None:
+            item.setOpacity(1.0 if track.is_visible and track.is_enabled else 0.4)
 
         # Connect signals
         item.transition_clicked.connect(self._on_transition_clicked)
@@ -14513,26 +14557,13 @@ class TimelineView(QGraphicsView):
                 item.set_waveform_gain(gain)
 
     def _on_track_visibility_changed(self, track_id: str, visible: bool) -> None:
-        """Handle track visibility change."""
+        """Toggle track output through the existing undoable command."""
         if self._timeline is None:
             return
 
         from src.features.edit.core.commands import SetTrackVisibilityCommand
         cmd = SetTrackVisibilityCommand.create(track_id, visible)
         self._execute_command(cmd)
-
-        # Show/hide clip items on this track
-        track = self._timeline.get_track_by_id(track_id)
-        if track:
-            for clip in track.clips:
-                clip_item = self._items_map.get(clip.clip_id)
-                if clip_item and isinstance(clip_item, ClipItem):
-                    clip_item.setVisible(visible)
-
-        # Update header state
-        header = self._track_headers.get(track_id)
-        if header:
-            header.set_visible(visible)
 
         logger.debug(f"Track {track_id} visibility changed to {visible}")
 
@@ -14834,6 +14865,7 @@ class TimelineView(QGraphicsView):
                 # 状态，把 clip own enabled 污染成轨道 effective 状态，
                 # Enable/Disable 菜单随之读错。
                 clip_item.set_enabled(clip.is_enabled)
+                clip_item.set_track_output_enabled(track.is_visible and track.is_enabled)
         # AUD-21102: 转场卡与片段共用锁轨语义
         for trans in getattr(track, "transitions", ()) or ():
             trans_item = self._items_map.get(trans.transition_id)
