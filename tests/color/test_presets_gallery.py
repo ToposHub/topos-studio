@@ -298,6 +298,13 @@ def _make_ctrl(tmp_path, monkeypatch, layers, image=None, folder="User"):
     ctrl._get_composite_state_data = lambda: None
     ctrl.current_file_is_video = False
     ctrl.save_router = MagicMock()
+    # R01：保存走 staging——SaveRouter 需真把 .topos 写到传入路径
+    # （事务按 staged 文件在场才安装）。需要失败场景的测试自行覆盖。
+    def _fake_save(path, *_args, **_kwargs):
+        with open(path, "wb") as fh:
+            fh.write(b"PK-fake-topos")
+        return True
+    ctrl.save_router._save_single_asset_project.side_effect = _fake_save
     ctrl.presets_panel = MagicMock()
     presets_user = os.path.join(os.getcwd(), "Presets", folder)
     os.makedirs(presets_user, exist_ok=True)
@@ -360,6 +367,7 @@ class TestCaptureStillSidecar:
         from src.features.color.core.layer import Layer
         ctrl = _make_ctrl(tmp_path, monkeypatch, [Layer(name="s")],
                           _img(seed=11))
+        ctrl.save_router._save_single_asset_project.side_effect = None
         ctrl.save_router._save_single_asset_project.return_value = False
         monkeypatch.setattr(
             "src.app.controllers.layer_controller.QMessageBox", MagicMock())
@@ -397,7 +405,9 @@ class TestCaptureStillSidecar:
             lambda: (bool(render_ok), 42))
         monkeypatch.setattr(
             "src.app.controllers.layer_controller.QMessageBox", MagicMock())
-        ctrl.save_router._save_single_asset_project.return_value = render_ok
+        if not render_ok:
+            ctrl.save_router._save_single_asset_project.side_effect = None
+            ctrl.save_router._save_single_asset_project.return_value = False
         return ctrl
 
     def test_video_capture_render_failure_restores_playback_writes_nothing(
