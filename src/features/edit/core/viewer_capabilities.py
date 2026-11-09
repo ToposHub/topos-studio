@@ -128,8 +128,12 @@ def evaluate_viewer_capabilities(
                      "source_tape_undesigned"))
 
     # ── Source transport 能力位（对齐 B05 落地） ─────────────────────
-    caps.append(_cap("source.loop", context.source_loop_supported,
-                     "source_loop_unsupported"))
+    # I03-2：无素材时 loop/reverse 不启用（此前 loop 只看能力位）。
+    caps.append(_cap(
+        "source.loop",
+        context.source_loop_supported and context.source_asset_open,
+        "no_source_asset" if not context.source_asset_open
+        else "source_loop_unsupported"))
     caps.append(_cap("source.reverse_play", context.source_asset_open,
                      "no_source_asset"))
     caps.append(_cap("source.reverse_play_audio",
@@ -137,12 +141,16 @@ def evaluate_viewer_capabilities(
                      "reverse_audio_unsupported"))
     caps.append(_cap("source.stop_in_place", True))
 
-    # ── Match Frame（B06 落地；Timeline→Source 需时间线） ───────────
+    # ── Match Frame（B06 落地） ─────────────────────────────────────
+    # Timeline→Source：会打开 Source（不需要已打开素材），需要时间线。
     caps.append(_cap("match_frame.timeline_to_source",
-                     context.has_timeline and context.source_asset_open
-                     or context.has_timeline, "no_timeline"))
-    caps.append(_cap("match_frame.source_to_timeline",
                      context.has_timeline, "no_timeline"))
+    # Source→Timeline：需要已打开的 Source 素材**和**时间线（I03-2：此前
+    # 只查时间线，无素材时按钮虚亮）。
+    caps.append(_cap(
+        "match_frame.source_to_timeline",
+        context.has_timeline and context.source_asset_open,
+        "no_timeline" if not context.has_timeline else "no_source_asset"))
 
     # ── Markers ─────────────────────────────────────────────────────
     caps.append(_cap("source.markers", context.source_marker_model_available,
@@ -156,12 +164,14 @@ def evaluate_viewer_capabilities(
                      "source_external_monitor_unavailable"))
 
     # ── Deliver 页：Source 侧一律不可用（强制 Timeline 监看） ───────
+    # I03-2：match_frame.source_to_timeline 不再豁免——Deliver 借走的是
+    # Program/Timeline，Source 监看与"Source→"方向的动作统一禁用。
     if context.in_deliver:
         caps = [
             (ViewerCapability(
                 c.action, False, _REASONS["deliver_mode"], c.checked)
              if c.action.startswith(("source.", "match_frame."))
-             and c.action != "match_frame.source_to_timeline" else c)
+             else c)
             for c in caps
         ]
     return tuple(caps)

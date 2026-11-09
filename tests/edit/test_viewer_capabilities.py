@@ -72,12 +72,30 @@ def test_b07_no_source_asset_gates_reverse():
 
 
 def test_unsupported_source_loop_has_explicit_reason() -> None:
-    capability = _caps(source_loop_supported=False)["source.loop"]
+    # I03-2：loop 同时需要素材在场；本用例钉"能力位不支持"的优先呈现
+    capability = _caps(source_asset_open=True,
+                       source_loop_supported=False)["source.loop"]
     assert not capability.supported
     assert capability.reason == "Source loop playback is not supported."
-    supported = _caps(source_loop_supported=True)["source.loop"]
+    supported = _caps(source_asset_open=True,
+                      source_loop_supported=True)["source.loop"]
     assert supported.supported
     assert supported.reason is None
+
+
+def test_i03_no_source_asset_gates_loop():
+    """无素材时 loop 不启用（此前只看能力位，按钮虚亮）。"""
+    caps = _caps(source_asset_open=False, source_loop_supported=True)
+    assert not caps["source.loop"].supported
+    assert caps["source.loop"].reason == \
+        "No source media is open in the viewer."
+
+
+def test_i03_source_to_timeline_needs_open_source():
+    caps = _caps(source_asset_open=False, has_timeline=True)
+    assert not caps["match_frame.source_to_timeline"].supported
+    assert caps["match_frame.source_to_timeline"].reason == \
+        "No source media is open in the viewer."
 
 
 def test_b07_deliver_forces_timeline_monitoring():
@@ -85,8 +103,11 @@ def test_b07_deliver_forces_timeline_monitoring():
     assert not caps["source.loop"].supported
     assert caps["source.loop"].reason == "Deliver forces Timeline monitoring."
     assert not caps["match_frame.timeline_to_source"].supported
-    # 交付页仍可从时间线定位到源（导出核对），不受 Source 面板隐藏影响
-    assert caps["match_frame.source_to_timeline"].supported
+    # I03（复查计划）：source_to_timeline 不再豁免——Deliver 借走的是
+    # Program/Timeline，Source 监看与"Source→"方向动作统一禁用。
+    assert not caps["match_frame.source_to_timeline"].supported
+    assert caps["match_frame.source_to_timeline"].reason == \
+        "Deliver forces Timeline monitoring."
     assert caps["proxy.prefer_proxy"].supported or not caps[
         "proxy.prefer_proxy"].supported  # 代理能力与页面无关
 

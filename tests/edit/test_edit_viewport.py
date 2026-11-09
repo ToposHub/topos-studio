@@ -391,3 +391,50 @@ def test_transport_groups_do_not_overlap_at_small_pane_widths(viewport, qapp, wi
     qapp.processEvents()
     assert footer.left_group.geometry().right() < footer.center_group.geometry().left()
     assert footer.center_group.geometry().right() < footer.right_group.geometry().left()
+
+
+# ── I03：capability 动作回填与分发 ─────────────────────────────────
+
+
+def test_i03_capability_actions_refresh_and_dispatch(viewport, qapp) -> None:
+    from src.features.edit.core.viewer_capabilities import ViewerCapability
+
+    source_mf = viewport._capability_actions["source.match_frame"][0]
+    timeline_mf = viewport._capability_actions["timeline.match_frame"][0]
+    reverse = viewport._capability_actions["source.reverse"][0]
+    assert not source_mf.isEnabled()      # 未回填前默认禁用（不虚亮）
+    assert not timeline_mf.isEnabled()
+    assert not reverse.isEnabled()
+
+    viewport.refresh_capabilities({
+        "match_frame.source_to_timeline": ViewerCapability(
+            action="match_frame.source_to_timeline", supported=True),
+        "match_frame.timeline_to_source": ViewerCapability(
+            action="match_frame.timeline_to_source", supported=False,
+            reason="No timeline is open."),
+        "source.reverse_play": ViewerCapability(
+            action="source.reverse_play", supported=False,
+            reason="No source media is open in the viewer."),
+    })
+
+    assert source_mf.isEnabled()
+    assert not timeline_mf.isEnabled()
+    assert "No timeline is open." in timeline_mf.toolTip()
+    assert not reverse.isEnabled()
+    assert "No source media" in reverse.toolTip()
+
+    # reverse 本地消化（真实 widget 入口在 source_viewer 上）
+    reverse_calls: list[int] = []
+    viewport.source_viewer.play_reverse = lambda: reverse_calls.append(1)  # type: ignore[method-assign]
+    viewport.refresh_capabilities({
+        "source.reverse_play": ViewerCapability(
+            action="source.reverse_play", supported=True)})
+    assert reverse.isEnabled()
+    reverse.trigger()
+    assert reverse_calls == [1]
+
+    # 其余键经宿主信号执行
+    requested: list[str] = []
+    viewport.capability_action_requested.connect(requested.append)
+    source_mf.trigger()
+    assert requested == ["source.match_frame"]

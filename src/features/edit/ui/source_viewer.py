@@ -128,7 +128,8 @@ def _build_time_domain(asset: MediaAsset) -> Optional[SourceTimeDomain]:
                          raw_tc, asset.asset_id)
     return SourceTimeDomain(
         asset_id=asset.asset_id,
-        media_fingerprint=media_fingerprint_for_path(str(asset.path)),
+        media_fingerprint=media_fingerprint_for_path(
+            str(getattr(asset, "path", "") or "")),
         fps=fps, total_frames=total, start_timecode=start_tc)
 
 
