@@ -600,6 +600,26 @@ class DockLayoutMixin:
                 except Exception:
                     logger.exception("Failed to install viewport capability host")
                     self._viewport_capability_host = None
+                # I06（复查计划）：双视图预算执行器——政策（B03）真实作用
+                # 到既有调度面（Timeline 预览分辨率档 + 结构性单在飞/可见性
+                # 守卫的核验记录），诊断可查询。渲染器在进入 Edit 页时懒建，
+                # 经 provider 每次取最新引用。
+                try:
+                    from src.features.edit.ui.viewport_budget_executor import (
+                        ViewportBudgetExecutor,
+                    )
+                    self._viewport_budget_executor = ViewportBudgetExecutor(
+                        viewport=self.edit_viewport,
+                        source_widget=self.source_viewer_widget,
+                        timeline_panel=self.timeline_panel,
+                        coordinator=coordinator,
+                        renderer_provider=(
+                            lambda: getattr(self, "timeline_preview_renderer",
+                                            None)),
+                        parent=self)
+                except Exception:
+                    logger.exception("Failed to install budget executor")
+                    self._viewport_budget_executor = None
 
         # Connect MediaPoolPanel double-click to Source Viewer (P3.1)
         if self._edit_available and self.media_pool_panel is not None:
