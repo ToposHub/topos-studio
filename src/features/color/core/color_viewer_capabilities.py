@@ -120,6 +120,7 @@ class ColorViewerCapabilityContext:
     unmix_designed: bool = False
     mute_service_available: bool = False
     input_alpha_available: bool = False
+    media_has_alpha: bool = False
     freeze_designed: bool = False
 
 
@@ -161,7 +162,10 @@ _REASONS = {
     "unmix_undesigned": "Unmix (transition isolation) is not designed "
                         "yet.",
     "mute_service_missing": "Page-scoped monitor mute is not wired yet.",
-    "alpha_unavailable": "Input alpha channel preview is not available.",
+    "alpha_unavailable": "This media has no alpha channel to preview.",
+    "alpha_preview_missing": "This media has an alpha channel, but an "
+                             "alpha preview display path is not "
+                             "implemented.",
     "freeze_undesigned": "Grade Freeze has no independent snapshot "
                          "semantics yet.",
     "reverse_unsupported": "Reverse playback is not implemented for "
@@ -272,8 +276,11 @@ def evaluate_color_viewer_capabilities(
                      "unmix_undesigned"))
     caps.append(_cap("monitor.mute", context.mute_service_available,
                      "mute_service_missing"))
+    # CV-B05：输入 Alpha 预览——素材有/无 alpha 分开归因（都不会把
+    # qualifier matte 灰度图冒充输入 alpha；显示路径未实现）。
     caps.append(_cap("monitor.alpha", context.input_alpha_available,
-                     "alpha_unavailable"))
+                     "alpha_preview_missing" if context.media_has_alpha
+                     else "alpha_unavailable"))
     caps.append(_cap("grade.freeze", context.freeze_designed,
                      "freeze_undesigned"))
     # Power Window 图形 overlay 的显示开关是既有真实能力（B05 接按钮）。
