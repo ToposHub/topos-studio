@@ -3179,6 +3179,9 @@ class VideoControlBar(QFrame):
         self.current_frame = 0
         self.is_playing = False
         self._fps = 24.0
+        # CV-B02：精确 TC 格式化器（SourceTimecodeContext 域）。None 时
+        # 保持旧 float fps 行为（显示连续性优先，不因域缺席黑屏时间码）。
+        self._timecode_formatter = None
         # In/Out range (None = unset). Drives the slider markers + Clear button.
         self._in_point: int | None = None
         self._out_point: int | None = None
@@ -3281,6 +3284,15 @@ class VideoControlBar(QFrame):
         self._fps = value
         self._update_timecode()
         self._sync_preview_fps_indicator()
+
+    def set_timecode_formatter(self, formatter) -> None:
+        """CV-B02：注入精确 TC 格式化器（TransportTimecodeFormatter）。
+
+        formatter 为 None 时清除，回落旧 float fps 近似（独立视频无
+        metadata、或探测失败时的显式回退）。只影响显示，不发 seek。
+        """
+        self._timecode_formatter = formatter
+        self._update_timecode()
 
     def _sync_preview_fps_indicator(self) -> None:
         """Propagate transport state to the owning preview toolbar."""
@@ -3432,7 +3444,21 @@ class VideoControlBar(QFrame):
             self.label_frame.setText(f"{self.current_frame + 1} / {max(1, self.total_frames)}")
 
     def _update_timecode(self) -> None:
-        """Render the current frame as Edit's HH:MM:SS:FF timecode."""
+        """Render the current frame as Edit's HH:MM:SS:FF timecode.
+
+        CV-B02：有精确域（Rational fps／起始 TC／DF）时用域格式化器，
+        否则保持旧 float 近似。镜像 ``timecode_changed`` 只发最终字符串。
+        """
+        formatter = self._timecode_formatter
+        if formatter is not None:
+            try:
+                text = formatter.format(int(self.current_frame))
+                self.timecode_label.setText(text)
+                self.timecode_changed.emit(text)
+                return
+            except Exception:
+                # 显示层兜底：域格式化异常时退回近似路径，不中断时间码。
+                pass
         fps = max(1.0, float(self._fps))
         total_seconds = max(0, int(self.current_frame)) / fps
         hours = int(total_seconds // 3600)
