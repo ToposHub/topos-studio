@@ -74,16 +74,14 @@ def test_marquee_then_delete_key_removes_all_grid_assets(qapp: Any) -> None:
     assert panel.grid_view is not None
     grid = panel.grid_view
 
-    blank = next(
-        (
-            QPoint(x, y)
-            for y in range(0, grid.viewport().height(), 8)
-            for x in range(0, grid.viewport().width(), 8)
-            if not grid.indexAt(QPoint(x, y)).isValid()
-        ),
-        None,
-    )
-    assert blank is not None
+    # Resolve-style poster gutters are genuine blank space between cards.
+    # Start below and to the right of the entire row, rather than assuming
+    # the first blank pixel in scan order lies beyond every asset.
+    bottom = max(grid.visualRect(panel.asset_model.index(row)).bottom()
+                 for row in range(panel.asset_model.rowCount()))
+    blank = QPoint(grid.viewport().width() - 2,
+                   min(grid.viewport().height() - 2, bottom + 8))
+    assert not grid.indexAt(blank).isValid()
     grid.clearFocus()
 
     viewport = grid.viewport()

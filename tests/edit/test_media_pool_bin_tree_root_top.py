@@ -1,11 +1,4 @@
-"""Tests for the Bins sidebar hiding the implicit Root bin.
-
-The project's root bin is an implicit container (like Finder's volume
-root or DaVinci's Master Bin) and is NOT shown as a node in the sidebar.
-User-created folders whose parent is the root bin are promoted to the
-top level; deeper folders nest under their parents as usual. Smart Bins
-are still appended below the bin tree.
-"""
+"""Resolve-style Master navigation and nested Bins sidebar contracts."""
 
 from __future__ import annotations
 
@@ -58,8 +51,8 @@ class TestRootAsTopLevel:
                 and top.data(0, BinTreeWidget.BIN_ID_ROLE) == "__bins__"
             ), "the 'Bins' section header should no longer exist"
 
-    def test_root_bin_is_hidden(self, qapp) -> None:
-        """The project root bin must NOT appear in the sidebar (implicit)."""
+    def test_master_bin_is_visible(self, qapp) -> None:
+        """Master exposes the existing project root without changing its data."""
         panel, project = _make_panel(qapp)
         bt = panel.bin_tree
         all_ids = set()
@@ -67,38 +60,28 @@ class TestRootAsTopLevel:
             for _d, _btype, bid, _txt in _walk(bt.topLevelItem(i)):
                 if bid:
                     all_ids.add(bid)
-        assert project.root_bin_id not in all_ids, (
-            "the root bin should not be rendered as a sidebar node"
+        assert project.root_bin_id in all_ids, (
+            "Master should be rendered as a sidebar navigation target"
         )
 
-    def test_folders_promoted_to_top_level(self, qapp) -> None:
-        """User folders under Root appear at the top level (Root is implicit)."""
+    def test_folders_are_children_of_master(self, qapp) -> None:
+        """Top-level folders appear immediately below Master."""
         panel, project = _make_panel(qapp)
         bt = panel.bin_tree
-        top_names = []
-        for i in range(bt.topLevelItemCount()):
-            top = bt.topLevelItem(i)
-            if top.data(0, BinTreeWidget.BIN_TYPE_ROLE) == "bin":
-                txt = top.data(0, Qt.ItemDataRole.DisplayRole) or top.text(0)
-                top_names.append(txt)
-        # FolderA and FolderB are promoted to the top level (Nested is under A).
-        assert any("FolderA" in (n or "") for n in top_names)
-        assert any("FolderB" in (n or "") for n in top_names)
+        master = bt._find_bin_item(project.root_bin_id)
+        assert master is not None
+        assert master.text(0) == "Master"
+        assert not master.flags() & Qt.ItemFlag.ItemIsEditable
+        assert not master.flags() & Qt.ItemFlag.ItemIsDragEnabled
+        names = [master.child(i).text(0) for i in range(master.childCount())]
+        assert names == ["FolderA", "FolderB"]
 
     def test_nested_folder_under_parent(self, qapp) -> None:
         """A deeply nested folder is still nested under its parent, not Root."""
         panel, project = _make_panel(qapp)
         bt = panel.bin_tree
-        # Find FolderA among top-level bins.
-        folder_a_item = None
-        for i in range(bt.topLevelItemCount()):
-            top = bt.topLevelItem(i)
-            if (
-                top.data(0, BinTreeWidget.BIN_TYPE_ROLE) == "bin"
-                and "FolderA" in (top.data(0, Qt.ItemDataRole.DisplayRole) or "")
-            ):
-                folder_a_item = top
-                break
+        folder_a_id = next(bid for bid, b in project.bins.items() if b.name == "FolderA")
+        folder_a_item = bt._find_bin_item(folder_a_id)
         assert folder_a_item is not None
         child_names = [
             folder_a_item.child(c).data(0, Qt.ItemDataRole.DisplayRole)
@@ -106,12 +89,12 @@ class TestRootAsTopLevel:
         ]
         assert any("Nested" in (n or "") for n in child_names)
 
-    def test_select_root_bin_returns_false(self, qapp) -> None:
-        """select_bin cannot find the root bin because it's no longer rendered."""
+    def test_select_master_bin_returns_true(self, qapp) -> None:
+        """Selecting Master restores root navigation without emitting twice."""
         panel, project = _make_panel(qapp)
         bt = panel.bin_tree
         ok = bt.select_bin(project.root_bin_id, is_smart_bin=False)
-        assert ok is False
+        assert ok is True
 
     def test_select_nested_bin_restores(self, qapp) -> None:
         """select_bin still finds deeply nested bins."""

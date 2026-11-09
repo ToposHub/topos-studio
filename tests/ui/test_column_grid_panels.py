@@ -195,11 +195,14 @@ def test_media_pool_column_zoom(qapp, clean_column_settings):
         panel._column_grid.apply_columns(3)
         _process_ui(qapp, rounds=3)
         view = panel.grid_view
-        _assert_flush(view, 3)
-        # The delegate's thumb_size (drives paint + sizeHint) follows the
-        # applied icon, 3:2 aspect.
+        # Media Pool hides the scrollbar when empty, reserving its width
+        # in the layout to prevent oscillation at the overflow threshold.
+        reserved = view.verticalScrollBar().sizeHint().width()
+        remaining = view.viewport().width() - reserved - view.gridSize().width() * 3
+        assert 0 <= remaining < 5
+        assert not view.verticalScrollBar().isVisible()
         assert panel.grid_delegate.thumb_size[1] == round(
-            panel.grid_delegate.thumb_size[0] * 2 / 3)
+            panel.grid_delegate.thumb_size[0] * 9 / 16)
         assert panel._thumb_width == view.iconSize().width()
     finally:
         panel.hide()
