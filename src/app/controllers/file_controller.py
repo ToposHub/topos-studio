@@ -5399,6 +5399,9 @@ class FileOpsMixin:
                     f"已加载视频: {os.path.basename(path)} ({info['width']}x{info['height']}, {info['fps']:.2f}fps, {info['total_frames']}帧)",
                     5000
                 )
+            # CV-B02：独立视频按源 metadata 建精确 TC 域（Rational fps／
+            # 起始 TC／DF；探测失败回落 float 显示）。
+            self._refresh_color_timecode_context()
 
             # M4.2: 新素材不能复用旧素材的邻帧窗口（清掉渲染器侧缓存），
             # 并为首个暂停帧调度窗口获取。
@@ -5885,6 +5888,12 @@ class FileOpsMixin:
         refresh_keyframes = getattr(self, "_color_keyframes_host_refresh", None)
         if callable(refresh_keyframes):
             refresh_keyframes()
+        # CV-B02：上下文清除后 TC 域回落（独立视频恒等映射或无媒体清除）。
+        try:
+            self._refresh_color_timecode_context()
+        except Exception:
+            logger.debug("color timecode context refresh on clear failed",
+                         exc_info=True)
         # CV-B01：上下文清除（卸载/离线）后刷新能力回填——无媒体状态下
         # 监看/transport 动作回到诚实禁用。
         try:
@@ -5914,29 +5923,30 @@ class FileOpsMixin:
         return self._clip_total_frames(context["clip"])
 
     def _color_local_frame_to_source_frame(self, frame_number: int) -> int:
+        # CV-B02：映射语义集中到纯领域层（含 effective_source_start 偏移
+        # 与夹取；clip 缺席＝恒等）。行为与旧 inline 路径一致。
+        from src.features.color.core.color_time_domain import (
+            local_to_source_frame,
+        )
         context = self._active_color_timeline_clip_playback_context()
         if not context:
             return int(frame_number)
-        clip = context["clip"]
-        total = max(1, int(getattr(clip, "timeline_duration", 1) or 1))
-        local_frame = max(0, min(int(frame_number), total - 1))
-        effective_start = context.get("effective_source_start")
-        clip_start = int(getattr(clip, "source_start", 0) or 0)
-        offset = int(effective_start) - clip_start if effective_start is not None else 0
-        try:
-            return int(clip.clip_local_to_source_frame(local_frame)) + offset
-        except (AttributeError, TypeError, ValueError):
-            return clip_start + offset + local_frame
+        return local_to_source_frame(
+            context["clip"], frame_number,
+            effective_source_start=context.get("effective_source_start"),
+            total_frames=self._color_timeline_clip_total_frames())
 
     def _color_local_frame_to_timeline_frame(self, frame_number: int) -> int | None:
         """Map Color's clip-local transport coordinate to the shared timeline."""
+        from src.features.color.core.color_time_domain import (
+            local_to_timeline_frame,
+        )
         context = self._active_color_timeline_clip_playback_context()
         if not context:
             return None
-        clip = context["clip"]
-        total = self._color_timeline_clip_total_frames() or 1
-        local_frame = max(0, min(int(frame_number), int(total) - 1))
-        return int(getattr(clip, "timeline_start", 0) or 0) + local_frame
+        return local_to_timeline_frame(
+            context["clip"], frame_number,
+            total_frames=self._color_timeline_clip_total_frames())
 
     def _sync_color_timeline_playhead(self, local_frame: int) -> None:
         """Reflect Color transport movement in the Edit timeline playhead."""
@@ -5954,19 +5964,59 @@ class FileOpsMixin:
             logger.debug("Failed to synchronize Color transport to timeline: %s", exc)
 
     def _color_source_frame_to_local_frame(self, source_frame: int) -> int:
+        from src.features.color.core.color_time_domain import (
+            source_to_local_frame,
+        )
         context = self._active_color_timeline_clip_playback_context()
         if not context:
             return int(source_frame)
-        clip = context["clip"]
-        total = max(1, int(getattr(clip, "timeline_duration", 1) or 1))
-        effective_start = context.get("effective_source_start")
-        clip_start = int(getattr(clip, "source_start", 0) or 0)
-        offset = int(effective_start) - clip_start if effective_start is not None else 0
+        return source_to_local_frame(
+            context["clip"], source_frame,
+            effective_source_start=context.get("effective_source_start"),
+            total_frames=self._color_timeline_clip_total_frames())
+
+    def _refresh_color_timecode_context(self) -> None:
+        """CV-B02：按当前媒体／clip 上下文重建 transport 精确 TC 域。
+
+        源 fps／起始 TC／DF 读取 media metadata（共享 probe 缓存，不解
+        码）；无 metadata／无 fps 时显式回落旧 float 显示（formatter=
+        None），不伪造 24fps 绝对码。timeline clip 场景把 clip-local →
+        source 换算接进格式化器；只影响显示，不发 seek。
+        """
+        bar = getattr(getattr(self, "canvas", None), "video_control_bar", None)
+        if bar is None:
+            return
+        formatter = None
         try:
-            local = int(clip.source_to_clip_local_frame(int(source_frame) - offset))
-        except (AttributeError, TypeError, ValueError):
-            local = int(source_frame) - clip_start - offset
-        return max(0, min(local, total - 1))
+            from src.features.color.core.color_time_domain import (
+                SourceTimecodeContext,
+                TransportTimecodeFormatter,
+            )
+            path = (getattr(self.video_controller, "current_path", None)
+                    or self.current_file_path)
+            metadata = None
+            if path:
+                try:
+                    from src.shared.media.factory import MediaSourceFactory
+                    metadata = MediaSourceFactory.probe_video_metadata(str(path))
+                except Exception:
+                    logger.debug("color timecode metadata probe failed",
+                                 exc_info=True)
+                    metadata = None
+            context = SourceTimecodeContext.from_metadata(metadata)
+            if context is not None:
+                active = self._active_color_timeline_clip_playback_context()
+                local_to_source = (self._color_local_frame_to_source_frame
+                                   if active else None)
+                formatter = TransportTimecodeFormatter(
+                    context, local_to_source)
+        except Exception:
+            logger.debug("color timecode context build failed", exc_info=True)
+            formatter = None
+        try:
+            bar.set_timecode_formatter(formatter)
+        except Exception:
+            logger.debug("color timecode formatter apply failed", exc_info=True)
 
     def _sync_color_timeline_clip_video_controls(self) -> None:
         """Keep Color's transport in clip-local coordinates for timeline clips."""
@@ -6004,6 +6054,8 @@ class FileOpsMixin:
                 bar.on_frame_changed(self._color_source_frame_to_local_frame(current_source))
             except (AttributeError, TypeError, ValueError):
                 pass
+        # CV-B02：切片段后按新 clip 的源域重建精确 TC 显示。
+        self._refresh_color_timecode_context()
 
     def _on_color_video_total_frames_changed(self, total_frames: int) -> None:
         sync_tracker = getattr(self, '_sync_tracker_clip_range', None)
@@ -7374,6 +7426,11 @@ class FileOpsMixin:
             self.current_file_path = None
             self.current_file_is_video = False
             self._clear_color_timeline_clip_playback_context()
+            # CV-B02：卸载后清除精确 TC 域（回空视口不再显示旧素材时码）。
+            try:
+                self.canvas.video_control_bar.set_timecode_formatter(None)
+            except (AttributeError, TypeError):
+                pass
 
     # ------------------------------------------------------------------
     # Qt Event overrides
