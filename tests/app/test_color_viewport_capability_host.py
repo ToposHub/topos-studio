@@ -94,7 +94,7 @@ def test_no_media_disables_monitor_actions_and_transport(host) -> None:
     assert not toolbar.split_btn.isEnabled()
     assert not chrome.transport.btn_play.isEnabled()
     assert not chrome.transport.slider.isEnabled()
-    assert "not designed" in chrome.split_screen_button.toolTip()
+    assert "not wired" in chrome.split_screen_button.toolTip()
     assert host.last_capabilities["view.highlight"].reason
 
 

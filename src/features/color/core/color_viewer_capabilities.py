@@ -153,8 +153,9 @@ _REASONS = {
     "no_timeline_choices": "The project has no timelines to switch.",
     "no_video_controller": "No video playback controller is available.",
     "not_video_presentation": "The current view is not presenting video.",
-    "compare_undesigned": "Multi-view Split Screen comparison is not "
-                          "designed yet; Wipe stays available.",
+    "compare_undesigned": "The compare-session backend is isolated "
+                          "(read-only, bounded), but the grid presenter "
+                          "is not wired yet; Wipe stays available.",
     "proxy_service_missing": "Proxy handling is not wired to the pipeline "
                              "yet.",
     "resolution_service_missing": "Preview resolution policy is not wired "
