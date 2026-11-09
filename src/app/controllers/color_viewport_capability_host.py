@@ -50,6 +50,8 @@ _HANDLED_ACTIONS = frozenset({
     # CV-B05：Power Window 线框 overlay 开关（chrome 按钮→
     # Canvas.set_overlay_visible，真实后端）。
     "overlay.power_windows",
+    # CV-B06：监看静音（chrome mute 按钮 → EditPage Master 总线）。
+    "monitor.mute",
 })
 
 _NO_HANDLER_REASON = "This action has no handler wired yet."
@@ -107,9 +109,22 @@ class ColorViewportCapabilityHost(QObject):
             chrome.capability_refresh_requested.connect(self.refresh)
             # 菜单打开时重新评估：checked 只反映后端实际生效状态。
             toolbar.view_menu.aboutToShow.connect(self.refresh)
+            # CV-B06：监看静音请求路由到 EditPage Master 总线服务。
+            chrome.monitor_mute_toggled.connect(self._on_monitor_mute_requested)
             self._connected = True
         self.refresh()
         return True
+
+    def _on_monitor_mute_requested(self, muted: bool) -> None:
+        """chrome 静音按钮 → 真实服务；失败如实（不虚报 checked）。"""
+        setter = getattr(self._window, "_set_color_monitor_mute", None)
+        if not callable(setter):
+            return
+        try:
+            setter(bool(muted))
+        except Exception:  # noqa: BLE001 —— 服务失败不崩 UI，回填将如实
+            logger.warning("monitor mute request failed", exc_info=True)
+        self.refresh()
 
     def bump_context_revision(self) -> int:
         """切 clip／换素材／换工程时推进；进行中的旧回填将被丢弃。"""
@@ -121,6 +136,8 @@ class ColorViewportCapabilityHost(QObject):
     def _gather_state(self) -> ColorViewerState:
         window = self._window
         page = str(getattr(window, "current_page", "Color") or "Color")
+        mute_active = getattr(window, "_color_monitor_mute_is_active", None)
+        monitor_muted = bool(mute_active()) if callable(mute_active) else False
 
         work_mode = "all"
         get_mode = getattr(window, "_get_work_mode", None)
@@ -190,6 +207,7 @@ class ColorViewportCapabilityHost(QObject):
             split_view_active=bool(getattr(engine, "split_view_active", False)),
             show_mask_mode=bool(getattr(engine, "show_mask_mode", False)),
             overlays_visible=bool(getattr(canvas, "_show_mask_overlays", True)),
+            monitor_muted=monitor_muted,
         )
 
     def _gather_context(self, state: ColorViewerState
@@ -221,6 +239,9 @@ class ColorViewportCapabilityHost(QObject):
             # 无媒体/未探测时为 False）。
             media_has_alpha=bool(getattr(
                 self._window, "_color_media_has_alpha", False)),
+            # CV-B06：监看静音服务在 FileOpsMixin（EditPage Master 总线）。
+            mute_service_available=callable(getattr(
+                self._window, "_set_color_monitor_mute", None)),
         )
 
     # ── 评估与回填 ─────────────────────────────────────────────────────

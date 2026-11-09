@@ -78,6 +78,7 @@ class ColorViewerState:
     split_view_active: bool = False
     show_mask_mode: bool = False
     overlays_visible: bool = True
+    monitor_muted: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -99,6 +100,7 @@ class ColorViewerState:
             "split_view_active": self.split_view_active,
             "show_mask_mode": self.show_mask_mode,
             "overlays_visible": self.overlays_visible,
+            "monitor_muted": self.monitor_muted,
         }
 
 
@@ -274,8 +276,11 @@ def evaluate_color_viewer_capabilities(
                      "bypass_service_missing"))
     caps.append(_cap("monitor.unmix", context.unmix_designed,
                      "unmix_undesigned"))
+    # CV-B06：监看静音（Master 总线）——服务在 EditPage 音频桥上，真实
+    # 接入；checked 反映实际生效状态。
     caps.append(_cap("monitor.mute", context.mute_service_available,
-                     "mute_service_missing"))
+                     "mute_service_missing",
+                     checked=state.monitor_muted))
     # CV-B05：输入 Alpha 预览——素材有/无 alpha 分开归因（都不会把
     # qualifier matte 灰度图冒充输入 alpha；显示路径未实现）。
     caps.append(_cap("monitor.alpha", context.input_alpha_available,

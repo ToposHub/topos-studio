@@ -2046,6 +2046,11 @@ class AudioMixer:
         with QMutexLocker(self._mutex):
             self._master_muted = bool(muted)
 
+    def is_master_muted(self) -> bool:
+        """读取 Master 总线静音状态。线程安全（CV-B06 监看静音回填）。"""
+        with QMutexLocker(self._mutex):
+            return bool(self._master_muted)
+
     def set_master_automation(self, automation: dict) -> None:
         """§3.1: 设置 Master automation（{param: KeyframeTrack}）。线程安全。"""
         with QMutexLocker(self._mutex):
@@ -4404,6 +4409,12 @@ class AudioPlaybackManager(QObject):
         """设置 Master 总线静音。转发到 AudioMixer。"""
         if self._mixer is not None:
             self._mixer.set_master_muted(muted)
+
+    def is_master_muted(self) -> bool:
+        """读取 Master 总线静音（CV-B06 监看静音回填；无 mixer 视为未静音）。"""
+        if self._mixer is None:
+            return False
+        return bool(self._mixer.is_master_muted())
 
     # ==================== Track Management ====================
 

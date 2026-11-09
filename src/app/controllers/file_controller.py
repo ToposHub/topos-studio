@@ -5567,6 +5567,53 @@ class FileOpsMixin:
         except (AttributeError, TypeError):
             return None
 
+    def _set_color_monitor_mute(self, muted: bool) -> bool:
+        """CV-B06：Color 页监看静音（Master 总线，保留先前状态）。
+
+        不改任何轨道/片段 volume；静音时记录用户在 Edit 混音器里的
+        master 状态，解除时恢复原值（不把用户本来静音的总线打开）。
+        音频服务缺席返回 False（诚实拒绝，不虚报成功）。
+        """
+        edit_page = getattr(self, "edit_page", None)
+        setter = getattr(edit_page, "set_monitor_master_muted", None)
+        if not callable(setter):
+            return False
+        try:
+            if muted and not getattr(self, "_color_monitor_muted", False):
+                previous = getattr(edit_page, "monitor_master_muted", None)
+                self._color_monitor_mute_previous = (
+                    previous() if callable(previous) else False)
+            applied = setter(bool(muted))
+        except Exception:
+            logger.warning("color monitor mute apply failed", exc_info=True)
+            return False
+        self._color_monitor_muted = bool(muted) if applied else False
+        if not applied:
+            return False
+        if not muted:
+            # 恢复静音前的 master 状态（默认 False）。
+            previous = getattr(self, "_color_monitor_mute_previous", False)
+            try:
+                if previous:
+                    setter(True)
+            except Exception:
+                logger.debug("color monitor mute previous-state restore failed",
+                             exc_info=True)
+            self._color_monitor_mute_previous = False
+        return True
+
+    def _restore_color_monitor_mute(self) -> None:
+        """离页/关闭时恢复监看静音（Color 作用域不泄漏到 Edit 监看）。"""
+        if not getattr(self, "_color_monitor_muted", False):
+            return
+        try:
+            self._set_color_monitor_mute(False)
+        except Exception:
+            logger.debug("color monitor mute restore failed", exc_info=True)
+
+    def _color_monitor_mute_is_active(self) -> bool:
+        return bool(getattr(self, "_color_monitor_muted", False))
+
     def _color_timeline_preview_is_active(self) -> bool:
         return bool(
             getattr(self, "current_page", None) == "Color"
@@ -6154,6 +6201,10 @@ class FileOpsMixin:
             return
         if not is_playing:
             edit_page.pause_timeline_audio_playback()
+            return
+        # CV-B06：监看静音时不再起声（视频照常；已有桥音频由 master 总线
+        # 静音压住，静音解除后由当前播放状态自然续接）。
+        if getattr(self, "_color_monitor_muted", False):
             return
         start_frame = self._color_video_timeline_frame_for_audio()
         if start_frame is None:

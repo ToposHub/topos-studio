@@ -631,6 +631,11 @@ class PageManagementMixin:
             deactivate_preview = getattr(self, "_deactivate_color_timeline_preview", None)
             if callable(deactivate_preview):
                 deactivate_preview()
+            # CV-B06：Color 页监看静音是页面作用域——离页恢复 Master 总线
+            # 原状（不把 Color 的临时静音泄漏到 Edit 监看）。
+            restore_mute = getattr(self, "_restore_color_monitor_mute", None)
+            if callable(restore_mute):
+                restore_mute()
             return
 
         if page_name == "Composite" and self._composite_available and self.composite_page is not None:
