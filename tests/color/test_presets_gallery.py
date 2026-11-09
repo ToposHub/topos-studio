@@ -353,6 +353,99 @@ class TestCaptureStillSidecar:
         ctrl.on_capture_still()
         assert not os.listdir(ctrl.presets_panel.get_current_folder())
 
+    # ── CV-B07：失败不留半份 preset；视频模式暂停/恢复政策 ──────────
+
+    def test_capture_save_failure_cleans_sidecars_no_half_preset(
+            self, tmp_path, monkeypatch):
+        from src.features.color.core.layer import Layer
+        ctrl = _make_ctrl(tmp_path, monkeypatch, [Layer(name="s")],
+                          _img(seed=11))
+        ctrl.save_router._save_single_asset_project.return_value = False
+        monkeypatch.setattr(
+            "src.app.controllers.layer_controller.QMessageBox", MagicMock())
+        ctrl.on_capture_still()
+        files = os.listdir(ctrl.presets_panel.get_current_folder())
+        assert files == []  # thumb/still/exr 全清，Gallery 无孤儿文件
+        ctrl.status_bar.showMessage.assert_called()
+
+    def _video_ctrl(self, tmp_path, monkeypatch, *, playing: bool,
+                    render_ok: bool):
+        from src.features.color.core.layer import Layer
+        ctrl = _make_ctrl(tmp_path, monkeypatch, [Layer(name="v")],
+                          _img(seed=12))
+        ctrl.current_file_is_video = True
+
+        class _VideoController:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+                self.is_playing = playing
+
+            def is_video_loaded(self) -> bool:
+                return True
+
+            def stop_playback(self) -> None:
+                self.calls.append("stop")
+                self.is_playing = False
+
+            def start_playback(self) -> None:
+                self.calls.append("start")
+
+        ctrl.video_controller = _VideoController()
+        # 真实签名是 tuple[bool, int]；帧本体经引擎（render 成功时已把
+        # 精确帧喂给 ImageEngine，grab_viewport_image 再取）。
+        ctrl._render_current_video_frame_for_grading = (
+            lambda: (bool(render_ok), 42))
+        monkeypatch.setattr(
+            "src.app.controllers.layer_controller.QMessageBox", MagicMock())
+        ctrl.save_router._save_single_asset_project.return_value = render_ok
+        return ctrl
+
+    def test_video_capture_render_failure_restores_playback_writes_nothing(
+            self, tmp_path, monkeypatch):
+        ctrl = self._video_ctrl(tmp_path, monkeypatch, playing=True,
+                                render_ok=False)
+        ctrl.on_capture_still()
+        assert ctrl.video_controller.calls[0] == "stop"
+        assert os.listdir(ctrl.presets_panel.get_current_folder()) == []
+
+    def test_video_capture_restores_playback_only_if_was_playing(
+            self, tmp_path, monkeypatch):
+        from PyQt6.QtTest import QTest
+        ctrl = self._video_ctrl(tmp_path, monkeypatch, playing=True,
+                                render_ok=True)
+        ctrl.on_capture_still()
+        QTest.qWait(160)  # 100ms 恢复定时器
+        assert "start" in ctrl.video_controller.calls
+
+        ctrl2 = self._video_ctrl(tmp_path, monkeypatch, playing=False,
+                                 render_ok=True)
+        ctrl2.on_capture_still()
+        QTest.qWait(160)
+        # 用户本来暂停：抓帧后不擅自恢复播放。
+        assert ctrl2.video_controller.calls == []
+
+    def test_video_capture_uses_requested_frame_not_stale_display(
+            self, tmp_path, monkeypatch):
+        """抓帧经 _render_current_video_frame_for_grading 的精确帧路径，
+        不直接保存显示缓存。"""
+        requested: list[bool] = []
+
+        ctrl = self._video_ctrl(tmp_path, monkeypatch, playing=False,
+                                render_ok=True)
+        original = ctrl._render_current_video_frame_for_grading
+
+        def _record():
+            requested.append(True)
+            return original()
+
+        ctrl._render_current_video_frame_for_grading = _record
+        ctrl.on_capture_still()
+        assert requested == [True]
+        # 精确帧路径已走（render → 引擎 → grab），保存经 SaveRouter。
+        ctrl.save_router._save_single_asset_project.assert_called_once()
+        files = os.listdir(ctrl.presets_panel.get_current_folder())
+        assert any(f.endswith(".thumb.jpg") for f in files)
+
 
 class TestApplyPresetCategories:
     def _preset_with(self, ctrl, exposure, curve):
