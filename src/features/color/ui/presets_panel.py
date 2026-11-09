@@ -92,6 +92,8 @@ class PresetsPanel(QWidget):
         self._bundle_service = GalleryBundleService(self.presets_root)
         self._gallery_capability_host = None
         self._init_ui()
+        # G11：用户级显示偏好（版本化、原子落盘；见 gallery_preferences）
+        self._load_preferences()
         self.scan_presets()
 
     def _ensure_dirs(self) -> None:
@@ -297,6 +299,81 @@ class PresetsPanel(QWidget):
         """Return the currently active folder path."""
         return self._current_folder
 
+    # --- G11: 用户级显示偏好（版本化、原子落盘） ---
+
+    def _load_preferences(self) -> None:
+        """载入偏好并应用到 chrome（zoom/视图模式/排序）；挂保存钩子。"""
+        from src.features.color.core.gallery_preferences import (
+            load_preferences,
+        )
+        prefs = load_preferences(self.presets_root)
+        self._preferences = prefs
+        grid = self._gallery.grid
+        grid.set_thumbnail_width(prefs.thumbnail_width)
+        self.zoom_slider.setValue(prefs.thumbnail_width)
+        self._gallery.set_view_mode(prefs.view_mode)
+        if prefs.sort_desc:
+            from PyQt6.QtCore import Qt as _Qt
+            self._gallery.sort(_Qt.SortOrder.DescendingOrder)
+        # 变更钩子（写盘去抖 500ms；原子写不阻塞交互）
+        from PyQt6.QtCore import QTimer
+        self._prefs_save_timer = QTimer(self)
+        self._prefs_save_timer.setSingleShot(True)
+        self._prefs_save_timer.setInterval(500)
+        self._prefs_save_timer.timeout.connect(self._flush_preferences)
+        self.zoom_slider.valueChanged.connect(self._schedule_prefs_save)
+        chrome = self._gallery
+        for button in (getattr(chrome, "grid_button", None),
+                       getattr(chrome, "list_button", None)):
+            if button is not None:
+                button.toggled.connect(self._schedule_prefs_save)
+        sort_menu = getattr(chrome, "sort_menu", None)
+        if sort_menu is not None:
+            sort_menu.triggered.connect(self._schedule_prefs_save)
+
+    def _schedule_prefs_save(self, *args) -> None:
+        self._prefs_save_timer.start()
+
+    def _flush_preferences(self) -> None:
+        """把当前 chrome 状态收进偏好并原子落盘（失败只记录）。"""
+        from src.features.color.core.gallery_preferences import (
+            GalleryPreferences,
+            save_preferences,
+        )
+        sidebar = getattr(self._gallery, "albums", None)
+        prefs = GalleryPreferences(
+            thumbnail_width=self.zoom_slider.value(),
+            view_mode="list" if self._gallery.grid.list_mode else "grid",
+            sort_desc=self._gallery._sort_order ==
+            Qt.SortOrder.DescendingOrder,
+            sidebar_visible=sidebar.isVisible() if sidebar is not None
+            else True,
+        )
+        self._preferences = prefs
+        if not save_preferences(self.presets_root, prefs):
+            logger.warning("Presets: gallery preferences save failed")
+
+    # --- G11: 外部变化同步（可见性驱动＋索引复用，不轮询磁盘） ---
+
+    def showEvent(self, event) -> None:
+        """面板重新可见时同步外部变化（索引未变则零磁盘成本）。"""
+        super().showEvent(event)
+        if getattr(self, "_gallery", None) is not None:
+            self.scan_presets()
+
+    def _selected_paths(self):
+        return {item.data(Qt.ItemDataRole.UserRole)
+                for item in self.list_widget.selectedItems()}
+
+    def _restore_selection(self, paths) -> None:
+        """重扫后按路径恢复仍在场的选中（外部删除的条目自然清出）。"""
+        if not paths:
+            return
+        for index in range(self.list_widget.count()):
+            item = self.list_widget.item(index)
+            if item.data(Qt.ItemDataRole.UserRole) in paths:
+                item.setSelected(True)
+
     # --- G01: 能力宿主接入（未安装时保持旧的恒启用行为） ---
 
     def set_gallery_capability_host(self, host) -> None:
@@ -330,6 +407,8 @@ class PresetsPanel(QWidget):
         """
         from src.features.color.core.gallery_contracts import GalleryQuery
         from src.features.color.core.preset_meta import matches_query
+        # G11：重扫保留仍在场的选中（外部删除的条目自然清出选择）
+        selected_paths = self._selected_paths()
         self.list_widget.clear()
         self._preset_meta_cache.clear()
         # AUD-25513：缩略图 QPixmap 缓存随目录重扫失效（重命名/删除/新增
@@ -368,6 +447,7 @@ class PresetsPanel(QWidget):
         # Fresh items carry no sizeHint — pin them to the current column
         # cell so the grid stays flush after a rescan.
         self._gallery.after_scan()
+        self._restore_selection(selected_paths)
 
     def _on_search_changed(self, text: str) -> None:
         """搜索词变化：对现有条目重放过滤（不重扫磁盘）。"""
