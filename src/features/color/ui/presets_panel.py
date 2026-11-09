@@ -78,7 +78,13 @@ class PresetsPanel(QWidget):
         from src.features.color.core.gallery_repository import (
             GalleryFolderRepository,
         )
+        from src.features.color.core.gallery_query_service import (
+            GalleryQueryService,
+        )
         self._repository = GalleryFolderRepository(self.presets_root)
+        # G05：扫描经索引服务——目录未变（mtime 一致）时复用已解析条目，
+        # 重扫零磁盘 I/O；rename/delete/capture 都改目录 mtime 自动失效。
+        self._query_service = GalleryQueryService(self._repository)
         # G03：rename/delete 统一走 bundle 事务服务（不再面板内逐文件操作）
         from src.features.color.core.gallery_bundle_service import (
             GalleryBundleService,
@@ -333,7 +339,7 @@ class PresetsPanel(QWidget):
         if not os.path.isdir(folder):
             return
 
-        result = self._repository.query(GalleryQuery(
+        result = self._query_service.query(GalleryQuery(
             album_id=self._repository.album_id_for_folder(folder),
         ))
         for still in result.stills:
