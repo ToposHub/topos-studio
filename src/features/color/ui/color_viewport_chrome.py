@@ -282,6 +282,20 @@ class ColorViewportChrome(QObject):
             self.enhanced_button.accessibleName() + " — " + I18N.tr("viewport.unavailable", "此版本暂不支持"))
         self.toolbar.focus_act.setToolTip(self.enhanced_button.toolTip())
 
+    # ── CV-B05：Power Window overlay 开关（真实后端：set_overlay_visible）──
+
+    def _toggle_power_window_overlays(self, checked: bool) -> None:
+        """显示/隐藏 Power Window 线框；只改显示，不改窗口业务状态。"""
+        setter = getattr(self.canvas, "set_overlay_visible", None)
+        if not callable(setter):
+            return
+        try:
+            setter(bool(checked))
+        except RuntimeError:
+            return  # canvas 已销毁（浮动/关闭竞态）
+        # 诚实回填：请求宿主按真实状态重评（checked 反映引擎侧事实）。
+        self.capability_refresh_requested.emit()
+
     # ── CV-B01：能力注册表回填（enabled/checked/reason 单一来源） ──────
 
     @staticmethod
@@ -433,7 +447,14 @@ class ColorViewportChrome(QObject):
         tools = QHBoxLayout(self.left_tools)
         tools.setContentsMargins(4, 0, 0, 0)
         tools.setSpacing(1)
-        self.power_window_button = _button(self.left_tools, "power_window", I18N.tr("viewport.power_window", "Power Window"), False)
+        self.power_window_button = _button(self.left_tools, "power_window", I18N.tr("viewport.power_window", "Power Window"))
+        # CV-B05：Power Window 图形 overlay 的显示开关（Off/All）。复用
+        # Canvas.set_overlay_visible（形状 overlay 与引擎 matte 预览是
+        # 独立状态；隐藏线框不改窗口 enabled/mask 结果）。Selected-only
+        # 模式未设计，按钮保持两态。
+        self.power_window_button.setCheckable(True)
+        self.power_window_button.toggled.connect(
+            self._toggle_power_window_overlays)
         self.unmix_button = _button(self.left_tools, "unmix", I18N.tr("viewport.unmix", "Unmix"), False)
         self.mute_button = _button(self.left_tools, "mute", I18N.tr("viewport.mute", "Mute"), False)
         for button in (self.power_window_button, self.unmix_button, self.mute_button):

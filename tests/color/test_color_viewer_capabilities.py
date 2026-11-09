@@ -133,7 +133,7 @@ def test_undesigned_services_report_stable_reasons() -> None:
         "monitor.bypass": "not wired",
         "monitor.unmix": "not designed",
         "monitor.mute": "not wired",
-        "monitor.alpha": "not available",
+        "monitor.alpha": "no alpha channel",
         "grade.freeze": "no independent snapshot",
     }
     for action, fragment in expected.items():

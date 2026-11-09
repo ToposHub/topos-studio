@@ -47,6 +47,9 @@ _HANDLED_ACTIONS = frozenset({
     "transport.play", "transport.first", "transport.last",
     "transport.next", "transport.prev", "transport.scrub",
     "transport.loop", "transport.timecode",
+    # CV-B05：Power Window 线框 overlay 开关（chrome 按钮→
+    # Canvas.set_overlay_visible，真实后端）。
+    "overlay.power_windows",
 })
 
 _NO_HANDLER_REASON = "This action has no handler wired yet."
@@ -214,6 +217,10 @@ class ColorViewportCapabilityHost(QObject):
             workspace_service_available=(
                 getattr(toolbar, "_workspace_provider", None) is not None),
             timeline_choice_count=timeline_choice_count,
+            # CV-B05：源 metadata 的 alpha 旗标（CV-B02 探测路径顺手记录；
+            # 无媒体/未探测时为 False）。
+            media_has_alpha=bool(getattr(
+                self._window, "_color_media_has_alpha", False)),
         )
 
     # ── 评估与回填 ─────────────────────────────────────────────────────

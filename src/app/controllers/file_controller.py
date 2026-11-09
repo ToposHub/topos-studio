@@ -5999,6 +5999,8 @@ class FileOpsMixin:
         if bar is None:
             return
         formatter = None
+        # 先归零：探测失败/无媒体时不保留上一素材的 alpha 旗标。
+        self._color_media_has_alpha = False
         try:
             from src.features.color.core.color_time_domain import (
                 SourceTimecodeContext,
@@ -6022,6 +6024,10 @@ class FileOpsMixin:
                                    if active else None)
                 formatter = TransportTimecodeFormatter(
                     context, local_to_source)
+            # CV-B05：顺手记录源 alpha 旗标（能力宿主读它归因 monitor.alpha；
+            # 素材有无 alpha 分开说明，不冒充可实现）。
+            self._color_media_has_alpha = bool(
+                getattr(metadata, "has_alpha", False))
         except Exception:
             logger.debug("color timecode context build failed", exc_info=True)
             formatter = None
