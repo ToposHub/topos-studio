@@ -53,6 +53,7 @@ import math
 import threading
 import time
 import numpy as np
+from dataclasses import replace
 from typing import Any, Optional, Tuple, Callable
 
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
@@ -73,12 +74,62 @@ from src.shared.assets.icon_manager import (
     icon_jump_start, icon_step_back, icon_play, icon_pause, icon_step_forward,
     icon_jump_end, IconColors,
 )
+from src.shared.media.metadata import Rational
 from src.features.edit.core.project import MediaAsset
+from src.features.edit.core.source_time_domain import (
+    SourceMonitorStateStore,
+    SourceTimeDomain,
+    media_fingerprint_for_path,
+    rational_from_float_fps,
+)
+from src.shared.media.timecode import Timecode
 from src.features.edit.ui.preview_view_transform import PreviewViewTransform
 from src.features.edit.ui.edit_style import EDIT_COLORS
 from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
 
 logger = logging.getLogger(__name__)
+
+
+def _build_time_domain(asset: MediaAsset) -> Optional[SourceTimeDomain]:
+    """I02-1：从素材 metadata 建立时间域权威（UI 不探测/解码）。
+
+    权威来源约定：
+
+    - Rational fps：``metadata["fps_rational_num"/"fps_rational_den"]``
+      显式给出时最优先；否则由浮点 ``fps`` 经 ``rational_from_float_fps``
+      映射到最近常见帧率（23.976 → 24000/1001）；
+    - 起始时间码 / DF 类型：``metadata["start_timecode"]``（SMPTE 字符串，
+      DF 由其分隔符决定）；缺失 = 从 00:00:00:00 起；
+    - VFR PTS 索引：异步分析产物，**不在打开时探测**——经
+      ``set_source_time_index`` 在拿到后注入（不阻塞 UI）；
+    - 指纹：path+size+mtime（``media_fingerprint_for_path``），素材换版
+      即失效。
+    """
+    try:
+        fps_value = float(asset.fps or 24.0)
+    except (TypeError, ValueError):
+        fps_value = 24.0
+    metadata = getattr(asset, "metadata", None) or {}
+    num = metadata.get("fps_rational_num")
+    den = metadata.get("fps_rational_den")
+    if (isinstance(num, int) and not isinstance(num, bool) and num > 0
+            and isinstance(den, int) and not isinstance(den, bool) and den > 0):
+        fps = Rational(num, den)
+    else:
+        fps = rational_from_float_fps(fps_value)
+    total = int(asset.total_frames or 1)
+    start_tc: Optional[Timecode] = None
+    raw_tc = metadata.get("start_timecode")
+    if isinstance(raw_tc, str) and raw_tc:
+        try:
+            start_tc = Timecode.from_string(raw_tc, fps)
+        except ValueError:
+            logger.debug("Ignoring unparsable start_timecode %r for %s",
+                         raw_tc, asset.asset_id)
+    return SourceTimeDomain(
+        asset_id=asset.asset_id,
+        media_fingerprint=media_fingerprint_for_path(str(asset.path)),
+        fps=fps, total_frames=total, start_timecode=start_tc)
 
 
 # ── OpenGL bindings via PyOpenGL ──────────────────────────────────────────────
@@ -1657,6 +1708,8 @@ class SourceViewerWidget(QWidget):
     # /open 换源重置/close_source/prepare_for_shutdown 都会翻转它——协调
     # 器据此把权威快照对齐（此前 Source 自然停止会让快照过期）。
     playback_state_changed = pyqtSignal(bool)
+    # I02-4：In/Out 校验拒绝（稳定原因键）——宿主回填状态栏；零状态写入。
+    range_rejected = pyqtSignal(str)
 
     # How many frames behind the expected frame an async GPU result may be
     # and still get displayed (covers background-decode round-trip latency).
@@ -1676,6 +1729,10 @@ class SourceViewerWidget(QWidget):
         self._total_frames: int = 0
         self._fps: float = 24.0
         self._is_playing: bool = False
+        # I02：时间域权威（Rational fps/起始 TC/VFR 索引位/媒体指纹）与
+        # 换源监看状态存储（A→B→A 恢复播放头与 In/Out；换版即作废）
+        self._time_domain: Optional[SourceTimeDomain] = None
+        self._monitor_state_store = SourceMonitorStateStore()
         # I01-2：起播仲裁门（宿主协调器安装；None = 未安装，行为同旧）
         self._playback_gate: Optional[Callable[[str], Optional[str]]] = None
 
@@ -1909,7 +1966,12 @@ class SourceViewerWidget(QWidget):
 
         # Get asset properties
         self._total_frames = asset.total_frames or 1
-        self._fps = asset.fps or 24.0
+        # I02-1/2：时间域是 fps/TC/区间的权威（上一素材的状态已在
+        # close_source 里按指纹保存）。浮点 fps 仅作显示/时钟近似。
+        self._time_domain = _build_time_domain(asset)
+        self._fps = (float(self._time_domain.fps)
+                     if self._time_domain is not None
+                     else float(asset.fps or 24.0))
 
         # Capture media display size from metadata for correct aspect ratio
         self._media_display_width = asset.width
@@ -1920,6 +1982,25 @@ class SourceViewerWidget(QWidget):
         self._in_point = None
         self._out_point = None
         self._is_playing = False
+
+        # I02-3：按 asset_id + 媒体指纹 + 帧数恢复监看状态（换版自动作
+        # 废，不回填假位置）。恢复值经时间域再校验；恢复发生在 generation
+        # 提升（下方）与末尾单次 _load_frame 之间——顺序保证迟到的旧资产
+        # 解码结果不会覆盖恢复帧。
+        if self._time_domain is not None:
+            restored = self._monitor_state_store.restore(
+                asset.asset_id, self._time_domain.media_fingerprint,
+                self._total_frames)
+            if restored is not None:
+                self._current_frame = max(
+                    0, min(int(restored.frame), self._total_frames - 1))
+                if restored.in_point is not None and \
+                        restored.out_point is not None:
+                    check = self._time_domain.validate_range(
+                        restored.in_point, restored.out_point)
+                    if check.ok:
+                        self._in_point = restored.in_point
+                        self._out_point = restored.out_point
 
         # Bump generation on asset change to invalidate all pending GPU results
         self._gpu_generation += 1
@@ -1951,24 +2032,26 @@ class SourceViewerWidget(QWidget):
         self.toolbar.set_enabled(True)
         self.toolbar.update_play_state(False)
         self.viewer.set_playback_state(False, self._fps)
-        self.toolbar.update_in_out_state(None, None)
+        self.toolbar.update_in_out_state(self._in_point, self._out_point)
 
         # Update slider
         self.slider.setRange(0, self._total_frames - 1 if self._total_frames > 1 else 100)
-        self.slider.setValue(0)
-        self.slider.set_in_out_points(None, None)
-        # FE-B05：切源重置范围也要发状态信号，按钮不残留上一素材状态
-        self.range_changed.emit(None, None)
+        self.slider.setValue(self._current_frame)
+        self.slider.set_in_out_points(self._in_point, self._out_point)
+        # FE-B05：切源范围状态信号（I02：可能携带恢复的 In/Out）
+        self.range_changed.emit(self._in_point, self._out_point)
 
         # Update timecode
-        timecode = self._frame_to_timecode(0)
+        timecode = self._frame_to_timecode(self._current_frame)
         duration_tc = self._frame_to_timecode(self._total_frames - 1)
         self.toolbar.set_timecode(timecode, self._fps)
-        self.toolbar.set_frame_number(0)
+        self.toolbar.set_frame_number(self._current_frame)
         self.toolbar.set_duration(duration_tc)
 
-        # Load first frame
-        self._load_frame(0)
+        # Load the (possibly restored) current frame — single request after
+        # the generation bump so stale results from the previous asset or a
+        # pre-restore position can never overwrite the restored frame.
+        self._load_frame(self._current_frame)
 
         # E22: source_opened 信号已删除（无接收者）
 
@@ -2012,6 +2095,15 @@ class SourceViewerWidget(QWidget):
 
     def close_source(self) -> None:
         """Close the current source."""
+        # I02-3：换源/关闭前按指纹保存监看状态（播放头 + In/Out）
+        if self._current_asset is not None and self._time_domain is not None:
+            self._monitor_state_store.save(
+                self._current_asset.asset_id,
+                self._time_domain.media_fingerprint,
+                self._total_frames,
+                frame=self._current_frame,
+                in_point=self._in_point,
+                out_point=self._out_point)
         # Stop playback
         self._playback_timer.stop()
         was_playing = self._is_playing
@@ -2214,8 +2306,39 @@ class SourceViewerWidget(QWidget):
 
     # ==================== Mark In/Out ====================
 
+    def _reject_half_range(self, frame: int, pair: tuple[int, int]) \
+            -> Optional[str]:
+        """I02-4：单端点写入前的校验；返回 None=通过，否则原因键。
+
+        ``pair`` 是"写入后的完整区间"（角色顺序：In 在前）；对侧未设时
+        传 ``(frame, frame)`` 只做边界校验。无时间域（异常注入路径）时
+        退化为纯整数边界/顺序校验，不砖化 mark 点。
+        """
+        if self._current_asset is None:
+            return "no_source_asset"
+        if not isinstance(frame, int) or isinstance(frame, bool):
+            return "range_empty"
+        if frame < 0:
+            return "negative"
+        if frame >= self._total_frames:
+            return "past_end"
+        start, end = pair
+        if start > end:
+            return "in_after_out"
+        if self._time_domain is not None:
+            check = self._time_domain.validate_range(start, end)
+            if not check.ok:
+                return check.reason
+        return None
+
     def set_in_point(self, frame: int) -> None:
-        """Set the In point."""
+        """Set the In point（I02：经时间域校验；拒绝时零写入并回因）。"""
+        out = self._out_point if self._out_point is not None else frame
+        reason = self._reject_half_range(frame, (frame, out))
+        if reason is not None:
+            self.range_rejected.emit(reason)
+            logger.debug("In point rejected (%s): %s", reason, frame)
+            return
         self._in_point = frame
         self.toolbar.update_in_out_state(self._in_point, self._out_point)
         self.slider.set_in_out_points(self._in_point, self._out_point)
@@ -2224,7 +2347,13 @@ class SourceViewerWidget(QWidget):
         logger.debug(f"In point set: {frame}")
 
     def set_out_point(self, frame: int) -> None:
-        """Set the Out point."""
+        """Set the Out point（I02：经时间域校验；拒绝时零写入并回因）。"""
+        start = self._in_point if self._in_point is not None else frame
+        reason = self._reject_half_range(frame, (start, frame))
+        if reason is not None:
+            self.range_rejected.emit(reason)
+            logger.debug("Out point rejected (%s): %s", reason, frame)
+            return
         self._out_point = frame
         self.toolbar.update_in_out_state(self._in_point, self._out_point)
         self.slider.set_in_out_points(self._in_point, self._out_point)
@@ -2856,12 +2985,36 @@ class SourceViewerWidget(QWidget):
     def _frame_to_timecode(self, frame: int) -> str:
         """Convert frame number to timecode (HH:MM:SS:FF).
 
-        FE-B13：改用 interchange.frames_to_timecode（Rational SMPTE，
-        fractional FPS 不再用浮点除/模产生漂移帧号）。
+        I02-2：优先走 ``SourceTimeDomain``（非零源起始 TC 偏移、NDF/DF
+        由起始 TC/帧率决定、Rational SMPTE 无浮点漂移）。素材未建域或
+        超出 SMPTE 24h 域时回落 FE-B13 的 interchange 实现。
         """
+        if self._time_domain is not None:
+            try:
+                return self._time_domain.frame_to_timecode(
+                    int(frame)).to_string()
+            except ValueError:
+                logger.debug(
+                    "frame %s outside SMPTE domain; falling back", frame)
         from src.features.edit.core.interchange import frames_to_timecode
 
         return frames_to_timecode(int(frame), float(self._fps))
+
+    @property
+    def source_time_domain(self) -> Optional[SourceTimeDomain]:
+        """I02-2：当前素材的时间域权威（宿主经此消费帧/秒/TC/校验）。"""
+        return self._time_domain
+
+    def set_source_time_index(self, time_index: Any) -> None:
+        """I02-1：VFR PTS 索引注入（异步取得后调用；打开时不探测）。
+
+        场景切割分析等后台产物到位后注入；本方法只重建时间域，不触发
+        seek/解码，UI 线程零阻塞。
+        """
+        if self._time_domain is None or self._current_asset is None:
+            return
+        self._time_domain = replace(self._time_domain,
+                                    time_index=time_index)
 
     def _load_frame(self, frame: int) -> None:
         """Load and display a specific frame."""

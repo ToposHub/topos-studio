@@ -78,8 +78,17 @@ def test_source_viewer_in_out_shortcuts_are_local_to_its_children(qapp) -> None:
     marked_out: list[int] = []
     widget.in_point_changed.connect(marked_in.append)
     widget.out_point_changed.connect(marked_out.append)
-    widget._current_asset = object()
-    widget._current_frame = 42
+    # I02：mark 点经时间域校验——真实打开素材（合法帧 0..119），I/O 帧 42
+    # 落在域内。此前直接注入 ``_current_asset = object()`` 绕过了校验。
+    asset = MediaAsset(
+        asset_id="asset-iout",
+        path="/tmp/source_iout.mov",
+        media_type="video",
+        display_name="source_iout.mov",
+        metadata={"fps": 24.0, "total_frames": 120, "width": 1920, "height": 1080},
+    )
+    widget.open_asset(asset)
+    widget.seek(42)
 
     assert widget._mark_in_shortcut.context() == Qt.ShortcutContext.WidgetWithChildrenShortcut
     assert widget._mark_out_shortcut.context() == Qt.ShortcutContext.WidgetWithChildrenShortcut
