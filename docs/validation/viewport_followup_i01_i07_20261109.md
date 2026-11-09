@@ -158,6 +158,12 @@ QT_QPA_PLATFORM=offscreen pytest tests/edit/test_viewport_real_media_smoke.py -q
 |---|---|
 | 基线 0db1b1be（无本批改动） | 24 failed / 14775 passed / 119 skipped |
 | 本批 HEAD（首跑） | 18 failed / 14945 passed / 43 skipped |
+| 本批 HEAD（终跑，含两项后续修复） | 16 failed / 14947 passed / 43 skipped（26:19） |
+
+终跑较首跑减少的 2 个失败正是 `save_routing` 与 `poster`——两项修复
+（getattr 守卫、`tests/` sys.path 遮蔽移除）经同配置复验生效；剩余 16 个
+（14 个基线稳定失败 ＋ `ef19_aud`/`quick_export` 两个组合配置顺序敏感项）
+逐项核对全部落在基线归属集合内，与首跑归属完全一致。
 
 逐项 diff 归属：
 
