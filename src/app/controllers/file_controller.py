@@ -1129,6 +1129,16 @@ class FileOpsMixin:
 
         # 将当前文件添加到导出队列
         self.export_panel.add_current_file(path)
+        # CV-B01：新素材进入 Color 视口——推进上下文 revision 并刷新能力
+        # 回填（图片呈现路径下 transport 诚实禁用）。
+        try:
+            from src.app.controllers.color_viewport_capability_host import (
+                bump_color_viewer_context,
+            )
+            bump_color_viewer_context(self)
+        except Exception:
+            logger.debug("color viewer capability refresh after load_image "
+                         "failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Save
@@ -5361,6 +5371,16 @@ class FileOpsMixin:
             # load_video() can be called repeatedly without unload_video(); avoid
             # stacked connections where one click toggles play twice.
             self._connect_video_control_bar()
+            # CV-B01：新视频进入 Color 视口——推进上下文 revision 并刷新
+            # 能力回填（transport/参考/抓帧按真实在场状态启用）。
+            try:
+                from src.app.controllers.color_viewport_capability_host import (
+                    bump_color_viewer_context,
+                )
+                bump_color_viewer_context(self)
+            except Exception:
+                logger.debug("color viewer capability refresh after "
+                             "load_video failed", exc_info=True)
 
             # Standalone video grading is no longer a Color-page mode.  Timeline
             # clips must load only the source media here; their grade comes from
@@ -5838,6 +5858,15 @@ class FileOpsMixin:
             "effective_source_start": effective_source_start,
         }
         self._sync_color_timeline_clip_video_controls()
+        # CV-B01：切片段＝换呈现上下文，推进 revision 并刷新能力回填。
+        try:
+            from src.app.controllers.color_viewport_capability_host import (
+                bump_color_viewer_context,
+            )
+            bump_color_viewer_context(self)
+        except Exception:
+            logger.debug("color viewer capability refresh after clip context "
+                         "set failed", exc_info=True)
 
     def _clear_color_timeline_clip_playback_context(self) -> None:
         self._color_timeline_clip_playback_context = None
@@ -5856,6 +5885,16 @@ class FileOpsMixin:
         refresh_keyframes = getattr(self, "_color_keyframes_host_refresh", None)
         if callable(refresh_keyframes):
             refresh_keyframes()
+        # CV-B01：上下文清除（卸载/离线）后刷新能力回填——无媒体状态下
+        # 监看/transport 动作回到诚实禁用。
+        try:
+            from src.app.controllers.color_viewport_capability_host import (
+                bump_color_viewer_context,
+            )
+            bump_color_viewer_context(self)
+        except Exception:
+            logger.debug("color viewer capability refresh after clip context "
+                         "clear failed", exc_info=True)
 
     def _active_color_timeline_clip_playback_context(self) -> dict | None:
         if getattr(self, "current_page", None) != "Color":

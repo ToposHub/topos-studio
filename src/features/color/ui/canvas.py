@@ -6485,11 +6485,9 @@ class Canvas(QGraphicsView):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        bar = getattr(self, 'color_status_bar', None)
-        if bar is not None and bar.isVisible():
-            bar.move(
-                max(8, (self.viewport().width() - bar.width()) // 2),
-                max(4, self.viewport().height() - bar.height() - 4))
+        # CV-B09：状态栏定位/折叠统一由 update_video_control_bar_position
+        # 裁决（预留 transport 高度的安全区 + 窄窗折叠），此处不再单独
+        # 搬移一份（旧路径不预留 footer，随后又被 update 覆盖）。
 
         # Position viewport controls at top-left
         self.controls.move(10, 10)
@@ -6524,6 +6522,11 @@ class Canvas(QGraphicsView):
         if status is not None and not status.isHidden():
             transport = getattr(self, "video_control_bar", None)
             reserved = transport.height() if transport is not None and not transport.isHidden() else 0
+            # CV-B09：状态栏按实际可用宽度折叠（文字进 tooltip，保留
+            # provider 诊断），再以 transport 之下的安全区定位。
+            apply_width = getattr(status, "apply_available_width", None)
+            if callable(apply_width):
+                apply_width(self.viewport().width())
             status.move(
                 max(8, (self.viewport().width() - status.width()) // 2),
                 max(4, self.viewport().height() - reserved - status.height() - 4))
