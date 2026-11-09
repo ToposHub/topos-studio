@@ -15846,6 +15846,14 @@ class TimelineView(QGraphicsView):
             if payload is None or asset is None:
                 event.ignore()
                 return
+            # I04-2：进入即按可信 metadata 校验（指纹/区间/流）——
+            # 跨工程同名 ID、越界区间、不存在的流在 enter 处即拒。
+            reason = self._validate_source_drag_payload(payload, asset)
+            if reason is not None:
+                self.status_message_requested.emit(
+                    f"Source clip drag rejected: {reason}")
+                event.ignore()
+                return
             self._drag_source_payload = payload
             self._drag_asset_ids = [payload.asset_id]
             self._drag_assets = [asset]
@@ -16327,6 +16335,39 @@ class TimelineView(QGraphicsView):
         finally:
             self._clear_drop_drag()
 
+    def _validate_source_drag_payload(self, payload, asset) -> Optional[str]:
+        """I04-2：载荷 × 当前项目**可信 metadata** 的校验（零写入）。
+
+        - 指纹：载荷声明了指纹（I04 生产端必带）而与当前项目素材指纹
+          不符 → 跨工程同名 ID / 素材换版，整单拒绝；
+        - 源区间：按素材自身 total_frames 校验（不信载荷自报范围）；
+        - 流可用性：video/audio 意图按素材实际流裁决；
+        - 载荷的 source_fps 只是冗余信息——所有时长换算一律用素材
+          metadata 的 fps（忽略任意覆盖）。
+        """
+        from src.features.edit.core.source_time_domain import (
+            media_fingerprint_for_path,
+        )
+        fingerprint = getattr(payload, "media_fingerprint", None)
+        if fingerprint:
+            if fingerprint != media_fingerprint_for_path(str(asset.path)):
+                return ("asset fingerprint mismatch: different media under "
+                        "asset id '%s'" % payload.asset_id)
+        total = asset.total_frames
+        if total and int(payload.out_frame) >= int(total):
+            return ("source range [%d..%d] is past the end of this asset "
+                    "(%d frames)" % (payload.in_frame, payload.out_frame,
+                                     int(total)))
+        has_video = asset.media_type != "audio"
+        has_audio = (asset.media_type == "audio"
+                     or bool(getattr(asset, "audio_channels", None)))
+        intent = payload.stream_intent
+        if intent == "video" and not has_video:
+            return "video stream unavailable for this asset"
+        if intent == "audio" and not has_audio:
+            return "audio stream unavailable for this asset"
+        return None
+
     def _handle_source_clip_drop(self, event: QDropEvent) -> None:
         """VP-B08: Source 拖放（viewer 源区间 + 流意图）→ 单次既有编辑链。
 
@@ -16342,6 +16383,12 @@ class TimelineView(QGraphicsView):
             event.ignore()
             return
         asset = self._drag_assets[0]
+        # I04-2：drop 处复验（enter 后工程/素材可能变化；零写入前置）
+        reason = self._validate_source_drag_payload(payload, asset)
+        if reason is not None:
+            self.status_message_requested.emit(f"Source drop rejected: {reason}")
+            event.ignore()
+            return
         timeline_was_missing = (
             self._timeline is None or self._provisional_timeline)
         if not self._ensure_first_asset_timeline_settings(asset):
@@ -16364,6 +16411,7 @@ class TimelineView(QGraphicsView):
         target_track = None
         if drop.track_id and self._timeline is not None:
             target_track = self._timeline.get_track_by_id(drop.track_id)
+        track_created_here = False
         if target_track is None and drop.create_track and \
                 self._timeline is not None:
             add_track_cmd = AddTrackCommand.create(target_track_type)
@@ -16371,6 +16419,7 @@ class TimelineView(QGraphicsView):
             if add_track_cmd._created_track_id:
                 target_track = self._get_track_by_id(
                     add_track_cmd._created_track_id)
+                track_created_here = True
         if target_track is None:
             self.status_message_requested.emit(
                 "Source drop rejected: no target track")
@@ -16385,12 +16434,15 @@ class TimelineView(QGraphicsView):
         source_range = (int(payload.in_frame), int(payload.out_frame))
         try:
             if self._edit_mode == "insert":
+                # I04-3：insert 分支同样消费流意图（此前直连 insert_clip
+                # 丢掉 intent，video 意图插出配对、audio 意图插出两条）
                 success = self.insert_clip(
                     asset_id=asset.asset_id,
                     in_frame=source_range[0],
                     out_frame=source_range[1],
                     playhead=insert_frame,
                     track_id=target_track.track_id,
+                    stream_intent=payload.stream_intent,
                 )
             else:
                 success = self._add_asset_as_clip(
@@ -16400,6 +16452,16 @@ class TimelineView(QGraphicsView):
         except (ValueError, RuntimeError) as exc:
             self.status_message_requested.emit(f"Source drop rejected: {exc}")
             success = False
+        if not success and track_created_here:
+            # I04-4：建轨后插入失败 → 回滚本次建轨（不留孤立轨与 Undo
+            # 垃圾；此时插入未产生任何命令，栈顶必为建轨命令）
+            try:
+                self.undo()
+                self.status_message_requested.emit(
+                    "Source drop rejected: insert failed; created track "
+                    "was rolled back")
+            except Exception:
+                logger.exception("Failed to roll back created track")
         if success:
             event.acceptProposedAction()
         else:
@@ -18318,6 +18380,7 @@ class TimelineView(QGraphicsView):
         source_fps_den: int | None = None,
         timeline_fps_num: int | None = None,
         timeline_fps_den: int | None = None,
+        stream_intent: str = "av",
     ) -> bool:
         """
         Insert clip at playhead with ripple.
@@ -18333,6 +18396,10 @@ class TimelineView(QGraphicsView):
             source_fps_den: Source fps denominator (optional)
             timeline_fps_num: Timeline fps numerator (optional)
             timeline_fps_den: Timeline fps denominator (optional)
+            stream_intent: I04-3 流意图（"av"/"video"/"audio"）。非 "av"
+                时覆盖 Source Patch/蓝徽章路由：video 只落视频轨，
+                audio 只落音频轨——拖拽意图与监视器插入共享同一条
+                planner 判定，insert 分支不再丢掉意图。
 
         Returns:
             True if successful, False otherwise
@@ -18400,6 +18467,13 @@ class TimelineView(QGraphicsView):
             audio_off = (
                 not patch.audio_enabled
                 or self.source_destination_stream_disabled("audio"))
+            # I04-3：显式流意图（拖拽生产端）覆盖 patch 路由——
+            # "video" 等价音频侧关、"audio" 等价视频侧关，两者共用
+            # 下方的统一判定（配对/单流/拒绝）。
+            if stream_intent == "video":
+                audio_off = True
+            elif stream_intent == "audio":
+                video_off = True
             if video_off and audio_off:
                 logger.warning(
                     "Insert clip blocked: both source patch streams off "
@@ -18445,7 +18519,17 @@ class TimelineView(QGraphicsView):
                         "asset %s", asset_id)
                     return False
                 audio_target = audio_destination
-                if audio_target:
+                # I04-3：拖拽显式命中的音频目标轨优先于蓝徽章重定向
+                # （用户放到哪条轨就插哪条轨；显式非音频轨仍按目的轨走）。
+                explicit_track = (self._timeline.get_track_by_id(track_id)
+                                  if track_id and self._timeline is not None
+                                  else None)
+                explicit_is_audio = (
+                    explicit_track is not None
+                    and getattr(explicit_track, "track_type", "") == "audio")
+                if explicit_is_audio:
+                    pass  # 保留显式目标
+                elif audio_target:
                     track_id = audio_target
                 elif has_audio and video_off:
                     # audio-only 路由但无音频目的轨：明确拒绝而非悄悄
