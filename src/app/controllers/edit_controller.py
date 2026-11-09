@@ -7531,6 +7531,12 @@ class EditControllerMixin:
         if hasattr(self, "unload_video"):
             self.unload_video(save_before_unload=False)
 
+        # I05（复查计划）：Source 释放走**可复用**边界（保存确认已过、
+        # 工程确实要关闭；取消保存/取消关闭在上面已 return False）。
+        # 暂停音频/关解码器/清 asset 与标记/归还显示 slot/清监看状态；
+        # 不用永久 shutdown token——新工程 open_asset 复用同一 widget。
+        self._release_edit_source_viewer()
+
         # Closing a project is an explicit decision to leave it. Its recovery
         # snapshot must not survive into a later open, otherwise a user who
         # chose Discard is prompted to restore those discarded changes. Detach
@@ -7601,6 +7607,36 @@ class EditControllerMixin:
 
         logger.info("Edit project closed")
         return True
+
+    def _release_edit_source_viewer(self) -> None:
+        """I05（复查计划）：工程关闭/切换时可复用的 Source 释放。
+
+        非永久 shutdown：``release_for_project_close`` 暂停播放/音频、
+        关闭解码器（worker 线程内弃置，UI 线程不碰 FFmpeg/GL 句柄）、
+        清 asset/In/Out/监看状态存储并归还显示中的 present slot；在飞
+        GPU/CPU 结果随 generation 递增作废。widget 保持可复用——新工程
+        ``open_asset`` 即新会话。应用退出才使用 ``prepare_for_shutdown``
+        的永久 token（FileOpsMixin.closeEvent 已接线）。
+
+        Deliver 借用中同样安全：借走的是 Program/Timeline，Source 释放
+        只作用于本 widget；浮动 dock 内的 widget 亦经同一所有者清理。
+        """
+        source = getattr(self, "source_viewer_widget", None)
+        if source is not None:
+            try:
+                source.release_for_project_close()
+            except Exception:
+                logger.exception(
+                    "Failed to release source viewer on project close")
+        # I01 快照同步：素材已清（播放态经 close_source 的状态信号回填）
+        coordinator = getattr(self, "_viewport_playback_coordinator", None)
+        if coordinator is not None:
+            try:
+                coordinator.open_source_asset(
+                    None, activate=False, via="project_close")
+            except Exception:
+                logger.debug("source asset bookkeeping on close failed",
+                             exc_info=True)
 
     # ================================================================
     # Phase 2: Explicit Comp Clip handlers

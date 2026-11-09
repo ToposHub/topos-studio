@@ -699,6 +699,10 @@ class FileOpsMixin:
         # covers a media session created before a project was hydrated.
         if getattr(self, "current_file_path", None):
             self.unload_video(save_before_unload=False)
+            # I05：无工程媒体会话关闭同样释放 Source（可复用边界）
+            release = getattr(self, "_release_edit_source_viewer", None)
+            if callable(release):
+                release()
             self.current_file_path = None
             self.current_file_is_video = False
             self.save_router.clear_cache()

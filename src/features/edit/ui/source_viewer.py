@@ -2121,6 +2121,20 @@ class SourceViewerWidget(QWidget):
         self._last_good_qimage = None
         self._last_good_frame = -1
 
+    def release_for_project_close(self) -> None:
+        """I05：工程关闭/切换的可复用 Source 释放边界（非永久 shutdown）。
+
+        与 ``prepare_for_shutdown``（应用退出专用**永久** token，此后
+        widget 不可再起播）不同：本方法释放的是**会话**内容——暂停播放
+        与音频、关闭解码器（worker 线程弃置，UI 线程不碰 FFmpeg 句柄）、
+        清 asset/In/Out/帧缓存/监看状态存储、归还显示中的 present slot；
+        在飞 GPU/CPU 结果随 close_source 的 generation 递增作废，迟到
+        结果不污染新工程。widget 本体保持可复用：新工程 ``open_asset``
+        即开启新会话，照常播放。
+        """
+        self.close_source()
+        self._monitor_state_store.clear()
+
     def close_source(self) -> None:
         """Close the current source."""
         # I02-3：换源/关闭前按指纹保存监看状态（播放头 + In/Out）
