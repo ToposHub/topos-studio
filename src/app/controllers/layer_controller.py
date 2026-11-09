@@ -549,6 +549,13 @@ class LayerOpsMixin:
         加载 .topos 项目文件，将预设的所有图层（含调色参数、曲线、遮罩、非 AI 插件）
         应用到当前图片。AI 蒙版、AI 效果、栅格化数据、画笔遮罩会被剥离。
 
+        G07：目标为 Color 页活动 timeline clip 时，全量应用统一走权威
+        ``_paste_grade_to_clip``（预设全部类别域、单一 undo 命令、工程
+        payload／预览／export 一致；目标层结构保留——与分类应用同一入
+        口同语义）。目标 clip 已删除／命令拒绝时如实回填并**不**回落到
+        引擎层改显示（那正是预览与工程分叉的来源）。standalone 图片/视频
+        保留引擎层路径（单次 history push）。
+
         Args:
             topos_path: .topos 预设文件的路径
         """
@@ -577,6 +584,28 @@ class LayerOpsMixin:
         if not source_layers:
             self.status_bar.showMessage(
                 f"预设无调色数据: {os.path.basename(topos_path)}", 3000)
+            return
+
+        # G07：timeline clip 目标 → 权威命令通道（单 undo，工程一致）。
+        strip = getattr(self, 'color_timeline_clip_strip', None)
+        active_clip_id = getattr(strip, '_active_clip_id', None) if strip else None
+        paste_to_clip = getattr(self, '_paste_grade_to_clip', None)
+        if active_clip_id and callable(paste_to_clip):
+            from src.features.color.core.grade_clipboard import (
+                ALL_CATEGORIES, GradeClipboard,
+            )
+            prepared = self._prepare_preset_layers(source_layers)
+            clipboard = GradeClipboard()
+            clipboard.copy_grade(prepared)
+            if paste_to_clip(active_clip_id, set(ALL_CATEGORIES)):
+                self.status_bar.showMessage(
+                    I18N.tr("status.preset_applied",
+                            f"已应用预设调色: {os.path.splitext(os.path.basename(topos_path))[0]}"),
+                    3000)
+            else:
+                self.status_bar.showMessage(
+                    I18N.tr("presets.apply_target_unavailable",
+                            "目标片段已不可用，未应用调色"), 3000)
             return
 
         # 保存历史状态（用于撤销）
@@ -636,12 +665,15 @@ class LayerOpsMixin:
                     pause_playback()
                 else:
                     self.video_controller.stop_playback()
+            # G07：恢复走 R01 的 generation 守卫收尾（换源/换 clip/关闭
+            # 序列已启动时不重新起播旧源），不再是裸 100ms timer。
+            finish_apply = self._make_capture_playback_restorer(was_playing)
             rendered, _ = self._render_current_video_frame_for_grading()
             if rendered:
                 self.update_canvas(is_new_source=False)
                 self.video_controller.frame_changed.emit(current_frame_num)
             if was_playing:
-                QTimer.singleShot(100, lambda: self.video_controller.start_playback())
+                QTimer.singleShot(100, finish_apply)
         else:
             self.request_render()
 
@@ -1185,6 +1217,11 @@ class LayerOpsMixin:
                     I18N.tr("presets.categories_applied",
                             f"已分类应用预设调色: {os.path.basename(topos_path)}"),
                     3000)
+            else:
+                # G07：目标 clip 已删／命令拒绝——如实回填，不改新目标
+                self.status_bar.showMessage(
+                    I18N.tr("presets.apply_target_unavailable",
+                            "目标片段已不可用，未应用调色"), 3000)
             return
 
         # 2. standalone：引擎层应用（单次 history push = 单一 undo）
@@ -1198,6 +1235,9 @@ class LayerOpsMixin:
             was_playing = bool(getattr(video_controller, 'is_playing', False))
             if was_playing:
                 video_controller.stop_playback()
+        # G07：恢复走 generation 守卫收尾（同全量应用／抓帧），不再裸
+        # 100ms timer 在用户已暂停/换源后重新起播。
+        finish_apply = self._make_capture_playback_restorer(was_playing)
         if not is_video_mode and getattr(engine, 'img_full_original', None) is not None:
             engine.history.push_state(
                 engine.img_full_original, engine.layers,
@@ -1207,7 +1247,7 @@ class LayerOpsMixin:
             engine.layers, categories=target_categories)
         if not applied:
             if was_playing:
-                QTimer.singleShot(100, video_controller.start_playback)
+                QTimer.singleShot(100, finish_apply)
             return
 
         # LUT / warper 辅助纹理重新提交（粘贴可能更换了路径/网格）
@@ -1252,7 +1292,7 @@ class LayerOpsMixin:
             if callable(request_render):
                 request_render()
         if was_playing:
-            QTimer.singleShot(100, video_controller.start_playback)
+            QTimer.singleShot(100, finish_apply)
         self.status_bar.showMessage(
             I18N.tr("presets.categories_applied",
                     f"已分类应用预设调色: {os.path.basename(topos_path)}"), 3000)
