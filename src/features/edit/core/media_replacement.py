@@ -19,6 +19,9 @@ _SOURCE_FIELDS = frozenset({
     "media_backend", "media_identity", "color_primaries", "color_transfer",
     "color_matrix", "color_range", "is_hdr", "camera", "lens", "iso",
     "shutter", "aperture", "date", "error", "pts_index", "source_pts_index",
+    # P0 完整 Clip 元数据：时间码派生字段与逐轨音频同样属于来源域，
+    # 换源后必须随新探测整体替换，旧值不得存活。
+    "timecode_fps", "timecode_drop_frame", "audio_tracks",
 })
 
 

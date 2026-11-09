@@ -742,8 +742,10 @@ class MediaSourceFactory:
                             fps_value = float(stream.base_rate)
                         fps_rational = Rational.from_float(fps_value, max_den=1001)
 
-                        # 总帧数
-                        total_frames = 0
+                        # 总帧数。快速探测没有 duration 兜底路径，未知时
+                        # 必须保持 None——0 会被导入层当作"确实 0 帧"持久
+                        # 化，与"未知"不可区分（P0 元数据诚实性）。
+                        total_frames = None
                         if hasattr(stream, 'frames') and stream.frames:
                             total_frames = stream.frames
 

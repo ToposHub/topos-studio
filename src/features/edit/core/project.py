@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any, Optional, ClassVar
 import uuid
 import time
 import os
+import re
 import logging
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
@@ -276,6 +277,43 @@ class MediaAsset:
         if self.media_type == "image":
             return None
         return self.metadata.get("total_frames")
+
+    # P0 完整 Clip 元数据：来源时间码/音频技术字段类型化读取。
+    # 未知值保持 None——绝不以 0/"" 伪造。
+
+    @property
+    def timecode_start(self) -> str | None:
+        """起始时间码字符串（HH:MM:SS[;:]FF），未知为 None"""
+        return self.metadata.get("timecode")
+
+    @property
+    def timecode_fps(self) -> int | None:
+        """时间码标称帧率（如 30000/1001 → 30），未知为 None"""
+        return self.metadata.get("timecode_fps")
+
+    @property
+    def timecode_drop_frame(self) -> bool | None:
+        """是否丢帧时间码（'；' 分隔），未知为 None"""
+        return self.metadata.get("timecode_drop_frame")
+
+    @property
+    def audio_tracks(self) -> tuple:
+        """逐轨音频元数据（name/codec/sample_rate/channel_count/
+        channel_layout/bits_per_sample/sample_format），无音频为空元组"""
+        tracks = self.metadata.get("audio_tracks")
+        if isinstance(tracks, (list, tuple)):
+            return tuple(tracks)
+        return ()
+
+    @property
+    def audio_bits_per_sample(self) -> int | None:
+        """首轨采样位深（PCM 采样格式位宽），压缩/未知为 None"""
+        info = self.metadata.get("audio_info")
+        if isinstance(info, dict):
+            bits = info.get("bits_per_sample")
+            if isinstance(bits, int) and bits > 0:
+                return bits
+        return None
 
     @property
     def width(self) -> int | None:
@@ -4343,20 +4381,87 @@ class EditProject:
 # 辅助函数：素材元数据探测
 # ================================================================
 
-def _probe_audio_info(path: str) -> Optional[dict[str, Any]]:
-    """
-    探测音频流信息（内部辅助函数）。
+# PCM 编码名内嵌位深（pcm_s24le/pcm_s16be/pcm_u8…）→ 位深捕获组。
+_PCM_BITS_FROM_CODEC_RE = re.compile(r"^pcm_[su](\d+)(?:le|be)?$")
 
-    使用 PyAV 打开文件并探测音频流元数据：
-    - channels: 声道数 (1=mono, 2=stereo, etc.)
-    - sample_rate: 采样率 (Hz)
-    - codec: 音频编码器名称
+
+def _probe_audio_track_info(stream: Any) -> dict[str, Any]:
+    """单条音频流 → audio_tracks 元素（P0 完整 Clip 元数据）。
+
+    与 Topos 源逐轨探测（topos_source.audio_tracks）同构：
+    name/codec/sample_rate/channel_count/channel_layout/bits_per_sample/
+    sample_format；压缩编码无明确位深时 bits_per_sample 为 None。
+    """
+    codec_name = 'unknown'
+    try:
+        if getattr(stream, 'codec', None):
+            codec_name = stream.codec.name or 'unknown'
+    except Exception:  # noqa: BLE001 — 损坏流的 codec 访问可能抛错
+        codec_name = 'unknown'
+    channels = None
+    try:
+        channels = int(stream.channels) if getattr(stream, 'channels', None) else None
+    except Exception:  # noqa: BLE001
+        channels = None
+    sample_rate = None
+    try:
+        sample_rate = int(stream.rate) if getattr(stream, 'rate', None) else None
+    except Exception:  # noqa: BLE001
+        sample_rate = None
+    channel_layout = None
+    try:
+        if getattr(stream, 'layout', None):
+            channel_layout = str(stream.layout.name)
+    except Exception:  # noqa: BLE001
+        channel_layout = None
+    # 采样格式（如 's16'/'s32'/'fltp'）与位深：PCM 编码名内嵌真实位深
+    # （pcm_s24le→24，即便 mov 容器以 s32 打包）；整数采样格式的容器位宽
+    # 兜底；浮点格式（'flt*'，含 aac→fltp）不代表源位深，保持 None——
+    # 不用 32 冒充"32-bit"整数位深。
+    sample_format = None
+    bits_per_sample = None
+    try:
+        fmt = getattr(stream, 'format', None)
+        if fmt is not None and getattr(fmt, 'name', None):
+            sample_format = str(fmt.name)
+    except Exception:  # noqa: BLE001
+        sample_format = None
+    pcm_bits = _PCM_BITS_FROM_CODEC_RE.match(codec_name or '')
+    if pcm_bits:
+        bits_per_sample = int(pcm_bits.group(1))
+    elif sample_format and sample_format[0] in ('s', 'u'):
+        try:
+            bits = getattr(fmt, 'bits', None)
+            if isinstance(bits, int) and bits > 0:
+                bits_per_sample = bits
+        except Exception:  # noqa: BLE001
+            bits_per_sample = None
+    return {
+        "name": getattr(stream, 'metadata', {}).get('title') or f"Audio {stream.index}",
+        "codec": codec_name,
+        "sample_rate": sample_rate,
+        "channel_count": channels,
+        "channel_layout": channel_layout,
+        "bits_per_sample": bits_per_sample,
+        "sample_format": sample_format,
+    }
+
+
+def _probe_av_details(path: str) -> Optional[dict[str, Any]]:
+    """
+    PyAV 单次打开探测：音频逐轨信息 + 容器拍摄日期（内部辅助函数）。
+
+    返回 dict（可能为空音频）：
+    - audio_info: 首轨视图（channels/sample_rate/codec/channel_layout/
+      duration_seconds/bits_per_sample/sample_format），无音频流为 None
+    - audio_tracks: 逐轨列表（P0 完整 Clip 元数据；多轨/分离声道素材）
+    - creation_time: 容器 creation_time 标签（ISO 字符串）或 None
 
     Args:
         path: 媒体文件路径
 
     Returns:
-        audio_info 字典，或 None（无音频流）
+        探测结果字典；打开失败返回 None
     """
     try:
         import av
@@ -4364,53 +4469,57 @@ def _probe_audio_info(path: str) -> Optional[dict[str, Any]]:
         container = None
         try:
             container = av.open(path)
-            audio_stream = None
+            audio_streams = [
+                stream for stream in container.streams if stream.type == 'audio'
+            ]
 
-            # 查找音频流
-            for stream in container.streams:
-                if stream.type == 'audio':
-                    audio_stream = stream
-                    break
+            audio_tracks = [_probe_audio_track_info(s) for s in audio_streams]
 
-            if audio_stream is None:
-                return None
-
-            # 提取音频信息
-            channels = audio_stream.channels if hasattr(audio_stream, 'channels') else 2
-            sample_rate = audio_stream.rate if hasattr(audio_stream, 'rate') else 48000
-            codec_name = audio_stream.codec.name if audio_stream.codec else 'unknown'
-            # §4.1: 提取声道布局（PyAV layout，如 'stereo'/'5.1'/'7.1'/'mono'）
-            channel_layout = None
-            try:
-                if hasattr(audio_stream, 'layout'):
-                    channel_layout = str(audio_stream.layout.name)
-            except Exception:
-                channel_layout = None
-
-            # 时长（秒）：音频素材的 duration_seconds 由 MediaAsset.duration_seconds
-            # 直接读取；缺失时时间线 clip 会退化为 5 秒图像默认值，音频播放
-            # 5 秒后被当作"到达终点"停止。优先 stream.duration，回退 container。
-            duration_seconds: float | None = None
-            try:
-                if audio_stream.duration is not None and audio_stream.time_base:
-                    duration_seconds = float(audio_stream.duration * audio_stream.time_base)
-            except Exception:
-                duration_seconds = None
-            if duration_seconds is None:
+            audio_info: Optional[dict[str, Any]] = None
+            if audio_streams:
+                first = audio_streams[0]
+                base = _probe_audio_track_info(first)
+                # 时长（秒）：音频素材的 duration_seconds 由
+                # MediaAsset.duration_seconds 直接读取；缺失时时间线 clip
+                # 会退化为 5 秒图像默认值。优先 stream.duration，回退
+                # container。
+                duration_seconds: float | None = None
                 try:
-                    if container.duration is not None:
-                        duration_seconds = float(container.duration / av.time_base)
-                except Exception:
+                    if first.duration is not None and first.time_base:
+                        duration_seconds = float(first.duration * first.time_base)
+                except Exception:  # noqa: BLE001
                     duration_seconds = None
-            if duration_seconds is not None and duration_seconds < 0:
-                duration_seconds = None
+                if duration_seconds is None:
+                    try:
+                        if container.duration is not None:
+                            duration_seconds = float(container.duration / av.time_base)
+                    except Exception:  # noqa: BLE001
+                        duration_seconds = None
+                if duration_seconds is not None and duration_seconds < 0:
+                    duration_seconds = None
+                audio_info = {
+                    "channels": base["channel_count"] if base["channel_count"] else 2,
+                    "sample_rate": base["sample_rate"] if base["sample_rate"] else 48000,
+                    "codec": base["codec"],
+                    "channel_layout": base["channel_layout"],  # §4.1: 声道布局（供 downmix 决策）
+                    "duration_seconds": duration_seconds,
+                    "bits_per_sample": base["bits_per_sample"],
+                    "sample_format": base["sample_format"],
+                }
+
+            creation_time: Optional[str] = None
+            try:
+                meta = getattr(container, 'metadata', None) or {}
+                raw = meta.get('creation_time')
+                if isinstance(raw, str) and raw.strip():
+                    creation_time = raw.strip()
+            except Exception:  # noqa: BLE001
+                creation_time = None
 
             return {
-                "channels": channels,
-                "sample_rate": sample_rate,
-                "codec": codec_name,
-                "channel_layout": channel_layout,  # §4.1: 声道布局（供 downmix 决策）
-                "duration_seconds": duration_seconds,
+                "audio_info": audio_info,
+                "audio_tracks": audio_tracks,
+                "creation_time": creation_time,
             }
         finally:
             # AUD-17107：探测中途抛异常（如损坏文件上 audio_stream.codec
@@ -4419,8 +4528,47 @@ def _probe_audio_info(path: str) -> Optional[dict[str, Any]]:
                 container.close()
 
     except Exception as e:
-        logger.warning(f"Failed to probe audio info: {path}, {e}")
+        logger.warning(f"Failed to probe av details: {path}, {e}")
         return None
+
+
+def _probe_audio_info(path: str) -> Optional[dict[str, Any]]:
+    """
+    探测音频流信息（首轨视图；兼容入口）。
+
+    Args:
+        path: 媒体文件路径
+
+    Returns:
+        audio_info 字典，或 None（无音频流/探测失败）
+    """
+    details = _probe_av_details(path)
+    if details is None:
+        return None
+    return details.get("audio_info")
+
+
+def _derive_timecode_flags(
+    timecode: Optional[str],
+    fps_rational: Any,
+) -> tuple[Optional[int], Optional[bool]]:
+    """起始时间码 → (timecode_fps, timecode_drop_frame)。
+
+    Topos 源在 VideoMetadata 上直接给出两者；FFmpeg 源只有字符串标签，
+    这里按行业约定推导：最后分隔符为 ';' 即丢帧（DF），标称整数帧率
+    取 round(fps)。无时间码时保持 (None, None)——不伪造 00:00:00:00。
+    """
+    if not timecode:
+        return (None, None)
+    drop_frame: Optional[bool] = ';' in timecode
+    tc_fps: Optional[int] = None
+    try:
+        fps_value = float(fps_rational)
+        if fps_value > 0:
+            tc_fps = int(round(fps_value))
+    except (TypeError, ValueError, ZeroDivisionError):
+        tc_fps = None
+    return (tc_fps, drop_frame)
 
 
 def probe_media_metadata(path: str) -> dict[str, Any]:
@@ -4542,6 +4690,11 @@ def probe_media_metadata(path: str) -> dict[str, Any]:
             video_meta = MediaSourceFactory.probe_video_metadata(path)
             if video_meta is not None:
                 source_fps = video_meta.fps
+                # P0 完整 Clip 元数据：时长优先 ticks 精确值（Topos 源），
+                # 其次 total_frames/fps 换算；两者都缺保持 None（不用 0）。
+                duration_seconds = video_meta.duration_seconds
+                if duration_seconds is None and source_fps and video_meta.total_frames:
+                    duration_seconds = video_meta.total_frames / float(source_fps)
                 metadata = {
                     "width": video_meta.width,
                     "height": video_meta.height,
@@ -4549,7 +4702,7 @@ def probe_media_metadata(path: str) -> dict[str, Any]:
                     "fps_num": getattr(source_fps, "num", None),
                     "fps_den": getattr(source_fps, "den", None),
                     "total_frames": video_meta.total_frames,
-                    "duration_seconds": video_meta.total_frames / float(source_fps) if source_fps and video_meta.total_frames else None,
+                    "duration_seconds": duration_seconds,
                     "codec": video_meta.codec_name,
                     # 档位/profile（topos 源 = 'Topos 422/4444/4444 XQ'；
                     # FFmpeg 源 = 'HQ'/'Standard' 等）——Info 面板显示
@@ -4567,6 +4720,22 @@ def probe_media_metadata(path: str) -> dict[str, Any]:
                     "format": ext[1:].upper(),
                     "file_size": os.path.getsize(path),
                 }
+                # P0 来源时间码：timecode_fps/drop_frame 与字符串同源落盘。
+                # Topos 源（tmcd 轨）由 VideoMetadata 直接给出；FFmpeg 源
+                # 只有标签字符串，按 ';' 分隔符与 fps 推导。无时间码时
+                # 保持缺失，不伪造 00:00:00:00。
+                tc_fps = getattr(video_meta, "timecode_fps", None)
+                tc_drop = getattr(video_meta, "timecode_drop_frame", None)
+                if video_meta.timecode and (tc_fps is None or tc_drop is None):
+                    derived_fps, derived_drop = _derive_timecode_flags(
+                        video_meta.timecode, source_fps,
+                    )
+                    if tc_fps is None:
+                        tc_fps = derived_fps
+                    if tc_drop is None:
+                        tc_drop = derived_drop
+                metadata["timecode_fps"] = tc_fps
+                metadata["timecode_drop_frame"] = tc_drop
                 # T-P0-10：持久化安全的 media identity（backend + 内容签名）。
                 # 只存可重建字段（size/mtime_ns），不存机器绝对 dylib 路径——
                 # 工程 reload 时可据此判断 metadata 是否仍可信。
@@ -4613,11 +4782,22 @@ def probe_media_metadata(path: str) -> dict[str, Any]:
                 except Exception as e:  # noqa: BLE001 — 索引失败不阻断导入
                     logger.warning(f"VFR PTS index build failed for {path}: {e}")
 
-                # 探测音频流信息（修复 V-05/V-09 问题）
-                audio_info = _probe_audio_info(path)
-                if audio_info:
-                    metadata["audio_info"] = audio_info
-                    logger.debug(f"Video has audio: {path}, channels={audio_info.get('channels')}, sample_rate={audio_info.get('sample_rate')}")
+                # 探测音频流信息（修复 V-05/V-09 问题）+ P0 补齐：
+                # 逐轨 audio_tracks（分离声道/多轨素材）、采样格式与位深、
+                # 容器拍摄日期（creation_time → metadata["date"]，与图片
+                # EXIF 日期同键）。
+                av_details = _probe_av_details(path)
+                if av_details is not None:
+                    audio_info = av_details.get("audio_info")
+                    if audio_info:
+                        metadata["audio_info"] = audio_info
+                        logger.debug(f"Video has audio: {path}, channels={audio_info.get('channels')}, sample_rate={audio_info.get('sample_rate')}")
+                    audio_tracks = av_details.get("audio_tracks")
+                    if audio_tracks:
+                        metadata["audio_tracks"] = audio_tracks
+                    creation_time = av_details.get("creation_time")
+                    if creation_time:
+                        metadata["date"] = creation_time
             else:
                 metadata = {"format": ext[1:].upper(), "error": "probe failed"}
         except Exception as e:
