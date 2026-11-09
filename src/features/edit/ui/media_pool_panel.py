@@ -3,7 +3,7 @@ Media Pool Panel - Project-level media asset management.
 
 This panel displays imported media assets, bins, and timeline sequences.
 Provides file import via button click, drag-and-drop, and context menu.
-Features two view modes: List View (detailed metadata) and Grid View (thumbnails).
+Provides List, Thumbnail and Metadata presentations with shared selection.
 
 Features:
 - List View: File name | Type | Duration | Resolution | FPS | Codec
@@ -17,6 +17,7 @@ Features:
 from __future__ import annotations
 
 import logging
+import math
 import os
 import uuid
 import platform
@@ -43,10 +44,12 @@ from PyQt6.QtGui import (
     QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent,
     QIcon, QPainter, QColor, QBrush, QPen, QPixmap, QFont,
     QLinearGradient, QDrag, QPolygon, QKeyEvent, QPainterPath, QKeySequence,
-    QShortcut,
+    QShortcut, QActionGroup, QFontMetrics,
 )
 import qtawesome as qta
 
+from src.shared.ui.style_sheet import C
+from .media_pool_icons import pool_icon
 from src.shared.i18n.i18n import I18N
 from src.shared.media.thumbnail_provider import ThumbnailProvider
 from src.shared.assets.icon_manager import icon_grid, icon_list, icon_folder, icon_smart, icon_search, icon_arrow_up, icon_arrow_down, icon_warning, icon_video_track, icon_audio_track, icon_image
@@ -550,6 +553,7 @@ class ViewMode(Enum):
     """视图模式枚举"""
     LIST = auto()  # 列表视图（详细元数据）
     GRID = auto()  # 网格视图（缩略图）
+    METADATA = auto()  # 缩略图与日志元数据
 
 
 class ThumbnailSize(Enum):
@@ -566,6 +570,7 @@ class ThumbnailSize(Enum):
 
 class SearchFilterMode(Enum):
     """搜索过滤模式枚举"""
+    ALL_FIELDS = "all_fields"
     FILENAME = "filename"
     CODEC = "codec"
     RESOLUTION = "resolution"
@@ -593,32 +598,28 @@ class SearchLineEdit(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        # 过滤模式下拉
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItem(
-            I18N.tr("edit.media_pool.filter_filename", "Name"), SearchFilterMode.FILENAME.value
-        )
-        self.filter_combo.addItem(
-            I18N.tr("edit.media_pool.filter_codec", "Codec"), SearchFilterMode.CODEC.value
-        )
-        self.filter_combo.addItem(
-            I18N.tr("edit.media_pool.filter_resolution", "Resolution"), SearchFilterMode.RESOLUTION.value
-        )
-        self.filter_combo.addItem(
-            I18N.tr("edit.media_pool.filter_fps", "FPS"), SearchFilterMode.FPS.value
-        )
-        self.filter_combo.setFixedWidth(85)
-        self.filter_combo.setFixedHeight(24)
-        layout.addWidget(self.filter_combo)
-
-        # 搜索输入框
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(8)
         self.line_edit = QLineEdit()
-        self.line_edit.setPlaceholderText(
-            I18N.tr("edit.media_pool.search_placeholder", "Search assets...")
-        )
+        self.line_edit.setPlaceholderText(I18N.tr("edit.media_pool.search", "Search"))
         self.line_edit.setFixedHeight(24)
         self.line_edit.setClearButtonEnabled(True)
+        self.line_edit.setAccessibleName(I18N.tr("edit.media_pool.search", "Search"))
         layout.addWidget(self.line_edit, stretch=1)
+        layout.addWidget(QLabel(I18N.tr("edit.media_pool.filter_by", "Filter by")))
+        self.filter_combo = QComboBox()
+        for key, label, mode in (
+            ("filter_all_fields", "All Fields", SearchFilterMode.ALL_FIELDS),
+            ("filter_filename", "File Name", SearchFilterMode.FILENAME),
+            ("filter_codec", "Codec", SearchFilterMode.CODEC),
+            ("filter_resolution", "Resolution", SearchFilterMode.RESOLUTION),
+            ("filter_fps", "FPS", SearchFilterMode.FPS),
+        ):
+            self.filter_combo.addItem(I18N.tr(f"edit.media_pool.{key}", label), mode.value)
+        self.filter_combo.setCurrentIndex(1)
+        self.filter_combo.setMinimumWidth(100)
+        self.filter_combo.setFixedHeight(24)
+        layout.addWidget(self.filter_combo)
 
         # 连接信号
         self.line_edit.textChanged.connect(self._on_text_changed)
@@ -669,6 +670,7 @@ class BinTreeWidget(QTreeWidget):
     create_smart_bin_requested = pyqtSignal()
     delete_smart_bin_requested = pyqtSignal(str)  # bin_id
     create_bin_requested = pyqtSignal()
+    create_bin_in_requested = pyqtSignal(str)  # explicit parent for tree context actions
     delete_bin_requested = pyqtSignal(str)  # bin_id
     rename_bin_requested = pyqtSignal(str)  # bin_id
 
@@ -793,12 +795,14 @@ class BinTreeWidget(QTreeWidget):
         if project is None:
             return
 
-        # ===== Regular Bins: user-created folders at the top level =====
-        # The project's root bin is the implicit container (like Finder's
-        # volume root or DaVinci's Master Bin) and is NOT shown as a node.
-        # Bins whose parent is the root bin (or legacy None) are promoted to
-        # the top level; deeper bins nest under their parents as usual.
-        # Smart Bins are appended below the bin tree.
+        # Resolve's Master node maps to the existing implicit root bin.
+        master = QTreeWidgetItem(self)
+        master.setText(0, I18N.tr("edit.media_pool.master", "Master"))
+        master.setData(0, self.BIN_ID_ROLE, project.root_bin_id)
+        master.setData(0, self.BIN_TYPE_ROLE, "bin")
+        master.setExpanded(True)
+        master.setSizeHint(0, QSize(0, 29))
+        master.setFlags(master.flags() & ~Qt.ItemFlag.ItemIsDragEnabled & ~Qt.ItemFlag.ItemIsEditable)
         root_id = project.root_bin_id
         children_by_parent: dict[str | None, list[str]] = {}
         for bin_id, bin_obj in project.bins.items():
@@ -828,14 +832,14 @@ class BinTreeWidget(QTreeWidget):
                 return
             visited.add(bin_id)
             bin_obj = project.bins[bin_id]
-            item = QTreeWidgetItem(parent_item) if parent_item is not None else QTreeWidgetItem(self)
+            item = QTreeWidgetItem(parent_item if parent_item is not None else master)
             # Display text carries the asset count; the EditRole stores the
             # plain name so inline editing only changes the name (not count).
-            item.setData(0, Qt.ItemDataRole.DisplayRole, f"{bin_obj.name} ({len(bin_obj.asset_ids)})")
+            item.setData(0, Qt.ItemDataRole.DisplayRole, bin_obj.name)
             item.setData(0, Qt.ItemDataRole.EditRole, bin_obj.name)
             item.setData(0, self.BIN_ID_ROLE, bin_id)
             item.setData(0, self.BIN_TYPE_ROLE, "bin")
-            item.setIcon(0, icon_folder())
+
             # Every visible bin is user-created → editable and draggable
             # (reparent into another bin). The root bin never reaches here.
             item.setFlags(
@@ -902,40 +906,8 @@ class BinTreeWidget(QTreeWidget):
                 item.setIcon(0, icon_smart())
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
 
-    def contextMenuEvent(self, event) -> None:  # noqa: N802
-        """Smart Bin 区块右键菜单：新建（区块头）/ 删除（用户自建项）。"""
-        item = self.itemAt(event.pos())
-        menu = QMenu(self)
-        fired = False
-
-        if item is not None:
-            item_type = item.data(0, self.BIN_TYPE_ROLE)
-            if item_type == "section":
-                act = menu.addAction(
-                    I18N.tr("edit.media_pool.new_smart_bin", "新建 Smart Bin…")
-                )
-                act.triggered.connect(
-                    lambda: self.create_smart_bin_requested.emit()
-                )
-                fired = True
-            elif (
-                item_type == "smart_bin"
-                and bool(item.data(0, self.BIN_USER_ROLE))
-            ):
-                bin_id = item.data(0, self.BIN_ID_ROLE)
-                act = menu.addAction(
-                    I18N.tr(
-                        "edit.media_pool.remove_from_project",
-                        "Remove from Media Pool",
-                    )
-                )
-                act.triggered.connect(
-                    lambda: self.delete_smart_bin_requested.emit(bin_id)
-                )
-                fired = True
-
-        if fired:
-            menu.exec(event.globalPos())
+    def contextMenuEvent(self, event: Any) -> None:  # noqa: N802
+        self._on_context_menu(self.viewport().mapFromGlobal(event.globalPos()))
         event.accept()
 
     def select_bin(self, bin_id: str, is_smart_bin: bool) -> bool:
@@ -993,47 +965,45 @@ class BinTreeWidget(QTreeWidget):
             self.bin_selected.emit(bin_id, False)
         # section 节点不触发选择
 
-    def _on_context_menu(self, pos: Any) -> None:
-        """右键菜单"""
+    def _build_context_menu(self, pos: QPoint) -> QMenu:
+        """Blank space under Master creates a root Bin, independent of selection."""
+        menu = QMenu(self)
         item = self.itemAt(pos)
         if item is None:
-            return
-
+            if bool(self.property("smartBinsOnly")):
+                menu.addAction(I18N.tr("edit.media_pool.new_smart_bin", "New Smart Bin…")).triggered.connect(self.create_smart_bin_requested.emit)
+            elif self._project is not None:
+                root_id = self._project.root_bin_id
+                menu.addAction(I18N.tr("edit.media_pool.new_bin", "New Bin")).triggered.connect(
+                    lambda _checked=False, bid=root_id: self.create_bin_in_requested.emit(bid))
+            return menu
         bin_id = item.data(0, self.BIN_ID_ROLE)
         bin_type = item.data(0, self.BIN_TYPE_ROLE)
-
-        menu = QMenu(self)
-
         if bin_type == "bin":
-            # 普通素材箱操作
-            rename_act = menu.addAction(
-                I18N.tr("edit.media_pool.rename_bin", "Rename Bin")
-            )
-            rename_act.triggered.connect(lambda: self.rename_bin_requested.emit(bin_id))
-
-            # root bin 不能删除
-            if bin_id and self._project and bin_id != self._project.root_bin_id:
-                delete_act = menu.addAction(
-                    I18N.tr(
-                        "edit.media_pool.remove_from_project",
-                        "Remove from Media Pool",
-                    )
-                )
-                delete_act.triggered.connect(lambda: self.delete_bin_requested.emit(bin_id))
-            else:
-                # Root bin: offer to create a new sub-folder under it.
-                new_act = menu.addAction(
-                    I18N.tr("edit.media_pool.new_bin", "New Bin")
-                )
-                new_act.triggered.connect(self.create_bin_requested.emit)
-
-        if menu.actions():
-            dock = find_parent_dock(self)
-            if dock is not None:
+            menu.addAction(I18N.tr("edit.media_pool.new_bin", "New Bin")).triggered.connect(
+                lambda _checked=False, bid=bin_id: self.create_bin_in_requested.emit(bid))
+            if self._project is not None and bin_id != self._project.root_bin_id:
                 menu.addSeparator()
-                add_dock_management_actions(menu, dock)
-            global_pos = self.viewport().mapToGlobal(pos)
-            menu.exec(global_pos)
+                menu.addAction(I18N.tr("edit.media_pool.rename_bin", "Rename Bin")).triggered.connect(
+                    lambda _checked=False: self.rename_bin_requested.emit(bin_id))
+                menu.addAction(I18N.tr("edit.media_pool.remove_from_project", "Remove from Media Pool")).triggered.connect(
+                    lambda _checked=False: self.delete_bin_requested.emit(bin_id))
+        elif bin_type == "section":
+            menu.addAction(I18N.tr("edit.media_pool.new_smart_bin", "New Smart Bin…")).triggered.connect(self.create_smart_bin_requested.emit)
+        elif bin_type == "smart_bin" and bool(item.data(0, self.BIN_USER_ROLE)):
+            menu.addAction(I18N.tr("edit.media_pool.remove_from_project", "Remove from Media Pool")).triggered.connect(
+                lambda _checked=False: self.delete_smart_bin_requested.emit(bin_id))
+        return menu
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        menu = self._build_context_menu(pos)
+        if not menu.actions():
+            return
+        dock = find_parent_dock(self)
+        if dock is not None:
+            menu.addSeparator()
+            add_dock_management_actions(menu, dock)
+        menu.exec(self.viewport().mapToGlobal(pos))
 
     def set_project(self, project: Optional[EditProject]) -> None:
         """设置项目引用"""
@@ -1226,7 +1196,7 @@ class BinTreeWidget(QTreeWidget):
             if (
                 item is not None
                 and item.data(0, self.BIN_TYPE_ROLE) == "bin"
-                and item.data(0, self.BIN_ID_ROLE)
+                and item.flags() & Qt.ItemFlag.ItemIsEditable
             ):
                 self.editItem(item, 0)
                 event.accept()
@@ -1274,6 +1244,11 @@ class BinTreeWidget(QTreeWidget):
                 item.data(0, self.BIN_TYPE_ROLE) == "bin"
                 and item.data(0, self.BIN_ID_ROLE) == bin_id
             ):
+                ancestor = item.parent()
+                while ancestor is not None:
+                    ancestor.setExpanded(True)
+                    ancestor = ancestor.parent()
+                self.scrollToItem(item)
                 self.setCurrentItem(item)
                 self.editItem(item, 0)
                 return
@@ -1317,7 +1292,7 @@ class GridItem:
         """Get display name for the item."""
         if self.item_type == "asset" and isinstance(self.data, MediaAsset):
             return self.data.display_name
-        elif self.item_type == "timeline" and isinstance(self.data, TimelineSequenceRef):
+        elif self.item_type in ("timeline", "bin"):
             return self.data.name
         return ""
 
@@ -1398,6 +1373,10 @@ class AssetListModel(QAbstractListModel):
         item = self._get_item(index)
         if not item:
             return None
+
+        if role == Qt.ItemDataRole.ToolTipRole:
+            path = getattr(item.data, "path", "")
+            return f"{item.display_name}\n{path}" if path else item.display_name
 
         if role == Qt.ItemDataRole.DisplayRole:
             return item.display_name
@@ -2458,7 +2437,7 @@ class GridDelegate(QStyledItemDelegate):
 
         # ---- 时长条（右下角，半透明） ----
         duration_text = self._get_duration_badge_text(asset)
-        if duration_text:
+        if duration_text and getattr(self, "show_duration_badge", True):
             font = QFont()
             font.setPixelSize(9)
             font.setBold(False)
@@ -2785,22 +2764,7 @@ class GridDelegate(QStyledItemDelegate):
 
     def _truncate_filename(self, name: str, max_width: int, font: QFont) -> str:
         """截断文件名以适应宽度"""
-        # 简单估算：每个字符约 6px（10pt字体）
-        char_width = 6
-        max_chars = max_width // char_width
-
-        if len(name) <= max_chars:
-            return name
-
-        # 保留扩展名，截断中间
-        if "." in name:
-            ext = name.rsplit(".", 1)[-1]
-            base = name.rsplit(".", 1)[0]
-            available = max_chars - len(ext) - 4  # "...xxx"
-            if available > 0:
-                return base[:available] + "..." + ext
-
-        return name[:max_chars - 3] + "..."
+        return QFontMetrics(font).elidedText(name, Qt.TextElideMode.ElideMiddle, max(0, max_width))
 
     def _get_metadata_text(self, asset: MediaAsset) -> str:
         """获取元数据文本（用于底部显示）"""
@@ -3412,6 +3376,8 @@ class AssetListView(QListView):
         super().__init__(parent)
         self._project: Optional[EditProject] = None
         self._context_menu_selection_ids: tuple[str, ...] = ()
+        self._info_pressed_key: Optional[tuple[str, str]] = None
+        self._info_hover_key: Optional[tuple[str, str]] = None
         # Inline rename only via programmatic edit() (F2 / menu), never on
         # double-click (double-click opens/enters the item).
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -3445,6 +3411,13 @@ class AssetListView(QListView):
         When the press lands on an item, defer to the default handler so the
         normal click-select / drag-initiate flow still works.
         """
+        if event.button() == Qt.MouseButton.LeftButton:
+            info_index = self._info_index_at(event.pos())
+            if info_index.isValid():
+                self._info_pressed_key = (info_index.data(AssetListModel.ITEM_TYPE_ROLE), info_index.data(AssetListModel.ITEM_ID_ROLE))
+                self.setFocus(Qt.FocusReason.MouseFocusReason)
+                event.accept()
+                return
         if event.button() == Qt.MouseButton.RightButton:
             # Some Qt styles collapse an extended selection while processing
             # the right-button press.  Snapshot the selected asset IDs before
@@ -3475,7 +3448,7 @@ class AssetListView(QListView):
                 self.setFocus(Qt.FocusReason.MouseFocusReason)
                 self._rubber_origin = event.pos()
                 if self._rubber_band is None:
-                    self._rubber_band = QRubberBand(QRubberBand.Shape.Rectangle, self)
+                    self._rubber_band = QRubberBand(QRubberBand.Shape.Rectangle, self.viewport())
                 self._rubber_band.setGeometry(QRect(event.pos(), event.pos()))
                 self._rubber_band.show()
                 # Clear current selection unless Ctrl/Cmd is held (additive).
@@ -3490,6 +3463,10 @@ class AssetListView(QListView):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """Grow the rubber band; the selection update is throttled."""
+        if self._info_pressed_key is not None:
+            event.accept()
+            return
+
         if self._rubber_origin is not None and self._rubber_band is not None:
             # Update the band geometry immediately (cheap, smooth feedback).
             self._rubber_band.setGeometry(
@@ -3500,10 +3477,18 @@ class AssetListView(QListView):
             self._marquee_select_timer.start()
             event.accept()
             return
-        # Hover scrub: when no button is held, track the hovered video card
-        # and request the frame under the cursor for live preview.
+        self._update_info_hover(event.pos())
+        # Inspecting the information badge must not scrub the underlying media.
         if event.buttons() == Qt.MouseButton.NoButton:
-            self._handle_hover_scrub(event.pos())
+            if self._info_index_at(event.pos()).isValid():
+                self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+                if self._hover_path is not None:
+                    self._hover_path = None
+                    self._hover_frame_index = None
+                    self.viewport().update()
+            else:
+                self.viewport().unsetCursor()
+                self._handle_hover_scrub(event.pos())
         super().mouseMoveEvent(event)
 
     def _apply_marquee_selection(self) -> None:
@@ -3543,6 +3528,18 @@ class AssetListView(QListView):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         """End the rubber-band marquee."""
+        if self._info_pressed_key is not None and event.button() == Qt.MouseButton.LeftButton:
+            expected = self._info_pressed_key
+            self._info_pressed_key = None
+            index = self._info_index_at(event.pos())
+            key = (index.data(AssetListModel.ITEM_TYPE_ROLE), index.data(AssetListModel.ITEM_ID_ROLE)) if index.isValid() else None
+            if key == expected:
+                panel = self._find_media_pool_panel()
+                if panel is not None:
+                    panel._show_pool_item_info(index, self)
+            event.accept()
+            return
+
         if self._rubber_origin is not None and self._rubber_band is not None:
             # Apply a final selection immediately so the result reflects the
             # exact release position (the throttled timer may be pending).
@@ -3554,8 +3551,35 @@ class AssetListView(QListView):
             return
         super().mouseReleaseEvent(event)
 
+    def _update_info_hover(self, pos: QPoint | None) -> None:
+        index = self.indexAt(pos) if pos is not None else QModelIndex()
+        key = None
+        if index.isValid() and index.data(AssetListModel.ITEM_TYPE_ROLE) in ("asset", "timeline"):
+            key = (index.data(AssetListModel.ITEM_TYPE_ROLE), index.data(AssetListModel.ITEM_ID_ROLE))
+        if key != self._info_hover_key:
+            self._info_hover_key = key
+            self.viewport().update()
+
+    def _info_index_at(self, pos: QPoint) -> QModelIndex:
+        index = self.indexAt(pos)
+        if not index.isValid() or index.data(AssetListModel.ITEM_TYPE_ROLE) not in ("asset", "timeline"):
+            return QModelIndex()
+        delegate = self.itemDelegateForIndex(index)
+        geometry = getattr(delegate, "info_button_rect", None)
+        if geometry is not None and geometry(self.visualRect(index)).contains(pos):
+            return index
+        return QModelIndex()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if self._info_index_at(event.pos()).isValid():
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def leaveEvent(self, event: Any) -> None:
         """Clear hover-scrub state when the cursor leaves the view."""
+        self.viewport().unsetCursor()
+        self._update_info_hover(None)
         self._hover_path = None
         self._hover_frame_index = None
         # AUD-20201: the cursor left the view — release every cached scrub
@@ -3566,6 +3590,8 @@ class AssetListView(QListView):
 
     def _handle_hover_scrub(self, pos: QPoint) -> None:
         """Request the video frame under ``pos`` for hover-scrub preview."""
+        if not getattr(self, "live_preview_enabled", True):
+            return
         model = self.model()
         if model is None or self._project is None:
             return
@@ -3743,7 +3769,11 @@ class AssetListView(QListView):
             event.modifiers() & Qt.KeyboardModifier.ControlModifier
             or event.modifiers() & Qt.KeyboardModifier.MetaModifier
         ):
-            self.selectAll()
+            if panel is not None and panel._view_mode == ViewMode.METADATA and model is not None and model.rowCount():
+                selection = QItemSelection(model.index(0, 0), model.index(model.rowCount() - 1, 0))
+                self.selectionModel().select(selection, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+            else:
+                self.selectAll()
             event.accept()
             return
         # Space — toggle Quick Look on the selected asset (Finder behavior).
@@ -3785,7 +3815,7 @@ class AssetListView(QListView):
             if panel is not None:
                 target_bin_id = panel._target_bin_at(
                     event.position().toPoint() if hasattr(event, 'position') else event.pos(),
-                    source="grid",
+                    source=self,
                 )
                 if target_bin_id is not None:
                     panel._set_drop_target_bin(target_bin_id)
@@ -3801,7 +3831,7 @@ class AssetListView(QListView):
             panel = self._find_media_pool_panel()
             if panel is not None:
                 pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
-                target_bin_id = panel._target_bin_at(pos, source="grid")
+                target_bin_id = panel._target_bin_at(pos, source=self)
                 panel._set_drop_target_bin(target_bin_id)
             event.acceptProposedAction()
             return
@@ -3816,7 +3846,7 @@ class AssetListView(QListView):
             panel = self._find_media_pool_panel()
             if panel is not None:
                 pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
-                target_bin_id = panel._target_bin_at(pos, source="grid")
+                target_bin_id = panel._target_bin_at(pos, source=self)
                 if target_bin_id is not None:
                     asset_ids, timeline_ids = parse_media_pool_drag_mime(mime)
                     if (
@@ -3844,7 +3874,7 @@ class AssetListView(QListView):
             while parent:
                 if isinstance(parent, MediaPoolPanel):
                     pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
-                    target_bin_id = parent._target_bin_at(pos, source="grid")
+                    target_bin_id = parent._target_bin_at(pos, source=self)
                     parent._set_drop_target_bin(None)
                     parent.dropEvent(event, target_bin_id=target_bin_id)
                     event.acceptProposedAction()
@@ -3871,7 +3901,7 @@ class AssetListView(QListView):
         - urls: File URLs for fallback support
         - thumbnail: Preview pixmap for drag visualization
         """
-        selected_indexes = self.selectedIndexes()
+        selected_indexes = self.selectionModel().selectedIndexes()
         if not selected_indexes:
             return
 
@@ -4803,6 +4833,8 @@ class MediaPoolPanel(QWidget):
         # findChild(QuickLookDialog) never matched because the dialog's QObject
         # parent is the top-level window, not this panel (nested in a dock).
         self._quick_look_dialog: Optional[QuickLookDialog] = None
+        self._pool_info_popup: Optional[QWidget] = None
+        self._pool_info_key: Optional[tuple[str, str]] = None
         self._offline_status_signature: Optional[tuple[tuple[str, str, bool, bool], ...]] = None
         # Detect files moved/deleted while the project stays open.  The scan
         # is deliberately infrequent and only publishes a project change when
@@ -4827,6 +4859,7 @@ class MediaPoolPanel(QWidget):
         self._command_stack: ProjectCommandStack = ProjectCommandStack()
 
         # Search and sort state
+        self._search_all_bins: bool = False
         self._search_text: str = ""
         self._search_filter_mode: str = SearchFilterMode.FILENAME.value
         self._sort_by: str = SORT_BY_NAME
@@ -4897,6 +4930,17 @@ class MediaPoolPanel(QWidget):
             self._delete_shortcuts.append(shortcut)
         # Restore last-used sort preferences (persisted across restarts).
         self._restore_sort_prefs()
+        self._sync_sort_indicator()
+        search_escape = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.search_box)
+        search_escape.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        search_escape.activated.connect(lambda: self.btn_search.setChecked(False))
+        self._search_escape = search_escape
+        self._pool_shortcuts: list[QShortcut] = []
+        for key, callback in (("Ctrl+f", lambda: self.btn_search.setChecked(True)), ("Ctrl+Shift+n", self._on_new_bin_clicked), ("Ctrl+i", self._show_selected_pool_info)):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(callback)
+            self._pool_shortcuts.append(shortcut)
 
         logger.debug("MediaPoolPanel initialized (with bin tree, smart bins, and search filter)")
 
@@ -4908,324 +4952,348 @@ class MediaPoolPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # ---- 工具栏样式 ----
-        _btn_bg = "transparent"
-        _btn_hover = "rgba(255,255,255,0.07)"
-        _btn_checked = "rgba(255,255,255,0.12)"
-        FLAT_BTN_STYLE = (
-            f"QToolButton {{ border: none; border-radius: 3px; padding: 3px; background: {_btn_bg}; }}"
-            f"QToolButton:checked {{ background: {_btn_checked}; }}"
-            f"QToolButton:hover {{ background: {_btn_hover}; }}"
-        )
+        self.setObjectName("mediaPoolPanel")
+        # Keep panel surfaces on the application's global theme. No local
+        # slider/scrollbar subcontrols inherit the shared application QSS.
+        self.setStyleSheet(f"""
+            QWidget#mediaPoolPanel, QWidget#mediaPoolContent {{ background: {C.BG_PANEL}; }}
+            QWidget#mediaPoolToolbar {{ background: {C.BG_DARK}; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
+            QToolButton {{ border: none; background: transparent; padding: 2px; margin: 0; border-radius: 2px; }}
+            QToolButton:hover {{ background: {C.BG_ACTIVE}; }}
+            QToolButton:checked {{ background: {C.BG_BUTTON}; }}
+            QToolButton::menu-indicator {{ image: none; }}
+            QTreeWidget, QListView {{ background: {C.BG_PANEL}; color: {C.TEXT_SECONDARY}; border: none; }}
+            QTreeWidget {{ alternate-background-color: {C.BG_INPUT}; }}
+            QTreeWidget::item {{ height: 23px; padding: 0 4px; border: none; }}
+            QTreeWidget::item:selected {{ background: {C.BG_DARKEST}; color: {C.TEXT_PRIMARY}; }}
+            QHeaderView::section {{ background: {C.BG_INPUT}; color: {C.TEXT_LABEL}; border: none;
+                border-right: 1px solid {C.BORDER}; border-bottom: 1px solid {C.PANEL_DIVIDER}; padding: 3px 6px; }}
+            QLabel {{ color: {C.TEXT_LABEL}; background: transparent; }}
+            QFrame#mediaPoolBreadcrumb {{ background: {C.BG_PANEL}; border: none; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
+            QFrame#mediaPoolBreadcrumb QPushButton {{ padding: 0; font-size: 12px; }}
+            QFrame#mediaPoolBreadcrumb QLabel {{ font-size: 12px; }}
+            QToolButton#mediaPoolPathBack {{ border-right: 1px solid {C.PANEL_DIVIDER}; border-radius: 0; padding: 0; }}
+            QPushButton {{ background: transparent; color: {C.TEXT_SECONDARY}; border: none; padding: 2px 4px; }}
+            QPushButton:hover {{ background: {C.BG_ACTIVE}; }}
+        """)
+        self.toolbar_container = QWidget()
+        self.toolbar_container.setObjectName("mediaPoolToolbar")
+        self.toolbar_container.setFixedHeight(30)
+        toolbar = QHBoxLayout(self.toolbar_container)
+        toolbar.setContentsMargins(4, 0, 4, 0)
+        toolbar.setSpacing(2)
 
-        # 排序下拉框样式 — 融入工具栏
-        SORT_COMBO_STYLE = (
-            "QComboBox {"
-            "  background: transparent; border: 1px solid #333; border-radius: 3px;"
-            "  padding: 1px 6px; color: #999; font-size: 11px; min-height: 18px;"
-            "}"
-            "QComboBox:hover { border: 1px solid #444; color: #bbb; }"
-            "QComboBox::drop-down { border: none; width: 14px; }"
-            "QComboBox::down-arrow {"
-            "  border-left: 4px solid transparent; border-right: 4px solid transparent;"
-            "  border-top: 5px solid #666; margin-right: 4px;"
-            "}"
-            "QComboBox QAbstractItemView {"
-            "  background: #1F1F22; border: 1px solid #333; color: #ccc;"
-            "  selection-background-color: rgba(255,255,255,0.1); selection-color: #ddd;"
-            "  min-width: 82px;"
-            "}"
-        )
-
-        # Toolbar container with subtle bottom border
-        toolbar_container = QWidget()
-        toolbar_container.setStyleSheet(
-            "QWidget { background: #1F1F22; border-bottom: 1px solid #2a2a2e; }"
-        )
-        toolbar_container.setFixedHeight(28)
-        toolbar = QHBoxLayout(toolbar_container)
-        toolbar.setContentsMargins(6, 0, 6, 0)
-        toolbar.setSpacing(3)
-
-        # Sidebar toggle button (leftmost)
-        self.btn_toggle_sidebar = QToolButton()
-        try:
-            self.btn_toggle_sidebar.setIcon(qta.icon("fa5s.columns", color="#888"))
-        except Exception:
-            self.btn_toggle_sidebar.setIcon(icon_folder())
-        self.btn_toggle_sidebar.setToolTip(
-            I18N.tr("edit.media_pool.toggle_sidebar", "Toggle Bins Panel")
-        )
-        self.btn_toggle_sidebar.setFixedSize(20, 20)
-        self.btn_toggle_sidebar.setCheckable(True)
-        # Default to hidden: bins are shown inline in the right-side view,
-        # the sidebar is an optional power-user affordance for Smart Bins.
-        self.btn_toggle_sidebar.setChecked(False)
-        self.btn_toggle_sidebar.setStyleSheet(FLAT_BTN_STYLE)
+        self.btn_toggle_sidebar = self._pool_button("fa5s.columns", "toggle_sidebar", "Bin List", True)
+        self.btn_toggle_sidebar.setChecked(True)
         self.btn_toggle_sidebar.clicked.connect(self._on_toggle_sidebar)
         toolbar.addWidget(self.btn_toggle_sidebar)
-
-        # 分隔线
-        _sep0 = QWidget()
-        _sep0.setFixedWidth(1)
-        _sep0.setStyleSheet("background: #2e2e32;")
-        toolbar.addWidget(_sep0)
-
-        # Search toggle button
-        self.btn_search = QToolButton()
-        self.btn_search.setIcon(icon_search())
-        self.btn_search.setToolTip(
-            I18N.tr("edit.media_pool.search_tooltip", "Search / Filter")
-        )
-        self.btn_search.setFixedSize(20, 20)
-        self.btn_search.setCheckable(True)
-        self.btn_search.setStyleSheet(FLAT_BTN_STYLE)
-        toolbar.addWidget(self.btn_search)
-
-        # Sort by combo
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItem(I18N.tr("edit.media_pool.sort_name", "Name"), SORT_BY_NAME)
-        self.sort_combo.addItem(I18N.tr("edit.media_pool.sort_date", "Date"), SORT_BY_DATE)
-        self.sort_combo.addItem(I18N.tr("edit.media_pool.sort_type", "Type"), SORT_BY_TYPE)
-        self.sort_combo.addItem(I18N.tr("edit.media_pool.sort_duration", "Duration"), SORT_BY_DURATION)
-        self.sort_combo.setFixedHeight(20)
-        self.sort_combo.setFixedWidth(82)
-        self.sort_combo.setStyleSheet(SORT_COMBO_STYLE)
-        toolbar.addWidget(self.sort_combo)
-
-        # Sort order toggle
-        self.btn_sort_order = QToolButton()
-        self.btn_sort_order.setIcon(icon_arrow_up())
-        self.btn_sort_order.setFixedSize(20, 20)
-        self.btn_sort_order.setToolTip(I18N.tr("edit.media_pool.sort_asc", "Ascending"))
-        self.btn_sort_order.setCheckable(True)
-        self.btn_sort_order.setStyleSheet(FLAT_BTN_STYLE)
-        toolbar.addWidget(self.btn_sort_order)
-
-        # 分隔线
-        _sep1 = QWidget()
-        _sep1.setFixedWidth(1)
-        _sep1.setStyleSheet("background: #2e2e32;")
-        toolbar.addWidget(_sep1)
-
-        # View mode toggle buttons (flat style)
-        self.btn_list_view = QToolButton()
-        self.btn_list_view.setIcon(icon_list())
-        self.btn_list_view.setToolTip(
-            I18N.tr("edit.media_pool.list_view_tooltip", "List View")
-        )
-        self.btn_list_view.setFixedSize(20, 20)
-        self.btn_list_view.setCheckable(True)
-        self.btn_list_view.setStyleSheet(FLAT_BTN_STYLE)
-        toolbar.addWidget(self.btn_list_view)
-
-        self.btn_grid_view = QToolButton()
-        self.btn_grid_view.setIcon(icon_grid())
-        self.btn_grid_view.setToolTip(
-            I18N.tr("edit.media_pool.grid_view_tooltip", "Grid View")
-        )
-        self.btn_grid_view.setFixedSize(20, 20)
-        self.btn_grid_view.setCheckable(True)
-        self.btn_grid_view.setChecked(True)
-        self.btn_grid_view.setStyleSheet(FLAT_BTN_STYLE)
-        toolbar.addWidget(self.btn_grid_view)
-
-        # 分隔线
-        _sep2 = QWidget()
-        _sep2.setFixedWidth(1)
-        _sep2.setStyleSheet("background: #2e2e32;")
-        toolbar.addWidget(_sep2)
-
-        # Thumbnail size slider (DaVinci Resolve style)
-        zoom_small = QLabel()
-        zoom_small.setPixmap(qta.icon("fa5s.th", color="#555").pixmap(10, 10))
-        zoom_small.setFixedWidth(12)
-        toolbar.addWidget(zoom_small)
-
-        self.thumb_slider = QSlider(Qt.Orientation.Horizontal)
-        self.thumb_slider.setRange(60, 240)
-        self.thumb_slider.setValue(100)
-        self.thumb_slider.setFixedWidth(70)
-        self.thumb_slider.setSingleStep(10)
-        self.thumb_slider.setPageStep(40)
-        self.thumb_slider.setToolTip(
-            I18N.tr("edit.media_pool.thumb_size_tooltip", "Thumbnail Size")
-        )
-        toolbar.addWidget(self.thumb_slider)
-
-        zoom_large = QLabel()
-        zoom_large.setPixmap(qta.icon("fa5s.th-large", color="#555").pixmap(14, 14))
-        zoom_large.setFixedWidth(14)
-        toolbar.addWidget(zoom_large)
-
-        toolbar.addStretch()
-
-        # Offline warning indicator (hidden by default)
-        self.btn_offline_warning = QToolButton()
-        self.btn_offline_warning.setIcon(icon_warning())
-        self.btn_offline_warning.setToolTip(
-            I18N.tr("edit.media_pool.offline_warning_tooltip", "Offline Assets - Click to Relink")
-        )
-        self.btn_offline_warning.setFixedSize(20, 20)
-        self.btn_offline_warning.setStyleSheet(
-            f"QToolButton {{ border: none; border-radius: 2px; padding: 2px; color: {get_color('danger')}; }}"
-            f"QToolButton:hover {{ background: rgba(255, 100, 100, 0.15); }}"
-        )
-        self.btn_offline_warning.hide()  # 默认隐藏
-        self.btn_offline_warning.clicked.connect(self._on_relink_batch)
-        toolbar.addWidget(self.btn_offline_warning)
-
-        # M3: AI 媒体分析开关（默认 off，§17.2）。checkable；toggled → 刷新菜单可用性。
-        # 分析由 host 接 MediaAnalysisController；本开关只控制菜单项可见性 + badge 显示。
-        self.btn_analysis_toggle = QToolButton()
-        self.btn_analysis_toggle.setIcon(qta.icon("fa5s.brain", color="#888"))
-        self.btn_analysis_toggle.setToolTip(
-            I18N.tr("edit.media_pool.analysis_toggle_tooltip", "Enable AI Media Analysis")
-        )
-        self.btn_analysis_toggle.setCheckable(True)
-        self.btn_analysis_toggle.setChecked(False)
-        self.btn_analysis_toggle.setFixedSize(20, 20)
-        self.btn_analysis_toggle.setStyleSheet(FLAT_BTN_STYLE)
+        self.btn_color_tag = self._pool_button("fa5s.tag", "clip_color", "Clip Color")
+        toolbar.addWidget(self.btn_color_tag)
+        self.btn_relink = self._pool_button("fa5s.link", "relink_media", "Relink Media")
+        self.btn_relink.clicked.connect(self._on_relink_batch)
+        toolbar.addWidget(self.btn_relink)
+        self.btn_analysis_toggle = self._pool_button("fa5s.brain", "analysis_toggle_tooltip", "Enable AI Media Analysis", True)
         self.btn_analysis_toggle.toggled.connect(self._on_analysis_toggle)
         toolbar.addWidget(self.btn_analysis_toggle)
-
-        self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #555; font-size: 10px;")
-        self.status_label.hide()  # 工具栏不显示状态文字
-        toolbar.addWidget(self.status_label)
-
-        layout.addWidget(toolbar_container)
-
-        # Search bar (hidden by default, toggle via btn_search)
+        toolbar.addStretch(1)
+        self.thumb_slider = QSlider(Qt.Orientation.Horizontal)
+        self.thumb_slider.setFixedWidth(64)
+        self.thumb_slider.setObjectName("mediaPoolThumbnailSlider")
+        # Only the widget surface is transparent; groove/handle colors and
+        # geometry still come from the shared application slider stylesheet.
+        self.thumb_slider.setStyleSheet("QSlider#mediaPoolThumbnailSlider { background: transparent; border: none; }")
+        # Larger images to the right, as in Resolve; the stored value remains
+        # a column count owned by ColumnGridController.
+        self.thumb_slider.setInvertedAppearance(True)
+        self.thumb_slider.setInvertedControls(True)
+        self.thumb_slider.setToolTip(I18N.tr("edit.media_pool.thumb_size_tooltip", "Thumbnail Size"))
+        self.thumb_slider.setAccessibleName(self.thumb_slider.toolTip())
+        toolbar.addWidget(self.thumb_slider)
+        toolbar.addSpacing(20)
+        self.btn_metadata_view = self._pool_button("fa5s.id-card", "metadata_view", "Metadata View", True)
+        self.btn_grid_view = self._pool_button("fa5s.th", "grid_view_tooltip", "Thumbnail View", True)
+        self.btn_list_view = self._pool_button("fa5s.list-ul", "list_view_tooltip", "List View", True)
+        self.btn_grid_view.setChecked(True)
+        for button in (self.btn_metadata_view, self.btn_grid_view, self.btn_list_view):
+            button.setFixedWidth(28)
+            toolbar.addWidget(button)
+        self.btn_search = self._pool_button("fa5s.search", "search_tooltip", "Search", True)
+        self.btn_search.setFixedWidth(28)
+        toolbar.addWidget(self.btn_search)
+        self.btn_search_scope = self._pool_button("fa5s.chevron-down", "search_scope", "Search in Selected Bin")
+        self.btn_search_scope.setFixedWidth(16)
+        toolbar.addWidget(self.btn_search_scope)
+        self.btn_sort = self._pool_button("fa5s.sort-amount-down", "sort", "Sort")
+        self.btn_sort.setFixedWidth(36)
+        toolbar.addWidget(self.btn_sort)
+        self.btn_more = self._pool_button("fa5s.ellipsis-h", "options", "Media Pool Options")
+        self.btn_more.setFixedWidth(36)
+        toolbar.addWidget(self.btn_more)
+        self.btn_offline_warning = self._pool_button("fa5s.exclamation-triangle", "offline_warning_tooltip", "Offline Assets - Click to Relink")
+        self.btn_offline_warning.clicked.connect(self._on_relink_batch)
+        self.btn_offline_warning.hide()
+        toolbar.addWidget(self.btn_offline_warning)
+        # Keep the existing sort controls as adapters for callers and tests;
+        # the visible UI uses the compact Resolve sort menu.
+        self.sort_combo = QComboBox(self)
+        for key, label, value in (("sort_name", "Clip Name", SORT_BY_NAME), ("sort_date", "Date Imported", SORT_BY_DATE),
+                                  ("sort_type", "Clip Type", SORT_BY_TYPE), ("sort_duration", "Duration", SORT_BY_DURATION)):
+            self.sort_combo.addItem(I18N.tr(f"edit.media_pool.{key}", label), value)
+        for key, label in (("reel", "Reel Name"), ("scene", "Scene/Shot/Take"), ("fps", "FPS"),
+                           ("resolution", "Resolution"), ("codec", "Codec"), ("audio", "Audio"), ("path", "File Path")):
+            self.sort_combo.addItem(I18N.tr(f"edit.media_pool.sort_{key}", label), key)
+        self.sort_combo.hide()
+        self.btn_sort_order = QToolButton(self)
+        self.btn_sort_order.setCheckable(True)
+        self.btn_sort_order.hide()
+        self.status_label = QLabel(self)
+        self.status_label.hide()
+        layout.addWidget(self.toolbar_container)
         self.search_box = SearchLineEdit()
         self.search_box.hide()
         layout.addWidget(self.search_box)
 
-        # ===== Main content: Splitter with Bin Tree + Asset View =====
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        # --- Left: Bin Tree ---
+        self.main_splitter.setChildrenCollapsible(False)
+        self.sidebar = QSplitter(Qt.Orientation.Vertical)
+        self.sidebar.setChildrenCollapsible(False)
+        self.sidebar.setMinimumWidth(100)
         self.bin_tree = BinTreeWidget()
-        self.bin_tree.setMinimumWidth(100)
-        # Default to hidden: bins are shown inline in the right-side view.
-        # The user can re-show this sidebar via the toolbar toggle button.
-        self.bin_tree.setVisible(False)
-        self.main_splitter.addWidget(self.bin_tree)
-
-        # --- Right: Asset View Container ---
+        self.bin_tree.setIndentation(18)
+        self.bin_tree.setStyleSheet(self._pool_tree_style())
+        self.smart_bin_tree = BinTreeWidget()
+        self.smart_bin_tree.setProperty("smartBinsOnly", True)
+        self.smart_bin_tree.setStyleSheet(self._pool_tree_style())
+        self.sidebar.addWidget(self.bin_tree)
+        self.sidebar.addWidget(self.smart_bin_tree)
+        self.sidebar.setSizes([560, 150])
+        self.sidebar.setStretchFactor(0, 1)
+        self.sidebar.setStretchFactor(1, 0)
+        self.main_splitter.addWidget(self.sidebar)
         self.view_container = QWidget()
+        self.view_container.setObjectName("mediaPoolContent")
         container_layout = QVBoxLayout(self.view_container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
+        self.breadcrumb_widget = QFrame()
+        self.breadcrumb_widget.setObjectName("mediaPoolBreadcrumb")
+        self.breadcrumb_widget.setFixedHeight(29)
+        breadcrumb_layout = QHBoxLayout(self.breadcrumb_widget)
+        breadcrumb_layout.setContentsMargins(0, 0, 5, 0)
+        breadcrumb_layout.setSpacing(6)
+        self.btn_breadcrumb_back = self._pool_button("fa5s.chevron-left", "navigate_up", "Back")
+        self.btn_breadcrumb_back.setObjectName("mediaPoolPathBack")
+        self.btn_breadcrumb_back.setFixedSize(29, 29)
+        self.btn_breadcrumb_back.clicked.connect(self._navigate_up)
+        breadcrumb_layout.addWidget(self.btn_breadcrumb_back)
+        self.breadcrumb_path_container = QWidget()
+        self.breadcrumb_path_layout = QHBoxLayout(self.breadcrumb_path_container)
+        self.breadcrumb_path_layout.setContentsMargins(0, 0, 0, 0)
+        self.breadcrumb_path_layout.setSpacing(3)
+        breadcrumb_layout.addWidget(self.breadcrumb_path_container, 1)
+        container_layout.addWidget(self.breadcrumb_widget)
 
-        # Tree widget for assets (List View)
         self.tree = AssetTreeWidget()
-        # 扩展列：Name | Reel | Scene/Shot/Take | Duration | FPS | Resolution | Codec | Audio | Path
         self.tree.setHeaderLabels([
-            I18N.tr("edit.media_pool.header_name", "Name"),
-            I18N.tr("edit.media_pool.header_reel", "Reel"),
+            I18N.tr("edit.media_pool.clip_name", "Clip Name"),
+            I18N.tr("edit.media_pool.header_reel", "Reel Name"),
             I18N.tr("edit.media_pool.header_scene", "Scene/Shot/Take"),
             I18N.tr("edit.media_pool.header_duration", "Duration"),
             I18N.tr("edit.media_pool.header_fps", "FPS"),
             I18N.tr("edit.media_pool.header_resolution", "Resolution"),
             I18N.tr("edit.media_pool.header_codec", "Codec"),
             I18N.tr("edit.media_pool.header_audio", "Audio"),
-            I18N.tr("edit.media_pool.header_path", "Path"),
+            I18N.tr("edit.media_pool.header_path", "File Path"),
         ])
+        for column, width in enumerate((200, 90, 120, 90, 65, 110, 90, 70, 250)):
+            self.tree.setColumnWidth(column, width)
         self.tree.setAlternatingRowColors(True)
-        self.tree.setAnimated(True)
-        # 设置列宽
-        self.tree.setColumnWidth(0, 180)   # Name
-        self.tree.setColumnWidth(1, 50)    # Reel
-        self.tree.setColumnWidth(2, 100)   # Scene/Shot/Take
-        self.tree.setColumnWidth(3, 80)    # Duration
-        self.tree.setColumnWidth(4, 60)    # FPS
-        self.tree.setColumnWidth(5, 100)   # Resolution
-        self.tree.setColumnWidth(6, 60)    # Codec
-        self.tree.setColumnWidth(7, 50)    # Audio
-        self.tree.setColumnWidth(8, 200)   # Path（可隐藏）
-        # Click-to-sort on column headers (Finder/Premiere behavior). Only
-        # Name and Duration columns map to a real sort key; others are ignored.
+        self.tree.setRootIsDecorated(False)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setStyleSheet(self._pool_tree_style())
         self.tree.header().setSectionsClickable(True)
+        self.tree.header().setSectionsMovable(True)
+        self.tree.header().setStretchLastSection(False)
+        self.tree.header().setSortIndicatorShown(True)
         self.tree.header().sectionClicked.connect(self._on_header_clicked)
+        self.tree.header().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.header().customContextMenuRequested.connect(self._show_column_menu)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_tree_context_menu)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         self.tree.itemDoubleClicked.connect(self._on_tree_double_clicked)
-        # Inline bin rename: fires when the editor commits a new name.
         self.tree.itemChanged.connect(self.tree._on_item_data_changed)
-        # Enable drag for assets (drag to timeline / drop into bins)
         self.tree.setDragEnabled(True)
-        # DragDrop: support both outgoing drags (to timeline) and incoming
-        # drops (asset/timeline -> bin). The view's dropEvent is overridden in
-        # AssetTreeWidget to dispatch bin-targeted drops.
         self.tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        # SelectRows 防止拖拽变成选择操作（默认 SelectItems 会拦截鼠标事件）
         self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        # Accept drops for file import + bin drops
         self.tree.setAcceptDrops(True)
-        # 应用样式
-        self.tree.setStyleSheet(tree_style())
-
         container_layout.addWidget(self.tree)
-        self.tree.hide()  # 默认隐藏，grid view 为默认视图
-
-        # Grid view placeholder (will be added in _setup_grid_view)
+        self.tree.hide()
         self.grid_view: Optional[QListView] = None
         self.grid_delegate: Optional[GridDelegate] = None
         self.asset_model: Optional[AssetListModel] = None
-
         self.main_splitter.addWidget(self.view_container)
-
-        # Set splitter sizes — sidebar narrower (DaVinci style)
-        self.main_splitter.setSizes([140, 640])
+        self.main_splitter.setSizes([150, 405])
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
+        layout.addWidget(self.main_splitter, 1)
+        self._setup_pool_menus()
+        self._update_breadcrumb()
 
-        # Breadcrumb navigation bar — shown only when navigating inside a bin
-        # (i.e. _navigation_stack is non-empty). Hidden at root level to keep
-        # the panel compact.
-        self.breadcrumb_widget = QFrame()
-        self.breadcrumb_widget.setObjectName("mediaPoolBreadcrumb")
-        self.breadcrumb_widget.setStyleSheet(
-            "QFrame#mediaPoolBreadcrumb { background: #1c1d20; border: none;"
-            "  border-top: 1px solid #2e2e32; }"
-            "QToolButton { border: none; background: transparent; padding: 2px 4px; }"
-            "QToolButton:hover { background: #2e2e32; border-radius: 3px; }"
-            "QToolButton:disabled { color: #555; }"
-            "QLabel { color: #888; background: transparent; }"
-            "QPushButton { border: none; background: transparent; padding: 2px 6px;"
-            "  color: #c8c8c8; }"
-            "QPushButton:hover { background: #2e2e32; border-radius: 3px; }"
-        )
-        breadcrumb_layout = QHBoxLayout(self.breadcrumb_widget)
-        breadcrumb_layout.setContentsMargins(6, 2, 6, 2)
-        breadcrumb_layout.setSpacing(4)
+    def _pool_button(self, icon_name: str, key: str, label: str, checkable: bool = False) -> QToolButton:
+        """Create a compact, accessible toolbar button using the global theme."""
+        button = QToolButton()
+        icon_names = {
+            "toggle_sidebar": "sidebar", "clip_color": "tag", "relink_media": "relink",
+            "analysis_toggle_tooltip": "analysis", "metadata_view": "metadata",
+            "grid_view_tooltip": "grid", "list_view_tooltip": "list", "search_tooltip": "search",
+            "search_scope": "chevron-down", "sort": "sort", "options": "more",
+            "offline_warning_tooltip": "warning", "navigate_up": "back",
+        }
+        button.setIcon(pool_icon(icon_names.get(key, "more")))
+        button.setFixedSize(25, 25)
+        button.setIconSize(QSize(16, 16))
+        button.setToolTip(I18N.tr(f"edit.media_pool.{key}", label))
+        button.setAccessibleName(button.toolTip())
+        button.setCheckable(checkable)
+        return button
 
-        # Back button (returns to the parent bin)
-        self.btn_breadcrumb_back = QToolButton()
-        try:
-            self.btn_breadcrumb_back.setIcon(qta.icon("fa5s.arrow-left", color="#c8c8c8"))
-        except Exception:
-            self.btn_breadcrumb_back.setText("←")
-        self.btn_breadcrumb_back.setToolTip(
-            I18N.tr("edit.media_pool.navigate_up", "Back")
-        )
-        self.btn_breadcrumb_back.setFixedSize(22, 22)
-        self.btn_breadcrumb_back.clicked.connect(self._navigate_up)
-        breadcrumb_layout.addWidget(self.btn_breadcrumb_back)
+    @staticmethod
+    def _pool_tree_style() -> str:
+        """Scope view styling without overriding global scrollbars."""
+        return f"""
+            QTreeWidget {{ background: {C.BG_PANEL}; alternate-background-color: {C.BG_INPUT};
+                color: {C.TEXT_SECONDARY}; border: none; font-size: 11px; }}
+            QTreeWidget::item {{ height: 23px; padding: 0 4px; border: none; }}
+            QTreeWidget::item:selected {{ background: {C.BG_DARKEST}; color: {C.TEXT_PRIMARY}; }}
+            QTreeWidget::item:hover {{ background: {C.BG_ACTIVE}; }}
+            QHeaderView::section {{ background: {C.BG_INPUT}; color: {C.TEXT_LABEL}; border: none;
+                border-right: 1px solid {C.BORDER}; border-bottom: 1px solid {C.PANEL_DIVIDER}; padding: 3px 6px; }}
+        """
 
-        # Container for the path segments (rebuilt by _update_breadcrumb)
-        self.breadcrumb_path_container = QWidget()
-        self.breadcrumb_path_layout = QHBoxLayout(self.breadcrumb_path_container)
-        self.breadcrumb_path_layout.setContentsMargins(0, 0, 0, 0)
-        self.breadcrumb_path_layout.setSpacing(2)
-        breadcrumb_layout.addWidget(self.breadcrumb_path_container, stretch=1)
+    def _setup_pool_menus(self) -> None:
+        """Expose existing actions through Resolve-style compact menus."""
+        color_menu = QMenu(self)
+        self._color_actions = {}
+        for label in ASSET_COLOR_LABELS:
+            action = color_menu.addAction(I18N.tr(f"edit.media_pool.label_{label}", label.title()))
+            if label != "none":
+                action.setIcon(qta.icon("fa5s.square", color=label))
+            action.triggered.connect(lambda _checked=False, value=label: self._apply_pool_color_label(value))
+            self._color_actions[label] = action
+        color_menu.aboutToShow.connect(self._sync_color_actions)
+        self.btn_color_tag.setMenu(color_menu)
+        self.btn_color_tag.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        scope_menu = QMenu(self)
+        scope_group = QActionGroup(scope_menu)
+        for all_bins, key, text in ((False, "selected_bins", "Selected Bin"), (True, "all_bins", "All Bins")):
+            action = scope_menu.addAction(I18N.tr(f"edit.media_pool.{key}", text))
+            action.setCheckable(True)
+            action.setChecked(not all_bins)
+            scope_group.addAction(action)
+            action.triggered.connect(lambda _checked=False, value=all_bins: self._set_search_scope(value))
+        self.btn_search_scope.setMenu(scope_menu)
+        self.btn_search_scope.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.sort_menu = QMenu(self)
+        self._sort_actions = []
+        group = QActionGroup(self.sort_menu)
+        for index in range(self.sort_combo.count()):
+            action = self.sort_menu.addAction(self.sort_combo.itemText(index))
+            action.setCheckable(True)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, i=index: self.sort_combo.setCurrentIndex(i))
+            self._sort_actions.append(action)
+        self.sort_menu.addSeparator()
+        order_group = QActionGroup(self.sort_menu)
+        self._order_actions = []
+        for order, key, label in (("asc", "sort_asc", "Ascending"), ("desc", "sort_desc", "Descending")):
+            action = self.sort_menu.addAction(I18N.tr(f"edit.media_pool.{key}", label))
+            action.setCheckable(True)
+            order_group.addAction(action)
+            action.triggered.connect(lambda _checked=False, value=order: self._set_sort_order(value))
+            self._order_actions.append(action)
+        self.sort_menu.aboutToShow.connect(self._sync_sort_menu)
+        self.btn_sort.setMenu(self.sort_menu)
+        self.btn_sort.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self)
+        for key, label, callback in (
+            ("import_media", "Import Media…", self._on_import_clicked),
+            ("import_folder", "Import Folder…", self._on_import_folder_clicked),
+            ("new_bin", "New Bin", self._on_new_bin_clicked),
+            ("new_smart_bin", "New Smart Bin…", self._on_create_smart_bin),
+        ):
+            menu.addAction(I18N.tr(f"edit.media_pool.{key}", label)).triggered.connect(callback)
+        menu.addSeparator()
+        action = menu.addAction(I18N.tr("edit.media_pool.show_smart_bins", "Show Smart Bins"))
+        action.setCheckable(True)
+        action.setChecked(True)
+        action.toggled.connect(self.smart_bin_tree.setVisible)
+        self.action_show_smart_bins = action
+        hover = menu.addAction(I18N.tr("edit.media_pool.live_preview", "Live Media Preview"))
+        hover.setCheckable(True)
+        hover.setChecked(True)
+        hover.toggled.connect(self._set_live_preview)
+        menu.addSeparator()
+        menu.addAction(I18N.tr("edit.media_pool.collect_project", "Collect Project…")).triggered.connect(self._on_collect_project)
+        menu.addAction(I18N.tr("edit.media_pool.consolidate", "Consolidate Media…")).triggered.connect(self._on_consolidate_project)
+        menu.addAction(I18N.tr("edit.media_pool.proxy_policy", "Proxy Settings…")).triggered.connect(self._on_proxy_policy_settings)
+        self.btn_more.setMenu(menu)
+        self.btn_more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
 
-        self.breadcrumb_widget.setVisible(False)  # hidden at root level
-        layout.addWidget(self.breadcrumb_widget)
+    def _sync_color_actions(self) -> None:
+        has_selection = bool(self.get_selected_asset_ids())
+        for action in self._color_actions.values():
+            action.setEnabled(has_selection)
 
-        layout.addWidget(self.main_splitter, stretch=1)
+    def _apply_pool_color_label(self, color_label: str) -> None:
+        """Use the existing undoable log command for the selected clips."""
+        if self._project is None or color_label not in ASSET_COLOR_LABELS:
+            return
+        asset_ids = self.get_selected_asset_ids()
+        if not asset_ids:
+            return
+        command = BatchUpdateAssetLogCommand.create(
+            asset_ids, color_label=color_label,
+            label=I18N.tr("edit.media_pool.clip_color", "Clip Color"))
+        self._project = self._command_stack.execute(command, self._project)
+        self.project_changed.emit(self._project)
+        self._refresh_tree()
+
+    def _set_live_preview(self, enabled: bool) -> None:
+        if self.grid_view is not None:
+            self.grid_view.live_preview_enabled = enabled
+            if not enabled:
+                self.grid_view._hover_path = None
+                self.grid_view._hover_frame_index = None
+                self.grid_view._hover_frames.clear()
+                self.grid_view.viewport().update()
+
+    def _set_search_scope(self, all_bins: bool) -> None:
+        self._search_all_bins = all_bins
+        self.btn_search_scope.setToolTip(I18N.tr("edit.media_pool.all_bins" if all_bins else "edit.media_pool.selected_bins",
+                                               "All Bins" if all_bins else "Selected Bin"))
+        self._refresh_tree()
+
+    def _set_sort_order(self, order: str) -> None:
+        if self._sort_order != order:
+            self._on_sort_order_toggled()
+
+    def _sync_sort_menu(self) -> None:
+        for i, action in enumerate(self._sort_actions):
+            action.setChecked(self.sort_combo.itemData(i) == self._sort_by)
+        for order, action in zip(("asc", "desc"), self._order_actions):
+            action.setChecked(order == self._sort_order)
+
+    def _show_column_menu(self, pos: QPoint) -> None:
+        menu = QMenu(self)
+        for column in range(self.tree.columnCount()):
+            action = menu.addAction(self.tree.headerItem().text(column))
+            action.setCheckable(True)
+            action.setChecked(not self.tree.isColumnHidden(column))
+            action.setEnabled(column != 0)
+            action.toggled.connect(lambda visible, c=column: self.tree.setColumnHidden(c, not visible))
+        menu.exec(self.tree.header().mapToGlobal(pos))
 
     def _setup_grid_view(self) -> None:
         """Set up the grid view (thumbnail display)."""
@@ -5240,7 +5308,9 @@ class MediaPoolPanel(QWidget):
         self.grid_view.setModel(self.asset_model)
 
         # Delegate setup
-        self.grid_delegate = GridDelegate(self)
+        from .media_pool_presentation import ResolvePoolDelegate
+        self.grid_delegate = ResolvePoolDelegate(self)
+        self.grid_delegate.poster_inset = 6
         self.grid_delegate.view = self.grid_view
         self.grid_view.setItemDelegate(self.grid_delegate)
 
@@ -5249,7 +5319,8 @@ class MediaPoolPanel(QWidget):
         self.grid_view.setResizeMode(QListView.ResizeMode.Adjust)
         self.grid_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.grid_view.setUniformItemSizes(True)  # Performance optimization
-        self.grid_view.setSpacing(4)
+        self.grid_view.setSpacing(0)
+        self.grid_view.setViewportMargins(15, 8, 0, 0)
         # Enable drag for assets (drag to timeline / drop into bins)
         self.grid_view.setDragEnabled(True)
         # DragDrop: support both outgoing drags (to timeline) and incoming
@@ -5262,7 +5333,7 @@ class MediaPoolPanel(QWidget):
         self.grid_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.grid_view.customContextMenuRequested.connect(self._on_grid_context_menu)
 
-        # Column-count zoom: media thumbs are 3:2 with a caption strip the
+        # Column-count zoom: media thumbs are 16:9 with a caption strip the
         # delegate paints below the thumb.  The controller derives card
         # size from the live viewport so rows tile flush with the right
         # edge; its callback syncs the delegate's thumb_size (which drives
@@ -5270,9 +5341,9 @@ class MediaPoolPanel(QWidget):
         from src.shared.ui.column_grid import ColumnGridController
         self._column_grid = ColumnGridController(
             self.grid_view, slider=None,
-            settings_key="media_pool_columns", columns_default=4,
-            gap=8, aspect=2.0 / 3.0, extra_height=34,
-            pin_item_hints=False,
+            settings_key="media_pool_columns", columns_default=3,
+            gap=34, aspect=9.0 / 16.0, extra_height=0,
+            pin_item_hints=False, scrollbar_as_needed=True,
             on_columns_applied=self._on_columns_applied)
 
         # Add to container — grid view 为默认视图
@@ -5282,7 +5353,58 @@ class MediaPoolPanel(QWidget):
                 container_layout.addWidget(self.grid_view)
                 self.grid_view.show()
 
+        self.metadata_shelf = AssetListView()
+        self.metadata_shelf.setModel(self.asset_model)
+        self.metadata_shelf.setSelectionModel(self.grid_view.selectionModel())
+        self.metadata_shelf.setViewMode(QListView.ViewMode.IconMode)
+        self.metadata_shelf.setFlow(QListView.Flow.LeftToRight)
+        self.metadata_shelf.setWrapping(True)
+        self.metadata_shelf.setResizeMode(QListView.ResizeMode.Adjust)
+        self.metadata_shelf.setMovement(QListView.Movement.Static)
+        self.metadata_shelf.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.metadata_shelf.setDragEnabled(True)
+        self.metadata_shelf.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.metadata_shelf.setAcceptDrops(True)
+        self.metadata_shelf.setGridSize(QSize(116, 88))
+        self.metadata_shelf.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.metadata_shelf.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.shelf_delegate = ResolvePoolDelegate(self)
+        self.shelf_delegate.view = self.metadata_shelf
+        self.shelf_delegate.set_thumb_size((86, 48))
+        self.metadata_shelf.setItemDelegate(self.shelf_delegate)
+        self.metadata_shelf.doubleClicked.connect(self._on_grid_double_clicked)
+        self.metadata_shelf.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.metadata_shelf.customContextMenuRequested.connect(
+            lambda pos: self._on_grid_context_menu(pos, self.metadata_shelf))
+        self.view_container.layout().insertWidget(1, self.metadata_shelf)
+        self.metadata_shelf.hide()
         logger.debug("Grid view setup complete")
+
+    def _sync_metadata_shelf(self) -> None:
+        """Group folders/sequences above media rows using shared model indexes."""
+        if not hasattr(self, "metadata_shelf") or self.asset_model is None or self.grid_view is None:
+            return
+        is_metadata = self._view_mode == ViewMode.METADATA
+        count = 0
+        for row in range(self.asset_model.rowCount()):
+            is_asset = self.asset_model.index(row).data(AssetListModel.ITEM_TYPE_ROLE) == "asset"
+            self.metadata_shelf.setRowHidden(row, is_asset)
+            self.grid_view.setRowHidden(row, is_metadata and not is_asset)
+            count += int(not is_asset)
+        self._metadata_shelf_count = count
+        self.metadata_shelf.setVisible(is_metadata and count > 0)
+        self._resize_metadata_shelf()
+
+    def _resize_metadata_shelf(self) -> None:
+        if not hasattr(self, "metadata_shelf"):
+            return
+        columns = max(1, (self.view_container.width() - 16) // 116)
+        rows = (getattr(self, "_metadata_shelf_count", 0) + columns - 1) // columns
+        self.metadata_shelf.setFixedHeight(max(88, min(176, rows * 88)))
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self._resize_metadata_shelf()
 
     def _setup_context_menu(self) -> None:
         """Set up context menu for the panel."""
@@ -5296,6 +5418,7 @@ class MediaPoolPanel(QWidget):
         # View mode toggle (mutually exclusive)
         self.btn_list_view.clicked.connect(self._toggle_list_view)
         self.btn_grid_view.clicked.connect(self._toggle_grid_view)
+        self.btn_metadata_view.clicked.connect(self._toggle_metadata_view)
 
         # Thumbnail size slider — column-count model (range set by the
         # controller; card width follows the viewport width).
@@ -5311,8 +5434,12 @@ class MediaPoolPanel(QWidget):
         self.bin_tree.create_smart_bin_requested.connect(self._on_create_smart_bin)
         self.bin_tree.delete_smart_bin_requested.connect(self._on_delete_smart_bin)
         self.bin_tree.create_bin_requested.connect(self._on_new_bin_clicked)
+        self.bin_tree.create_bin_in_requested.connect(lambda parent_id: self._create_bin(parent_id=parent_id))
         self.bin_tree.delete_bin_requested.connect(self._delete_bin)
         self.bin_tree.rename_bin_requested.connect(self._start_rename_bin)
+        self.smart_bin_tree.bin_selected.connect(self._on_bin_selected)
+        self.smart_bin_tree.create_smart_bin_requested.connect(self._on_create_smart_bin)
+        self.smart_bin_tree.delete_smart_bin_requested.connect(self._on_delete_smart_bin)
 
         # Grid view selection
         if self.grid_view:
@@ -5362,11 +5489,14 @@ class MediaPoolPanel(QWidget):
             self._project = project
             self.tree.set_project(project)
             self.bin_tree.set_project(project)
+            self.smart_bin_tree.set_project(project)
             if self.grid_view:
                 self.grid_view.set_project(project)
+                self.metadata_shelf.set_project(project)
             self._update_status_label()
             return
 
+        self._close_pool_info()
         offline_status_changed = False
         self._updating = True
         try:
@@ -5398,8 +5528,10 @@ class MediaPoolPanel(QWidget):
             # Update project reference in tree and grid view for drag support
             self.tree.set_project(project)
             self.bin_tree.set_project(project)
+            self.smart_bin_tree.set_project(project)
             if self.grid_view:
                 self.grid_view.set_project(project)
+                self.metadata_shelf.set_project(project)
             self._refresh_bin_tree()
             self._refresh_tree()
             self._update_status_label()
@@ -5494,6 +5626,7 @@ class MediaPoolPanel(QWidget):
 
     def clear_project(self) -> None:
         """Clear the current project reference and reset UI."""
+        self._close_pool_info()
         if self._active_import_batch_id is not None:
             self._cancel_import_batch(self._active_import_batch_id)
             self._finish_import_batch()
@@ -5501,6 +5634,11 @@ class MediaPoolPanel(QWidget):
         self._notify_analysis_project_changed(None)
         self._analysis_status_cache.clear()
         self._project = None
+        self._current_bin_id = ""
+        self._current_bin_is_smart = False
+        self._navigation_stack.clear()
+        self._navigation_forward_stack.clear()
+        self._refresh_timer.stop()
         self._current_timeline_id = None  # Clear active timeline
         self._offline_status_signature = None
         self._pending_timeline_frame_previews.clear()
@@ -5511,8 +5649,11 @@ class MediaPoolPanel(QWidget):
         # AUD-20209: 树已清空 → 索引失效。
         self._tree_index_dirty = True
         self.bin_tree.populate(None)
+        self.smart_bin_tree.populate(None)
         if self.asset_model:
             self.asset_model.set_items([])
+        self._sync_metadata_shelf()
+        self._update_breadcrumb()
         self._update_status_label()
 
     # ==================== M3: 媒体池可选快速分析（§17.2）==================== #
@@ -5550,8 +5691,8 @@ class MediaPoolPanel(QWidget):
         """分析开关 toggled（§17.2）。开 → 菜单可见；关 → 隐藏分析项。"""
         self._media_analysis_enabled = enabled
         # 图标颜色反映开关状态
-        color = "#3a8a4a" if enabled else "#888888"
-        self.btn_analysis_toggle.setIcon(qta.icon("fa5s.brain", color=color))
+        color = C.ORANGE if enabled else C.TEXT_HINT
+        self.btn_analysis_toggle.setIcon(pool_icon("analysis", color))
         self._refresh_analysis_badges()
 
     def _on_analysis_status_changed(self, asset_id: str, status: str) -> None:
@@ -5574,7 +5715,7 @@ class MediaPoolPanel(QWidget):
     def _emit_analysis_scope(self, scope: str) -> None:
         """收集 asset_ids 并发 analysis_requested 信号（§17.2 / §17.3）。
 
-        scope: "selected"（_collect_selected_asset_ids）/ "bin"（_get_current_assets）
+        scope: "selected"（_collect_selected_asset_ids）/ "bin"（_get_current_bin_assets）
             / "all"（project.assets.keys()）。
         "all" 范围由 host/controller 弹二次确认卡（§17.3 红线：所有素材必须列出范围
         并二次确认）。
@@ -5584,7 +5725,7 @@ class MediaPoolPanel(QWidget):
         if scope == "selected":
             asset_ids = self._collect_selected_asset_ids()
         elif scope == "bin":
-            asset_ids = [a.asset_id for a in self._get_current_assets()]
+            asset_ids = [a.asset_id for a in self._get_current_bin_assets()]
         elif scope == "all":
             asset_ids = list(self._project.assets.keys())
         else:
@@ -5669,19 +5810,12 @@ class MediaPoolPanel(QWidget):
 
         self._current_timeline_id = timeline_id
 
-        # Update visual highlight in grid view
-        # AUD-20213: 列表视图已不再渲染 timelines 顶级节点（见 _delayed_refresh
-        # 注释），原有的列表视图高亮函数查找的节点不存在、永远空转，已连同
-        # 调用一并移除；高亮只保留 grid 视图路径。
-        if self._view_mode == ViewMode.GRID and self.grid_view:
-            self._update_timeline_highlight_grid()
-
-        logger.debug(f"Current timeline set to: {timeline_id}")
-
-    # AUD-20213: 查找 "timelines" 顶级节点的列表视图高亮函数已删除 —— 它
-    # 查找的节点在列表视图中早已不再渲染（_delayed_refresh 注释），函数永远
-    # 空转且每次切换时间线白白扫一遍树。列表视图若恢复渲染 timeline 行，
-    # 再按新节点结构重建高亮逻辑。
+        self._update_timeline_highlight_grid()
+        for row in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(row)
+            if item.data(0, Qt.ItemDataRole.UserRole + 1) == "timeline":
+                active = item.data(0, Qt.ItemDataRole.UserRole) == timeline_id
+                item.setForeground(0, QColor(C.ORANGE if active else C.TEXT_SECONDARY))
 
     def _update_timeline_highlight_grid(self) -> None:
         """Update timeline highlight in grid view (request repaint)."""
@@ -5693,58 +5827,118 @@ class MediaPoolPanel(QWidget):
     # ==================== View Mode Toggle ====================
 
     def _toggle_list_view(self) -> None:
-        """切换到列表视图"""
-        if self._updating:
-            return
-
-        self._updating = True
-        self._view_mode = ViewMode.LIST
-
-        # 更新按钮状态
-        self.btn_list_view.setChecked(True)
-        self.btn_grid_view.setChecked(False)
-
-        # 显示列表，隐藏网格
-        self.tree.show()
-        if self.grid_view:
-            self.grid_view.hide()
-
-        self._updating = False
-        logger.debug("Switched to list view")
+        self._switch_view_mode(ViewMode.LIST)
 
     def _toggle_grid_view(self) -> None:
-        """切换到网格视图"""
-        if self._updating:
+        self._switch_view_mode(ViewMode.GRID)
+
+    def _toggle_metadata_view(self) -> None:
+        self._switch_view_mode(ViewMode.METADATA)
+
+    def _switch_view_mode(self, mode: ViewMode) -> None:
+        """Share selection, navigation and commands across the three views."""
+        if self._updating or self.grid_view is None or self.grid_delegate is None:
             return
-
+        snapshot = self._capture_pool_selection()
+        self._close_pool_info()
         self._updating = True
-        self._view_mode = ViewMode.GRID
+        try:
+            self._view_mode = mode
+            for button, target in ((self.btn_list_view, ViewMode.LIST),
+                                   (self.btn_grid_view, ViewMode.GRID),
+                                   (self.btn_metadata_view, ViewMode.METADATA)):
+                button.setChecked(mode == target)
+            self._column_grid.set_active(mode == ViewMode.GRID)
+            self.thumb_slider.setVisible(mode == ViewMode.GRID)
+            self.grid_delegate.metadata_mode = mode == ViewMode.METADATA
+            if mode == ViewMode.METADATA:
+                self.grid_view.setViewportMargins(0, 0, 0, 0)
+                self.grid_view.setViewMode(QListView.ViewMode.ListMode)
+                self.grid_view.setFlow(QListView.Flow.TopToBottom)
+                self.grid_view.setWrapping(False)
+                self.grid_view.setGridSize(QSize())
+                self.grid_view.setSpacing(0)
+                self.grid_view.setUniformItemSizes(True)
+            elif mode == ViewMode.GRID:
+                self.grid_view.setViewportMargins(15, 8, 0, 0)
+                self.grid_view.setViewMode(QListView.ViewMode.IconMode)
+                self.grid_view.setFlow(QListView.Flow.LeftToRight)
+                self.grid_view.setWrapping(True)
+                self.grid_view.setSpacing(0)
+                self._column_grid.schedule_retile()
+            self.tree.setVisible(mode == ViewMode.LIST)
+            self.grid_view.setVisible(mode != ViewMode.LIST)
+            if mode != ViewMode.LIST:
+                self._populate_grid_view()
+                self.grid_view.doItemsLayout()
+            self._sync_metadata_shelf()
+            self._restore_pool_selection(snapshot)
+        finally:
+            self._updating = False
 
-        # 更新按钮状态
-        self.btn_list_view.setChecked(False)
-        self.btn_grid_view.setChecked(True)
+    def _capture_pool_selection(self) -> tuple[list[tuple[str, str]], Optional[tuple[str, str]], int]:
+        """Capture stable item identities rather than invalidatable indexes."""
+        keys: list[tuple[str, str]] = []
+        current_key = None
+        if self._view_mode == ViewMode.LIST:
+            for item in self.tree.selectedItems():
+                keys.append((item.data(0, Qt.ItemDataRole.UserRole + 1), item.data(0, Qt.ItemDataRole.UserRole)))
+            current = self.tree.currentItem()
+            if current is not None:
+                current_key = (current.data(0, Qt.ItemDataRole.UserRole + 1), current.data(0, Qt.ItemDataRole.UserRole))
+            scroll = self.tree.verticalScrollBar().value()
+        elif self.grid_view is not None:
+            for index in self.grid_view.selectionModel().selectedIndexes():
+                keys.append((index.data(AssetListModel.ITEM_TYPE_ROLE), index.data(AssetListModel.ITEM_ID_ROLE)))
+            current = self.grid_view.currentIndex()
+            if current.isValid():
+                current_key = (current.data(AssetListModel.ITEM_TYPE_ROLE), current.data(AssetListModel.ITEM_ID_ROLE))
+            scroll = self.grid_view.verticalScrollBar().value()
+        else:
+            scroll = 0
+        return keys, current_key, scroll
 
-        # 显示网格，隐藏列表
-        self.tree.hide()
-        if self.grid_view:
-            self.grid_view.show()
+    def _restore_pool_selection(self, snapshot: tuple[list[tuple[str, str]], Optional[tuple[str, str]], int]) -> None:
+        """Restore every selected item silently, including bins and timelines."""
+        keys, current_key, scroll = snapshot
+        selected = set(keys)
+        view = self.tree if self._view_mode == ViewMode.LIST else self.grid_view
+        if view is None:
+            return
+        selection_model = view.selectionModel()
+        previous = selection_model.blockSignals(True)
+        previous_view = view.blockSignals(True)
+        try:
+            selection_model.clearSelection()
+            if self._view_mode == ViewMode.LIST:
+                for row in range(self.tree.topLevelItemCount()):
+                    item = self.tree.topLevelItem(row)
+                    key = (item.data(0, Qt.ItemDataRole.UserRole + 1), item.data(0, Qt.ItemDataRole.UserRole))
+                    item.setSelected(key in selected)
+                    if key == current_key:
+                        self.tree.setCurrentItem(item, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
+            elif self.asset_model is not None:
+                for row in range(self.asset_model.rowCount()):
+                    index = self.asset_model.index(row)
+                    key = (index.data(AssetListModel.ITEM_TYPE_ROLE), index.data(AssetListModel.ITEM_ID_ROLE))
+                    if key in selected:
+                        selection_model.select(index, QItemSelectionModel.SelectionFlag.Select)
+                    if key == current_key:
+                        selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
+            view.verticalScrollBar().setValue(scroll)
+        finally:
+            selection_model.blockSignals(previous)
+            view.blockSignals(previous_view)
 
-        # 更新网格尺寸
-        self._update_grid_size()
-
-        # 重新填充网格视图
-        self._populate_grid_view()
-
-        self._updating = False
-        logger.debug("Switched to grid view")
-
-    # ==================== Sidebar Toggle ====================
+    def _navigate_to_sidebar_bin(self, bin_id: str) -> None:
+        self._on_bin_selected(bin_id, False)
+        self.bin_tree.select_bin(bin_id, False)
 
     def _on_toggle_sidebar(self, checked: bool) -> None:
-        """切换左侧文件夹面板（Bins）的显示/隐藏。"""
-        self.bin_tree.setVisible(checked)
-
-    # ==================== Search and Sort ====================
+        self.sidebar.setVisible(checked)
+        if checked and self._project is not None:
+            tree = self.smart_bin_tree if self._current_bin_is_smart else self.bin_tree
+            tree.select_bin(self._current_bin_id or self._project.root_bin_id, self._current_bin_is_smart)
 
     def _on_search_toggled(self, checked: bool) -> None:
         """Toggle search bar visibility."""
@@ -6055,32 +6249,65 @@ class MediaPoolPanel(QWidget):
         self._refresh_tree()
 
     def _on_bin_selected(self, bin_id: str, is_smart_bin: bool) -> None:
-        """Handle bin selection in the bin tree."""
-        if self._updating:
+        """Navigate from either sidebar section and synchronize the path."""
+        if self._updating or self._project is None:
             return
-
-        # 选中 root bin 等同于回到 root 层级（显示未归类素材），与右侧
-        # 内联导航保持一致。
-        if self._project and bin_id == self._project.root_bin_id:
-            bin_id = ""
-
-        self._current_bin_id = bin_id
+        self._current_bin_id = "" if bin_id == self._project.root_bin_id else bin_id
         self._current_bin_is_smart = is_smart_bin
+        self._navigation_forward_stack.clear()
+        self._navigation_stack.clear()
+        if self._current_bin_id and not is_smart_bin:
+            ancestors: list[str] = []
+            cursor = self._project.bins.get(self._current_bin_id)
+            visited = {self._current_bin_id}
+            while cursor is not None and cursor.parent_id and cursor.parent_id not in visited:
+                parent_id = cursor.parent_id
+                visited.add(parent_id)
+                if parent_id != self._project.root_bin_id:
+                    ancestors.append(parent_id)
+                cursor = self._project.bins.get(parent_id)
+            self._navigation_stack = [self._project.root_bin_id] + list(reversed(ancestors))
+        other = self.bin_tree if is_smart_bin else self.smart_bin_tree
+        previous = other.blockSignals(True)
+        other.setCurrentItem(None)
+        other.clearSelection()
+        other.blockSignals(previous)
+        self._update_breadcrumb()
         self._refresh_tree()
 
-        logger.debug(f"Bin selected: {bin_id} (smart={is_smart_bin})")
-
     def _refresh_bin_tree(self) -> None:
-        """Refresh the bin tree sidebar."""
-        self.bin_tree.populate(self._project)
-        if self._current_bin_id:
-            restored = self.bin_tree.select_bin(
-                self._current_bin_id,
-                self._current_bin_is_smart,
-            )
-            if not restored:
-                self._current_bin_id = ""
-                self._current_bin_is_smart = False
+        """Refresh regular and Smart Bins, preserving expanded folders."""
+        expanded: set[str] = set()
+        iterator = QTreeWidgetItemIterator(self.bin_tree)
+        had_items = self.bin_tree.topLevelItemCount() > 0
+        while iterator.value() is not None:
+            item = iterator.value()
+            if item.isExpanded():
+                expanded.add(item.data(0, BinTreeWidget.BIN_ID_ROLE))
+            iterator += 1
+        for tree, smart_only in ((self.bin_tree, False), (self.smart_bin_tree, True)):
+            previous = tree.blockSignals(True)
+            try:
+                tree.set_project(self._project)
+                tree.populate(self._project)
+                for row in range(tree.topLevelItemCount()):
+                    item = tree.topLevelItem(row)
+                    is_section = item.data(0, BinTreeWidget.BIN_TYPE_ROLE) == "section"
+                    item.setHidden(is_section != smart_only)
+                if self._project and self._current_bin_is_smart == smart_only:
+                    tree.select_bin(self._current_bin_id or self._project.root_bin_id, smart_only)
+            finally:
+                tree.blockSignals(previous)
+        if had_items:
+            iterator = QTreeWidgetItemIterator(self.bin_tree)
+            while iterator.value() is not None:
+                item = iterator.value()
+                item.setExpanded(item.data(0, BinTreeWidget.BIN_ID_ROLE) in expanded)
+                iterator += 1
+        if self._project and self._current_bin_id and not self._current_bin_is_smart and self._current_bin_id not in self._project.bins:
+            self._current_bin_id = ""
+            self._navigation_stack.clear()
+        self._update_breadcrumb()
 
     def _on_sort_changed(self, index: int) -> None:
         """Handle sort criteria change."""
@@ -6102,7 +6329,10 @@ class MediaPoolPanel(QWidget):
         self._refresh_tree()
 
     # Column index -> sort key for click-to-sort (Name=0, Duration=3).
-    _COLUMN_SORT_MAP = {0: SORT_BY_NAME, 3: SORT_BY_DURATION}
+    _COLUMN_SORT_MAP = {
+        0: SORT_BY_NAME, 1: "reel", 2: "scene", 3: SORT_BY_DURATION,
+        4: "fps", 5: "resolution", 6: "codec", 7: "audio", 8: "path",
+    }
 
     def _on_header_clicked(self, column: int) -> None:
         """Handle column-header click: sort by that column.
@@ -6138,8 +6368,15 @@ class MediaPoolPanel(QWidget):
         self._persist_sort_prefs()
         self._refresh_tree()
 
+    def _sync_sort_indicator(self) -> None:
+        column = next((c for c, key in self._COLUMN_SORT_MAP.items() if key == self._sort_by), None)
+        self.tree.header().setSortIndicatorShown(column is not None)
+        if column is not None:
+            self.tree.header().setSortIndicator(column, Qt.SortOrder.AscendingOrder if self._sort_order == "asc" else Qt.SortOrder.DescendingOrder)
+
     def _persist_sort_prefs(self) -> None:
         """Save sort key/order to QSettings so they survive restarts."""
+        self._sync_sort_indicator()
         try:
             from PyQt6.QtCore import QSettings
 
@@ -6157,7 +6394,7 @@ class MediaPoolPanel(QWidget):
             settings = QSettings("ToposColor", "MediaPool")
             saved_by = settings.value("sort_by")
             saved_order = settings.value("sort_order")
-            if saved_by in (SORT_BY_NAME, SORT_BY_DATE, SORT_BY_TYPE, SORT_BY_DURATION):
+            if saved_by in {self.sort_combo.itemData(i) for i in range(self.sort_combo.count())}:
                 self._sort_by = saved_by
                 for i in range(self.sort_combo.count()):
                     if self.sort_combo.itemData(i) == saved_by:
@@ -6195,7 +6432,17 @@ class MediaPoolPanel(QWidget):
                 reverse=reverse,
             ) + untimed
 
-        return assets
+        fields = {
+            "reel": lambda a: (a.reel or "").casefold(),
+            "scene": lambda a: (a.production_info_str or "").casefold(),
+            "fps": lambda a: a.fps or 0.0,
+            "resolution": lambda a: (a.width or 0) * (a.height or 0),
+            "codec": lambda a: (a.codec or "").casefold(),
+            "audio": lambda a: a.audio_channels or 0,
+            "path": lambda a: a.path.casefold(),
+        }
+        key = fields.get(self._sort_by)
+        return sorted(assets, key=key, reverse=reverse) if key is not None else assets
 
     def _update_grid_size(self) -> None:
         """更新网格视图尺寸 — 尺寸计算归列数控制器所有"""
@@ -6204,7 +6451,7 @@ class MediaPoolPanel(QWidget):
             grid.schedule_retile()
         elif self.grid_view and self.grid_delegate:
             w = self._thumb_width
-            h = w * 2 // 3  # 3:2 aspect ratio
+            h = round(w * 9 / 16)
             self.grid_delegate.set_thumb_size((w, h))
             self.grid_view.setGridSize(QSize(w + 14, h + 38))
             self.grid_view.viewport().update()
@@ -6246,7 +6493,7 @@ class MediaPoolPanel(QWidget):
         self._thumb_width = icon.width()
         if self.grid_delegate:
             self.grid_delegate.set_thumb_size((icon.width(), icon.height()))
-        if self._view_mode == ViewMode.GRID:
+        if self._view_mode != ViewMode.LIST:
             self._reload_grid_thumbnails()
         logger.debug(f"Thumbnail columns applied: {icon.width()}x{icon.height()}px")
 
@@ -6346,6 +6593,9 @@ class MediaPoolPanel(QWidget):
 
         sel_model = self.grid_view.selectionModel() if self.grid_view else None
         if sel_model is None:
+            return
+
+        if len(sel_model.selectedIndexes()) != 1:
             return
 
         # A selected timeline is inspectable without switching the active
@@ -7215,7 +7465,7 @@ class MediaPoolPanel(QWidget):
 
         self._updating = True
         try:
-            selected_key = self._selected_pool_item_key()
+            selection_snapshot = self._capture_pool_selection()
             self.tree.clear()
             # AUD-20209: 树已重建/清空 → 索引失效，下次缩略图到达时懒重建。
             self._tree_index_dirty = True
@@ -7224,51 +7474,39 @@ class MediaPoolPanel(QWidget):
                 # 清空网格视图
                 if self.asset_model:
                     self.asset_model.set_items([])
+                self._sync_metadata_shelf()
+                self._update_breadcrumb()
                 if self._refresh_bins_pending:
                     self._refresh_bin_tree()
                     self._refresh_bins_pending = False
                 return
 
 
-            # 根据 bin 选择获取素材列表
-            assets_to_display = self._get_current_assets()
-
-            # 应用搜索过滤
-            assets_to_display = self._apply_search_filter(assets_to_display)
-
-            # 排序素材
-            assets_to_display = self._sort_assets(assets_to_display)
-
-            # 先显示当前层级的普通 bin（文件夹卡片），再显示素材
-            # Smart Bins 不在这里显示——它们保留在左侧边栏。
-            bins_to_display = self._get_current_bins()
-            for bin_obj in bins_to_display:
-                self._add_bin_item_direct(bin_obj)
-
-            # 直接显示素材（不再按 bin 分组，bin 选择在左侧树中）
-            for asset in assets_to_display:
-                self._add_asset_item_direct(asset)
-
-            # 时间线节点：不再在媒体池主列表显示。时间线由专用的 Timeline
-            # 面板管理（对标 DaVinci Resolve/Premiere——媒体池只管素材和素材箱，
-            # 时间线在单独的面板）。_get_current_timelines 仍保留供拖拽等逻辑使用。
-            # timelines_to_show = self._get_current_timelines()
-            # (kept for reference; intentionally not rendered)
-
-            # 刷新网格视图（如果当前是网格模式）
-            if self._view_mode == ViewMode.GRID:
-                self._populate_grid_view()
+            for pool_item in self._current_pool_items():
+                if pool_item.item_type == "bin":
+                    self._add_bin_item_direct(pool_item.data)
+                elif pool_item.item_type == "asset":
+                    self._add_asset_item_direct(pool_item.data)
+                else:
+                    self._add_timeline_item_direct(pool_item.data)
+            self._populate_grid_view()
 
             if self._refresh_bins_pending:
                 self._refresh_bin_tree()
                 self._refresh_bins_pending = False
-            self._restore_pool_item_selection(selected_key)
+            self._restore_pool_selection(selection_snapshot)
 
         finally:
             self._updating = False
 
     def _get_current_assets(self) -> List[MediaAsset]:
-        """根据当前 bin 选择获取素材列表。"""
+        """Search scope affects presentation, not AI or command scope."""
+        if self._project and self._search_text and self._search_all_bins:
+            return list(self._project.assets.values())
+        return self._get_current_bin_assets()
+
+    def _get_current_bin_assets(self) -> List[MediaAsset]:
+        """Read the selected bin independently of presentation filters."""
         if not self._project:
             return []
 
@@ -7298,71 +7536,36 @@ class MediaPoolPanel(QWidget):
         return assets
 
     def _get_current_bins(self) -> List[ProjectBin]:
-        """获取当前层级应显示的普通 bin（不含 Smart Bins，不含 root bin）。
-
-        - root 层级（_current_bin_id 为空）：返回所有顶层 bin，即
-          ``parent_id == root_bin_id`` **或** ``parent_id is None`` 的 bin。
-          后者是兼容旧数据/``_create_bin(parent_id=None)`` 的写法——
-          ``BinTreeWidget.populate`` 用同样的兜底逻辑把它们挂到顶层。
-        - bin 内层级：返回所有 ``parent_id == _current_bin_id`` 的 bin。
-
-        Smart Bins 不在这里返回——它们仅在左侧边栏显示。
-        """
-        if not self._project:
+        """Read visible folders without changing project membership semantics."""
+        if self._project is None or self._current_bin_is_smart:
             return []
-
-        is_root_level = self._current_bin_id == "" or self._current_bin_id is None
-        root_bin_id = self._project.root_bin_id
-
-        if is_root_level:
-            # Root level: bins whose parent is the project root, or whose
-            # parent_id is None (legacy / "New Bin" without parent).
-            child_bins = [
-                bin_obj
-                for bin_id, bin_obj in self._project.bins.items()
-                if bin_id != root_bin_id
-                and (bin_obj.parent_id == root_bin_id or bin_obj.parent_id is None)
-            ]
-        else:
-            # Inside a bin: only its direct children.
-            child_bins = [
-                bin_obj
-                for bin_id, bin_obj in self._project.bins.items()
-                if bin_id != root_bin_id
-                and bin_obj.parent_id == self._current_bin_id
-            ]
-        return sorted(child_bins, key=lambda b: b.name.casefold())
+        parent_id = self._current_bin_id or self._project.root_bin_id
+        child_bins = [b for bid, b in self._project.bins.items()
+                      if bid != self._project.root_bin_id and
+                      ((self._search_text and self._search_all_bins) or b.parent_id == parent_id
+                       or (not self._current_bin_id and b.parent_id is None))]
+        if self._search_text:
+            child_bins = [b for b in child_bins if self._search_text.casefold() in b.name.casefold()
+                          and self._search_filter_mode in (SearchFilterMode.FILENAME.value, SearchFilterMode.ALL_FIELDS.value)]
+        return sorted(child_bins, key=lambda b: b.name.casefold(), reverse=self._sort_order == "desc")
 
     def _get_current_timelines(self) -> List[TimelineSequenceRef]:
-        """获取当前层级应显示的时间线列表。
-
-        - root 层级：只显示未被任何用户 bin 引用的时间线（与素材一致，
-          拖进文件夹后从 root 视图消失）
-        - bin 内层级：仅返回该 bin 的 ``timeline_ids`` 中引用的时间线
-
-        跳过项目里已经不存在（被删除）的 timeline_id。
-        """
-        if not self._project:
+        """Use the same timeline references in all three presentations."""
+        if self._project is None or self._current_bin_is_smart:
             return []
-
-        if self._is_at_root_level():
-            unfiled_ids = self._project.get_unfiled_timeline_ids()
-            result: List[TimelineSequenceRef] = []
-            for tid in unfiled_ids:
-                ref = self._project.timelines.get(tid)
-                if ref is not None:
-                    result.append(ref)
-            return result
-
-        bin_obj = self._project.bins.get(self._current_bin_id) if self._current_bin_id else None
-        if bin_obj is None:
-            return []
-        result = []
-        for tid in bin_obj.timeline_ids:
-            ref = self._project.timelines.get(tid)
-            if ref is not None:
-                result.append(ref)
-        return result
+        if self._search_text and self._search_all_bins:
+            result = list(self._project.timelines.values())
+        elif not self._current_bin_id:
+            result = [self._project.timelines[tid] for tid in self._project.get_unfiled_timeline_ids()
+                      if tid in self._project.timelines]
+        else:
+            bin_obj = self._project.bins.get(self._current_bin_id)
+            result = [self._project.timelines[tid] for tid in (bin_obj.timeline_ids if bin_obj else ())
+                      if tid in self._project.timelines]
+        if self._search_text:
+            result = [t for t in result if self._search_text.casefold() in t.name.casefold()
+                      and self._search_filter_mode in (SearchFilterMode.FILENAME.value, SearchFilterMode.ALL_FIELDS.value)]
+        return sorted(result, key=lambda t: t.name.casefold(), reverse=self._sort_order == "desc")
 
     def _is_at_root_level(self) -> bool:
         """当前是否在 root 层级（未进入任何 bin）。"""
@@ -7419,8 +7622,8 @@ class MediaPoolPanel(QWidget):
             self._current_bin_id = parent_bin_id
         self._current_bin_is_smart = False
 
-        if self.bin_tree.isVisible() and self._current_bin_id:
-            self.bin_tree.select_bin(self._current_bin_id, False)
+        if self.bin_tree.isVisible() and self._project:
+            self.bin_tree.select_bin(self._current_bin_id or self._project.root_bin_id, False)
 
         self._update_breadcrumb()
         self._refresh_tree()
@@ -7446,92 +7649,47 @@ class MediaPoolPanel(QWidget):
         logger.debug(f"Navigated forward to: {next_bin_id}")
 
     def _navigate_to_root(self) -> None:
-        """直接跳回 root 层级（清空整个导航栈）。"""
-        if not self._navigation_stack:
+        """Master remains available from every regular or Smart Bin."""
+        if self._project is None:
             return
-        self._navigation_stack.clear()
-        self._current_bin_id = ""
-        self._current_bin_is_smart = False
-        if self.bin_tree.isVisible():
-            # Deselect any bin in the sidebar to reflect root-level view.
-            current = self.bin_tree.currentItem()
-            if current is not None:
-                prev = self.bin_tree.blockSignals(True)
-                try:
-                    self.bin_tree.setCurrentItem(None)
-                finally:
-                    self.bin_tree.blockSignals(prev)
-        self._update_breadcrumb()
-        self._refresh_tree()
+        self._on_bin_selected(self._project.root_bin_id, False)
+        self.bin_tree.select_bin(self._project.root_bin_id, False)
 
     def _update_breadcrumb(self) -> None:
-        """Rebuild the breadcrumb path from ``_navigation_stack``.
-
-        The breadcrumb is hidden at root level (empty stack). When navigating
-        into bins, each ancestor becomes a clickable segment that jumps
-        directly to that level; the current (deepest) bin is shown as plain
-        text (non-clickable).
-        """
-        if not hasattr(self, "breadcrumb_widget") or self.breadcrumb_widget is None:
-            return
-
-        # Clear existing segments
+        """Keep Resolve's current-bin header visible even at Master."""
         while self.breadcrumb_path_layout.count():
-            child = self.breadcrumb_path_layout.takeAt(0)
-            widget = child.widget() if child is not None else None
+            item = self.breadcrumb_path_layout.takeAt(0)
+            widget = item.widget()
             if widget is not None:
+                widget.hide()
+                widget.setParent(None)
                 widget.deleteLater()
-
-        if not self._navigation_stack:
-            self.breadcrumb_widget.setVisible(False)
-            return
-
-        self.breadcrumb_widget.setVisible(True)
-
-        # "Root" segment — always present, clickable to go all the way back
-        root_btn = QPushButton(
-            I18N.tr("edit.media_pool.breadcrumb_root", "Root")
-        )
-        root_btn.clicked.connect(self._navigate_to_root)
-        self.breadcrumb_path_layout.addWidget(root_btn)
-
-        # Intermediate ancestors from the stack (excluding the last entry,
-        # which represents the bin we were in before the current one — handled
-        # below together with the current bin name).
+        self.breadcrumb_widget.show()
+        self.btn_breadcrumb_back.setVisible(True)
+        self.btn_breadcrumb_back.setEnabled(bool(self._navigation_stack))
+        master = QPushButton(I18N.tr("edit.media_pool.master", "Master"))
+        master.clicked.connect(self._navigate_to_root)
+        self.breadcrumb_path_layout.addWidget(master)
         if self._project is not None:
-            for i, bin_id in enumerate(self._navigation_stack):
-                # Skip root_bin_id entries — they render as "Root" already
-                if bin_id == self._project.root_bin_id:
-                    continue
-                bin_obj = self._project.bins.get(bin_id)
-                if bin_obj is None:
-                    continue
-
-                # Separator "›"
-                sep = QLabel("›")
-                self.breadcrumb_path_layout.addWidget(sep)
-
-                # Clickable segment that navigates back to this depth
-                target_depth = i + 1
-                btn = QPushButton(bin_obj.name)
-                btn.clicked.connect(lambda _checked=False, d=target_depth: self._navigate_to_depth(d))
-                self.breadcrumb_path_layout.addWidget(btn)
-
-            # The current bin (deepest) — non-clickable plain text
-            if self._current_bin_id:
-                current_bin = self._project.bins.get(self._current_bin_id)
-                if current_bin is not None:
-                    sep = QLabel("›")
-                    self.breadcrumb_path_layout.addWidget(sep)
-                    current_label = QPushButton(current_bin.name)
-                    # Make it look like the active segment (no hover, bold)
-                    current_label.setEnabled(False)
-                    current_label.setStyleSheet(
-                        "QPushButton { color: #E29227; font-weight: bold; }"
-                    )
-                    self.breadcrumb_path_layout.addWidget(current_label)
-
-        # Stretch at the end to left-align the path
+            if self._current_bin_is_smart:
+                bins = list(EditProject.get_default_smart_bins()) + list(self._project.smart_bins.values())
+                name = next((b.name for b in bins if b.bin_id == self._current_bin_id), "")
+                self.breadcrumb_path_layout.addWidget(QLabel("›"))
+                self.breadcrumb_path_layout.addWidget(QLabel(name))
+            else:
+                for depth, bin_id in enumerate(self._navigation_stack):
+                    if bin_id == self._project.root_bin_id:
+                        continue
+                    bin_obj = self._project.bins.get(bin_id)
+                    if bin_obj is not None:
+                        self.breadcrumb_path_layout.addWidget(QLabel("›"))
+                        button = QPushButton(bin_obj.name)
+                        button.clicked.connect(lambda _checked=False, bid=bin_id: self._navigate_to_sidebar_bin(bid))
+                        self.breadcrumb_path_layout.addWidget(button)
+                current = self._project.bins.get(self._current_bin_id)
+                if current is not None:
+                    self.breadcrumb_path_layout.addWidget(QLabel("›"))
+                    self.breadcrumb_path_layout.addWidget(QLabel(current.name))
         self.breadcrumb_path_layout.addStretch(1)
 
     def _navigate_to_depth(self, depth: int) -> None:
@@ -7551,8 +7709,8 @@ class MediaPoolPanel(QWidget):
         else:
             self._current_bin_id = ""
         self._current_bin_is_smart = False
-        if self.bin_tree.isVisible() and self._current_bin_id:
-            self.bin_tree.select_bin(self._current_bin_id, False)
+        if self.bin_tree.isVisible() and self._project:
+            self.bin_tree.select_bin(self._current_bin_id or self._project.root_bin_id, False)
         self._update_breadcrumb()
         self._refresh_tree()
 
@@ -7561,7 +7719,12 @@ class MediaPoolPanel(QWidget):
         if not self._search_text:
             return assets
 
-        search_lower = self._search_text.lower()
+        search_lower = self._search_text.casefold()
+        if self._search_filter_mode == SearchFilterMode.ALL_FIELDS.value:
+            return [asset for asset in assets if search_lower in " ".join(str(value or "") for value in (
+                asset.display_name, asset.path, asset.reel, asset.scene, asset.shot, asset.take,
+                asset.codec, asset.resolution_str, asset.fps, asset.keywords, asset.comment, asset.color_label,
+            )).casefold()]
 
         if self._search_filter_mode == SearchFilterMode.FILENAME.value:
             return [a for a in assets if search_lower in (a.display_name or "").lower()]
@@ -7596,8 +7759,7 @@ class MediaPoolPanel(QWidget):
     def _add_bin_item_direct(self, bin_obj: ProjectBin) -> QTreeWidgetItem:
         """Add a bin item to the tree as a top-level entry.
 
-        The bin is rendered with a folder icon and a trailing asset count,
-        matching the style used by the sidebar bin tree.
+        Folder names match the sidebar; counts stay in the tooltip.
 
         Args:
             bin_obj: ProjectBin to add
@@ -7607,9 +7769,8 @@ class MediaPoolPanel(QWidget):
         """
         item = QTreeWidgetItem(self.tree)
 
-        # Col 0: display "Name (count)"; EditRole stores the plain name so the
-        # inline editor only edits the name, not the trailing count.
-        item.setData(0, Qt.ItemDataRole.DisplayRole, f"{bin_obj.name} ({len(bin_obj.asset_ids)})")
+        # Display and inline-edit roles both carry the plain bin name.
+        item.setData(0, Qt.ItemDataRole.DisplayRole, bin_obj.name)
         item.setData(0, Qt.ItemDataRole.EditRole, bin_obj.name)
         item.setIcon(0, icon_folder())
 
@@ -7734,7 +7895,8 @@ class MediaPoolPanel(QWidget):
         path_display = asset.path
         if len(path_display) > 40:
             path_display = path_display[:20] + "..." + path_display[-20:]
-        item.setText(8, path_display)
+        item.setText(8, asset.path)
+        item.setToolTip(8, asset.path)
 
         # Scene-backed virtual assets render their own deterministic poster;
         # never send the topos:// URI to the file thumbnail decoder.
@@ -7743,41 +7905,72 @@ class MediaPoolPanel(QWidget):
 
         return item
 
+    def _add_timeline_item_direct(self, timeline: TimelineSequenceRef) -> QTreeWidgetItem:
+        """Present existing timeline actions consistently in List View."""
+        item = QTreeWidgetItem(self.tree)
+        item.setText(0, timeline.name)
+        item.setIcon(0, pool_icon("timeline"))
+        item.setData(0, Qt.ItemDataRole.UserRole, timeline.timeline_id)
+        item.setData(0, Qt.ItemDataRole.UserRole + 1, "timeline")
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
+        item.setText(4, self._format_timeline_fps(timeline.fps))
+        item.setText(5, f"{timeline.width}×{timeline.height}")
+        item.setToolTip(0, timeline.name)
+        if timeline.timeline_id == self._current_timeline_id:
+            item.setForeground(0, QColor(C.ORANGE))
+        return item
+
+    def _current_pool_items(self) -> List[GridItem]:
+        """Use one ordering/filtering result for all media-pool presentations."""
+        bins = self._get_current_bins()
+        assets = self._apply_search_filter(self._get_current_assets())
+        timelines = self._get_current_timelines()
+        items = ([GridItem("bin", b.bin_id, b) for b in bins]
+                 + [GridItem("asset", a.asset_id, a) for a in assets]
+                 + [GridItem("timeline", t.timeline_id, t) for t in timelines])
+        known: list[tuple[Any, GridItem]] = []
+        unknown: list[GridItem] = []
+        for item in items:
+            value = self._pool_sort_value(item)
+            if value is None:
+                unknown.append(item)
+            else:
+                known.append((value, item))
+        known.sort(key=lambda pair: (pair[0], pair[1].display_name.casefold()), reverse=self._sort_order == "desc")
+        unknown.sort(key=lambda item: item.display_name.casefold())
+        return [item for _, item in known] + unknown
+
+    def _pool_sort_value(self, item: GridItem) -> Any:
+        """Sort references by available UI fields; missing values stay last."""
+        if self._sort_by == SORT_BY_NAME:
+            return item.display_name.casefold()
+        data = item.data
+        if self._sort_by == SORT_BY_TYPE:
+            return str(getattr(data, "media_type", item.item_type)).casefold()
+        if self._sort_by == "resolution":
+            width, height = getattr(data, "width", None), getattr(data, "height", None)
+            if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+                return width * height
+            return None
+        field = {SORT_BY_DATE: "created_at", SORT_BY_DURATION: "duration_seconds", "audio": "audio_channels", "scene": "production_info_str"}.get(self._sort_by, self._sort_by)
+        value = getattr(data, field, None)
+        if self._sort_by in (SORT_BY_DATE, SORT_BY_DURATION, "fps", "audio"):
+            return value if isinstance(value, (int, float)) and math.isfinite(value) else None
+        return str(value).casefold() if value is not None and str(value).strip() else None
+
     def _populate_grid_view(self) -> None:
         """填充网格视图（包含 bins + assets + timelines，V-08, UI-28）"""
         if not self._project or not self.asset_model:
             return
 
-        # 创建混合列表
-        items: List[GridItem] = []
-
-        # 先添加当前层级的 bin 卡片（不含 Smart Bins，不含 root bin）
-        bins = self._get_current_bins()
-
-        # 获取当前素材（与列表视图相同逻辑）
-        assets = self._get_current_assets()
-
-        # 应用搜索过滤
-        assets = self._apply_search_filter(assets)
-
-        # 排序
-        assets = self._sort_assets(assets)
-
-        # 添加 bin items（在最前面，文件夹优先于素材）
-        for bin_obj in bins:
-            items.append(GridItem("bin", bin_obj.bin_id, bin_obj))
-
-        # 添加 asset items
-        for asset in assets:
-            items.append(GridItem("asset", asset.asset_id, asset))
-
-        # 添加 timeline items（root 层级显示全部；bin 内显示该 bin 引用的时间线）
-        timelines = self._get_current_timelines()
-        for timeline_ref in timelines:
-            items.append(GridItem("timeline", timeline_ref.timeline_id, timeline_ref))
+        items = self._current_pool_items()
+        assets = [item.data for item in items if item.item_type == "asset"]
+        timelines = [item.data for item in items if item.item_type == "timeline"]
+        bins = [item.data for item in items if item.item_type == "bin"]
 
         # 更新模型
         self.asset_model.set_items(items)
+        self._sync_metadata_shelf()
 
         # Timeline cards use the first dropped media asset's persisted random
         # frame as their preview source. Requests are asynchronous and are
@@ -7993,7 +8186,8 @@ class MediaPoolPanel(QWidget):
         if len(path_display) > 40:
             # 截断中间部分
             path_display = path_display[:20] + "..." + path_display[-20:]
-        item.setText(8, path_display)
+        item.setText(8, asset.path)
+        item.setToolTip(8, asset.path)
 
         # Scene-backed virtual assets render their own deterministic poster;
         # never send the topos:// URI to the file thumbnail decoder.
@@ -8085,7 +8279,7 @@ class MediaPoolPanel(QWidget):
             it for it in selected_items
             if it.data(0, Qt.ItemDataRole.UserRole + 1) == "asset"
         ]
-        if len(asset_items) != 1:
+        if len(self.tree.selectedItems()) != 1 or len(asset_items) != 1:
             return
         item = asset_items[0]
         asset_id = item.data(0, Qt.ItemDataRole.UserRole)
@@ -8105,7 +8299,7 @@ class MediaPoolPanel(QWidget):
             return None
 
         if self.grid_view and self.asset_model:
-            indexes = self.grid_view.selectedIndexes()
+            indexes = self.grid_view.selectionModel().selectedIndexes()
             if indexes:
                 index = indexes[0]
                 item_type = self.asset_model.data(index, AssetListModel.ITEM_TYPE_ROLE)
@@ -8649,13 +8843,14 @@ class MediaPoolPanel(QWidget):
         global_pos = self.tree.viewport().mapToGlobal(pos)
         menu.exec(global_pos)
 
-    def _on_grid_context_menu(self, pos: Any) -> None:
+    def _on_grid_context_menu(self, pos: Any, source_view: Optional[QListView] = None) -> None:
         """Show context menu for grid view item (assets and timelines)."""
-        if not self.grid_view or not self.asset_model:
+        view = source_view if source_view is not None else self.grid_view
+        if view is None or not self.asset_model:
             return
 
         # Get the index at the position
-        index = self.grid_view.indexAt(pos)
+        index = view.indexAt(pos)
         if not index.isValid():
             # Click on empty area - show panel actions only
             menu = QMenu(self)
@@ -8707,7 +8902,7 @@ class MediaPoolPanel(QWidget):
                 menu.addSeparator()
                 add_dock_management_actions(menu, dock)
 
-            global_pos = self.grid_view.mapToGlobal(pos)
+            global_pos = view.viewport().mapToGlobal(pos)
             menu.exec(global_pos)
             return
 
@@ -8718,10 +8913,10 @@ class MediaPoolPanel(QWidget):
         # processing the right-button press.  The action also receives the
         # captured IDs below, so a later menu interaction cannot change the
         # deletion target.
-        context_ids = getattr(self.grid_view, "_context_menu_selection_ids", ())
+        context_ids = getattr(view, "_context_menu_selection_ids", ())
         if context_ids:
             self._restore_grid_context_selection(list(context_ids), index)
-        self.grid_view._context_menu_selection_ids = ()
+        view._context_menu_selection_ids = ()
 
         # Preserve a selected group; otherwise select only the card under the
         # context-menu pointer.  This keeps single-item actions unambiguous
@@ -8969,7 +9164,7 @@ class MediaPoolPanel(QWidget):
             add_dock_management_actions(menu, dock)
 
         # 显示菜单
-        global_pos = self.grid_view.mapToGlobal(pos)
+        global_pos = view.viewport().mapToGlobal(pos)
         menu.exec(global_pos)
 
     def _append_motion_graphic_create_action(self, menu: QMenu) -> None:
@@ -9058,7 +9253,7 @@ class MediaPoolPanel(QWidget):
         if focused is None:
             return
 
-        for view in (self.bin_tree, self.tree, self.grid_view):
+        for view in (self.bin_tree, self.tree, self.grid_view, self.metadata_shelf):
             if view is None:
                 continue
             if focused is view or view.isAncestorOf(focused):
@@ -9088,6 +9283,8 @@ class MediaPoolPanel(QWidget):
         if source_widget is self.bin_tree:
             return self._delete_selected_bins()
         # List / grid views own asset + timeline deletion
+        if source_widget is self.metadata_shelf:
+            return self._delete_selected_pool_items(source_widget=self.grid_view)
         if source_widget is self.tree or source_widget is self.grid_view:
             return self._delete_selected_pool_items(source_widget=source_widget)
         return False
@@ -9198,10 +9395,10 @@ class MediaPoolPanel(QWidget):
                     selection.append((item_type, item_id))
         elif (
             source_widget is self.grid_view
-            or (source_widget is None and self._view_mode == ViewMode.GRID)
+            or (source_widget is None and self._view_mode != ViewMode.LIST)
         ) and self.grid_view is not None and self.asset_model is not None:
             seen_ids: set[tuple[str, str]] = set()
-            for index in self.grid_view.selectedIndexes():
+            for index in self.grid_view.selectionModel().selectedIndexes():
                 if not index.isValid():
                     continue
                 item_type = self.asset_model.data(
@@ -9392,6 +9589,89 @@ class MediaPoolPanel(QWidget):
                 I18N.tr("edit.media_pool.error", "Error"),
                 I18N.tr("edit.media_pool.reveal_failed", "Failed to open file manager.")
             )
+
+    def _close_pool_info(self) -> None:
+        if self._pool_info_popup is not None:
+            self._pool_info_popup.close()
+        self._pool_info_key = None
+
+    def _clear_pool_info_reference(self, popup: QWidget) -> None:
+        if self._pool_info_popup is popup:
+            self._pool_info_popup = None
+            self._pool_info_key = None
+
+    def _show_selected_pool_info(self) -> None:
+        if self.asset_model is None:
+            return
+        keys, current, _scroll = self._capture_pool_selection()
+        target = current if current in keys else (keys[0] if len(keys) == 1 else None)
+        if target is None:
+            return
+        for row in range(self.asset_model.rowCount()):
+            index = self.asset_model.index(row)
+            key = (index.data(AssetListModel.ITEM_TYPE_ROLE), index.data(AssetListModel.ITEM_ID_ROLE))
+            if key == target:
+                if self._view_mode == ViewMode.LIST:
+                    for tree_row in range(self.tree.topLevelItemCount()):
+                        item = self.tree.topLevelItem(tree_row)
+                        item_key = (item.data(0, Qt.ItemDataRole.UserRole + 1), item.data(0, Qt.ItemDataRole.UserRole))
+                        if item_key == target:
+                            self._show_pool_item_info(index, self.tree, self.tree.visualItemRect(item))
+                            break
+                else:
+                    view = self.metadata_shelf if self._view_mode == ViewMode.METADATA and key[0] == "timeline" else self.grid_view
+                    self._show_pool_item_info(index, view)
+                return
+
+    def _show_pool_item_info(self, index: QModelIndex, view: QAbstractItemView, anchor_rect: Optional[QRect] = None) -> None:
+        """Badge clicks inspect cached metadata without changing selection."""
+        from .media_pool_info import MediaPoolInfoPopup
+        if self._project is None or not index.isValid():
+            return
+        kind, item_id = index.data(AssetListModel.ITEM_TYPE_ROLE), index.data(AssetListModel.ITEM_ID_ROLE)
+        key = (kind, item_id)
+        if kind not in ("asset", "timeline"):
+            return
+        if self._pool_info_popup is not None and self._pool_info_popup.isVisible() and self._pool_info_key == key:
+            self._close_pool_info()
+            return
+        self._close_pool_info()
+        data = self._project.assets.get(item_id) if kind == "asset" else self._project.timelines.get(item_id)
+        if data is None:
+            return
+        title = getattr(data, "display_name", getattr(data, "name", ""))
+        label = lambda field, fallback: I18N.tr(f"edit.media_pool.{field}", fallback)
+        value = lambda field: str(getattr(data, field, None) or "—")
+        rows = [(label("type", "Type"), label("timeline", "Timeline") if kind == "timeline" else str(data.media_type).title()),
+                (label("header_resolution", "Resolution"), f"{data.width} × {data.height}" if data.width and data.height else "—"),
+                (label("header_fps", "FPS"), value("fps"))]
+        if kind == "asset":
+            duration = data.duration_seconds
+            duration_text = "—"
+            if isinstance(duration, (int, float)) and math.isfinite(duration) and duration >= 0:
+                duration_text = f"{int(duration // 60)}:{duration % 60:06.3f}".rstrip("0").rstrip(".")
+            rows.extend([(label("header_duration", "Duration"), duration_text),
+                         (label("header_codec", "Codec"), data.codec_str),
+                         (label("header_audio", "Audio"), data.audio_channels_str),
+                         (label("header_reel", "Reel Name"), data.reel or "—"),
+                         (label("header_scene", "Scene/Shot/Take"), data.production_info_str),
+                         (label("total_frames", "Frames"), value("total_frames"))])
+            audio_info = data.metadata.get("audio_info", {})
+            if isinstance(audio_info, dict) and audio_info.get("sample_rate"):
+                rows.append((label("sample_rate", "Sample Rate"), f"{audio_info['sample_rate']} Hz"))
+            rows.append((label("header_path", "File Path"), data.path))
+        else:
+            rows.append((label("sample_rate", "Sample Rate"), f"{data.sample_rate} Hz"))
+        popup = MediaPoolInfoPopup(title, rows, self)
+        self._pool_info_popup, self._pool_info_key = popup, key
+        popup.destroyed.connect(lambda _obj=None, owned=popup: self._clear_pool_info_reference(owned))
+        local = anchor_rect if anchor_rect is not None else view.visualRect(index)
+        if anchor_rect is None:
+            geometry = getattr(view.itemDelegateForIndex(index), "info_button_rect", None)
+            if geometry is not None:
+                local = geometry(local)
+        anchor = QRect(view.viewport().mapToGlobal(local.topLeft()), local.size())
+        popup.show_at(anchor, view.screen().availableGeometry())
 
     def _show_properties(self, asset: MediaAsset) -> None:
         """Show asset properties dialog; save editable production info on accept."""
@@ -9649,7 +9929,7 @@ class MediaPoolPanel(QWidget):
             if was_visible:
                 return
         asset_id = None
-        if self._view_mode == ViewMode.GRID and self.grid_view is not None:
+        if self._view_mode != ViewMode.LIST and self.grid_view is not None:
             sel = self.grid_view.selectionModel()
             if sel is not None:
                 for idx in sel.selectedRows():
@@ -9801,7 +10081,7 @@ class MediaPoolPanel(QWidget):
     def _collect_selected_asset_ids(self) -> List[str]:
         """Return asset ids selected in the currently active view."""
         ids: List[str] = []
-        if self._view_mode == ViewMode.GRID and self.grid_view is not None:
+        if self._view_mode != ViewMode.LIST and self.grid_view is not None:
             sel_model = self.grid_view.selectionModel()
             if sel_model is not None:
                 for idx in sel_model.selectedRows():
@@ -9930,7 +10210,7 @@ class MediaPoolPanel(QWidget):
         """Enter inline-edit mode on an asset (Finder-style rename)."""
         if not self._project or not asset_id:
             return
-        if self._view_mode == ViewMode.GRID and self.grid_view is not None:
+        if self._view_mode != ViewMode.LIST and self.grid_view is not None:
             self._start_grid_asset_rename(asset_id)
         elif self.tree is not None:
             self._start_tree_asset_rename(asset_id)
@@ -9972,7 +10252,7 @@ class MediaPoolPanel(QWidget):
             return
 
         # Right-side views: only the visible one needs editing.
-        if self._view_mode == ViewMode.GRID and self.grid_view is not None:
+        if self._view_mode != ViewMode.LIST and self.grid_view is not None:
             self._start_grid_bin_rename(bin_id)
         elif self.tree is not None:
             self._start_tree_bin_rename(bin_id)
@@ -10009,7 +10289,8 @@ class MediaPoolPanel(QWidget):
                 and self.asset_model.data(index, AssetListModel.ITEM_ID_ROLE) == bin_id
             ):
                 self.grid_view.setCurrentIndex(index)
-                self.grid_view.edit(index)
+                view = self.metadata_shelf if (self._view_mode == ViewMode.METADATA and index.data(AssetListModel.ITEM_TYPE_ROLE) != "asset") else self.grid_view
+                view.edit(index)
                 return
 
     # ==================== Drop-into-Bin ====================
@@ -10234,7 +10515,7 @@ class MediaPoolPanel(QWidget):
         )
         return True
 
-    def _target_bin_at(self, pos: QPoint, source: str) -> Optional[str]:
+    def _target_bin_at(self, pos: QPoint, source: str | QListView) -> Optional[str]:
         """Resolve the bin id under a drag/drop position, if any.
 
         Args:
@@ -10245,10 +10526,11 @@ class MediaPoolPanel(QWidget):
         Returns:
             The bin id under the cursor if it points at a bin item, else None.
         """
-        if source == "grid":
+        if source == "grid" or isinstance(source, QListView):
             if self.grid_view is None or self.asset_model is None:
                 return None
-            index = self.grid_view.indexAt(pos)
+            view = self.grid_view if source == "grid" else source
+            index = view.indexAt(pos)
             if not index.isValid():
                 return None
             if self.asset_model.data(index, AssetListModel.ITEM_TYPE_ROLE) != "bin":
@@ -11243,8 +11525,8 @@ class MediaPoolPanel(QWidget):
                     return self._project.assets.get(asset_id)
 
         # Grid view
-        elif self._view_mode == ViewMode.GRID and self.grid_view:
-            indexes = self.grid_view.selectedIndexes()
+        elif self._view_mode != ViewMode.LIST and self.grid_view:
+            indexes = self.grid_view.selectionModel().selectedIndexes()
             if indexes:
                 asset = indexes[0].data(Qt.ItemDataRole.UserRole)
                 if isinstance(asset, MediaAsset):
@@ -11268,6 +11550,8 @@ class MediaPoolPanel(QWidget):
             self._toggle_list_view()
         elif mode == ViewMode.GRID:
             self._toggle_grid_view()
+        elif mode == ViewMode.METADATA:
+            self._toggle_metadata_view()
 
     def set_thumb_size(self, width: int) -> None:
         """Set thumbnail size programmatically.

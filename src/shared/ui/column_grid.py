@@ -17,7 +17,8 @@ building the MG asset library — keep them fixed here):
    Two px of slack prevent that.
 3. An on-demand vertical scrollbar changes the viewport width whenever it
    toggles, which both leaves a blank strip and sets up
-   resize→retile→resize oscillation.  Always-on keeps the width constant.
+   resize→retile→resize oscillation. Always-on keeps the width constant;
+   opt-in as-needed mode reserves the same width while the bar is hidden.
 4. An event filter sees the view's Resize BEFORE QAbstractScrollArea has
    resized its viewport child, so re-tiling must be deferred one event-loop
    turn; the viewport itself must be watched too (scrollbar geometry
@@ -58,6 +59,7 @@ class ColumnGridController(QObject):
                  aspect: float = 1.0,
                  extra_height: int = 0,
                  pin_item_hints: bool = True,
+                 scrollbar_as_needed: bool = False,
                  on_columns_applied: Optional[Callable[[QSize, QSize], None]] = None,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent if parent is not None else view)
@@ -77,6 +79,7 @@ class ColumnGridController(QObject):
         self._aspect = float(aspect) if aspect > 0 else 1.0
         self._extra_height = max(0, int(extra_height))
         self._pin_item_hints = bool(pin_item_hints)
+        self._scrollbar_as_needed = scrollbar_as_needed
         self._applied = on_columns_applied
         self._active = True
         self._columns = self._default
@@ -87,7 +90,7 @@ class ColumnGridController(QObject):
         # 2px slack keeps every row inside the width) and a flooring
         # remainder must not spawn a phantom one.
         view.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded if scrollbar_as_needed else Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         view.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -197,7 +200,13 @@ class ColumnGridController(QObject):
             return
         # A not-yet-shown view still reports a stub viewport; keep cells
         # sane until the first real resize re-applies with live width.
-        width = max(self._columns * 40, self._view.viewport().width())
+        viewport_width = self._view.viewport().width()
+        if self._scrollbar_as_needed and not self._view.verticalScrollBar().isVisible():
+            # Reserve layout space even while the bar is hidden. Otherwise
+            # showing the bar shrinks cards/row heights and may make it hide
+            # again indefinitely around the overflow threshold.
+            viewport_width -= self._view.verticalScrollBar().sizeHint().width()
+        width = max(self._columns * 40, viewport_width)
         # Pitfall 2: 2px slack so an exact division doesn't wrap the last
         # column.
         cell_w = max(24 + self._gap, (width - 2) // self._columns)
