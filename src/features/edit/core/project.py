@@ -2115,6 +2115,30 @@ class EditProject:
         )
         return new_project, new_asset_id
 
+    def update_asset_metadata(
+        self,
+        asset_id: str,
+        metadata_updates: dict[str, Any],
+    ) -> EditProject:
+        """更新素材 metadata 的指定键（P0-2 统一范围/标记服务底层）。
+
+        浅合并：只覆盖给出的键，其余键（含未知字段）原样保留。值本身
+        为 None 表示"该字段未知/未设置"——与探测层的诚实缺失约定一致。
+        结构性约束（帧域校验、标记 schema）由调用方服务
+        （asset_source_range）负责，本方法不做域校验。
+        """
+        if asset_id not in self.assets:
+            raise ValueError(f"Asset not found: {asset_id}")
+        asset = self.assets[asset_id]
+        new_asset = replace(asset, metadata={**asset.metadata, **metadata_updates})
+        new_assets = dict(self.assets)
+        new_assets[asset_id] = new_asset
+        return replace(
+            self,
+            assets=new_assets,
+            modified_at=time.time(),
+        )
+
     def update_asset_production_info(
         self,
         asset_id: str,
