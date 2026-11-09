@@ -144,3 +144,59 @@ def test_b11_cpu_result_after_shutdown_dropped(qapp):
 
     assert submitted == []                     # 关闭 token：结果不上屏
     assert widget._last_good_frame == -1
+
+
+# ── I05：工程关闭/切换的可复用释放边界 ─────────────────────────────
+
+
+def test_i05_release_for_project_close_is_reusable_not_permanent(qapp):
+    """释放后 widget 可复用：新素材照常打开/播放；永久 token 不置位。"""
+    widget = _widget(qapp, _Provider())
+    widget.open_asset(_video_asset())
+    widget.toggle_playback()
+    assert widget.is_playing is True
+    acked: list[int] = []
+    widget.set_gpu_slot_ack_callback(acked.append)
+    widget._gpu_displayed_slot_id = 5
+
+    states: list[bool] = []
+    widget.playback_state_changed.connect(states.append)
+    widget.release_for_project_close()
+
+    assert widget.is_playing is False
+    assert states[-1:] == [False]          # 播放状态信号如实翻转
+    assert acked == [5]                    # 显示中的 slot 已归还
+    assert widget.current_asset is None
+    assert widget._in_point is None and widget._out_point is None
+    assert widget._shutdown_prepared is False  # 非永久 token
+
+    # 新工程复用：再次打开并播放正常
+    widget.open_asset(_video_asset())
+    assert widget.toggle_playback() is True
+    assert widget.is_playing is True
+
+
+def test_i05_release_clears_monitor_state_store(qapp):
+    """旧工程的监看状态不带入新工程（同一素材重开从第 0 帧起）。"""
+    widget = _widget(qapp, _Provider())
+    asset = _video_asset()
+    widget.open_asset(asset)
+    widget.seek(77)
+    assert widget._current_frame == 77
+
+    widget.release_for_project_close()
+    widget.open_asset(asset)
+
+    assert widget._current_frame == 0     # 存储已清，不回填旧工程位置
+
+
+def test_i05_close_source_keeps_monitor_state_within_project(qapp):
+    """对照：工程内换源（close_source）保留监看状态——只有工程级释放才清。"""
+    widget = _widget(qapp, _Provider())
+    widget.open_asset(_video_asset())
+    widget.seek(33)
+
+    widget.close_source()                 # 换源路径（I02 语义）
+    widget.open_asset(_video_asset())
+
+    assert widget._current_frame == 33
