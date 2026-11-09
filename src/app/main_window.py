@@ -2726,6 +2726,18 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             logger.debug("shutdown: budget executor close failed",
                          exc_info=True)
 
+        # 3.8 G06：抓帧会话登记处关门——全部在场请求令牌失效，迟到
+        #     阶段据此取消（不再把旧上下文的帧写盘）。
+        try:
+            capture_coordinator = getattr(
+                self, "_gallery_capture_coordinator_inst", None)
+            if capture_coordinator is not None and hasattr(
+                    capture_coordinator, "mark_shutdown"):
+                capture_coordinator.mark_shutdown()
+        except Exception:
+            logger.debug("shutdown: gallery capture coordinator close failed",
+                         exc_info=True)
+
         # 4. 时间线预览渲染器（内部依次 join worker 与 GPU 渲染线程）
         try:
             renderer = getattr(self, "timeline_preview_renderer", None)

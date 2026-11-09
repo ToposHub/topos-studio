@@ -306,9 +306,17 @@ def _make_ctrl(tmp_path, monkeypatch, layers, image=None, folder="User"):
         return True
     ctrl.save_router._save_single_asset_project.side_effect = _fake_save
     ctrl.presets_panel = MagicMock()
-    presets_user = os.path.join(os.getcwd(), "Presets", folder)
+    presets_root = os.path.join(os.getcwd(), "Presets")
+    presets_user = os.path.join(presets_root, folder)
     os.makedirs(presets_user, exist_ok=True)
     ctrl.presets_panel.get_current_folder.return_value = presets_user
+    # G06：抓帧会话需要真实 repository 解析目标集合（MagicMock 的
+    # album_id 不是 str，会被如实拒绝）。
+    from src.features.color.core.gallery_repository import (
+        GalleryFolderRepository,
+    )
+    ctrl.presets_panel._repository = GalleryFolderRepository(presets_root)
+    ctrl.presets_panel.presets_root = presets_root
     ctrl._page_context_manager = SimpleNamespace(
         get_current_context=lambda: SimpleNamespace(
             clip_id="clip-1", asset_id="asset-1",

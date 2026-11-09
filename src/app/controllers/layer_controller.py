@@ -39,6 +39,19 @@ import weakref
 
 from typing import Any, Optional
 
+# G06：抓帧会话契约（请求／阶段复核／取消令牌）
+from src.features.color.core.gallery_capture_service import (
+    GalleryCaptureCoordinator,
+    GalleryCaptureFacts,
+    GalleryCaptureSession,
+)
+from src.features.color.core.gallery_contracts import (
+    GalleryCaptureRequest,
+    GalleryOperationResult,
+    make_gallery_request_id,
+)
+from src.features.color.core.gallery_repository import GalleryFolderRepository
+
 import cv2
 import numpy as np
 
@@ -660,6 +673,11 @@ class LayerOpsMixin:
         固定目标名删除——覆盖保存失败时旧集合被破坏，留下不完整的旧
         ``.topos``。现在失败/取消/提交中断都把旧文件集合按字节原样
         恢复（见 ``still_capture_transaction``）。
+
+        G06：抓帧套上会话契约——请求锁定发起时刻的 clip/asset/timeline/
+        帧事实，阶段边界复核（换 clip／换源／取消／关闭 → cancelled，
+        不把上一帧写进新上下文）；完成后的刷新只在用户仍停在抓帧时的
+        album 才重扫，不抢回已切走的 选择。
         """
         is_video_mode = bool(getattr(self, 'current_file_is_video', False))
         was_playing = False
@@ -683,54 +701,180 @@ class LayerOpsMixin:
         # 关闭序列已启动时不重新起播旧源）。
         finish_capture = self._make_capture_playback_restorer(was_playing)
 
-        name = ""
         try:
-            if is_video_mode:
-                rendered, current_frame = (
-                    self._render_current_video_frame_for_grading())
-                if not rendered:
-                    self.status_bar.showMessage(
-                        f"Capture failed: could not render video frame "
-                        f"{current_frame}",
-                        3000,
-                    )
-                    return
-            elif self.engine.img_high is None:
+            built = self._build_gallery_capture_request(is_video_mode)
+            if built is None:
+                return
+            request, facts = built
+            session = GalleryCaptureSession(
+                request, facts,
+                context_probe=lambda: self._probe_gallery_capture_facts(
+                    is_video_mode))
+            coordinator = self._gallery_capture_coordinator()
+            coordinator.register(session)
+            captured: dict = {}
+            try:
+                result = session.run(
+                    prepare_frame=lambda: self._prepare_capture_image(
+                        is_video_mode),
+                    persist_bundle=lambda img: self._persist_still_capture(
+                        img, is_video_mode, captured))
+            finally:
+                coordinator.finish(session)
+            if result.succeeded and captured.get("folder"):
+                self._refresh_gallery_after_capture(captured["folder"])
                 self.status_bar.showMessage(
-                    I18N.tr("status.no_image_loaded", "请先打开一张图片或视频"), 3000)
-                return
-
-            # 渲染当前调色后的图像
-            rendered_img = self.engine.grab_viewport_image()
-            if rendered_img is None:
+                    I18N.tr("presets.captured",
+                            f"静帧已抓取: {captured.get('name', '')}"), 3000)
+            elif result.status == "cancelled":
                 self.status_bar.showMessage(
-                    "Capture failed: could not render image", 3000)
-                return
-
-            name = self._new_still_name()
-            current_folder = self.presets_panel.get_current_folder()
-            topos_path = os.path.join(current_folder, f"{name}.topos")
-
-            if os.path.exists(topos_path):
-                reply = QMessageBox.question(
-                    self,
-                    I18N.tr("presets.overwrite_title", "Overwrite"),
-                    I18N.tr("presets.overwrite_msg",
-                            f"Preset '{name}' already exists. Overwrite?"),
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply != QMessageBox.StandardButton.Yes:
-                    return
-
-            if not self._commit_still_capture(topos_path, rendered_img,
-                                              is_video_mode):
-                return
+                    I18N.tr("presets.capture_cancelled",
+                            f"抓帧已取消（{result.reason}）"), 3000)
         finally:
             finish_capture()
 
-        self.presets_panel.scan_presets()
-        self.status_bar.showMessage(
-            I18N.tr("presets.captured", f"静帧已抓取: {name}"), 3000)
+    # ── G06：抓帧会话阶段回调 ──────────────────────────────────────────
+
+    def _prepare_capture_image(self, is_video_mode: bool):
+        """prepare 阶段：取精确帧并渲染调色结果（None = 拒绝，已提示）。"""
+        if is_video_mode:
+            rendered, current_frame = (
+                self._render_current_video_frame_for_grading())
+            if not rendered:
+                self.status_bar.showMessage(
+                    f"Capture failed: could not render video frame "
+                    f"{current_frame}",
+                    3000,
+                )
+                return None
+        elif self.engine.img_high is None:
+            self.status_bar.showMessage(
+                I18N.tr("status.no_image_loaded", "请先打开一张图片或视频"), 3000)
+            return None
+        return self.engine.grab_viewport_image()
+
+    def _persist_still_capture(self, rendered_img, is_video_mode: bool,
+                               captured: dict):
+        """persist 阶段：命名→覆盖确认→R01 事务提交；结果带稳定 reason。"""
+        if rendered_img is None:
+            return GalleryOperationResult(
+                request_id=make_gallery_request_id(), status="rejected",
+                reason="render_failed")
+        name = self._new_still_name()
+        current_folder = self.presets_panel.get_current_folder()
+        topos_path = os.path.join(current_folder, f"{name}.topos")
+
+        if os.path.exists(topos_path):
+            reply = QMessageBox.question(
+                self,
+                I18N.tr("presets.overwrite_title", "Overwrite"),
+                I18N.tr("presets.overwrite_msg",
+                        f"Preset '{name}' already exists. Overwrite?"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return GalleryOperationResult(
+                    request_id=make_gallery_request_id(), status="cancelled",
+                    reason="user_declined")
+
+        if self._commit_still_capture(topos_path, rendered_img, is_video_mode):
+            captured.update({"name": name, "folder": current_folder})
+            return GalleryOperationResult(
+                request_id=make_gallery_request_id(), status="success",
+                affected_still_ids=(name,))
+        return GalleryOperationResult(
+            request_id=make_gallery_request_id(), status="rejected",
+            reason="save_failed")
+
+    def _build_gallery_capture_request(self, is_video_mode: bool):
+        """发起时刻的请求与上下文事实；目标集合不可写/不可解析时拒绝。"""
+        panel = getattr(self, 'presets_panel', None)
+        if panel is None:
+            self.status_bar.showMessage(
+                I18N.tr("status.no_image_loaded", "请先打开一张图片或视频"),
+                3000)
+            return None
+        repository = getattr(panel, '_repository', None)
+        root = getattr(panel, 'presets_root', None)
+        if repository is None and isinstance(root, str):
+            repository = GalleryFolderRepository(root)
+        if repository is None:
+            return None
+        folder = panel.get_current_folder()
+        try:
+            album_id = repository.album_id_for_folder(folder)
+            album = repository.album_for_folder(folder)
+        except Exception:
+            album_id, album = None, None
+        if not isinstance(album_id, str) or not album_id:
+            self.status_bar.showMessage(
+                I18N.tr("presets.capture_no_album",
+                        "抓帧目标集合不可用"), 3000)
+            return None
+        if album is not None and album.read_only:
+            self.status_bar.showMessage(
+                I18N.tr("presets.capture_album_readonly",
+                        "目标集合只读，无法抓帧"), 3000)
+            return None
+
+        facts = self._probe_gallery_capture_facts(is_video_mode,
+                                                  album_id=album_id)
+        request = GalleryCaptureRequest(
+            request_id=make_gallery_request_id(),
+            album_id=album_id,
+            clip_id=facts.clip_id,
+            asset_id=facts.asset_id,
+            timeline_id=facts.timeline_id,
+            source_frame=facts.source_frame,
+            timeline_frame=facts.timeline_frame,
+            grade_revision=facts.grade_revision,
+            expected_target_revision=album.revision if album else 0)
+        return request, facts
+
+    def _probe_gallery_capture_facts(self, is_video_mode: bool,
+                                     album_id: Optional[str] = None
+                                     ) -> GalleryCaptureFacts:
+        """当前抓帧上下文事实（probe 返回 None = 上下文源消失）。"""
+        clip_id = asset_id = timeline_id = None
+        source_frame = timeline_frame = None
+        mgr = getattr(self, '_page_context_manager', None)
+        ctx = None
+        if mgr is not None:
+            try:
+                ctx = mgr.get_current_context()
+            except Exception:
+                ctx = None
+        if ctx is not None:
+            clip_id = getattr(ctx, 'clip_id', None)
+            asset_id = getattr(ctx, 'asset_id', None)
+            timeline_id = getattr(ctx, 'timeline_id', None)
+            source_frame = getattr(ctx, 'source_frame', None)
+            timeline_frame = getattr(ctx, 'timeline_frame', None)
+        return GalleryCaptureFacts(
+            album_id=album_id or "",
+            media_path=getattr(self, 'current_file_path', None),
+            clip_id=clip_id, asset_id=asset_id, timeline_id=timeline_id,
+            source_frame=source_frame, timeline_frame=timeline_frame)
+
+    def _refresh_gallery_after_capture(self, captured_folder: str) -> None:
+        """完成后的增量刷新：用户已切走 album 时不抢回选择。"""
+        panel = getattr(self, 'presets_panel', None)
+        if panel is None:
+            return
+        try:
+            current = panel.get_current_folder()
+        except Exception:
+            return
+        if os.path.abspath(str(current)) != os.path.abspath(captured_folder):
+            return
+        panel.scan_presets()
+
+    def _gallery_capture_coordinator(self) -> GalleryCaptureCoordinator:
+        coordinator = getattr(self, '_gallery_capture_coordinator_inst', None)
+        if coordinator is None:
+            coordinator = GalleryCaptureCoordinator()
+            self._gallery_capture_coordinator_inst = coordinator
+        return coordinator
 
     def _new_still_name(self) -> str:
         """静帧名（时间戳；抽成方法便于确定性测试）。"""
