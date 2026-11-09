@@ -10,7 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Callable
 
 from PyQt6.QtCore import QEvent, QObject, QPointF, QRectF, QSignalBlocker, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QResizeEvent
+from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QSizePolicy, QSlider, QSplitter,
     QToolButton, QVBoxLayout, QWidget,
@@ -35,6 +35,14 @@ if TYPE_CHECKING:
 HEADER_HEIGHT = 30
 TRANSPORT_HEIGHT = 34
 MONITOR_BACKGROUND = "#191919"
+
+# I03：本容器的动作键 → viewer_capabilities 注册表动作名（单一事实源）。
+_CAPABILITY_REGISTRY_KEYS = {
+    "source.match_frame": "match_frame.source_to_timeline",
+    "timeline.match_frame": "match_frame.timeline_to_source",
+    "source.reverse": "source.reverse_play",
+    "source.loop": "source.loop",
+}
 _BUTTON_STYLE = """
 QToolButton { background: transparent; border: none; border-radius: 0;
     color: #b9b9bd; padding: 0; margin: 0; font-size: 11px; }
@@ -317,6 +325,12 @@ class EditViewport(QWidget):
     active_monitor_changed = pyqtSignal(str)
     program_seek_requested = pyqtSignal(int)
     program_stop_requested = pyqtSignal()
+    # I03：能力宿主协议。capability_action_requested(key) —— 有真实
+    # handler 的动作经宿主执行（Match Frame 等）；本地动作（reverse）
+    # 在容器内消化。capabilities_context_requested —— 菜单即将展开/状
+    # 态可能过期，宿主应重评注册表并调 refresh_capabilities 回填。
+    capability_action_requested = pyqtSignal(str)
+    capabilities_context_requested = pyqtSignal()
 
     def __init__(
         self, program_viewer: ProgramViewerWidget,
@@ -327,6 +341,8 @@ class EditViewport(QWidget):
         self.setMinimumSize(320, 200)
         self.program_viewer = program_viewer
         self.source_viewer = source_viewer
+        self._capability_actions: dict[str, list] = {}
+        self._capability_labels: dict[str, str] = {}
         self._dual_view = False
         self._active_monitor = "program"
         self._deliver_mode = False
@@ -399,16 +415,23 @@ class EditViewport(QWidget):
         options.addAction(bar.btn_prev.toolTip(), bar.btn_prev.click)
         options.addAction(bar.btn_next.toolTip(), bar.btn_next.click)
         options.addSeparator()
-        for key, label in (("match_frame", "Match Frame"), ("source_tape", "Source Tape"),
-                           ("reverse", "Play Reverse"),
+        for key, label in (("source_tape", "Source Tape"),
                            ("previous_marker", "Previous Marker"), ("marker", "Add Marker"),
                            ("next_marker", "Next Marker")):
             self._unavailable(options, I18N.tr("edit.viewport." + key, label))
+        self._capability_menu_action(
+            options, "source.match_frame",
+            I18N.tr("edit.viewport.match_frame", "Match Frame"))
+        self._capability_menu_action(
+            options, "source.reverse",
+            I18N.tr("edit.viewport.reverse", "Play Reverse"))
         self.source_loop_action = options.addAction(
             I18N.tr("edit.viewport.loop", "Loop Source Playback"))
         self.source_loop_action.setCheckable(True)
         self.source_loop_action.triggered.connect(viewer.set_loop)
+        self._register_capability_action("source.loop", self.source_loop_action)
         options.aboutToShow.connect(self._sync_source_loop_action)
+        options.aboutToShow.connect(self.capabilities_context_requested.emit)
         header.options_button.setMenu(options)
         footer, left, center, right = self._footer(viewer)
         _adopt(left, bar.btn_source_patch, "source_patch", 40)
@@ -422,7 +445,9 @@ class EditViewport(QWidget):
             _adopt_transport(center, button, name)
         center.setSpacing(3)
         bar.update_play_state(bar._is_playing)
-        right.addWidget(self._pending_button(footer, "match_frame", I18N.tr("edit.viewport.match_frame", "Match Frame")))
+        right.addWidget(self._capability_footer_button(
+            footer, "match_frame", I18N.tr("edit.viewport.match_frame", "Match Frame"),
+            "source.match_frame"))
         _adopt(right, bar.btn_mark_in, "mark_in", 26)
         _adopt(right, bar.btn_mark_out, "mark_out", 26)
         viewer.slider.setProperty("resolveMonitorScrubber", True)
@@ -460,11 +485,15 @@ class EditViewport(QWidget):
         options.addAction(transport.btn_next_frame.toolTip(), transport.btn_next_frame.click)
         options.addSeparator()
         for key, label in (("proxy", "Proxy Handling"), ("bypass", "Bypass Color Grades and Fusion Effects"),
-                           ("reverse", "Play Reverse"), ("match_frame", "Match Frame"),
+                           ("reverse", "Play Reverse"),
                            ("timeline_mark_in", "Mark Timeline In"), ("timeline_mark_out", "Mark Timeline Out"),
                            ("previous_marker", "Previous Marker"), ("marker", "Add Marker"),
                            ("next_marker", "Next Marker")):
             self._unavailable(options, I18N.tr("edit.viewport." + key, label))
+        self._capability_menu_action(
+            options, "timeline.match_frame",
+            I18N.tr("edit.viewport.match_frame", "Match Frame"))
+        options.aboutToShow.connect(self.capabilities_context_requested.emit)
         header.options_button.setMenu(options)
         guides_group = QWidget(header)
         guides_group.setObjectName("monitorGuidesGroup")
@@ -512,7 +541,9 @@ class EditViewport(QWidget):
         transport.set_loop_checked(transport._loop_enabled)
         transport.update_play_button(transport._is_playing)
         center.setSpacing(3)
-        right.addWidget(self._pending_button(footer, "match_frame", I18N.tr("edit.viewport.match_frame", "Match Frame")))
+        right.addWidget(self._capability_footer_button(
+            footer, "match_frame", I18N.tr("edit.viewport.match_frame", "Match Frame"),
+            "timeline.match_frame"))
         for glyph, key, label in (("mark_in", "timeline_mark_in", "Mark Timeline In"),
                                   ("mark_out", "timeline_mark_out", "Mark Timeline Out")):
             mark = _tool(glyph, I18N.tr("edit.viewport." + key, label), footer)
@@ -553,6 +584,61 @@ class EditViewport(QWidget):
         button.setToolTip(label + " — " + I18N.tr("edit.viewport.backend_pending", "Not available in this version"))
         footer.optional_controls.append(button)
         return button
+
+    # ── I03：capability 动作（注册表单一事实源驱动 enabled/reason） ──
+
+    def _register_capability_action(self, key: str, action: Any) -> None:
+        """同键可注册多个控件（菜单项 + 底栏按钮），回填共享。"""
+        self._capability_actions.setdefault(key, []).append(action)
+        self._capability_labels.setdefault(
+            key, action.text() if hasattr(action, "text") else "")
+
+    def _capability_menu_action(self, menu: QMenu, key: str, label: str) -> QAction:
+        """有真实 handler 的菜单项：宿主触发；未回填前默认禁用。"""
+        action = menu.addAction(label)
+        action.setEnabled(False)
+        action.setToolTip(label + " — " + I18N.tr("edit.viewport.backend_pending", "Not available in this version"))
+        action.triggered.connect(lambda: self._dispatch_capability_action(key))
+        self._register_capability_action(key, action)
+        self._capability_labels[key] = label
+        return action
+
+    def _capability_footer_button(self, footer: _MonitorFooter, icon: str,
+                                  label: str, key: str) -> QToolButton:
+        """监视器底栏的能力按钮（与菜单同键，回填共享）。"""
+        button = _tool(icon, label, footer)
+        button.setEnabled(False)
+        button.setToolTip(label + " — " + I18N.tr("edit.viewport.backend_pending", "Not available in this version"))
+        button.clicked.connect(lambda: self._dispatch_capability_action(key))
+        footer.optional_controls.append(button)
+        self._register_capability_action(key, button)
+        self._capability_labels[key] = label
+        return button
+
+    def _dispatch_capability_action(self, key: str) -> None:
+        """本地可消化的动作在容器内执行，其余交给宿主。"""
+        if key == "source.reverse":
+            reverse = getattr(self.source_viewer, "play_reverse", None)
+            if callable(reverse):
+                reverse()
+            return
+        self.capability_action_requested.emit(key)
+
+    def refresh_capabilities(self, caps_by_action: dict) -> None:
+        """I03：按注册表回填 enabled/tooltip（宿主在状态变化与菜单展开时调用）。"""
+        for key, actions in self._capability_actions.items():
+            cap = caps_by_action.get(_CAPABILITY_REGISTRY_KEYS.get(key, ""))
+            if cap is None:
+                continue
+            label = self._capability_labels.get(key, "")
+            for action in actions:
+                blocker = QSignalBlocker(action)
+                action.setEnabled(bool(cap.supported))
+                action.setToolTip(
+                    label if cap.supported
+                    else f"{label} — {cap.reason}"
+                    if cap.reason else label)
+                del blocker
 
     @staticmethod
     def _stop_button(stop: Callable[[], None], parent: QWidget) -> QToolButton:

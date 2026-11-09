@@ -587,6 +587,19 @@ class DockLayoutMixin:
                 except Exception:
                     logger.debug("text-input gate feed unavailable",
                                  exc_info=True)
+                # I03（复查计划）：capability 宿主——真实上下文喂注册表，
+                # 菜单/底栏按钮按 supported/reason 回填；Match Frame 两向
+                # 接真实 handler（timeline→source 走既有打开链，
+                # source→timeline 多使用时出候选，取消不动播放头）。
+                try:
+                    from src.app.controllers.viewport_capability_host import (
+                        install_viewport_capability_host,
+                    )
+                    self._viewport_capability_host = (
+                        install_viewport_capability_host(self))
+                except Exception:
+                    logger.exception("Failed to install viewport capability host")
+                    self._viewport_capability_host = None
 
         # Connect MediaPoolPanel double-click to Source Viewer (P3.1)
         if self._edit_available and self.media_pool_panel is not None:
