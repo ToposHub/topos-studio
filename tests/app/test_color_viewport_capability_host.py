@@ -115,7 +115,8 @@ def test_video_media_enables_transport_and_backfills_loop(host) -> None:
     host.refresh()
     chrome = host._chrome
     assert host.last_state.presentation_path == "source_gl"
-    assert host.last_state.time_domain == "clip_local"
+    # R05：独立源（无 clip 上下文）显式声明 source 帧域。
+    assert host.last_state.time_domain == "source_frame"
     for button in (chrome.transport.btn_first, chrome.transport.btn_prev,
                    chrome.transport.btn_play, chrome.transport.btn_next,
                    chrome.transport.btn_last):
@@ -232,3 +233,122 @@ def test_stub_buttons_registered_in_options_menu(host) -> None:
     for action in actions.values():
         assert not action.isEnabled()
         assert action.toolTip()
+
+
+# ── R05：按 presentation_path 取唯一权威控制器与域 ──────────────────
+
+
+class TestR05PathAuthoritativeFacts:
+    def _clip_context(self, window, clip):
+        window._active_color_timeline_clip_playback_context = lambda: {
+            "timeline_id": "t1", "clip": clip, "effective_source_start": None}
+
+    def test_clip_context_maps_position_and_total_to_clip_local(self, host):
+        """计划复现数字：源 120/1000、clip 局部 20/50——快照不得再报
+        clip_local 的 120/1000。"""
+        _open_video(host._window, current_frame=120, total_frames=1000)
+        clip = SimpleNamespace(clip_id="c1", source_start=100,
+                               source_duration=50, timeline_duration=50)
+        self._clip_context(host._window, clip)
+        host._window._color_source_frame_to_local_frame = (
+            lambda f: max(0, int(f) - 100))
+        host._window._color_timeline_clip_total_frames = lambda: 50
+        host.refresh()
+        state = host.last_state
+        assert state.presentation_path == "source_gl"
+        assert state.time_domain == "clip_local"
+        assert state.current_frame == 20
+        assert state.total_frames == 50
+
+    def test_independent_source_declares_source_domain(self, host):
+        _open_video(host._window, current_frame=33, total_frames=250)
+        host.refresh()
+        state = host.last_state
+        assert state.time_domain == "source_frame"
+        assert state.current_frame == 33
+        assert state.total_frames == 250
+
+    def test_clip_mapping_falls_back_to_clip_geometry(self, host):
+        """宿主缺映射 helper：按 clip 几何（source_start/时长）近似，
+        仍不混入源全域帧数。"""
+        _open_video(host._window, current_frame=120, total_frames=1000)
+        clip = SimpleNamespace(clip_id="c2", source_start=100,
+                               source_duration=60)
+        self._clip_context(host._window, clip)
+        host.refresh()
+        state = host.last_state
+        assert state.time_domain == "clip_local"
+        assert state.current_frame == 20
+        assert state.total_frames == 60
+
+    def _timeline_window(self, host, *, playing, current):
+        host._canvas._timeline_preview_active = True
+        controller = SimpleNamespace(is_playing=playing, loop_enabled=True,
+                                     current_frame=current)
+        host._window.timeline_panel = SimpleNamespace(
+            get_playback_controller=lambda: controller,
+            get_total_frames=lambda: 300)
+        return controller
+
+    def test_timeline_preview_uses_timeline_controller_not_source(self, host):
+        """TimelinePreview 权威是共享时间线控制器：源控制器静止/越域
+        帧数不得进入快照，也不得参与可播判定。"""
+        _open_video(host._window, is_playing=False, current_frame=888,
+                    total_frames=1000)  # 源控制器静止、帧数在别的域
+        self._timeline_window(host, playing=True, current=42)
+        host.refresh()
+        state = host.last_state
+        assert state.presentation_path == "timeline_preview"
+        assert state.time_domain == "timeline_frame"
+        assert state.playing is True            # 来自时间线控制器
+        assert state.loop_enabled is True
+        assert state.current_frame == 42
+        assert state.total_frames == 300
+        caps = host.last_capabilities
+        assert caps["transport.play"].supported is True
+        assert caps["transport.play"].reason is None
+
+    def test_timeline_preview_without_timeline_controller_disables_transport(
+            self, host):
+        """只有源控制器在场：TimelinePreview 的 transport 仍禁用（源
+        控制器与时间线域无关，不冒充可用）。"""
+        _open_video(host._window)  # 源控制器在场
+        host._canvas._timeline_preview_active = True
+        host.refresh()
+        assert host.last_state.presentation_path == "timeline_preview"
+        caps = host.last_capabilities
+        assert caps["transport.play"].supported is False
+
+    def test_composite_uses_timeline_controller_as_authority(self, host):
+        host._window.current_page = "Composite"
+        self._timeline_window(host, playing=False, current=77)
+        host._canvas._timeline_preview_active = False
+        host.refresh()
+        state = host.last_state
+        assert state.presentation_path == "composite"
+        assert state.time_domain == "timeline_frame"
+        assert state.current_frame == 77
+        assert state.total_frames == 300
+
+    def test_refresh_emits_no_seek_scrub_or_toggle(self, host):
+        """刷新只读事实：不发 seek/scrub/loop toggle（程序化回填零回声）。"""
+        _open_video(host._window, current_frame=120, total_frames=1000,
+                    loop_playback=True)
+        clip = SimpleNamespace(clip_id="c3", source_start=100,
+                               source_duration=50, timeline_duration=50)
+        self._clip_context(host._window, clip)
+        host._window._color_source_frame_to_local_frame = (
+            lambda f: max(0, int(f) - 100))
+        host._window._color_timeline_clip_total_frames = lambda: 50
+        transport = host._chrome.transport
+        seeks: list[int] = []
+        scrubs: list[int] = []
+        loops: list[bool] = []
+        transport.seek_requested.connect(seeks.append)
+        transport.scrub_started.connect(scrubs.append)
+        transport.loop_toggled.connect(loops.append)
+        host.refresh()
+        host.refresh()  # 连续刷新同样零回声
+        assert seeks == [] and scrubs == []
+        assert loops == []
+        assert host.last_state.current_frame == 20

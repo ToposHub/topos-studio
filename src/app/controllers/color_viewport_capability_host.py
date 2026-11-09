@@ -25,6 +25,9 @@ from src.features.color.core.color_viewer_capabilities import (
     PRESENTATION_SOURCE_GL,
     PRESENTATION_TIMELINE_PREVIEW,
     PRESENTATION_NONE,
+    TIME_DOMAIN_CLIP_LOCAL,
+    TIME_DOMAIN_SOURCE,
+    TIME_DOMAIN_TIMELINE,
     ColorViewerCapability,
     ColorViewerCapabilityContext,
     ColorViewerState,
@@ -140,6 +143,61 @@ class ColorViewportCapabilityHost(QObject):
 
     # ── 事实聚合 ───────────────────────────────────────────────────────
 
+    def _timeline_controller(self):
+        """共享 Edit 时间线播放控制器（TimelinePreview／Composite 权威）。"""
+        panel = getattr(self._window, "timeline_panel", None)
+        getter = getattr(panel, "get_playback_controller", None)
+        if not callable(getter):
+            return None
+        try:
+            return getter()
+        except Exception:  # noqa: BLE001 —— 控制器缺席＝该域事实缺席
+            return None
+
+    def _timeline_total_frames(self) -> int:
+        panel = getattr(self._window, "timeline_panel", None)
+        for name in ("get_total_frames", "total_frames"):
+            getter = getattr(panel, name, None)
+            if callable(getter):
+                try:
+                    value = getter()
+                    if value:
+                        return int(value)
+                except Exception:  # noqa: BLE001
+                    continue
+        return 0
+
+    def _clip_local_position(self, source_frame, clip) -> int:
+        """源帧 → clip-local 位置（权威映射经 FileOps；缺席按偏移近似）。"""
+        if source_frame is None:
+            return 0
+        to_local = getattr(self._window, "_color_source_frame_to_local_frame",
+                           None)
+        if callable(to_local):
+            try:
+                return max(0, int(to_local(int(source_frame))))
+            except Exception:  # noqa: BLE001 —— 映射失败回落偏移推导
+                pass
+        start = int(getattr(clip, "source_start", 0) or 0)
+        return max(0, int(source_frame) - start)
+
+    def _clip_local_total(self, clip, source_total) -> int:
+        """clip-local 总长（与 transport bar 同源：_color_timeline_clip_total_frames）。"""
+        getter = getattr(self._window, "_color_timeline_clip_total_frames",
+                         None)
+        if callable(getter):
+            try:
+                total = getter()
+                if total:
+                    return int(total)
+            except Exception:  # noqa: BLE001
+                pass
+        for attr in ("timeline_duration", "duration", "source_duration"):
+            value = getattr(clip, attr, None)
+            if value:
+                return int(value)
+        return int(source_total or 0)
+
     def _gather_state(self) -> ColorViewerState:
         window = self._window
         page = str(getattr(window, "current_page", "Color") or "Color")
@@ -175,6 +233,7 @@ class ColorViewportCapabilityHost(QObject):
         context = getattr(window, "_active_color_timeline_clip_playback_context", None)
         clip_id: str | None = None
         timeline_id: str | None = None
+        active_clip = None
         if callable(context):
             try:
                 active = context()
@@ -182,31 +241,77 @@ class ColorViewportCapabilityHost(QObject):
                 active = None
             if active:
                 timeline_id = str(active.get("timeline_id") or "") or None
-                clip_id = str(getattr(active.get("clip"), "clip_id", "") or "") or None
+                active_clip = active.get("clip")
+                clip_id = (str(getattr(active_clip, "clip_id", "") or "")
+                           or None)
 
-        playing = bool(getattr(video_controller, "is_playing", False))
-        loop_enabled = bool(getattr(video_controller, "loop_playback", False))
-        if video_controller is None and bar is not None:
-            playing = bool(getattr(bar, "is_playing", False))
-            loop_enabled = bool(getattr(bar.btn_loop, "isChecked", lambda: False)())
+        # R05（2026-11-09 复查）：transport 事实按呈现路径取**唯一权威**
+        # 控制器与域——不再把源 video_controller 的全域帧数混进声明为
+        # clip-local 的快照，也不再用源控制器判定 TimelinePreview／
+        # Composite 的可播性。
+        playing = False
+        loop_enabled = False
+        current_frame = 0
+        total_frames = 0
+        frame_rate = float(getattr(bar, "_fps", 24.0) or 24.0)
+        time_domain = default_time_domain_for(path)
 
-        current_frame = getattr(video_controller, "current_frame", None)
-        total_frames = getattr(video_controller, "total_frames", None)
+        if path == PRESENTATION_SOURCE_GL:
+            playing = bool(getattr(video_controller, "is_playing", False))
+            loop_enabled = bool(
+                getattr(video_controller, "loop_playback", False))
+            source_current = getattr(video_controller, "current_frame", None)
+            source_total = getattr(video_controller, "total_frames", None)
+            if active_clip is not None:
+                # 有 clip：位置/总长映射为 clip-local（与 bar 同域同源）。
+                time_domain = TIME_DOMAIN_CLIP_LOCAL
+                current_frame = self._clip_local_position(
+                    source_current, active_clip)
+                total_frames = self._clip_local_total(
+                    active_clip, source_total)
+            else:
+                # 独立源：显式 source 帧域。
+                time_domain = TIME_DOMAIN_SOURCE
+                current_frame = int(source_current or 0)
+                total_frames = int(source_total or 0)
+            if video_controller is None and bar is not None:
+                playing = bool(getattr(bar, "is_playing", False))
+                loop_enabled = bool(
+                    getattr(bar.btn_loop, "isChecked", lambda: False)())
+            if source_current is None and bar is not None:
+                current_frame = int(getattr(bar, "current_frame", 0) or 0)
+            if source_total is None and bar is not None:
+                total_frames = int(getattr(bar, "total_frames", 0) or 0)
+        elif path in (PRESENTATION_TIMELINE_PREVIEW, PRESENTATION_COMPOSITE):
+            # TimelinePreview／Composite：共享时间线控制器是权威（源
+            # video_controller 与此域无关，不得参与判定）。
+            controller = self._timeline_controller()
+            if controller is not None:
+                playing = bool(getattr(controller, "is_playing", False))
+                loop_enabled = bool(
+                    getattr(controller, "loop_enabled", False))
+                current_frame = int(
+                    getattr(controller, "current_frame", 0) or 0)
+                total_frames = self._timeline_total_frames()
+                time_domain = TIME_DOMAIN_TIMELINE
+            elif bar is not None:
+                # 无时间线控制器：回落 bar 事实（可能为 0——如实，不假装）。
+                playing = bool(getattr(bar, "is_playing", False))
+                loop_enabled = bool(
+                    getattr(bar.btn_loop, "isChecked", lambda: False)())
+                current_frame = int(getattr(bar, "current_frame", 0) or 0)
+                total_frames = int(getattr(bar, "total_frames", 0) or 0)
+
         # Zero is an authoritative controller value (start / unloaded source),
         # not a reason to reuse a previous transport position or duration.
-        if current_frame is None:
-            current_frame = getattr(bar, "current_frame", 0)
-        if total_frames is None:
-            total_frames = getattr(bar, "total_frames", 0)
         current_frame = int(current_frame or 0)
         total_frames = int(total_frames or 0)
-        frame_rate = float(getattr(bar, "_fps", 24.0) or 24.0)
 
         return ColorViewerState(
             page=page,
             work_mode=work_mode,
             presentation_path=path,
-            time_domain=default_time_domain_for(path),
+            time_domain=time_domain,
             context_revision=self._revision,
             has_media=path != PRESENTATION_NONE,
             playing=playing,
@@ -239,11 +344,20 @@ class ColorViewportCapabilityHost(QObject):
         except Exception:  # noqa: BLE001
             timeline_choice_count = 0
 
+        # R05：transport 可用性按呈现路径取该域的权威控制器——
+        # TimelinePreview／Composite 看共享时间线控制器（只有 Timeline
+        # 控制器在场时 transport 不再被误禁用）；Source-GL 看源控制器。
+        if state.presentation_path in (PRESENTATION_TIMELINE_PREVIEW,
+                                       PRESENTATION_COMPOSITE):
+            transport_available = self._timeline_controller() is not None
+        else:
+            transport_available = (
+                getattr(self._window, "video_controller", None) is not None)
+
         return ColorViewerCapabilityContext(
             state=state,
             engine_available=getattr(self._canvas, "engine", None) is not None,
-            video_controller_available=(
-                getattr(self._window, "video_controller", None) is not None),
+            video_controller_available=transport_available,
             focus_host_available=focus_host_available,
             workspace_service_available=(
                 getattr(toolbar, "_workspace_provider", None) is not None),
