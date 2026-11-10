@@ -77,16 +77,25 @@ ContextProbe = Callable[[], Optional[GalleryCaptureFacts]]
 
 @dataclass(frozen=True)
 class CaptureFrameSnapshot:
-    """prepare 阶段取得的同一呈现代际快照（BR03）。
+    """prepare 阶段取得的同一呈现代际快照（BR03＋SR06）。
 
     JPEG 视口图与 float 帧一次取得；persist 消费快照，不二次读取
     engine——prepare 与 persist 之间换 grade／帧不会把旧 JPEG 与新
     EXR／grade 混装进同一个 bundle。
+
+    SR06（第二轮复查）：grade 序列化载荷（``frozen_engine`` 只读视图：
+    layers／raw_params／active index／tracking／stabilization）、合成图
+    数据与源素材路径同样在 prepare 冻结——落盘全程不读 live engine／
+    live 上下文（旧兼容入口无快照时才回退 live 读，属已声明范围）。
     """
 
     image: object
     hdr_frame: object = None
     grade_revision: int = 0
+    frozen_engine: object = None
+    source_asset_path: Optional[str] = None
+    composite_graph_data: object = None
+    composite_viewer_state: object = None
 
 
 class GalleryCaptureSession:

@@ -128,6 +128,33 @@ class _AiPluginRestoreWorker(QRunnable):
         self.signals.finished.emit()
 
 
+class _FrozenEngineGradeView:
+    """prepare 时刻的 grade 只读视图（SR06）。
+
+    SaveRouter 的调色栈序列化只读这些成员（layers／current_raw_params／
+    active_layer_index／tracking_store／video stabilization）；深拷贝后
+    persist 阶段的 grade 落盘与 prepare 同代际——覆盖对话框／脚本重入
+    窗口内的 live engine 改动不会混进本次 bundle。
+    """
+
+    def __init__(self, engine) -> None:
+        self.layers = copy_mod.deepcopy(
+            getattr(engine, "layers", None) or [])
+        self.active_layer_index = int(
+            getattr(engine, "active_layer_index", 0) or 0)
+        self.current_raw_params = copy_mod.deepcopy(
+            getattr(engine, "current_raw_params", None) or {})
+        store = getattr(engine, "tracking_store", None)
+        self.tracking_store = (copy_mod.deepcopy(store)
+                               if store is not None else None)
+        stabilization = getattr(engine, "get_video_stabilization_state", None)
+        self._stabilization = (stabilization()
+                               if callable(stabilization) else None)
+
+    def get_video_stabilization_state(self):
+        return self._stabilization
+
+
 class LayerOpsMixin:
     """Mixin providing layer, render, grading, and undo/redo controller methods.
 
@@ -777,6 +804,11 @@ class LayerOpsMixin:
         BR03：同一呈现代际的快照——JPEG 视口图与 float 帧都在这里取得，
         persist 阶段不再二次读取 engine（换 grade／帧的窗口内不会把旧
         JPEG 与新 EXR 混装）。
+
+        SR06：grade 序列化载荷（layers/raw_params/tracking/stabilization
+        只读视图）、合成图数据与源素材路径同批冻结——落盘全程与 prepare
+        同代际。冻结失败（异常引擎形态）退化为无载荷快照（commit 回退
+        live 读，兼容旧入口，已在完成报告声明）。
         """
         if is_video_mode:
             rendered, current_frame = (
@@ -799,8 +831,24 @@ class LayerOpsMixin:
                 max_dim=max(STILL_IMAGE_MAX, 4096))
         except Exception:
             hdr_frame = None
+        frozen_engine = None
+        try:
+            frozen_engine = _FrozenEngineGradeView(self.engine)
+        except Exception:
+            frozen_engine = None
+        try:
+            composite_graph = self._get_composite_graph_data()
+            composite_state = self._get_composite_state_data()
+        except Exception:
+            composite_graph = composite_state = None
         return CaptureFrameSnapshot(
-            image=self.engine.grab_viewport_image(), hdr_frame=hdr_frame)
+            image=self.engine.grab_viewport_image(), hdr_frame=hdr_frame,
+            grade_revision=int(getattr(self.engine, 'color_graph_revision',
+                                       0) or 0),
+            frozen_engine=frozen_engine,
+            source_asset_path=getattr(self, 'current_file_path', '') or '',
+            composite_graph_data=composite_graph,
+            composite_viewer_state=composite_state)
 
     def _persist_still_capture(self, rendered_img, is_video_mode: bool,
                                captured: dict,
@@ -1039,10 +1087,18 @@ class LayerOpsMixin:
             context_probe=lambda: self._probe_gallery_capture_facts(
                 is_video_mode))
         captured: dict = {}
-        result = session.run(
-            prepare_frame=lambda: self._prepare_capture_image(is_video_mode),
-            persist_bundle=lambda img: self._script_persist_still(
-                img, is_video_mode, name, captured, request=request))
+        # SR06：脚本路径与 UI 路径登记到同一 coordinator——关闭／取消
+        # 能中断所有尚未 commit 的请求（不再只覆盖面板入口）。
+        coordinator = self._gallery_capture_coordinator()
+        coordinator.register(session)
+        try:
+            result = session.run(
+                prepare_frame=lambda: self._prepare_capture_image(
+                    is_video_mode),
+                persist_bundle=lambda img: self._script_persist_still(
+                    img, is_video_mode, name, captured, request=request))
+        finally:
+            coordinator.finish(session)
         if not result.succeeded or not captured.get("topos"):
             if result.reason:
                 self.status_bar.showMessage(
@@ -1127,10 +1183,19 @@ class LayerOpsMixin:
             StillCaptureTransactionError,
         )
 
-        # BR03：快照解包——persist 不二次读取 engine 呈现结果
+        # BR03：快照解包——persist 不二次读取 engine 呈现结果。
+        # SR06：grade 载荷／合成数据／源路径同样消费 prepare 冻结值；
+        # 旧兼容入口（无快照）回退 live 读。
+        frozen_engine = None
+        source_asset_path = None
+        composite_graph = composite_state = None
         if isinstance(rendered_img, CaptureFrameSnapshot):
             image = rendered_img.image
             hdr_frame = rendered_img.hdr_frame
+            frozen_engine = rendered_img.frozen_engine
+            source_asset_path = rendered_img.source_asset_path
+            composite_graph = rendered_img.composite_graph_data
+            composite_state = rendered_img.composite_viewer_state
         else:
             image = rendered_img
             try:
@@ -1181,14 +1246,22 @@ class LayerOpsMixin:
 
             # SaveRouter 把 .topos 写进 staging（与 sidecar 同一提交点）；
             # 工程引用的资产路径用最终位置——提交后即为真实路径。
+            # SR06：序列化消费 prepare 冻结的 grade 视图／合成数据／
+            # 源路径——不读 live engine（无快照的兼容入口除外）。
             image_path = (
                 final_thumb if is_video_mode
-                else getattr(self, 'current_file_path', '') or ''
+                else (source_asset_path
+                      or getattr(self, 'current_file_path', '') or '')
             )
             saved = self.save_router._save_single_asset_project(
-                staged_topos, image_path, self.engine,
-                composite_graph_data=self._get_composite_graph_data(),
-                composite_viewer_state=self._get_composite_state_data(),
+                staged_topos, image_path,
+                frozen_engine if frozen_engine is not None else self.engine,
+                composite_graph_data=composite_graph
+                if composite_graph is not None
+                else self._get_composite_graph_data(),
+                composite_viewer_state=composite_state
+                if composite_state is not None
+                else self._get_composite_state_data(),
             )
             if not saved:
                 raise StillCaptureTransactionError(
