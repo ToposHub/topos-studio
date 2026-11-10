@@ -2258,10 +2258,23 @@ class EditProject:
     ) -> EditProject:
         """更新素材的日志字段（P1-12：关键词/评级/旗标/颜色标签/注释）。
 
-        任何为 None 的参数保持原值不变。
+        任何为 None 的参数保持原值不变。P1-4 域校验：flag/color_label/
+        rating 必须在既有取值域内（fail-loud，拒绝把脏值写进日志——旧
+        工程的合法日志靠域约束保证不丢）。
         """
         if asset_id not in self.assets:
             raise ValueError(f"Asset not found: {asset_id}")
+        if flag is not None and flag not in ASSET_FLAG_VALUES:
+            raise ValueError(
+                f"未知旗标 {flag!r}（合法: {ASSET_FLAG_VALUES}）。多旗标"
+                "扩展需声明 schema 版本与迁移。")
+        if color_label is not None and color_label not in ASSET_COLOR_LABELS:
+            raise ValueError(
+                f"未知颜色标签 {color_label!r}（合法: {ASSET_COLOR_LABELS}）")
+        if rating is not None and (isinstance(rating, bool)
+                                   or not isinstance(rating, int)
+                                   or not 0 <= rating <= 5):
+            raise ValueError(f"评级必须是 0-5 整数: {rating!r}")
         asset = self.assets[asset_id]
         new_asset = asset.with_log_fields(
             keywords=keywords,
