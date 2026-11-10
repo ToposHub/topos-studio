@@ -840,6 +840,11 @@ class LayerOpsMixin:
                 drifted = session.check_before_write()
                 if drifted is not None:
                     return drifted
+            # The modal dialog permits filesystem/context events. Recheck the
+            # destination as well as the source before starting the transaction.
+            locked = self._locked_capture_folder(request)
+            if isinstance(locked, GalleryOperationResult):
+                return locked
 
         if self._commit_still_capture(topos_path, rendered_img,
                                       is_video_mode, request):

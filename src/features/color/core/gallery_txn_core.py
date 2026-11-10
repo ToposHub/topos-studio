@@ -142,8 +142,15 @@ def read_journal(path: str) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise JournalError("journal is not a JSON object")
     schema = payload.get("schema", TXN_JOURNAL_SCHEMA)  # 遗留日志无版本号
-    if type(schema) is not int or schema > TXN_JOURNAL_SCHEMA:
+    if type(schema) is not int or schema != TXN_JOURNAL_SCHEMA:
         raise JournalError(f"unsupported journal schema: {schema!r}")
+    for field, member_types in (("entries", (dict,)), ("finals", (str, dict))):
+        if field not in payload:
+            continue
+        members = payload[field]
+        if not isinstance(members, list) or any(
+                not isinstance(member, member_types) for member in members):
+            raise JournalError(f"invalid journal {field}")
     return payload
 
 
