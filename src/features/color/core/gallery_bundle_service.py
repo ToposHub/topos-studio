@@ -123,6 +123,29 @@ class GalleryBundleService:
                 for suffix in BUNDLE_SUFFIX_BY_ROLE.values()]
 
     @staticmethod
+    def bundle_revision(folder: str, stem: str) -> str:
+        """bundle **全成员**内容 revision（BR06：wipe/比较会话 provenance）。
+
+        逐成员 ``stat``（大小＋mtime_ns）多重集哈希——参考 sidecar／
+        meta 原地改写也会变，不再只看 ``.topos`` mtime；成员缺失记
+        ``gone``。返回稳定短哈希（与 :meth:`GalleryQueryIndex.
+        folder_signature` 同一纪律）。
+        """
+        import hashlib
+        parts = []
+        for path in GalleryBundleService.bundle_paths(folder, stem):
+            try:
+                stat = os.stat(path)
+            except OSError:
+                parts.append(f"{os.path.basename(path)}:gone")
+                continue
+            parts.append(f"{os.path.basename(path)}:"
+                         f"{stat.st_size}:{stat.st_mtime_ns}")
+        digest = hashlib.sha1("\n".join(sorted(parts)).encode(
+            "utf-8", "replace")).hexdigest()[:16]
+        return f"{len(parts)}:{digest}"
+
+    @staticmethod
     def existing_members(folder: str, stem: str) -> List[str]:
         """bundle 中真实存在的成员（含 dotfile 之外的正常命名）。"""
         return [path for path in GalleryBundleService.bundle_paths(folder, stem)
