@@ -196,8 +196,14 @@ class GalleryChrome(QObject):
         self.sidebar_button = _button(self.toolbar, "sidebar", I18N.tr("gallery.sidebar", "Show Albums"))
         self.sidebar_button.setCheckable(True)
         self.import_button = _button(self.toolbar, "import", I18N.tr("gallery.import", "Import Still"))
-        self.import_button.setEnabled(False)
-        self.import_button.setToolTip(I18N.tr("gallery.import_unavailable", "Import Still — not available in this version"))
+        # BR05：传输服务已接线（面板 ``_import_bundle_interactive``）；
+        # 菜单/按钮的可用性由能力宿主按 import.bundle 门控。
+        self.import_button.clicked.connect(
+            lambda: panel._import_bundle_interactive())
+        self.import_button.setToolTip(I18N.tr("gallery.import_hint",
+                                              "Import Still — import a "
+                                              ".toposbundle into the "
+                                              "current album"))
         tools.addWidget(self.sidebar_button)
         tools.addWidget(self.import_button)
         tools.addStretch(1)
@@ -302,10 +308,11 @@ class GalleryChrome(QObject):
         self._update_responsive()
 
     def apply_item(self, item: object) -> None:
+        """双击/Enter 应用调色（BR05：走面板统一执行门，不再只查文件在）。"""
         if item is not None:
             path = item.data(Qt.ItemDataRole.UserRole)
-            if isinstance(path, str) and os.path.isfile(path):
-                self.panel.grade_applied.emit(path)
+            if isinstance(path, str):
+                self.panel._execute_gallery_action("apply.grade", path)
 
     def set_view_mode(self, mode: str) -> None:
         enabled = mode == "list"
@@ -417,8 +424,9 @@ class GalleryChrome(QObject):
         menu.addAction(I18N.tr("presets.refresh", "Refresh"), self.panel.scan_presets)
         menu.addAction(I18N.tr("presets.delete", "Delete"), self.panel._delete_selected).setEnabled(bool(self.panel.list_widget.selectedItems()))
         menu.addSeparator()
-        action = menu.addAction(I18N.tr("gallery.import", "Import Still"))
-        action.setEnabled(False)
+        action = menu.addAction(I18N.tr("gallery.import", "Import Still"),
+                                self.panel._import_bundle_interactive)
+        action.setEnabled(self.import_button.isEnabled())
         action.setToolTip(self.import_button.toolTip())
         float_action = menu.addAction(I18N.tr("gallery.expand", "Gallery View"), self.toggle_float)
         float_action.setEnabled(self.panel._find_dock_widget() is not None)
