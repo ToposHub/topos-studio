@@ -19,6 +19,10 @@ import pytest
 
 from src.features.color.core.gallery_bundle_service import GalleryBundleService
 from src.features.color.core.gallery_repository import GalleryFolderRepository
+from src.features.color.core.gallery_resource_refs import (
+    parse_managed_lut_reference,
+    resolve_lut_reference,
+)
 from src.features.color.core.gallery_transfer_service import (
     BUNDLE_MANIFEST_NAME,
     GalleryTransferService,
@@ -81,7 +85,7 @@ class TestPortableRoundtrip:
         # 移走原 LUT——包自身已携带内容
         lut.unlink()
 
-        # 另一临时库（不同根路径）导入：安装 + 重写引用
+        # 另一临时库（不同根路径）导入：安装 + 重写为受管引用（SR04）
         svc_b = _svc(b)
         target = b / "Presets" / "System"
         imported = svc_b.import_bundle(str(archive), str(target))
@@ -93,8 +97,18 @@ class TestPortableRoundtrip:
         with zipfile.ZipFile(target / "Look.topos") as zf:
             project = json.loads(zf.read("project.json"))
         rewritten = project["layers"][0]["active_lut_path"]
-        assert os.path.isfile(rewritten)               # 解析得到
-        assert Path(rewritten).read_bytes() == LUT_BYTES
+        # 引用是库相对受管形式——不绑定本机绝对路径
+        assert parse_managed_lut_reference(rewritten) is not None
+        resolved = resolve_lut_reference(rewritten, str(b / "Presets"))
+        assert os.path.isfile(resolved)                 # 换算到当前库根
+        assert Path(resolved).read_bytes() == LUT_BYTES
+        # 整库迁移后引用仍解析到随库资源（第二轮复查 SR04 场景）
+        moved_b = b / "MovedPresets"
+        (b / "Presets").rename(moved_b)
+        moved_ref = resolve_lut_reference(
+            rewritten, str(moved_b))
+        assert Path(moved_ref).read_bytes() == LUT_BYTES
+        (moved_b).rename(b / "Presets")
 
         # 二次导入（重名顺延）：LUT 幂等复用，不重复安装
         again = svc_b.import_bundle(str(archive), str(target))

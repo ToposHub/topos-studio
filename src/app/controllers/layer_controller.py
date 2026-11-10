@@ -595,7 +595,8 @@ class LayerOpsMixin:
             from src.features.color.core.grade_clipboard import (
                 ALL_CATEGORIES, GradeClipboard,
             )
-            prepared = self._prepare_preset_layers(source_layers)
+            prepared = self._prepare_preset_layers(source_layers,
+                                                  topos_path)
             clipboard = GradeClipboard()
             clipboard.copy_grade(prepared)
             if paste_to_clip(active_clip_id, set(ALL_CATEGORIES)):
@@ -618,7 +619,8 @@ class LayerOpsMixin:
             )
 
         # ---- Deep copy 并剥离 AI 数据 ----
-        new_layers = self._prepare_preset_layers(source_layers)
+        new_layers = self._prepare_preset_layers(source_layers,
+                                                topos_path=topos_path)
 
         self.engine.layers = new_layers
         self.engine.active_layer_index = min(source_active_idx, len(new_layers) - 1)
@@ -1350,9 +1352,20 @@ class LayerOpsMixin:
         valid = set(PresetMeta.__dataclass_fields__)
         return {k: v for k, v in fields.items() if k in valid}
 
-    def _prepare_preset_layers(self, source_layers):
-        """深拷贝预设图层并剥离 AI/烘焙/画笔数据（可安全应用到其他素材）。"""
+    def _prepare_preset_layers(self, source_layers, topos_path=None):
+        """深拷贝预设图层并剥离 AI/烘焙/画笔数据（可安全应用到其他素材）。
+
+        SR04：grade 内的受管 LUT 引用（``topos-lut://``）在应用边界换算
+        为**当前库根**的本机路径（库目录迁移后仍解析）；换算不出的交给
+        既有缺失处理路径，不猜替代文件。非受管引用（用户绝对路径）原样
+        保留。
+        """
         from src.features.color.core.layer import MaskShape
+        library_root = None
+        if topos_path:
+            # 库根＝相册目录的父目录（Presets/<Album>/<still>.topos）
+            library_root = os.path.dirname(os.path.dirname(
+                os.path.abspath(topos_path)))
         new_layers = []
         for src_layer in source_layers:
             layer = copy_mod.deepcopy(src_layer)
@@ -1365,6 +1378,16 @@ class LayerOpsMixin:
                              if p.get("type", "dctl") == "dctl"]
             layer.mask_shapes = [s for s in layer.mask_shapes
                                  if s.type not in (MaskShape.BITMAP, MaskShape.BRUSH)]
+            if library_root:
+                ref = getattr(layer, 'active_lut_path', None)
+                if ref:
+                    from src.features.color.core.gallery_resource_refs import (
+                        parse_managed_lut_reference,
+                        resolve_lut_reference,
+                    )
+                    if parse_managed_lut_reference(ref) is not None:
+                        layer.active_lut_path = resolve_lut_reference(
+                            ref, library_root)
             new_layers.append(layer)
         return new_layers
 
@@ -1388,7 +1411,8 @@ class LayerOpsMixin:
             self.status_bar.showMessage(
                 f"无法加载预设: {os.path.basename(topos_path)}", 3000)
             return
-        source_layers = self._prepare_preset_layers(source_layers)
+        source_layers = self._prepare_preset_layers(source_layers,
+                                                    topos_path)
 
         # 临时剪贴板：分类应用不写脏用户 Copy Grade 的全局剪贴板
         clipboard = GradeClipboard()
