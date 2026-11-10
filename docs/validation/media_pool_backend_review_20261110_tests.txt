@@ -1,0 +1,55 @@
+Command (project root):
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/test_media_pool_backend_review_20261110.py tests/edit/test_backend_p*.py tests/edit/test_multicam_production.py tests/edit/test_asset_usage_index.py tests/edit/test_project_archive.py tests/edit/test_project_archive_w10.py tests/edit/test_consolidate.py tests/edit/test_interpretation_override.py tests/edit/test_m04_interpretation_matrix.py tests/edit/test_track_lock_guard_and_source_range.py tests/edit/ai_editing/test_analysis_request.py tests/edit/ai_editing/test_analysis_scheduler.py tests/edit/ai_editing/test_analysis_progress.py tests/edit/ai_editing/test_analysis.py tests/shared/test_backend_p0_proxy_tasks.py tests/app/test_media_analysis_controller.py -q -rs --tb=short
+
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 345 items
+
+tests/edit/test_media_pool_backend_review_20261110.py ..........         [  2%]
+tests/edit/test_backend_p0_bin_semantics.py .............                [  6%]
+tests/edit/test_backend_p0_clip_attributes.py ...                        [  7%]
+tests/edit/test_backend_p0_clip_metadata.py .........                    [ 10%]
+tests/edit/test_backend_p0_pool_query.py ..................              [ 15%]
+tests/edit/test_backend_p0_relink_replace.py ....                        [ 16%]
+tests/edit/test_backend_p0_source_range.py ....................          [ 22%]
+tests/edit/test_backend_p1_log_semantics.py ....                         [ 23%]
+tests/edit/test_backend_p1_media_containers.py ....                      [ 24%]
+tests/edit/test_backend_p1_metadata_csv.py .......                       [ 26%]
+tests/edit/test_backend_p1_multicam_sync.py ..                           [ 27%]
+tests/edit/test_backend_p1_smart_bin_rules.py .............              [ 31%]
+tests/edit/test_backend_p1_transcription_job.py ...............          [ 35%]
+tests/edit/test_backend_p1_usage_index.py ....                           [ 36%]
+tests/edit/test_backend_p2_media_management.py .....                     [ 37%]
+tests/edit/test_multicam_production.py ......................            [ 44%]
+tests/edit/test_asset_usage_index.py ......                              [ 46%]
+tests/edit/test_project_archive.py ................                      [ 50%]
+tests/edit/test_project_archive_w10.py ...s.....s.                       [ 53%]
+tests/edit/test_consolidate.py ....sssssss.ss                            [ 57%]
+tests/edit/test_interpretation_override.py ...............               [ 62%]
+tests/edit/test_m04_interpretation_matrix.py .......                     [ 64%]
+tests/edit/test_track_lock_guard_and_source_range.py ........            [ 66%]
+tests/edit/ai_editing/test_analysis_request.py .................         [ 71%]
+tests/edit/ai_editing/test_analysis_scheduler.py ....................    [ 77%]
+tests/edit/ai_editing/test_analysis_progress.py .......                  [ 79%]
+tests/edit/ai_editing/test_analysis.py ................................. [ 88%]
+...............                                                          [ 93%]
+tests/shared/test_backend_p0_proxy_tasks.py .......                      [ 95%]
+tests/app/test_media_analysis_controller.py ................             [100%]
+
+=========================== short test summary info ============================
+SKIPPED [1] tests/edit/test_project_archive_w10.py:116: win32 reserved names
+SKIPPED [1] tests/edit/test_project_archive_w10.py:187: win32 long paths
+SKIPPED [1] tests/edit/test_consolidate.py:147: ffmpeg CLI not on PATH
+SKIPPED [1] tests/edit/test_consolidate.py:161: ffmpeg CLI not on PATH
+SKIPPED [1] tests/edit/test_consolidate.py:202: ffmpeg CLI not on PATH
+SKIPPED [1] tests/edit/test_consolidate.py:224: ffmpeg CLI not on PATH
+SKIPPED [1] tests/edit/test_consolidate.py:254: ffmpeg CLI not on PATH
+SKIPPED [1] tests/edit/test_consolidate.py:278: ffmpeg CLI not on PATH
+SKIPPED [1] tests/edit/test_consolidate.py:294: ffmpeg CLI not on PATH
+SKIPPED [1] tests/edit/test_consolidate.py:322: ffmpeg CLI not on PATH
+SKIPPED [1] tests/edit/test_consolidate.py:341: ffmpeg CLI not on PATH
+======================= 334 passed, 11 skipped in 20.13s =======================
