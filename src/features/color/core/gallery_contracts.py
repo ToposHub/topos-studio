@@ -94,7 +94,7 @@ def is_safe_bundle_stem(name: str) -> bool:
     ``_is_safe_preset_name`` 语义一致（中缀点合法）。
     """
     import os as _os
-    if not name or not name.strip():
+    if not isinstance(name, str) or not name.strip():
         return False
     name = name.strip()
     if name in {".", ".."}:

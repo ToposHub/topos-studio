@@ -117,6 +117,61 @@ class TestExport:
 
 
 class TestInspectAndImport:
+    @pytest.mark.parametrize("defect", [
+        "absent_member", "duplicate_name", "duplicate_role", "wrong_role",
+        "missing_hash", "invalid_hash",
+    ])
+    def test_manifest_members_must_match_archive_and_roles(self, svc, defect):
+        service, root = svc
+        path = self._export(service, root)
+        with zipfile.ZipFile(path) as package:
+            entries = {info.filename: package.read(info.filename)
+                       for info in package.infolist()}
+        manifest = json.loads(entries[BUNDLE_MANIFEST_NAME])
+        grade = next(f for f in manifest["files"] if f["role"] == "grade")
+        if defect == "absent_member":
+            grade["name"] = "Absent.topos"
+        elif defect == "duplicate_name":
+            manifest["files"].append(dict(grade))
+        elif defect == "duplicate_role":
+            extra = dict(grade, name="Another.topos")
+            manifest["files"].append(extra)
+            entries[extra["name"]] = entries[grade["name"]]
+        elif defect == "wrong_role":
+            grade["role"] = "thumbnail"
+        elif defect == "missing_hash":
+            grade.pop("sha256")
+        else:
+            grade["sha256"] = "not-a-sha256"
+        entries[BUNDLE_MANIFEST_NAME] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(path, "w") as package:
+            for name, contents in entries.items():
+                package.writestr(name, contents)
+        assert not service.inspect_bundle(path).ok
+        target = _folder(root, "System")
+        assert not service.import_bundle(path, target).succeeded
+        assert os.listdir(target) == []
+
+    @pytest.mark.parametrize("replacement", [
+        {"schema": True}, {"schema": 0}, {"schema": -1},
+        {"files": None}, {"files": "bad"}, {"files": [None]},
+        {"files": [{"name": []}]}, {"files": [{"name": "Look\u0000.topos"}]},
+        {"still": []}, {"still": "bad"},
+    ])
+    def test_malformed_manifest_rejected_without_exception(self, svc, replacement):
+        service, root = svc
+        path = self._export(service, root)
+        with zipfile.ZipFile(path) as package:
+            entries = {info.filename: package.read(info.filename)
+                       for info in package.infolist()}
+        manifest = json.loads(entries[BUNDLE_MANIFEST_NAME])
+        manifest.update(replacement)
+        entries[BUNDLE_MANIFEST_NAME] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(path, "w") as package:
+            for name, contents in entries.items():
+                package.writestr(name, contents)
+        assert not service.inspect_bundle(path).ok
+
     def _export(self, service, root, stem="Look"):
         folder = _folder(root)
         _seed_bundle(folder, stem)

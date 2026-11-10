@@ -73,6 +73,24 @@ def _seed(folder: str, name: str, *, real_zip=True, meta: PresetMeta = None,
 
 
 class TestAlbums:
+    def test_nested_folder_can_be_resolved_and_queried(self, repo):
+        folder = os.path.join(repo.root, "User", "Travel", "Day1")
+        os.makedirs(folder)
+        _seed(folder, "Sunset")
+        album = repo.album_for_folder(folder)
+        assert album is not None and album.album_id == "legacy:User/Travel/Day1"
+        result = repo.query(GalleryQuery(album_id=album.album_id))
+        assert result.scan_error is None
+        assert [still.display_name for still in result.stills] == ["Sunset"]
+
+    def test_symlink_album_outside_library_is_not_read(self, repo, tmp_path):
+        outside = tmp_path / "other-project"
+        outside.mkdir()
+        _seed(str(outside), "Private")
+        os.symlink(outside, os.path.join(repo.root, "User", "link"))
+        assert repo.album_folder("legacy:User/link") is None
+        assert repo.query(GalleryQuery(album_id="legacy:User/link")).stills == ()
+
     def test_sections_and_one_level_subdirs(self, repo, tmp_path):
         (tmp_path / "Presets" / "User" / "SubA").mkdir()
         (tmp_path / "Presets" / "User" / ".hidden").mkdir()

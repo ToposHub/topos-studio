@@ -90,10 +90,13 @@ class GalleryQueryIndex:
             with self._lock:
                 self._cache[album_id] = (mtime, base)
         stills = self._replay(base.stills, query)
+        total_matched = len(stills)
+        if query.limit is not None:
+            stills = stills[:query.limit]
         return GalleryQueryResult(
             album=base.album, stills=stills,
             request_revision=query.request_revision,
-            total_matched=len(stills),
+            total_matched=total_matched,
             degraded_count=sum(1 for s in stills if not s.has_meta),
             scan_error=base.scan_error)
 
@@ -104,8 +107,6 @@ class GalleryQueryIndex:
                    if matches_query(s.display_name, s.meta,
                                     query.search_text)]
         self._repository._sort_stills(ordered, query)
-        if query.limit is not None:
-            ordered = ordered[:query.limit]
         return tuple(ordered)
 
     @staticmethod

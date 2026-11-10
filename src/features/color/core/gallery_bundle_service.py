@@ -168,6 +168,8 @@ class GalleryBundleService:
         committed 后清源。
         """
         request_id = request_id or make_gallery_request_id()
+        if not is_safe_bundle_stem(stem):
+            return self._rejected(request_id, REASON_UNSAFE_NAME, repr(stem))
         # new_stem=None：move 保持原名；显式空名按不安全名拒绝（不得
         # 静默退化成"改回自己"）
         new_stem = (new_stem.strip() if isinstance(new_stem, str)
@@ -239,6 +241,8 @@ class GalleryBundleService:
         ``warnings`` 并以 ``partial`` 如实返回，绝不静默吞掉后报成功。
         """
         request_id = request_id or make_gallery_request_id()
+        if not is_safe_bundle_stem(stem):
+            return self._rejected(request_id, REASON_UNSAFE_NAME, repr(stem))
         real = self._resolve_in_root(folder)
         if real is None:
             return self._rejected(request_id, REASON_OUTSIDE_ROOT, folder)
@@ -328,6 +332,8 @@ class GalleryBundleService:
     def restore_from_trash(self, trash_id: str) -> GalleryOperationResult:
         """把一条 trash 记录搬回原目录（同名冲突时拒绝，不覆盖）。"""
         request_id = make_gallery_request_id()
+        if not is_safe_bundle_stem(trash_id):
+            return self._rejected(request_id, REASON_UNSAFE_NAME, repr(trash_id))
         trash_root = os.path.join(self._root, TRASH_DIR_NAME)
         txn_dir = os.path.join(trash_root, trash_id)
         manifest = os.path.join(txn_dir, MANIFEST_NAME)
