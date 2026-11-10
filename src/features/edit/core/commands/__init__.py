@@ -1016,6 +1016,7 @@ from .asset_commands import (
     BatchUpdateAssetLogCommand as BatchUpdateAssetLogCommand,
     CreateSmartBinCommand as CreateSmartBinCommand,
     UpdateSmartBinRulesCommand as UpdateSmartBinRulesCommand,
+    ImportMetadataCommand as ImportMetadataCommand,
     DeleteSmartBinCommand as DeleteSmartBinCommand,
     ReplaceMediaCommand as ReplaceMediaCommand,
     RelinkAssetCommand as RelinkAssetCommand,

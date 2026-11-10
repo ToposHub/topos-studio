@@ -2795,6 +2795,77 @@ class UpdateSmartBinRulesCommand:
 
 
 @dataclass(frozen=True)
+class ImportMetadataCommand:
+    """P1-7: 应用元数据 CSV 导入计划（整体单步撤销）。
+
+    plan 来自 ``plan_metadata_import``（差异预览，用户已确认）。apply
+    只写有实际变化的字段；undo 恢复首次 apply 快照的全部旧值（含
+    display_name/reel 等制作与日志字段）。
+    """
+
+    command_id: str
+    label: str
+    plan: Any  # MetadataImportPlan
+    _applied: bool = False
+
+    def apply(self, project: EditProject) -> EditProject:
+        from src.features.edit.core.metadata_interchange import (
+            apply_metadata_import,
+        )
+        new_project = apply_metadata_import(project, self.plan)
+        object.__setattr__(self, "_applied", True)
+        return new_project
+
+    def undo(self, project: EditProject) -> EditProject:
+        if not self._applied:
+            logger.warning("ImportMetadataCommand undo before apply")
+            return project
+        for change in reversed(self.plan.asset_changes):
+            asset = project.assets.get(change.asset_id)
+            if asset is None:
+                continue
+            log_kwargs: dict[str, Any] = {}
+            production_kwargs: dict[str, Any] = {}
+            rename: str | None = None
+            for item in change.changes:
+                if not item.is_changed:
+                    continue
+                if item.field == "display_name":
+                    rename = str(item.old_value)
+                elif item.field in ("keywords", "rating", "flag",
+                                    "color_label", "comment"):
+                    log_kwargs[item.field] = item.old_value
+                else:
+                    production_kwargs[item.field] = str(item.old_value or "")
+            if log_kwargs:
+                project = project.update_asset_log_info(
+                    change.asset_id, **log_kwargs)
+            if production_kwargs:
+                project = project.update_asset_production_info(
+                    change.asset_id, **production_kwargs)
+            if rename is not None:
+                project = project.rename_asset(change.asset_id, rename)
+        return project
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "ImportMetadataCommand",
+            "label": self.label,
+            "plan": {
+                "asset_changes": [
+                    {"asset_id": c.asset_id,
+                     "changes": [
+                         {"field": f.field, "old_value": repr(f.old_value),
+                          "new_value": repr(f.new_value)}
+                         for f in c.changes]}
+                    for c in self.plan.asset_changes],
+                "warnings": list(self.plan.warnings),
+            },
+        }
+
+
+@dataclass(frozen=True)
 class DeleteSmartBinCommand:
     """Command to delete a user smart bin (P1-12). Undo restores it."""
 
