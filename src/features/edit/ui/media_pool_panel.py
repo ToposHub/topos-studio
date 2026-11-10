@@ -142,6 +142,10 @@ SORT_BY_DATE = "date"
 SORT_BY_TYPE = "type"
 SORT_BY_DURATION = "duration"
 
+# P0-4 大数据查询：素材数达到阈值后，过滤/排序走异步查询会话
+# （MediaPoolQuerySession，latest-wins），小池保持同步内存路径。
+MEDIA_POOL_ASYNC_QUERY_THRESHOLD = 5000
+
 
 # ================================================================
 # 支持的媒体文件扩展名
@@ -4848,6 +4852,16 @@ class MediaPoolPanel(QWidget):
         # Command stack for undo/redo
         self._command_stack: ProjectCommandStack = ProjectCommandStack()
 
+        # P0-4 大数据查询：十万素材级池的异步过滤/排序会话（latest-wins；
+        # 小池走同步内存路径，见 _large_pool_query_active）
+        from src.features.edit.core.media_pool_query import MediaPoolQuerySession
+        self._query_session = MediaPoolQuerySession(self)
+        self._query_session.results_ready.connect(self._on_pool_query_results)
+        self._query_session.query_failed.connect(self._on_pool_query_failed)
+        self._query_asset_ids: Optional[tuple[str, ...]] = None
+        self._last_query_fingerprint: tuple = ()
+        self._pending_query_fingerprint: tuple = ()
+
         # Search and sort state
         self._search_all_bins: bool = False
         self._search_text: str = ""
@@ -5471,6 +5485,10 @@ class MediaPoolPanel(QWidget):
             # F-R07/R26：跨工程注销全部代理任务——旧工程的 completion/
             # error/探测回调不得写新工程模型或服务缓存。
             self._invalidate_all_proxy_jobs()
+            # P0-4：跨工程丢弃旧查询结果（会话侧另有 project_id/revision
+            # 守卫，这里清 UI 缓存避免渲染旧工程素材）。
+            self._query_asset_ids = None
+            self._last_query_fingerprint = ()
 
         # Timeline activation replaces the project dataclass but keeps the
         # pool-owned collections intact. Updating drag references is enough;
@@ -7472,6 +7490,10 @@ class MediaPoolPanel(QWidget):
                 return
 
 
+            # P0-4：大数据池先确保异步查询已按当前状态提交（指纹变化
+            # 才重发）；本轮渲染用上一次结果，结果到达后再刷新一次。
+            self._ensure_pool_query()
+
             for pool_item in self._current_pool_items():
                 if pool_item.item_type == "bin":
                     self._add_bin_item_direct(pool_item.data)
@@ -7913,7 +7935,12 @@ class MediaPoolPanel(QWidget):
     def _current_pool_items(self) -> List[GridItem]:
         """Use one ordering/filtering result for all media-pool presentations."""
         bins = self._get_current_bins()
-        assets = self._apply_search_filter(self._get_current_assets())
+        if self._large_pool_query_active():
+            # P0-4：大数据池的过滤/排序由异步查询会话给出（latest-wins；
+            # 结果未到达时素材区为空，bins/timelines 照常同步渲染）。
+            assets = self._large_pool_ordered_assets()
+        else:
+            assets = self._apply_search_filter(self._get_current_assets())
         timelines = self._get_current_timelines()
         items = ([GridItem("bin", b.bin_id, b) for b in bins]
                  + [GridItem("asset", a.asset_id, a) for a in assets]
@@ -7947,6 +7974,83 @@ class MediaPoolPanel(QWidget):
         if self._sort_by in (SORT_BY_DATE, SORT_BY_DURATION, "fps", "audio"):
             return value if isinstance(value, (int, float)) and math.isfinite(value) else None
         return str(value).casefold() if value is not None and str(value).strip() else None
+
+    # ==================== P0-4 大数据池异步查询 ====================
+
+    def _large_pool_query_active(self) -> bool:
+        """素材量达到阈值且非 Smart Bin 视图时启用异步查询路径。
+
+        Smart Bin 本身就是后端条件查询（get_smart_bin_assets），规模由
+        规则筛选限定，保持同步路径。
+        """
+        return (self._project is not None
+                and not self._current_bin_is_smart
+                and len(self._project.assets) >= MEDIA_POOL_ASYNC_QUERY_THRESHOLD)
+
+    def _pool_query_fingerprint(self) -> tuple:
+        """影响查询结果的全部 UI 状态 + 工程身份/修订。"""
+        return (
+            self._search_text, self._search_filter_mode, self._search_all_bins,
+            self._current_bin_id, self._sort_by, self._sort_order,
+            self._project.project_id if self._project else "",
+            self._project.revision if self._project else -1,
+        )
+
+    def _ensure_pool_query(self) -> None:
+        """指纹变化或结果缺失时提交异步查询（防抖由 _refresh_timer 承担）。"""
+        if not self._large_pool_query_active() or self._project is None:
+            return
+        fingerprint = self._pool_query_fingerprint()
+        if (self._query_asset_ids is not None
+                and fingerprint == self._last_query_fingerprint):
+            return
+        from src.features.edit.core.media_pool_query import (
+            VALID_SORT_KEYS, MediaPoolQuery,
+        )
+        if self._search_text and self._search_all_bins:
+            scope, bin_id = "all_bins", None
+        elif self._current_bin_id and not self._current_bin_is_smart:
+            scope, bin_id = "bin", self._current_bin_id
+        else:
+            scope, bin_id = "unfiled", None
+        sort_key = self._sort_by if self._sort_by in VALID_SORT_KEYS else "name"
+        self._pending_query_fingerprint = fingerprint
+        self._query_session.submit(self._project, MediaPoolQuery(
+            text=self._search_text,
+            field=self._search_filter_mode,
+            scope=scope,
+            bin_id=bin_id,
+            sort_key=sort_key,
+            sort_desc=self._sort_order == "desc",
+        ))
+
+    def _large_pool_ordered_assets(self) -> List[MediaAsset]:
+        """把查询结果的稳定 asset_id 序映射回素材（缺项跳过）。"""
+        if self._query_asset_ids is None or self._project is None:
+            return []
+        return [
+            asset for aid in self._query_asset_ids
+            if (asset := self._project.assets.get(aid)) is not None
+        ]
+
+    def _on_pool_query_results(self, result: Any) -> None:
+        """应用最新查询结果并刷新（旧结果已被会话按代际丢弃）。"""
+        if self._project is None:
+            return
+        if getattr(result, "project_id", "") != self._project.project_id:
+            return
+        self._query_asset_ids = tuple(result.asset_ids)
+        self._last_query_fingerprint = self._pending_query_fingerprint
+        self._delayed_refresh()
+
+    def _on_pool_query_failed(self, query_id: str, error: str) -> None:
+        logger.warning(f"Media pool query failed ({query_id}): {error}")
+        # 查询失败时保留上一次结果，等待下一次刷新重试。
+
+    def closeEvent(self, event: Any) -> None:
+        """面板关闭：取消在途查询并等待查询线程退出（不留后台任务）。"""
+        self._query_session.shutdown()
+        super().closeEvent(event)
 
     def _populate_grid_view(self) -> None:
         """填充网格视图（包含 bins + assets + timelines，V-08, UI-28）"""
