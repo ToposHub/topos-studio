@@ -3648,14 +3648,14 @@ class EditPage(QWidget):
             logger.debug("analysis request_analysis_draft failed", exc_info=True)
 
     def _on_analysis_cancel_requested(self, asset_id: str) -> None:
-        """取消某 asset 的分析（经 controller 的 scheduler）。"""
+        """取消某 asset 的分析（P0-8：per-asset 定向取消，不再 cancel_all）。"""
         controller = self._get_media_analysis_controller()
         if controller is None:
             return
         try:
-            scheduler = getattr(controller, "_scheduler", None)
-            if scheduler is not None:
-                scheduler.cancel_all()  # 首版：取消所有分析（per-asset 取消留 M5）
+            cancel_asset = getattr(controller, "cancel_asset_analysis", None)
+            if callable(cancel_asset):
+                cancel_asset(asset_id)
         except Exception:
             logger.debug("analysis cancel failed", exc_info=True)
 

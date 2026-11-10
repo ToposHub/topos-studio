@@ -109,6 +109,9 @@ class _QueueItem:
     on_cancel: Callable[[], Any] | None = None
     # 入队顺序（FIFO；同 lane 按此排序）
     seq: int = 0
+    # P0-8：按域取消的标签（如 asset_id）——per-asset 取消经
+    # cancel_jobs_by_tags 定位，不与 job_id 耦合。
+    tags: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------- #
@@ -192,6 +195,7 @@ class AnalysisJobScheduler:
         *,
         work: Callable[[], Any] | None = None,
         on_cancel: Callable[[], Any] | None = None,
+        tags: tuple[str, ...] = (),
     ) -> JobHandle:
         """提交一个 job 到指定 lane。
 
@@ -205,11 +209,15 @@ class AnalysisJobScheduler:
         收尾）时调用，让提交方收尾依赖状态（如 AnalysisRequest 状态迁移）。回调在
         scheduler 锁外执行，签名 ``() -> None``；抛出的异常被吞并记日志（取消路径
         不应因回调失败而中断清理）。
+
+        ``tags``（P0-8）：按域取消标签（如 asset_id），供
+        :meth:`cancel_jobs_by_tags` 定位；空元组 = 不参与按域取消。
         """
         with self._lock:
             self._seq_counter += 1
             item = _QueueItem(
-                lane=lane, job=job, work=work, on_cancel=on_cancel, seq=self._seq_counter,
+                lane=lane, job=job, work=work, on_cancel=on_cancel,
+                seq=self._seq_counter, tags=tuple(tags),
             )
             self._all[job.job_id] = item
 
@@ -259,6 +267,28 @@ class AnalysisJobScheduler:
         # 锁外执行 on_cancel（避免回调内回调 scheduler 造成死锁）
         _safe_invoke(on_cancel_cb, job_id)
         return True
+
+    def cancel_jobs_by_tags(self, tags: tuple[str, ...] | set | list) -> int:
+        """按标签取消匹配的 pending + active job（P0-8 per-asset 取消）。
+
+        语义与 :meth:`cancel_job` 一致（pending 直接移除并收尾；running 标
+        CANCELLING 由 worker 协作中断），只是按 ``submit(tags=...)`` 的域
+        标签筛选。返回被取消/标记取消的 job 数。
+        """
+        wanted = set(tags)
+        if not wanted:
+            return 0
+        with self._lock:
+            job_ids = [
+                item.job.job_id for item in self._all.values()
+                if wanted.intersection(item.tags)
+                and item.job.status.is_active
+            ]
+        cancelled = 0
+        for job_id in job_ids:
+            if self.cancel_job(job_id):
+                cancelled += 1
+        return cancelled
 
     def cancel_all(self) -> int:
         """取消所有 pending + active job（工程关闭用，无 orphan worker）。
