@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import inspect
 import logging
+import math
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable
@@ -191,6 +192,20 @@ def _accepts_provider_options(analyze: Callable[..., Any]) -> bool:
         or parameter.kind == inspect.Parameter.VAR_KEYWORD
         for parameter in parameters
     )
+
+
+def _fps_to_float(fps: Any) -> float:
+    """调度器 fps（"num/den" 或数值）→ float（未知回 24.0）。"""
+    try:
+        text = str(fps)
+        if "/" in text:
+            num, den = text.split("/", 1)
+            value = float(num) / float(den)
+        else:
+            value = float(text)
+        return value if value > 0 and math.isfinite(value) else 24.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 24.0
 
 
 class AnalysisService:
@@ -551,10 +566,29 @@ class AnalysisService:
                             detail = violation
                         else:
                             fingerprint = AssetFingerprint()
+                            # R15（媒体池复查）：请求级 options 下发
+                            # provider——转录协议键（language/
+                            # time_range_frames/speaker_diarization/
+                            # data_policy）先经 TranscriptionJobRequest
+                            # fail-loud 校验（帧域范围按 R07 含端点语义
+                            # 折算秒域），非法值按本素材失败上报。
+                            provider_options = None
+                            if req.options:
+                                from src.features.edit.ai_editing.transcription_job import (
+                                    transcription_options_from_request,
+                                )
+                                fps_value = _fps_to_float(fps)
+                                provider_options = (
+                                    transcription_options_from_request(
+                                        asset_id, req.project_id,
+                                        int(req.project_revision or 0),
+                                        req.options, fps_value)
+                                )
                             job, err = self.request_analysis(
                                 asset_id, fingerprint, fps=fps,
                                 provider_ids=provider_ids,
                                 require_user_confirmation=req.is_cloud,
+                                options=provider_options,
                             )
                             success = (
                                 err == "" and job is not None

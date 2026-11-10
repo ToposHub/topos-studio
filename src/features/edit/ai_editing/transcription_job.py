@@ -125,6 +125,54 @@ class TranscriptionJobRequest:
         return (start / self.fps, (end + 1) / self.fps)
 
 
+def _opt_fps(fps: Any) -> Any:
+    """fps → float；None/非法保持 None（协议侧按"缺 fps"fail-loud）。"""
+    if fps is None:
+        return None
+    try:
+        return float(fps)
+    except (TypeError, ValueError):
+        return None
+
+
+def transcription_options_from_request(
+    asset_id: str,
+    project_id: str,
+    source_revision: int,
+    options: Any,
+    fps: float,
+) -> dict:
+    """R15（媒体池复查）：请求层转录选项 → 协议验证后的 provider 选项。
+
+    UI/请求层用协议键表达意图（``language`` / ``time_range_frames``
+    （含端点帧域，R07 同域）/ ``speaker_diarization`` / ``data_policy``）；
+    本函数经 :class:`TranscriptionJobRequest` **fail-loud 校验**后输出
+    provider 可消费的 options（帧域范围折算秒域、缺省项显式化、携带
+    协议 request_id 供证据链回查）。未识别键原样透传（前向兼容）。
+    """
+    raw = dict(options) if isinstance(options, dict) else {}
+    job_request = TranscriptionJobRequest(
+        asset_id=asset_id,
+        project_id=project_id,
+        source_revision=source_revision,
+        source_fingerprint=(0, 0),
+        language=raw.get("language"),
+        time_range_frames=raw.get("time_range_frames"),
+        fps=_opt_fps(fps) if raw.get("time_range_frames") is not None else None,
+        speaker_diarization=bool(raw.get("speaker_diarization", False)),
+        data_policy=str(raw.get("data_policy", "local_only")),
+        cancel_tag=str(raw.get("cancel_tag", "") or ""),
+    )
+    out = dict(raw)
+    out["language"] = job_request.language
+    if job_request.time_range_seconds is not None:
+        out["time_range_seconds"] = job_request.time_range_seconds
+    out["speaker_diarization"] = job_request.speaker_diarization
+    out["data_policy"] = job_request.data_policy
+    out["transcription_request_id"] = job_request.request_id
+    return out
+
+
 @dataclass(frozen=True)
 class TranscriptionSegment:
     """一条转录片段（证据时间戳：秒域 [start, end)，说话人可空）。"""
