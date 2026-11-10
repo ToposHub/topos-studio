@@ -115,12 +115,14 @@ def get_insert_range(asset: MediaAsset) -> tuple[int, int]:
     SourceRangeError（不允许用 0 帧窗口假装成功）。
     """
     start, end = get_effective_source_range(asset)
-    if start is None or end is None:
+    if start is None:
+        start = 0
+    if end is None:
         total = _known_total_frames(asset)
         if total is None:
             raise SourceRangeError(
                 f"素材 {asset.display_name} 总帧数未知，无法确定默认插入范围。")
-        start, end = 0, total - 1
+        end = total - 1
     return (int(start), int(end))
 
 
@@ -175,7 +177,7 @@ def make_asset_marker(
     """构造一条素材级标记（与时间线标记同款 #RRGGBB 颜色约定）。"""
     marker: dict[str, Any] = {
         "marker_id": marker_id or str(uuid.uuid4()),
-        "frame": int(frame),
+        "frame": frame,
         "name": str(name),
         "color": str(color),
         "comment": str(comment),
@@ -193,7 +195,8 @@ def validate_marker(marker: Mapping[str, Any]) -> None:
     if isinstance(frame, bool) or not isinstance(frame, int) or frame < 0:
         raise AssetMarkerValidationError(f"frame 必须是非负整数: {frame!r}")
     color = marker.get("color")
-    if not isinstance(color, str) or not color.startswith("#") or len(color) != 7:
+    if (not isinstance(color, str) or not color.startswith("#") or len(color) != 7
+            or any(character not in "0123456789abcdefABCDEF" for character in color[1:])):
         raise AssetMarkerValidationError(f"color 必须是 #RRGGBB: {color!r}")
 
 

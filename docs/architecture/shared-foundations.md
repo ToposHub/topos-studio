@@ -225,6 +225,12 @@ SQLite（`topos.db`）四张表：`settings`（KV）、`layouts`（name+work_mod
 
 `paths/paths.py`（get_project_root/get_lut_dir/get_models_dir/get_cache_dir 等资源路径单一来源）；`logging/log_manager.py::LogManager`（单例，控制台+轮转文件 handler，config 驱动级别/路径/大小，运行时可重配）；`ffmpeg_locator.py`（FFmpeg 定位）；`app_restart.py`（应用重启）；`actions/`（`MenuActionDescriptor` 动作贡献系统）与 `panels/`（`PanelDescriptor` + `PanelRegistry`，Window > Panels 菜单按 feature_id/类别分组过滤）——两者都是 feature → app 的解耦贡献通道。
 
+### 5.7 面板边界与拖拽区域（2026-11-09）
+
+- `ui/panel_divider.py`：`PanelDockWidget` 与 Dock 标签栏覆盖层只画整组面板的外沿；共享边界由主窗口绘制一次。布局快照包含当前标签栏，排除 Qt 移到屏外的未选中 Dock。线段在空的分隔区内合并，并延长到相邻线的交点及外周边界；不能穿过面板内容。
+- `ui/panel_splitter.py`：所有工作区和面板使用 `PanelSplitter`，保留 Qt 原生拖动、折叠与尺寸持久化。把手热区为 8 个逻辑像素，仅在中央绘制 1 个逻辑像素；嵌套分割线抵达把手边缘时补齐连接。恢复旧布局后重设热区宽度，保留面板比例。
+- Dock、Splitter 统一使用 `C.PANEL_DIVIDER` 与整数 `fillRect`，在不同 DPR 下保持相同的逻辑宽度。内容控件不另画紧贴分割把手的外框；卡片、工具栏、输入框及图表坐标轴保留各自内部边界。回归测试见 `tests/ui/test_panel_dividers.py`、`tests/ui/test_panel_splitter.py`。
+
 ---
 
 ## 6. 关键接口表与改动注意事项

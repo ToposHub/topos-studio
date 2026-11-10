@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -107,7 +108,8 @@ class TranscriptionJobRequest:
             if start < 0 or end <= start:
                 raise TranscriptionJobError(
                     f"时间范围不合法: [{start}, {end}]")
-            if self.fps is None or self.fps <= 0:
+            if (isinstance(self.fps, bool) or not isinstance(self.fps, (int, float))
+                    or not math.isfinite(self.fps) or self.fps <= 0):
                 raise TranscriptionJobError("帧域时间范围需要正 fps")
         if self.data_policy not in ("local_only", "approved_cloud"):
             raise TranscriptionJobError(f"未知隐私策略: {self.data_policy}")
@@ -134,9 +136,10 @@ class TranscriptionSegment:
     confidence: Optional[float] = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.start_seconds, (int, float)) or \
-                not isinstance(self.end_seconds, (int, float)):
-            raise TranscriptionJobError("segment 时间戳必须是数值")
+        if any(isinstance(value, bool) or not isinstance(value, (int, float))
+               or not math.isfinite(value)
+               for value in (self.start_seconds, self.end_seconds)):
+            raise TranscriptionJobError("segment 时间戳必须是有限数值")
         if self.start_seconds < 0 or self.end_seconds <= self.start_seconds:
             raise TranscriptionJobError(
                 f"segment 时间戳不合法: [{self.start_seconds}, {self.end_seconds})")
@@ -148,6 +151,8 @@ def segments_from_dicts(raw: Any) -> tuple[TranscriptionSegment, ...]:
     """持久化 dicts → segments（顺序与数值校验）。"""
     if not isinstance(raw, (list, tuple)):
         raise TranscriptionJobError("segments 载荷必须是列表")
+    if any(not isinstance(item, dict) for item in raw):
+        raise TranscriptionJobError("segments 每一项必须是 dict")
     segments = tuple(
         TranscriptionSegment(
             start_seconds=float(item["start_seconds"]),
@@ -156,7 +161,7 @@ def segments_from_dicts(raw: Any) -> tuple[TranscriptionSegment, ...]:
             speaker=item.get("speaker"),
             confidence=item.get("confidence"),
         )
-        for item in raw if isinstance(item, dict)
+        for item in raw
     )
     for previous, current in zip(segments, segments[1:]):
         if current.start_seconds < previous.start_seconds - 1e-9:

@@ -462,7 +462,6 @@ class AnalysisService:
         """
         completed = {"count": 0}
         errors: list[str] = []
-        canceled = {"count": 0}
         total = len(req.asset_ids)
         counters_lock = threading.Lock()
         finalized = {"done": False}
@@ -481,7 +480,7 @@ class AnalysisService:
             with counters_lock:
                 if finalized["done"]:
                     return
-                done = completed["count"] + len(errors) + canceled["count"]
+                done = completed["count"] + len(errors)
                 if done < total:
                     return
                 finalized["done"] = True
@@ -558,7 +557,6 @@ class AnalysisService:
         def _make_on_cancel(asset_id: str) -> "Callable[[], Any]":
             def _on_cancel() -> None:
                 with counters_lock:
-                    canceled["count"] += 1
                     errors.append(f"{asset_id}: canceled by scheduler")
                 if on_asset_done is not None:
                     try:
