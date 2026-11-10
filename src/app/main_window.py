@@ -1892,9 +1892,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.presets_panel.reference_requested.connect(
             self.on_preset_reference_requested)
         # G13：split 协议闭环（宿主如实拒绝，直到 presenter 落地）；清除
-        # 参考时结束 wipe 会话（菜单路径）。
+        # 参考时结束 wipe 会话（菜单路径）。BR06：bundle 删除/改名 →
+        # 在场 wipe 会话按来源身份失效并释放引擎参考。
         self.presets_panel.split_comparison_requested.connect(
             self.on_split_compare_requested)
+        self.presets_panel.bundle_mutated.connect(
+            self.on_gallery_bundle_mutated)
         self.canvas.viewport_menu.clear_reference_requested.connect(
             self.end_gallery_compare_session)
         self.canvas.color_viewport_chrome.gallery_compare_requested.connect(

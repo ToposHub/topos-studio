@@ -1568,30 +1568,51 @@ class LayerOpsMixin:
 
     def _begin_gallery_compare_session(self, topos_path: str,
                                        precision: str, img) -> None:
-        """以真实加载的参考开一个 wipe 会话（still 身份/revision/精度）。"""
+        """以真实加载的参考开一个 wipe 会话（still 身份/revision/精度）。
+
+        BR06 provenance 升级：revision 是 **bundle 全成员**内容哈希
+        （sidecar／meta 原地改写也会变，不再只看 ``.topos`` mtime）；
+        color_context 打包精度＋alpha 语义＋参考域，是可比较的稳定标识。
+        失效政策（明确声明）：gallery still 是**加载时刻的快照**——
+        工程/色彩设置切换后快照仍有效（不自动失效）；参考 bundle 被
+        删除/改名时立即失效并释放引擎参考（见
+        :meth:`on_gallery_bundle_mutated`）。
+        """
         from src.features.color.core.compare_session import (
             ColorCompareSession,
             CompareItem,
         )
-        from src.features.color.core.preset_meta import load_preset_meta
+        from src.features.color.core.preset_meta import (
+            load_preset_meta,
+            still_alpha_declaration,
+        )
         meta = load_preset_meta(topos_path)
         stem = os.path.splitext(os.path.basename(topos_path))[0]
         still_id = getattr(meta, "still_id", None) or topos_path
-        try:
-            revision = os.stat(topos_path).st_mtime_ns
-        except OSError:
-            revision = 0
+        from src.features.color.core.gallery_bundle_service import (
+            GalleryBundleService,
+        )
+        revision_hash = GalleryBundleService.bundle_revision(
+            os.path.dirname(topos_path), stem)
         fidelity = "hdr_exr" if precision == "exr_float32" else "uint8_still"
+        alpha = still_alpha_declaration(topos_path) or "none"
+        color_context = f"{precision}|alpha={alpha}|ref=premultiplied"
+        # revision 取内容哈希的稳定整数前缀（跨进程确定，不用加盐 hash()）
+        try:
+            revision_int = int(revision_hash.split(":")[1][:8], 16)
+        except (IndexError, ValueError):
+            revision_int = 0
         item = CompareItem(
             item_id=still_id,
             label=getattr(meta, "label", None) or stem,
             kind="gallery_still",
-            revision=revision,
+            revision=revision_int,
             source_frame=getattr(meta, "source_frame", None),
             width=int(getattr(img, "shape", [0])[1]),
             height=int(getattr(img, "shape", [0])[0]),
             fidelity=fidelity,
             approx_bytes=int(getattr(img, "nbytes", 0)),
+            color_context=color_context,
         )
         released = []
         session = ColorCompareSession(max_items=2)
@@ -1599,7 +1620,7 @@ class LayerOpsMixin:
             [item], "single",
             anchor_clip_id=getattr(meta, "clip_id", None),
             anchor_source_frame=getattr(meta, "source_frame", None),
-            color_context=fidelity,
+            color_context=color_context,
             on_release=released.append)
         if not accepted:
             return
@@ -1610,14 +1631,41 @@ class LayerOpsMixin:
             previous.release()
         self._gallery_compare_session = session
         self._gallery_compare_released = released
+        self._gallery_compare_source_path = topos_path
 
     def end_gallery_compare_session(self) -> None:
-        """清除参考时结束会话（menu clear-reference 路径调用）。"""
+        """清除参考时结束会话并释放**引擎参考**（BR06：真实资源收尾）。"""
         session = getattr(self, "_gallery_compare_session", None)
         if session is not None:
             session.end()
             session.release()
         self._gallery_compare_session = None
+        self._gallery_compare_source_path = None
+        engine = getattr(self, "engine", None)
+        clear = getattr(engine, "clear_reference_still", None)
+        if callable(clear):
+            try:
+                clear()
+            except Exception:
+                logger.exception("clear reference still failed on compare "
+                                 "session end")
+
+    def on_gallery_bundle_mutated(self, event: str, topos_path: str) -> None:
+        """Gallery bundle 删除/改名通知（BR06）：命中在场参考则失效。
+
+        删除或改名意味着参考的来源身份不复存在——立即结束会话并释放
+        引擎参考（已加载的像素快照随之丢弃，不显示"幽灵参考"）。
+        """
+        session = getattr(self, "_gallery_compare_session", None)
+        source = getattr(self, "_gallery_compare_source_path", None)
+        if session is None or not session.active:
+            return
+        if source and topos_path and os.path.abspath(str(source)) != \
+                os.path.abspath(str(topos_path)):
+            return                      # 不是当前参考的来源：不动
+        logger.info("gallery compare session invalidated (%s %s)",
+                    event, topos_path)
+        self.end_gallery_compare_session()
 
     def gallery_compare_snapshot(self) -> dict:
         """当前 wipe 会话快照（诊断/能力同步；无会话如实为空）。"""

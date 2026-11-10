@@ -76,6 +76,9 @@ class PresetsPanel(QWidget):
     reference_requested = pyqtSignal(str)         # 加载为参考帧 wipe
     # P1-COLOR-21: Color Match（把当前调色结果匹配到此静帧）
     match_requested = pyqtSignal(str)
+    # BR06：bundle 变更通知（event: "renamed"/"deleted"，topos 路径）——
+    # 比较会话据此失效在场参考（改名前的路径随事件一起发出）。
+    bundle_mutated = pyqtSignal(str, str)
     # G13：分屏比较设置窗的预留协议（presenter 未实现——宿主如实拒绝）
     split_comparison_requested = pyqtSignal(object)
 
@@ -843,6 +846,9 @@ class PresetsPanel(QWidget):
             result = self._delete_preset_files(topos_path)
             if result is not None and result.status != "success":
                 failures.extend(result.warnings or (result.reason or "",))
+            else:
+                # BR06：删除成功 → 通知比较会话失效在场参考
+                self.bundle_mutated.emit("deleted", topos_path)
         return failures
 
     def _rename_preset(self, item) -> None:
@@ -913,6 +919,7 @@ class PresetsPanel(QWidget):
                         "The still keeps working; its identity may change "
                         "on the next rename."))
         # BR05：成功后选中新条目（失败路径不改原选择——上面已 return）
+        self.bundle_mutated.emit("renamed", topos_path)   # 旧路径（BR06）
         self._query_service.invalidate(
             self._repository.album_id_for_folder(folder))
         self.scan_presets()

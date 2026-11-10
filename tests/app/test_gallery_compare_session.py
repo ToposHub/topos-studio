@@ -67,7 +67,13 @@ class TestWipeSessionProvenance:
         assert slot["label"] == "Label Ref"
         assert slot["kind"] == "gallery_still"
         assert slot["fidelity"] == "hdr_exr"          # 实际加载精度
-        assert slot["revision"] == os.stat(topos).st_mtime_ns
+        # BR06：revision 是 bundle 全成员内容哈希（sidecar 原地改写也变）
+        from src.features.color.core.gallery_bundle_service import (
+            GalleryBundleService,
+        )
+        revision_hash = GalleryBundleService.bundle_revision(
+            os.path.dirname(str(topos)), "Ref")
+        assert slot["revision"] == int(revision_hash.split(":")[1][:8], 16)
 
     def test_jpeg_reference_records_limited_fidelity(self, tmp_path):
         ctrl = _make_ctrl()
