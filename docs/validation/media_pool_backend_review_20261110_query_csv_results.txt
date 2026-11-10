@@ -1,0 +1,31 @@
+{
+  "csv_bad_header": [
+    "MetadataImportPlan(asset_changes=(), unmatched_rows=(), warnings=('没有可导入的列（日志/制作字段）',), total_rows=1)",
+    "MetadataImportPlan(asset_changes=(), unmatched_rows=(), warnings=('缺少匹配列（asset_id 或 path）',), total_rows=1)"
+  ],
+  "ambiguous_path": {
+    "changes": [
+      "c597ce6a-5a04-4d5c-b2ed-6ce73b41fcda"
+    ],
+    "warnings": []
+  },
+  "stale_plan": {
+    "concurrent": "concurrent",
+    "after_apply": "CSV",
+    "after_undo": ""
+  },
+  "keyword_roundtrip": {
+    "before": [
+      "night;exterior",
+      "hero"
+    ],
+    "after": [
+      "night",
+      "exterior",
+      "hero"
+    ]
+  },
+  "smart_keyword_in": true,
+  "malformed_numeric_error": "SmartBinRuleErrorrules: 字段 rating 需要有限数值",
+  "query_reel": "ValueError未知排序键: reel"
+}
