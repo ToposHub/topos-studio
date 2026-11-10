@@ -413,6 +413,63 @@ class ProxyManager:
                     cancelled += 1
         return cancelled
 
+    def retry_failed(self, source_path: str) -> Optional[str]:
+        """P0-7：失败任务的显式重试（不自动重试，对齐 Resolve 手动 Retry）。
+
+        把该源最近一次失败任务的回调（含 AUD-35610 合并进来的多方回调）
+        原样带入一次全新入队；失败任务已被保留额度淘汰或无失败记录时
+        返回 None——调用方可直接 queue_proxy_generation 重新排队。
+
+        Args:
+            source_path: 源文件路径
+
+        Returns:
+            新任务 ID；无失败记录可重试时 None
+        """
+        with self._lock:
+            task_id = self._source_to_task.get(source_path)
+            task = self._tasks.get(task_id) if task_id else None
+            if task is None or task.status != "failed":
+                # 终态任务到达时即从 _source_to_task 摘除（AUD-35611 保留
+                # 期内仍留在 _tasks）——按源直接检索失败任务，取最近完成者。
+                candidates = [
+                    t for t in self._tasks.values()
+                    if t.source_path == source_path and t.status == "failed"
+                ]
+                task = (max(candidates, key=lambda t: t.completed_at or 0.0)
+                        if candidates else None)
+            if task is None:
+                return None
+            task_id = task.task_id
+            asset_id = task.asset_id
+            completes = [cb for cb in task.on_complete if callable(cb)]
+            errors = [cb for cb in task.on_error if callable(cb)]
+            progresses = [cb for cb in task.on_progress if callable(cb)]
+            # 清掉旧记录，避免同源占用 _source_to_task 槽位
+            self._source_to_task.pop(source_path, None)
+            self._tasks.pop(task_id, None)
+
+        def _dispatch(cbs: list) -> Optional[Callable]:
+            if not cbs:
+                return None
+            return lambda *args: [cb(*args) for cb in cbs]
+
+        return self.queue_proxy_generation(
+            asset_id=asset_id,
+            source_path=source_path,
+            on_complete=_dispatch(completes),
+            on_error=_dispatch(errors),
+            on_progress=_dispatch(progresses),
+        )
+
+    def failed_sources(self) -> list[str]:
+        """当前仍在任务表中的失败任务源列表（供重试 UI 枚举）。"""
+        with self._lock:
+            return [
+                task.source_path for task in self._tasks.values()
+                if task.status == "failed"
+            ]
+
     def is_proxy_valid(self, source_path: str) -> bool:
         """
         检查源文件的代理是否有效。

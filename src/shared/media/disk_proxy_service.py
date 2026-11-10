@@ -55,6 +55,7 @@ MediaPool Panel / VideoFrameProviderService
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import (
     Optional,
@@ -152,6 +153,51 @@ ProxyStatusCallback = Callable[[str, DiskProxyInfo], None]
 
 # 代理进度回调
 ProxyProgressCallback = Callable[[str, ProxyProgress], None]
+
+
+# =============================================================================
+# P0-7 磁盘空间预检
+# =============================================================================
+
+# 预留绝对下限：半分辨率中间编码（ProRes/DNxHR）对长 GOP 源可能显著
+# 大于源文件，取 512MiB 下限 + max(源大小) 作为保守预留。
+PROXY_MIN_FREE_RESERVE_BYTES = 512 * 1024 * 1024
+
+
+def estimate_proxy_reserve_bytes(source_path: str) -> int:
+    """Pre-encode 空间预留估算（保守启发式，宁可误拒不落半成品）。
+
+    半分辨率 mezzanine 转码对 H.264/HEVC 源的输出常大于源文件，故以
+    ``max(源文件大小, 512MiB)`` 作为预留；确切大小只有编码完成才可知。
+    """
+    try:
+        source_size = os.path.getsize(source_path)
+    except OSError:
+        source_size = 0
+    return max(source_size, PROXY_MIN_FREE_RESERVE_BYTES)
+
+
+def check_free_space(directory: str, required_bytes: int) -> tuple[bool, int]:
+    """检查目录可用空间是否足够。
+
+    目录尚不存在时沿父级向上找最近存在的目录（代理缓存目录通常在
+    首次生成时才创建）。探测失败返回 (True, -1)——fail-open，磁盘探测
+    不阻塞生成（生成失败自有既有失败路径兜底）。
+    """
+    import shutil as _shutil
+
+    probe = directory or os.path.curdir
+    while not os.path.isdir(probe):
+        parent = os.path.dirname(probe)
+        if parent in ("", probe):
+            probe = os.path.curdir
+            break
+        probe = parent
+    try:
+        free = _shutil.disk_usage(probe).free
+    except OSError:
+        return (True, -1)
+    return (free >= required_bytes, free)
 
 
 # =============================================================================
@@ -482,6 +528,21 @@ class DiskProxyService:
             logger.info(f"Proxy already generating (raced): {source_path}")
             self._attach_pending_caller_callbacks(
                 source_path, on_complete, on_progress, on_error)
+            return None
+
+        # P0-7 磁盘空间预检：空间不足直接失败，不启动编码、不落半成品。
+        # 估算保守（max(源大小, 512MiB)），宁可误拒也不在写满磁盘后才崩。
+        required_bytes = estimate_proxy_reserve_bytes(source_path)
+        space_ok, free_bytes = check_free_space(
+            self._config.cache_dir, required_bytes)
+        if not space_ok:
+            message = (
+                f"Insufficient disk space for proxy: need ~"
+                f"{required_bytes // (1024 * 1024)} MiB (conservative "
+                f"estimate), {free_bytes // (1024 * 1024)} MiB free in "
+                f"'{self._config.cache_dir}'. Free up space and retry.")
+            logger.warning(message)
+            self._on_generation_error(source_path, message, on_error)
             return None
 
         # 启动生成任务
