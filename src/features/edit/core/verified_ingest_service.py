@@ -138,7 +138,7 @@ class ImportIngestAssetsCommand:
         # 复用媒体池导入同源语义：类型/探测来自 core.project，颜色元
         # 数据提取复用媒体池实现（同函数，无旁路）。
         from src.features.edit.core.project import (
-            get_media_type, probe_media_metadata,
+            media_type_from_probe, probe_media_metadata,
         )
         from src.features.edit.ui.media_pool_panel import (
             _extract_color_metadata,
@@ -147,8 +147,9 @@ class ImportIngestAssetsCommand:
         new_project = project
         for path in self.targets:
             try:
-                media_type = get_media_type(path)
                 metadata = probe_media_metadata(path)
+                # R12：probe 修正类型（纯音频容器按 audio）
+                media_type = media_type_from_probe(path, metadata)
                 candidate = new_project.import_asset(
                     path=path, media_type=media_type, metadata=metadata,
                     color_metadata=_extract_color_metadata(metadata))

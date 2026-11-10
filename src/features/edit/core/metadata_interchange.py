@@ -41,6 +41,7 @@ __all__ = [
     "MetadataImportPlan",
     "plan_metadata_import",
     "apply_metadata_import",
+    "rebuild_import_plan",
     "decode_metadata_csv_bytes",
 ]
 
@@ -58,6 +59,39 @@ IMPORTABLE_COLUMNS: tuple[str, ...] = (
 )
 
 _KEYWORDS_SEPARATOR = ";"
+
+
+# ================================================================
+# R13：关键词可逆编码（转义分隔符；兼容旧 CSV 的裸分号拆分）
+# ================================================================
+
+def _escape_keyword(keyword: str) -> str:
+    """导出转义：反斜杠与分隔符 ';' 前加 '\\'——round-trip 可逆。"""
+    return keyword.replace("\\", "\\\\").replace(";", "\\;")
+
+
+def _split_keywords(raw: str) -> tuple[str, ...]:
+    """导入拆分：按**未转义**的 ';' 切分并反转义。
+
+    兼容旧 CSV：无反斜杠的单元行为与历史一致（裸 ';' 拆多词）；
+    新导出把含 ';' 的关键词转义成 '\\;'，往返不再被拆散。
+    """
+    parts: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for ch in raw:
+        if escaped:
+            current.append(ch)
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == ";":
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    parts.append("".join(current))
+    return tuple(part.strip() for part in parts if part.strip())
 
 
 # ================================================================
@@ -82,7 +116,8 @@ def export_metadata_csv(
             asset.asset_id,
             asset.path,
             asset.display_name,
-            _KEYWORDS_SEPARATOR.join(asset.keywords),
+            _KEYWORDS_SEPARATOR.join(
+                _escape_keyword(k) for k in asset.keywords),
             asset.rating,
             asset.flag,
             asset.color_label,
@@ -144,6 +179,11 @@ class MetadataImportPlan:
     unmatched_rows: tuple[int, ...] = ()      # 1 基行号（不含表头）
     warnings: tuple[str, ...] = ()
     total_rows: int = 0
+    # R13（媒体池复查）：计划绑定生成时的工程身份——提交侧据此重验；
+    # 过期时按同一导入意图重建差异（rebuild_import_plan），撤销使用
+    # apply 时刻的真实提交前快照（命令层），不回放计划生成时的旧值。
+    project_id: str = ""
+    source_revision: int = -1
 
 
 def _parse_cell(field: str, raw: str, warnings: list[str],
@@ -181,8 +221,7 @@ def _parse_cell(field: str, raw: str, warnings: list[str],
     if field == "keywords":
         if raw == "":
             return (True, ())
-        return (True, tuple(k.strip() for k in raw.split(_KEYWORDS_SEPARATOR)
-                            if k.strip()))
+        return (True, _split_keywords(raw))
     # 其余字符串字段：空串 = 清除为 ""
     return (True, raw)
 
@@ -220,14 +259,18 @@ def plan_metadata_import(
     if not importable_indexes:
         return MetadataImportPlan(
             warnings=tuple(warnings) + ("没有可导入的列（日志/制作字段）",),
-            total_rows=max(0, len(rows) - 1))
+            total_rows=max(0, len(rows) - 1),
+            project_id=project.project_id,
+            source_revision=project.revision)
 
     asset_id_index = lower_header.index("asset_id") if "asset_id" in lower_header else None
     path_index = lower_header.index("path") if "path" in lower_header else None
     if asset_id_index is None and path_index is None:
         return MetadataImportPlan(
             warnings=tuple(warnings) + ("缺少匹配列（asset_id 或 path）",),
-            total_rows=max(0, len(rows) - 1))
+            total_rows=max(0, len(rows) - 1),
+            project_id=project.project_id,
+            source_revision=project.revision)
 
     pending: dict[str, dict[str, Any]] = {}
     unmatched: list[int] = []
@@ -246,11 +289,17 @@ def plan_metadata_import(
         else:
             by_path = _cell(path_index)
             if by_path:
-                asset = project.get_asset_by_path(by_path)
-                if asset is None:
-                    matches = [a for a in project.assets.values()
-                               if a.path == by_path]
-                    asset = matches[0] if matches else None
+                # R13：同路径多素材（父/子片段共享文件）——歧义行可见
+                # 且跳过，绝不静默挑第一个。
+                matches = [a for a in project.assets.values()
+                           if a.path == by_path]
+                if len(matches) > 1:
+                    warnings.append(
+                        f"第 {row_number} 行路径 {by_path!r} 匹配 "
+                        f"{len(matches)} 个素材（同路径多素材），"
+                        "已跳过——请改用 asset_id 匹配")
+                    continue
+                asset = matches[0] if matches else None
         if asset is None:
             unmatched.append(row_number - 1)
             continue
@@ -288,6 +337,8 @@ def plan_metadata_import(
         unmatched_rows=tuple(unmatched),
         warnings=tuple(warnings),
         total_rows=max(0, len(rows) - 1),
+        project_id=project.project_id,
+        source_revision=project.revision,
     )
 
 
@@ -318,3 +369,45 @@ def apply_metadata_import(
             project = project.update_asset_production_info(
                 change.asset_id, **production_kwargs)
     return project
+
+
+def rebuild_import_plan(
+    project: EditProject,
+    plan: MetadataImportPlan,
+) -> MetadataImportPlan:
+    """R13：按**同一导入意图**对当前工程重建差异（计划过期/跨工程）。
+
+    保留原计划的 new_value（用户在预览里确认过的导入意图），对当前
+    工程重取 old_value；素材已不存在/字段已不在的条目剔除并警告
+    （跨工程计划不冒充成功）。撤销安全性由命令层的 apply 时刻快照
+    保证——即便此处不触发（revision 未变的并发编辑），undo 也恢复
+    真实提交前状态而不是计划生成时的旧值。
+    """
+    warnings: list[str] = list(plan.warnings)
+    changes: list[MetadataAssetChange] = []
+    dropped = 0
+    for asset_change in plan.asset_changes:
+        asset = project.assets.get(asset_change.asset_id)
+        if asset is None:
+            dropped += 1
+            continue
+        rebuilt = tuple(
+            MetadataFieldChange(
+                field=item.field,
+                old_value=_current_value(asset, item.field),
+                new_value=item.new_value)
+            for item in asset_change.changes)
+        changes.append(MetadataAssetChange(
+            asset_id=asset_change.asset_id, changes=rebuilt))
+    if dropped:
+        warnings.append(
+            f"计划重验：{dropped} 个素材在当前工程不存在，已剔除")
+    rebuilt_plan = MetadataImportPlan(
+        asset_changes=tuple(changes),
+        unmatched_rows=plan.unmatched_rows,
+        warnings=tuple(warnings),
+        total_rows=plan.total_rows,
+        project_id=project.project_id,
+        source_revision=project.revision,
+    )
+    return rebuilt_plan
