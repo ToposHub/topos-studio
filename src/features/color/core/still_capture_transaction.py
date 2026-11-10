@@ -31,6 +31,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.features.color.core.gallery_txn_core import (
+    ACTIVE_TXNS,
     OUTCOME_CONFLICT,
     OUTCOME_PENDING,
     OUTCOME_QUARANTINED,
@@ -99,6 +100,11 @@ def _restore_entry_to_old_set(entry: Dict[str, Any]) -> None:
     backup 在 → 放回 final（覆盖可能已装上的新内容）；
     backup 不在且 final 是登记过的旧身份 → 从未被触碰；
     backup 不在、final 是新内容/消失 → 唯一副本已丢，保全报错。
+
+    SR02：旧格式/伪造日志缺 ``old_identity`` 证据（existed 却无身份）
+    时不再"无法证伪即通过"——没有归属证据就没有删除/覆盖授权，直接
+    conflict 保全；备份内容**先验**身份再覆盖 final，不先覆盖再发现
+    不匹配。
     """
     final = str(entry.get("final") or "")
     staged = entry.get("staged")
@@ -107,6 +113,17 @@ def _restore_entry_to_old_set(entry: Dict[str, Any]) -> None:
     old_identity = _norm_identity(entry.get("old_identity"))
 
     if backup and os.path.lexists(str(backup)):
+        if existed and old_identity is None:
+            raise _EntryRestoreError(
+                OUTCOME_CONFLICT,
+                f"legacy entry without identity evidence: {final}")
+        # 先验备份内容（replace 原子，但覆盖目标之前就要确认归属）
+        if old_identity is not None \
+                and not identity_matches(str(backup), old_identity):
+            raise _EntryRestoreError(
+                OUTCOME_CONFLICT,
+                f"backup content does not match registered identity: "
+                f"{backup}")
         os.replace(str(backup), final)          # 唯一旧副本从备份放回
         if not identity_matches(final, old_identity):
             raise _EntryRestoreError(
@@ -122,6 +139,11 @@ def _restore_entry_to_old_set(entry: Dict[str, Any]) -> None:
             raise _EntryRestoreError(          # staged 还在＝final 非本事务
                 OUTCOME_CONFLICT,               # 所装，不删别人的文件
                 f"unexpected target exists: {final}")
+        if old_identity is None:
+            # 旧格式/伪造日志：existed 却无身份证据，不猜归属
+            raise _EntryRestoreError(
+                OUTCOME_CONFLICT,
+                f"legacy entry without identity evidence: {final}")
         if identity_matches(final, old_identity):
             return                              # 旧文件从未被触碰
         raise _EntryRestoreError(
@@ -180,6 +202,14 @@ def recover_still_transactions_detailed(
 def _recover_one_still_txn(txn_dir: str, name: str,
                            target_dir: str) -> TxnRecoveryResult:
     txn_id = name[len(TXN_DIR_PREFIX):]
+    if os.path.islink(txn_dir):
+        # 伪装/链接的事务目录不是本协议产物：保全不动（SR02）
+        return TxnRecoveryResult(txn_id, txn_dir, OUTCOME_QUARANTINED,
+                                 "transaction dir is a symlink")
+    if ACTIVE_TXNS.is_active(txn_dir):
+        # SR01：进程内在场事务（同线程重入也持锁）——登记表是权威
+        return TxnRecoveryResult(txn_id, txn_dir, "skipped_active",
+                                 "owned by a live transaction in this process")
     try:
         manifest = read_journal(_manifest_path(txn_dir))
     except JournalError as exc:
@@ -226,14 +256,16 @@ def _recover_one_still_txn(txn_dir: str, name: str,
         return TxnRecoveryResult(txn_id, txn_dir, exc.outcome, str(exc))
     except OSError as exc:
         return TxnRecoveryResult(txn_id, txn_dir, OUTCOME_PENDING, str(exc))
-    # 后置条件：旧集合完整在位（existed 条目 final 在且身份一致）。
+    # 后置条件：旧集合完整在位（existed 条目 final 在且身份一致；
+    # 无身份证据的旧日志不可验证收敛，保全待人工——SR02）。
     for entry in entries:
         final = str(entry.get("final") or "")
-        if entry.get("existed") and not identity_matches(
-                final, _norm_identity(entry.get("old_identity"))):
-            return TxnRecoveryResult(
-                txn_id, txn_dir, OUTCOME_CONFLICT,
-                f"post-condition failed: {final}")
+        if entry.get("existed"):
+            identity = _norm_identity(entry.get("old_identity"))
+            if identity is None or not identity_matches(final, identity):
+                return TxnRecoveryResult(
+                    txn_id, txn_dir, OUTCOME_CONFLICT,
+                    f"post-condition failed: {final}")
     shutil.rmtree(txn_dir, ignore_errors=True)
     return TxnRecoveryResult(txn_id, txn_dir, OUTCOME_RECOVERED,
                              "old set restored")
@@ -241,10 +273,14 @@ def _recover_one_still_txn(txn_dir: str, name: str,
 
 def _still_entries_valid(entries: List[Dict[str, Any]], txn_dir: str,
                          target_dir: str) -> bool:
+    finals: set = set()
     for entry in entries:
         final = entry.get("final")
         if not isinstance(final, str) or not path_within(final, target_dir):
             return False
+        if final in finals:            # 重复/相互覆盖的条目非法（SR02）
+            return False
+        finals.add(final)
         for key in ("staged", "backup"):
             value = entry.get(key)
             if value is not None and (
@@ -286,26 +322,35 @@ class StillCaptureTransaction:
                  recover_leftovers: bool = True) -> None:
         self.target_dir = os.path.abspath(target_dir)
         self.txn_id = txn_id or uuid.uuid4().hex
+        self._active_token: Optional[str] = None
         os.makedirs(self.target_dir, exist_ok=True)
         # 目录互斥：同目录并发抓帧明确失败，而不是互相破坏 staging。
+        # 同线程重入（模态回调/脚本重入）持锁合法，靠 ACTIVE_TXNS
+        # 登记把在场事务与"可恢复的遗留"区分开（SR01）。
         try:
             self._lock_keys = acquire_directories(self.target_dir)
         except DirectoryBusyError as exc:
             raise StillCaptureTransactionError(
                 f"target busy (another capture in flight): {exc}") from exc
-        if recover_leftovers:
-            recover_still_transactions(self.target_dir)
-        # staging 必须与最终目标同卷（单文件 rename 原子），故建在目标
-        # 目录内；"." 前缀让 Gallery/扫描默认忽略。
-        self.txn_dir = tempfile.mkdtemp(
-            prefix=TXN_DIR_PREFIX, dir=self.target_dir)
-        self.staged_dir = os.path.join(self.txn_dir, _STAGED_SUBDIR)
-        self.backup_dir = os.path.join(self.txn_dir, _BACKUP_SUBDIR)
-        os.makedirs(self.staged_dir)
-        os.makedirs(self.backup_dir)
-        self._entries: List[Dict[str, Any]] = []
-        self._state = STATE_PREPARED
-        self._write_manifest()
+        try:
+            if recover_leftovers:
+                recover_still_transactions(self.target_dir)
+            # staging 必须与最终目标同卷（单文件 rename 原子），故建在目标
+            # 目录内；"." 前缀让 Gallery/扫描默认忽略。
+            self.txn_dir = tempfile.mkdtemp(
+                prefix=TXN_DIR_PREFIX, dir=self.target_dir)
+            self._active_token = ACTIVE_TXNS.register(self.txn_dir)
+            self.staged_dir = os.path.join(self.txn_dir, _STAGED_SUBDIR)
+            self.backup_dir = os.path.join(self.txn_dir, _BACKUP_SUBDIR)
+            os.makedirs(self.staged_dir)
+            os.makedirs(self.backup_dir)
+            self._entries: List[Dict[str, Any]] = []
+            self._state = STATE_PREPARED
+            self._write_manifest()
+        except BaseException:
+            # 初始化任一步失败：锁与登记必须平衡释放，新请求不被卡死
+            self._release_locks()
+            raise
 
     # ── staging 阶段（现有目标不动） ─────────────────────────────────
 
@@ -478,6 +523,8 @@ class StillCaptureTransaction:
         })
 
     def _release_locks(self) -> None:
+        ACTIVE_TXNS.unregister(self._active_token)
+        self._active_token = None
         keys = getattr(self, "_lock_keys", None)
         if keys:
             self._lock_keys = []
