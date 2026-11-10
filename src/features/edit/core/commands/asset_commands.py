@@ -2798,21 +2798,56 @@ class UpdateSmartBinRulesCommand:
 class ImportMetadataCommand:
     """P1-7: 应用元数据 CSV 导入计划（整体单步撤销）。
 
-    plan 来自 ``plan_metadata_import``（差异预览，用户已确认）。apply
-    只写有实际变化的字段；undo 恢复首次 apply 快照的全部旧值（含
-    display_name/reel 等制作与日志字段）。
+    R13（媒体池复查）：
+    - 计划绑定生成时的 project_id + revision；apply 时重验，过期/
+      跨工程按同一导入意图重建差异（素材不存在的条目剔除并警告）；
+    - undo 恢复 **apply 时刻捕获的真实提交前状态**（``_pre_state``），
+      不再回放计划生成时的旧值——计划生成后发生的并发编辑不会被
+      undo 静默吞掉；序列化往返后无快照时退回计划 old_value（同
+      历史行为）。
     """
 
     command_id: str
     label: str
     plan: Any  # MetadataImportPlan
     _applied: bool = False
+    # R13：asset_id -> {field: apply 时刻的真实旧值}
+    _pre_state: dict[str, dict[str, Any]] | None = None
 
     def apply(self, project: EditProject) -> EditProject:
         from src.features.edit.core.metadata_interchange import (
             apply_metadata_import,
+            rebuild_import_plan,
         )
-        new_project = apply_metadata_import(project, self.plan)
+        plan = self.plan
+        stale = (
+            (getattr(plan, "project_id", "") not in ("", project.project_id))
+            or (getattr(plan, "source_revision", -1) >= 0
+                and getattr(plan, "source_revision", -1) != project.revision)
+        )
+        if stale:
+            plan = rebuild_import_plan(project, plan)
+            object.__setattr__(self, "plan", plan)
+
+        # R13：捕获**真实提交前状态**——直接读当前工程（不是计划的
+        # old_value：计划生成后的并发编辑必须随 undo 完整还原）。
+        from src.features.edit.core.metadata_interchange import (
+            _current_value,
+        )
+        pre_state: dict[str, dict[str, Any]] = {}
+        for change in plan.asset_changes:
+            asset = project.assets.get(change.asset_id)
+            if asset is None:
+                continue
+            values: dict[str, Any] = {}
+            for item in change.changes:
+                if item.is_changed:
+                    values[item.field] = _current_value(asset, item.field)
+            if values:
+                pre_state[change.asset_id] = values
+        object.__setattr__(self, "_pre_state", pre_state)
+
+        new_project = apply_metadata_import(project, plan)
         object.__setattr__(self, "_applied", True)
         return new_project
 
@@ -2820,31 +2855,36 @@ class ImportMetadataCommand:
         if not self._applied:
             logger.warning("ImportMetadataCommand undo before apply")
             return project
-        for change in reversed(self.plan.asset_changes):
-            asset = project.assets.get(change.asset_id)
-            if asset is None:
-                continue
+        source = self._pre_state
+        if source is None:
+            # 序列化往返：退回计划 old_value（同历史行为）
+            source = {
+                change.asset_id: {
+                    item.field: item.old_value
+                    for item in change.changes if item.is_changed}
+                for change in self.plan.asset_changes
+            }
+        for asset_id in reversed(list(source.keys())):
+            values = source[asset_id]
             log_kwargs: dict[str, Any] = {}
             production_kwargs: dict[str, Any] = {}
             rename: str | None = None
-            for item in change.changes:
-                if not item.is_changed:
-                    continue
-                if item.field == "display_name":
-                    rename = str(item.old_value)
-                elif item.field in ("keywords", "rating", "flag",
-                                    "color_label", "comment"):
-                    log_kwargs[item.field] = item.old_value
+            for field, value in values.items():
+                if field == "display_name":
+                    rename = str(value)
+                elif field in ("keywords", "rating", "flag",
+                               "color_label", "comment"):
+                    log_kwargs[field] = value
                 else:
-                    production_kwargs[item.field] = str(item.old_value or "")
+                    production_kwargs[field] = str(value or "")
             if log_kwargs:
                 project = project.update_asset_log_info(
-                    change.asset_id, **log_kwargs)
+                    asset_id, **log_kwargs)
             if production_kwargs:
                 project = project.update_asset_production_info(
-                    change.asset_id, **production_kwargs)
+                    asset_id, **production_kwargs)
             if rename is not None:
-                project = project.rename_asset(change.asset_id, rename)
+                project = project.rename_asset(asset_id, rename)
         return project
 
     def to_dict(self) -> dict[str, Any]:

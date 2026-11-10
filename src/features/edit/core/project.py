@@ -4995,6 +4995,23 @@ def get_media_type(path: str) -> str:
     return result
 
 
+def media_type_from_probe(path: str, metadata: Any) -> str:
+    """R12（媒体池复查）：探测结果修正导入媒体类型。
+
+    纯音频专业容器（无视频流的 .mov/.mxf 等）：``probe_media_metadata``
+    的视频探测失败回退块/音频扩展名分支都会给出 ``metadata["audio"]
+    = True`` 的探测事实——此时扩展名判型让位，按 **audio** 导入（源
+    监视器/时间线不再尝试视频解码）。探测未表态（正常视频/图片）时
+    保持扩展名判定，探测异常不改变类型（fail-open 到既有行为）。
+    """
+    try:
+        if isinstance(metadata, dict) and metadata.get("audio") is True:
+            return "audio"
+    except Exception:  # noqa: BLE001 — 探测载荷异常保持扩展名判定
+        pass
+    return get_media_type(path)
+
+
 # ================================================================
 # P6.3 Offline/Relink/Proxy 功能
 # ================================================================

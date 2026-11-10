@@ -57,6 +57,7 @@ from src.shared.assets.icon_manager import icon_grid, icon_list, icon_folder, ic
 from src.features.edit.core.project import (
     EditProject, MediaAsset, ProjectBin, TimelineSequenceRef,
     probe_media_metadata,
+    media_type_from_probe,
     update_offline_status,
     update_asset_proxy,
     ASSET_COLOR_LABELS,
@@ -356,8 +357,10 @@ class MediaImportWorker(QRunnable):
             if self._cancelled:
                 break
             try:
-                media_type = get_media_type(path)
                 metadata = probe_media_metadata(path)
+                # R12：probe 修正类型——纯音频容器（无视频流的
+                # .mov/.mxf）按 audio 导入，不按扩展名伪装 video
+                media_type = media_type_from_probe(path, metadata)
                 results.append((path, media_type, metadata, None))
             except Exception as exc:
                 logger.error(f"Failed to probe file: {path}, error={exc}")
@@ -7176,11 +7179,11 @@ class MediaPoolPanel(QWidget):
             return False
 
         try:
-            # 获取媒体类型
-            media_type = get_media_type(path)
-
             # 探测元数据
             metadata = probe_media_metadata(path)
+
+            # 获取媒体类型（R12：probe 修正——纯音频容器按 audio）
+            media_type = media_type_from_probe(path, metadata)
 
             # 调用 EditProject.import_asset()
             # 注意：EditProject 是 frozen dataclass，import_asset 返回新实例
@@ -9543,9 +9546,55 @@ class MediaPoolPanel(QWidget):
         """Remove an asset from the project while keeping its source file."""
         self._do_remove_asset(asset_id)
 
+    def _confirm_delete_with_usage(self, asset_ids: List[str]) -> bool:
+        """R11（媒体池复查）：删除确认消费**扩展使用索引**。
+
+        ``usage_check_for_assets`` 把同路径父/子片段整组核验（删其一
+        不等于文件无人引用），时间线/嵌套引用全部列出；与定位、Replace
+        的使用检查共用同一索引——两处看到的使用事实一致。无任何引用
+        时不弹窗（Delete 键行为不变）；用户拒绝则中止删除。
+        """
+        from src.features.edit.core.asset_usage_index import (
+            usage_check_for_assets,
+        )
+        sequences = self._collect_timeline_sequences()
+        try:
+            usage = usage_check_for_assets(
+                self._project, sequences, asset_ids)
+        except Exception:  # noqa: BLE001 — 索引失败不阻断删除
+            logger.exception("usage check before delete failed")
+            return True
+        if not usage:
+            return True
+        lines = [I18N.tr(
+            "edit.media_pool.delete_usage_header",
+            "以下素材正被时间线使用（含同路径父/子片段组），"
+            "删除后引用片段将离线：")]
+        for asset_id, locations in list(usage.items())[:12]:
+            asset = self._project.assets.get(asset_id)
+            name = asset.display_name if asset else asset_id
+            lines.append(f"  · {name}")
+            for loc in locations[:3]:
+                lines.append(f"      {loc.format()}")
+        if len(usage) > 12:
+            lines.append(
+                I18N.tr("edit.media_pool.usage_more",
+                        "  · …（另 {n} 个素材）", n=len(usage) - 12))
+        reply = QMessageBox.question(
+            self._get_top_level_widget(),
+            I18N.tr("edit.media_pool.delete_usage_title",
+                    "删除使用中的素材"),
+            "\n".join(lines),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def _do_remove_asset(self, asset_id: str) -> bool:
         """Remove one asset through the same command path as batch deletion."""
         if not self._project or asset_id not in self._project.assets:
+            return False
+        if not self._confirm_delete_with_usage([asset_id]):
             return False
         self._invalidate_proxy_job(asset_id)
         try:
@@ -9778,6 +9827,10 @@ class MediaPoolPanel(QWidget):
         # Filter out non-deletable bins: root bin is protected.
         if self._project is not None:
             bin_ids = [b for b in bin_ids if b != self._project.root_bin_id]
+
+        # R11：素材删除前经扩展使用索引确认（同路径整组 + 全部引用）。
+        if asset_ids and not self._confirm_delete_with_usage(asset_ids):
+            return False
 
         # Build sub-commands
         sub_commands: list[Any] = []
