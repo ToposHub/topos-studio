@@ -55,15 +55,15 @@ KeyboardInterrupt 用来模拟文件操作已完成、下一次日志写入尚�
 
 | 编号 | 优先级 | 工作项 | 依赖 | 状态 |
 |---|---|---|---|---|
-| BR01 | P1 | 统一截图／bundle／恢复操作的持久化事务与故障保全 | 无 | 待实施 |
-| BR02 | P1 | 导入完整原子性、全成员冲突与身份提交 | BR01 | 待实施 |
-| BR03 | P1 | 抓帧请求锁定目标、帧、grade 和工程上下文 | BR01 | 待实施 |
-| BR04 | P2 | 查询失效协议、真实异步 UI、分页与队列背压 | 可并行设计 | 待实施 |
-| BR05 | P2 | 所有动作统一执行门、服务入口与集合导航闭环 | BR02、BR04 | 待实施 |
-| BR06 | P2 | Gallery 分屏 presenter 与划像会话生命周期 | BR04、BR05 | 待实施 |
-| BR07 | P2 | 导出依赖可移植性与缺失依赖反馈 | BR02、BR05 | 待实施 |
-| BR08 | P2 | 旧 Viewport 计划明确保留的生产执行端 | 与 Gallery 主链独立 | 待实施 |
-| BR09 | P2 | 故障／并发／真实 GPU 验收与文档收尾 | 对应实现完成后 | 待实施 |
+| BR01 | P1 | 统一截图／bundle／恢复操作的持久化事务与故障保全 | 无 | 已完成（7f48a62e） |
+| BR02 | P1 | 导入完整原子性、全成员冲突与身份提交 | BR01 | 已完成（a811d69e） |
+| BR03 | P1 | 抓帧请求锁定目标、帧、grade 和工程上下文 | BR01 | 已完成（ce534ab9） |
+| BR04 | P2 | 查询失效协议、真实异步 UI、分页与队列背压 | 可并行设计 | 已完成核心（36a60ee6；分页/可见区模型见范围声明） |
+| BR05 | P2 | 所有动作统一执行门、服务入口与集合导航闭环 | BR02、BR04 | 已完成核心（693838a6；PowerGrade/Timelines/Memories 仍如实禁用） |
+| BR06 | P2 | Gallery 分屏 presenter 与划像会话生命周期 | BR04、BR05 | 部分完成（19621bea；分屏 presenter 未实现，见范围声明） |
+| BR07 | P2 | 导出依赖可移植性与缺失依赖反馈 | BR02、BR05 | 已完成（8b948047） |
+| BR08 | P2 | 旧 Viewport 计划明确保留的生产执行端 | 与 Gallery 主链独立 | 部分完成（f10e29f0；菜单门已接生产 feed，其余见范围声明） |
+| BR09 | P2 | 故障／并发／真实 GPU 验收与文档收尾 | 对应实现完成后 | 本轮完成故障回归与文档（真实 GPU 验收见范围声明） |
 
 建议顺序：先 BR01→BR02／BR03，消除数据风险；再完成 BR04→BR05；最后接 BR06／BR07，并执行 BR09。BR08 可作为独立批次，但完成前不能将旧 Viewport 的完整产品范围标为全部完成。
 
@@ -245,3 +245,34 @@ KeyboardInterrupt 用来模拟文件操作已完成、下一次日志写入尚�
 6. 更新旧 G01–G13／R01–R06 完成记录，保留历史证据，链接本表实际修复提交；BR01–BR09 逐项验收后再更改状态。
 
 本轮仅完成第 1 节的小修和复查证据整理，BR01–BR09 尚未实施。
+
+## 13. 实施记录（2026-11-10）
+
+本轮（基线 `c0cb9af2` 之后）逐项实施 BR01–BR09，批次提交如下：
+
+| 项 | 提交 | 交付 |
+|---|---|---|
+| BR01 | `7f48a62e` | `gallery_txn_core`（原子 journal/fsync/内容身份/库外防护/目录互斥）；still-capture 意图先行备份＋实际状态恢复＋回滚失败保全；bundle copy-move 独立恢复分支、坏日志/越界路径隔离、trash 恢复幂等；`test_br01_gallery_txn_recovery` 21 例 |
+| BR02 | `a811d69e` | 导入意图 journal 覆盖全部 finals（第 N 成员失败零残留）；全成员占用冲突（孤立 sidecar/大小写）；staging 内身份换发（失败整笔拒绝）；完整 bundle 指纹去重；取消/进度；`test_br02_import_atomicity` 15 例 |
+| BR03 | `ce534ab9` | 目的地由请求锁定（切相册写回原相册）；grade_revision/project_id 真实 probe＋阻断；prepare 同代际快照（persist 不二次渲染）；对话框返回后复核；稳定 request_id；`test_br03_capture_context` 10 例 |
+| BR04 | `36a60ee6` | 分层文件签名（原地改写可检测）；缓存发布代际守卫＋失败不缓存；runner 同 album 合并＋有界队列＋shutdown 丢弃；面板异步回填（≥2000 条）＋队列化桥；选择跟随 still_id；搜索补 label/still_id/timeline_name；`test_br04_gallery_async_query` 13 例 |
+| BR05 | `693838a6` | 统一执行门（菜单/双击/Enter/中键按被操作对象复核）；import/export bundle 真接线；Label 服务；成功选中新条目；关闭态与未安装区分；`test_br05_action_gate` 9 例 |
+| BR06 | `19621bea` | bundle 全成员 revision（sidecar 原地改写可检测）；color_context 打包精度+alpha；删除/改名失效联动＋引擎参考释放；快照政策显式声明；`test_br06_compare_lifecycle` 9 例 |
+| BR07 | `8b948047` | LUT 随包携带（schema 2 dependencies）；导入安装受管 `LUTs/`＋引用重写（跨库同内容 hash）；缺失依赖如实 portable=false；越界/坏 hash 拒绝；schema 1 向下兼容；`test_br07_export_dependencies` 5 例 |
+| BR08 | `f10e29f0` | 菜单期间 transport 门生产 feed（app 级事件过滤→set_menu_open）；`test_br08_menu_transport_gate` 4 例 |
+| BR09 | 本提交 | 故障回归与文档收尾（见下） |
+
+### 验收记录
+
+- 复现脚本 `docs/validation/gallery_backend_review_20261110_repro.py --strict`：**9/9 场景 finding=false，退出码 0**（事务恢复 4 项、导入 2 项、抓帧上下文 2 项、原地写缓存 1 项全部收敛）。
+- 复现脚本的 9 个故障点已全部转为正式回归（`test_br01/02/03` + `test_br04` 的 in-place 失效用例），不再只依赖诊断脚本。
+- 92 文件回归清单 + 全部新增 `test_br0*` 套件：见本轮提交记录的回归数字（无新增失败；既有 3 项 skip 维持原状——大小写敏感文件系统 1 项、曲线 LUT `skipif(True)` 2 项，不计为通过）。
+- 未做真实 GPU 呈现/听感/像素一致性验收（划像/分屏、10 分钟播放、50 次切 clip/工程等 §12.4 清单）——offscreen 回归不代表它们。
+
+### 剩余范围（如实声明，未实现项保持真实禁用）
+
+1. **BR06 分屏 presenter**：多参考左右分屏/2×2 的真实呈现执行端未实现——`compare.split` 能力位仍如实禁用，Start Comparison 入口明确拒绝并说明；本轮交付的是其生命周期/失效/资源释放基座（`ColorCompareSession` 接真实引擎参考释放）。
+2. **BR04 分页/可见区模型**：查询层已有 `limit`/`total_matched`；QListWidget 全量重建未改为增量插入——异步回填＋代际守卫已消掉 UI 卡顿主因，1k/10k 真实条目的 p95/内存实测仍属设备验收。
+3. **BR05 集合导航**：PowerGrade/Timelines 深层枚举与 project-scope album 存储服务、Memories/DRX 未实现——菜单项保留真实禁用原因。
+4. **BR08 其余子项**：Color Enhanced VFR PTS 帧钟（现状仍是 wall-clock×fps 的 CFR 路径）、Source 预算执行通道、Proxy/Resolution/Bypass/Unmix/Grade Freeze/Alpha 显示/viewer-only 全屏等禁用服务的执行端——均未实施；macOS 原生菜单栏下拉不经 QWidget，菜单门覆盖 Qt 菜单/右键菜单（PyQt6 绑定暴露原生事件后自动生效）。
+5. **BR09 设备验收**：§12.3–12.4 的真实素材（4K60/HDR/alpha/VFR/外置卷）与真机 GPU 检查未执行。
