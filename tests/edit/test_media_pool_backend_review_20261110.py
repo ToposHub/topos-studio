@@ -192,4 +192,6 @@ def test_cancelling_one_pending_asset_does_not_finish_multiasset_request() -> No
     service.request_analysis = successful_analysis
     scheduler.items[1][1]["work"]()
     assert len(completed) == 1
-    assert service.get_request(request.request_id).state == RequestState.FAILED
+    # R06：取消与失败三分——1 取消 + 1 成功、无失败 → 请求完成
+    #（被取消的 asset 不再计入 errors 把整体拖成 FAILED）。
+    assert service.get_request(request.request_id).state == RequestState.COMPLETED

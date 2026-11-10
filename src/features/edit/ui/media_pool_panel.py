@@ -58,8 +58,6 @@ from src.features.edit.core.project import (
     EditProject, MediaAsset, ProjectBin, TimelineSequenceRef,
     probe_media_metadata,
     update_offline_status,
-    relink_asset,
-    batch_relink_assets,
     update_asset_proxy,
     ASSET_COLOR_LABELS,
     SmartBin,
@@ -94,7 +92,6 @@ from src.features.edit.core.consolidate import (
 from src.features.edit.core.edit_project_io import EditProjectIO
 from src.features.edit.ui.relink_media_dialog import RelinkMediaDialog
 from src.features.edit.core.proxy_generator import (
-    ProxyGeneratorWorker,
     check_ffmpeg_available,
     delete_proxy as delete_proxy_file,
 )
@@ -103,6 +100,8 @@ from src.shared.media.proxy import DiskProxyInfo, ProxyStatus
 from src.shared.video.frame_provider_service import get_frame_provider_service
 from src.features.edit.core.commands import (
     CreateBinCommand,
+    RelinkAssetCommand,
+    BatchRelinkAssetsCommand,
     DeleteBinCommand,
     DeleteAssetCommand,
     DeleteTimelineCommand,
@@ -519,6 +518,19 @@ class ProxyResolutionSignals(QObject):
 
     #: proxy_path, source_path, resolution | None, asset_id, generation
     probed = pyqtSignal(str, str, object, str, int, str)
+
+
+class ProxyServiceSignals(QObject):
+    """R03（媒体池复查）：统一代理服务回调 → UI 线程的信号桥。
+
+    ``DiskProxyService.generate_proxy`` 的 on_complete/on_progress/
+    on_error 在管理器后台线程直接调用；本桥把回调转成 Qt 信号
+    （自动排队到面板线程），沿用既有 token+代际+源签名守卫链。
+    """
+
+    progress = pyqtSignal(str, int, int)   # asset_id, percent, token
+    finished = pyqtSignal(str, str, int)   # asset_id, proxy_path, token
+    error = pyqtSignal(str, str, int)      # asset_id, message, token
 
 
 class ProxyResolutionWorker(QRunnable):
@@ -4929,6 +4941,13 @@ class MediaPoolPanel(QWidget):
         self._pending_proxy_meta: Dict[str, tuple[Any, ...]] = {}
         self._replacement_requests: dict[str, tuple[Any, ...]] = {}
         self._replacement_workers: dict[str, ReplacementProbeWorker] = {}
+        # R03：统一代理服务回调 → UI 线程信号桥（服务回调来自后台线程）。
+        self._proxy_service_signals = ProxyServiceSignals()
+        self._proxy_service_signals.progress.connect(
+            self._on_proxy_progress)
+        self._proxy_service_signals.finished.connect(
+            self._on_proxy_finished)
+        self._proxy_service_signals.error.connect(self._on_proxy_error)
 
         # 设置拖拽支持
         self.setAcceptDrops(True)
@@ -11106,6 +11125,13 @@ class MediaPoolPanel(QWidget):
         if not asset:
             return
 
+        # R05（媒体池复查）：模态前冻结身份（与 Replace 同一纪律）——
+        # 对话框期间切到另一工程（即便含同 asset_id）或素材被并发修改，
+        # 返回后不得把新路径写进别的工程/别的内容。
+        from copy import deepcopy
+        original_asset = deepcopy(asset)
+        project_id = self._project.project_id
+
         # Determine starting directory
         original_dir = os.path.dirname(asset.path)
         if not os.path.isdir(original_dir):
@@ -11129,12 +11155,29 @@ class MediaPoolPanel(QWidget):
         if not new_path:
             return
 
-        # Relink the asset. Existing proxy files/status belong to the old source
-        # path, so clear them and let the user regenerate a fresh proxy.
-        new_project = relink_asset(self._project, asset_id, new_path)
-        if asset.proxy_path is not None or asset.proxy_status != "none":
-            new_project = update_asset_proxy(new_project, asset_id, None, "none")
+        # R05：模态后守卫——工程或素材已变化即丢弃本次重连意图。
+        if (self._project is None
+                or self._project.project_id != project_id):
+            logger.info(
+                "Relink dropped: project switched during dialog (%s)",
+                asset_id)
+            return
+        current_asset = self._project.assets.get(asset_id)
+        if (current_asset is None
+                or vars(current_asset) != vars(original_asset)):
+            logger.info(
+                "Relink dropped: asset changed during dialog (%s)", asset_id)
+            return
+
+        # R05：单步命令事务——旧代理属于旧源路径，命令内一并失效；
+        # Undo/Redo 恢复完整旧素材（路径/代理/离线状态）。
         self._invalidate_proxy_job(asset_id)
+        try:
+            cmd = RelinkAssetCommand.create(asset_id, new_path)
+            new_project = self._command_stack.execute(cmd, self._project)
+        except ValueError as exc:
+            logger.warning(f"Relink failed for {asset_id}: {exc}")
+            return
         self._project = new_project
         self.project_changed.emit(new_project)
 
@@ -11152,6 +11195,8 @@ class MediaPoolPanel(QWidget):
         if not self._project:
             return
 
+        # R05：模态前冻结工程身份（批量对话框同样在模态期运行事件循环）
+        project_id = self._project.project_id
         offline_assets = [a for a in self._project.assets.values() if a.is_offline]
         if not offline_assets:
             QMessageBox.information(
@@ -11165,27 +11210,41 @@ class MediaPoolPanel(QWidget):
         if dialog.exec() == RelinkMediaDialog.DialogCode.Accepted:
             relink_map = dialog.get_relink_map()
             if relink_map:
-                new_project = batch_relink_assets(self._project, relink_map)
-                for asset_id in relink_map:
+                # R05：模态后守卫——切工程即丢弃；素材已删除的条目剔除。
+                if (self._project is None
+                        or self._project.project_id != project_id):
+                    logger.info(
+                        "Batch relink dropped: project switched during dialog")
+                    return
+                valid_map = {
+                    aid: path for aid, path in relink_map.items()
+                    if aid in self._project.assets
+                }
+                if not valid_map:
+                    return
+                # R05：批量重连走命令事务（单步 Undo/Redo；代理失效在
+                # 命令内，撤销恢复完整旧素材表）。
+                for asset_id in valid_map:
                     self._invalidate_proxy_job(asset_id)
-                    asset = new_project.assets.get(asset_id)
-                    if asset is not None and (
-                        asset.proxy_path is not None or asset.proxy_status != "none"
-                    ):
-                        new_project = update_asset_proxy(new_project, asset_id, None, "none")
+                try:
+                    cmd = BatchRelinkAssetsCommand.create(valid_map)
+                    new_project = self._command_stack.execute(cmd, self._project)
+                except ValueError as exc:
+                    logger.warning(f"Batch relink failed: {exc}")
+                    return
                 self._project = new_project
                 self.project_changed.emit(new_project)
                 self._refresh_tree()
 
                 online_count = sum(
-                    1 for aid in relink_map
+                    1 for aid in valid_map
                     if not new_project.assets.get(aid, MediaAsset(
                         asset_id="", path="/__invalid__", media_type="video",
                         display_name="", metadata={}
                     )).is_offline
                 )
                 logger.info(
-                    f"Batch relink: {online_count}/{len(relink_map)} assets now online"
+                    f"Batch relink: {online_count}/{len(valid_map)} assets now online"
                 )
 
     # ==================== Proxy Actions ====================
@@ -11420,19 +11479,35 @@ class MediaPoolPanel(QWidget):
         self.__dict__.setdefault("_proxy_job_signatures", {})[asset_id] = (
             source_stat.st_size, source_stat.st_mtime_ns)
 
-        # Create and start proxy generation worker（FE-B11：回调携带 token）
-        worker = ProxyGeneratorWorker(asset)
-        worker.signals.progress.connect(
-            lambda aid, pct, _t=token: self._on_proxy_progress(aid, pct, _t)
-        )
-        worker.signals.finished.connect(
-            lambda aid, path, _t=token: self._on_proxy_finished(aid, path, _t)
-        )
-        worker.signals.error.connect(
-            lambda aid, err, _t=token: self._on_proxy_error(aid, err, _t)
-        )
+        # R03（媒体池复查）：菜单接**统一代理服务**——队列/并发上限/
+        # 磁盘预检/失败重试/编码进程取消由服务统一管理（此前直接构造
+        # 旧 ProxyGeneratorWorker 绕过了预检与队列，失败还会误删既有
+        # 同名代理文件）。服务回调来自后台线程，经 ProxyServiceSignals
+        # 桥接回 UI 线程，沿用 token+代际+源签名守卫链。
+        service = get_disk_proxy_service()
+        signals = self._proxy_service_signals
 
-        QThreadPool.globalInstance().start(worker)
+        def _service_complete(source_path: str, info: Any) -> None:
+            signals.finished.emit(
+                asset_id, str(getattr(info, "proxy_path", "") or ""), token)
+
+        def _service_progress(source_path: str, progress: Any) -> None:
+            try:
+                percent = int(getattr(progress, "percent", 0) or 0)
+            except (TypeError, ValueError):
+                percent = 0
+            signals.progress.emit(asset_id, percent, token)
+
+        def _service_error(source_path: str, message: str) -> None:
+            signals.error.emit(asset_id, str(message), token)
+
+        service.generate_proxy(
+            source_path=asset.path,
+            asset_id=asset_id,
+            on_complete=_service_complete,
+            on_progress=_service_progress,
+            on_error=_service_error,
+        )
 
         logger.info(f"Proxy generation started for: {asset.display_name}")
 
@@ -11480,7 +11555,12 @@ class MediaPoolPanel(QWidget):
             logger.info(f"Proxy deleted for: {asset.display_name}")
 
     def _invalidate_proxy_job(self, asset_id: str) -> None:
-        """FE-B11：注销任务并令其 token 失效（晚到回调将被拒绝）。"""
+        """FE-B11：注销任务并令其 token 失效（晚到回调将被拒绝）。
+
+        R03：同时取消统一代理服务上该源的在途生成（删素材/换源/重新
+        入队 = 终止编码进程本身，不只丢弃回调）。
+        """
+        source = self._proxy_jobs.get(asset_id)
         self._proxy_jobs.pop(asset_id, None)
         self._proxy_job_tokens.pop(asset_id, None)
         self._proxy_job_generations.pop(asset_id, None)
@@ -11489,6 +11569,18 @@ class MediaPoolPanel(QWidget):
         for path, meta in list(pending.items()):
             if len(meta) > 3 and meta[3] == asset_id:
                 pending.pop(path, None)
+        if source:
+            self._cancel_service_proxy_generation(source)
+
+    def _cancel_service_proxy_generation(self, source_path: str) -> None:
+        """R03：取消统一代理服务上该源的在途任务（容错——服务不可用
+        或任务已终态时静默）。"""
+        try:
+            get_disk_proxy_service().cancel_generation(source_path)
+        except Exception:  # noqa: BLE001 — 注销路径不得因服务异常中断
+            logger.debug(
+                "proxy service cancel failed for %s", source_path,
+                exc_info=True)
 
     def _proxy_job_token_valid(self, asset_id: str, token: int) -> bool:
         # F-R07/R26：token 与会话代次都匹配才有效（切工程后旧 token
@@ -11500,14 +11592,21 @@ class MediaPoolPanel(QWidget):
         )
 
     def _invalidate_all_proxy_jobs(self) -> None:
-        """F-R07/R26：切工程/清空工程——注销全部在途代理任务与探测。"""
+        """F-R07/R26：切工程/清空工程——注销全部在途代理任务与探测。
+
+        R03：面板登记过的源同步取消统一代理服务上的在途生成（不波及
+        服务上其他调用方自行排队的任务）。
+        """
         self._proxy_session_generation += 1
         self.__dict__.get("_replacement_requests", {}).clear()
+        tracked_sources = list(self._proxy_jobs.values())
         self._proxy_jobs.clear()
         self._proxy_job_tokens.clear()
         self._proxy_job_generations.clear()
         self.__dict__.get("_proxy_job_signatures", {}).clear()
         self._pending_proxy_meta.clear()
+        for source in tracked_sources:
+            self._cancel_service_proxy_generation(source)
 
     def _on_proxy_progress(
         self, asset_id: str, percentage: int, token: int = -1

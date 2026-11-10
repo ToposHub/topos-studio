@@ -3010,6 +3010,11 @@ class RelinkAssetCommand:
     """
     Command to relink an asset to a new file path.
 
+    R05（媒体池复查）：apply 快照**完整旧素材**（含 proxy/offline/
+    metadata），旧代理属于旧源路径、重连即失效（命令内重置，单步
+    Undo/Redo 一并恢复完整旧素材）；序列化往返后无快照时退回旧的
+    按路径反向重连（同历史行为）。
+
     Attributes:
         command_id: Unique identifier
         label: Human-readable label
@@ -3023,6 +3028,7 @@ class RelinkAssetCommand:
     asset_id: str
     new_path: str
     old_path: str | None = None  # Set during apply
+    _old_asset: MediaAsset | None = None
 
     def apply(self, project: EditProject) -> EditProject:
         """
@@ -3039,8 +3045,15 @@ class RelinkAssetCommand:
 
         asset = project.assets[self.asset_id]
         old_path = asset.path
+        object.__setattr__(self, "_old_asset", asset)
+        object.__setattr__(self, "old_path", old_path)
 
         new_project = relink_asset(project, self.asset_id, self.new_path)
+        # R05：旧代理文件/状态属于旧源路径——重连后在命令内失效，
+        # 撤销时随完整素材快照一并恢复。
+        if asset.proxy_path is not None or asset.proxy_status != "none":
+            new_project = update_asset_proxy(
+                new_project, self.asset_id, None, "none")
         logger.debug(
             f"RelinkAssetCommand applied: {self.asset_id} "
             f"from {old_path} to {self.new_path}"
@@ -3057,6 +3070,18 @@ class RelinkAssetCommand:
         Returns:
             Project with asset path restored
         """
+        if self._old_asset is not None:
+            # R05：完整旧素材还原（路径/代理/离线状态一起回到重连前）
+            if self.asset_id not in project.assets:
+                logger.warning(
+                    f"RelinkAssetCommand undo: asset gone {self.asset_id}")
+                return project
+            new_assets = dict(project.assets)
+            new_assets[self.asset_id] = self._old_asset
+            logger.debug(
+                f"RelinkAssetCommand undone: {self.asset_id} restored "
+                f"to {self.old_path}")
+            return replace(project, assets=new_assets)
         if self.old_path is None:
             logger.warning("RelinkAssetCommand undo: old_path not stored")
             return project
@@ -3114,24 +3139,30 @@ class BatchRelinkAssetsCommand:
     label: str
     relink_map: dict[str, str]
     _old_paths: dict[str, str] | None = None  # Set during apply
+    _old_assets: dict[str, MediaAsset] | None = None  # R05：完整旧素材快照
 
     def apply(self, project: EditProject) -> EditProject:
         """
         Apply the command: batch relink assets.
 
-        Args:
-            project: Current project
-
-        Returns:
-            New project with assets relinked
+        R05：快照完整旧素材表；旧代理随旧源失效（命令内重置，单步
+        撤销一并恢复）。
         """
         # Store old paths for undo
         old_paths: dict[str, str] = {}
+        old_assets: dict[str, MediaAsset] = {}
         for asset_id in self.relink_map:
             if asset_id in project.assets:
                 old_paths[asset_id] = project.assets[asset_id].path
+                old_assets[asset_id] = project.assets[asset_id]
 
         new_project = batch_relink_assets(project, self.relink_map)
+        object.__setattr__(self, "_old_paths", old_paths)
+        object.__setattr__(self, "_old_assets", old_assets)
+        for asset_id, asset in old_assets.items():
+            if asset.proxy_path is not None or asset.proxy_status != "none":
+                new_project = update_asset_proxy(
+                    new_project, asset_id, None, "none")
         logger.debug(f"BatchRelinkAssetsCommand applied: {len(self.relink_map)} assets")
         return new_project
 
@@ -3145,6 +3176,16 @@ class BatchRelinkAssetsCommand:
         Returns:
             Project with paths restored
         """
+        if self._old_assets:
+            # R05：完整旧素材还原（路径/代理/离线状态一起回到重连前）
+            new_assets = dict(project.assets)
+            for asset_id, asset in self._old_assets.items():
+                if asset_id in new_assets:
+                    new_assets[asset_id] = asset
+            logger.debug(
+                f"BatchRelinkAssetsCommand undone: "
+                f"{len(self._old_assets)} assets restored")
+            return replace(project, assets=new_assets)
         if self._old_paths is None:
             logger.warning("BatchRelinkAssetsCommand undo: old_paths not stored")
             return project

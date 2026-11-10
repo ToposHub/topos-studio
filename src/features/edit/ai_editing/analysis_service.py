@@ -46,7 +46,12 @@ from src.features.edit.ai_editing.analysis_request import (
     RequestState,
 )
 from src.features.edit.ai_editing.editorial_models import SegmentKind, SemanticSegment
-from src.features.edit.ai_editing.jobs import JobHandle, JobKind, JobRegistry
+from src.features.edit.ai_editing.jobs import (
+    JobHandle,
+    JobKind,
+    JobRegistry,
+    JobStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -459,9 +464,15 @@ class AnalysisService:
 
         AUD-12905：完成/失败/取消计数与 finalize 判定在 ``counters_lock`` 内原子
         进行——并发 pool 线程的读-改-写不再丢失更新，也不会双重收尾。
+
+        R06（媒体池复查）：取消是独立结局类（成功/失败/取消三分）——
+        外层 asset job 已请求取消时，work 在 **provider 执行前**就拒绝
+        启动（provider 不支持中断也一样不 ingest/不发布）；全部为取消
+        的 request 收尾为 CANCELLED（不再与失败混淆）。
         """
         completed = {"count": 0}
         errors: list[str] = []
+        cancelled = {"count": 0}
         total = len(req.asset_ids)
         counters_lock = threading.Lock()
         finalized = {"done": False}
@@ -480,14 +491,16 @@ class AnalysisService:
             with counters_lock:
                 if finalized["done"]:
                     return
-                done = completed["count"] + len(errors)
+                done = completed["count"] + len(errors) + cancelled["count"]
                 if done < total:
                     return
                 finalized["done"] = True
                 error_snapshot = list(errors)
                 completed_snapshot = completed["count"]
+                cancelled_snapshot = cancelled["count"]
             self._finalize_scheduled_request(
                 request_id, error_snapshot, completed_snapshot,
+                cancelled=cancelled_snapshot,
                 summary_job=summary_job, recipe=req.recipe_id,
                 on_request_done=on_request_done,
             )
@@ -501,11 +514,17 @@ class AnalysisService:
 
         def _settle_asset_job(
             asset_id: str, asset_job: JobHandle, success: bool, detail: str,
+            *, job_cancelled: bool = False,
         ) -> None:
-            """AUD-12903：work 结束后终结 asset_job 并释放 lane 容量。"""
+            """AUD-12903：work 结束后终结 asset_job 并释放 lane 容量。
+
+            R06：取消结局走 complete()（CANCELLING → CANCELLED），与
+            失败（FAILED）区分。
+            """
             if asset_job.status.is_active:
-                if success:
-                    asset_job.complete({"asset_id": asset_id})
+                if success or job_cancelled:
+                    asset_job.complete({"asset_id": asset_id,
+                                        "cancelled": job_cancelled})
                 else:
                     asset_job.fail("ANALYSIS_FAILED", detail or "analysis job failed")
                 # CANCELLING 状态下 complete() 会转 CANCELLED（协作取消语义）。
@@ -515,33 +534,49 @@ class AnalysisService:
             def _work() -> None:
                 success = False
                 detail = ""
+                job_cancelled = False
                 try:
-                    violation = self._budget_violation(
-                        req, started_at, spent_cost_units["units"],
-                    )
-                    if violation is not None:
-                        detail = violation
+                    # R06：外层 asset job 已请求取消——取消边界在 **发布前**：
+                    # 不启动 provider（即不 ingest，晚到结果不得入库）、
+                    # 不计成功，按取消计数。不依赖 provider 支持中断。
+                    if asset_job.status in (JobStatus.CANCELLING,
+                                            JobStatus.CANCELLED):
+                        job_cancelled = True
+                        detail = "canceled before provider execution"
                     else:
-                        fingerprint = AssetFingerprint()
-                        job, err = self.request_analysis(
-                            asset_id, fingerprint, fps=fps, provider_ids=provider_ids,
-                            require_user_confirmation=req.is_cloud,
+                        violation = self._budget_violation(
+                            req, started_at, spent_cost_units["units"],
                         )
-                        success = (
-                            err == "" and job is not None
-                            and job.status.value == "succeeded"
-                        )
-                        if not success:
-                            detail = (
-                                err
-                                or (getattr(job, "error_message", "") if job is not None else "")
-                                or "analysis job failed"
-                            )
+                        if violation is not None:
+                            detail = violation
                         else:
-                            spent_cost_units["units"] += _job_cost_units(job)
+                            fingerprint = AssetFingerprint()
+                            job, err = self.request_analysis(
+                                asset_id, fingerprint, fps=fps,
+                                provider_ids=provider_ids,
+                                require_user_confirmation=req.is_cloud,
+                            )
+                            success = (
+                                err == "" and job is not None
+                                and job.status.value == "succeeded"
+                            )
+                            if not success:
+                                detail = (
+                                    err
+                                    or (getattr(job, "error_message", "") if job is not None else "")
+                                    or "analysis job failed"
+                                )
+                            else:
+                                spent_cost_units["units"] += _job_cost_units(job)
                 except Exception as exc:  # noqa: BLE001 — work 内异常不得卡死 request 状态机
                     detail = f"{type(exc).__name__}: {exc}"
-                _record_outcome(asset_id, success, detail)
+                with counters_lock:
+                    if job_cancelled:
+                        cancelled["count"] += 1
+                    elif success:
+                        completed["count"] += 1
+                    else:
+                        errors.append(f"{asset_id}: {detail or 'analysis job failed'}")
                 if on_asset_done is not None:
                     try:
                         on_asset_done(asset_id, success)
@@ -551,13 +586,15 @@ class AnalysisService:
                             exc_info=True,
                         )
                 _finalize_if_done()
-                _settle_asset_job(asset_id, asset_job, success, detail)
+                _settle_asset_job(asset_id, asset_job, success, detail,
+                                  job_cancelled=job_cancelled)
             return _work
 
         def _make_on_cancel(asset_id: str) -> "Callable[[], Any]":
             def _on_cancel() -> None:
+                # R06：pending 阶段取消同样是"取消"结局（不与失败混淆）
                 with counters_lock:
-                    errors.append(f"{asset_id}: canceled by scheduler")
+                    cancelled["count"] += 1
                 if on_asset_done is not None:
                     try:
                         on_asset_done(asset_id, False)
@@ -585,25 +622,45 @@ class AnalysisService:
     def _finalize_scheduled_request(
         self, request_id: str, errors: list[str], completed: int,
         *,
+        cancelled: int = 0,
         summary_job: JobHandle | None = None,
         recipe: AnalysisRecipe | None = None,
         on_request_done: "Callable[[str, bool], Any] | None" = None,
     ) -> None:
-        """scheduler 路径的 request 收尾（状态迁移 + 汇总 job 终结）。"""
-        new_state = RequestState.COMPLETED if not errors else RequestState.FAILED
+        """scheduler 路径的 request 收尾（状态迁移 + 汇总 job 终结）。
+
+        R06：成功/失败/取消三分——全部 asset 都被取消（无成功无失败）时
+        request 收尾为 CANCELLED、汇总 job 终结为 CANCELLED，与单项结局
+        一致（此前取消被计成失败，或 provider 已跑完照常发布成功）。
+        """
+        if errors:
+            new_state = RequestState.FAILED
+        elif cancelled and not completed:
+            new_state = RequestState.CANCELLED
+        else:
+            new_state = RequestState.COMPLETED
         with self._state_lock:
             cur = self._requests.get(request_id)
             if cur is not None:
                 self._requests[request_id] = cur.with_state(new_state)
         if summary_job is not None and summary_job.status.is_active:
             # AUD-12903：汇总 job 必须终结，否则永久 QUEUED 且 is_idle() 永假。
-            if not errors:
+            if errors:
+                summary_job.fail("ANALYSIS_FAILED", "; ".join(errors))
+            elif new_state == RequestState.CANCELLED:
+                # QUEUED/CANCELLING → CANCELLED（complete 在 CANCELLING 态
+                # 协作转 CANCELLED；先 request_cancel 兜底其他活跃态）。
+                summary_job.request_cancel()
                 summary_job.complete({
-                    "assets": completed,
+                    "assets": completed, "cancelled": cancelled,
                     "recipe": recipe.value if recipe is not None else "",
                 })
             else:
-                summary_job.fail("ANALYSIS_FAILED", "; ".join(errors))
+                summary_job.complete({
+                    "assets": completed,
+                    "cancelled": cancelled,
+                    "recipe": recipe.value if recipe is not None else "",
+                })
         if on_request_done is not None:
             try:
                 on_request_done(request_id, not errors)

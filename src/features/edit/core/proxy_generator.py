@@ -23,7 +23,9 @@ Usage:
 
 import logging
 import os
+import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -33,6 +35,11 @@ from src.features.edit.core.project import MediaAsset
 from src.shared.ffmpeg_locator import find_ffmpeg
 
 logger = logging.getLogger(__name__)
+
+#: R03（媒体池复查）：编码前空间预留下限（与统一代理服务
+#: ``estimate_proxy_reserve_bytes`` 同口径——半分辨率转码输出可大于
+#: 源文件，宁可误拒不落半成品）。
+_MIN_PROXY_RESERVE_BYTES = 512 << 20
 
 
 # ================================================================
@@ -179,29 +186,55 @@ class ProxyGeneratorWorker(QRunnable):
             logger.warning(f"Asset file does not exist: {asset.path}")
             return None
 
-        # Generate proxy path
+        # Generate proxy path（图片输出按配置格式换扩展名）
         proxy_path = _generate_proxy_path(asset.path, config.suffix)
+        if asset.is_image:
+            proxy_path = (
+                os.path.splitext(proxy_path)[0]
+                + f".{config.image_format}"
+            )
+
+        # R03（媒体池复查）：产物所有权——编码写**私有 staging**，成功后
+        # 原子发布到最终路径；失败/取消/超时只清理 staging，绝不动既有
+        # 同名文件。旧实现 ``-y`` 直写固定目标 + 失败 unlink 最终路径，
+        # 对既有 shot_proxy.mp4 重新生成失败会把用户文件一并删掉。
+        staging_path = _staging_path(proxy_path)
+
+        # R03：空间预检（不足提前失败，不写半成品）
+        try:
+            free_bytes = shutil.disk_usage(
+                os.path.dirname(proxy_path) or ".").free
+        except OSError:
+            free_bytes = -1
+        if free_bytes >= 0:
+            try:
+                source_size = os.path.getsize(asset.path)
+            except OSError:
+                source_size = 0
+            if free_bytes < max(source_size, _MIN_PROXY_RESERVE_BYTES):
+                logger.warning(
+                    f"Insufficient disk space for proxy (need ~"
+                    f"{max(source_size, _MIN_PROXY_RESERVE_BYTES)} bytes, "
+                    f"{free_bytes} free): {asset.path}")
+                return None
 
         try:
             if asset.is_video:
                 return _generate_video_proxy(
-                    asset, proxy_path, config, progress_callback,
-                    cancelled_fn=cancelled_fn,
+                    asset, proxy_path, staging_path, config,
+                    progress_callback, cancelled_fn=cancelled_fn,
                 )
             elif asset.is_image:
-                return _generate_image_proxy(asset, proxy_path, config, progress_callback)
+                return _generate_image_proxy(
+                    asset, proxy_path, staging_path, config, progress_callback)
             else:
                 logger.warning(f"Proxy generation not supported for media type: {asset.media_type}")
                 return None
 
         except Exception as e:
             logger.error(f"Failed to generate proxy for {asset.path}: {e}")
-            # Clean up partial file
-            if os.path.exists(proxy_path):
-                try:
-                    os.remove(proxy_path)
-                except OSError:
-                    pass
+            # R03：失败清理只针对本任务私有 staging（最终路径不碰）
+            _remove_quietly(staging_path)
             return None
 
 
@@ -209,9 +242,37 @@ class ProxyGeneratorWorker(QRunnable):
 # Video Proxy Generation
 # ================================================================
 
+def _staging_path(final_path: str) -> str:
+    """R03：私有 staging 路径——同目录隐藏文件，保留媒体扩展名
+    （PyAV/ffmpeg CLI 按扩展名识别容器），带 pid+uuid 任务身份。"""
+    directory = os.path.dirname(final_path) or "."
+    name, ext = os.path.splitext(os.path.basename(final_path))
+    return os.path.join(
+        directory,
+        f".{name}.topos-proxy-{os.getpid()}-{uuid.uuid4().hex[:8]}{ext}",
+    )
+
+
+def _publish_proxy(staging_path: str, final_path: str) -> Optional[str]:
+    """R03：staging → 最终路径原子发布（同目录 os.replace）。
+
+    成功替换既有同名代理是**预期行为**（重新生成）；失败只清理
+    staging，既有文件保持原字节。
+    """
+    try:
+        os.replace(staging_path, final_path)
+        return final_path
+    except OSError as exc:
+        logger.error(
+            f"Proxy publish failed: {staging_path} -> {final_path}: {exc}")
+        _remove_quietly(staging_path)
+        return None
+
+
 def _generate_video_proxy(
     asset: MediaAsset,
     proxy_path: str,
+    staging_path: str,
     config: ProxyConfig,
     progress_callback: Optional[Any] = None,
     cancelled_fn: Optional[Callable[[], bool]] = None
@@ -223,9 +284,13 @@ def _generate_video_proxy(
     libraries bundled with the app, so packaged builds work without a
     system ffmpeg installation; the CLI path only serves as a fallback.
 
+    R03：编码统一写 ``staging_path``，成功后 ``_publish_proxy`` 原子
+    发布；两条路径的失败清理都只删 staging。
+
     Args:
         asset: Source video asset
-        proxy_path: Output proxy file path
+        proxy_path: Final proxy file path（发布目标）
+        staging_path: Private staging path（实际写入目标）
         config: Proxy configuration
         progress_callback: Progress callback
         cancelled_fn: Optional cancellation check invoked per decoded frame
@@ -236,26 +301,34 @@ def _generate_video_proxy(
     logger.info(f"Generating video proxy: {asset.path} -> {proxy_path}")
 
     proxy = _generate_video_proxy_pyav(
-        asset, proxy_path, config, progress_callback, cancelled_fn,
+        asset, staging_path, config, progress_callback, cancelled_fn,
     )
     if proxy is not None:
-        return proxy
+        return _publish_proxy(staging_path, proxy_path)
 
     if cancelled_fn is not None and cancelled_fn():
+        _remove_quietly(staging_path)
         return None
 
     logger.debug("PyAV proxy unavailable; falling back to ffmpeg CLI")
-    return _generate_video_proxy_cli(asset, proxy_path, config, progress_callback)
+    cli = _generate_video_proxy_cli(
+        asset, proxy_path, staging_path, config, progress_callback)
+    if cli is None:
+        return None
+    return _publish_proxy(staging_path, proxy_path)
 
 
 def _generate_video_proxy_pyav(
     asset: MediaAsset,
-    proxy_path: str,
+    staging_path: str,
     config: ProxyConfig,
     progress_callback: Optional[Any] = None,
     cancelled_fn: Optional[Callable[[], bool]] = None
 ) -> Optional[str]:
-    """PyAV 进程内编码（无需系统 ffmpeg），失败返回 None 交由 CLI 兜底。"""
+    """PyAV 进程内编码（无需系统 ffmpeg），失败返回 None 交由 CLI 兜底。
+
+    R03：``staging_path`` 是本任务私有写入目标；取消/异常清理只删它。
+    """
     try:
         import av
 
@@ -281,9 +354,9 @@ def _generate_video_proxy_pyav(
 
             muxer_options = (
                 {"movflags": "+faststart"}
-                if proxy_path.lower().endswith((".mp4", ".mov")) else {}
+                if staging_path.lower().endswith((".mp4", ".mov")) else {}
             )
-            output_container = av.open(proxy_path, "w", options=muxer_options)
+            output_container = av.open(staging_path, "w", options=muxer_options)
             try:
                 output_stream = output_container.add_stream(
                     config.video_codec, rate=rate,
@@ -368,38 +441,44 @@ def _generate_video_proxy_pyav(
         if cancelled:
             # AUD-17231：取消路径与异常路径同样清理半成品（容器已在上方
             # finally 中关闭），避免截断文件随后被识别为 ready 代理
-            logger.debug(f"PyAV video proxy cancelled, removing partial: {proxy_path}")
-            _remove_quietly(proxy_path)
+            logger.debug(f"PyAV video proxy cancelled, removing partial: {staging_path}")
+            _remove_quietly(staging_path)
             return None
 
-        if not os.path.exists(proxy_path) or os.path.getsize(proxy_path) == 0:
-            logger.error(f"PyAV proxy not created: {proxy_path}")
+        if not os.path.exists(staging_path) or os.path.getsize(staging_path) == 0:
+            logger.error(f"PyAV proxy not created: {staging_path}")
             return None
 
         original_size = os.path.getsize(asset.path)
-        proxy_size = os.path.getsize(proxy_path)
+        proxy_size = os.path.getsize(staging_path)
         ratio = proxy_size / original_size if original_size > 0 else 1.0
         logger.info(
-            f"Video proxy generated: {proxy_path} "
+            f"Video proxy generated: {staging_path} "
             f"({proxy_size / 1024 / 1024:.1f}MB, {ratio:.1%} of original)"
         )
         if progress_callback:
             progress_callback(100)
-        return proxy_path
+        return staging_path
 
     except Exception as e:
         logger.debug(f"PyAV video proxy failed: {e}")
-        _remove_quietly(proxy_path)
+        _remove_quietly(staging_path)
         return None
 
 
 def _generate_video_proxy_cli(
     asset: MediaAsset,
     proxy_path: str,
+    staging_path: str,
     config: ProxyConfig,
     progress_callback: Optional[Any] = None
 ) -> Optional[str]:
-    """ffmpeg CLI 兜底路径（二进制经 ffmpeg_locator 定位）。"""
+    """ffmpeg CLI 兜底路径（二进制经 ffmpeg_locator 定位）。
+
+    R03：写 ``staging_path``，成功返回 staging（调用方发布）；
+    失败/超时只清理 staging——最终路径 ``proxy_path`` 处的既有文件
+    保持原字节。
+    """
     # Build FFmpeg command
     # - Scale to 720p width (maintain aspect ratio)
     # - Use libx264 with CRF 23 (medium quality)
@@ -415,8 +494,8 @@ def _generate_video_proxy_cli(
         "-preset", config.video_preset,
         "-c:a", config.audio_codec,
         "-b:a", config.audio_bitrate,
-        "-y",  # Overwrite output file
-        proxy_path
+        "-y",  # staging 是本任务私有新文件，覆盖无所有权风险
+        staging_path
     ]
 
     logger.debug(f"FFmpeg command: {' '.join(cmd)}")
@@ -436,13 +515,14 @@ def _generate_video_proxy_cli(
         if process.returncode != 0:
             error_msg = stderr.decode("utf-8", errors="replace")
             logger.error(f"FFmpeg error: {error_msg}")
-            _remove_quietly(proxy_path)  # AUD-17232：失败分支清理坏输出
+            # AUD-17232 + R03：失败清理坏输出，但只删本任务 staging
+            _remove_quietly(staging_path)
             return None
 
         # Verify proxy file was created
-        if os.path.exists(proxy_path):
+        if os.path.exists(staging_path):
             original_size = os.path.getsize(asset.path)
-            proxy_size = os.path.getsize(proxy_path)
+            proxy_size = os.path.getsize(staging_path)
             ratio = proxy_size / original_size if original_size > 0 else 1.0
 
             logger.info(
@@ -453,9 +533,9 @@ def _generate_video_proxy_cli(
             if progress_callback:
                 progress_callback(100)
 
-            return proxy_path
+            return staging_path
         else:
-            logger.error(f"Proxy file not created: {proxy_path}")
+            logger.error(f"Proxy file not created: {staging_path}")
             return None
 
     except subprocess.TimeoutExpired:
@@ -467,14 +547,16 @@ def _generate_video_proxy_cli(
                 process.communicate(timeout=5)
             except (OSError, ValueError, subprocess.TimeoutExpired) as reap_exc:
                 logger.warning(f"Failed to reap FFmpeg process: {reap_exc}")
-        _remove_quietly(proxy_path)  # AUD-17232：超时残留的部分输出一并清理
+        # AUD-17232 + R03：超时残留的部分输出一并清理（仅 staging）
+        _remove_quietly(staging_path)
         return None
     except FileNotFoundError:
         logger.error("FFmpeg not found and PyAV unavailable; cannot generate proxy.")
+        _remove_quietly(staging_path)
         return None
     except Exception as e:
         logger.error(f"FFmpeg execution error: {e}")
-        _remove_quietly(proxy_path)  # AUD-17232：失败分支清理坏输出
+        _remove_quietly(staging_path)
         return None
 
 
@@ -485,6 +567,7 @@ def _generate_video_proxy_cli(
 def _generate_image_proxy(
     asset: MediaAsset,
     proxy_path: str,
+    staging_path: str,
     config: ProxyConfig,
     progress_callback: Optional[Any] = None
 ) -> Optional[str]:
@@ -492,38 +575,42 @@ def _generate_image_proxy(
     Generate image proxy by resizing（PyAV 主路径，CLI 兜底）.
 
     Creates a JPEG proxy fitted within ``image_max_size`` (no upscaling).
+    R03：与视频路径同一所有权纪律——写 staging，成功后原子发布。
 
     Args:
         asset: Source image asset
-        proxy_path: Output proxy file path
+        proxy_path: Final proxy file path（发布目标，扩展名已按输出格式）
+        staging_path: Private staging path（实际写入目标）
         config: Proxy configuration
         progress_callback: Progress callback
 
     Returns:
         Proxy file path, or None if failed
     """
-    # Change extension to match output format
-    base_path = os.path.splitext(proxy_path)[0]
-    proxy_path = f"{base_path}.{config.image_format}"
-
     logger.info(f"Generating image proxy: {asset.path} -> {proxy_path}")
 
-    proxy = _generate_image_proxy_pyav(asset, proxy_path, config)
+    proxy = _generate_image_proxy_pyav(asset, staging_path, config)
     if proxy is not None:
-        if progress_callback:
+        published = _publish_proxy(staging_path, proxy_path)
+        if published is not None and progress_callback:
             progress_callback(100)
-        return proxy
+        return published
 
     logger.debug("PyAV image proxy unavailable; falling back to ffmpeg CLI")
-    return _generate_image_proxy_cli(asset, proxy_path, config, progress_callback)
+    cli = _generate_image_proxy_cli(
+        asset, proxy_path, staging_path, config, progress_callback)
+    if cli is None:
+        return None
+    return _publish_proxy(staging_path, proxy_path)
 
 
 def _generate_image_proxy_pyav(
     asset: MediaAsset,
-    proxy_path: str,
+    staging_path: str,
     config: ProxyConfig,
 ) -> Optional[str]:
-    """PyAV 解码并缩放图片代理；失败返回 None 交由 CLI 兜底。"""
+    """PyAV 解码并缩放图片代理；失败返回 None 交由 CLI 兜底（R03：
+    ``staging_path`` 为私有写入目标，清理只删 staging）。"""
     try:
         import av
 
@@ -546,7 +633,7 @@ def _generate_image_proxy_pyav(
                     width=out_w, height=out_h, format="yuvj420p",
                 )
 
-                output_container = av.open(proxy_path, "w")
+                output_container = av.open(staging_path, "w")
                 try:
                     out_stream = output_container.add_stream("mjpeg", rate=1)
                     out_stream.width, out_stream.height = out_w, out_h
@@ -565,39 +652,40 @@ def _generate_image_proxy_pyav(
         finally:
             input_container.close()
 
-        if not os.path.exists(proxy_path) or os.path.getsize(proxy_path) == 0:
+        if not os.path.exists(staging_path) or os.path.getsize(staging_path) == 0:
             return None
 
         original_size = os.path.getsize(asset.path)
-        proxy_size = os.path.getsize(proxy_path)
+        proxy_size = os.path.getsize(staging_path)
         ratio = proxy_size / original_size if original_size > 0 else 1.0
         logger.info(
-            f"Image proxy generated: {proxy_path} "
+            f"Image proxy generated: {staging_path} "
             f"({proxy_size / 1024:.1f}KB, {ratio:.1%} of original)"
         )
-        return proxy_path
+        return staging_path
 
     except Exception as e:
         logger.debug(f"PyAV image proxy failed: {e}")
-        _remove_quietly(proxy_path)
+        _remove_quietly(staging_path)
         return None
 
 
 def _generate_image_proxy_cli(
     asset: MediaAsset,
     proxy_path: str,
+    staging_path: str,
     config: ProxyConfig,
     progress_callback: Optional[Any] = None
 ) -> Optional[str]:
-    """ffmpeg CLI 兜底路径（二进制经 ffmpeg_locator 定位）。"""
+    """ffmpeg CLI 兜底路径（写 staging，成功返回 staging 由调用方发布）。"""
     ffmpeg_bin = find_ffmpeg() or "ffmpeg"
     cmd = [
         ffmpeg_bin,
         "-i", asset.path,
         "-vf", f"scale={config.image_max_size}:-2",  # Scale to max dimension
         "-q:v", str(int(100 - config.image_quality)),  # JPEG quality (inverted)
-        "-y",  # Overwrite output file
-        proxy_path
+        "-y",  # staging 是本任务私有新文件，覆盖无所有权风险
+        staging_path
     ]
 
     try:
@@ -610,12 +698,13 @@ def _generate_image_proxy_cli(
         if process.returncode != 0:
             error_msg = process.stderr.decode("utf-8", errors="replace")
             logger.error(f"FFmpeg error: {error_msg}")
+            _remove_quietly(staging_path)
             return None
 
-        # Verify proxy file was created
-        if os.path.exists(proxy_path):
+        # Verify proxy file was created（R03：校验/返回 staging，发布在调用方）
+        if os.path.exists(staging_path):
             original_size = os.path.getsize(asset.path)
-            proxy_size = os.path.getsize(proxy_path)
+            proxy_size = os.path.getsize(staging_path)
             ratio = proxy_size / original_size if original_size > 0 else 1.0
 
             logger.info(
@@ -626,19 +715,21 @@ def _generate_image_proxy_cli(
             if progress_callback:
                 progress_callback(100)
 
-            return proxy_path
+            return staging_path
         else:
-            logger.error(f"Proxy file not created: {proxy_path}")
+            logger.error(f"Proxy file not created: {staging_path}")
             return None
 
     except subprocess.TimeoutExpired:
         logger.error(f"FFmpeg timeout for {asset.path}")
+        _remove_quietly(staging_path)
         return None
     except FileNotFoundError:
         logger.error("FFmpeg not found and PyAV unavailable; cannot generate proxy.")
         return None
     except Exception as e:
         logger.error(f"Image proxy generation error: {e}")
+        _remove_quietly(staging_path)
         return None
 
 
