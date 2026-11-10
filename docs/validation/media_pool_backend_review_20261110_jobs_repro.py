@@ -77,7 +77,10 @@ with TemporaryDirectory() as td:
         returncode=1
         def communicate(self,timeout: Any=None) -> tuple[bytes, bytes]:return b'',b'forced error'
     with patch.object(proxy_generator.subprocess,'Popen',return_value=FailedProcess()), patch.object(proxy_generator,'find_ffmpeg',return_value='never-run'):
-        proxy_generator._generate_video_proxy_cli(asset,str(target),proxy_generator.ProxyConfig())
+        proxy_generator._generate_video_proxy_cli(
+            asset, str(target),
+            proxy_generator._staging_path(str(target)),
+            proxy_generator.ProxyConfig())
     print(json.dumps({'case':'failed_proxy_removes_preexisting_filename','target_exists_after_failure':target.exists(),'source_exists':source.exists()}))
 
 from dataclasses import replace
