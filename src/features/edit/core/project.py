@@ -4935,6 +4935,23 @@ def probe_media_metadata(path: str) -> dict[str, Any]:
             logger.warning(f"Failed to probe video metadata: {path}, {e}")
             metadata = {"format": ext[1:].upper(), "error": str(e)}
 
+        # P1-6 分离声道/纯音频专业容器（如无视频流的 .mov/.mxf 风格
+        # 分离音频）：视频探测失败不代表文件不可用——音频信息照常
+        # 探测并给出可用 metadata（保留 error 供诊断），不再整体失败。
+        if metadata.get("error"):
+            av_details = _probe_av_details(path)
+            if av_details is not None and (
+                    av_details.get("audio_info") or av_details.get("audio_tracks")):
+                metadata.setdefault("file_size", os.path.getsize(path))
+                metadata["audio"] = True
+                if av_details.get("audio_info"):
+                    metadata["audio_info"] = av_details["audio_info"]
+                    duration = av_details["audio_info"].get("duration_seconds")
+                    if duration is not None:
+                        metadata["duration_seconds"] = duration
+                if av_details.get("audio_tracks"):
+                    metadata["audio_tracks"] = av_details["audio_tracks"]
+
     elif ext in audio_extensions:
         # 音频：探测音频流信息
         audio_info = _probe_audio_info(path)
