@@ -11770,7 +11770,10 @@ class MediaPoolPanel(QWidget):
             if len(meta) > 3 and meta[3] == asset_id:
                 pending.pop(path, None)
         if source:
-            self._cancel_service_proxy_generation(source)
+            # 轻量宿主（测试替身按本方法既有防御风格构造）无此方法时跳过
+            cancel = getattr(self, "_cancel_service_proxy_generation", None)
+            if callable(cancel):
+                cancel(source)
 
     def _cancel_service_proxy_generation(self, source_path: str) -> None:
         """R03：取消统一代理服务上该源的在途任务（容错——服务不可用

@@ -449,7 +449,9 @@ def test_analysis_request_migrates_to_terminal_on_pending_cancel():
     assert final_state != RequestState.RUNNING, (
         f"request 仍卡 RUNNING（{final_state}）——on_cancel 回写未生效"
     )
-    assert final_state in (RequestState.COMPLETED, RequestState.FAILED)
+    # R06：全取消 → CANCELLED（成功/失败/取消三分）
+    assert final_state in (
+        RequestState.COMPLETED, RequestState.FAILED, RequestState.CANCELLED)
 
 
 def test_analysis_request_migrates_to_terminal_on_cancel_all():

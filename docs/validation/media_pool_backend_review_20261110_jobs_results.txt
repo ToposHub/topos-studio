@@ -1,9 +1,9 @@
 FFmpeg error: forced error
 {"case": "cancel_one_of_two_pending", "summary_status": "queued", "request_state": "running", "second_job_status": "queued"}
-{"case": "cancel_running_before_provider_returns", "outer_status": "cancelled", "summary_status": "succeeded", "evidence_stored": true}
+{"case": "cancel_running_before_provider_returns", "outer_status": "cancelled", "summary_status": "cancelled", "evidence_stored": false}
 {"case": "nonfinite_segment_rejected", "error": "TranscriptionJobError"}
 {"case": "nonfinite_segment_rejected", "error": "TranscriptionJobError"}
 {"case": "invalid_segment_rejected", "error": "TranscriptionJobError"}
 {"case": "undo_prior_rename_reverts_unrecorded_relink", "linked_before_undo": "new.mp4", "path_after_undo": "new.mp4"}
-{"case": "failed_proxy_removes_preexisting_filename", "target_exists_after_failure": false, "source_exists": true}
-{"case": "relink_mutates_project_switched_during_modal", "project_id": "different-project", "new_path": "new.mp4"}
+{"case": "failed_proxy_removes_preexisting_filename", "target_exists_after_failure": true, "source_exists": true}
+{"case": "relink_mutates_project_switched_during_modal", "project_id": "different-project", "new_path": "other.mp4"}
