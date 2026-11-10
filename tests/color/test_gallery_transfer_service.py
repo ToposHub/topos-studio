@@ -73,7 +73,13 @@ class TestExport:
             names = set(zf.namelist())
             assert "Look.topos" in names and "Look.still.exr.json" in names
             manifest = json.loads(zf.read(BUNDLE_MANIFEST_NAME))
-        assert manifest["kind"] == "topos-bundle" and manifest["schema"] == 1
+        assert manifest["kind"] == "topos-bundle"
+        assert manifest["schema"] == 2      # BR07：依赖清单 schema
+        # 本机没有 /luts/a.cube → 引用型包如实标注（不冒充完整便携）
+        (dep,) = manifest["dependencies"]
+        assert dep["kind"] == "lut" and dep["missing"] is True
+        assert manifest["portable"] is False
+        assert any("dependency not bundled" in w for w in result.warnings)
         assert manifest["still"]["still_id"] == "S-origin000000001"
         assert manifest["still"]["timeline_name"] == "Main"
         assert manifest["precision"] == "exr_float32"

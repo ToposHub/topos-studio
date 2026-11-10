@@ -73,7 +73,7 @@ logger = logging.getLogger(__name__)
 
 #: 可移植包信封名（zip 内的清单）
 BUNDLE_MANIFEST_NAME = "bundle_manifest.json"
-#: 导入限制（zip bomb 防线）
+#: 导入限制（zip bomb 防线；依赖计入同一限额）
 IMPORT_MAX_FILES = 16
 IMPORT_MAX_TOTAL_BYTES = 256 * 1024 * 1024
 IMPORT_MAX_FILE_BYTES = 128 * 1024 * 1024
@@ -81,8 +81,14 @@ IMPORT_TXN_PREFIX = ".gallery-import-"
 IMPORT_JOURNAL_NAME = "__journal.json"
 #: 自动重名后缀上限（防病态目录把导入卡成死循环）
 IMPORT_MAX_STEM_SUFFIX = 10000
+#: 受管依赖资源目录（导入时安装 LUT 等依赖；库根内、可随库迁移）
+DEPENDENCY_DIR_NAME = "LUTs"
+#: 归档内依赖条目前缀
+DEPENDENCY_ARCHIVE_PREFIX = "assets/luts/"
 
-EXPORT_SCHEMA = 1
+#: schema 2（BR07）：新增 ``dependencies``（外部 LUT 等依赖的打包/
+#: 缺失记录）。schema 1 包仍可导入（无依赖信息＝引用型包，如实告警）。
+EXPORT_SCHEMA = 2
 
 # 稳定拒绝原因
 REASON_NOT_A_BUNDLE = "not_a_bundle"
@@ -94,6 +100,8 @@ REASON_FILE_COUNT_LIMIT = "file_count_limit"
 REASON_HASH_MISMATCH = "hash_mismatch"
 REASON_DUPLICATE_IDENTITY = "duplicate_identity"
 REASON_IDENTITY_SAVE_FAILED = "identity_save_failed"
+REASON_DEPENDENCY_ESCAPED = "dependency_path_escape"
+REASON_DEPENDENCY_LIMIT = "dependency_limit"
 
 _ROLE_BY_SUFFIX = {suffix: role for role, suffix
                    in BUNDLE_SUFFIX_BY_ROLE.items()}
@@ -153,9 +161,18 @@ class GalleryTransferService:
     # ── 导出 ───────────────────────────────────────────────────────────
 
     def export_bundle(self, folder: str, stem: str, dest_zip_path: str, *,
-                      include_exr: bool = True
+                      include_exr: bool = True,
+                      include_dependencies: bool = True
                       ) -> GalleryOperationResult:
-        """把 bundle 打包为单个 ``.toposbundle`` zip（源不动）。"""
+        """把 bundle 打包为单个 ``.toposbundle`` zip（源不动）。
+
+        BR07：grade 引用的外部 LUT（``active_lut_path``）默认**随包携带**
+        （``assets/luts/<sha8>_<name>``，manifest schema 2 的
+        ``dependencies`` 记录内容 hash／来源路径）；缺失的依赖如实记录
+        ``missing`` 并进 warnings——引用型包**不冒充完整便携**。导入时
+        依赖安装进目标库的受管 ``LUTs/`` 目录并重写引用（见
+        :meth:`import_bundle`）。
+        """
         request_id = make_gallery_request_id()
         if not is_safe_bundle_stem(stem):
             return self._rejected(request_id, REASON_UNSAFE_NAME, repr(stem))
@@ -179,15 +196,38 @@ class GalleryTransferService:
             return self._rejected(request_id, REASON_IO_ERROR,
                                   f"dest not writable: {dest_dir}")
 
-        meta = load_preset_meta(os.path.join(real, f"{stem}.topos"))
+        topos_path = os.path.join(real, f"{stem}.topos")
+        dependencies, dep_warnings = self._collect_grade_dependencies(
+            topos_path)
+        if not include_dependencies:
+            dependencies = [dict(dep, bundled=False, missing=True,
+                                 reason="dependencies not included")
+                            for dep in dependencies]
+            dep_warnings = [
+                f"dependency not bundled: {dep['name']} "
+                f"({dep.get('reason') or 'excluded'})"
+                for dep in dependencies]
+        meta = load_preset_meta(topos_path)
         manifest = self._build_export_manifest(real, stem, chosen, meta,
-                                               include_exr)
+                                               include_exr, dependencies)
+        bundled: Dict[str, str] = {}     # archive 名 → 本机源路径
+        for dep in dependencies:
+            if dep.get("bundled") and dep.get("source"):
+                bundled[dep["archive"]] = dep["source"]
+        total_dep_bytes = sum(dep.get("size", 0) for dep in
+                              dependencies if dep.get("bundled"))
+        if bundled and total_dep_bytes > IMPORT_MAX_FILE_BYTES:
+            return self._rejected(request_id, REASON_DEPENDENCY_LIMIT,
+                                  f"dependencies total {total_dep_bytes} "
+                                  f"bytes")
         tmp_path = f"{dest_zip_path}.tmp-{os.getpid()}"
         try:
             with zipfile.ZipFile(tmp_path, "w",
                                  zipfile.ZIP_DEFLATED) as zf:
                 for path in chosen:
                     zf.write(path, arcname=os.path.basename(path))
+                for archive_name, source in sorted(bundled.items()):
+                    zf.write(source, arcname=archive_name)
                 zf.writestr(
                     BUNDLE_MANIFEST_NAME,
                     json.dumps(manifest, ensure_ascii=False, indent=1))
@@ -196,14 +236,70 @@ class GalleryTransferService:
             _silent_remove(tmp_path)
             return self._rejected(request_id, REASON_IO_ERROR, str(exc),
                                   recoverable=False)
+        warnings = [f"exported {len(chosen)} files -> {dest_zip_path}",
+                    *dep_warnings]
+        if dependencies:
+            warnings.append(
+                "portable: full" if manifest["portable"] else
+                "portable: partial (missing dependencies listed above)")
         return GalleryOperationResult(
             request_id=request_id, status=OP_SUCCESS,
-            affected_still_ids=(stem,),
-            warnings=(f"exported {len(chosen)} files -> {dest_zip_path}",))
+            affected_still_ids=(stem,), warnings=tuple(warnings))
+
+    def _collect_grade_dependencies(self,
+                                    topos_path: str
+                                    ) -> Tuple[List[Dict[str, Any]],
+                                               List[str]]:
+        """收集 grade 的外部依赖（BR07 首类：``active_lut_path`` LUT）。
+
+        本机存在的文件 → 打包候选（sha256/大小/归档名）；缺失 → 记
+        ``missing`` + 原因并告警——引用型包不冒充完整便携。
+        """
+        references: List[str] = []
+        try:
+            with zipfile.ZipFile(topos_path, "r") as zf:
+                if "project.json" in zf.namelist():
+                    project = json.loads(zf.read("project.json"))
+                    for layer in project.get("layers") or []:
+                        if isinstance(layer, dict):
+                            ref = layer.get("active_lut_path")
+                            if isinstance(ref, str) and ref:
+                                references.append(ref)
+        except (OSError, ValueError, zipfile.BadZipFile):
+            return [], []
+        dependencies: List[Dict[str, Any]] = []
+        warnings: List[str] = []
+        seen = set()
+        for source in references:
+            if source in seen:
+                continue
+            seen.add(source)
+            name = os.path.basename(source.replace("\\", "/"))
+            if not name:
+                continue
+            if not os.path.isfile(source):
+                dependencies.append({
+                    "kind": "lut", "name": name, "source": source,
+                    "missing": True, "reason": "source file not found",
+                    "bundled": False})
+                warnings.append(
+                    f"dependency not bundled: {name} "
+                    f"(source file not found: {source})")
+                continue
+            digest = _sha256_file(source)
+            dependencies.append({
+                "kind": "lut", "name": name, "source": source,
+                "sha256": digest, "size": os.path.getsize(source),
+                "archive": f"{DEPENDENCY_ARCHIVE_PREFIX}"
+                           f"{digest[:8]}_{name}",
+                "missing": False, "reason": "", "bundled": True})
+        return dependencies, warnings
 
     def _build_export_manifest(self, folder: str, stem: str,
                                members: List[str], meta: Optional[PresetMeta],
-                               include_exr: bool) -> Dict[str, Any]:
+                               include_exr: bool,
+                               dependencies: Optional[List[Dict[str, Any]]]
+                               = None) -> Dict[str, Any]:
         files = []
         lut_refs = 0
         for path in members:
@@ -249,6 +345,10 @@ class GalleryTransferService:
             "alpha_semantics": alpha,
             "exr_included": include_exr and precision == "exr_float32",
             "grade_lut_reference_count": lut_refs,
+            # BR07（schema 2）：依赖清单 + 便携性如实标注
+            "dependencies": [dict(dep) for dep in (dependencies or [])],
+            "portable": all(not dep.get("missing")
+                            for dep in (dependencies or [])),
         }
 
     # ── 检查 ───────────────────────────────────────────────────────────
@@ -271,7 +371,14 @@ class GalleryTransferService:
                         inspection.reject(REASON_NOT_A_BUNDLE,
                                           f"duplicate member: {info.filename}")
                         continue
-                    if not _is_safe_member_name(info.filename):
+                    # BR07：依赖资源条目允许 assets/luts/ 子目录（不落入
+                    # 包顶层），结构在 _validate 依赖段单独校验（越界拒绝）。
+                    if info.filename.startswith(DEPENDENCY_ARCHIVE_PREFIX):
+                        if ".." in info.filename.split("/"):
+                            inspection.reject(REASON_DEPENDENCY_ESCAPED,
+                                              info.filename)
+                            continue
+                    elif not _is_safe_member_name(info.filename):
                         inspection.reject(REASON_PATH_ESCAPE,
                                           info.filename)
                         continue
@@ -304,10 +411,35 @@ class GalleryTransferService:
             inspection.reject(REASON_NOT_A_BUNDLE, "bad manifest")
             return inspection
         schema = manifest.get("schema")
-        if type(schema) is not int or schema != EXPORT_SCHEMA:
+        if type(schema) is not int or not 1 <= schema <= EXPORT_SCHEMA:
             inspection.reject(REASON_FUTURE_SCHEMA, f"schema {schema}")
             return inspection
         inspection.manifest = manifest
+        # BR07：依赖条目校验（归档名必须位于 assets/luts/ 纯文件名空间、
+        # sha256 格式合法、条目真实存在于包内——越界资源条目直接拒绝）
+        for dep in manifest.get("dependencies") or []:
+            if not isinstance(dep, dict):
+                inspection.reject(REASON_NOT_A_BUNDLE, "bad dependency")
+                return inspection
+            if dep.get("bundled"):
+                archive = dep.get("archive")
+                digest = dep.get("sha256")
+                if not isinstance(archive, str) \
+                        or not archive.startswith(DEPENDENCY_ARCHIVE_PREFIX) \
+                        or not _is_safe_member_name(
+                            os.path.basename(archive)) \
+                        or "/" in archive[len(DEPENDENCY_ARCHIVE_PREFIX):]:
+                    inspection.reject(REASON_DEPENDENCY_ESCAPED,
+                                      repr(archive))
+                    return inspection
+                if archive not in inspection.members:
+                    inspection.reject(REASON_NOT_A_BUNDLE,
+                                      f"dependency member missing: {archive}")
+                    return inspection
+                if not isinstance(digest, str) or len(digest) != 64:
+                    inspection.reject(REASON_NOT_A_BUNDLE,
+                                      f"bad dependency hash: {archive}")
+                    return inspection
         files = manifest.get("files")
         still = manifest.get("still", {})
         if (not isinstance(files, list) or not isinstance(still, dict)
@@ -460,6 +592,11 @@ class GalleryTransferService:
                     if progress_callback is not None:
                         progress_callback(index, len(inspection.members))
 
+            # BR07：随包依赖安装进库受管 LUTs/ 并重写 staged grade 引用；
+            # 缺失依赖如实告警（引用型包不冒充完整便携）。
+            warnings.extend(self._install_dependencies(
+                zip_path, txn_dir, manifest, staged))
+
             # 身份换发在 staging 完成（BR02）：文件提交之前；失败整笔拒绝
             if identity_action == "reallocate" and origin_id:
                 grade_name = next(
@@ -519,6 +656,107 @@ class GalleryTransferService:
             affected_still_ids=(stem,), warnings=tuple(warnings))
 
     # ── 内部 ───────────────────────────────────────────────────────────
+
+    def _install_dependencies(self, zip_path: str, txn_dir: str,
+                              manifest: Dict[str, Any],
+                              staged: List[Tuple[str, str]]) -> List[str]:
+        """安装随包依赖（BR07）：受管 ``LUTs/`` 目录 + 重写 grade 引用。
+
+        - bundled 依赖：解压→sha256 校验→安装为
+          ``<root>/LUTs/<sha8>_<name>``（同内容幂等复用）；staged grade
+          内的 ``active_lut_path`` 重写到安装路径——换机器/换库根导入后
+          仍解析到相同内容（hash 不变）。
+        - missing／schema 1 引用型包：不装不改，warnings 如实说明
+          （grade 保留原引用，缺失不静默）。
+        - 依赖安装是**附加性**资源写入（temp＋replace 原子）；崩溃残留
+          最多是受管目录里的孤儿资源文件，下次导入按 sha 复用。
+        """
+        deps = manifest.get("dependencies") or []
+        if not deps:
+            return []
+        warnings: List[str] = []
+        lut_root = os.path.join(self._repository.root, DEPENDENCY_DIR_NAME)
+        rewrites: Dict[str, str] = {}
+        try:
+            os.makedirs(lut_root, exist_ok=True)
+        except OSError as exc:
+            raise _ImportVerifiedError(REASON_IO_ERROR,
+                                       f"cannot create LUTs dir: {exc}")
+        for dep in deps:
+            name = dep.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            if not dep.get("bundled"):
+                warnings.append(
+                    f"lut not in package: {name} "
+                    f"({dep.get('reason') or 'reference-only package'}) — "
+                    f"grade keeps original reference")
+                continue
+            archive = dep.get("archive")
+            expected = dep.get("sha256")
+            tmp = os.path.join(txn_dir, "dep-" + os.path.basename(archive))
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zf, \
+                        open(tmp, "wb") as out:
+                    shutil.copyfileobj(zf.open(archive), out)
+            except (OSError, zipfile.BadZipFile, KeyError) as exc:
+                raise _ImportVerifiedError(REASON_NOT_A_BUNDLE,
+                                           f"dependency {archive}: {exc}")
+            digest = _sha256_file(tmp)
+            if digest != expected:
+                _silent_remove(tmp)
+                raise _ImportVerifiedError(REASON_HASH_MISMATCH,
+                                           str(archive))
+            target = os.path.join(lut_root, f"{digest[:8]}_{name}")
+            if not (os.path.isfile(target)
+                    and _sha256_file(target) == digest):
+                os.replace(tmp, target)
+            rewrites[str(dep.get("source"))] = target
+            warnings.append(f"lut installed: {target}")
+        if rewrites:
+            grade_name = next(
+                (f["name"] for f in manifest.get("files", [])
+                 if f.get("role") == BUNDLE_ROLE_GRADE), None)
+            staged_by_name = dict(staged)
+            if grade_name and grade_name in staged_by_name:
+                self._rewrite_staged_grade_references(
+                    staged_by_name[grade_name], rewrites)
+        return warnings
+
+    @staticmethod
+    def _rewrite_staged_grade_references(staged_topos: str,
+                                         rewrites: Dict[str, str]) -> None:
+        """把 staged grade 内的依赖引用重写到本库安装路径（staging 内）。"""
+        try:
+            with zipfile.ZipFile(staged_topos, "r") as zf:
+                names = zf.namelist()
+                project_raw = zf.read("project.json")
+                payload = {name: zf.read(name)
+                           for name in names if name != "project.json"}
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            raise _ImportVerifiedError(REASON_NOT_A_BUNDLE,
+                                       f"grade rewrite failed: {exc}")
+        try:
+            project = json.loads(project_raw)
+        except ValueError as exc:
+            raise _ImportVerifiedError(REASON_NOT_A_BUNDLE,
+                                       f"grade json broken: {exc}")
+        changed = False
+        for layer in project.get("layers") or []:
+            if isinstance(layer, dict):
+                ref = layer.get("active_lut_path")
+                if isinstance(ref, str) and ref in rewrites:
+                    layer["active_lut_path"] = rewrites[ref]
+                    changed = True
+        if not changed:
+            return
+        tmp = staged_topos + ".rewritten"
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, data in payload.items():
+                zf.writestr(name, data)
+            zf.writestr("project.json",
+                        json.dumps(project, ensure_ascii=False, indent=1))
+        os.replace(tmp, staged_topos)
 
     def _resolve_import_stem(self, folder: str, base_stem: str,
                              explicit: bool
