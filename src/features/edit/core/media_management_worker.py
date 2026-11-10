@@ -35,6 +35,9 @@ __all__ = [
 KIND_COLLECT = "collect"
 KIND_CONSOLIDATE = "consolidate"
 
+#: R04：dependencies.json / 归档报告 / 工程包等小额产出的保守余量
+_SIDECAR_SLACK_BYTES = 64 << 20
+
 
 # ================================================================
 # 空间预检
@@ -60,13 +63,23 @@ def _asset_paths(project: Any, asset_ids: Optional[Iterable[str]] = None) -> lis
 def estimate_collect_bytes(project: Any, *,
                            include_unused: bool = True,
                            sequences: Iterable[Any] = ()) -> int:
-    """收集空间估算：待复制媒体文件字节和（保守，缺失文件不计）。"""
+    """收集空间估算：待复制媒体 + LUT 闭包 + 清单/工程包余量。
+
+    R04（媒体池复查）：估算覆盖收集任务实际写出的全部产物——媒体
+    文件、LUT 依赖（与归档收集共用 :func:`lut_dependency_paths`，两处
+    不再各维护一份近似清单）、dependencies.json/报告/工程包的小额
+    余量。仍是保守上界（宁可误拒不写满磁盘）。
+    """
     if include_unused:
-        return _existing_files_size(_asset_paths(project))
-    from src.features.edit.core.asset_usage_index import build_asset_usage_index
-    index = build_asset_usage_index(sequences, project)
-    used = set(index.used_asset_ids())
-    return _existing_files_size(_asset_paths(project, used))
+        media = _existing_files_size(_asset_paths(project))
+    else:
+        from src.features.edit.core.asset_usage_index import build_asset_usage_index
+        index = build_asset_usage_index(sequences, project)
+        used = set(index.used_asset_ids())
+        media = _existing_files_size(_asset_paths(project, used))
+    from src.features.edit.core.project_archive import lut_dependency_paths
+    luts = _existing_files_size(sorted(lut_dependency_paths(project)))
+    return media + luts + _SIDECAR_SLACK_BYTES
 
 
 def estimate_consolidate_bytes(project: Any,

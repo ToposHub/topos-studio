@@ -172,6 +172,101 @@ class ArchiveReport:
         }
 
 
+#: R02（媒体池复查）：单文件复制前的最低预留空间（哈希读缓存/元数据余量）
+_MIN_FREE_SLACK_BYTES = 1 << 20
+
+
+def _preexisting_names(dir_path: str) -> set[str]:
+    """R02：目标子目录既有条目名（大小写不敏感键）。
+
+    这些名字进入唯一名空间后，本轮收集的所有目标名都会避开它们——
+    目标目录已有文件（含 LUT/manifest 之外的同名媒体）绝不被覆盖，
+    冲突策略 = 追加序号改名，既有文件字节保持不变。
+    """
+    try:
+        return {name.casefold() for name in os.listdir(dir_path)}
+    except OSError:
+        return set()
+
+
+def _free_bytes(path: str) -> Optional[int]:
+    """R02：持续空间检查——目标所在卷剩余字节（探测失败返回 None）。"""
+    try:
+        return shutil.disk_usage(path).free
+    except OSError:
+        return None
+
+
+def _source_size_bytes(path: str) -> int:
+    """源文件/目录树的磁盘字节数（目录素材递归求和；失败返回 0）。"""
+    if os.path.isdir(path):
+        total = 0
+        for root, _dirs, files in os.walk(path):
+            for filename in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, filename))
+                except OSError:
+                    continue
+        return total
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _remove_partial(dest_path: str, src: str) -> None:
+    """R02：复制失败只清理本任务刚创建的半成品。
+
+    目标名经唯一名空间分配（不与既有文件重名），因此 dest_path 处的
+    内容只可能是本轮写入的半成品；再用 realpath 双保险确认不是源
+    自身（源/目标相同或别名时绝不误删源文件）。
+    """
+    try:
+        if os.path.realpath(dest_path) == os.path.realpath(src):
+            return
+        if os.path.isdir(dest_path) and not os.path.islink(dest_path):
+            shutil.rmtree(dest_path)
+        else:
+            os.remove(dest_path)
+    except OSError:
+        logger.debug("archive partial cleanup failed: %s", dest_path,
+                     exc_info=True)
+
+
+def lut_dependency_paths(project: Any) -> set[str]:
+    """M20.2 LUT 闭包扫描（调色栈 + 合成图 LUT 节点）。
+
+    从 :func:`collect_project` 抽出共用：归档收集与 Media Management
+    的空间估算（R04）消费同一份依赖路径，避免两处近似清单漂移。
+    """
+    lut_paths: set[str] = set()
+    try:
+        for stack in (getattr(project, "color_stacks", None) or {}).values():
+            lp = getattr(stack, "lut_path", None)
+            if lp:
+                lut_paths.add(str(lp))
+            for layer in (getattr(stack, "layers", None) or ()):
+                if isinstance(layer, dict):
+                    llp = layer.get("active_lut_path") or layer.get("lut_path")
+                    if llp:
+                        lut_paths.add(str(llp))
+        # N11 余项：Composite 图的 LUT 闭包——compositions[].nodes[]
+        # （NodeEngine 序列化 dict）中 lut 节点 parameters["lut_path"]
+        # 引用的外部 .cube/.3dl 随归档（旧实现只遍历调色栈，合成图
+        # LUT 被静默丢弃=恢复断链）。
+        for comp in (getattr(project, "compositions", None) or {}).values():
+            for node in (getattr(comp, "nodes", None) or ()):
+                if not isinstance(node, dict):
+                    continue
+                params = node.get("parameters") or {}
+                nlp = params.get("lut_path")
+                if nlp:
+                    lut_paths.add(str(nlp))
+    except Exception:  # noqa: BLE001 — 收集失败不阻断媒体归档
+        logger.exception("LUT dependency collection failed")
+    return lut_paths
+
+
 def _unique_dest_name(base: str, used: set[str]) -> str:
     """W10：目标名唯一性按大小写不敏感键判定。
 
@@ -385,7 +480,12 @@ def collect_project(
     media_root = os.path.join(target_dir, media_dir)
     os.makedirs(media_root, exist_ok=True)
 
-    used_names: set[str] = set()
+    # R02（媒体池复查）：目标目录预检——既有文件名进入唯一名空间，
+    # 本轮所有目标名避开它们（冲突 = 追加序号改名），既有文件字节
+    # 保持不变；dependencies.json 同一所有权策略（已有即保留）。
+    used_names: set[str] = _preexisting_names(media_root)
+    manifest_path = os.path.join(target_dir, "dependencies.json")
+    manifest_preexisting = os.path.exists(manifest_path)
     records: list[ArchiveFileRecord] = []
     missing_usage: dict[str, tuple[str, ...]] = {}
     skipped_unused: list[str] = []
@@ -410,31 +510,10 @@ def collect_project(
     lut_records: list[ArchiveFileRecord] = []
     lut_relink_map: dict[str, str] = {}
     lut_root = os.path.join(target_dir, "luts")
-    lut_paths: set[str] = set()
-    try:
-        for stack in (getattr(project, "color_stacks", None) or {}).values():
-            lp = getattr(stack, "lut_path", None)
-            if lp:
-                lut_paths.add(str(lp))
-            for layer in (getattr(stack, "layers", None) or ()):
-                if isinstance(layer, dict):
-                    llp = layer.get("active_lut_path") or layer.get("lut_path")
-                    if llp:
-                        lut_paths.add(str(llp))
-        # N11 余项：Composite 图的 LUT 闭包——compositions[].nodes[]
-        # （NodeEngine 序列化 dict）中 lut 节点 parameters["lut_path"]
-        # 引用的外部 .cube/.3dl 随归档（旧实现只遍历调色栈，合成图
-        # LUT 被静默丢弃=恢复断链）。
-        for comp in (getattr(project, "compositions", None) or {}).values():
-            for node in (getattr(comp, "nodes", None) or ()):
-                if not isinstance(node, dict):
-                    continue
-                params = node.get("parameters") or {}
-                nlp = params.get("lut_path")
-                if nlp:
-                    lut_paths.add(str(nlp))
-    except Exception:  # noqa: BLE001 — 收集失败不阻断媒体归档
-        logger.exception("LUT dependency collection failed")
+    # R02：既有 LUT 目录预检进唯一名空间（同名冲突改名，不覆盖）。
+    if os.path.isdir(lut_root):
+        used_names |= _preexisting_names(lut_root)
+    lut_paths = lut_dependency_paths(project)
     if lut_paths:
         os.makedirs(lut_root, exist_ok=True)
         for lut_path in sorted(lut_paths):
@@ -445,6 +524,11 @@ def collect_project(
                 os.path.basename(lut_path), "lut")
             dest = _unique_dest_name(base, used_names)
             src_file = os.path.join(lut_root, dest)
+            # R04：持续空间检查（LUT 与媒体同一策略）。
+            free = _free_bytes(lut_root)
+            if free is not None and free < _source_size_bytes(lut_path) + _MIN_FREE_SLACK_BYTES:
+                warnings.append(f"目标空间不足，LUT 未收集：{lut_path}")
+                continue
             try:
                 import shutil as _shutil
                 _shutil.copy2(lut_path, src_file)
@@ -502,12 +586,33 @@ def collect_project(
             dest_name = _unique_dest_name(base, used_names)
             dest_path = os.path.join(media_root, dest_name)
 
+            # R04（媒体池复查）：持续空间检查——预检只是启动时点的保守
+            # 估算，长任务中途磁盘被填满时在这里按文件失败（截断半成品
+            # 即时清理），不再误报收集成功。
+            src_size = _source_size_bytes(src)
+            free = _free_bytes(media_root)
+            if (src_size > 0 and free is not None
+                    and free < src_size + _MIN_FREE_SLACK_BYTES):
+                warnings.append(
+                    f"目标空间不足（需约 {src_size} 字节），未复制：{src}")
+                records.append(ArchiveFileRecord(
+                    asset_id=asset_id,
+                    display_name=asset.display_name,
+                    source_path=src,
+                    archived_path="",
+                    status=STATUS_COPY_FAILED,
+                ))
+                continue
+
             try:
                 if os.path.isdir(src):
                     shutil.copytree(src, dest_path, dirs_exist_ok=True)
                 else:
                     shutil.copy2(src, dest_path)
             except OSError as exc:
+                # R02：失败只删除本任务刚创建的半成品（目标名不与既有
+                # 文件重名；realpath 双保险防源/目标别名误删源）。
+                _remove_partial(dest_path, src)
                 logger.warning("Archive copy failed for %s: %s", src, exc)
                 records.append(ArchiveFileRecord(
                     asset_id=asset_id,
@@ -666,13 +771,17 @@ def collect_project(
 
     # M20.2b：字体/插件/模型身份闭包——dependencies.json 随归档写出
     # （不可复制项保留身份/版本与准确缺失诊断；字体不随包分发，许可）。
+    # R02：目标已有 dependencies.json 时保留原文件（不覆盖）。
     identity_manifest: dict[str, Any] = {}
     try:
         import json as _json
         identity_manifest = build_identity_manifest(project, sequences)
-        manifest_path = os.path.join(target_dir, "dependencies.json")
-        with open(manifest_path, "w", encoding="utf-8") as fh:
-            _json.dump(identity_manifest, fh, ensure_ascii=False, indent=2)
+        if manifest_preexisting:
+            warnings.append(
+                "目标目录已有 dependencies.json，保留原文件（不覆盖）")
+        else:
+            with open(manifest_path, "w", encoding="utf-8") as fh:
+                _json.dump(identity_manifest, fh, ensure_ascii=False, indent=2)
         for font in identity_manifest.get("fonts", ()):
             if font.get("status") != "resolved":
                 warnings.append(
