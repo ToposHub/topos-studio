@@ -32,7 +32,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QMenu
 
 from src.features.edit.core.viewport_playback_arbiter import (
     PAGE_DELIVER,
@@ -322,6 +323,56 @@ class ViewportPlaybackCoordinator(QObject):
                          decision.reason)
             self.status_message.emit(describe_reason(decision.reason))
         self.snapshot_changed.emit(decision.snapshot)
+
+
+#: 原生菜单栏生命周期事件（PyQt6 绑定按版本暴露；缺省时空集）
+_MENU_BAR_EVENT_TYPES = tuple(
+    event_type for event_type in (
+        getattr(QEvent.Type, "MenuBarAboutToBeShown", None),
+        getattr(QEvent.Type, "MenuBarAboutToBeHidden", None),
+    ) if event_type is not None)
+
+
+class MenuTransportGate(QObject):
+    """BR08：Qt／原生菜单生命周期 → transport 门（``set_menu_open`` feed）。
+
+    菜单打开期间 Space/J/K/L 不得触发底层播放：``QMenu`` 的 Show/Hide
+    与原生菜单栏的 MenuBarAboutToBeShown/Hidden 都馈入协调器；嵌套子
+    菜单收起时以 ``activePopupWidget`` 判定整体是否仍打开（计数易错，
+    不用）。事件过滤装在 QApplication 上——新建菜单无需逐个接线。
+    """
+
+    def __init__(self, coordinator, parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self._coordinator = coordinator
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        etype = event.type()
+        if etype in (QEvent.Type.Show, QEvent.Type.ShowToParent):
+            if isinstance(watched, QMenu):
+                self._coordinator.set_menu_open(True)
+        elif etype in (QEvent.Type.Hide, QEvent.Type.HideToParent):
+            if isinstance(watched, QMenu):
+                app = QApplication.instance()
+                popup = app.activePopupWidget() if app is not None else None
+                self._coordinator.set_menu_open(popup is not None)
+        elif etype in _MENU_BAR_EVENT_TYPES:
+            # 原生菜单栏事件（PyQt6 绑定可用时生效；macOS 原生下拉菜单
+            # 不经 QWidget，能力范围见 BR09 完成报告声明）
+            self._coordinator.set_menu_open(
+                etype == _MENU_BAR_EVENT_TYPES[-1])
+        return False
+
+
+def install_menu_transport_gate(
+        coordinator: "ViewportPlaybackCoordinator",
+        app: Optional[QApplication] = None) -> MenuTransportGate:
+    """把菜单生命周期门接到协调器（app 级事件过滤，一次安装）。"""
+    app = app or QApplication.instance()
+    gate = MenuTransportGate(coordinator, parent=app)
+    if app is not None:
+        app.installEventFilter(gate)
+    return gate
 
 
 def install_viewport_playback_coordinator(
