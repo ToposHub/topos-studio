@@ -2724,6 +2724,77 @@ class CreateSmartBinCommand:
 
 
 @dataclass(frozen=True)
+class UpdateSmartBinRulesCommand:
+    """P1-1: 编辑 Smart Bin 的名称与规则树（单步撤销）。
+
+    apply 先校验规则树（有 rules 键时 SmartBinRuleError fail-loud），
+    再整体替换；undo 恢复首次 apply 快照的完整 SmartBin（含未知
+    filter_params 键）。
+    """
+
+    command_id: str
+    label: str
+    smart_bin: SmartBin
+    _old_bin: SmartBin | None = None
+    _applied: bool = False
+
+    def apply(self, project: EditProject) -> EditProject:
+        from src.features.edit.core.smart_bin_rules import (
+            has_rule_tree, validate_rule_tree,
+        )
+        if has_rule_tree(self.smart_bin.filter_params):
+            validate_rule_tree(self.smart_bin.filter_params.get("rules"))
+        if self.smart_bin.bin_id not in project.smart_bins:
+            raise ValueError(f"Smart bin not found: {self.smart_bin.bin_id}")
+        if not self._applied:
+            object.__setattr__(
+                self, "_old_bin",
+                project.smart_bins[self.smart_bin.bin_id])
+            object.__setattr__(self, "_applied", True)
+        return project.replace_smart_bin(self.smart_bin)
+
+    def undo(self, project: EditProject) -> EditProject:
+        if not self._applied or self._old_bin is None:
+            logger.warning("UpdateSmartBinRulesCommand undo before apply")
+            return project
+        return project.replace_smart_bin(self._old_bin)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "UpdateSmartBinRulesCommand",
+            "label": self.label,
+            "smart_bin": {
+                "bin_id": self.smart_bin.bin_id,
+                "name": self.smart_bin.name,
+                "filter_type": self.smart_bin.filter_type,
+                "filter_params": dict(self.smart_bin.filter_params),
+            },
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "UpdateSmartBinRulesCommand":
+        raw = data.get("smart_bin") or {}
+        params = raw.get("filter_params")
+        return UpdateSmartBinRulesCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Edit Smart Bin"),
+            smart_bin=SmartBin(
+                bin_id=raw.get("bin_id", ""),
+                name=raw.get("name", ""),
+                filter_type=raw.get("filter_type", "custom"),
+                filter_params=dict(params) if isinstance(params, dict) else {},
+            ),
+        )
+
+    @staticmethod
+    def create(smart_bin: SmartBin,
+               *, label: str = "Edit Smart Bin") -> "UpdateSmartBinRulesCommand":
+        return UpdateSmartBinRulesCommand(
+            command_id=str(uuid.uuid4()), label=label, smart_bin=smart_bin)
+
+
+@dataclass(frozen=True)
 class DeleteSmartBinCommand:
     """Command to delete a user smart bin (P1-12). Undo restores it."""
 

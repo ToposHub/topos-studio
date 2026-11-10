@@ -805,7 +805,16 @@ class SmartBin:
                     assets.append(asset)
 
         elif self.filter_type == "custom":
-            # 自定义过滤条件
+            # P1-1 规则树（v2 schema）：嵌套 AND/OR + 比较操作符 + 日期区间。
+            # 有 "rules" 键走规则树求值；否则走平铺 filter_params 路径
+            # （旧工程零迁移，两种形态可共存于同一工程）。
+            from src.features.edit.core.smart_bin_rules import (
+                evaluate_smart_bin_rules, has_rule_tree,
+            )
+            if has_rule_tree(self.filter_params):
+                return evaluate_smart_bin_rules(
+                    list(project.assets.values()), self.filter_params)
+            # 自定义过滤条件（平铺键）
             for asset in project.assets.values():
                 if self._matches_custom_filter(asset):
                     assets.append(asset)
@@ -2315,6 +2324,17 @@ class EditProject:
         """
         if smart_bin.bin_id in self.smart_bins:
             raise ValueError(f"Smart bin already exists: {smart_bin.bin_id}")
+        new_bins = dict(self.smart_bins)
+        new_bins[smart_bin.bin_id] = smart_bin
+        return self._with_smart_bins(new_bins)
+
+    def replace_smart_bin(self, smart_bin: SmartBin) -> EditProject:
+        """整体替换用户自建 Smart Bin（P1-1 规则编辑：名称/规则一起换）。
+
+        不存在的 id 抛 ValueError（编辑丢失时 fail-loud，不悄悄新建）。
+        """
+        if smart_bin.bin_id not in self.smart_bins:
+            raise ValueError(f"Smart bin not found: {smart_bin.bin_id}")
         new_bins = dict(self.smart_bins)
         new_bins[smart_bin.bin_id] = smart_bin
         return self._with_smart_bins(new_bins)

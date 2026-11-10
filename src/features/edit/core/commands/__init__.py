@@ -1015,6 +1015,7 @@ from .asset_commands import (
     UpdateClipFpsInterpretationCommand,
     BatchUpdateAssetLogCommand as BatchUpdateAssetLogCommand,
     CreateSmartBinCommand as CreateSmartBinCommand,
+    UpdateSmartBinRulesCommand as UpdateSmartBinRulesCommand,
     DeleteSmartBinCommand as DeleteSmartBinCommand,
     ReplaceMediaCommand as ReplaceMediaCommand,
     RelinkAssetCommand as RelinkAssetCommand,
