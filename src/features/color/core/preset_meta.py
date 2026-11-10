@@ -565,7 +565,11 @@ def align_alpha_domain(img: np.ndarray, semantics: str,
 
 def matches_query(preset_name: str, meta: Optional[PresetMeta],
                   query: str) -> bool:
-    """搜索匹配：预设名 / 来源片段名 / 元数据（大小写不敏感子串）。"""
+    """搜索匹配：预设名 / 来源片段名 / 元数据（大小写不敏感子串）。
+
+    BR04：搜索字段补齐 G02 引入的新元数据——label（用户标签）、
+    still_id（稳定身份）、timeline_name（来源时间线快照名）。
+    """
     q = (query or "").strip().lower()
     if not q:
         return True
@@ -575,6 +579,7 @@ def matches_query(preset_name: str, meta: Optional[PresetMeta],
             str(v) for v in (
                 meta.display_name, meta.clip_id, meta.source_transfer,
                 meta.source_primaries, meta.source_range,
+                meta.label, meta.still_id, meta.timeline_name,
             ) if v
         )
     return q in hay.lower()

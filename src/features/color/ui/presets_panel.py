@@ -9,7 +9,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame,
                              QToolButton, QSlider, QLabel, QLineEdit,
                              QMenu, QInputDialog, QMessageBox,
                              QDockWidget)
-from PyQt6.QtCore import (QStandardPaths, pyqtSignal, Qt, QSize, QRect)
+from PyQt6.QtCore import (QStandardPaths, QObject, pyqtSignal, Qt, QSize,
+                          QRect)
 from PyQt6.QtGui import (QPainter, QColor, QBrush, QPen, QPixmap, QLinearGradient)
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
@@ -17,6 +18,17 @@ from src.shared.assets.icon_manager import get_icon
 from src.features.color.core.gallery_contracts import BUNDLE_SUFFIX_BY_ROLE
 
 logger = logging.getLogger(__name__)
+
+#: 大库阈值：相册条目数达到该值时扫描走后台 runner（BR04），小相册
+#: 保持同步路径（与媒体池 P0-4 的 MEDIA_POOL_ASYNC_QUERY_THRESHOLD
+#: 同一模式）。测试可经 ``_async_query_threshold`` 注入更小值。
+GALLERY_ASYNC_QUERY_THRESHOLD = 2000
+
+
+class _AsyncScanBridge(QObject):
+    """工作线程 → GUI 线程的队列化投递桥（跨线程 emit 自动排队）。"""
+
+    delivered = pyqtSignal(object, object)   # query, result
 
 
 def _resolve_presets_root() -> str:
@@ -84,9 +96,19 @@ class PresetsPanel(QWidget):
             GalleryQueryService,
         )
         self._repository = GalleryFolderRepository(self.presets_root)
-        # G05：扫描经索引服务——目录未变（mtime 一致）时复用已解析条目，
-        # 重扫零磁盘 I/O；rename/delete/capture 都改目录 mtime 自动失效。
+        # G05：扫描经索引服务——分层签名（逐条目 stat 多重集）未变时
+        # 复用已解析条目，重扫零磁盘 I/O；rename/delete/capture 改目录、
+        # 原地改 meta/sidecar 改文件 stat，都会自动失效（BR04）。
         self._query_service = GalleryQueryService(self._repository)
+        # BR04：大库走后台 runner（同 album 合并保留最新＋代际守卫），
+        # 结果经队列化桥回 GUI 线程；小相册保持同步路径。
+        self._async_query_threshold = GALLERY_ASYNC_QUERY_THRESHOLD
+        self._scan_generation = 0
+        self._last_scan_signature: Optional[str] = None
+        self._async_bridge = _AsyncScanBridge()
+        self._async_bridge.delivered.connect(self._on_async_query_delivered)
+        self._query_service.attach_runner(
+            on_result=self._async_bridge.delivered.emit)
         # G03：rename/delete 统一走 bundle 事务服务（不再面板内逐文件操作）
         from src.features.color.core.gallery_bundle_service import (
             GalleryBundleService,
@@ -363,30 +385,43 @@ class PresetsPanel(QWidget):
     def showEvent(self, event) -> None:
         """面板重新可见时同步外部变化。
 
-        只有当前目录 mtime 与上次扫描不同才重扫（外部增删/改名必然
-        改目录 mtime）——未变化时零成本，也不重建视图（保留当前项与
-        选中）。"""
+        BR04：按**分层文件签名**比较——目录 mtime 检测不到的原地修改
+        （meta/JPEG/EXR/grade 改写）也会触发重扫；未变化时零成本，也不
+        重建视图（保留当前项与选中）。"""
         super().showEvent(event)
         if getattr(self, "_gallery", None) is None:
             return
-        try:
-            mtime = os.stat(self._current_folder).st_mtime_ns
-        except OSError:
-            return
-        if mtime != getattr(self, "_last_scan_folder_mtime", None):
+        from src.features.color.core.gallery_query_service import (
+            GalleryQueryIndex,
+        )
+        signature = GalleryQueryIndex.folder_signature(self._current_folder)
+        if signature != getattr(self, "_last_scan_signature", None):
             self.scan_presets()
 
-    def _selected_paths(self):
-        return {item.data(Qt.ItemDataRole.UserRole)
-                for item in self.list_widget.selectedItems()}
+    def _selected_keys(self):
+        """选中键集合：优先 still_id（BR04——rename 后选择跟随身份），
+        无 meta/ID 的降级条目回退路径（明确的迁移回退，不猜）。"""
+        keys = set()
+        for item in self.list_widget.selectedItems():
+            meta = item.data(Qt.ItemDataRole.UserRole + 1)
+            still_id = getattr(meta, "still_id", None)
+            if still_id:
+                keys.add(f"id:{still_id}")
+            else:
+                keys.add(f"path:{item.data(Qt.ItemDataRole.UserRole)}")
+        return keys
 
-    def _restore_selection(self, paths) -> None:
-        """重扫后按路径恢复仍在场的选中（外部删除的条目自然清出）。"""
-        if not paths:
+    def _restore_selection(self, keys) -> None:
+        """重扫后按 still_id 恢复仍在场的选中（无 ID 回退路径）。"""
+        if not keys:
             return
         for index in range(self.list_widget.count()):
             item = self.list_widget.item(index)
-            if item.data(Qt.ItemDataRole.UserRole) in paths:
+            meta = item.data(Qt.ItemDataRole.UserRole + 1)
+            still_id = getattr(meta, "still_id", None)
+            key = (f"id:{still_id}" if still_id else
+                   f"path:{item.data(Qt.ItemDataRole.UserRole)}")
+            if key in keys:
                 item.setSelected(True)
 
     # --- G01: 能力宿主接入（未安装时保持旧的恒启用行为） ---
@@ -412,35 +447,70 @@ class PresetsPanel(QWidget):
         if not cap.supported and cap.reason:
             action.setToolTip(cap.reason)
 
-    def scan_presets(self) -> None:
+    def scan_presets(self, force: bool = False) -> None:
         """Scan current folder for .topos preset files and populate the grid.
 
         G01：磁盘读取经 ``GalleryFolderRepository.query``（与能力宿主共用
-        同一查询事实源）；条目构建／UserRole／tooltip／搜索隐藏重放与旧
-        实现逐项一致（条目全部入列后按 matches_query 置 hidden——不把不
-        匹配条目从模型中剔除，重扫后过滤状态可回放）。
+        同一查询事实源）；条目全部入列后按 matches_query 置 hidden——
+        不把不匹配条目从模型中剔除，重扫后过滤状态可回放。
+
+        BR04：失效按**分层文件签名**（逐条目 stat 多重集——原地改
+        meta/sidecar 不改目录 mtime 也能检测）；``force=True`` 显式失效
+        强制重建（手动刷新）。相册条目数达到 ``_async_query_threshold``
+        时走后台 runner（同 album 合并保留最新＋代际守卫，结果经队列化
+        桥回 GUI 线程），小相册保持同步路径。
         """
         from src.features.color.core.gallery_contracts import GalleryQuery
+        from src.features.color.core.gallery_query_service import (
+            GalleryQueryIndex,
+        )
+        folder = self._current_folder
+        signature = GalleryQueryIndex.folder_signature(folder)
+        self._last_scan_signature = signature
+        if force:
+            try:
+                self._query_service.invalidate(
+                    self._repository.album_id_for_folder(folder))
+            except Exception:
+                self._query_service.invalidate()
+        if not os.path.isdir(folder):
+            self.list_widget.clear()
+            self._preset_meta_cache.clear()
+            self.delegate.clear_thumbnail_cache()
+            return
+        try:
+            album_id = self._repository.album_id_for_folder(folder)
+        except Exception:
+            album_id = None
+        if not album_id:
+            return
+        try:
+            entry_count = int(str(signature).split(":", 1)[0])
+        except ValueError:
+            entry_count = 0
+        runner = self._query_service.runner
+        if runner is not None and entry_count >= self._async_query_threshold:
+            # 大库：后台扫描——用户操作不卡 UI；结果回填前复核代际与相册
+            self._scan_generation += 1
+            runner.begin_generation()
+            runner.submit(GalleryQuery(
+                album_id=album_id,
+                request_revision=self._scan_generation))
+            return
+        result = self._query_service.query(GalleryQuery(album_id=album_id))
+        self._populate_from_result(result)
+
+    def _populate_from_result(self, result) -> None:
+        """按查询结果重建列表（同步/异步回填共用；选择按 still_id 恢复）。"""
         from src.features.color.core.preset_meta import matches_query
         # G11：重扫保留仍在场的选中（外部删除的条目自然清出选择）
-        selected_paths = self._selected_paths()
-        try:
-            self._last_scan_folder_mtime = \
-                os.stat(self._current_folder).st_mtime_ns
-        except OSError:
-            self._last_scan_folder_mtime = None
+        selected_keys = self._selected_keys()
         self.list_widget.clear()
         self._preset_meta_cache.clear()
         # AUD-25513：缩略图 QPixmap 缓存随目录重扫失效（重命名/删除/新增
         # 都可能改变磁盘内容）。
         self.delegate.clear_thumbnail_cache()
         folder = self._current_folder
-        if not os.path.isdir(folder):
-            return
-
-        result = self._query_service.query(GalleryQuery(
-            album_id=self._repository.album_id_for_folder(folder),
-        ))
         for still in result.stills:
             topos_path = os.path.join(folder, still.bundle.topos_name)
             preset_name = still.display_name
@@ -467,7 +537,29 @@ class PresetsPanel(QWidget):
         # Fresh items carry no sizeHint — pin them to the current column
         # cell so the grid stays flush after a rescan.
         self._gallery.after_scan()
-        self._restore_selection(selected_paths)
+        self._restore_selection(selected_keys)
+
+    def _on_async_query_delivered(self, query, result) -> None:
+        """后台扫描回填（GUI 线程）：代际与相册复核通过才重建列表。"""
+        try:
+            current_album = self._repository.album_id_for_folder(
+                self._current_folder)
+        except Exception:
+            current_album = None
+        if query.album_id != current_album:
+            return                      # 用户已切走相册：旧结果不回填
+        if query.request_revision != self._scan_generation:
+            return                      # 已有更新的扫描请求在途
+        if result.scan_error is not None:
+            logger.warning("gallery async scan failed for %s: %s",
+                           query.album_id, result.scan_error)
+            return
+        self._populate_from_result(result)
+
+    def closeEvent(self, event) -> None:
+        """关闭时停掉后台 runner（未执行任务丢弃，不触碰已销毁 UI）。"""
+        self._query_service.shutdown()
+        super().closeEvent(event)
 
     def _on_search_changed(self, text: str) -> None:
         """搜索词变化：对现有条目重放过滤（不重扫磁盘）。"""
