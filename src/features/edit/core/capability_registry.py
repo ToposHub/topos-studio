@@ -474,6 +474,22 @@ def build_capability_registry() -> CapabilityRegistry:
         ),
     ))
 
+    # P2-1：Cloud / Power Bins / 跨工程共享——协议已设计、实现为零。
+    # UNAVAILABLE 是诚实声明：服务具备前 UI 不得出现任何入口。
+    caps.append(Capability(
+        capability_id="cloud_power_bins",
+        title="Cloud / Power Bins（跨工程共享）",
+        status=CapabilityStatus.UNAVAILABLE,
+        evidence=(
+            "docs/architecture/media-cloud-sharing-protocol.md (协议设计稿)",
+        ),
+        notes=(
+            "未实现。身份/同步/冲突/权限/离线缓存/配额协议见设计文档；"
+            "具备云服务后按协议实施并把本条目升级（补实现/测试/生产"
+            "入口 evidence）。在此之前任何 UI 不得声明可用。"
+        ),
+    ))
+
     return CapabilityRegistry(
         capabilities=tuple(caps),
         generated_at=datetime.now(timezone.utc).isoformat(),
