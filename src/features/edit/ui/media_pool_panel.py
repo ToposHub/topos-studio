@@ -28,7 +28,7 @@ from enum import Enum, auto
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QLabel, QHBoxLayout,
-    QTreeWidget, QTreeWidgetItem, QSplitter, QFileDialog,
+    QTreeWidget, QTreeWidgetItem, QFileDialog,
     QProgressDialog, QMessageBox, QMenu, QDialog, QDialogButtonBox,
     QFormLayout, QLineEdit, QListView, QToolButton, QComboBox,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QSlider, QFrame, QPushButton,
@@ -48,6 +48,7 @@ from PyQt6.QtGui import (
 )
 import qtawesome as qta
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.ui.style_sheet import C
 from .media_pool_icons import pool_icon
 from src.shared.i18n.i18n import I18N
@@ -101,8 +102,12 @@ from src.features.edit.core.commands import (
     RenameAssetCommand,
     RenameBinCommand,
     MoveAssetToBinCommand,
+    MoveAssetBetweenBinsCommand,
     MoveBinCommand,
     MoveTimelineToBinCommand,
+    MoveTimelineBetweenBinsCommand,
+    UnfileAssetCommand,
+    UnfileTimelineCommand,
     RemoveAssetFromBinCommand,
     RemoveTimelineFromBinCommand,
     DuplicateAssetCommand,
@@ -1099,18 +1104,13 @@ class BinTreeWidget(QTreeWidget):
                             return
                     else:
                         asset_ids, timeline_ids = parse_media_pool_drag_mime(mime)
-                        # Option/Alt held = copy (duplicate assets); otherwise add references.
-                        if (
-                            event.modifiers() & Qt.KeyboardModifier.AltModifier
-                            and asset_ids
-                        ):
-                            handled = panel._duplicate_assets_to_bin(
-                                target_bin_id, asset_ids
-                            )
-                        else:
-                            handled = panel._handle_drop_into_bin(
-                                target_bin_id, asset_ids, timeline_ids
-                            )
+                        # P0-5：Alt/Option = 拷贝引用（多箱共存）；普通拖拽 = 移动。
+                        handled = panel._handle_drop_into_bin(
+                            target_bin_id, asset_ids, timeline_ids,
+                            copy=bool(
+                                event.modifiers()
+                                & Qt.KeyboardModifier.AltModifier),
+                        )
                         if handled:
                             self._clear_drop_target()
                             event.acceptProposedAction()
@@ -3187,17 +3187,12 @@ class AssetTreeWidget(QTreeWidget):
                 target_bin_id = panel._target_bin_at(pos, source="tree")
                 if target_bin_id is not None:
                     asset_ids, timeline_ids = parse_media_pool_drag_mime(mime)
-                    if (
-                        event.modifiers() & Qt.KeyboardModifier.AltModifier
-                        and asset_ids
-                    ):
-                        handled = panel._duplicate_assets_to_bin(
-                            target_bin_id, asset_ids
-                        )
-                    else:
-                        handled = panel._handle_drop_into_bin(
-                            target_bin_id, asset_ids, timeline_ids
-                        )
+                    # P0-5：Alt/Option = 拷贝引用（多箱共存）；普通拖拽 = 移动。
+                    handled = panel._handle_drop_into_bin(
+                        target_bin_id, asset_ids, timeline_ids,
+                        copy=bool(
+                            event.modifiers() & Qt.KeyboardModifier.AltModifier),
+                    )
                     if handled:
                         panel._set_drop_target_bin(None)
                         event.acceptProposedAction()
@@ -3849,17 +3844,12 @@ class AssetListView(QListView):
                 target_bin_id = panel._target_bin_at(pos, source=self)
                 if target_bin_id is not None:
                     asset_ids, timeline_ids = parse_media_pool_drag_mime(mime)
-                    if (
-                        event.modifiers() & Qt.KeyboardModifier.AltModifier
-                        and asset_ids
-                    ):
-                        handled = panel._duplicate_assets_to_bin(
-                            target_bin_id, asset_ids
-                        )
-                    else:
-                        handled = panel._handle_drop_into_bin(
-                            target_bin_id, asset_ids, timeline_ids
-                        )
+                    # P0-5：Alt/Option = 拷贝引用（多箱共存）；普通拖拽 = 移动。
+                    handled = panel._handle_drop_into_bin(
+                        target_bin_id, asset_ids, timeline_ids,
+                        copy=bool(
+                            event.modifiers() & Qt.KeyboardModifier.AltModifier),
+                    )
                     if handled:
                         panel._set_drop_target_bin(None)
                         event.acceptProposedAction()
@@ -5053,9 +5043,9 @@ class MediaPoolPanel(QWidget):
         self.search_box.hide()
         layout.addWidget(self.search_box)
 
-        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter = PanelSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
-        self.sidebar = QSplitter(Qt.Orientation.Vertical)
+        self.sidebar = PanelSplitter(Qt.Orientation.Vertical)
         self.sidebar.setChildrenCollapsible(False)
         self.sidebar.setMinimumWidth(100)
         self.bin_tree = BinTreeWidget()
@@ -10346,73 +10336,44 @@ class MediaPoolPanel(QWidget):
             self._refresh_tree()
         return moved
 
-    def _remove_items_from_current_bin(
+    def _unfile_items(
         self, asset_ids: List[str], timeline_ids: List[str]
     ) -> bool:
-        """Remove the given items from the bin currently being viewed.
+        """Move the given items back to Master（未归类）——移出全部普通箱。
 
-        Used when dragging items onto the root bin / sidebar root node: the
-        items stay in the project but lose their reference in the active bin
-        (they "fall back" to the un-filed root view).
+        P0-5 移动语义：拖到 root/Master 节点是"移动到未归类"（exclusive），
+        不是只从当前箱拿掉一个引用。素材/时间线本体保留，undo 一次恢复
+        全部跨箱归属。
         """
         if not self._project:
             return False
-        current_bin_id = self._current_bin_id
-        if not current_bin_id or current_bin_id == self._project.root_bin_id:
-            return False  # Already at root — nothing to remove from.
-        current_bin = self._project.bins.get(current_bin_id)
-        if current_bin is None:
-            return False
-
         sub_commands: list[Any] = []
         for aid in asset_ids:
-            if aid in current_bin.asset_ids:
-                sub_commands.append(
-                    RemoveAssetFromBinCommand.create(aid, current_bin_id)
-                )
+            if aid not in self._project.assets:
+                continue
+            # root 是隐式容器不算"归类"：只有用户箱引用才需要 unfile
+            if any(
+                aid in b.asset_ids
+                for bid, b in self._project.bins.items()
+                if bid != self._project.root_bin_id
+            ):
+                sub_commands.append(UnfileAssetCommand.create(aid))
         for tid in timeline_ids:
-            if tid in current_bin.timeline_ids:
-                sub_commands.append(
-                    RemoveTimelineFromBinCommand.create(tid, current_bin_id)
-                )
+            if tid not in self._project.timelines:
+                continue
+            if any(
+                tid in b.timeline_ids
+                for bid, b in self._project.bins.items()
+                if bid != self._project.root_bin_id
+            ):
+                sub_commands.append(UnfileTimelineCommand.create(tid))
         if not sub_commands:
             return False
-        macro = ProjectMacroCommand.create("Remove from bin", sub_commands)
+        macro = ProjectMacroCommand.create("Move to Master", sub_commands)
         try:
             self._project = self._command_stack.execute(macro, self._project)
         except ValueError as e:
-            logger.warning(f"Remove from bin failed: {e}")
-            return False
-        self.project_changed.emit(self._project)
-        self._refresh_tree(refresh_bins=True)
-        return True
-
-    def _duplicate_assets_to_bin(
-        self, target_bin_id: str, asset_ids: List[str]
-    ) -> bool:
-        """Duplicate (copy) dragged assets into a bin (Option/Alt-drop).
-
-        Unlike ``_handle_drop_into_bin`` (which only adds references), this
-        creates brand-new asset entries that share the source files. This is
-        the Finder "Option-drag = copy" semantic.
-        """
-        if not self._project or not asset_ids:
-            return False
-        if target_bin_id == self._project.root_bin_id:
-            return False  # No meaningful target for duplication at root.
-        if target_bin_id not in self._project.bins:
-            return False
-        new_ids = [aid for aid in asset_ids if aid in self._project.assets]
-        if not new_ids:
-            return False
-        sub_commands = [
-            DuplicateAssetCommand.create(aid, target_bin_id) for aid in new_ids
-        ]
-        macro = ProjectMacroCommand.create("Copy assets into bin", sub_commands)
-        try:
-            self._project = self._command_stack.execute(macro, self._project)
-        except ValueError as e:
-            logger.warning(f"Duplicate-drop into bin failed: {e}")
+            logger.warning(f"Move to Master failed: {e}")
             return False
         self.project_changed.emit(self._project)
         self._refresh_tree(refresh_bins=True)
@@ -10423,55 +10384,93 @@ class MediaPoolPanel(QWidget):
         target_bin_id: str,
         asset_ids: List[str],
         timeline_ids: List[str],
+        copy: bool = False,
     ) -> bool:
-        """Move the given assets/timelines into a bin (drag-and-drop handler).
+        """Move/copy the given assets/timelines into a bin (drag-and-drop).
 
         Called by ``AssetListView.dropEvent``, ``AssetTreeWidget.dropEvent``
         and ``BinTreeWidget.dropEvent``. Builds a single macro command so the
-        whole drag is one undo unit. Assets/timelines are *added* to the
-        target bin (multi-bin reference semantics — they may already exist in
-        other bins).
+        whole drag is one undo unit.
+
+        P0-5 移动语义（对齐 Resolve 呈现；存储保持引用式、旧工程零迁移）：
+        - ``copy=False``（普通拖拽）＝移动：目标箱成为唯一普通箱归属，
+          其它箱移除引用（MoveAssetBetweenBinsCommand，undo 恢复完整
+          跨箱归属映射）。
+        - ``copy=True``（Alt/Option 拖拽）＝拷贝引用：仅向目标箱加引用，
+          可多箱共存（MoveAssetToBinCommand，即引用式加法）。
+        - 拖到 root/Master＝移回未归类：移出全部普通箱（Unfile*Command）。
+        - 素材实体复制不在拖拽路径：右键菜单 Duplicate / Cmd+D。
 
         Args:
-            target_bin_id: Destination bin ID. Must not be the root bin
-                (root is implicit — dropping there is a no-op).
-            asset_ids: Asset IDs to add to the bin.
-            timeline_ids: Timeline IDs to add to the bin.
+            target_bin_id: Destination bin ID. Root bin = move back to
+                Master (un-file from every regular bin).
+            asset_ids: Asset IDs to move/copy.
+            timeline_ids: Timeline IDs to move/copy.
+            copy: ``True`` = add references (Alt-drop); ``False`` = move.
 
         Returns:
-            ``True`` if at least one item was added.
+            ``True`` if at least one item was moved/copied.
         """
         if not self._project:
             return False
         if not asset_ids and not timeline_ids:
             return False
-        # Dropping onto the root bin means "remove from current bin" — i.e.
-        # pull the items back to the root level (un-file them). The items stay
-        # in the project; only the bin reference is removed.
+        # Dropping onto the root bin means "move back to Master" — remove
+        # the items from every regular bin (they stay in the project).
         if target_bin_id == self._project.root_bin_id:
-            return self._remove_items_from_current_bin(asset_ids, timeline_ids)
+            return self._unfile_items(asset_ids, timeline_ids)
         target_bin = self._project.bins.get(target_bin_id)
         if target_bin is None:
             return False
 
-        # Filter out items already in the target bin (idempotent) and ids
-        # that no longer exist in the project.
-        new_asset_ids = [
-            aid for aid in asset_ids
-            if aid in self._project.assets and aid not in target_bin.asset_ids
-        ]
-        new_timeline_ids = [
-            tid for tid in timeline_ids
-            if tid in self._project.timelines and tid not in target_bin.timeline_ids
-        ]
-        if not new_asset_ids and not new_timeline_ids:
-            return False
-
         sub_commands: list[Any] = []
-        for aid in new_asset_ids:
-            sub_commands.append(MoveAssetToBinCommand.create(aid, target_bin_id))
-        for tid in new_timeline_ids:
-            sub_commands.append(MoveTimelineToBinCommand.create(tid, target_bin_id))
+        new_asset_ids: List[str] = []
+        new_timeline_ids: List[str] = []
+        if copy:
+            # Alt = 拷贝引用：仅加引用，可多箱共存（幂等过滤已引用项）。
+            for aid in asset_ids:
+                if (aid in self._project.assets
+                        and aid not in target_bin.asset_ids):
+                    new_asset_ids.append(aid)
+                    sub_commands.append(
+                        MoveAssetToBinCommand.create(aid, target_bin_id))
+            for tid in timeline_ids:
+                if (tid in self._project.timelines
+                        and tid not in target_bin.timeline_ids):
+                    new_timeline_ids.append(tid)
+                    sub_commands.append(
+                        MoveTimelineToBinCommand.create(tid, target_bin_id))
+        else:
+            # 普通拖拽 = 移动（exclusive）：目标箱成为唯一普通箱归属。
+            # 已"独占在目标箱"的素材跳过（幂等）。
+            for aid in asset_ids:
+                if aid not in self._project.assets:
+                    continue
+                in_target = aid in target_bin.asset_ids
+                in_others = any(
+                    aid in b.asset_ids
+                    for bid, b in self._project.bins.items()
+                    if bid not in (target_bin_id, self._project.root_bin_id))
+                if in_target and not in_others:
+                    continue
+                new_asset_ids.append(aid)
+                sub_commands.append(
+                    MoveAssetBetweenBinsCommand.create(aid, target_bin_id))
+            for tid in timeline_ids:
+                if tid not in self._project.timelines:
+                    continue
+                in_target = tid in target_bin.timeline_ids
+                in_others = any(
+                    tid in b.timeline_ids
+                    for bid, b in self._project.bins.items()
+                    if bid not in (target_bin_id, self._project.root_bin_id))
+                if in_target and not in_others:
+                    continue
+                new_timeline_ids.append(tid)
+                sub_commands.append(
+                    MoveTimelineBetweenBinsCommand.create(tid, target_bin_id))
+        if not sub_commands:
+            return False
 
         # Compose label
         parts: list[str] = []

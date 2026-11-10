@@ -1192,6 +1192,249 @@ class MoveTimelineToBinCommand:
 
 
 @dataclass(frozen=True)
+class MoveAssetBetweenBinsCommand:
+    """P0-5: 移动素材到目标箱（exclusive，Resolve 普通拖拽语义）。
+
+    apply = 目标箱成为唯一普通箱归属（其它箱移除引用，目标确保持有）；
+    undo 按首次 apply 快照的**完整跨箱归属映射**恢复——即使移动前素材
+    同时存在于多个箱（引用式存储的历史工程）也逐箱复原。Alt 拷贝引用
+    请用 ``MoveAssetToBinCommand``（多箱共存）。
+    """
+
+    command_id: str
+    label: str
+    asset_id: str
+    target_bin_id: str
+    _old_membership: dict[str, bool] = field(default_factory=dict)
+    _applied: bool = False
+
+    def apply(self, project: EditProject) -> EditProject:
+        if self.asset_id not in project.assets:
+            raise ValueError(f"Asset not found: {self.asset_id}")
+        if self.target_bin_id not in project.bins:
+            raise ValueError(f"Target bin not found: {self.target_bin_id}")
+        if not self._applied:
+            object.__setattr__(self, "_old_membership", {
+                bin_id: (self.asset_id in bin_obj.asset_ids)
+                for bin_id, bin_obj in project.bins.items()
+            })
+            object.__setattr__(self, "_applied", True)
+        return project.move_asset_exclusive(self.asset_id, self.target_bin_id)
+
+    def undo(self, project: EditProject) -> EditProject:
+        if not self._applied:
+            logger.warning("MoveAssetBetweenBinsCommand undo before apply")
+            return project
+        return project.with_asset_membership(
+            self.asset_id,
+            {k: v for k, v in self._old_membership.items() if k in project.bins},
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "MoveAssetBetweenBinsCommand",
+            "label": self.label,
+            "asset_id": self.asset_id,
+            "target_bin_id": self.target_bin_id,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "MoveAssetBetweenBinsCommand":
+        return MoveAssetBetweenBinsCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Move Asset"),
+            asset_id=data.get("asset_id", ""),
+            target_bin_id=data.get("target_bin_id", ""),
+        )
+
+    @staticmethod
+    def create(asset_id: str, target_bin_id: str) -> "MoveAssetBetweenBinsCommand":
+        return MoveAssetBetweenBinsCommand(
+            command_id=str(uuid.uuid4()),
+            label="Move Asset",
+            asset_id=asset_id,
+            target_bin_id=target_bin_id,
+        )
+
+
+@dataclass(frozen=True)
+class MoveTimelineBetweenBinsCommand:
+    """P0-5: 移动时间线到目标箱（exclusive，同素材版语义与 undo 映射）。"""
+
+    command_id: str
+    label: str
+    timeline_id: str
+    target_bin_id: str
+    _old_membership: dict[str, bool] = field(default_factory=dict)
+    _applied: bool = False
+
+    def apply(self, project: EditProject) -> EditProject:
+        if self.timeline_id not in project.timelines:
+            raise ValueError(f"Timeline not found: {self.timeline_id}")
+        if self.target_bin_id not in project.bins:
+            raise ValueError(f"Target bin not found: {self.target_bin_id}")
+        if not self._applied:
+            object.__setattr__(self, "_old_membership", {
+                bin_id: (self.timeline_id in bin_obj.timeline_ids)
+                for bin_id, bin_obj in project.bins.items()
+            })
+            object.__setattr__(self, "_applied", True)
+        return project.move_timeline_exclusive(self.timeline_id, self.target_bin_id)
+
+    def undo(self, project: EditProject) -> EditProject:
+        if not self._applied:
+            logger.warning("MoveTimelineBetweenBinsCommand undo before apply")
+            return project
+        return project.with_timeline_membership(
+            self.timeline_id,
+            {k: v for k, v in self._old_membership.items() if k in project.bins},
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "MoveTimelineBetweenBinsCommand",
+            "label": self.label,
+            "timeline_id": self.timeline_id,
+            "target_bin_id": self.target_bin_id,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "MoveTimelineBetweenBinsCommand":
+        return MoveTimelineBetweenBinsCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Move Timeline"),
+            timeline_id=data.get("timeline_id", ""),
+            target_bin_id=data.get("target_bin_id", ""),
+        )
+
+    @staticmethod
+    def create(timeline_id: str, target_bin_id: str) -> "MoveTimelineBetweenBinsCommand":
+        return MoveTimelineBetweenBinsCommand(
+            command_id=str(uuid.uuid4()),
+            label="Move Timeline",
+            timeline_id=timeline_id,
+            target_bin_id=target_bin_id,
+        )
+
+
+@dataclass(frozen=True)
+class UnfileAssetCommand:
+    """P0-5: 移回 Master（未归类）——全部普通箱移除引用。
+
+    undo 恢复完整跨箱归属快照。与 RemoveAssetFromBinCommand（单箱移除）
+    的区别：这是"移动"语义（Resolve 拖回 Media Root），不是"从当前箱
+    拿掉一个引用"。
+    """
+
+    command_id: str
+    label: str
+    asset_id: str
+    _old_membership: dict[str, bool] = field(default_factory=dict)
+    _applied: bool = False
+
+    def apply(self, project: EditProject) -> EditProject:
+        if self.asset_id not in project.assets:
+            raise ValueError(f"Asset not found: {self.asset_id}")
+        if not self._applied:
+            object.__setattr__(self, "_old_membership", {
+                bin_id: (self.asset_id in bin_obj.asset_ids)
+                for bin_id, bin_obj in project.bins.items()
+            })
+            object.__setattr__(self, "_applied", True)
+        return project.unfile_asset(self.asset_id)
+
+    def undo(self, project: EditProject) -> EditProject:
+        if not self._applied:
+            logger.warning("UnfileAssetCommand undo before apply")
+            return project
+        return project.with_asset_membership(
+            self.asset_id,
+            {k: v for k, v in self._old_membership.items() if k in project.bins},
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "UnfileAssetCommand",
+            "label": self.label,
+            "asset_id": self.asset_id,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "UnfileAssetCommand":
+        return UnfileAssetCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Move to Master"),
+            asset_id=data.get("asset_id", ""),
+        )
+
+    @staticmethod
+    def create(asset_id: str) -> "UnfileAssetCommand":
+        return UnfileAssetCommand(
+            command_id=str(uuid.uuid4()),
+            label="Move to Master",
+            asset_id=asset_id,
+        )
+
+
+@dataclass(frozen=True)
+class UnfileTimelineCommand:
+    """P0-5: 时间线移回 Master（全部普通箱移除引用），undo 恢复快照。"""
+
+    command_id: str
+    label: str
+    timeline_id: str
+    _old_membership: dict[str, bool] = field(default_factory=dict)
+    _applied: bool = False
+
+    def apply(self, project: EditProject) -> EditProject:
+        if self.timeline_id not in project.timelines:
+            raise ValueError(f"Timeline not found: {self.timeline_id}")
+        if not self._applied:
+            object.__setattr__(self, "_old_membership", {
+                bin_id: (self.timeline_id in bin_obj.timeline_ids)
+                for bin_id, bin_obj in project.bins.items()
+            })
+            object.__setattr__(self, "_applied", True)
+        return project.unfile_timeline(self.timeline_id)
+
+    def undo(self, project: EditProject) -> EditProject:
+        if not self._applied:
+            logger.warning("UnfileTimelineCommand undo before apply")
+            return project
+        return project.with_timeline_membership(
+            self.timeline_id,
+            {k: v for k, v in self._old_membership.items() if k in project.bins},
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "UnfileTimelineCommand",
+            "label": self.label,
+            "timeline_id": self.timeline_id,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "UnfileTimelineCommand":
+        return UnfileTimelineCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Move Timeline to Master"),
+            timeline_id=data.get("timeline_id", ""),
+        )
+
+    @staticmethod
+    def create(timeline_id: str) -> "UnfileTimelineCommand":
+        return UnfileTimelineCommand(
+            command_id=str(uuid.uuid4()),
+            label="Move Timeline to Master",
+            timeline_id=timeline_id,
+        )
+
+
+@dataclass(frozen=True)
 class RemoveAssetFromBinCommand:
     """Command to remove an asset reference from a bin (drag out to root).
 

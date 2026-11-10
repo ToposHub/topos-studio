@@ -128,7 +128,7 @@ def test_metadata_bin_drop_uses_shelf_coordinates(pool, qapp, monkeypatch) -> No
     event = QDropEvent(QPointF(position), Qt.DropAction.MoveAction, mime,
                        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     panel.metadata_shelf.dropEvent(event)
-    handle_drop.assert_called_once_with(footage, [assets[0]], [])
+    handle_drop.assert_called_once_with(footage, [assets[0]], [], copy=False)
 
 
 def test_metadata_shelf_delete_routes_to_shared_selection(pool, monkeypatch) -> None:
