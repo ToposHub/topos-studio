@@ -176,7 +176,9 @@ with tempfile.TemporaryDirectory() as directory:
     facts = GalleryCaptureFacts(album_id="legacy:User", grade_revision=1)
     written = []
     controller = LayerOpsMixin.__new__(LayerOpsMixin)
-    controller.presets_panel = SimpleNamespace(get_current_folder=lambda: current[0])
+    controller.presets_panel = SimpleNamespace(
+        get_current_folder=lambda: current[0],
+        _repository=GalleryFolderRepository(str(root)))
     controller._new_still_name = lambda: "Capture"
     controller._commit_still_capture = lambda path, *_: written.append(path) or True
     captured = {}
@@ -186,10 +188,12 @@ with tempfile.TemporaryDirectory() as directory:
         return object()
 
     result = GalleryCaptureSession(request, facts, lambda: facts).run(
-        prepare, lambda image: controller._persist_still_capture(image, False, captured))
+        prepare, lambda image: controller._persist_still_capture(
+            image, False, captured, request=request))
     wrong_target = bool(written) and Path(written[0]).parent == root / "System"
     report("capture_destination_not_locked", wrong_target, status=result.status,
-           requested_album=request.album_id, actual_folder=Path(written[0]).parent.name)
+           requested_album=request.album_id,
+           actual_folder=Path(written[0]).parent.name if written else "none")
     result = GalleryCaptureSession(request, facts, lambda: GalleryCaptureFacts(
         album_id="legacy:User", grade_revision=2)).run(
         object, lambda _: GalleryOperationResult(request_id=request.request_id, status="success"))
