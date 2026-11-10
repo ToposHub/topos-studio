@@ -56,6 +56,7 @@ from src.features.color.core.gallery_txn_core import (
     acquire_directories,
     make_owner_block,
     other_process_alive,
+    path_within,
     read_journal,
     release_directories,
     try_recover_lock,
@@ -65,6 +66,7 @@ from src.features.color.core.preset_meta import (
     PresetMeta,
     allocate_still_id,
     load_preset_meta,
+    meta_path_for,
     save_preset_meta,
     still_alpha_declaration,
 )
@@ -417,13 +419,21 @@ class GalleryTransferService:
         inspection.manifest = manifest
         # BR07：依赖条目校验（归档名必须位于 assets/luts/ 纯文件名空间、
         # sha256 格式合法、条目真实存在于包内——越界资源条目直接拒绝）
-        for dep in manifest.get("dependencies") or []:
+        dependencies = manifest.get("dependencies", [])
+        if not isinstance(dependencies, list):
+            inspection.reject(REASON_NOT_A_BUNDLE, "invalid dependencies list")
+            return inspection
+        for dep in dependencies:
             if not isinstance(dep, dict):
                 inspection.reject(REASON_NOT_A_BUNDLE, "bad dependency")
                 return inspection
             if dep.get("bundled"):
                 archive = dep.get("archive")
                 digest = dep.get("sha256")
+                if not is_safe_bundle_stem(dep.get("name")):
+                    inspection.reject(REASON_DEPENDENCY_ESCAPED,
+                                      "invalid dependency install name")
+                    return inspection
                 if not isinstance(archive, str) \
                         or not archive.startswith(DEPENDENCY_ARCHIVE_PREFIX) \
                         or not _is_safe_member_name(
@@ -436,7 +446,8 @@ class GalleryTransferService:
                     inspection.reject(REASON_NOT_A_BUNDLE,
                                       f"dependency member missing: {archive}")
                     return inspection
-                if not isinstance(digest, str) or len(digest) != 64:
+                if (not isinstance(digest, str) or len(digest) != 64
+                        or any(c not in "0123456789abcdef" for c in digest)):
                     inspection.reject(REASON_NOT_A_BUNDLE,
                                       f"bad dependency hash: {archive}")
                     return inspection
@@ -608,6 +619,12 @@ class GalleryTransferService:
                             staged_topos, origin_id, warnings):
                         raise _ImportVerifiedError(
                             REASON_IDENTITY_SAVE_FAILED, str(origin_id))
+                    # A manifest may carry the origin identity without a meta
+                    # member. Include the newly created sidecar in the same
+                    # install journal rather than discarding it with staging.
+                    staged_meta = meta_path_for(staged_topos)
+                    if staged_meta not in {path for _, path in staged}:
+                        staged.append((os.path.basename(staged_meta), staged_meta))
 
             # 安装意图先行：全部 finals（含大小）落盘后再动第一个文件
             finals = [{"path": os.path.join(
@@ -676,6 +693,9 @@ class GalleryTransferService:
             return []
         warnings: List[str] = []
         lut_root = os.path.join(self._repository.root, DEPENDENCY_DIR_NAME)
+        if not path_within(lut_root, self._repository.root):
+            raise _ImportVerifiedError(REASON_DEPENDENCY_ESCAPED,
+                                       "LUTs directory escapes library root")
         rewrites: Dict[str, str] = {}
         try:
             os.makedirs(lut_root, exist_ok=True)
@@ -708,6 +728,9 @@ class GalleryTransferService:
                 raise _ImportVerifiedError(REASON_HASH_MISMATCH,
                                            str(archive))
             target = os.path.join(lut_root, f"{digest[:8]}_{name}")
+            if not path_within(target, lut_root):
+                raise _ImportVerifiedError(REASON_DEPENDENCY_ESCAPED,
+                                           "LUT target escapes managed directory")
             if not (os.path.isfile(target)
                     and _sha256_file(target) == digest):
                 os.replace(tmp, target)
@@ -882,6 +905,18 @@ class GalleryTransferService:
                                    txn_dir, exc)
                     continue             # 坏日志：保全，不据此动文件
                 if other_process_alive(journal.get("pid")):
+                    continue
+                state = journal.get("state")
+                finals = journal.get("finals", [])
+                paths = [entry.get("path") if isinstance(entry, dict) else entry
+                         for entry in finals]
+                if (state not in ("staging", "installing", "committed")
+                        or any(not isinstance(path, str)
+                               or not path_within(path, folder)
+                               or os.path.dirname(os.path.abspath(path))
+                               != os.path.abspath(folder) for path in paths)):
+                    logger.warning("gallery import: quarantine %s "
+                                   "(unknown state or final outside album)", txn_dir)
                     continue
                 if journal.get("state") != "committed":
                     if self._rollback_import(journal):
