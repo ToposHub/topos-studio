@@ -579,6 +579,7 @@ class AnalysisService:
                 lane, asset_job,
                 work=_make_work(asset_id, asset_job),
                 on_cancel=_make_on_cancel(asset_id),
+                tags=(asset_id,),  # P0-8：per-asset 取消定位标签
             )
 
         return summary_job, ""

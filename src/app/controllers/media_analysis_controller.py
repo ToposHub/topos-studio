@@ -261,6 +261,19 @@ class MediaAnalysisController(QObject):
         """取消尚未执行的 Agent 分析提议。"""
         return bool(self._service.cancel_request(request_id))
 
+    def cancel_asset_analysis(self, asset_id: str) -> int:
+        """取消该素材的分析 job（P0-8 per-asset 取消，不再只能 cancel_all）。
+
+        只取消打有该 asset 标签的 pending/running job；同批其它素材不受
+        影响。返回取消数（0 = 该素材当前无活动分析）。
+        """
+        cancelled = int(self._scheduler.cancel_jobs_by_tags((asset_id,)))
+        if cancelled:
+            logger.info(
+                "MediaAnalysisController: cancelled %d job(s) for asset %s",
+                cancelled, asset_id)
+        return cancelled
+
     # ---------------- 工程生命周期 ---------------- #
 
     def on_project_changed(self, project_id: str | None) -> None:
