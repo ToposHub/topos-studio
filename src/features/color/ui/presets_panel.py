@@ -107,6 +107,10 @@ class PresetsPanel(QWidget):
         # 结果经队列化桥回 GUI 线程；小相册保持同步路径。
         self._async_query_threshold = GALLERY_ASYNC_QUERY_THRESHOLD
         self._scan_generation = 0
+        # SR05：导入/改名后大库异步回填未就绪时的待选 stem（随 token 回填）
+        self._pending_selection: Optional[tuple] = None
+        # SR04：受管引用迁移每相册一次（幂等，扫描入口触发）
+        self._migrated_albums: set = set()
         self._last_scan_signature: Optional[str] = None
         self._async_bridge = _AsyncScanBridge()
         self._async_bridge.delivered.connect(self._on_async_query_delivered)
@@ -518,6 +522,15 @@ class PresetsPanel(QWidget):
                 I18N.tr("gallery.import_failed_detail",
                         f"Import failed ({result.reason}): "
                         + "; ".join(result.warnings)))
+            return
+        # SR04.4：服务的诚实警告不静默丢弃——缺依赖/引用型包要可见
+        notable = [w for w in result.warnings
+                   if "not in package" in w or "incomplete" in w]
+        if notable:
+            QMessageBox.information(
+                self, I18N.tr("gallery.import_done", "Imported"),
+                I18N.tr("gallery.import_done_detail",
+                        "Imported with warnings:\n") + "\n".join(notable))
 
     def _import_bundle_from(self, zip_path: str) -> object:
         """经传输服务导入 bundle（纯执行，无对话框——可编程/测试安全）。
@@ -551,10 +564,15 @@ class PresetsPanel(QWidget):
         result = self._transfer_service.export_bundle(
             os.path.dirname(topos_path), stem, dest)
         if result.succeeded:
+            # SR04.4：缺依赖的"部分可移植"导出必须可见，不静默称完整
+            notable = [w for w in result.warnings
+                       if "not bundled" in w or "portable: partial" in w]
+            message = I18N.tr("gallery.export_done_detail",
+                              f"Exported {stem} → {dest}")
+            if notable:
+                message += "\n\n" + "\n".join(notable)
             QMessageBox.information(
-                self, I18N.tr("gallery.export_done", "Exported"),
-                I18N.tr("gallery.export_done_detail",
-                        f"Exported {stem} → {dest}"))
+                self, I18N.tr("gallery.export_done", "Exported"), message)
         else:
             QMessageBox.warning(
                 self, I18N.tr("gallery.export_failed", "Export Failed"),
@@ -604,8 +622,13 @@ class PresetsPanel(QWidget):
                         "sidecar."))
 
     def _select_items_by_stems(self, stems) -> None:
-        """按 stem 选中条目（导入/改名成功后选中新条目；失败不动选择）。"""
+        """按 stem 选中条目（导入/改名成功后选中新条目；失败不动选择）。
+
+        SR05：大库异步回填未就绪时列表里还没有新条目——登记待选
+        (token, stems)，异步回填后补选；同步路径立即生效。
+        """
         wanted = {os.path.normcase(f"{stem}.topos") for stem in stems}
+        matched = False
         for index in range(self.list_widget.count()):
             item = self.list_widget.item(index)
             name = os.path.basename(
@@ -613,8 +636,24 @@ class PresetsPanel(QWidget):
             if os.path.normcase(name) in wanted:
                 item.setSelected(True)
                 self.list_widget.setCurrentItem(item)
+                matched = True
             else:
                 item.setSelected(False)
+        if not matched and wanted:
+            self._pending_selection = (
+                self._scan_generation, tuple(stems))
+
+    def _apply_pending_selection(self) -> None:
+        """扫描回填后补选（SR05）：token 仍当前的待选请求才生效。"""
+        pending = self._pending_selection
+        if pending is None:
+            return
+        token, stems = pending
+        if token != self._scan_generation:
+            self._pending_selection = None    # 已被更新的扫描取代
+            return
+        self._pending_selection = None
+        self._select_items_by_stems(stems)
 
     def scan_presets(self, force: bool = False) -> None:
         """Scan current folder for .topos preset files and populate the grid.
@@ -628,12 +667,17 @@ class PresetsPanel(QWidget):
         强制重建（手动刷新）。相册条目数达到 ``_async_query_threshold``
         时走后台 runner（同 album 合并保留最新＋代际守卫，结果经队列化
         桥回 GUI 线程），小相册保持同步路径。
+
+        SR05：**同步／异步共用单调扫描 token**（``_scan_generation`` 每
+        次扫描递增）——同步扫描后迟到的旧异步结果不再覆盖新状态。SR04：
+        每相册一次受管引用迁移（可证明归属的绝对 LUT 引用升级，幂等）。
         """
         from src.features.color.core.gallery_contracts import GalleryQuery
         from src.features.color.core.gallery_query_service import (
             GalleryQueryIndex,
         )
         folder = self._current_folder
+        self._maybe_migrate_album_refs(folder)
         signature = GalleryQueryIndex.folder_signature(folder)
         self._last_scan_signature = signature
         if force:
@@ -653,6 +697,8 @@ class PresetsPanel(QWidget):
             album_id = None
         if not album_id:
             return
+        # 单调 token：同步与异步都递增——异步回填据此拒绝过期结果
+        self._scan_generation += 1
         try:
             entry_count = int(str(signature).split(":", 1)[0])
         except ValueError:
@@ -660,14 +706,37 @@ class PresetsPanel(QWidget):
         runner = self._query_service.runner
         if runner is not None and entry_count >= self._async_query_threshold:
             # 大库：后台扫描——用户操作不卡 UI；结果回填前复核代际与相册
-            self._scan_generation += 1
             runner.begin_generation()
             runner.submit(GalleryQuery(
                 album_id=album_id,
                 request_revision=self._scan_generation))
             return
-        result = self._query_service.query(GalleryQuery(album_id=album_id))
+        result = self._query_service.query(GalleryQuery(
+            album_id=album_id, request_revision=self._scan_generation))
         self._populate_from_result(result)
+        self._apply_pending_selection()
+
+    def _maybe_migrate_album_refs(self, folder: str) -> None:
+        """每相册一次的受管引用迁移（SR04.3；内容证据确凿才重写）。"""
+        if not folder or folder in self._migrated_albums:
+            return
+        self._migrated_albums.add(folder)
+        service = getattr(self, "_transfer_service", None)
+        if service is None:
+            return
+        try:
+            # 只有库内存在受管资源目录时才有可迁移对象（廉价闸门）
+            lut_dir = os.path.join(self._repository.root, "LUTs")
+            if not os.path.isdir(lut_dir):
+                return
+            warnings = service.migrate_album_lut_references(folder)
+        except Exception:
+            logger.exception("gallery lut ref migration failed for %s",
+                             folder)
+            return
+        if warnings:
+            logger.info("gallery lut refs migrated in %s: %s",
+                        folder, "; ".join(warnings))
 
     def _populate_from_result(self, result) -> None:
         """按查询结果重建列表（同步/异步回填共用；选择按 still_id 恢复）。"""
@@ -724,6 +793,7 @@ class PresetsPanel(QWidget):
                            query.album_id, result.scan_error)
             return
         self._populate_from_result(result)
+        self._apply_pending_selection()
 
     def closeEvent(self, event) -> None:
         """关闭时停掉后台 runner（未执行任务丢弃，不触碰已销毁 UI）。"""

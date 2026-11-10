@@ -7,25 +7,38 @@
 - **导出**：bundle 全成员（六角色，按需含 EXR 对）＋ ``bundle_manifest``
   （schema/still 身份/每文件 sha256/精度/alpha 声明）打包为单个
   ``.toposbundle`` zip——staging 写入后一次 ``os.replace``，失败/取消不
-  留半目标；**源 bundle 一律不动**。成员只存相对文件名，不携带机器
-  绝对路径/secret；grade 内 LUT 引用按原样保留（应用时经
-  ``_prepare_preset_layers`` 既有可移植过滤），manifest 汇总 LUT 引用数。
+  留半目标；**源 bundle 一律不动**。SR03 起导出后**验证最终归档**
+  （CRC＋逐成员 hash==manifest），并发修改源文件时要么完整成功要么
+  明确拒绝；导出与导入共享数量／单文件／总量限额——不生成自己无法
+  导入的成功包。
 - **导入**：zip 安全限制（文件数／解压总量／单文件上限／纯文件名归属／
-  symlink 条目拒绝／不执行任何内含内容）；manifest schema 已知才继续
-  （未来 schema 拒绝）；逐文件 sha256 校验后经 dest 目录内 staging 一次
-  安装——journal 可恢复，拒绝时不落任何散文件。
+  symlink 条目拒绝／不执行任何内含内容）；manifest schema 已知才继续；
+  **同一归档句柄**贯穿检查与解压（两次打开之间包被替换的结构差异不再
+  放行）；逐文件分块解压（取消／进度／字节数核对）＋sha256 校验后经
+  dest 目录内 staging 一次安装。
+- **依赖统一事务**（SR03）：随包 LUT 先在事务 staging 内解压校验，与
+  bundle finals 写进**同一份意图 journal**（``resources`` 段）后才安装
+  到受管 ``LUTs/``——取消／失败／崩溃的回滚把资源与 bundle 一起撤掉，
+  不留无记录的孤儿资源；安装名内容寻址（sha 前缀），碰撞（同前缀不同
+  内容）顺延更长前缀，全 hash 同名异内容明确拒绝，**不覆盖外来文件**。
+- **受管引用**（SR04）：导入重写 grade 的 ``active_lut_path`` 为库相对
+  受管引用（``topos-lut://LUTs/<安装名>``，见 gallery_resource_refs）；
+  库目录整体迁移后引用仍解析到当前库根。已导入的绝对引用经
+  :meth:`migrate_album_lut_references` 按内容证据升级。
 - **身份冲突**（G02 政策）：导入的 still_id 与目标库既有条目冲突时——
-  同内容＝重复拒绝；不同内容＝保留外部 origin ID（meta ``origin_still_id``）
-  并分配本库新 ID。重名文件自动后缀分配，结果里给出**实际采用名**供
-  审阅；不做静默覆盖。
+  同内容＝重复拒绝；不同内容＝保留外部 origin ID 并分配本库新 ID。
+  重名文件自动后缀分配，结果里给出**实际采用名**；不做静默覆盖。
+- **回滚内容归属**（SR02）：journal finals/resources 带 sha256——同大小
+  不同内容、或旧格式无内容证据的日志一律不删（保全待人工），删除授权
+  只来自内容证据。
 """
-
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -50,7 +63,14 @@ from src.features.color.core.gallery_contracts import (
     is_safe_bundle_stem,
     make_gallery_request_id,
 )
+from src.features.color.core.gallery_resource_refs import (
+    DEPENDENCY_DIR_NAME,
+    managed_lut_reference,
+    parse_managed_lut_reference,
+    resolve_lut_reference,
+)
 from src.features.color.core.gallery_txn_core import (
+    ACTIVE_TXNS,
     DirectoryBusyError,
     JournalError,
     acquire_directories,
@@ -83,13 +103,13 @@ IMPORT_TXN_PREFIX = ".gallery-import-"
 IMPORT_JOURNAL_NAME = "__journal.json"
 #: 自动重名后缀上限（防病态目录把导入卡成死循环）
 IMPORT_MAX_STEM_SUFFIX = 10000
-#: 受管依赖资源目录（导入时安装 LUT 等依赖；库根内、可随库迁移）
-DEPENDENCY_DIR_NAME = "LUTs"
 #: 归档内依赖条目前缀
 DEPENDENCY_ARCHIVE_PREFIX = "assets/luts/"
+#: 分块解压粒度（取消/进度在块间生效，不等整个大文件读完）
+_EXTRACT_CHUNK = 1 << 20
 
-#: schema 2（BR07）：新增 ``dependencies``（外部 LUT 等依赖的打包/
-#: 缺失记录）。schema 1 包仍可导入（无依赖信息＝引用型包，如实告警）。
+#: schema 2（BR07）：新增 ``dependencies``。schema 1 包仍可导入（无依赖
+#: 信息＝引用型包，如实告警）。
 EXPORT_SCHEMA = 2
 
 # 稳定拒绝原因
@@ -104,15 +124,18 @@ REASON_DUPLICATE_IDENTITY = "duplicate_identity"
 REASON_IDENTITY_SAVE_FAILED = "identity_save_failed"
 REASON_DEPENDENCY_ESCAPED = "dependency_path_escape"
 REASON_DEPENDENCY_LIMIT = "dependency_limit"
+REASON_DEPENDENCY_COLLISION = "dependency_collision"
 
 _ROLE_BY_SUFFIX = {suffix: role for role, suffix
                    in BUNDLE_SUFFIX_BY_ROLE.items()}
+
+_INSTALL_NAME_HASH_RE = re.compile(r"^([0-9a-f]{8,64})_(.+)$")
 
 
 def _sha256_file(path: str) -> str:
     hasher = hashlib.sha256()
     with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
+        for chunk in iter(lambda: fh.read(_EXTRACT_CHUNK), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
 
@@ -168,12 +191,10 @@ class GalleryTransferService:
                       ) -> GalleryOperationResult:
         """把 bundle 打包为单个 ``.toposbundle`` zip（源不动）。
 
-        BR07：grade 引用的外部 LUT（``active_lut_path``）默认**随包携带**
-        （``assets/luts/<sha8>_<name>``，manifest schema 2 的
-        ``dependencies`` 记录内容 hash／来源路径）；缺失的依赖如实记录
-        ``missing`` 并进 warnings——引用型包**不冒充完整便携**。导入时
-        依赖安装进目标库的受管 ``LUTs/`` 目录并重写引用（见
-        :meth:`import_bundle`）。
+        BR07：grade 引用的外部 LUT（含受管引用，解析到当前库）默认**随
+        包携带**；缺失的依赖如实记录 ``missing`` 并进 warnings——引用型
+        包不冒充完整便携。SR03：导出后验证最终归档（CRC＋成员 hash），
+        并与导入共享数量／单文件／总量限额。
         """
         request_id = make_gallery_request_id()
         if not is_safe_bundle_stem(stem):
@@ -200,7 +221,7 @@ class GalleryTransferService:
 
         topos_path = os.path.join(real, f"{stem}.topos")
         dependencies, dep_warnings = self._collect_grade_dependencies(
-            topos_path)
+            topos_path, self._repository.root)
         if not include_dependencies:
             dependencies = [dict(dep, bundled=False, missing=True,
                                  reason="dependencies not included")
@@ -209,31 +230,59 @@ class GalleryTransferService:
                 f"dependency not bundled: {dep['name']} "
                 f"({dep.get('reason') or 'excluded'})"
                 for dep in dependencies]
+        bundled = {dep["archive"]: dep["resolved"]
+                   for dep in dependencies if dep.get("bundled")}
+
+        # 与导入同一限额：超限的包本服务自己就无法导入，明确拒绝
+        total_members = len(chosen) + len(bundled) + 1
+        if total_members > IMPORT_MAX_FILES:
+            return self._rejected(
+                request_id, REASON_FILE_COUNT_LIMIT,
+                f"{total_members} members (limit {IMPORT_MAX_FILES})")
+        total_bytes = 0
+        for path in chosen:
+            try:
+                size = os.path.getsize(path)
+            except OSError as exc:
+                return self._rejected(request_id, REASON_IO_ERROR, str(exc))
+            if size > IMPORT_MAX_FILE_BYTES:
+                return self._rejected(
+                    request_id, REASON_SIZE_LIMIT,
+                    f"{os.path.basename(path)}: {size} bytes")
+            total_bytes += size
+        for dep in dependencies:
+            if dep.get("bundled"):
+                total_bytes += dep.get("size", 0)
+                if dep.get("size", 0) > IMPORT_MAX_FILE_BYTES:
+                    return self._rejected(
+                        request_id, REASON_DEPENDENCY_LIMIT,
+                        f"{dep['name']}: {dep.get('size')} bytes")
+        if total_bytes > IMPORT_MAX_TOTAL_BYTES:
+            return self._rejected(
+                request_id, REASON_SIZE_LIMIT, f"total {total_bytes} bytes")
+
         meta = load_preset_meta(topos_path)
         manifest = self._build_export_manifest(real, stem, chosen, meta,
                                                include_exr, dependencies)
-        bundled: Dict[str, str] = {}     # archive 名 → 本机源路径
-        for dep in dependencies:
-            if dep.get("bundled") and dep.get("source"):
-                bundled[dep["archive"]] = dep["source"]
-        total_dep_bytes = sum(dep.get("size", 0) for dep in
-                              dependencies if dep.get("bundled"))
-        if bundled and total_dep_bytes > IMPORT_MAX_FILE_BYTES:
-            return self._rejected(request_id, REASON_DEPENDENCY_LIMIT,
-                                  f"dependencies total {total_dep_bytes} "
-                                  f"bytes")
         tmp_path = f"{dest_zip_path}.tmp-{os.getpid()}"
         try:
             with zipfile.ZipFile(tmp_path, "w",
                                  zipfile.ZIP_DEFLATED) as zf:
                 for path in chosen:
                     zf.write(path, arcname=os.path.basename(path))
-                for archive_name, source in sorted(bundled.items()):
-                    zf.write(source, arcname=archive_name)
+                for archive_name in sorted(bundled):
+                    zf.write(bundled[archive_name], arcname=archive_name)
                 zf.writestr(
                     BUNDLE_MANIFEST_NAME,
                     json.dumps(manifest, ensure_ascii=False, indent=1))
             os.replace(tmp_path, dest_zip_path)
+            # SR03：验证最终归档——并发修改源文件时要么完整成功要么拒绝
+            self._verify_export_archive(dest_zip_path, manifest)
+        except _ExportVerifiedError as exc:
+            _silent_remove(tmp_path)
+            _silent_remove(dest_zip_path)
+            return self._rejected(request_id, exc.reason, exc.detail,
+                                  recoverable=False)
         except OSError as exc:
             _silent_remove(tmp_path)
             return self._rejected(request_id, REASON_IO_ERROR, str(exc),
@@ -248,14 +297,44 @@ class GalleryTransferService:
             request_id=request_id, status=OP_SUCCESS,
             affected_still_ids=(stem,), warnings=tuple(warnings))
 
-    def _collect_grade_dependencies(self,
-                                    topos_path: str
-                                    ) -> Tuple[List[Dict[str, Any]],
-                                               List[str]]:
-        """收集 grade 的外部依赖（BR07 首类：``active_lut_path`` LUT）。
+    @staticmethod
+    def _verify_export_archive(path: str, manifest: Dict[str, Any]) -> None:
+        """最终归档验证：CRC＋逐成员内容 hash 与 manifest 一致。"""
+        def _member_digest(zf: zipfile.ZipFile, name: str) -> str:
+            hasher = hashlib.sha256()
+            with zf.open(name) as fh:
+                for chunk in iter(lambda: fh.read(_EXTRACT_CHUNK), b""):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
 
-        本机存在的文件 → 打包候选（sha256/大小/归档名）；缺失 → 记
-        ``missing`` + 原因并告警——引用型包不冒充完整便携。
+        with zipfile.ZipFile(path, "r") as zf:
+            bad = zf.testzip()
+            if bad is not None:
+                raise _ExportVerifiedError(
+                    REASON_HASH_MISMATCH, f"CRC failed: {bad}")
+            for entry in manifest.get("files", []):
+                if _member_digest(zf, entry["name"]) != entry["sha256"]:
+                    raise _ExportVerifiedError(
+                        REASON_HASH_MISMATCH,
+                        f"archive differs from manifest: {entry['name']}")
+            for dep in manifest.get("dependencies") or []:
+                if dep.get("bundled") and _member_digest(
+                        zf, dep["archive"]) != dep["sha256"]:
+                    raise _ExportVerifiedError(
+                        REASON_HASH_MISMATCH,
+                        f"dependency differs from manifest: "
+                        f"{dep['archive']}")
+
+    def _collect_grade_dependencies(
+            self, topos_path: str,
+            library_root: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """收集 grade 的外部依赖（``active_lut_path`` LUT）。
+
+        受管引用（``topos-lut://``）解析到**当前库根**（SR04——迁移后的
+        库仍可打包）；本机存在的文件 → 打包候选（sha256/大小/归档名）；
+        缺失 → 记 ``missing`` + 原因并告警——引用型包不冒充完整便携。
+        ``source`` 字段＝grade 内的**引用字符串**（导入重写的匹配键）。
         """
         references: List[str] = []
         try:
@@ -272,25 +351,38 @@ class GalleryTransferService:
         dependencies: List[Dict[str, Any]] = []
         warnings: List[str] = []
         seen = set()
-        for source in references:
-            if source in seen:
+        for reference in references:
+            if reference in seen:
                 continue
-            seen.add(source)
-            name = os.path.basename(source.replace("\\", "/"))
+            seen.add(reference)
+            managed = parse_managed_lut_reference(reference)
+            if managed is not None:
+                name = managed
+                source: Optional[str] = resolve_lut_reference(
+                    reference, library_root or
+                    os.path.dirname(os.path.dirname(topos_path)))
+                missing_reason = "managed resource missing in this library"
+            else:
+                name = os.path.basename(reference.replace("\\", "/"))
+                source = reference
+                missing_reason = "source file not found"
             if not name:
                 continue
-            if not os.path.isfile(source):
+            if not source or not os.path.isfile(source):
                 dependencies.append({
-                    "kind": "lut", "name": name, "source": source,
-                    "missing": True, "reason": "source file not found",
-                    "bundled": False})
+                    "kind": "lut", "name": name, "source": reference,
+                    "resolved": None,
+                    "missing": True,
+                    "reason": missing_reason if source else
+                    "library root unknown", "bundled": False})
                 warnings.append(
                     f"dependency not bundled: {name} "
-                    f"(source file not found: {source})")
+                    f"({missing_reason}: {reference})")
                 continue
             digest = _sha256_file(source)
             dependencies.append({
-                "kind": "lut", "name": name, "source": source,
+                "kind": "lut", "name": name, "source": reference,
+                "resolved": source,
                 "sha256": digest, "size": os.path.getsize(source),
                 "archive": f"{DEPENDENCY_ARCHIVE_PREFIX}"
                            f"{digest[:8]}_{name}",
@@ -347,8 +439,11 @@ class GalleryTransferService:
             "alpha_semantics": alpha,
             "exr_included": include_exr and precision == "exr_float32",
             "grade_lut_reference_count": lut_refs,
-            # BR07（schema 2）：依赖清单 + 便携性如实标注
-            "dependencies": [dict(dep) for dep in (dependencies or [])],
+            # BR07（schema 2）：依赖清单 + 便携性如实标注（不携带本机
+            # 绝对路径——resolved 只在导出进程内使用）
+            "dependencies": [
+                {k: v for k, v in dep.items() if k != "resolved"}
+                for dep in (dependencies or [])],
             "portable": all(not dep.get("missing")
                             for dep in (dependencies or [])),
         }
@@ -357,54 +452,64 @@ class GalleryTransferService:
 
     def inspect_bundle(self, zip_path: str) -> BundleInspection:
         """zip 安全线检查＋manifest 校验（不解压到目标目录）。"""
-        inspection = BundleInspection()
         if not os.path.isfile(zip_path) or not zipfile.is_zipfile(zip_path):
+            inspection = BundleInspection()
             inspection.reject(REASON_NOT_A_BUNDLE, zip_path)
             return inspection
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                infos = zf.infolist()
-                if len(infos) > IMPORT_MAX_FILES:
-                    inspection.reject(
-                        REASON_FILE_COUNT_LIMIT, f"{len(infos)} entries")
-                total = 0
-                for info in infos:
-                    if info.filename in inspection.members:
-                        inspection.reject(REASON_NOT_A_BUNDLE,
-                                          f"duplicate member: {info.filename}")
-                        continue
-                    # BR07：依赖资源条目允许 assets/luts/ 子目录（不落入
-                    # 包顶层），结构在 _validate 依赖段单独校验（越界拒绝）。
-                    if info.filename.startswith(DEPENDENCY_ARCHIVE_PREFIX):
-                        if ".." in info.filename.split("/"):
-                            inspection.reject(REASON_DEPENDENCY_ESCAPED,
-                                              info.filename)
-                            continue
-                    elif not _is_safe_member_name(info.filename):
-                        inspection.reject(REASON_PATH_ESCAPE,
-                                          info.filename)
-                        continue
-                    # symlink 条目（external_attr 高位 S_IFLNK）拒绝
-                    mode = (info.external_attr >> 16) & 0o170000
-                    if mode == 0o120000:
-                        inspection.reject(REASON_PATH_ESCAPE,
-                                          f"symlink: {info.filename}")
-                        continue
-                    if info.file_size > IMPORT_MAX_FILE_BYTES:
-                        inspection.reject(REASON_SIZE_LIMIT, info.filename)
-                    total += info.file_size
-                    inspection.members[info.filename] = info
-                if total > IMPORT_MAX_TOTAL_BYTES:
-                    inspection.reject(REASON_SIZE_LIMIT,
-                                      f"total {total} bytes")
-                if not inspection.ok:
-                    return inspection  # Do not decompress a rejected archive.
-                if BUNDLE_MANIFEST_NAME not in inspection.members:
-                    inspection.reject(REASON_NOT_A_BUNDLE,
-                                      "manifest missing")
-                    return inspection
-                raw = zf.read(BUNDLE_MANIFEST_NAME)
-                manifest = json.loads(raw)
+                return self._inspect_bundle_handle(zf, zip_path)
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            inspection = BundleInspection()
+            inspection.reject(REASON_NOT_A_BUNDLE, str(exc))
+            return inspection
+
+    def _inspect_bundle_handle(self, zf: zipfile.ZipFile,
+                               zip_path: str) -> BundleInspection:
+        """在已打开的归档句柄上做安全线检查（SR03：单一稳定句柄）。"""
+        inspection = BundleInspection()
+        infos = zf.infolist()
+        if len(infos) > IMPORT_MAX_FILES:
+            inspection.reject(
+                REASON_FILE_COUNT_LIMIT, f"{len(infos)} entries")
+        total = 0
+        for info in infos:
+            if info.filename in inspection.members:
+                inspection.reject(REASON_NOT_A_BUNDLE,
+                                  f"duplicate member: {info.filename}")
+                continue
+            # BR07：依赖资源条目允许 assets/luts/ 子目录（不落入
+            # 包顶层），结构在依赖段单独校验（越界拒绝）。
+            if info.filename.startswith(DEPENDENCY_ARCHIVE_PREFIX):
+                if ".." in info.filename.split("/"):
+                    inspection.reject(REASON_DEPENDENCY_ESCAPED,
+                                      info.filename)
+                    continue
+            elif not _is_safe_member_name(info.filename):
+                inspection.reject(REASON_PATH_ESCAPE,
+                                  info.filename)
+                continue
+            # symlink 条目（external_attr 高位 S_IFLNK）拒绝
+            mode = (info.external_attr >> 16) & 0o170000
+            if mode == 0o120000:
+                inspection.reject(REASON_PATH_ESCAPE,
+                                  f"symlink: {info.filename}")
+                continue
+            if info.file_size > IMPORT_MAX_FILE_BYTES:
+                inspection.reject(REASON_SIZE_LIMIT, info.filename)
+            total += info.file_size
+            inspection.members[info.filename] = info
+        if total > IMPORT_MAX_TOTAL_BYTES:
+            inspection.reject(REASON_SIZE_LIMIT,
+                              f"total {total} bytes")
+        if not inspection.ok:
+            return inspection  # Do not decompress a rejected archive.
+        if BUNDLE_MANIFEST_NAME not in inspection.members:
+            inspection.reject(REASON_NOT_A_BUNDLE,
+                              "manifest missing")
+            return inspection
+        try:
+            manifest = json.loads(zf.read(BUNDLE_MANIFEST_NAME))
         except (OSError, ValueError, zipfile.BadZipFile) as exc:
             inspection.reject(REASON_NOT_A_BUNDLE, str(exc))
             return inspection
@@ -501,18 +606,10 @@ class GalleryTransferService:
                       ) -> GalleryOperationResult:
         """检查→staging→身份提交→一次安装；拒绝不落任何散文件。
 
-        BR02 原子性合同：
-
-        - **全成员占用**：目标 stem 的任意 bundle 成员名被占（含孤立
-          sidecar、大小写变体）都算冲突——显式 ``new_name`` 拒绝、自动
-          命名顺延后缀（复用 bundle 服务的同名校验语义）；
-        - **意图先行**：安装前 journal 先登记**全部** finals 与大小；
-          第 N 个成员失败时按日志撤掉前 N−1 个，零残留；
-        - **身份在 staging 提交**：still_id 换发／origin 记录发生在任何
-          文件进入目标目录**之前**；保存失败整笔拒绝（不报 success）；
-        - **取消**：``cancel_check`` 在解压与安装的每一步复核——commit
-          前取消＝零落地，commit 后照常返回已完成状态；
-        - 目录互斥：同目标相册的并发导入明确 ``album_busy``。
+        BR02 原子性合同（全成员占用／意图先行／身份在 staging 提交／
+        取消零落地／目录互斥）；SR03 起随包依赖与 bundle finals 同一
+        journal 事务（``resources`` 段），资源目录与目标相册一起加锁；
+        SR03.6 检查与解压共用同一归档句柄。
         """
         request_id = make_gallery_request_id()
         real = self._bundles._resolve_in_root(dest_folder)
@@ -521,24 +618,42 @@ class GalleryTransferService:
                                   dest_folder)
         if not os.access(real, os.W_OK):
             return self._rejected(request_id, "readonly_album", real)
-        inspection = self.inspect_bundle(zip_path)
-        if not inspection.ok:
-            return GalleryOperationResult(
-                request_id=request_id, status="rejected",
-                reason=inspection.reasons[0][0],
-                warnings=tuple(f"{r}: {d}" for r, d in inspection.reasons))
         try:
-            lock_keys = acquire_directories(real)
-        except DirectoryBusyError as exc:
-            return self._rejected(request_id, REASON_ALBUM_BUSY, str(exc))
-        try:
-            return self._import_bundle_locked(
-                zip_path, real, inspection, new_name, request_id,
-                progress_callback, cancel_check)
-        finally:
-            release_directories(lock_keys)
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                inspection = self._inspect_bundle_handle(zf, zip_path)
+                if not inspection.ok:
+                    return GalleryOperationResult(
+                        request_id=request_id, status="rejected",
+                        reason=inspection.reasons[0][0],
+                        warnings=tuple(f"{r}: {d}"
+                                       for r, d in inspection.reasons))
+                manifest = inspection.manifest or {}
+                lock_dirs = [real]
+                if any(dep.get("bundled")
+                       for dep in manifest.get("dependencies") or []
+                       if isinstance(dep, dict)):
+                    lock_dirs.append(self._managed_lut_root())
+                try:
+                    lock_keys = acquire_directories(*lock_dirs)
+                except DirectoryBusyError as exc:
+                    return self._rejected(request_id, REASON_ALBUM_BUSY,
+                                          str(exc))
+                try:
+                    return self._import_bundle_locked(
+                        zf, real, inspection, new_name, request_id,
+                        progress_callback, cancel_check)
+                finally:
+                    release_directories(lock_keys)
+        except zipfile.BadZipFile as exc:
+            return self._rejected(request_id, REASON_NOT_A_BUNDLE, str(exc))
+        except OSError as exc:
+            return self._rejected(request_id, REASON_IO_ERROR, str(exc),
+                                  recoverable=True)
 
-    def _import_bundle_locked(self, zip_path: str, real: str,
+    def _managed_lut_root(self) -> str:
+        return os.path.join(self._repository.root, DEPENDENCY_DIR_NAME)
+
+    def _import_bundle_locked(self, zf: zipfile.ZipFile, real: str,
                               inspection: "BundleInspection",
                               new_name: Optional[str], request_id: str,
                               progress_callback, cancel_check
@@ -571,42 +686,61 @@ class GalleryTransferService:
 
         self._recover_import_txns(real)
         txn_dir = tempfile.mkdtemp(prefix=IMPORT_TXN_PREFIX, dir=real)
+        active_token = ACTIVE_TXNS.register(txn_dir)
+        try:
+            return self._run_import_txn(
+                zf, real, inspection, request_id, stem, identity_action,
+                origin_id, txn_dir, warnings, progress_callback,
+                cancel_check)
+        finally:
+            # SR01：登记与事务生命周期平衡（任何出口都注销）
+            ACTIVE_TXNS.unregister(active_token)
+
+    def _run_import_txn(self, zf: zipfile.ZipFile, real: str,
+                        inspection: "BundleInspection", request_id: str,
+                        stem: str, identity_action: Optional[str],
+                        origin_id, txn_dir: str, warnings: List[str],
+                        progress_callback, cancel_check
+                        ) -> GalleryOperationResult:
+        manifest = inspection.manifest or {}
         journal_path = os.path.join(txn_dir, IMPORT_JOURNAL_NAME)
         journal: Dict[str, Any] = {"schema": 1, "kind": "gallery-import",
                                    "state": "staging", "stem": stem,
-                                   "finals": [], **make_owner_block()}
+                                   "finals": [], "resources": [],
+                                   **make_owner_block()}
         listed_names = {f.get("name") for f in manifest.get("files", [])}
         try:
             write_journal(journal_path, dict(journal, txn_id=request_id))
             staged: List[Tuple[str, str]] = []   # (成员名, staging 路径)
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                for index, (name, _info) in enumerate(
-                        sorted(inspection.members.items()), start=1):
-                    if name == BUNDLE_MANIFEST_NAME:
-                        continue
-                    if cancel_check is not None and cancel_check():
-                        raise _ImportCancelled()
-                    if name not in listed_names:
-                        warnings.append(f"skipped unlisted file: {name}")
-                        continue
-                    target = os.path.join(txn_dir, name)
-                    with zf.open(name) as src, open(target, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                    listed = next(
-                        f for f in manifest.get("files", [])
-                        if f.get("name") == name)
-                    if listed.get("sha256") and \
-                            _sha256_file(target) != listed["sha256"]:
-                        raise _ImportVerifiedError(
-                            REASON_HASH_MISMATCH, name)
-                    staged.append((name, target))
-                    if progress_callback is not None:
-                        progress_callback(index, len(inspection.members))
+            for index, (name, info) in enumerate(
+                    sorted(inspection.members.items()), start=1):
+                if cancel_check is not None and cancel_check():
+                    raise _ImportCancelled()
+                if name == BUNDLE_MANIFEST_NAME:
+                    continue
+                if name not in listed_names:
+                    warnings.append(f"skipped unlisted file: {name}")
+                    continue
+                target = os.path.join(txn_dir, name)
+                _extract_member_chunked(
+                    zf, name, target, expected_size=info.file_size,
+                    cancel_check=cancel_check)
+                listed = next(
+                    f for f in manifest.get("files", [])
+                    if f.get("name") == name)
+                if listed.get("sha256") and \
+                        _sha256_file(target) != listed["sha256"]:
+                    raise _ImportVerifiedError(
+                        REASON_HASH_MISMATCH, name)
+                staged.append((name, target))
+                if progress_callback is not None:
+                    progress_callback(index, len(inspection.members))
 
-            # BR07：随包依赖安装进库受管 LUTs/ 并重写 staged grade 引用；
-            # 缺失依赖如实告警（引用型包不冒充完整便携）。
-            warnings.extend(self._install_dependencies(
-                zip_path, txn_dir, manifest, staged))
+            # SR03：依赖在事务 staging 内解压校验，安装意图与 bundle
+            # finals 同一 journal；引用重写为受管形式（SR04）。
+            dep_records, dep_warnings_extra = self._stage_dependencies(
+                zf, txn_dir, manifest, cancel_check)
+            warnings.extend(dep_warnings_extra)
 
             # 身份换发在 staging 完成（BR02）：文件提交之前；失败整笔拒绝
             if identity_action == "reallocate" and origin_id:
@@ -619,21 +753,40 @@ class GalleryTransferService:
                             staged_topos, origin_id, warnings):
                         raise _ImportVerifiedError(
                             REASON_IDENTITY_SAVE_FAILED, str(origin_id))
-                    # A manifest may carry the origin identity without a meta
-                    # member. Include the newly created sidecar in the same
-                    # install journal rather than discarding it with staging.
+                    # A manifest may carry the origin identity without a
+                    # meta member. Include the newly created sidecar in the
+                    # same install journal rather than discarding it with
+                    # staging.
                     staged_meta = meta_path_for(staged_topos)
                     if staged_meta not in {path for _, path in staged}:
-                        staged.append((os.path.basename(staged_meta), staged_meta))
+                        staged.append((os.path.basename(staged_meta),
+                                       staged_meta))
 
-            # 安装意图先行：全部 finals（含大小）落盘后再动第一个文件
+            # 依赖安装目标解析（碰撞顺延/复用）＋受管引用重写
+            resources, install_warnings = self._resolve_dependency_installs(
+                dep_records, staged, manifest)
+            warnings.extend(install_warnings)
+
+            # 安装意图先行：全部 finals（含内容 hash）与 resources 落盘
+            # 后再动第一个文件（SR02：删除授权来自内容证据）
             finals = [{"path": os.path.join(
                            real, _rebased(name, inspection.stem, stem)),
-                       "size": os.path.getsize(path)}
+                       "size": os.path.getsize(path),
+                       "sha256": _sha256_file(path)}
                       for name, path in staged]
             journal["state"] = "installing"
             journal["finals"] = finals
+            journal["resources"] = resources
             write_journal(journal_path, dict(journal, txn_id=request_id))
+
+            # 资源安装（受管目录；不覆盖外来内容）
+            os.makedirs(self._managed_lut_root(), exist_ok=True)
+            for record in dep_records:
+                if record.get("staged_path") and record.get("target_path"):
+                    if cancel_check is not None and cancel_check():
+                        raise _ImportCancelled()
+                    os.replace(record["staged_path"], record["target_path"])
+
             for index, (_name, staged_path) in enumerate(staged):
                 if cancel_check is not None and cancel_check():
                     raise _ImportCancelled()
@@ -643,16 +796,35 @@ class GalleryTransferService:
             journal["state"] = "committed"
             write_journal(journal_path, dict(journal, txn_id=request_id))
         except _ImportCancelled:
-            self._rollback_import(journal)
+            rollback_errors = self._rollback_import(journal)
+            if rollback_errors:
+                # SR02：取消回滚失败保留日志，结果标记可恢复
+                return GalleryOperationResult(
+                    request_id=request_id, status=OP_CANCELLED,
+                    reason="cancelled", recoverable=True,
+                    warnings=tuple(f"rollback incomplete: {e}"
+                                   for e in rollback_errors),
+                    affected_still_ids=(stem,))
             shutil.rmtree(txn_dir, ignore_errors=True)
             return GalleryOperationResult(
                 request_id=request_id, status=OP_CANCELLED,
                 reason="cancelled", affected_still_ids=(stem,))
         except _ImportVerifiedError as exc:
+            rollback_errors = self._rollback_import(journal)
+            if rollback_errors:
+                # SR02：回滚不完整＝保留日志与现场（可重试/人工）
+                return GalleryOperationResult(
+                    request_id=request_id, status="rejected",
+                    reason=exc.reason, recoverable=True,
+                    warnings=(exc.detail,
+                              *(f"rollback incomplete: {e}"
+                                for e in rollback_errors)),
+                    affected_still_ids=(stem,))
             shutil.rmtree(txn_dir, ignore_errors=True)
             return self._rejected(request_id, exc.reason, exc.detail)
         except OSError as exc:
-            # 回滚已安装部分；失败保留 journal 供下次恢复
+            # 回滚已安装部分（finals＋resources）；失败保留 journal 供
+            # 下次恢复
             rollback_errors = self._rollback_import(journal)
             if rollback_errors:
                 return GalleryOperationResult(
@@ -672,36 +844,27 @@ class GalleryTransferService:
             request_id=request_id, status=OP_SUCCESS,
             affected_still_ids=(stem,), warnings=tuple(warnings))
 
-    # ── 内部 ───────────────────────────────────────────────────────────
+    # ── 内部：依赖 staging／目标解析 ──────────────────────────────────
 
-    def _install_dependencies(self, zip_path: str, txn_dir: str,
-                              manifest: Dict[str, Any],
-                              staged: List[Tuple[str, str]]) -> List[str]:
-        """安装随包依赖（BR07）：受管 ``LUTs/`` 目录 + 重写 grade 引用。
+    def _stage_dependencies(self, zf: zipfile.ZipFile, txn_dir: str,
+                            manifest: Dict[str, Any], cancel_check
+                            ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """随包依赖在事务 staging 内解压＋sha 校验（SR03：先全验证）。
 
-        - bundled 依赖：解压→sha256 校验→安装为
-          ``<root>/LUTs/<sha8>_<name>``（同内容幂等复用）；staged grade
-          内的 ``active_lut_path`` 重写到安装路径——换机器/换库根导入后
-          仍解析到相同内容（hash 不变）。
-        - missing／schema 1 引用型包：不装不改，warnings 如实说明
-          （grade 保留原引用，缺失不静默）。
-        - 依赖安装是**附加性**资源写入（temp＋replace 原子）；崩溃残留
-          最多是受管目录里的孤儿资源文件，下次导入按 sha 复用。
+        返回 ``(dep_records, warnings)``；record 携带引用串、内容 hash、
+        staging 路径——安装目标在全部 bundle 成员校验后统一解析。
+        missing／schema 1 引用型包：不装不改，warnings 如实说明。
         """
         deps = manifest.get("dependencies") or []
         if not deps:
-            return []
-        warnings: List[str] = []
-        lut_root = os.path.join(self._repository.root, DEPENDENCY_DIR_NAME)
+            return [], []
+        lut_root = self._managed_lut_root()
         if not path_within(lut_root, self._repository.root):
             raise _ImportVerifiedError(REASON_DEPENDENCY_ESCAPED,
                                        "LUTs directory escapes library root")
-        rewrites: Dict[str, str] = {}
-        try:
-            os.makedirs(lut_root, exist_ok=True)
-        except OSError as exc:
-            raise _ImportVerifiedError(REASON_IO_ERROR,
-                                       f"cannot create LUTs dir: {exc}")
+        warnings: List[str] = []
+        records: List[Dict[str, Any]] = []
+        resource_dir = os.path.join(txn_dir, "resources")
         for dep in deps:
             name = dep.get("name")
             if not isinstance(name, str) or not name:
@@ -714,42 +877,95 @@ class GalleryTransferService:
                 continue
             archive = dep.get("archive")
             expected = dep.get("sha256")
-            tmp = os.path.join(txn_dir, "dep-" + os.path.basename(archive))
-            try:
-                with zipfile.ZipFile(zip_path, "r") as zf, \
-                        open(tmp, "wb") as out:
-                    shutil.copyfileobj(zf.open(archive), out)
-            except (OSError, zipfile.BadZipFile, KeyError) as exc:
-                raise _ImportVerifiedError(REASON_NOT_A_BUNDLE,
-                                           f"dependency {archive}: {exc}")
-            digest = _sha256_file(tmp)
+            os.makedirs(resource_dir, exist_ok=True)
+            staged_path = os.path.join(
+                resource_dir, "dep-" + os.path.basename(str(archive)))
+            _extract_member_chunked(
+                zf, str(archive), staged_path, cancel_check=cancel_check)
+            digest = _sha256_file(staged_path)
             if digest != expected:
-                _silent_remove(tmp)
                 raise _ImportVerifiedError(REASON_HASH_MISMATCH,
                                            str(archive))
-            target = os.path.join(lut_root, f"{digest[:8]}_{name}")
-            if not path_within(target, lut_root):
-                raise _ImportVerifiedError(REASON_DEPENDENCY_ESCAPED,
-                                           "LUT target escapes managed directory")
-            if not (os.path.isfile(target)
-                    and _sha256_file(target) == digest):
-                os.replace(tmp, target)
-            rewrites[str(dep.get("source"))] = target
-            warnings.append(f"lut installed: {target}")
-        if rewrites:
+            records.append({
+                "source_ref": str(dep.get("source")),
+                "name": name, "sha256": digest,
+                "size": os.path.getsize(staged_path),
+                "staged_path": staged_path})
+        return records, warnings
+
+    def _resolve_dependency_installs(
+            self, dep_records: List[Dict[str, Any]],
+            staged: List[Tuple[str, str]], manifest: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """解析依赖安装目标（复用/顺延前缀/拒绝碰撞）＋重写 grade 引用。
+
+        返回 ``(resources, warnings)``——resources 是写入 journal 的段
+        （只含本次要安装的条目）。碰撞策略（SR03）：目标已存在且同内容
+        → 复用（不重复安装）；同前缀不同内容 → 顺延更长 hash 前缀；
+        全 hash 同名异内容 → 拒绝（不覆盖外来文件）。
+        """
+        lut_root = self._managed_lut_root()
+        resources: List[Dict[str, Any]] = []
+        warnings: List[str] = []
+        by_source: Dict[str, str] = {}
+        for record in dep_records:
+            digest = record["sha256"]
+            name = record["name"]
+            target, reuse = self._dependency_target(lut_root, digest, name)
+            install_name = os.path.basename(target)
+            record["install_name"] = install_name
+            record["target_path"] = None if reuse else target
+            by_source[record["source_ref"]] = install_name
+            if reuse:
+                warnings.append(f"lut reused: {target}")
+            else:
+                resources.append({"path": target,
+                                  "size": record["size"],
+                                  "sha256": digest})
+        if by_source:
             grade_name = next(
                 (f["name"] for f in manifest.get("files", [])
                  if f.get("role") == BUNDLE_ROLE_GRADE), None)
             staged_by_name = dict(staged)
             if grade_name and grade_name in staged_by_name:
                 self._rewrite_staged_grade_references(
-                    staged_by_name[grade_name], rewrites)
-        return warnings
+                    staged_by_name[grade_name],
+                    {source: managed_lut_reference(install)
+                     for source, install in by_source.items()})
+                warnings.extend(
+                    f"lut installed: {os.path.join(lut_root, install)}"
+                    for install in sorted(set(by_source.values())))
+        return resources, warnings
+
+    def _dependency_target(self, lut_root: str, digest: str,
+                           name: str) -> Tuple[str, bool]:
+        """内容寻址安装目标：``<shaN>_<name>``（N 顺延 8→64）。
+
+        returns: ``(target, reuse)``——reuse=True 表示已有同内容文件。
+        raises: ``_ImportVerifiedError``——全 hash 文件名被不同内容占用。
+        """
+        if not path_within(os.path.join(lut_root, f"{digest[:8]}_{name}"),
+                           lut_root):
+            raise _ImportVerifiedError(REASON_DEPENDENCY_ESCAPED,
+                                       "LUT target escapes managed directory")
+        for prefix_len in (8, 12, 16, 20, 32, 64):
+            candidate = os.path.join(
+                lut_root, f"{digest[:prefix_len]}_{name}")
+            if not os.path.lexists(candidate):
+                return candidate, False
+            try:
+                if _sha256_file(candidate) == digest:
+                    return candidate, True    # 已有同内容：幂等复用
+            except OSError:
+                continue
+        raise _ImportVerifiedError(
+            REASON_DEPENDENCY_COLLISION,
+            f"{digest[:8]}_{name}: managed name occupied by foreign content")
 
     @staticmethod
     def _rewrite_staged_grade_references(staged_topos: str,
                                          rewrites: Dict[str, str]) -> None:
-        """把 staged grade 内的依赖引用重写到本库安装路径（staging 内）。"""
+        """把 staged grade 内的依赖引用重写（staging 内，原子替换）。"""
         try:
             with zipfile.ZipFile(staged_topos, "r") as zf:
                 names = zf.namelist()
@@ -780,6 +996,101 @@ class GalleryTransferService:
             zf.writestr("project.json",
                         json.dumps(project, ensure_ascii=False, indent=1))
         os.replace(tmp, staged_topos)
+
+    # ── 内部：受管引用迁移（SR04） ─────────────────────────────────────
+
+    def migrate_album_lut_references(self, folder: str) -> List[str]:
+        """把相册内**可证明归属**的绝对 LUT 引用升级为受管引用。
+
+        只重写 realpath 位于 ``<root>/LUTs/`` 且文件内容 sha256 与文件
+        名 hash 前缀一致的 ``active_lut_path``（内容证据确凿才迁移，
+        SR04.3）；外部用户引用不猜。幂等：受管引用跳过，可反复执行。
+        返回 warnings（迁移明细／跳过原因），供日志与状态栏呈现。
+        """
+        real = self._bundles._resolve_in_root(folder)
+        if real is None:
+            return [f"migration skipped (outside root): {folder}"]
+        lut_root = os.path.realpath(self._managed_lut_root())
+        try:
+            names = os.listdir(real)
+        except OSError as exc:
+            return [f"migration skipped: {exc}"]
+        try:
+            lock_keys = acquire_directories(real)
+        except DirectoryBusyError:
+            return ["migration skipped: album busy"]
+        warnings: List[str] = []
+        try:
+            for name in names:
+                if not name.endswith(".topos"):
+                    continue
+                path = os.path.join(real, name)
+                if not os.path.isfile(path) or os.path.islink(path):
+                    continue
+                self._migrate_grade_file(path, lut_root, warnings)
+        finally:
+            release_directories(lock_keys)
+        return warnings
+
+    def _migrate_grade_file(self, topos_path: str, lut_root: str,
+                            warnings: List[str]) -> bool:
+        try:
+            with zipfile.ZipFile(topos_path, "r") as zf:
+                if "project.json" not in zf.namelist():
+                    return False
+                project = json.loads(zf.read("project.json"))
+                payload = {name: zf.read(name) for name in zf.namelist()
+                           if name != "project.json"}
+        except (OSError, ValueError, zipfile.BadZipFile):
+            return False
+        changed = False
+        for layer in project.get("layers") or []:
+            if not isinstance(layer, dict):
+                continue
+            ref = layer.get("active_lut_path")
+            if not isinstance(ref, str) or \
+                    parse_managed_lut_reference(ref) is not None:
+                continue                      # 受管引用无需迁移
+            if not os.path.isabs(ref):
+                continue                      # 相对引用归属不明，不猜
+            candidate = os.path.realpath(ref)
+            if not (candidate == lut_root
+                    or candidate.startswith(lut_root + os.sep)):
+                continue                      # 库外引用：用户自己的文件
+            match = _INSTALL_NAME_HASH_RE.match(os.path.basename(candidate))
+            if not match or not os.path.isfile(candidate):
+                continue
+            try:
+                digest = _sha256_file(candidate)
+            except OSError:
+                continue
+            if not digest.startswith(match.group(1)):
+                continue                      # 内容与文件名前缀不符：证据不足
+            layer["active_lut_path"] = managed_lut_reference(
+                os.path.basename(candidate))
+            changed = True
+            warnings.append(
+                f"migrated lut reference: {os.path.basename(topos_path)} "
+                f"-> {layer['active_lut_path']}")
+        if not changed:
+            return False
+        tmp = topos_path + f".migrate-{os.getpid()}.tmp"
+        try:
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+                for member, data in payload.items():
+                    zf.writestr(member, data)
+                zf.writestr("project.json",
+                            json.dumps(project, ensure_ascii=False,
+                                       indent=1))
+            os.replace(tmp, topos_path)
+        except OSError as exc:
+            _silent_remove(tmp)
+            warnings.append(f"migration failed for "
+                            f"{os.path.basename(topos_path)}: {exc}")
+            return False
+        return True
+
+    # ── 内部：stem／身份 ───────────────────────────────────────────────
 
     def _resolve_import_stem(self, folder: str, base_stem: str,
                              explicit: bool
@@ -882,21 +1193,30 @@ class GalleryTransferService:
                 return False
         return True
 
+    # ── 崩溃恢复（SR02：内容归属＋登记表＋保全优先） ────────────────────
+
     def _recover_import_txns(self, folder: str) -> None:
         """收敛遗留导入事务（installing → 按意图撤掉已装部分）。
 
-        BR01 纪律：坏 journal／其他进程在途 → 保全不动（不再直接删）；
-        撤除失败保留事务目录供重试/人工处理。
+        BR01 纪律：坏 journal／其他进程在途 → 保全不动；撤除失败保留
+        事务目录供重试/人工处理。SR01：进程内登记的在场事务跳过；
+        SR03：恢复同时锁住受管资源目录（resources 撤除）。
         """
         if not os.path.isdir(folder):
             return
-        with try_recover_lock(folder) as lock:
+        with try_recover_lock(folder, self._managed_lut_root()) as lock:
             if not lock.acquired:
                 return
             for name in sorted(os.listdir(folder)):
                 if not name.startswith(IMPORT_TXN_PREFIX):
                     continue
                 txn_dir = os.path.join(folder, name)
+                if os.path.islink(txn_dir):
+                    logger.warning("gallery import: quarantine %s "
+                                   "(symlink txn dir)", txn_dir)
+                    continue
+                if ACTIVE_TXNS.is_active(txn_dir):
+                    continue             # SR01：在场事务不扫
                 try:
                     journal = read_journal(
                         os.path.join(txn_dir, IMPORT_JOURNAL_NAME))
@@ -906,17 +1226,11 @@ class GalleryTransferService:
                     continue             # 坏日志：保全，不据此动文件
                 if other_process_alive(journal.get("pid")):
                     continue
-                state = journal.get("state")
-                finals = journal.get("finals", [])
-                paths = [entry.get("path") if isinstance(entry, dict) else entry
-                         for entry in finals]
-                if (state not in ("staging", "installing", "committed")
-                        or any(not isinstance(path, str)
-                               or not path_within(path, folder)
-                               or os.path.dirname(os.path.abspath(path))
-                               != os.path.abspath(folder) for path in paths)):
+                if not self._import_journal_actionable(journal, folder,
+                                                       txn_dir):
                     logger.warning("gallery import: quarantine %s "
-                                   "(unknown state or final outside album)", txn_dir)
+                                   "(unknown state/paths or duplicates)",
+                                   txn_dir)
                     continue
                 if journal.get("state") != "committed":
                     if self._rollback_import(journal):
@@ -926,26 +1240,94 @@ class GalleryTransferService:
                         continue
                 shutil.rmtree(txn_dir, ignore_errors=True)
 
+    def _import_journal_actionable(self, journal: Dict[str, Any],
+                                   folder: str, txn_dir: str) -> bool:
+        """恢复前置校验：状态已知、finals 属目标相册、resources 属受管
+        目录、无重复路径（SR02.4——日志是意图，不是删除授权的全部证据）。
+        """
+        state = journal.get("state")
+        if state not in ("staging", "installing", "committed"):
+            return False
+        finals = journal.get("finals", [])
+        paths = [entry.get("path") if isinstance(entry, dict) else entry
+                 for entry in finals]
+        if any(not isinstance(path, str)
+               or not path_within(path, folder)
+               or os.path.dirname(os.path.abspath(path))
+               != os.path.abspath(folder) for path in paths):
+            return False
+        if len(set(paths)) != len(paths):
+            return False
+        lut_root = os.path.realpath(self._managed_lut_root())
+        resources = journal.get("resources", [])
+        if not isinstance(resources, list):
+            return False
+        resource_paths = [entry.get("path")
+                          for entry in resources
+                          if isinstance(entry, dict)]
+        if any(not isinstance(path, str)
+               or not path_within(path, lut_root)
+               for path in resource_paths):
+            return False
+        if len(set(resource_paths)) != len(resource_paths):
+            return False
+        return True
+
     @staticmethod
     def _rollback_import(journal: Dict[str, Any]) -> List[str]:
-        """按 journal 意图撤掉已安装成员；返回撤除失败的条目。
+        """按 journal 意图撤掉已安装成员＋资源；返回撤除失败的条目。
 
-        size 校验防止误删事务之外的新文件（finals 带大小，BR02 起）；
-        遗留日志（纯路径字符串）按路径撤除。
+        SR02：删除授权来自**内容证据**——finals/resources 带 sha256 且
+        当前内容一致才撤；无 hash 的旧格式日志不猜归属（保全）。
         """
         errors: List[str] = []
+
+        def _owned(path: str, entry: Dict[str, Any]) -> Optional[bool]:
+            """True=证据齐全且内容一致；False=内容不符；None=无证据。"""
+            digest = entry.get("sha256")
+            if not isinstance(digest, str):
+                return None
+            size = entry.get("size")
+            if type(size) is int and (
+                    not os.path.isfile(path)
+                    or os.path.getsize(path) != size):
+                return False
+            try:
+                return _sha256_file(path) == digest
+            except OSError:
+                return False
+
         for final in reversed(journal.get("finals", [])):
             if isinstance(final, dict):
-                path, size = final.get("path"), final.get("size")
+                path = final.get("path")
             else:
-                path, size = final, None
+                path, final = final, {}
             if not isinstance(path, str) or not os.path.lexists(path):
                 continue
             try:
-                if type(size) is int:
-                    if not os.path.isfile(path) or \
-                            os.path.getsize(path) != size:
-                        continue         # 非本事务装入的文件：不动
+                verdict = _owned(path, final)
+                if verdict is None:
+                    # 旧格式日志：没有内容证据就没有删除授权（保全）
+                    errors.append(
+                        f"{os.path.basename(path)}: no content evidence")
+                    continue
+                if verdict is False:
+                    # 日志声称装过此文件而磁盘内容不符：矛盾现场保全
+                    errors.append(
+                        f"{os.path.basename(path)}: content mismatch")
+                    continue
+                os.remove(path)
+            except OSError as exc:
+                errors.append(f"{os.path.basename(path)}: {exc}")
+        for resource in reversed(journal.get("resources", []) or []):
+            if not isinstance(resource, dict):
+                continue
+            path = resource.get("path")
+            if not isinstance(path, str) or not os.path.lexists(path):
+                continue
+            try:
+                if not _owned(path, resource):
+                    continue
                 os.remove(path)
             except OSError as exc:
                 errors.append(f"{os.path.basename(path)}: {exc}")
@@ -962,6 +1344,13 @@ class GalleryTransferService:
             affected_still_ids=affected_still_ids)
 
 
+class _ExportVerifiedError(RuntimeError):
+    def __init__(self, reason: str, detail: str) -> None:
+        super().__init__(f"{reason}: {detail}")
+        self.reason = reason
+        self.detail = detail
+
+
 class _ImportVerifiedError(RuntimeError):
     def __init__(self, reason: str, detail: str) -> None:
         super().__init__(f"{reason}: {detail}")
@@ -971,6 +1360,32 @@ class _ImportVerifiedError(RuntimeError):
 
 class _ImportCancelled(RuntimeError):
     """协作取消（commit 前零落地；状态如实返回 cancelled）。"""
+
+
+def _extract_member_chunked(zf: zipfile.ZipFile, name: str, target: str, *,
+                            expected_size: Optional[int] = None,
+                            cancel_check: Optional[Callable[[], bool]] = None
+                            ) -> int:
+    """分块解压单个成员：取消在块间生效，字节数与 ZipInfo 核对。"""
+    written = 0
+    try:
+        with zf.open(name) as src, open(target, "wb") as dst:
+            while True:
+                if cancel_check is not None and cancel_check():
+                    raise _ImportCancelled()
+                chunk = src.read(_EXTRACT_CHUNK)
+                if not chunk:
+                    break
+                dst.write(chunk)
+                written += len(chunk)
+    except zipfile.BadZipFile as exc:
+        raise _ImportVerifiedError(REASON_NOT_A_BUNDLE,
+                                   f"{name}: {exc}") from exc
+    if expected_size is not None and written != expected_size:
+        raise _ImportVerifiedError(
+            REASON_SIZE_LIMIT, f"{name}: byte count {written} != "
+                               f"{expected_size}")
+    return written
 
 
 def _rebased(member_name: str, inspection_stem: Optional[str],
