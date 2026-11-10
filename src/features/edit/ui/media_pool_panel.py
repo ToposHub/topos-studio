@@ -78,6 +78,14 @@ from src.features.edit.core.media_replacement import (
     merge_replacement_metadata, validate_replacement_usages,
 )
 from src.features.edit.core.project_archive import collect_project
+from src.features.edit.core.media_management_worker import (
+    KIND_COLLECT,
+    KIND_CONSOLIDATE,
+    MediaManagementWorker,
+    estimate_collect_bytes,
+    estimate_consolidate_bytes,
+    preflight_disk_space,
+)
 from src.features.edit.core.consolidate import (
     MODE_REMUX,
     MODE_TRANSCODE,
@@ -4799,6 +4807,8 @@ class MediaPoolPanel(QWidget):
         self._project: Optional[EditProject] = None
         self._updating: bool = False
         self._import_progress: Optional[QProgressDialog] = None
+        # P2-2：收集/整理后台任务运行态（运行中禁止重复启动）
+        self._media_mgmt_running: bool = False
         # 进度对话框重入保护：setValue 期间的嵌套事件派发不得销毁对话框
         self._progress_update_in_flight: bool = False
         self._finish_import_deferred: bool = False
@@ -5963,6 +5973,109 @@ class MediaPoolPanel(QWidget):
         self._search_filter_mode = filter_mode
         self._refresh_tree()
 
+    # ==================== P2-2 Media Management 后台执行 ====================
+
+    def _run_media_management(
+        self,
+        kind: str,
+        work,
+        on_finish,
+        *,
+        estimate_bytes: int,
+        target_dir: str,
+    ) -> None:
+        """磁盘空间预检 + 后台执行收集/整理（进度对话框 + 协作取消）。
+
+        核心已在后台线程运行（UI 不再同步复制/转码）；完成/失败/取消
+        均回主线程收尾。空间不足直接拒绝（保守估算，宁可误拒）。
+        """
+        if self._media_mgmt_running:
+            QMessageBox.information(
+                self._get_top_level_widget(),
+                I18N.tr("edit.media_pool.media_mgmt_title", "Media Management"),
+                I18N.tr(
+                    "edit.media_pool.media_mgmt_busy",
+                    "已有收集/整理任务在进行中，请等待完成或取消。",
+                ),
+            )
+            return
+        ok, free_bytes = preflight_disk_space(target_dir, estimate_bytes)
+        if not ok:
+            QMessageBox.warning(
+                self._get_top_level_widget(),
+                I18N.tr("edit.media_pool.media_mgmt_title", "Media Management"),
+                I18N.tr(
+                    "edit.media_pool.media_mgmt_no_space",
+                    "目标目录空间不足：预估需要约 {need} MiB（保守估算），"
+                    "当前可用 {free} MiB。",
+                    need=estimate_bytes // (1024 * 1024),
+                    free=free_bytes // (1024 * 1024),
+                ),
+            )
+            return
+
+        self._media_mgmt_running = True
+        title = (I18N.tr("edit.media_pool.collect_title", "收集工程")
+                 if kind == KIND_COLLECT
+                 else I18N.tr("edit.media_pool.consolidate_title", "整理工程"))
+        dialog = QProgressDialog(
+            I18N.tr("edit.media_pool.media_mgmt_running", "正在处理…"), 
+            I18N.tr("edit.media_pool.cancel", "取消"), 0, 0,
+            self._get_top_level_widget(),
+        )
+        dialog.setWindowTitle(title)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setMinimumDuration(300)
+        dialog.show()
+
+        worker = MediaManagementWorker(kind, work)
+        state = {"worker": worker, "dialog": dialog, "done": False}
+
+        def _settle() -> None:
+            if state["done"]:
+                return
+            state["done"] = True
+            self._media_mgmt_running = False
+            dialog.reset()
+            dialog.close()
+            dialog.deleteLater()
+
+        def _on_progress(kind_id: str, done: int, total: int) -> None:
+            if kind_id != kind or total <= 0:
+                return
+            dialog.setMaximum(total)
+            dialog.setValue(done)
+
+        def _on_finished(kind_id: str, payload, report) -> None:
+            if kind_id != kind:
+                return
+            _settle()
+            on_finish(payload, report)
+
+        def _on_failed(kind_id: str, message: str) -> None:
+            if kind_id != kind:
+                return
+            _settle()
+            QMessageBox.critical(
+                self._get_top_level_widget(),
+                I18N.tr("edit.media_pool.error", "Error"),
+                message,
+            )
+
+        def _on_cancelled(kind_id: str) -> None:
+            if kind_id != kind:
+                return
+            _settle()
+            self._update_status_label()
+
+        worker.signals.progress.connect(_on_progress)
+        worker.signals.finished.connect(_on_finished)
+        worker.signals.failed.connect(_on_failed)
+        worker.signals.cancelled.connect(_on_cancelled)
+        dialog.canceled.connect(worker.cancel)
+        QThreadPool.globalInstance().start(worker)
+
     def _on_collect_project(self) -> None:
         """收集工程（P1-13）：媒体 + 工程包复制到自洽归档目录。
 
@@ -5986,19 +6099,25 @@ class MediaPoolPanel(QWidget):
             return
 
         sequences = self._collect_timeline_sequences()
-        try:
-            archived, report = collect_project(
-                self._project, target_dir=target, sequences=sequences
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Collect project failed")
-            QMessageBox.critical(
-                self._get_top_level_widget(),
-                I18N.tr("edit.media_pool.error", "Error"),
-                str(exc),
-            )
-            return
 
+        def _work(progress_cb, cancel_check):
+            archived, report = collect_project(
+                self._project, target_dir=target, sequences=sequences,
+                progress_callback=progress_cb, cancelled_fn=cancel_check,
+            )
+            return archived, report
+
+        self._run_media_management(
+            KIND_COLLECT, _work,
+            lambda archived, report: self._finish_collect(archived, report, target),
+            estimate_bytes=estimate_collect_bytes(self._project,
+                                                  sequences=sequences),
+            target_dir=target,
+        )
+        return
+
+    def _finish_collect(self, archived, report, target: str) -> None:
+        """收集完成（主线程）：保存归档工程包 + 汇总报告（P2-2 后台化）。"""
         # 收集出的工程包保存在归档目录内（媒体就在旁边，跨机器可开）
         topos_path = os.path.join(
             target, f"{self._project.name or 'collected'}.topos"
@@ -6099,20 +6218,25 @@ class MediaPoolPanel(QWidget):
         if not target:
             return
 
-        try:
+        def _work(progress_cb, cancel_check):
             new_project, _new_seqs, report = consolidate_project(
                 self._project, sequences=sequences, target_dir=target,
                 mode=mode, handles_frames=handles,
+                progress_cb=progress_cb, cancel_check=cancel_check,
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Consolidate project failed")
-            QMessageBox.critical(
-                self._get_top_level_widget(),
-                I18N.tr("edit.media_pool.error", "Error"),
-                str(exc),
-            )
-            return
+            return new_project, report
 
+        self._run_media_management(
+            KIND_CONSOLIDATE, _work,
+            lambda new_project, report: self._finish_consolidate(
+                new_project, report, target),
+            estimate_bytes=estimate_consolidate_bytes(self._project, sequences),
+            target_dir=target,
+        )
+        return
+
+    def _finish_consolidate(self, new_project, report, target: str) -> None:
+        """整理完成（主线程）：保存归档工程包 + 汇总报告（P2-2 后台化）。"""
         topos_path = os.path.join(
             target, f"{self._project.name or 'consolidated'}.topos"
         )
