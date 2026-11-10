@@ -60,6 +60,7 @@ from src.features.color.core.gallery_contracts import (
     make_gallery_request_id,
 )
 from src.features.color.core.gallery_txn_core import (
+    ACTIVE_TXNS,
     OUTCOME_CONFLICT,
     OUTCOME_PENDING,
     OUTCOME_QUARANTINED,
@@ -533,6 +534,15 @@ class GalleryBundleService:
     def _recover_one_gallery_txn(self, txn_dir: str,
                                  name: str) -> TxnRecoveryResult:
         txn_id = name[len(TXN_DIR_PREFIX):]
+        if os.path.islink(txn_dir):
+            # 伪装/链接的事务目录不是本协议产物：保全不动（SR02）
+            return TxnRecoveryResult(txn_id, txn_dir, OUTCOME_QUARANTINED,
+                                     "transaction dir is a symlink")
+        if ACTIVE_TXNS.is_active(txn_dir):
+            # SR01：进程内在场事务（同线程重入也持锁）——登记表是权威
+            return TxnRecoveryResult(txn_id, txn_dir, OUTCOME_SKIPPED_ACTIVE,
+                                     "owned by a live transaction in this "
+                                     "process")
         try:
             manifest = read_journal(os.path.join(txn_dir, MANIFEST_NAME))
         except JournalError as exc:
@@ -594,7 +604,13 @@ class GalleryBundleService:
     def _recover_committed_txn(self, txn_dir: str, txn_id: str, kind: str,
                                entries: List[Dict[str, Any]]
                                ) -> TxnRecoveryResult:
-        """committed 遗留：验证新集合，copy 继续按日志清源后才清理。"""
+        """committed 遗留：验证新集合，copy 继续按日志清源后才清理。
+
+        SR02：清源之前逐条验证**目标内容**与日志一致（size＋sha256），
+        且**源未被事务之外重建/修改**（源身份仍等于条目登记值）——源
+        发生变化即明确 conflict，不删用户数据；无身份证据的旧日志同
+        样保全，不把"文件名存在"当作删除授权。
+        """
         absent = [str(e.get("dst")) for e in entries
                   if not os.path.lexists(str(e.get("dst")))]
         if absent:
@@ -602,15 +618,53 @@ class GalleryBundleService:
                                      f"committed but targets missing: "
                                      f"{absent}")
         if kind == KIND_COPY_MOVE:
-            # committed 后中断在清源途中：按日志继续清源（源此刻冗余）。
+            # committed 后中断在清源途中：目标全部验证一致才继续清源。
+            import hashlib
+
+            def _digest(path: str) -> Optional[str]:
+                hasher = hashlib.sha256()
+                try:
+                    with open(path, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(1 << 20), b""):
+                            hasher.update(chunk)
+                except OSError:
+                    return None
+                return hasher.hexdigest()
+
+            # SR02：清源授权需要内容证据——旧格式（无 sha256）不猜归属，
+            # 保全事务目录待人工确认。
+            for entry in entries:
+                if not isinstance(entry.get("sha256"), str) \
+                        or not isinstance(entry.get("src_sha256"), str):
+                    return TxnRecoveryResult(
+                        txn_id, txn_dir, OUTCOME_CONFLICT,
+                        "committed copy without content evidence — "
+                        "manual confirmation required")
+            for entry in entries:
+                dst = str(entry.get("dst"))
+                digest = entry.get("sha256")
+                if type(entry.get("size")) is int \
+                        and os.path.getsize(dst) != entry["size"]:
+                    return TxnRecoveryResult(
+                        txn_id, txn_dir, OUTCOME_CONFLICT,
+                        f"committed target content mismatch: {dst}")
+                if _digest(dst) != digest:
+                    return TxnRecoveryResult(
+                        txn_id, txn_dir, OUTCOME_CONFLICT,
+                        f"committed target content mismatch: {dst}")
             pending: List[str] = []
             for entry in entries:
                 src = str(entry.get("src"))
-                if os.path.lexists(src):
-                    try:
-                        os.remove(src)
-                    except OSError as exc:
-                        pending.append(f"{os.path.basename(src)}: {exc}")
+                if not os.path.lexists(src):
+                    continue               # 已清理过（幂等重试）
+                if _digest(src) != entry.get("src_sha256"):
+                    return TxnRecoveryResult(
+                        txn_id, txn_dir, OUTCOME_CONFLICT,
+                        f"source changed since commit, kept: {src}")
+                try:
+                    os.remove(src)
+                except OSError as exc:
+                    pending.append(f"{os.path.basename(src)}: {exc}")
             if pending:
                 return TxnRecoveryResult(txn_id, txn_dir, OUTCOME_PENDING,
                                          "; ".join(pending))
@@ -621,6 +675,7 @@ class GalleryBundleService:
     def _txn_entries_in_root(self, entries: List[Dict[str, Any]],
                              txn_dir: str) -> bool:
         """坏日志不得驱动库外文件操作：src/dst 归根、staged 归事务目录。"""
+        seen: set = set()
         for entry in entries:
             src, dst, staged = (entry.get("src"), entry.get("dst"),
                                 entry.get("staged"))
@@ -633,6 +688,10 @@ class GalleryBundleService:
                     not isinstance(staged, str)
                     or not path_within(staged, txn_dir)):
                 return False
+            key = (src, dst)                # 重复/自相覆盖条目非法（SR02）
+            if key in seen:
+                return False
+            seen.add(key)
         return True
 
     @staticmethod
@@ -660,7 +719,23 @@ class GalleryBundleService:
 
     @staticmethod
     def _rollback_copy_entries(entries: List[Dict[str, Any]]) -> str:
-        """uncommitted copy-move：只删本事务拥有的目标副本，源不动。"""
+        """uncommitted copy-move：只删本事务拥有的目标副本，源不动。
+
+        SR02：删除授权来自内容证据（sha256）——同大小不同内容、或旧
+        格式日志无 hash，一律判冲突保全，不按 path＋size 猜归属。
+        """
+        import hashlib
+
+        def _digest(path: str) -> Optional[str]:
+            hasher = hashlib.sha256()
+            try:
+                with open(path, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        hasher.update(chunk)
+            except OSError:
+                return None
+            return hasher.hexdigest()
+
         for entry in reversed(entries):
             src = str(entry.get("src"))
             dst = str(entry.get("dst"))
@@ -672,8 +747,13 @@ class GalleryBundleService:
                 if not src_here:
                     # 源不在而目标副本在：副本是唯一内容，保全不动
                     return f"copy target is sole copy: {dst}"
+                digest = entry.get("sha256")
+                if not isinstance(digest, str):
+                    return (f"copy without content evidence, kept: {dst}")
                 size = entry.get("size")
                 if type(size) is int and os.path.getsize(dst) != size:
+                    return f"target occupied by foreign file: {dst}"
+                if _digest(dst) != digest:
                     return f"target occupied by foreign file: {dst}"
                 os.remove(dst)                # 本事务安装的副本：撤下
             elif staged_here and not src_here:
@@ -745,11 +825,22 @@ class _MoveTransaction:
         self.dst = os.path.abspath(dst_folder)
         self.txn_id = txn_id
         self.txn_dir = tempfile.mkdtemp(prefix=TXN_DIR_PREFIX, dir=self.dst)
+        self._active_token = ACTIVE_TXNS.register(self.txn_dir)
         self.state = STATE_PREPARED
         self.entries: List[Dict[str, Any]] = []
         self.warnings: List[str] = []
 
     def run(self, members: List[str], new_stem: str) -> Dict[str, Any]:
+        try:
+            return self._run_locked(members, new_stem)
+        finally:
+            # SR01：登记与事务生命周期平衡——run 的任何出口都注销，
+            # 恢复入口从此只处理确定无活跃所有者的事务。
+            ACTIVE_TXNS.unregister(self._active_token)
+            self._active_token = None
+
+    def _run_locked(self, members: List[str], new_stem: str
+                    ) -> Dict[str, Any]:
         try:
             # 逐成员登记意图：src / staged / dst（先落盘后动文件）
             for path in members:
@@ -829,17 +920,27 @@ def _suffix_of(path: str) -> str:
 
 
 class _CopyMoveTransaction(_MoveTransaction):
-    """跨卷 move：copy → fsync → size 校验 → install → committed 后清源。
+    """跨卷 move：copy → fsync → 内容校验 → install → committed 后清源。
 
-    BR01：journal kind 独立（``gallery-copy-move``），条目记录源文件
-    size——恢复据此区分"本事务安装的副本"与"事务之外的新文件"。跨卷
-    回滚不靠 rename：未提交只删本事务目标副本（源不动）；committed
-    后中断在清源途中则按日志继续清源。
+    BR01：journal kind 独立（``gallery-copy-move``）。SR02 起条目记录
+    **源与副本的 sha256**——恢复据此区分"本事务安装的副本"与"事务之外
+    的新文件"（同大小不同内容不再误判），committed 清源前先验目标内容
+    与源身份。跨卷回滚不靠 rename：未提交只删本事务目标副本（源不动）。
     """
 
     kind = KIND_COPY_MOVE
 
-    def run(self, members: List[str], new_stem: str) -> Dict[str, Any]:
+    def _run_locked(self, members: List[str], new_stem: str
+                    ) -> Dict[str, Any]:
+        import hashlib
+
+        def _digest(path: str) -> str:
+            hasher = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+
         try:
             for path in members:
                 suffix = _suffix_of(path)
@@ -849,7 +950,8 @@ class _CopyMoveTransaction(_MoveTransaction):
                 self.entries.append({
                     "src": os.path.abspath(path), "staged": staged,
                     "dst": dst, "installed": False,
-                    "size": os.path.getsize(path)})
+                    "size": os.path.getsize(path),
+                    "src_sha256": _digest(os.path.abspath(path))})
             self._write()
             self.state = STATE_INSTALLING
             self._write()
@@ -862,6 +964,9 @@ class _CopyMoveTransaction(_MoveTransaction):
                     raise OSError(errno.EIO,
                                   "size mismatch after copy",
                                   entry["src"])
+                # 副本内容证据先落 journal，再安装到目标（SR02）
+                entry["sha256"] = _digest(entry["staged"])
+                self._write()
             for entry in self.entries:
                 os.replace(entry["staged"], entry["dst"])
                 entry["installed"] = True
@@ -899,6 +1004,19 @@ class _CopyMoveTransaction(_MoveTransaction):
         for entry in reversed(self.entries):
             try:
                 if entry["installed"] and os.path.lexists(entry["dst"]):
+                    # 撤下前核对内容（安装后被外部替换的文件不属于本事务）
+                    digest = entry.get("sha256")
+                    if isinstance(digest, str):
+                        import hashlib
+                        hasher = hashlib.sha256()
+                        with open(entry["dst"], "rb") as fh:
+                            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                                hasher.update(chunk)
+                        if hasher.hexdigest() != digest:
+                            errors.append(
+                                f"{os.path.basename(entry['dst'])}: "
+                                f"replaced by foreign content")
+                            continue
                     os.remove(entry["dst"])
                     entry["installed"] = False
                 elif os.path.lexists(entry["staged"]):

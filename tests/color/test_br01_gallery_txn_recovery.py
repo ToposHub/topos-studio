@@ -172,20 +172,30 @@ class TestMoveRecovery:
 # ── copy-move：独立恢复分支 ────────────────────────────────────────────
 
 class TestCopyMoveRecovery:
-    def _copy_txn(self, root: Path, state: str) -> Path:
+    @staticmethod
+    def _sha(data: bytes) -> str:
+        import hashlib
+        return hashlib.sha256(data).hexdigest()
+
+    def _copy_txn(self, root: Path, state: str, *,
+                  with_evidence: bool = True) -> Path:
         user, target = root / "User", root / "System"
         txn = target / (bundles.TXN_DIR_PREFIX + "copy")
         txn.mkdir()
         (user / "Big.topos").write_bytes(b"SOURCE")
         (target / "Big.topos").write_bytes(b"SOURCE")     # 已安装副本
+        entry = {
+            "src": str(user / "Big.topos"),
+            "staged": str(txn / "copy-Big.topos"),
+            "dst": str(target / "Big.topos"),
+            "installed": state == bundles.STATE_COMMITTED,
+            "size": len(b"SOURCE")}
+        if with_evidence:   # SR02 起生产格式：源/副本内容证据
+            entry.update({"sha256": self._sha(b"SOURCE"),
+                          "src_sha256": self._sha(b"SOURCE")})
         (txn / bundles.MANIFEST_NAME).write_text(json.dumps({
             "kind": bundles.KIND_COPY_MOVE, "state": state,
-            "entries": [{
-                "src": str(user / "Big.topos"),
-                "staged": str(txn / "copy-Big.topos"),
-                "dst": str(target / "Big.topos"),
-                "installed": state == bundles.STATE_COMMITTED,
-                "size": len(b"SOURCE")}]}))
+            "entries": [entry]}))
         return txn
 
     def test_uncommitted_copy_removes_target_copy_keeps_source(
@@ -218,8 +228,43 @@ class TestCopyMoveRecovery:
             str(root / "System"))
         assert [r.outcome for r in results] == ["conflict"]
         assert (root / "System" / "Big.topos").read_bytes() == \
-            b"FOREIGN FILE!!"    # size 不符：不删事务之外的新文件
+            b"FOREIGN FILE!!"    # 内容不符：不删事务之外的新文件
         assert (root / "User" / "Big.topos").exists()
+
+    def test_legacy_copy_without_evidence_is_preserved(self, root: Path):
+        """SR02：无内容证据的旧格式日志不猜归属——副本与日志都保全。"""
+        txn = self._copy_txn(root, bundles.STATE_INSTALLING,
+                             with_evidence=False)
+        service = bundles.GalleryBundleService(str(root))
+        results = service.recover_gallery_transactions_detailed(
+            str(root / "System"))
+        assert [r.outcome for r in results] == ["conflict"]
+        assert (root / "System" / "Big.topos").exists()
+        assert (root / "User" / "Big.topos").exists()
+        assert txn.exists()
+
+    def test_committed_copy_target_corrupt_is_conflict(self, root: Path):
+        """committed 清源前发现目标内容损坏：源不删，现场保全。"""
+        txn = self._copy_txn(root, bundles.STATE_COMMITTED)
+        (root / "System" / "Big.topos").write_bytes(b"CORRUPTED!!")
+        service = bundles.GalleryBundleService(str(root))
+        results = service.recover_gallery_transactions_detailed(
+            str(root / "System"))
+        assert [r.outcome for r in results] == ["conflict"]
+        assert (root / "User" / "Big.topos").exists()   # 源保住
+        assert txn.exists()
+
+    def test_committed_copy_source_rebuilt_is_conflict(self, root: Path):
+        """committed 清源前发现源被重建（内容变化）：不删用户数据。"""
+        txn = self._copy_txn(root, bundles.STATE_COMMITTED)
+        (root / "User" / "Big.topos").write_bytes(b"USER REBUILT")
+        service = bundles.GalleryBundleService(str(root))
+        results = service.recover_gallery_transactions_detailed(
+            str(root / "System"))
+        assert [r.outcome for r in results] == ["conflict"]
+        assert (root / "User" / "Big.topos").read_bytes() == b"USER REBUILT"
+        assert (root / "System" / "Big.topos").exists()
+        assert txn.exists()
 
 
 # ── still capture：备份窗口与回滚保全 ─────────────────────────────────
@@ -289,6 +334,8 @@ class TestStillCaptureRecovery:
         txn2._state = captures.STATE_COMMITTED
         txn2._write_manifest()
         (tmp_path / "Old.topos").unlink()
+        # SR01：模拟所有者进程消亡（登记注销）——在场事务是 skipped_active
+        txn2._release_locks()
         results = captures.recover_still_transactions_detailed(str(tmp_path))
         assert results[0].outcome == "conflict"       # 保全，不误清备份
         assert Path(txn2.txn_dir).exists()
