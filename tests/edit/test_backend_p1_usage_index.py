@@ -116,7 +116,7 @@ def test_same_path_groups_and_usage_check_cover_subclips() -> None:
                                          display_name="头")
 
     groups = same_path_asset_groups(project)
-    assert groups.get("/tmp/shared.mov") == (parent_id, sub.asset_id)
+    assert groups.get("/tmp/shared.mov") == tuple(sorted((parent_id, sub.asset_id)))
 
     # 子片段被时间线引用；父素材删除检查必须看到同一文件仍在使用
     timeline = _sequence("t1", [("v1", sub.asset_id, 0, 25)])

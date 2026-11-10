@@ -61,7 +61,6 @@ def estimate_collect_bytes(project: Any, *,
                            include_unused: bool = True,
                            sequences: Iterable[Any] = ()) -> int:
     """收集空间估算：待复制媒体文件字节和（保守，缺失文件不计）。"""
-    del sequences  # include_unused=True 时即全量素材
     if include_unused:
         return _existing_files_size(_asset_paths(project))
     from src.features.edit.core.asset_usage_index import build_asset_usage_index
@@ -124,8 +123,8 @@ class MediaManagementWorker(QRunnable):
                 done, total = int(args[0]), int(args[1])
             else:
                 progress = args[0] if args else None
-                done = int(getattr(progress, "completed", 0) or 0)
-                total = int(getattr(progress, "total", 0) or 0)
+                done = int(getattr(progress, "completed_segments", 0) or 0)
+                total = int(getattr(progress, "total_segments", 0) or 0)
             self.signals.progress.emit(self._kind, done, total)
 
         def _cancel_check() -> bool:

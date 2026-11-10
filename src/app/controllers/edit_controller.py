@@ -8283,6 +8283,8 @@ class EditControllerMixin:
         durations = [
             float((getattr(
                 self._current_edit_project.assets.get(j.asset_id),
+                "metadata", {}) or {}).get("duration_seconds") or (getattr(
+                self._current_edit_project.assets.get(j.asset_id),
                 "metadata", {}) or {}).get("duration") or 0.0)
             for j in jobs
         ]

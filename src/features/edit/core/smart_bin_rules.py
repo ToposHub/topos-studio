@@ -29,6 +29,7 @@
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
@@ -223,6 +224,14 @@ def validate_rule_tree(node: Any, _path: str = "rules") -> None:
     elif value is None:
         raise SmartBinRuleError(f"{_path}: 操作符 {cmp_op} 需要 value")
 
+    if cmp_op != "exists" and cap.value_type in ("number", "timestamp"):
+        values = value if cmp_op in ("in", "between") else (value,)
+        if any(isinstance(v, bool) or not isinstance(v, (int, float))
+               or not math.isfinite(v) for v in values):
+            raise SmartBinRuleError(f"{_path}: 字段 {field} 需要有限数值")
+        if cmp_op == "between" and value[0] > value[1]:
+            raise SmartBinRuleError(f"{_path}: between 下界不能大于上界")
+
 
 def has_rule_tree(filter_params: Optional[Mapping[str, Any]]) -> bool:
     """filter_params 是否携带 v2 规则树。"""
@@ -269,6 +278,9 @@ def _match_leaf(asset: MediaAsset, node: Mapping[str, Any]) -> bool:
             return any(str(value).casefold() in str(k).casefold() for k in actual)
         return str(value).casefold() in str(actual).casefold()
     if cmp_op == "in":
+        if isinstance(actual, (tuple, list)):
+            candidates = {str(v).casefold() for v in value}
+            return any(str(keyword).casefold() in candidates for keyword in actual)
         return actual in value or str(actual).casefold() in {
             str(v).casefold() for v in value}
     if cmp_op == "between":

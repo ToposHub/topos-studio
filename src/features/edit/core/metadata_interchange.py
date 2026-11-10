@@ -219,14 +219,14 @@ def plan_metadata_import(
     ]
     if not importable_indexes:
         return MetadataImportPlan(
-            warnings=warnings + ("没有可导入的列（日志/制作字段）",),
+            warnings=tuple(warnings) + ("没有可导入的列（日志/制作字段）",),
             total_rows=max(0, len(rows) - 1))
 
     asset_id_index = lower_header.index("asset_id") if "asset_id" in lower_header else None
     path_index = lower_header.index("path") if "path" in lower_header else None
     if asset_id_index is None and path_index is None:
         return MetadataImportPlan(
-            warnings=warnings + ("缺少匹配列（asset_id 或 path）",),
+            warnings=tuple(warnings) + ("缺少匹配列（asset_id 或 path）",),
             total_rows=max(0, len(rows) - 1))
 
     pending: dict[str, dict[str, Any]] = {}
