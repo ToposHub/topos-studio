@@ -100,3 +100,10 @@ tests/ui/test_br05_action_gate.py
 tests/ui/test_br08_menu_transport_gate.py
 tests/color/test_gallery_review_round2.py
 tests/app/test_gallery_review_round2_capture.py
+tests/color/test_sr01_active_txn_identity.py
+tests/color/test_sr02_import_ownership.py
+tests/color/test_sr03_lut_transaction.py
+tests/color/test_sr04_managed_refs.py
+tests/app/test_sr04_managed_ref_apply.py
+tests/ui/test_sr05_query_generation.py
+tests/app/test_sr06_capture_snapshot_freeze.py

@@ -103,17 +103,21 @@ class TestConstructorFailureReleases:
 
 class TestLockTableHygiene:
     def test_table_releases_entries_when_unused(self, tmp_path):
+        baseline = core._TABLE.size()     # 其他用例可能仍持有目录（不强求 0）
         keys = core.acquire_directories(str(tmp_path))
-        assert core._TABLE.size() >= 1
+        assert core._TABLE.size() == baseline + 1
         core.release_directories(keys)
-        assert core._TABLE.size() == 0             # 无使用者即回收
+        assert core._TABLE.size() == baseline   # 无使用者即回收
 
     def test_nested_same_thread_acquire_is_allowed(self, tmp_path):
+        baseline = core._TABLE.size()
         outer = core.acquire_directories(str(tmp_path))
         inner = core.acquire_directories(str(tmp_path))   # 服务内嵌套恢复
+        assert core._TABLE.size() == baseline + 1         # 同键不重复建条目
         core.release_directories(inner)
+        assert core._TABLE.size() == baseline + 1
         core.release_directories(outer)
-        assert core._TABLE.size() == 0
+        assert core._TABLE.size() == baseline
 
 
 class TestCrossProcessLease:

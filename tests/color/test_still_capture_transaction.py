@@ -289,6 +289,9 @@ class TestCrashRecovery:
         txn = StillCaptureTransaction(folder, recover_leftovers=False)
         _stage_new_set(txn, paths)  # prepared 状态即“进程退出”
         assert txn.state == "prepared"
+        # SR01：模拟所有者进程消亡（登记注销＋锁释放）——在场事务是
+        # skipped_active，不属"遗留清扫"范围
+        txn._release_locks()
 
         recovered = recover_still_transactions(folder)
         assert recovered

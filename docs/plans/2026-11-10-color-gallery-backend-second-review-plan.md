@@ -47,13 +47,13 @@
 
 | 编号 | 优先级 | 内容 | 依赖 | 状态 |
 |---|---|---|---|---|
-| SR01 | P1 | 活跃事务身份与同线程／跨进程互斥 | 无 | 待实施 |
-| SR02 | P1 | 恢复与回滚的内容归属、完整性和旧日志保全 | SR01 | 待实施 |
-| SR03 | P2 | LUT 与 bundle 的统一事务、取消与资源管理 | SR01、SR02 | 待实施 |
-| SR04 | P2 | 受管资源稳定引用与库迁移 | SR03 | 待实施 |
-| SR05 | P2 | 异步请求的代际归属、回填与大库 UI | 可并行 | 待实施 |
-| SR06 | P2 | 真正的抓帧不可变快照与脚本生命周期 | SR01、SR02 | 待实施 |
-| SR07 | P2 | 原计划保留功能与设备验收 | 对应实现完成后 | 待实施 |
+| SR01 | P1 | 活跃事务身份与同线程／跨进程互斥 | 无 | **已完成**（84e34ac0） |
+| SR02 | P1 | 恢复与回滚的内容归属、完整性和旧日志保全 | SR01 | **已完成**（4f2f9de7） |
+| SR03 | P2 | LUT 与 bundle 的统一事务、取消与资源管理 | SR01、SR02 | **已完成**（4f2f9de7） |
+| SR04 | P2 | 受管资源稳定引用与库迁移 | SR03 | **已完成**（4f2f9de7，UI 警告透出同批） |
+| SR05 | P2 | 异步请求的代际归属、回填与大库 UI | 可并行 | **部分完成**（1443ae0b：代际随请求／原子调度／同步共用 token／待选回填；分页模型与传输异步化见 §13） |
+| SR06 | P2 | 真正的抓帧不可变快照与脚本生命周期 | SR01、SR02 | **部分完成**（bd2f2ade：grade 载荷冻结＋脚本 coordinator 登记；独立视频权威帧 probe 等见 §13） |
+| SR07 | P2 | 原计划保留功能与设备验收 | 对应实现完成后 | 保留项维持诚实禁用；设备验收未做（§10/§13） |
 
 建议优先 SR01→SR02；其余项目按依赖实施。每项关闭须附生产入口与执行端证据，不能只提交领域辅助类或把按钮改为 enabled。
 
@@ -211,3 +211,32 @@ PY
 ```
 
 本表 SR01–SR07 尚未实施，本轮没有自动提交。
+
+## 12. 实施记录（2026-11-10 SR 整改批次）
+
+| 提交 | 内容 |
+|---|---|
+| f8506686 | 复查计划与复现脚本入库（本计划＋媒体池复核计划及验证产物） |
+| 68a3d333 | §1 已直接修复的 color 侧小修与 25 项回归（复查过程产出） |
+| 02d3e4b9 | §"已直接修复"的媒体池 9 类局部修复与 14 项回归（复查过程产出） |
+| 84e34ac0 | SR01：`ActiveTxnRegistry` 进程内活跃登记（三套事务统一登记/注销）；flock 跨进程目录租约（进程内引用计数共享，锁文件在系统临时目录）；锁表引用计数清零回收；构造失败 finally 平衡释放；fsync 合同收紧（EINVAL/ENOTSUP/ENOSYS 之外上抛）。回归 `tests/color/test_sr01_active_txn_identity.py`（10 项，含真实双进程租约用例） |
+| 4f2f9de7 | SR02：import finals/resources 带 sha256（删除授权=内容证据；无证据旧日志保全）；copy-move 条目记录源/副本 sha（回滚与 committed 清源先验全部目标内容＋源身份，源被重建→conflict）；截图备份先验身份、existed 无身份证据→conflict；重复条目/symlink 事务目录/资源越界全部隔离；取消回滚失败保留日志＋recoverable。SR03：依赖在事务 staging 解压校验，`resources` 段与 finals 同一 journal 先落盘；安装名 sha 前缀顺延（8→64），全 hash 碰撞明确拒绝，同内容幂等复用；单一归档句柄贯穿检查/解压；分块解压（块间取消＋字节数核对）；导出后验证最终归档（CRC＋成员 hash==manifest）并共享导入限额。SR04：受管引用 `topos-lut://LUTs/<shaN>_<name>`（`gallery_resource_refs.py`）；导入重写为受管引用；应用边界（`_prepare_preset_layers`）resolver 换算当前库根；`migrate_album_lut_references` 按内容证据升级绝对引用（扫描入口每相册一次接线）；导入/导出交互层透出缺依赖警告。回归 `tests/color/test_sr02_import_ownership.py`（9）、`test_sr03_lut_transaction.py`（7）、`test_sr04_managed_refs.py`（7）、`tests/app/test_sr04_managed_ref_apply.py`（4） |
+| 1443ae0b | SR05：pending 项携带 `(generation, query)`——工作项消费**请求自己的**代际（复现修复）；submit/shutdown 锁内原子调度（executor 提交不再落在锁外）；pending 相册 FIFO 上限 128（`dropped_overflow`）；执行前取消计入 `dropped_stale`；面板同步/异步共用单调扫描 token（迟到异步结果不覆盖同步状态）；导入/改名待选随 token 在异步回填后生效。回归 `tests/ui/test_sr05_query_generation.py`（7） |
+| bd2f2ade | SR06（可落地核心）：`CaptureFrameSnapshot` 冻结 grade 载荷（layers/raw_params/active index/tracking/stabilization 只读视图）＋合成图数据＋源素材路径，commit 全程不读 live engine（无快照的兼容入口回退 live 读，已声明）；脚本抓帧路径与 UI 路径登记同一 coordinator（register/finish 配对）。回归 `tests/app/test_sr06_capture_snapshot_freeze.py`（7） |
+
+**验收记录**
+
+- 本轮复现脚本 `--strict`：**7/7 finding=false，退出码 0**（修复前 5 项 finding=true）。
+- 上一轮复现脚本 `--strict`：9/9 finding=false（未回归）。
+- 合并回归清单（109 文件，本轮新增 7 个 SR 套件）：**1866 passed / 4 skipped，63.7 秒**；跳过项＝cv2 缺失 2、大小写敏感文件系统 1、PyQt6 未暴露原生菜单事件 1，均不计作通过。deselect 的 `test_curves_soft_clip_model::test_legacy_v2_layer_dict_loads_identity_and_resaves_stable` 为上一轮已溯源的**既有失败**（基线 c0cb9af2 干净树同样失败），非本轮引入。
+- 全树分目录回归：`tests/color + tests/app`＝**6245 passed / 6 skipped / 2 failed**（仅上一轮已溯源的两项既有失败：curves soft-clip v2 用例、`test_fix_wd1g7_aud`，见上一轮实施记录）；`tests/ui`＝**2305 passed / 2 skipped**。全树单进程连跑（color+app+ui 一次 pytest）在 macOS Qt 6.10 存在与本轮改动无关的偶发段错误（`test_panel_dividers` 的既有 skip 理由同源），故以分目录结果为准。
+- 隔离启动检查：`QT_QPA_PLATFORM=offscreen .venv/bin/python -m src.main --test-startup --no-startup-dialog` 退出码 0、无 traceback。
+- 有意行为变更并已更新对应测试：导入依赖引用由绝对路径改为受管引用（`test_br07_export_dependencies`）；伪造/旧格式恢复日志由"按 size 删除"改为"无内容证据保全"（`test_br01` copy 用例组）；在场事务不被自动恢复（`test_still_capture_transaction` prepared 用例模拟所有者消亡）。
+
+**剩余范围（诚实声明，未交付）**
+
+1. SR05 大库 UI：增量/分页/可见区解码模型未实施（当前仍是全量 QListWidgetItem 回填）；Import/Export 仍由 GUI 线程同步调用（大包会阻塞窗口，无取消/进度接线）；1k/10k 首屏、搜索 p95、256MB 包操作响应性未实测——不宣称大库 UI 卡顿已验收消除。
+2. SR06 剩余：独立源视频的权威帧 probe（clip-local/source/timeline 映射）未实施；meta 采集仍含 live 上下文读取（grade 载荷已冻结）；未做真实 GPU 混装复现（合同闭环以单测证据为准）。
+3. SR04 剩余：Gallery grade 移入工程/工程导出/跨机器场景的资源所有权与打包行为未定义实施（当前覆盖：库内迁移/导入导出/应用解析）。
+4. §10 全部保留项（真分屏 presenter、PowerGrade/Timelines/Memories/DRX、VFR PTS、Source 预算、Proxy 等）维持诚实禁用；真机 GPU/音频/性能验收未做。
+5. 媒体池复核计划（`2026-11-10-media-pool-backend-review-plan.md`）的 R01–R15 未在本批实施，另属独立整改批次。
