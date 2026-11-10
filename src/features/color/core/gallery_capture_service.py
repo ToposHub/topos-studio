@@ -42,8 +42,11 @@ REASON_CANCELLED = "cancelled"
 
 # 上下文事实中"变了就必须取消"的字段（album 允许变——写入目的地在请求
 # 发起时已锁定，用户切走 album 只影响完成后的刷新，见控制器侧）。
+# BR03（2026-11-10）：grade_revision／project_id 升为阻断字段——发起后
+# 调色被改动或换了工程，persist 不得把旧帧写进新 grade／新工程上下文。
 _BLOCKING_FACT_FIELDS = ("clip_id", "asset_id", "timeline_id", "media_path",
-                         "source_frame", "timeline_frame")
+                         "source_frame", "timeline_frame", "grade_revision",
+                         "project_id")
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,7 @@ class GalleryCaptureFacts:
     source_frame: Optional[int] = None
     timeline_frame: Optional[int] = None
     grade_revision: int = 0
+    project_id: Optional[str] = None
 
     def diff_blocking(self, other: "GalleryCaptureFacts"
                       ) -> Tuple[str, ...]:
@@ -69,6 +73,20 @@ class GalleryCaptureFacts:
 PrepareFrame = Callable[[], object]
 PersistBundle = Callable[[object], GalleryOperationResult]
 ContextProbe = Callable[[], Optional[GalleryCaptureFacts]]
+
+
+@dataclass(frozen=True)
+class CaptureFrameSnapshot:
+    """prepare 阶段取得的同一呈现代际快照（BR03）。
+
+    JPEG 视口图与 float 帧一次取得；persist 消费快照，不二次读取
+    engine——prepare 与 persist 之间换 grade／帧不会把旧 JPEG 与新
+    EXR／grade 混装进同一个 bundle。
+    """
+
+    image: object
+    hdr_frame: object = None
+    grade_revision: int = 0
 
 
 class GalleryCaptureSession:
@@ -113,6 +131,14 @@ class GalleryCaptureSession:
                 reason=REASON_CONTEXT_CHANGED,
                 warnings=(f"changed: {', '.join(changed)}",))
         return None
+
+    def check_before_write(self) -> Optional[GalleryOperationResult]:
+        """写盘前的最后复核（BR03：覆盖对话框返回后调用）。
+
+        取消令牌或上下文已变 → 返回取消结果（调用方不得继续写盘）；
+        一致 → None。
+        """
+        return self._check_cancelled() or self._check_context()
 
     # ── 执行 ───────────────────────────────────────────────────────────
 

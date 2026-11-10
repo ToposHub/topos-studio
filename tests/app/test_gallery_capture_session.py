@@ -239,13 +239,14 @@ class TestControllerIntegration:
         self._disable_overwrite_dialog(monkeypatch)
         scanned = []
         original_folder = ctrl.presets_panel.get_current_folder.return_value
-        # get_current_folder 调用序：build(1) → persist(2) → 完成后复核(3)
-        # 第 3 次（完成后的刷新复核）时用户已切到 System
+        # BR03 后 get_current_folder 调用序：build(1) → 完成后复核(2)
+        # （persist 的目的地由请求锁定，不再读 UI 当前选择）。第 2 次
+        # （完成后的刷新复核）时用户已切到 System。
         calls = {"n": 0}
 
         def folder_now():
             calls["n"] += 1
-            if calls["n"] >= 3:
+            if calls["n"] >= 2:
                 return os.path.join(os.path.dirname(original_folder),
                                     "System")
             return original_folder
@@ -253,7 +254,7 @@ class TestControllerIntegration:
         ctrl.presets_panel.scan_presets.side_effect = (
             lambda: scanned.append(1))
         ctrl.on_capture_still()
-        # persist 已写入原 folder；完成后 panel 已在 System → 不重扫
+        # persist 写入请求锁定的原 folder；完成后 panel 已在 System → 不重扫
         assert scanned == []
         assert any(f.endswith(".topos")
                    for f in os.listdir(original_folder))

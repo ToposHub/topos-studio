@@ -41,6 +41,7 @@ from typing import Any, Optional
 
 # G06：抓帧会话契约（请求／阶段复核／取消令牌）
 from src.features.color.core.gallery_capture_service import (
+    CaptureFrameSnapshot,
     GalleryCaptureCoordinator,
     GalleryCaptureFacts,
     GalleryCaptureSession,
@@ -750,7 +751,8 @@ class LayerOpsMixin:
                     prepare_frame=lambda: self._prepare_capture_image(
                         is_video_mode),
                     persist_bundle=lambda img: self._persist_still_capture(
-                        img, is_video_mode, captured))
+                        img, is_video_mode, captured,
+                        request=request, session=session))
             finally:
                 coordinator.finish(session)
             if result.succeeded and captured.get("folder"):
@@ -768,7 +770,12 @@ class LayerOpsMixin:
     # ── G06：抓帧会话阶段回调 ──────────────────────────────────────────
 
     def _prepare_capture_image(self, is_video_mode: bool):
-        """prepare 阶段：取精确帧并渲染调色结果（None = 拒绝，已提示）。"""
+        """prepare 阶段：取精确帧并渲染调色结果（None = 拒绝，已提示）。
+
+        BR03：同一呈现代际的快照——JPEG 视口图与 float 帧都在这里取得，
+        persist 阶段不再二次读取 engine（换 grade／帧的窗口内不会把旧
+        JPEG 与新 EXR 混装）。
+        """
         if is_video_mode:
             rendered, current_frame = (
                 self._render_current_video_frame_for_grading())
@@ -783,18 +790,39 @@ class LayerOpsMixin:
             self.status_bar.showMessage(
                 I18N.tr("status.no_image_loaded", "请先打开一张图片或视频"), 3000)
             return None
-        return self.engine.grab_viewport_image()
+        hdr_frame = None
+        try:
+            from src.features.color.core.preset_meta import STILL_IMAGE_MAX
+            hdr_frame = self.engine.render_full_image_for_scope(
+                max_dim=max(STILL_IMAGE_MAX, 4096))
+        except Exception:
+            hdr_frame = None
+        return CaptureFrameSnapshot(
+            image=self.engine.grab_viewport_image(), hdr_frame=hdr_frame)
 
     def _persist_still_capture(self, rendered_img, is_video_mode: bool,
-                               captured: dict):
-        """persist 阶段：命名→覆盖确认→R01 事务提交；结果带稳定 reason。"""
+                               captured: dict,
+                               request: Optional["GalleryCaptureRequest"] = None,
+                               session: Optional[Any] = None
+                               ) -> GalleryOperationResult:
+        """persist 阶段：命名→覆盖确认→R01 事务提交；结果带稳定 reason。
+
+        BR03：写入目的地由**请求锁定**（``request.album_id`` → repository
+        解析），不读 UI 当前选择——用户切走相册仍写回原相册；提交前复核
+        相册可写性与 revision（发起后被外部改动 → 拒绝，不写半新半旧）。
+        结果沿用发起时的 ``request_id``（可完整追踪原请求）。
+        """
+        request_id = (request.request_id if request is not None
+                      else make_gallery_request_id())
         if rendered_img is None:
             return GalleryOperationResult(
-                request_id=make_gallery_request_id(), status="rejected",
+                request_id=request_id, status="rejected",
                 reason="render_failed")
+        locked = self._locked_capture_folder(request)
+        if isinstance(locked, GalleryOperationResult):
+            return locked                 # 目标相册失效/只读/revision 变化
         name = self._new_still_name()
-        current_folder = self.presets_panel.get_current_folder()
-        topos_path = os.path.join(current_folder, f"{name}.topos")
+        topos_path = os.path.join(locked, f"{name}.topos")
 
         if os.path.exists(topos_path):
             reply = QMessageBox.question(
@@ -806,17 +834,62 @@ class LayerOpsMixin:
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return GalleryOperationResult(
-                    request_id=make_gallery_request_id(), status="cancelled",
+                    request_id=request_id, status="cancelled",
                     reason="user_declined")
+            if session is not None:       # BR03：覆盖框返回后复核上下文
+                drifted = session.check_before_write()
+                if drifted is not None:
+                    return drifted
 
-        if self._commit_still_capture(topos_path, rendered_img, is_video_mode):
-            captured.update({"name": name, "folder": current_folder})
+        if self._commit_still_capture(topos_path, rendered_img,
+                                      is_video_mode, request):
+            captured.update({"name": name, "folder": locked})
             return GalleryOperationResult(
-                request_id=make_gallery_request_id(), status="success",
+                request_id=request_id, status="success",
                 affected_still_ids=(name,))
         return GalleryOperationResult(
-            request_id=make_gallery_request_id(), status="rejected",
+            request_id=request_id, status="rejected",
             reason="save_failed")
+
+    def _locked_capture_folder(
+            self, request: Optional["GalleryCaptureRequest"]):
+        """请求锁定的目标相册目录（BR03）；失效时返回拒绝结果。
+
+        ``request=None``（旧调用路径）退回 UI 当前目录。相册被移除 →
+        ``album_unavailable``；只读 → ``readonly_album``；发起后相册
+        revision 变化 → ``album_revision_changed``（不猜新旧结构）。
+        """
+        if request is None:
+            return self.presets_panel.get_current_folder()
+        request_id = request.request_id
+        panel = getattr(self, 'presets_panel', None)
+        repository = getattr(panel, '_repository', None)
+        if repository is None:
+            root = getattr(panel, 'presets_root', None)
+            if isinstance(root, str):
+                repository = GalleryFolderRepository(root)
+        if repository is None:
+            return GalleryOperationResult(
+                request_id=request_id, status="rejected",
+                reason="album_unavailable")
+        folder = repository.album_folder(request.album_id)
+        if not isinstance(folder, str) or not os.path.isdir(folder):
+            return GalleryOperationResult(
+                request_id=request_id, status="rejected",
+                reason="album_unavailable",
+                warnings=(f"album removed: {request.album_id}",))
+        album = repository.album_for_folder(folder)
+        if album is not None and album.read_only:
+            return GalleryOperationResult(
+                request_id=request_id, status="rejected",
+                reason="readonly_album", warnings=(folder,))
+        if (request.expected_target_revision and album is not None
+                and album.revision != request.expected_target_revision):
+            return GalleryOperationResult(
+                request_id=request_id, status="rejected",
+                reason="album_revision_changed",
+                warnings=(f"album {request.album_id} changed since request",))
+        return folder
 
     def _build_gallery_capture_request(self, is_video_mode: bool):
         """发起时刻的请求与上下文事实；目标集合不可写/不可解析时拒绝。"""
@@ -854,6 +927,7 @@ class LayerOpsMixin:
         request = GalleryCaptureRequest(
             request_id=make_gallery_request_id(),
             album_id=album_id,
+            project_id=facts.project_id,
             clip_id=facts.clip_id,
             asset_id=facts.asset_id,
             timeline_id=facts.timeline_id,
@@ -866,7 +940,13 @@ class LayerOpsMixin:
     def _probe_gallery_capture_facts(self, is_video_mode: bool,
                                      album_id: Optional[str] = None
                                      ) -> GalleryCaptureFacts:
-        """当前抓帧上下文事实（probe 返回 None = 上下文源消失）。"""
+        """当前抓帧上下文事实（probe 返回 None = 上下文源消失）。
+
+        BR03：``grade_revision`` 取引擎真实调色代际
+        （``engine.color_graph_revision``，无则 0）；``project_id`` 取当前
+        编辑工程——两者都是阻断字段，persist 边界复核防"旧帧写进新
+        grade／新工程"。
+        """
         clip_id = asset_id = timeline_id = None
         source_frame = timeline_frame = None
         mgr = getattr(self, '_page_context_manager', None)
@@ -882,11 +962,19 @@ class LayerOpsMixin:
             timeline_id = getattr(ctx, 'timeline_id', None)
             source_frame = getattr(ctx, 'source_frame', None)
             timeline_frame = getattr(ctx, 'timeline_frame', None)
+        project = getattr(self, '_current_edit_project', None)
+        project_id = getattr(project, 'project_id', None) \
+            if project is not None else None
+        if not isinstance(project_id, str):
+            project_id = None
         return GalleryCaptureFacts(
             album_id=album_id or "",
             media_path=getattr(self, 'current_file_path', None),
             clip_id=clip_id, asset_id=asset_id, timeline_id=timeline_id,
-            source_frame=source_frame, timeline_frame=timeline_frame)
+            source_frame=source_frame, timeline_frame=timeline_frame,
+            grade_revision=int(getattr(self.engine, 'color_graph_revision',
+                                       0) or 0),
+            project_id=project_id)
 
     def _refresh_gallery_after_capture(self, captured_folder: str) -> None:
         """完成后的增量刷新：用户已切走 album 时不抢回选择。"""
@@ -947,7 +1035,7 @@ class LayerOpsMixin:
         result = session.run(
             prepare_frame=lambda: self._prepare_capture_image(is_video_mode),
             persist_bundle=lambda img: self._script_persist_still(
-                img, is_video_mode, name, captured))
+                img, is_video_mode, name, captured, request=request))
         if not result.succeeded or not captured.get("topos"):
             if result.reason:
                 self.status_bar.showMessage(
@@ -957,12 +1045,18 @@ class LayerOpsMixin:
         return captured["topos"]
 
     def _script_persist_still(self, rendered_img, is_video_mode: bool,
-                              name: Optional[str], captured: dict
+                              name: Optional[str], captured: dict,
+                              request: Optional["GalleryCaptureRequest"] = None
                               ) -> GalleryOperationResult:
-        """脚本 persist：显式名（重名拒绝，不弹对话框）。"""
+        """脚本 persist：显式名（重名拒绝，不弹对话框）。
+
+        BR03：目的地由请求锁定，结果沿用发起 ``request_id``。
+        """
+        request_id = (request.request_id if request is not None
+                      else make_gallery_request_id())
         if rendered_img is None:
             return GalleryOperationResult(
-                request_id=make_gallery_request_id(), status="rejected",
+                request_id=request_id, status="rejected",
                 reason="render_failed")
         stem = (name or self._new_still_name()).strip()
         from src.features.color.core.gallery_contracts import (
@@ -970,27 +1064,32 @@ class LayerOpsMixin:
         )
         if not is_safe_bundle_stem(stem):
             return GalleryOperationResult(
-                request_id=make_gallery_request_id(), status="rejected",
+                request_id=request_id, status="rejected",
                 reason="unsafe_name")
-        folder = self.presets_panel.get_current_folder()
-        topos_path = os.path.join(folder, f"{stem}.topos")
+        locked = self._locked_capture_folder(request)
+        if isinstance(locked, GalleryOperationResult):
+            return locked
+        topos_path = os.path.join(locked, f"{stem}.topos")
         if os.path.exists(topos_path):
             return GalleryOperationResult(
-                request_id=make_gallery_request_id(), status="rejected",
+                request_id=request_id, status="rejected",
                 reason="name_conflict",
                 warnings=(f"{stem}.topos exists",))
-        if self._commit_still_capture(topos_path, rendered_img, is_video_mode):
-            captured.update({"topos": topos_path, "folder": folder,
+        if self._commit_still_capture(topos_path, rendered_img,
+                                      is_video_mode, request):
+            captured.update({"topos": topos_path, "folder": locked,
                              "name": stem})
             return GalleryOperationResult(
-                request_id=make_gallery_request_id(), status="success",
+                request_id=request_id, status="success",
                 affected_still_ids=(stem,))
         return GalleryOperationResult(
-            request_id=make_gallery_request_id(), status="rejected",
+            request_id=request_id, status="rejected",
             reason="save_failed")
 
     def _commit_still_capture(self, topos_path: str, rendered_img: Any,
-                              is_video_mode: bool) -> bool:
+                              is_video_mode: bool,
+                              request: Optional["GalleryCaptureRequest"] = None
+                              ) -> bool:
         """R01：staging → 备份 → 统一提交一次静帧的多文件集合。
 
         新集合（.topos／缩略图／参考帧 JPEG／可选 EXR＋声明／meta）全部
@@ -999,6 +1098,11 @@ class LayerOpsMixin:
         （JPEG 写失败／SaveRouter 拒绝或抛异常／提交中断）回滚整个旧
         集合，返回 False；EXR 写失败按 M09.2 语义降级为纯 JPEG（不阻断
         保存，过期旧 EXR 不保留）。
+
+        BR03：JPEG／EXR 消费 prepare 阶段的 :class:`CaptureFrameSnapshot`
+        （同一呈现代际）；meta 的 album 快照来自**请求锁定的 album_id**
+        （不读 UI 当前选择）。grade 序列化由会话的 revision 复核守卫
+        （prepare 与 persist 边界 grade 变化 → 会话取消，不会走到这里）。
         """
         from src.features.color.core.preset_meta import (
             STILL_IMAGE_MAX,
@@ -1016,17 +1120,22 @@ class LayerOpsMixin:
             StillCaptureTransactionError,
         )
 
+        # BR03：快照解包——persist 不二次读取 engine 呈现结果
+        if isinstance(rendered_img, CaptureFrameSnapshot):
+            image = rendered_img.image
+            hdr_frame = rendered_img.hdr_frame
+        else:
+            image = rendered_img
+            try:
+                hdr_frame = self.engine.render_full_image_for_scope(
+                    max_dim=max(STILL_IMAGE_MAX, 4096))
+            except Exception:
+                hdr_frame = None
+
         # 缩略图 + 全分辨率参考帧 sidecar（P1-COLOR-04：参考 wipe 用）。
         # M09.2（S12）：float 抓帧链闭合——FBO f4 回读的 float 帧写入
         # .still.exr 侧车（HDR 值保留，JPEG 仍写供低精度消费方）；回读
         # 失败降级纯 JPEG（不阻断保存）。
-        hdr_frame = None
-        try:
-            hdr_frame = self.engine.render_full_image_for_scope(
-                max_dim=max(STILL_IMAGE_MAX, 4096))
-        except Exception:
-            hdr_frame = None
-
         final_thumb = thumb_path_for(topos_path)
         final_still = still_path_for(topos_path)
         final_exr = still_exr_path_for(topos_path)
@@ -1046,7 +1155,7 @@ class LayerOpsMixin:
         staged_topos = txn.staged_path(topos_path)
         try:
             written_thumb, written_still = write_still_images(
-                staged_topos, rendered_img, hdr_image=hdr_frame)
+                staged_topos, image, hdr_image=hdr_frame)
             # JPEG（缩略图/参考帧）写失败 → 放弃本次抓帧（旧集合不动）。
             if not written_thumb or not written_still:
                 raise StillCaptureTransactionError(
@@ -1092,7 +1201,9 @@ class LayerOpsMixin:
                                still_id=allocate_still_id(),
                                still_precision="float32" if exr_in_bundle
                                else None,
-                               **self._collect_still_capture_meta())):
+                               **self._collect_still_capture_meta(
+                                   album_id=request.album_id
+                                   if request is not None else None))):
                 txn.add(final_meta)
             elif os.path.exists(final_meta):
                 # 元数据写失败：不留描述旧帧的过期 meta。
@@ -1163,12 +1274,15 @@ class LayerOpsMixin:
     # Gallery in Presets (P1-COLOR-04)
     # ------------------------------------------------------------------
 
-    def _collect_still_capture_meta(self) -> dict:
-        """静帧抓取元数据：PageContext 帧号/clip + asset 名与 source tag。
+    def _collect_still_capture_meta(self,
+                                    album_id: Optional[str] = None) -> dict:
+        """静帧抓帧元数据：PageContext 帧号/clip + asset 名与 source tag。
 
         G02：新增 timeline_id/timeline_name/project_id 来源快照与目标
         album_id 快照（timeline 显示名是**快照**，timeline 改名后旧静帧
-        仍显示当时名称，不靠名字反查串联）。
+        仍显示当时名称，不靠名字反查串联）。BR03：``album_id`` 优先取
+        **请求锁定**的集合（用户切走相册后 meta 仍描述真实写入目标），
+        无请求时退回 UI 当前目录解析。
         """
         from src.features.color.core.preset_meta import PresetMeta
 
@@ -1212,18 +1326,21 @@ class LayerOpsMixin:
                                       ("color_range", "source_range")):
                 if asset_meta.get(src_key):
                     fields.setdefault(meta_key, asset_meta[src_key])
-        # 目标集合快照（抓帧写入的当前 Gallery 目录）；只有真实 repository
+        # 目标集合快照（BR03：优先请求锁定的 album）；只有真实 repository
         # 解析出的字符串 album_id 才入快照——不把任何占位对象写进 meta。
-        panel = getattr(self, 'presets_panel', None)
-        repository = getattr(panel, '_repository', None)
-        if repository is not None:
-            try:
-                album_id = repository.album_id_for_folder(
-                    panel.get_current_folder())
-            except Exception:
-                album_id = None
-            if isinstance(album_id, str) and album_id:
-                fields.setdefault("album_id", album_id)
+        if isinstance(album_id, str) and album_id:
+            fields.setdefault("album_id", album_id)
+        else:
+            panel = getattr(self, 'presets_panel', None)
+            repository = getattr(panel, '_repository', None)
+            if repository is not None:
+                try:
+                    resolved = repository.album_id_for_folder(
+                        panel.get_current_folder())
+                except Exception:
+                    resolved = None
+                if isinstance(resolved, str) and resolved:
+                    fields.setdefault("album_id", resolved)
         # 只保留 PresetMeta 认识的字段
         valid = set(PresetMeta.__dataclass_fields__)
         return {k: v for k, v in fields.items() if k in valid}
