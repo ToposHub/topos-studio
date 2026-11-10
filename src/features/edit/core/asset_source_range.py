@@ -18,6 +18,7 @@ SetAssetInOutCommand / SetAssetMarkersCommand / CreateSubclipCommand）。
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from dataclasses import replace
@@ -32,6 +33,8 @@ from src.features.edit.core.scene_cut.subclips import (
     SUBCLIP_SOURCE_DURATION,
     SUBCLIP_SOURCE_END,
     SUBCLIP_THUMB_FRAME,
+    SUBCLIP_RANGE_SEMANTICS,
+    SUBCLIP_RANGE_END_INCLUSIVE,
     is_subclip,
 )
 
@@ -52,6 +55,7 @@ __all__ = [
     "remove_asset_marker",
     "create_manual_subclip",
     "validate_marker",
+    "migrate_subclip_range_semantics",
 ]
 
 
@@ -330,6 +334,9 @@ def create_manual_subclip(
         SUBCLIP_PARENT_PATH: parent.path,
         SUBCLIP_SOURCE_START: start_frame,
         SUBCLIP_SOURCE_END: end_frame,
+        # R07：显式域标记（含尾端点）；旧手工子片段本身即含尾写入，
+        # 由迁移补标。
+        SUBCLIP_RANGE_SEMANTICS: SUBCLIP_RANGE_END_INCLUSIVE,
         SUBCLIP_SOURCE_DURATION: end_frame - start_frame + 1,
         "start_seconds": start_frame / float(fps) if duration_seconds is not None else None,
         "duration_seconds": duration_seconds,
@@ -358,3 +365,73 @@ def create_manual_subclip(
     )
     new_project = project.import_subclip(subclip_asset, bin_id=target_bin_id)
     return new_project, subclip_asset
+
+
+# ================================================================
+# R07：子片段范围域迁移（不含尾 → 含尾，可证明条目）
+# ================================================================
+
+def migrate_subclip_range_semantics(
+    project: EditProject,
+) -> tuple[EditProject, int]:
+    """把旧子片段元数据升级到规范的含尾（end-inclusive）域。
+
+    背景：旧场景剪切写入器把 ``source_end`` 写成 **不含尾端点**
+    （start + duration），而本模块/手工子片段/素材 In/Out 全部按
+    **含端点** 解释——同一键两种语义，读取会多出 1 帧（start=20、
+    duration=10 的场景子片段被读成 20..30 共 11 帧）。
+
+    迁移规则（只动**可证明**的条目，绝不盲减 1）：
+
+    - 无域标记 + scene-cut 来源（有 scene_cut_analysis_id）+
+      ``end == start + duration``（旧写入器不变式）→ 改
+      ``end = start + duration - 1`` 并打 ``end_inclusive`` 标记；
+    - 无域标记但 ``end == start + duration - 1``（手工/已含尾）→
+      只补标记；
+    - 无法证明（缺 duration/两端、等式不成立、非整数）→ 保持原样
+      并计入返回的迁移数之外的日志（fail-loud 交给读取方/后续人工）。
+
+    幂等：已带 ``end_inclusive`` 标记的条目不动。
+
+    Returns:
+        (新 project, 迁移条数)
+    """
+    from src.features.edit.core.scene_cut.subclips import SUBCLIP_ANALYSIS_ID
+
+    updates: dict[str, dict[str, Any]] = {}
+    for asset_id, asset in project.assets.items():
+        if not is_subclip(asset):
+            continue
+        meta = asset.metadata or {}
+        if meta.get(SUBCLIP_RANGE_SEMANTICS) == SUBCLIP_RANGE_END_INCLUSIVE:
+            continue
+        start = meta.get(SUBCLIP_SOURCE_START)
+        end = meta.get(SUBCLIP_SOURCE_END)
+        duration = meta.get(SUBCLIP_SOURCE_DURATION)
+        values = (start, end, duration)
+        if any(isinstance(v, bool) or not isinstance(v, int)
+               for v in values):
+            continue  # 无法证明：保持原样
+        patch: dict[str, Any] = {
+            SUBCLIP_RANGE_SEMANTICS: SUBCLIP_RANGE_END_INCLUSIVE}
+        if (SUBCLIP_ANALYSIS_ID in meta
+                and end == start + duration
+                and duration >= 1):
+            # 旧场景剪切写入器不变式：不含尾端点 → 转含尾
+            patch[SUBCLIP_SOURCE_END] = start + duration - 1
+        elif end != start + duration - 1:
+            continue  # 既非旧不变式也非含尾：不盲改
+        updates[asset_id] = patch
+    if not updates:
+        return project, 0
+    new_assets = dict(project.assets)
+    for asset_id, patch in updates.items():
+        asset = new_assets[asset_id]
+        merged = dict(asset.metadata or {})
+        merged.update(patch)
+        new_assets[asset_id] = replace(asset, metadata=merged)
+    migrated = replace(project, assets=new_assets)
+    logger = logging.getLogger(__name__)
+    logger.info("R07 subclip range semantics migrated: %d asset(s)",
+                len(updates))
+    return migrated, len(updates)

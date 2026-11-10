@@ -1742,6 +1742,22 @@ class EditProjectIO(QObject):
             self._current_filepath = str(filepath)
             self._current_ui_state = ui_state
             self._current_timeline_sequences = timeline_sequences
+            # R07（媒体池复查）：子片段 source_end 域迁移——旧场景剪切
+            # 子片段写成不含尾端点，读取按含尾解释会多 1 帧。加载时升级
+            # 可证明条目（等式不变式，不盲减 1）；失败不阻断打开。
+            try:
+                from src.features.edit.core.asset_source_range import (
+                    migrate_subclip_range_semantics,
+                )
+                project, migrated_subclips = \
+                    migrate_subclip_range_semantics(project)
+                self._current_project = project
+                if migrated_subclips:
+                    logger.info(
+                        "loaded project: migrated %d legacy subclip "
+                        "source_end semantics", migrated_subclips)
+            except Exception:  # noqa: BLE001 — 迁移失败不阻断打开
+                logger.exception("subclip range semantics migration failed")
             # DESK-02A：工程内嵌字体注册（按内容身份）。无预装字体的
             # 机器上字幕换行/锚点仍正确；注册诊断留日志供 UI 预检展示。
             # headless（无 QGuiApplication）时跳过注册并留诊断——渲染

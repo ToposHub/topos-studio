@@ -2249,8 +2249,15 @@ class FileOpsMixin:
                 )
             return
 
-        # Open in Source Viewer
-        self.source_viewer_widget.open_asset(asset)
+        # Open in Source Viewer（R09：解释覆盖帧率随打开传入——
+        # 监视器时基与插入/导出同口径）
+        from src.features.edit.core.interpretation import effective_asset_fps
+        self.source_viewer_widget.open_asset(
+            asset,
+            interpretation_fps=effective_asset_fps(
+                asset,
+                getattr(self._current_edit_project,
+                        "interpretation_overrides", None)))
         # I01（复查计划）：素材打开进入仲裁快照（内容同步；激活由
         # show_source 的 viewport 信号单独产生一次领域请求——一次交互
         # 恰好对应内容+激活两类请求，不重复）。
@@ -2310,7 +2317,15 @@ class FileOpsMixin:
         if current is not None and getattr(current, "asset_id", None) == asset_id:
             return
         try:
-            self.source_viewer_widget.open_asset(asset)
+            from src.features.edit.core.interpretation import (
+                effective_asset_fps,
+            )
+            self.source_viewer_widget.open_asset(
+                asset,
+                interpretation_fps=effective_asset_fps(
+                    asset,
+                    getattr(self._current_edit_project,
+                            "interpretation_overrides", None)))
         except Exception:
             logger.exception("Failed to preview asset on select: %s", asset_id)
             return

@@ -95,13 +95,20 @@ from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
 logger = logging.getLogger(__name__)
 
 
-def _build_time_domain(asset: MediaAsset) -> Optional[SourceTimeDomain]:
+def _build_time_domain(
+    asset: MediaAsset,
+    interpretation_fps: Optional[float] = None,
+) -> Optional[SourceTimeDomain]:
     """I02-1：从素材 metadata 建立时间域权威（UI 不探测/解码）。
 
     权威来源约定：
 
-    - Rational fps：导入元数据 ``fps_num``/``fps_den`` 优先，兼容旧别名
-      ``fps_rational_num``/``fps_rational_den``；否则由浮点 ``fps`` 经 ``rational_from_float_fps``
+    - Rational fps：**解释覆盖优先**（R09 媒体池复查——
+      ``interpretation_fps`` 为宿主传入的 ``effective_asset_fps`` 结果，
+      与插入/导出同口径；此前源监视器读原始探测帧率，解释了帧率的
+      素材监视器时基与时间线不一致）；其次导入元数据
+      ``fps_num``/``fps_den``（兼容旧别名 ``fps_rational_num``/
+      ``fps_rational_den``）；否则由浮点 ``fps`` 经 ``rational_from_float_fps``
       映射到最近常见帧率（23.976 → 24000/1001）；
     - 起始时间码 / DF 类型：``metadata["timecode"]``（兼容 ``start_timecode``，SMPTE 字符串，
       DF 由其分隔符决定）；缺失 = 从 00:00:00:00 起；
@@ -125,6 +132,16 @@ def _build_time_domain(asset: MediaAsset) -> Optional[SourceTimeDomain]:
         fps = Rational(num, den)
     else:
         fps = rational_from_float_fps(fps_value)
+    if interpretation_fps is not None:
+        # R09：用户解释帧率覆盖一切探测值（非有限/非正值回退探测）。
+        # 与本函数无覆盖路径同一映射（rational_from_float_fps：常见
+        # 帧率恢复 1001 系节拍，如 23.976 → 24000/1001）。
+        try:
+            declared = float(interpretation_fps)
+        except (TypeError, ValueError):
+            declared = 0.0
+        if declared > 0 and math.isfinite(declared):
+            fps = rational_from_float_fps(declared)
     total = int(asset.total_frames or 1)
     start_tc: Optional[Timecode] = None
     raw_tc = metadata.get("timecode") or metadata.get("start_timecode")
@@ -1987,6 +2004,7 @@ class SourceViewerWidget(QWidget):
         source_channel_map: Optional[tuple] = None,
         audio_source_path: Optional[str] = None,
         audio_offset_seconds: float = 0.0,
+        interpretation_fps: Optional[float] = None,
     ) -> None:
         """
         Open a media asset for preview.
@@ -2013,7 +2031,8 @@ class SourceViewerWidget(QWidget):
         self._total_frames = asset.total_frames or 1
         # I02-1/2：时间域是 fps/TC/区间的权威（上一素材的状态已在
         # close_source 里按指纹保存）。浮点 fps 仅作显示/时钟近似。
-        self._time_domain = _build_time_domain(asset)
+        self._time_domain = _build_time_domain(
+            asset, interpretation_fps=interpretation_fps)
         self._fps = (float(self._time_domain.fps)
                      if self._time_domain is not None
                      else float(asset.fps or 24.0))

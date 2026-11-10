@@ -1157,7 +1157,10 @@ class SceneSubclipSpec:
             "parent_path": self.source_path,
             "source_start": self.source_start,
             "source_duration": self.source_duration,
-            "source_end": self.source_end,
+            # R07：元数据域为含尾端点（与 asset_source_range 读取同域）；
+            # spec.source_end 属性仍是检测域的不含尾端点。
+            "source_end": self.source_start + self.source_duration - 1,
+            "source_range_semantics": "end_inclusive",
             "start_seconds": self.start_seconds,
             "duration_seconds": self.duration_seconds,
             "end_seconds": self.end_seconds,

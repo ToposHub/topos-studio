@@ -71,6 +71,13 @@ SUBCLIP_KIND = "scene_cut_kind"
 SUBCLIP_START_TIMECODE = "start_timecode"
 SUBCLIP_END_TIMECODE = "end_timecode"
 SUBCLIP_THUMB_FRAME = "thumbnail_source_frame"
+# R07（媒体池复查）：SUBCLIP_SOURCE_END 的**域标记**——规范域为含尾端点
+# （end inclusive，与手工子片段/素材 In/Out/markers 及
+# asset_source_range 的读取语义同域）。旧场景剪切子片段由旧写入器写成
+# 不含尾端点（start+duration），读取侧统一按含尾解释会多出 1 帧；
+# 迁移见 asset_source_range.migrate_subclip_range_semantics。
+SUBCLIP_RANGE_SEMANTICS = "source_range_semantics"
+SUBCLIP_RANGE_END_INCLUSIVE = "end_inclusive"
 
 
 # ================================================================
@@ -165,7 +172,11 @@ def create_subclip_asset(
         SUBCLIP_PARENT_PATH: spec.source_path,
         SUBCLIP_SOURCE_START: spec.source_start,
         SUBCLIP_SOURCE_DURATION: spec.source_duration,
-        SUBCLIP_SOURCE_END: spec.source_end,
+        # R07：元数据域统一为含尾端点——spec.source_end 是检测域的
+        # 不含尾端点（start+duration），写入时转换并打域标记；旧工程
+        # 由迁移升级（load 时），读取侧不再有两种解释。
+        SUBCLIP_SOURCE_END: spec.source_start + spec.source_duration - 1,
+        SUBCLIP_RANGE_SEMANTICS: SUBCLIP_RANGE_END_INCLUSIVE,
         SUBCLIP_START_SECONDS: spec.start_seconds,
         SUBCLIP_DURATION_SECONDS: spec.duration_seconds,
         SUBCLIP_END_SECONDS: spec.end_seconds,
