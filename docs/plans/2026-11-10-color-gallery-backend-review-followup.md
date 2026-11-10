@@ -266,7 +266,11 @@ KeyboardInterrupt 用来模拟文件操作已完成、下一次日志写入尚�
 
 - 复现脚本 `docs/validation/gallery_backend_review_20261110_repro.py --strict`：**9/9 场景 finding=false，退出码 0**（事务恢复 4 项、导入 2 项、抓帧上下文 2 项、原地写缓存 1 项全部收敛）。
 - 复现脚本的 9 个故障点已全部转为正式回归（`test_br01/02/03` + `test_br04` 的 in-place 失效用例），不再只依赖诊断脚本。
-- 92 文件回归清单 + 全部新增 `test_br0*` 套件：见本轮提交记录的回归数字（无新增失败；既有 3 项 skip 维持原状——大小写敏感文件系统 1 项、曲线 LUT `skipif(True)` 2 项，不计为通过）。
+- 92 文件回归清单 + 全部新增 `test_br0*` 套件：**1787 passed / 4 skipped**，无新增失败。
+- 全量 `tests/color + tests/app + tests/ui`：**8471 passed / 8 skipped**，除下列**既有失败**（均在本轮基线 `c0cb9af2` 前引入、与本轮改动无关）：
+  - `tests/color/test_curves_soft_clip_model.py::...test_legacy_v2_layer_dict_loads_identity_and_resaves_stable`（在干净 `c0cb9af2` worktree 复现失败）
+  - `tests/app/test_fix_wd1g7_aud.py::...test_load_video_success_applies_session_swaps_after_load`（`_refresh_color_timecode_context` 由 2026-11-09 `74178007` CV-B02 引入，测试的假宿主无该属性）
+- 隔离启动检查：`--test-startup --no-startup-dialog`（offscreen）退出 0、无 traceback——不代表 GPU 呈现/听感验收。
 - 未做真实 GPU 呈现/听感/像素一致性验收（划像/分屏、10 分钟播放、50 次切 clip/工程等 §12.4 清单）——offscreen 回归不代表它们。
 
 ### 剩余范围（如实声明，未实现项保持真实禁用）
