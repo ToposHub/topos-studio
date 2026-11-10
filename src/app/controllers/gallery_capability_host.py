@@ -86,6 +86,9 @@ class GalleryCapabilityHost(QObject):
         return True
 
     def mark_shutdown(self) -> None:
+        # 先置关闭标志再脱离面板——面板据此把动作门切到"关闭态拒绝"
+        # （区别于"宿主未安装"的旧恒启用行为，BR05）。
+        self._shutdown = True
         for signal, slot in self._connections:
             try:
                 signal.disconnect(slot)
@@ -99,7 +102,6 @@ class GalleryCapabilityHost(QObject):
                 pass  # 面板已销毁
         self._panel = None
         self._repository = None
-        self._shutdown = True
 
     @property
     def shutdown(self) -> bool:
@@ -135,6 +137,43 @@ class GalleryCapabilityHost(QObject):
         self.last_capabilities = caps
         self.last_revision = revision
 
+    def action_context(self) -> GalleryCapabilityContext:
+        """当前权威上下文快照（执行门 BR05 用；随取随新）。"""
+        return self._gather_context()
+
+    def evaluate_targeted(self, action_key: str,
+                          topos_path: Optional[str]) -> GalleryCapability:
+        """按**被操作对象**评估动作能力（BR05）。
+
+        右击未选中项时作用于该对象本身——把目标 still 代入评估上下文
+        （grade 探测对目标做，而不是碰巧的选中项）；同一坏包／无媒体／
+        关闭态下所有入口（菜单/双击/Enter/中键）结论一致。
+        """
+        from src.features.color.core.gallery_contracts import GalleryCapability
+        if self._shutdown:
+            return GalleryCapability(action=action_key, supported=False,
+                                     reason="host shutdown", checked=True)
+        import dataclasses
+        context = self._gather_context()
+        still = None
+        if self._repository is not None and self._panel is not None \
+                and isinstance(topos_path, str):
+            still = self._repository.still_at(
+                self._panel.get_current_folder(), topos_path,
+                probe_grade=True)
+        targeted = dataclasses.replace(
+            context, selection=still,
+            selection_count=1 if still is not None else 0,
+            selection_grade_loadable=(still.grade_loadable
+                                      if still is not None else None))
+        caps = gallery_capability_by_action(
+            evaluate_gallery_capabilities(targeted))
+        cap = caps.get(action_key)
+        if cap is None:
+            return GalleryCapability(action=action_key, supported=False,
+                                     reason="unknown action", checked=True)
+        return cap
+
     def _gather_context(self) -> GalleryCapabilityContext:
         window = self._window
         panel = self._panel
@@ -159,6 +198,7 @@ class GalleryCapabilityHost(QObject):
                     if selection is not None:
                         selection_grade = selection.grade_loadable
 
+        # BR05：服务位反映面板真实接线（传输/Label 服务在场即真）。
         return GalleryCapabilityContext(
             has_media=has_media,
             media_is_video=media_is_video,
@@ -167,6 +207,10 @@ class GalleryCapabilityHost(QObject):
             selection=selection,
             selection_count=selection_count,
             selection_grade_loadable=selection_grade,
+            import_service_available=bool(
+                getattr(panel, "_transfer_service", None)),
+            label_service_available=bool(
+                getattr(panel, "_label_service", None)),
         )
 
     # ── chrome more-menu 门控 ──────────────────────────────────────────

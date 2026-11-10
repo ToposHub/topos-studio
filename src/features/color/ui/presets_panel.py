@@ -114,6 +114,14 @@ class PresetsPanel(QWidget):
             GalleryBundleService,
         )
         self._bundle_service = GalleryBundleService(self.presets_root)
+        # BR05：传输服务（导入/导出 bundle）真正接到面板；Label 服务＝
+        # preset_meta 落盘（``_set_still_label``）。宿主据此反映真实能力。
+        from src.features.color.core.gallery_transfer_service import (
+            GalleryTransferService,
+        )
+        self._transfer_service = GalleryTransferService(
+            self._repository, self._bundle_service)
+        self._label_service = self._set_still_label
         self._gallery_capability_host = None
         self._init_ui()
         # G11：用户级显示偏好（版本化、原子落盘；见 gallery_preferences）
@@ -427,7 +435,17 @@ class PresetsPanel(QWidget):
     # --- G01: 能力宿主接入（未安装时保持旧的恒启用行为） ---
 
     def set_gallery_capability_host(self, host) -> None:
-        """由 ``GalleryCapabilityHost`` 安装／解除（None 清除）。"""
+        """由 ``GalleryCapabilityHost`` 安装／解除（None 清除）。
+
+        BR05：宿主**关闭**时解除（``host.shutdown`` 已置位）与"从未
+        安装"不同——关闭态下统一执行门拒绝一切动作（窗口正在关闭），
+        未安装保持旧的恒启用行为。
+        """
+        previous = getattr(self, "_gallery_capability_host", None)
+        if host is not None:
+            self._gallery_actions_dead = False
+        elif previous is not None and getattr(previous, "shutdown", False):
+            self._gallery_actions_dead = True
         self._gallery_capability_host = host
 
     def gallery_action_caps(self):
@@ -446,6 +464,154 @@ class PresetsPanel(QWidget):
         action.setEnabled(cap.supported)
         if not cap.supported and cap.reason:
             action.setToolTip(cap.reason)
+
+    # --- BR05: 统一执行门 + 传输/Label 服务接线 ---
+
+    _ACTION_SIGNALS = ("apply.grade", "apply.categories", "reference.load",
+                       "match.color")
+
+    def _execute_gallery_action(self, action_key: str,
+                                topos_path: object) -> bool:
+        """统一执行门（BR05）：菜单／双击／Enter／中键的单一入口。
+
+        执行前按**被操作对象**（非碰巧的选中项）重新评估权威上下文
+        （媒体在场／目标 grade 探测／album 可写／宿主关闭态）；拒绝时
+        原因进 tooltip 诊断并返回 False，不 emit 动作信号——同一坏包／
+        无媒体／关闭态下所有入口结论一致。宿主未安装时保持旧的恒启用
+        行为（文件在场即执行，与菜单门控同一约定）。
+        """
+        if not isinstance(topos_path, str) or not os.path.isfile(topos_path):
+            return False
+        if getattr(self, "_gallery_actions_dead", False):
+            return False          # 宿主已关闭（窗口关闭序列）：一切动作拒绝
+        host = self._gallery_capability_host
+        if host is not None:
+            cap = host.evaluate_targeted(action_key, topos_path)
+            if not cap.supported:
+                logger.info("gallery action %s rejected for %s: %s",
+                            action_key, topos_path, cap.reason)
+                return False
+        signal = {"apply.grade": self.grade_applied,
+                  "apply.categories": self.apply_categories_requested,
+                  "reference.load": self.reference_requested,
+                  "match.color": self.match_requested}.get(action_key)
+        if signal is None:
+            return False
+        signal.emit(topos_path)
+        return True
+
+    def _import_bundle_interactive(self) -> None:
+        """Import Still 入口（BR05）：文件选择 → 导入 → 失败弹窗（交互层）。"""
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, I18N.tr("gallery.import_title", "Import Still Bundle"),
+            "", "Topos Still Bundle (*.toposbundle *.zip)")
+        if not path:
+            return
+        result = self._import_bundle_from(path)
+        if not result.succeeded:
+            QMessageBox.warning(
+                self, I18N.tr("gallery.import_failed", "Import Failed"),
+                I18N.tr("gallery.import_failed_detail",
+                        f"Import failed ({result.reason}): "
+                        + "; ".join(result.warnings)))
+
+    def _import_bundle_from(self, zip_path: str) -> object:
+        """经传输服务导入 bundle（纯执行，无对话框——可编程/测试安全）。
+
+        成功后失效缓存、重扫并选中新条目；失败不改原选择，结果如实
+        返回（弹窗属交互包装层）。
+        """
+        folder = self._current_folder
+        result = self._transfer_service.import_bundle(zip_path, folder)
+        if not result.succeeded:
+            logger.info("gallery import rejected: %s (%s)", result.reason,
+                        "; ".join(result.warnings))
+            return result
+        self._query_service.invalidate(
+            self._repository.album_id_for_folder(folder))
+        self.scan_presets()
+        self._select_items_by_stems(result.affected_still_ids)
+        return result
+
+    def _export_bundle_interactive(self, topos_path: str) -> None:
+        """Export Bundle 入口（BR05）：选择目标 → 导出（源不动）。"""
+        from PyQt6.QtWidgets import QFileDialog
+        stem = os.path.splitext(os.path.basename(topos_path))[0]
+        suggested = os.path.join(
+            os.path.expanduser("~"), f"{stem}.toposbundle")
+        dest, _ = QFileDialog.getSaveFileName(
+            self, I18N.tr("gallery.export_title", "Export Still Bundle"),
+            suggested, "Topos Still Bundle (*.toposbundle)")
+        if not dest:
+            return
+        result = self._transfer_service.export_bundle(
+            os.path.dirname(topos_path), stem, dest)
+        if result.succeeded:
+            QMessageBox.information(
+                self, I18N.tr("gallery.export_done", "Exported"),
+                I18N.tr("gallery.export_done_detail",
+                        f"Exported {stem} → {dest}"))
+        else:
+            QMessageBox.warning(
+                self, I18N.tr("gallery.export_failed", "Export Failed"),
+                I18N.tr("gallery.export_failed_detail",
+                        f"Export failed ({result.reason}): "
+                        + "; ".join(result.warnings)))
+
+    def _set_still_label(self, topos_path: str,
+                         label: Optional[str] = None) -> bool:
+        """Label 服务（BR05）：独立 label 落盘到 meta sidecar。
+
+        空 label＝清除；保存成功后失效该相册缓存并重扫（分层签名对
+        原地写敏感，双保险）。失败如实返回 False。
+        """
+        from src.features.color.core.preset_meta import (
+            load_preset_meta, save_preset_meta,
+        )
+        meta = load_preset_meta(topos_path)
+        if meta is None:
+            return False
+        meta.label = (label or "").strip() or None
+        if not save_preset_meta(topos_path, meta):
+            return False
+        self._query_service.invalidate(
+            self._repository.album_id_for_folder(
+                os.path.dirname(topos_path)))
+        self.scan_presets()
+        return True
+
+    def _set_label_interactive(self, topos_path: str) -> None:
+        current = ""
+        from src.features.color.core.preset_meta import load_preset_meta
+        meta = load_preset_meta(topos_path)
+        if meta is not None and meta.label:
+            current = meta.label
+        label, ok = QInputDialog.getText(
+            self, I18N.tr("gallery.set_label_title", "Set Label"),
+            I18N.tr("gallery.set_label", "Label (empty to clear):"),
+            text=current)
+        if not ok:
+            return
+        if not self._set_still_label(topos_path, label):
+            QMessageBox.warning(
+                self, I18N.tr("gallery.label_failed", "Label Not Saved"),
+                I18N.tr("gallery.label_failed_detail",
+                        "Could not save the label to the still's meta "
+                        "sidecar."))
+
+    def _select_items_by_stems(self, stems) -> None:
+        """按 stem 选中条目（导入/改名成功后选中新条目；失败不动选择）。"""
+        wanted = {os.path.normcase(f"{stem}.topos") for stem in stems}
+        for index in range(self.list_widget.count()):
+            item = self.list_widget.item(index)
+            name = os.path.basename(
+                str(item.data(Qt.ItemDataRole.UserRole) or ""))
+            if os.path.normcase(name) in wanted:
+                item.setSelected(True)
+                self.list_widget.setCurrentItem(item)
+            else:
+                item.setSelected(False)
 
     def scan_presets(self, force: bool = False) -> None:
         """Scan current folder for .topos preset files and populate the grid.
@@ -746,7 +912,11 @@ class PresetsPanel(QWidget):
                         "Renamed, but saving the still's stable ID failed. "
                         "The still keeps working; its identity may change "
                         "on the next rename."))
+        # BR05：成功后选中新条目（失败路径不改原选择——上面已 return）
+        self._query_service.invalidate(
+            self._repository.album_id_for_folder(folder))
         self.scan_presets()
+        self._select_items_by_stems((new_name,))
 
     # --- Context Menu ---
 
@@ -767,20 +937,24 @@ class PresetsPanel(QWidget):
             topos_path = item.data(Qt.ItemDataRole.UserRole)
 
             apply_act = menu.addAction(I18N.tr("presets.apply_grade", "Apply Grade"))
-            apply_act.triggered.connect(lambda: self.grade_applied.emit(topos_path))
+            apply_act.triggered.connect(
+                lambda: self._execute_gallery_action("apply.grade",
+                                                     topos_path))
             self._apply_action_capability("apply.grade", apply_act)
 
             # P1-COLOR-04: 分类应用（Paste Attributes）与参考帧对比
             apply_cats_act = menu.addAction(
                 I18N.tr("presets.apply_categories", "Apply Grade (Categories)…"))
             apply_cats_act.triggered.connect(
-                lambda: self.apply_categories_requested.emit(topos_path))
+                lambda: self._execute_gallery_action("apply.categories",
+                                                     topos_path))
             self._apply_action_capability("apply.categories", apply_cats_act)
 
             reference_act = menu.addAction(
                 I18N.tr("presets.load_reference", "Load as Reference Wipe"))
             reference_act.triggered.connect(
-                lambda: self.reference_requested.emit(topos_path))
+                lambda: self._execute_gallery_action("reference.load",
+                                                     topos_path))
             self._apply_action_capability("reference.load", reference_act)
 
             compare_act = menu.addAction(
@@ -792,7 +966,8 @@ class PresetsPanel(QWidget):
             match_act = menu.addAction(
                 I18N.tr("presets.match_to_still", "Color Match to This Still"))
             match_act.triggered.connect(
-                lambda: self.match_requested.emit(topos_path))
+                lambda: self._execute_gallery_action("match.color",
+                                                     topos_path))
             self._apply_action_capability("match.color", match_act)
 
             menu.addSeparator()
@@ -800,6 +975,19 @@ class PresetsPanel(QWidget):
             rename_act = menu.addAction(I18N.tr("presets.rename", "Rename"))
             rename_act.triggered.connect(lambda: self._rename_preset(item))
             self._apply_action_capability("rename.bundle", rename_act)
+
+            label_act = menu.addAction(
+                I18N.tr("gallery.set_label_title", "Set Label…"))
+            label_act.triggered.connect(
+                lambda: self._set_label_interactive(topos_path))
+            self._apply_action_capability("label.rename", label_act)
+
+            export_bundle_act = menu.addAction(
+                I18N.tr("gallery.export_bundle", "Export Bundle…"))
+            export_bundle_act.triggered.connect(
+                lambda: self._export_bundle_interactive(topos_path))
+            self._apply_action_capability("export.bundle",
+                                          export_bundle_act)
 
             export_act = menu.addAction(I18N.tr("presets.export_thumb", "Export Thumbnail"))
             export_act.triggered.connect(lambda: self._export_thumbnail(topos_path))
@@ -944,11 +1132,11 @@ class PresetDelegate(QStyledItemDelegate):
         return QSize(108, 27 if self.panel._gallery.grid.list_mode else 98)
 
     def editorEvent(self, event, model, option, index):
-        """Handle middle-click to apply grade."""
+        """Handle middle-click to apply grade（BR05：走统一执行门）。"""
         if event.type() == event.Type.MouseButtonRelease:
             if event.button() == Qt.MouseButton.MiddleButton:
                 topos_path = index.data(Qt.ItemDataRole.UserRole)
-                if topos_path and os.path.isfile(topos_path):
-                    self.panel.grade_applied.emit(topos_path)
+                if self.panel._execute_gallery_action("apply.grade",
+                                                      topos_path):
                     return True
         return super().editorEvent(event, model, option, index)

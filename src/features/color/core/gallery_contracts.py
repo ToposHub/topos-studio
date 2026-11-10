@@ -536,6 +536,9 @@ _REASONS = {
                                   "not backed by a storage service yet.",
     "memories_unavailable": "Memories has no model or storage in this "
                             "version.",
+    "host_shutdown": "Gallery actions are disabled because the gallery "
+                     "host is shutting down.",
+    "unknown_action": "Unknown gallery action.",
 }
 
 
@@ -598,6 +601,7 @@ def evaluate_gallery_capabilities(
                      has_selection and album_writable, bundle_reason))
     caps.append(_cap("delete.bundle",
                      has_selection and album_writable, bundle_reason))
+    caps.append(_cap("export.bundle", has_selection, "no_selection"))
     caps.append(_cap("export.thumbnail",
                      has_selection and bool(selection and selection.has_thumbnail),
                      "no_selection" if not has_selection else "no_thumbnail"))

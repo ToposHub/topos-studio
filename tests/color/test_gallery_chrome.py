@@ -85,7 +85,8 @@ def test_narrow_dark_theme_keeps_core_tools_inside_panel(panel, qtbot):
                    panel._gallery.more_button):
         assert not button.isHidden()
         assert button.mapTo(panel, button.rect().topRight()).x() < panel.width()
-    assert not panel._gallery.import_button.isEnabled()
+    # BR05：传输服务已接线——导入按钮真实可用（不再是无服务桩的禁用态）
+    assert panel._gallery.import_button.isEnabled()
     panel.zoom_slider.setValue(256)
     panel._gallery.sidebar_button.setChecked(True)
     qtbot.wait(20)
