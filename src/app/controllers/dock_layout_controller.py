@@ -567,6 +567,14 @@ class DockLayoutMixin:
                     timeline_panel=self.timeline_panel,
                     parent=self)
                 self._viewport_playback_coordinator = coordinator
+                # BR08：菜单期间 transport 门的生产 feed——app 级事件过滤
+                # 把 Qt/原生菜单生命周期接到 set_menu_open（Space/J/K/L
+                # 菜单打开时不穿透触发底层播放）。
+                from src.features.edit.ui.viewport_playback_coordinator import (
+                    install_menu_transport_gate,
+                )
+                self._menu_transport_gate = install_menu_transport_gate(
+                    coordinator)
                 # I01-5：拒绝原因回填宿主状态栏（不静默吞掉仲裁拒绝）
                 coordinator.status_message.connect(
                     lambda message: self.statusBar().showMessage(message, 4000))
