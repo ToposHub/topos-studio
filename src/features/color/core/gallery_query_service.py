@@ -170,7 +170,18 @@ class AsyncGalleryQueryRunner:
     BR04：pending 按 ``album_id`` 归并——快速切 100 次相册/搜索时队列
     上界＝不同 album 数，同 album 旧请求被最新取代（不再逐条排队）；
     ``shutdown`` 后未执行任务直接丢弃。
+
+    SR05（第二轮复查）：**代际归属随请求**——pending 项携带
+    ``(generation, query)``，工作项消费的是**请求自己的代际**，不再沿用
+    排队时刻旧工作项的代际（复现：旧任务排队→切代际→新请求并入
+    pending→旧工作项读到新请求却带旧代际→最新结果被当 stale 丢弃）。
+    submit／shutdown 在同一把锁内完成调度（executor 提交不再落到锁外，
+    与 shutdown 竞态消失）；pending 超过上限时按 FIFO 丢弃最旧相册
+    （``dropped_overflow``，该相册下次扫描会重新提交）。
     """
+
+    #: pending 相册上限（不同 album 数的硬界；超出丢最旧）
+    MAX_PENDING_ALBUMS = 128
 
     def __init__(self, index: GalleryQueryIndex, *,
                  on_result: Optional[Callable[
@@ -181,13 +192,14 @@ class AsyncGalleryQueryRunner:
         self._lock = threading.Lock()
         self._generation = 0
         self._shutdown = False
-        self._pending: Dict[str, GalleryQuery] = {}   # album_id → 最新
+        # album_id → (generation, query)：代际属于**这条请求**
+        self._pending: Dict[str, Tuple[int, GalleryQuery]] = {}
         self._scheduled: set = set()
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="gallery-query")
         self._stats = {"submitted": 0, "delivered": 0,
                        "dropped_stale": 0, "dropped_shutdown": 0,
-                       "dropped_superseded": 0}
+                       "dropped_superseded": 0, "dropped_overflow": 0}
 
     # ── 代际 ───────────────────────────────────────────────────────────
 
@@ -204,7 +216,7 @@ class AsyncGalleryQueryRunner:
                 return
             self._shutdown = True
             self._pending.clear()
-        self._executor.shutdown(wait=False)
+            self._executor.shutdown(wait=False)   # 原子：锁内完成调度
 
     @property
     def is_shutdown(self) -> bool:
@@ -222,22 +234,37 @@ class AsyncGalleryQueryRunner:
             superseded = self._pending.pop(query.album_id, None)
             if superseded is not None:
                 self._stats["dropped_superseded"] += 1
-            self._pending[query.album_id] = query
+            self._pending[query.album_id] = (generation, query)
+            while len(self._pending) > self.MAX_PENDING_ALBUMS:
+                oldest = next(iter(self._pending))
+                del self._pending[oldest]
+                self._stats["dropped_overflow"] += 1
             self._stats["submitted"] += 1
-            scheduled = query.album_id in self._scheduled
-            if not scheduled:
-                self._scheduled.add(query.album_id)
-        if scheduled:
-            return True              # 已有同 album 任务在途：合并进最新
-        self._executor.submit(self._run, generation, query.album_id)
-        return True
+            if query.album_id in self._scheduled:
+                return True          # 已有同 album 任务在途：合并进最新
+            self._scheduled.add(query.album_id)
+            try:
+                self._executor.submit(self._run, query.album_id)
+            except RuntimeError:
+                # executor 在锁内 shutdown 后的提交竞态：任务视作丢弃
+                self._scheduled.discard(query.album_id)
+                return False
+            return True
 
-    def _run(self, generation: int, album_id: str) -> None:
+    def _run(self, album_id: str) -> None:
         with self._lock:
-            query = self._pending.pop(album_id, None)
+            pending = self._pending.pop(album_id, None)
             self._scheduled.discard(album_id)
-            if query is None or self._shutdown:
+            if self._shutdown:
                 return
+            if pending is None:
+                # begin_generation／溢出把请求在执行前丢弃：如实计数
+                self._stats["dropped_stale"] += 1
+                return
+            generation, query = pending      # 代际属于这条请求（SR05）
+            if generation != self._generation:
+                self._stats["dropped_stale"] += 1
+                return     # 排队期间上下文已切走：执行前取消
         try:
             result = self._index.query(query)
         except Exception:
