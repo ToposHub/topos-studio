@@ -1862,10 +1862,84 @@ class EditProject:
         new_bins[bin_id] = target_bin.with_timeline_removed(timeline_id)
 
         now = time.time()
-        return replace(self, 
+        return replace(self,
             bins=new_bins,
             modified_at=now,
         )
+
+    # ==================== P0-5 素材箱移动语义 ====================
+    # 产品约定（对齐 Resolve 呈现，存储保持引用式、旧工程零迁移）：
+    # - 普通拖拽 = 移动（exclusive）：目标箱成为唯一普通箱归属；
+    # - Alt 拖拽 = 拷贝引用（move_asset_to_bin，可多箱共存）；
+    # - 移回 Master = unfile（全部普通箱移除引用，回到未归类集合）；
+    # - 素材实体复制走 Duplicate 命令（右键菜单/快捷键），与拖拽解耦。
+
+    def with_asset_membership(
+        self, asset_id: str, membership: dict[str, bool],
+    ) -> EditProject:
+        """按映射整体设置素材在各**用户箱**的引用存在性（移动/undo 原语）。
+
+        membership 只作用于用户创建的箱；root bin 是隐式容器
+        （import 总会放入，get_unfiled_asset_ids 也忽略它），不受影响。
+        未出现在键中的箱一律移除该素材引用（exclusive 语义）。
+        """
+        if asset_id not in self.assets:
+            raise ValueError(f"Asset not found: {asset_id}")
+        new_bins = dict(self.bins)
+        for bin_id, bin_obj in self.bins.items():
+            if bin_id == self.root_bin_id:
+                continue
+            should_have = bool(membership.get(bin_id, False))
+            has = asset_id in bin_obj.asset_ids
+            if should_have and not has:
+                new_bins[bin_id] = bin_obj.with_asset_added(asset_id)
+            elif not should_have and has:
+                new_bins[bin_id] = bin_obj.with_asset_removed(asset_id)
+        return replace(self, bins=new_bins, modified_at=time.time())
+
+    def move_asset_exclusive(self, asset_id: str, bin_id: str) -> EditProject:
+        """移动素材到目标箱：其它普通箱移除引用，目标箱确保持有
+        （Resolve 普通拖拽语义；引用式存储不变）。移回 root 请用
+        ``unfile_asset``——root 是隐式容器，不是移动目标。"""
+        if bin_id not in self.bins:
+            raise ValueError(f"Bin not found: {bin_id}")
+        if bin_id == self.root_bin_id:
+            raise ValueError("Root bin is implicit; use unfile_asset instead")
+        return self.with_asset_membership(asset_id, {bin_id: True})
+
+    def unfile_asset(self, asset_id: str) -> EditProject:
+        """移回 Master：全部普通箱移除引用（回到未归类集合）。"""
+        return self.with_asset_membership(asset_id, {})
+
+    def with_timeline_membership(
+        self, timeline_id: str, membership: dict[str, bool],
+    ) -> EditProject:
+        """按映射整体设置时间线在各**用户箱**的引用存在性（root 不受影响）。"""
+        if timeline_id not in self.timelines:
+            raise ValueError(f"Timeline not found: {timeline_id}")
+        new_bins = dict(self.bins)
+        for bin_id, bin_obj in self.bins.items():
+            if bin_id == self.root_bin_id:
+                continue
+            should_have = bool(membership.get(bin_id, False))
+            has = timeline_id in bin_obj.timeline_ids
+            if should_have and not has:
+                new_bins[bin_id] = bin_obj.with_timeline_added(timeline_id)
+            elif not should_have and has:
+                new_bins[bin_id] = bin_obj.with_timeline_removed(timeline_id)
+        return replace(self, bins=new_bins, modified_at=time.time())
+
+    def move_timeline_exclusive(self, timeline_id: str, bin_id: str) -> EditProject:
+        """移动时间线到目标箱（exclusive，同 move_asset_exclusive）。"""
+        if bin_id not in self.bins:
+            raise ValueError(f"Bin not found: {bin_id}")
+        if bin_id == self.root_bin_id:
+            raise ValueError("Root bin is implicit; use unfile_timeline instead")
+        return self.with_timeline_membership(timeline_id, {bin_id: True})
+
+    def unfile_timeline(self, timeline_id: str) -> EditProject:
+        """移回 Master：全部普通箱移除时间线引用。"""
+        return self.with_timeline_membership(timeline_id, {})
 
     def rename_bin(self, bin_id: str, new_name: str) -> EditProject:
         """
