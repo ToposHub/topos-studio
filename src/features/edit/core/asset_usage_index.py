@@ -131,21 +131,42 @@ def _snapshot_referenced_asset_ids(project: Any) -> set:
     return referenced
 
 
-def build_asset_usage_index(
-    sequences: Iterable[Any],
-    project: Optional[Any] = None,
-) -> AssetUsageIndex:
-    """构建素材使用索引。
+def _nested_child_timeline_id(asset: Any) -> Optional[str]:
+    """嵌套序列素材引用的子时间线 ID（metadata 或 topos:// URI 回退）。"""
+    metadata = getattr(asset, "metadata", None) or {}
+    child = metadata.get("timeline_id")
+    if isinstance(child, str) and child:
+        return child
+    path = str(getattr(asset, "path", "") or "")
+    if path.startswith("topos://sequence/"):
+        return path[len("topos://sequence/"):] or None
+    return None
 
-    Args:
-        sequences: TimelineSequence 集合（导出路径传当前序列；
-            工程级报告传全部序列）。
-        project: 提供时同时计算"工程中存在但无引用"的素材清单。
+
+def _collect_clips(
+    sequence: Any,
+    seen_keys: set,
+    entries: Dict[str, List[ClipUsage]],
+    sequence_by_id: Dict[str, Any],
+    asset_by_id: Dict[str, Any],
+    expanding_timeline_ids: set,
+    *,
+    expand_nested: bool = True,
+) -> None:
+    """扫描一个序列的 clips（含嵌套序列递归展开）。
+
+    - 容器引用（nested_sequence 素材本身）照常记为一次使用；
+    - expand 语义：嵌套 clip 解析到子序列后，把**子序列内部**的真实
+      引用也计入对应素材（删除前检查与定位跳转看到同一事实）；
+    - 防环：expanding_timeline_ids 记录展开链上的 timeline_id；
+    - 去重：同一 (asset, timeline, track, clip) 只计一次（子序列既被
+      单独传入又被嵌套展开时不双记）。
     """
-    entries: Dict[str, List[ClipUsage]] = {}
-    for sequence in sequences:
-        seq_id = str(getattr(sequence, "timeline_id", "") or "")
-        seq_name = str(getattr(sequence, "name", "") or "")
+    seq_id = str(getattr(sequence, "timeline_id", "") or "")
+    if seq_id in expanding_timeline_ids:
+        return  # 环：拒绝展开（模型层 reparent 防护之外的最后防线）
+    expanding_timeline_ids.add(seq_id)
+    try:
         for track in getattr(sequence, "all_tracks", ()):
             track_id = str(getattr(track, "track_id", "") or "")
             track_name = str(getattr(track, "name", "") or "")
@@ -156,16 +177,71 @@ def build_asset_usage_index(
                     continue
                 start = int(getattr(clip, "timeline_start", 0) or 0)
                 end = start + int(getattr(clip, "timeline_duration", 0) or 0)
-                entries.setdefault(asset_id, []).append(ClipUsage(
-                    timeline_id=seq_id,
-                    timeline_name=seq_name,
-                    track_id=track_id,
-                    track_name=track_name,
-                    track_type=track_type,
-                    clip_id=str(getattr(clip, "clip_id", "") or ""),
-                    timeline_start=start,
-                    timeline_end=end,
-                ))
+                key = (asset_id, seq_id, track_id,
+                       str(getattr(clip, "clip_id", "") or ""))
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    entries.setdefault(asset_id, []).append(ClipUsage(
+                        timeline_id=seq_id,
+                        timeline_name=str(getattr(sequence, "name", "") or ""),
+                        track_id=track_id,
+                        track_name=track_name,
+                        track_type=track_type,
+                        clip_id=key[3],
+                        timeline_start=start,
+                        timeline_end=end,
+                    ))
+                # 嵌套序列：展开子序列内部引用（子序列不在传入集合时无法
+                # 展开——调用方应传全部序列；不伪造）
+                if expand_nested and getattr(
+                        asset_by_id.get(asset_id), "media_type", "") == "nested_sequence":
+                    child_id = _nested_child_timeline_id(
+                        asset_by_id.get(asset_id))
+                    child = sequence_by_id.get(child_id or "")
+                    if child is not None:
+                        _collect_clips(
+                            child, seen_keys, entries, sequence_by_id,
+                            asset_by_id, expanding_timeline_ids,
+                            expand_nested=expand_nested)
+    finally:
+        expanding_timeline_ids.discard(seq_id)
+
+
+def build_asset_usage_index(
+    sequences: Iterable[Any],
+    project: Optional[Any] = None,
+    *,
+    expand_nested: bool = True,
+) -> AssetUsageIndex:
+    """构建素材使用索引。
+
+    Args:
+        sequences: TimelineSequence 集合（导出路径传当前序列；
+            工程级报告传全部序列）。
+        project: 提供时同时计算"工程中存在但无引用"的素材清单。
+        expand_nested: P1-5——嵌套序列内部引用展开计入（容器引用与
+            内部真实引用都算使用；子序列需在 sequences 中才能展开）。
+            Comp Clip 的图内引用属 CompositeGraph 子系统，不在本索引
+            伪造遍历（comp_clip 素材本身的 clip 引用照常计入）。
+    """
+    sequence_list = list(sequences)
+    sequence_by_id: Dict[str, Any] = {
+        str(getattr(seq, "timeline_id", "") or ""): seq
+        for seq in sequence_list
+    }
+    asset_by_id: Dict[str, Any] = {}
+    if project is not None:
+        assets = getattr(project, "assets", None)
+        if isinstance(assets, dict):
+            asset_by_id = {str(k): v for k, v in assets.items()}
+
+    entries: Dict[str, List[ClipUsage]] = {}
+    seen_keys: set = set()
+    expanding: set = set()
+    for sequence in sequence_list:
+        _collect_clips(
+            sequence, seen_keys, entries, sequence_by_id,
+            asset_by_id, expanding, expand_nested=expand_nested)
 
     unused: Tuple[str, ...] = ()
     binding_used: set = set()
@@ -204,3 +280,55 @@ def build_asset_usage_index(
             s for s in snapshot_used
             if not entries.get(s) and s not in binding_used)),
     )
+
+
+def same_path_asset_groups(project: Any) -> Dict[str, Tuple[str, ...]]:
+    """同一路径的多个素材实例分组（P1-5）。
+
+    子片段/复制素材共享原文件路径：对同一文件的使用检查必须把整组
+    asset_id 一起算（删其一不等于文件无人引用）。返回 {path: asset_ids}，
+    仅包含 >1 个素材的路径，按 asset_id 排序稳定输出。
+    """
+    assets = getattr(project, "assets", None)
+    if not isinstance(assets, dict):
+        return {}
+    by_path: Dict[str, List[str]] = {}
+    for asset_id, asset in assets.items():
+        path = str(getattr(asset, "path", "") or "")
+        if not path or path.startswith("topos://"):
+            continue  # 虚拟素材无文件路径
+        by_path.setdefault(path, []).append(str(asset_id))
+    return {
+        path: tuple(sorted(ids))
+        for path, ids in sorted(by_path.items())
+        if len(ids) > 1
+    }
+
+
+def usage_check_for_assets(
+    project: Any,
+    sequences: Iterable[Any],
+    asset_ids: Iterable[str],
+    *,
+    include_same_path: bool = True,
+) -> Dict[str, Tuple[ClipUsage, ...]]:
+    """删除前使用检查：素材（及同路径整组实例）的全部真实引用。
+
+    与定位跳转（locations_for）引用同一索引——两处看到的使用事实
+    一定一致。include_same_path=True 时同路径伙伴的使用也计入
+    （共享文件维度）。
+    """
+    wanted = {str(a) for a in asset_ids}
+    if not wanted:
+        return {}
+    index = build_asset_usage_index(sequences, project)
+    related = set(wanted)
+    if include_same_path:
+        for ids in same_path_asset_groups(project).values():
+            if wanted & set(ids):
+                related.update(ids)
+    return {
+        asset_id: index.locations_for(asset_id)
+        for asset_id in sorted(related)
+        if index.usage_count(asset_id) > 0
+    }
