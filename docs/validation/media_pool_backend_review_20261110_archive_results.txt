@@ -1,15 +1,19 @@
-Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
-Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
-If this causes problems, reconfigure your locale. See the locale(1) manual
-for more information.
-qt.qpa.fonts: Populating font family aliases took 669 ms. Replace uses of missing font family "Sans Serif" with one that exists to avoid this cost. 
+qt.qpa.fonts: Populating font family aliases took 649 ms. Replace uses of missing font family "Sans Serif" with one that exists to avoid this cost. 
+Media management result dropped (project switched, kind=collect)
+OpenCV: Couldn't read video stream from file "/var/folders/j2/m4dcthbx3h5086ywnnplqwmc0000gn/T/topos-media-pool-review-le93yivm/source.mov"
+OpenCV: Couldn't read video stream from file "/var/folders/j2/m4dcthbx3h5086ywnnplqwmc0000gn/T/topos-media-pool-review-le93yivm/source.mov"
 {
-  "existing_target_overwritten": true,
+  "existing_target_overwritten": false,
+  "conflict_renamed_copy_present": true,
+  "preexisting_manifest_kept": true,
   "archive_save_returns_success": true,
   "saved_timeline_refs": [
-    "6b3b1bba-5780-47e6-b271-e95f692da2e4"
+    "50155f0c-27f0-48f3-bbcb-cf101efe3f6f"
   ],
-  "saved_timeline_sequences": [],
-  "queued_collect_uses_replacement_project": true,
-  "queued_collect_keeps_old_sequence": true
+  "saved_timeline_sequences": [
+    "50155f0c-27f0-48f3-bbcb-cf101efe3f6f"
+  ],
+  "queued_collect_uses_replacement_project": false,
+  "queued_collect_keeps_old_sequence": true,
+  "late_finish_after_project_switch_dropped": true
 }

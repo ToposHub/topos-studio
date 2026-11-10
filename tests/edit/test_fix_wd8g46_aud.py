@@ -154,9 +154,10 @@ def test_aud12903_pending_cancel_finalizes_summary_job() -> None:
     sched.cancel_all()
 
     final = svc.get_request(req.request_id)
-    assert final.state == RequestState.FAILED  # 取消计入 errors
-    assert summary.status == JobStatus.FAILED
-    assert summary.error_code == "ANALYSIS_FAILED"
+    # R06（媒体池复查）：取消与失败三分——全部 asset 被取消（无失败）
+    # → request/summary 收尾 CANCELLED（不再与失败混淆）
+    assert final.state == RequestState.CANCELLED
+    assert summary.status == JobStatus.CANCELLED
 
 
 # --------------------------------------------------------------------------- #

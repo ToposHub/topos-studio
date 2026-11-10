@@ -1,18 +1,18 @@
 {
   "csv_bad_header": [
-    "MetadataImportPlan(asset_changes=(), unmatched_rows=(), warnings=('没有可导入的列（日志/制作字段）',), total_rows=1)",
-    "MetadataImportPlan(asset_changes=(), unmatched_rows=(), warnings=('缺少匹配列（asset_id 或 path）',), total_rows=1)"
+    "MetadataImportPlan(asset_changes=(), unmatched_rows=(), warnings=('没有可导入的列（日志/制作字段）',), total_rows=1, project_id='dca4797c-f6e9-4c17-9504-128f371ee37c', source_revision=0)",
+    "MetadataImportPlan(asset_changes=(), unmatched_rows=(), warnings=('缺少匹配列（asset_id 或 path）',), total_rows=1, project_id='dca4797c-f6e9-4c17-9504-128f371ee37c', source_revision=0)"
   ],
   "ambiguous_path": {
-    "changes": [
-      "c597ce6a-5a04-4d5c-b2ed-6ce73b41fcda"
-    ],
-    "warnings": []
+    "changes": [],
+    "warnings": [
+      "第 2 行路径 '/m/a.mov' 匹配 2 个素材（同路径多素材），已跳过——请改用 asset_id 匹配"
+    ]
   },
   "stale_plan": {
     "concurrent": "concurrent",
     "after_apply": "CSV",
-    "after_undo": ""
+    "after_undo": "concurrent"
   },
   "keyword_roundtrip": {
     "before": [
@@ -20,8 +20,7 @@
       "hero"
     ],
     "after": [
-      "night",
-      "exterior",
+      "night;exterior",
       "hero"
     ]
   },

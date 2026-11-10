@@ -1,5 +1,5 @@
-Command (project root):
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/test_media_pool_backend_review_20261110.py tests/edit/test_backend_p*.py tests/edit/test_multicam_production.py tests/edit/test_asset_usage_index.py tests/edit/test_project_archive.py tests/edit/test_project_archive_w10.py tests/edit/test_consolidate.py tests/edit/test_interpretation_override.py tests/edit/test_m04_interpretation_matrix.py tests/edit/test_track_lock_guard_and_source_range.py tests/edit/ai_editing/test_analysis_request.py tests/edit/ai_editing/test_analysis_scheduler.py tests/edit/ai_editing/test_analysis_progress.py tests/edit/ai_editing/test_analysis.py tests/shared/test_backend_p0_proxy_tasks.py tests/app/test_media_analysis_controller.py -q -rs --tb=short
+Command (project root, updated 2026-11-11 after R01–R15 remediation):
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/test_media_pool_backend_review_20261110.py tests/edit/test_backend_p*.py tests/edit/test_multicam_production.py tests/edit/test_asset_usage_index.py tests/edit/test_project_archive.py tests/edit/test_project_archive_w10.py tests/edit/test_consolidate.py tests/edit/test_interpretation_override.py tests/edit/test_m04_interpretation_matrix.py tests/edit/test_track_lock_guard_and_source_range.py tests/edit/ai_editing/test_analysis_request.py tests/edit/ai_editing/test_analysis_scheduler.py tests/edit/ai_editing/test_analysis_progress.py tests/edit/ai_editing/test_analysis.py tests/shared/test_backend_p0_proxy_tasks.py tests/app/test_media_analysis_controller.py tests/edit/test_r01_r02_r04_archive_ownership.py tests/edit/test_r03_r05_r06_jobs_and_relink.py tests/edit/test_r07_r08_r09_range_semantics.py tests/edit/test_r11_r12_r13_usage_probe_csv.py tests/edit/test_r10_r14_r15_query_smartbin_transcription.py -q -rs --tb=short
 
 ============================= test session starts ==============================
 platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
@@ -7,49 +7,36 @@ PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
 rootdir: /Users/heng/Documents/vscode/topos-studio
 configfile: pytest.ini
 plugins: qt-4.5.0
-collected 345 items
+collected 404 items
 
-tests/edit/test_media_pool_backend_review_20261110.py ..........         [  2%]
-tests/edit/test_backend_p0_bin_semantics.py .............                [  6%]
-tests/edit/test_backend_p0_clip_attributes.py ...                        [  7%]
-tests/edit/test_backend_p0_clip_metadata.py .........                    [ 10%]
-tests/edit/test_backend_p0_pool_query.py ..................              [ 15%]
-tests/edit/test_backend_p0_relink_replace.py ....                        [ 16%]
-tests/edit/test_backend_p0_source_range.py ....................          [ 22%]
-tests/edit/test_backend_p1_log_semantics.py ....                         [ 23%]
-tests/edit/test_backend_p1_media_containers.py ....                      [ 24%]
-tests/edit/test_backend_p1_metadata_csv.py .......                       [ 26%]
-tests/edit/test_backend_p1_multicam_sync.py ..                           [ 27%]
-tests/edit/test_backend_p1_smart_bin_rules.py .............              [ 31%]
-tests/edit/test_backend_p1_transcription_job.py ...............          [ 35%]
-tests/edit/test_backend_p1_usage_index.py ....                           [ 36%]
-tests/edit/test_backend_p2_media_management.py .....                     [ 37%]
-tests/edit/test_multicam_production.py ......................            [ 44%]
-tests/edit/test_asset_usage_index.py ......                              [ 46%]
-tests/edit/test_project_archive.py ................                      [ 50%]
-tests/edit/test_project_archive_w10.py ...s.....s.                       [ 53%]
-tests/edit/test_consolidate.py ....sssssss.ss                            [ 57%]
-tests/edit/test_interpretation_override.py ...............               [ 62%]
-tests/edit/test_m04_interpretation_matrix.py .......                     [ 64%]
-tests/edit/test_track_lock_guard_and_source_range.py ........            [ 66%]
-tests/edit/ai_editing/test_analysis_request.py .................         [ 71%]
-tests/edit/ai_editing/test_analysis_scheduler.py ....................    [ 77%]
-tests/edit/ai_editing/test_analysis_progress.py .......                  [ 79%]
-tests/edit/ai_editing/test_analysis.py ................................. [ 88%]
-...............                                                          [ 93%]
-tests/shared/test_backend_p0_proxy_tasks.py .......                      [ 95%]
-tests/app/test_media_analysis_controller.py ................             [100%]
+======================= 393 passed, 11 skipped in 21.01s =======================
+============================== 393 passed, 11 skipped ==============================
 
-=========================== short test summary info ============================
-SKIPPED [1] tests/edit/test_project_archive_w10.py:116: win32 reserved names
-SKIPPED [1] tests/edit/test_project_archive_w10.py:187: win32 long paths
-SKIPPED [1] tests/edit/test_consolidate.py:147: ffmpeg CLI not on PATH
-SKIPPED [1] tests/edit/test_consolidate.py:161: ffmpeg CLI not on PATH
-SKIPPED [1] tests/edit/test_consolidate.py:202: ffmpeg CLI not on PATH
-SKIPPED [1] tests/edit/test_consolidate.py:224: ffmpeg CLI not on PATH
-SKIPPED [1] tests/edit/test_consolidate.py:254: ffmpeg CLI not on PATH
-SKIPPED [1] tests/edit/test_consolidate.py:278: ffmpeg CLI not on PATH
-SKIPPED [1] tests/edit/test_consolidate.py:294: ffmpeg CLI not on PATH
-SKIPPED [1] tests/edit/test_consolidate.py:322: ffmpeg CLI not on PATH
-SKIPPED [1] tests/edit/test_consolidate.py:341: ffmpeg CLI not on PATH
-======================= 334 passed, 11 skipped in 20.13s =======================
+对比基线（2026-11-10 复查轮：334 passed, 11 skipped / 345 项）：本轮范围在原
+清单上新增 R 整改回归 5 个文件 59 项，全部通过，无失败。11 个跳过与基线一致
+（9 项 ffmpeg CLI 缺失的编码集成 + 2 项仅 Windows 的归档测试），这些路径仍
+不能视为已验证通过。
+
+广域回归（tests/edit + tests/app 单进程全量，2026-11-11）：
+15102 passed, 32 failed, 43 skipped (39m33s)。
+32 项失败处置（全部溯源）：
+- 7 项为本轮整改的有意行为变化触发的测试预期过时，已更新并复测通过（131/131）：
+  test_fix_wd11g58_aud（代理失败清理改为 staging 语义，3）、test_fix_wd8g46_aud
+  与 test_ai_editing_composition_root_r1（全取消收尾 CANCELLED，2）、
+  test_edit_viewport_integration（open_asset 新增 interpretation_fps 关键字，2 中
+  的 2）、test_round4_media_replacement（轻量宿主缺新方法，代码侧加防御，1）。
+- 14 项在基线 dc95e25e 同配置复现失败（非本轮引入，未修）：n03_grade_degrade_gate
+  ×5、n03_layers_mask_preflight ×3、channel_layout_import ×2、
+  timeline_disable_shortcut ×1、linked_ripple_revision_proxy_jobs ×1（本轮新溯源
+  的基线失败）、fix_ui2_aud3 ×1、fix_wd1g7_aud ×1（上轮已记录）。
+- 其余 ~11 项（timeline_clip_affordance_gestures ×8、ef19_aud、edit_viewport
+  的第 2 项等）为长会话顺序敏感：单文件单跑全过（gestures 50/50），失败集合在
+  两次全量运行间漂移，与既知 macOS Qt 长会话行为一致；本轮改动文件单独套件
+  均稳定通过。
+
+启动检查：QT_QPA_PLATFORM=offscreen .venv/bin/python -m src.main
+--test-startup --no-startup-dialog → exit 0。
+
+本轮没有运行真实云端/ASR 服务，也未做十万素材 UI 性能认证（计划 §13 剩余
+范围 1）。工作区原有 Color Gallery、全局样式及其他未提交修改保持原状；本
+次没有替用户提交 Git。

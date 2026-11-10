@@ -599,13 +599,13 @@ class TestPyAVCancelCleansPartialProxy:
 
         result = proxy_generator_module._generate_video_proxy_pyav(
             asset=_asset("a1", source),
-            proxy_path=proxy_path,
+            staging_path=proxy_path,   # R03：私有写入目标（staging 语义）
             config=proxy_generator_module.DEFAULT_PROXY_CONFIG,
             cancelled_fn=lambda: True,  # 首个 packet 即取消
         )
 
         assert result is None
-        # AUD-17231：取消路径不残留截断的代理文件
+        # AUD-17231 + R03：取消路径不残留截断的 staging 输出
         assert not os.path.exists(proxy_path)
 
 
@@ -630,19 +630,23 @@ class _FakeCliProcess:
 
 
 class TestCliFallbackCleanup:
-    def _prepare(self, tmp_path) -> tuple[MediaAsset, str]:
+    def _prepare(self, tmp_path) -> tuple[MediaAsset, str, str]:
         source = str(tmp_path / "source.mp4")
         with open(source, "wb") as f:
             f.write(b"fake video")
         proxy_path = str(tmp_path / "source_proxy.mp4")
+        staging_path = str(tmp_path / ".source_proxy.mp4.topos-proxy-test")
+        with open(staging_path, "wb") as f:
+            f.write(b"partial output")  # 模拟超时前对 staging 的部分写入
+        # R03：既有同名最终文件必须保留（所有权分离的另一半断言）
         with open(proxy_path, "wb") as f:
-            f.write(b"partial output")  # 模拟超时前的部分写入
-        return _asset("a1", source), proxy_path
+            f.write(b"preexisting-user-file")
+        return _asset("a1", source), proxy_path, staging_path
 
     def test_timeout_reaps_process_and_removes_partial(
         self, tmp_path, monkeypatch,
     ) -> None:
-        asset, proxy_path = self._prepare(tmp_path)
+        asset, proxy_path, staging_path = self._prepare(tmp_path)
 
         created: dict[str, _FakeCliProcess] = {}
 
@@ -656,7 +660,8 @@ class TestCliFallbackCleanup:
         monkeypatch.setattr(subprocess, "Popen", _fake_popen)
 
         result = proxy_generator_module._generate_video_proxy_cli(
-            asset, proxy_path, proxy_generator_module.DEFAULT_PROXY_CONFIG,
+            asset, proxy_path, staging_path,
+            proxy_generator_module.DEFAULT_PROXY_CONFIG,
         )
 
         proc = created["p"]
@@ -665,13 +670,15 @@ class TestCliFallbackCleanup:
         assert proc.killed is True
         assert len(proc.communicate_calls) == 2
         assert proc.communicate_calls[1] == 5
-        # AUD-17232：部分输出被清理
-        assert not os.path.exists(proxy_path)
+        # AUD-17232 + R03：staging 部分输出被清理；既有最终文件保持原字节
+        assert not os.path.exists(staging_path)
+        with open(proxy_path, "rb") as f:
+            assert f.read() == b"preexisting-user-file"
 
     def test_nonzero_returncode_removes_partial(
         self, tmp_path, monkeypatch,
     ) -> None:
-        asset, proxy_path = self._prepare(tmp_path)
+        asset, proxy_path, staging_path = self._prepare(tmp_path)
 
         monkeypatch.setattr(proxy_generator_module, "find_ffmpeg",
                             lambda: "/fake/ffmpeg")
@@ -681,8 +688,11 @@ class TestCliFallbackCleanup:
         )
 
         result = proxy_generator_module._generate_video_proxy_cli(
-            asset, proxy_path, proxy_generator_module.DEFAULT_PROXY_CONFIG,
+            asset, proxy_path, staging_path,
+            proxy_generator_module.DEFAULT_PROXY_CONFIG,
         )
 
         assert result is None
-        assert not os.path.exists(proxy_path)
+        # R03：失败清理只删 staging；既有最终文件不动
+        assert not os.path.exists(staging_path)
+        assert os.path.exists(proxy_path)

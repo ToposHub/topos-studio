@@ -34,7 +34,8 @@ def test_asset_double_click_opens_source_in_unified_viewport() -> None:
         dock_source_viewer=None,
     )
     FileOpsMixin._on_asset_double_clicked(host, "camera")
-    source.open_asset.assert_called_once_with(asset)
+    # R09：宿主把解释覆盖的生效帧率随打开传入（测试替身工程无覆盖 → None）
+    source.open_asset.assert_called_once_with(asset, interpretation_fps=None)
     viewport.show_source.assert_called_once_with(focus=True)
     dock.show.assert_called_once_with()
     dock.raise_.assert_called_once_with()
@@ -49,7 +50,7 @@ def test_quick_preview_keeps_current_monitor_and_focus() -> None:
         source_viewer_widget=source, edit_viewport=viewport,
     )
     FileOpsMixin._on_asset_selected(host, "camera")
-    source.open_asset.assert_called_once_with(asset)
+    source.open_asset.assert_called_once_with(asset, interpretation_fps=None)
     viewport.show_source.assert_not_called()
 
 
