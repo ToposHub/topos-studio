@@ -105,6 +105,10 @@ class ProxyManifestEntry:
     updated_at: float
     progress: float = 0.0
     error: Optional[str] = None
+    # P0-7：缓存产物类型域声明。现有唯一取值 "proxy"（半分辨率可替身
+    # 播放）；"optimized"（全分辨率 mezzanine）是未来独立产物，届时按
+    # 本字段区分调度/清理策略。旧清单无该键 → 读回 "proxy"。
+    kind: str = "proxy"
 
     @property
     def is_ready(self) -> bool:
@@ -155,6 +159,7 @@ class ProxyManifestEntry:
             updated_at=float(d.get("updated_at", 0.0)),  # type: ignore[arg-type]
             progress=float(d.get("progress", 0.0)),  # type: ignore[arg-type]
             error=d.get("error"),  # type: ignore[arg-type]
+            kind=str(d.get("kind", "proxy")),  # type: ignore[arg-type]
         )
 
 
