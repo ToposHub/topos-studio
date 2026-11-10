@@ -49,6 +49,14 @@ def _folder(repo):
 
 
 class TestIndex:
+    def test_limit_preserves_total_matched_count(self, repo):
+        for name in ("A", "B", "C"):
+            _seed(_folder(repo), name)
+        query = GalleryQuery(album_id="legacy:User", limit=1)
+        for result in (repo.query(query), GalleryQueryIndex(repo).query(query)):
+            assert len(result.stills) == 1
+            assert result.total_matched == 3
+
     def test_unchanged_folder_hits_index_without_rescan(self, repo):
         _seed(_folder(repo), "A")
         index = GalleryQueryIndex(repo)

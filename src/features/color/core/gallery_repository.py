@@ -75,7 +75,7 @@ def _default_grade_probe(topos_path: str) -> bool:
             return False
         with zipfile.ZipFile(topos_path, "r") as zf:
             return "project.json" in zf.namelist()
-    except OSError:
+    except (OSError, zipfile.BadZipFile):
         return False
 
 
@@ -169,6 +169,10 @@ class GalleryFolderRepository:
         if not real_folder.startswith(self._root + os.sep) \
                 and real_folder != self._root:
             return None
+        resolved = os.path.realpath(real_folder)
+        root = os.path.realpath(self._root)
+        if resolved != root and not resolved.startswith(root + os.sep):
+            return None
         return real_folder
 
     def album_for_folder(self, folder: str) -> Optional[GalleryAlbum]:
@@ -178,7 +182,7 @@ class GalleryFolderRepository:
             album_dir = self.album_folder(album.album_id)
             if album_dir is not None and album_dir == target:
                 return album
-        return None
+        return self._find_album_by_id(self.album_id_for_folder(target))
 
     # ── 查询 ───────────────────────────────────────────────────────────
 
@@ -236,6 +240,7 @@ class GalleryFolderRepository:
             stills.append(still)
 
         self._sort_stills(stills, query)
+        total_matched = len(stills)
         if query.limit is not None:
             stills = stills[:query.limit]
         degraded = sum(1 for s in stills if not s.has_meta)
@@ -243,7 +248,7 @@ class GalleryFolderRepository:
             album=album,
             stills=tuple(stills),
             request_revision=query.request_revision,
-            total_matched=len(stills),
+            total_matched=total_matched,
             degraded_count=degraded,
         )
 
@@ -321,6 +326,17 @@ class GalleryFolderRepository:
         for album in self.list_albums():
             if album.album_id == album_id:
                 return album
+        folder = self.album_folder(album_id)
+        if folder is not None and os.path.isdir(folder):
+            relative = os.path.relpath(folder, self._root)
+            parts = tuple(relative.split(os.sep))
+            if parts and parts[0] in ("User", "System"):
+                return GalleryAlbum(
+                    album_id=album_id, scope=SCOPE_LEGACY_FOLDER,
+                    kind=ALBUM_KIND_STILLS, label="/".join(parts),
+                    parent_id=self.album_id_for_rel(parts[:-1]) if len(parts) > 1 else None,
+                    read_only=not os.access(folder, os.W_OK),
+                    revision=_folder_revision(folder))
         return None
 
     def _still_from_name(self, folder: str, topos_name: str,

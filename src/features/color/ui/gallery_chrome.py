@@ -13,10 +13,11 @@ from PyQt6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, QSignalBlock
 from PyQt6.QtGui import QActionGroup, QColor, QFont, QKeyEvent, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QMenu, QSlider, QSplitter, QStyle, QToolButton, QTreeWidget,
+    QMenu, QSlider, QStyle, QToolButton, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.features.color.ui.gallery_icons import gallery_icon
@@ -251,10 +252,8 @@ class GalleryChrome(QObject):
         root.addWidget(self.search_row)
         self.search_row.hide()
 
-        self.splitter = QSplitter(Qt.Orientation.Horizontal, panel)
+        self.splitter = PanelSplitter(Qt.Orientation.Horizontal, panel)
         self.splitter.setChildrenCollapsible(False)
-        self.splitter.setHandleWidth(1)
-        self.splitter.setStyleSheet("QSplitter::handle { background: #17171b; }")
         self.albums = QTreeWidget(self.splitter)
         self.albums.setObjectName("galleryAlbums")
         self.albums.setHeaderHidden(True)

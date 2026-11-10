@@ -96,7 +96,7 @@ def _sha256_bytes(data: bytes) -> str:
 
 def _is_safe_member_name(name: str) -> bool:
     """zip 成员必须是纯文件名（拒绝绝对路径/../分隔符）。"""
-    if not name or name.startswith(("/", "\\")):
+    if not is_safe_bundle_stem(name) or name.startswith(("/", "\\")):
         return False
     if "/" in name or "\\" in name or ".." in name.split("/") \
             or ".." in name.split("\\"):
@@ -140,6 +140,8 @@ class GalleryTransferService:
                       ) -> GalleryOperationResult:
         """把 bundle 打包为单个 ``.toposbundle`` zip（源不动）。"""
         request_id = make_gallery_request_id()
+        if not is_safe_bundle_stem(stem):
+            return self._rejected(request_id, REASON_UNSAFE_NAME, repr(stem))
         real = self._bundles._resolve_in_root(folder)
         if real is None:
             return self._rejected(request_id, REASON_OUTSIDE_ROOT, folder)
@@ -248,6 +250,10 @@ class GalleryTransferService:
                         REASON_FILE_COUNT_LIMIT, f"{len(infos)} entries")
                 total = 0
                 for info in infos:
+                    if info.filename in inspection.members:
+                        inspection.reject(REASON_NOT_A_BUNDLE,
+                                          f"duplicate member: {info.filename}")
+                        continue
                     if not _is_safe_member_name(info.filename):
                         inspection.reject(REASON_PATH_ESCAPE,
                                           info.filename)
@@ -265,6 +271,8 @@ class GalleryTransferService:
                 if total > IMPORT_MAX_TOTAL_BYTES:
                     inspection.reject(REASON_SIZE_LIMIT,
                                       f"total {total} bytes")
+                if not inspection.ok:
+                    return inspection  # Do not decompress a rejected archive.
                 if BUNDLE_MANIFEST_NAME not in inspection.members:
                     inspection.reject(REASON_NOT_A_BUNDLE,
                                       "manifest missing")
@@ -279,12 +287,35 @@ class GalleryTransferService:
             inspection.reject(REASON_NOT_A_BUNDLE, "bad manifest")
             return inspection
         schema = manifest.get("schema")
-        if not isinstance(schema, int) or schema > EXPORT_SCHEMA:
+        if type(schema) is not int or schema != EXPORT_SCHEMA:
             inspection.reject(REASON_FUTURE_SCHEMA, f"schema {schema}")
             return inspection
         inspection.manifest = manifest
-        listed = {f.get("name"): f for f in manifest.get("files", [])
-                  if isinstance(f, dict)}
+        files = manifest.get("files")
+        still = manifest.get("still", {})
+        if (not isinstance(files, list) or not isinstance(still, dict)
+                or any(not isinstance(f, dict)
+                       or not isinstance(f.get("name"), str)
+                       or not _is_safe_member_name(f["name"])
+                       for f in files)):
+            inspection.reject(REASON_NOT_A_BUNDLE, "invalid manifest fields")
+            return inspection
+        listed = {}
+        roles = set()
+        for entry in files:
+            name, role = entry["name"], entry.get("role")
+            digest = entry.get("sha256")
+            if (name not in inspection.members or name in listed
+                    or not isinstance(role, str)
+                    or role not in BUNDLE_SUFFIX_BY_ROLE or role in roles
+                    or _suffix_of_name(name) != BUNDLE_SUFFIX_BY_ROLE[role]
+                    or not isinstance(digest, str) or len(digest) != 64
+                    or any(c not in "0123456789abcdef" for c in digest)):
+                inspection.reject(REASON_NOT_A_BUNDLE,
+                                  f"invalid manifest member: {name}")
+                return inspection
+            listed[name] = entry
+            roles.add(role)
         grade_listed = any(f.get("role") == BUNDLE_ROLE_GRADE
                            for f in listed.values())
         has_grade_member = any(name.endswith(".topos")
@@ -292,7 +323,7 @@ class GalleryTransferService:
         if not (grade_listed and has_grade_member):
             inspection.reject(REASON_MISSING_GRADE, "grade package absent")
         # 导入名优先取 manifest 的来源名（保留大小写），回退 zip 文件名
-        display = (manifest.get("still") or {}).get("display_name")
+        display = still.get("display_name")
         if isinstance(display, str) and display.strip():
             inspection.stem = display.strip()
         else:

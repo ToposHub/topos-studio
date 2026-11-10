@@ -73,6 +73,18 @@ def _exists(folder, stem, suffix):
 
 
 class TestValidation:
+    @pytest.mark.parametrize("operation", ["move", "delete"])
+    def test_source_stem_cannot_escape_root(self, svc, tmp_path, operation):
+        outside = tmp_path / "Outside.topos"
+        outside.write_bytes(b"must remain untouched")
+        stem = "../../Outside"
+        folder = _folder(svc)
+        result = (svc.rename_bundle(folder, stem, "New")
+                  if operation == "move" else svc.delete_bundle(folder, stem, permanent=True))
+        assert result.reason == REASON_UNSAFE_NAME
+        assert outside.read_bytes() == b"must remain untouched"
+        assert not os.path.exists(os.path.join(folder, "New.topos"))
+
     def test_rename_moves_all_six_members_including_exr_declaration(self, svc):
         folder = _folder(svc)
         _seed_bundle(folder, "Old")
