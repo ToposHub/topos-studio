@@ -23,7 +23,11 @@ def test_collect_used_only_estimate_keeps_supplied_sequences(tmp_path: Any) -> N
     clip = SimpleNamespace(asset_id=asset_id, clip_id="c", timeline_start=0, timeline_duration=1)
     track = SimpleNamespace(track_id="v", name="V", track_type="video", clips=(clip,))
     sequence = SimpleNamespace(timeline_id="t", name="Timeline", all_tracks=(track,))
-    assert estimate_collect_bytes(project, include_unused=False, sequences=iter([sequence])) == 37
+    estimate = estimate_collect_bytes(project, include_unused=False, sequences=iter([sequence]))
+    # R04：估算含 LUT/清单余量（_SIDECAR_SLACK_BYTES），但"只统计已用
+    # 素材"的语义不变——未用素材 91 字节不进入估算。
+    from src.features.edit.core.media_management_worker import _SIDECAR_SLACK_BYTES
+    assert estimate == 37 + _SIDECAR_SLACK_BYTES
 
 
 def test_consolidate_worker_forwards_actual_progress_fields(qapp: Any) -> None:

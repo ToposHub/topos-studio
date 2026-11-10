@@ -4809,6 +4809,11 @@ class MediaPoolPanel(QWidget):
         self._import_progress: Optional[QProgressDialog] = None
         # P2-2：收集/整理后台任务运行态（运行中禁止重复启动）
         self._media_mgmt_running: bool = False
+        # R04（媒体池复查）：Media Management 会话代际 + 在场任务状态。
+        # 切工程/关闭时递增代际并请求协作取消——晚到的完成/失败回调
+        # 按代际+工程身份丢弃，不向新工程弹"成功"提示或写归档。
+        self._media_mgmt_session_generation: int = 0
+        self._media_mgmt_state: Optional[dict] = None
         # 进度对话框重入保护：setValue 期间的嵌套事件派发不得销毁对话框
         self._progress_update_in_flight: bool = False
         self._finish_import_deferred: bool = False
@@ -5495,6 +5500,9 @@ class MediaPoolPanel(QWidget):
             # F-R07/R26：跨工程注销全部代理任务——旧工程的 completion/
             # error/探测回调不得写新工程模型或服务缓存。
             self._invalidate_all_proxy_jobs()
+            # R04：跨工程取消在场的收集/整理任务——晚到回调按
+            # （代际, 工程身份）丢弃，不向新工程弹结果/写归档。
+            self._invalidate_media_management()
             # P0-4：跨工程丢弃旧查询结果（会话侧另有 project_id/revision
             # 守卫，这里清 UI 缓存避免渲染旧工程素材）。
             self._query_asset_ids = None
@@ -5663,6 +5671,8 @@ class MediaPoolPanel(QWidget):
         self._pending_timeline_image_previews.clear()
         # F-R07/R26：清空工程同样注销全部代理任务与 pending 探测
         self._invalidate_all_proxy_jobs()
+        # R04：关闭工程取消在场的收集/整理任务（回调守卫同一纪律）
+        self._invalidate_media_management()
         self.tree.clear()
         # AUD-20209: 树已清空 → 索引失效。
         self._tree_index_dirty = True
@@ -5975,6 +5985,21 @@ class MediaPoolPanel(QWidget):
 
     # ==================== P2-2 Media Management 后台执行 ====================
 
+    def _invalidate_media_management(self) -> None:
+        """R04：切工程/关闭——使在场的收集/整理任务过期并请求取消。
+
+        代际递增后，已排队/运行中的任务即使完成，其回调也会按
+        （代际, project_id）双重校验丢弃；协作取消让核心尽快停在
+        素材/分段边界。输出目录中的半成品由收集报告如实记录。
+        """
+        self._media_mgmt_session_generation += 1
+        state = self._media_mgmt_state
+        if state is not None and not state.get("done", False):
+            try:
+                state["worker"].cancel()
+            except RuntimeError:  # noqa: BLE001 — 包装器已销毁等
+                pass
+
     def _run_media_management(
         self,
         kind: str,
@@ -5983,11 +6008,14 @@ class MediaPoolPanel(QWidget):
         *,
         estimate_bytes: int,
         target_dir: str,
+        project_id: str,
     ) -> None:
         """磁盘空间预检 + 后台执行收集/整理（进度对话框 + 协作取消）。
 
         核心已在后台线程运行（UI 不再同步复制/转码）；完成/失败/取消
         均回主线程收尾。空间不足直接拒绝（保守估算，宁可误拒）。
+        R04：``project_id`` 为发起时工程身份——完成回调仅在面板仍在
+        同一工程且代际未变时触发（切工程/关闭后丢弃晚到结果）。
         """
         if self._media_mgmt_running:
             QMessageBox.information(
@@ -6030,16 +6058,34 @@ class MediaPoolPanel(QWidget):
         dialog.show()
 
         worker = MediaManagementWorker(kind, work)
-        state = {"worker": worker, "dialog": dialog, "done": False}
+        state = {
+            "worker": worker,
+            "dialog": dialog,
+            "done": False,
+            # R04：发起时的代际与工程身份（回调接受的双重守卫）
+            "generation": self._media_mgmt_session_generation,
+            "project_id": project_id,
+        }
+        self._media_mgmt_state = state
 
         def _settle() -> None:
             if state["done"]:
                 return
             state["done"] = True
+            if self._media_mgmt_state is state:
+                self._media_mgmt_state = None
             self._media_mgmt_running = False
             dialog.reset()
             dialog.close()
             dialog.deleteLater()
+
+        def _stale() -> bool:
+            """R04：发起后切工程/关闭 → 本轮回调全部过期。"""
+            return (
+                state["generation"] != self._media_mgmt_session_generation
+                or self._project is None
+                or self._project.project_id != state["project_id"]
+            )
 
         def _on_progress(kind_id: str, done: int, total: int) -> None:
             if kind_id != kind or total <= 0:
@@ -6051,6 +6097,12 @@ class MediaPoolPanel(QWidget):
             if kind_id != kind:
                 return
             _settle()
+            if _stale():
+                logger.warning(
+                    "Media management result dropped (project switched, "
+                    "kind=%s)", kind,
+                )
+                return
             on_finish(payload, report)
 
         def _on_failed(kind_id: str, message: str) -> None:
@@ -6098,36 +6150,72 @@ class MediaPoolPanel(QWidget):
         if not target:
             return
 
+        # R04：冻结发起时工程 + 序列——排队期间切工程不得混用
+        # "新工程 + 旧时间线"（发起快照整体进任务，回调按身份守卫）。
+        project = self._project
         sequences = self._collect_timeline_sequences()
+        sequence_map = {
+            getattr(seq, "timeline_id", None): seq
+            for seq in sequences if getattr(seq, "timeline_id", None)
+        }
+        project_name = project.name or "collected"
 
         def _work(progress_cb, cancel_check):
             archived, report = collect_project(
-                self._project, target_dir=target, sequences=sequences,
+                project, target_dir=target, sequences=sequences,
                 progress_callback=progress_cb, cancelled_fn=cancel_check,
             )
             return archived, report
 
         self._run_media_management(
             KIND_COLLECT, _work,
-            lambda archived, report: self._finish_collect(archived, report, target),
-            estimate_bytes=estimate_collect_bytes(self._project,
+            lambda archived, report: self._finish_collect(
+                archived, report, target,
+                project_name=project_name,
+                timeline_sequences=sequence_map),
+            estimate_bytes=estimate_collect_bytes(project,
                                                   sequences=sequences),
             target_dir=target,
+            project_id=project.project_id,
         )
         return
 
-    def _finish_collect(self, archived, report, target: str) -> None:
-        """收集完成（主线程）：保存归档工程包 + 汇总报告（P2-2 后台化）。"""
+    def _unique_archive_topos_path(self, target: str,
+                                   project_name: str) -> str:
+        """R02：归档工程包目标名也不覆盖既有文件（追加序号）。"""
+        base = os.path.join(target, f"{project_name}.topos")
+        if not os.path.exists(base):
+            return base
+        stem, ext = os.path.splitext(base)
+        counter = 2
+        while os.path.exists(f"{stem}_{counter}{ext}"):
+            counter += 1
+        return f"{stem}_{counter}{ext}"
+
+    def _finish_collect(self, archived, report, target: str, *,
+                        project_name: str = "",
+                        timeline_sequences: Optional[dict] = None) -> None:
+        """收集完成（主线程）：保存归档工程包 + 汇总报告（P2-2 后台化）。
+
+        R01：``timeline_sequences``（发起时冻结的序列快照）随包保存——
+        只存 timeline refs 不存序列时，重开归档时间线为空。R04：工程
+        名取发起快照（不读当前面板工程）。保存失败按失败报告（warning
+        级弹窗 + 明示"归档不完整"），不得提示完成。
+        """
         # 收集出的工程包保存在归档目录内（媒体就在旁边，跨机器可开）
-        topos_path = os.path.join(
-            target, f"{self._project.name or 'collected'}.topos"
-        )
+        topos_path = self._unique_archive_topos_path(
+            target, project_name or "collected")
         try:
             io = EditProjectIO()
-            saved = io.save_project(topos_path, archived)
+            saved = io.save_project(
+                topos_path, archived,
+                timeline_sequences=timeline_sequences or None)
         except Exception:  # noqa: BLE001
             logger.exception("Collect project save failed")
             saved = False
+        if not saved:
+            report.warnings = tuple(report.warnings) + (
+                "工程包保存失败——归档不完整，请检查目标磁盘/权限后重试",)
 
         lines = [
             I18N.tr(
@@ -6165,7 +6253,9 @@ class MediaPoolPanel(QWidget):
                 ),
             )
         )
-        box = (QMessageBox.warning if report.failures else QMessageBox.information)
+        # R01：保存失败与收集失败同级——不得以 information 级提示"完成"
+        box = (QMessageBox.warning
+               if (report.failures or not saved) else QMessageBox.information)
         box(
             self._get_top_level_widget(),
             I18N.tr("edit.media_pool.collect_title", "收集工程"),
@@ -6187,6 +6277,8 @@ class MediaPoolPanel(QWidget):
             )
             return
 
+        # R04：冻结发起时工程 + 序列（与收集路径同一快照纪律）
+        project = self._project
         sequences = self._collect_timeline_sequences()
         has_clips = any(
             getattr(track, "clips", ())
@@ -6219,33 +6311,52 @@ class MediaPoolPanel(QWidget):
             return
 
         def _work(progress_cb, cancel_check):
-            new_project, _new_seqs, report = consolidate_project(
-                self._project, sequences=sequences, target_dir=target,
+            new_project, new_seqs, report = consolidate_project(
+                project, sequences=sequences, target_dir=target,
                 mode=mode, handles_frames=handles,
                 progress_cb=progress_cb, cancel_check=cancel_check,
             )
-            return new_project, report
+            # R01：重映射后的新序列随任务载荷返回——归档工程包必须保存
+            # 它们（旧序列引用的是整理前的源路径，写进包=断链）。
+            sequence_map = {
+                getattr(seq, "timeline_id", None): seq
+                for seq in new_seqs if getattr(seq, "timeline_id", None)
+            }
+            return (new_project, sequence_map), report
 
         self._run_media_management(
             KIND_CONSOLIDATE, _work,
-            lambda new_project, report: self._finish_consolidate(
-                new_project, report, target),
-            estimate_bytes=estimate_consolidate_bytes(self._project, sequences),
+            lambda payload, report: self._finish_consolidate(
+                payload[0], report, target,
+                project_name=project.name or "consolidated",
+                timeline_sequences=payload[1]),
+            estimate_bytes=estimate_consolidate_bytes(project, sequences),
             target_dir=target,
+            project_id=project.project_id,
         )
         return
 
-    def _finish_consolidate(self, new_project, report, target: str) -> None:
-        """整理完成（主线程）：保存归档工程包 + 汇总报告（P2-2 后台化）。"""
-        topos_path = os.path.join(
-            target, f"{self._project.name or 'consolidated'}.topos"
-        )
+    def _finish_consolidate(self, new_project, report, target: str, *,
+                            project_name: str = "",
+                            timeline_sequences: Optional[dict] = None) -> None:
+        """整理完成（主线程）：保存归档工程包 + 汇总报告（P2-2 后台化）。
+
+        R01：保存**重映射后的序列**（分段素材的新引用）；R04：工程名取
+        发起快照；保存失败按失败报告（与收集路径同一纪律）。
+        """
+        topos_path = self._unique_archive_topos_path(
+            target, project_name or "consolidated")
         try:
             io = EditProjectIO()
-            saved = io.save_project(topos_path, new_project)
+            saved = io.save_project(
+                topos_path, new_project,
+                timeline_sequences=timeline_sequences or None)
         except Exception:  # noqa: BLE001
             logger.exception("Consolidate project save failed")
             saved = False
+        if not saved:
+            report.warnings = tuple(report.warnings) + (
+                "工程包保存失败——归档不完整，请检查目标磁盘/权限后重试",)
 
         def _mb(num_bytes: int) -> str:
             return f"{num_bytes / 1024 / 1024:.1f} MB"
@@ -6298,7 +6409,9 @@ class MediaPoolPanel(QWidget):
                 ),
             )
         )
-        box = QMessageBox.warning if not report.passed else QMessageBox.information
+        # R01：保存失败与整理失败同级——不得以 information 级提示"完成"
+        box = (QMessageBox.warning
+               if (not report.passed or not saved) else QMessageBox.information)
         box(
             self._get_top_level_widget(),
             I18N.tr("edit.media_pool.consolidate_title", "整理工程"),
@@ -8174,6 +8287,8 @@ class MediaPoolPanel(QWidget):
     def closeEvent(self, event: Any) -> None:
         """面板关闭：取消在途查询并等待查询线程退出（不留后台任务）。"""
         self._query_session.shutdown()
+        # R04：面板关闭取消在场的收集/整理任务
+        self._invalidate_media_management()
         super().closeEvent(event)
 
     def _populate_grid_view(self) -> None:
