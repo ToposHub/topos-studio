@@ -204,6 +204,10 @@ class AnalysisRequest:
     state: RequestState = RequestState.PROPOSED
     created_at: float = 0.0
     title: str = ""
+    # R15（媒体池复查）：转录/说话人意图统一经 TranscriptionJobRequest
+    # 协议键携带（language/time_range_frames/speaker_diarization/
+    # data_policy 等）——执行边界做协议校验后下发 provider。
+    options: dict | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id:
@@ -298,6 +302,8 @@ class AnalysisRequest:
             state=RequestState(str(data.get("state", RequestState.PROPOSED.value))),
             created_at=float(data.get("created_at", 0.0)),
             title=str(data.get("title", "")),
+            options=dict(data["options"]) if isinstance(
+                data.get("options"), dict) else None,
         )
 
     @staticmethod
@@ -313,6 +319,7 @@ class AnalysisRequest:
         project_revision: int | None = None,
         title: str = "",
         now: float | None = None,
+        options: dict | None = None,
     ) -> "AnalysisRequest":
         """便捷构造：生成 request_id / created_at；默认未确认（PROPOSED）。
 
@@ -332,6 +339,7 @@ class AnalysisRequest:
             state=RequestState.PROPOSED,
             created_at=now if now is not None else _time.time(),
             title=title,
+            options=dict(options) if options else None,
         )
 
 

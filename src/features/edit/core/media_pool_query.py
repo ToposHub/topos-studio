@@ -57,7 +57,12 @@ VALID_SORT_KEYS = (
 _SCOPE_BIN = "bin"
 _SCOPE_UNFILED = "unfiled"
 _SCOPE_ALL_BINS = "all_bins"
-VALID_SCOPES = (_SCOPE_BIN, _SCOPE_UNFILED, _SCOPE_ALL_BINS)
+#: R10（媒体池复查）：Smart Bin 视图进入同一异步查询——规则筛选
+#: （get_smart_bin_assets）在查询线程执行，大数据池切 Smart Bin 不再
+#: 阻塞 UI。
+_SCOPE_SMART_BIN = "smart_bin"
+VALID_SCOPES = (_SCOPE_BIN, _SCOPE_UNFILED, _SCOPE_ALL_BINS,
+                 _SCOPE_SMART_BIN)
 
 
 class MediaPoolQueryCancelled(Exception):
@@ -78,7 +83,7 @@ class MediaPoolQuery:
     text: str = ""
     field: str = FIELD_FILENAME
     scope: str = _SCOPE_ALL_BINS
-    bin_id: Optional[str] = None      # scope=bin 时必填
+    bin_id: Optional[str] = None      # scope=bin / smart_bin 时必填
     sort_key: str = "name"
     sort_desc: bool = False
     offset: int = 0
@@ -91,6 +96,8 @@ class MediaPoolQuery:
             raise ValueError(f"未知查询范围: {self.scope}")
         if self.scope == _SCOPE_BIN and not self.bin_id:
             raise ValueError("scope=bin 需要 bin_id")
+        if self.scope == _SCOPE_SMART_BIN and not self.bin_id:
+            raise ValueError("scope=smart_bin 需要 bin_id")
         if self.sort_key not in VALID_SORT_KEYS:
             raise ValueError(f"未知排序键: {self.sort_key}")
         if self.offset < 0:
@@ -227,6 +234,13 @@ def _scope_assets(project: EditProject, query: MediaPoolQuery) -> list[MediaAsse
         assets = [project.assets[aid] for aid in bin_obj.asset_ids
                   if aid in project.assets]
         return assets
+    if query.scope == _SCOPE_SMART_BIN:
+        # R10：Smart Bin 的规则求值与普通查询同一执行域（查询线程），
+        # 大数据池切 Smart Bin 不再在 UI 线程同步全量求值。
+        assets = project.get_smart_bin_assets(query.bin_id or "")
+        if assets is None:
+            raise ValueError(f"Smart bin not found: {query.bin_id}")
+        return list(assets)
     # unfiled（Master 层级）
     return [project.assets[aid] for aid in project.get_unfiled_asset_ids()
             if aid in project.assets]

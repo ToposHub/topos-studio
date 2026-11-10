@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
     QFormLayout, QLineEdit, QListView, QToolButton, QComboBox,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QSlider, QFrame, QPushButton,
     QTreeWidgetItemIterator, QRubberBand, QSpinBox, QCheckBox,
+    QDoubleSpinBox,
 )
 from PyQt6.QtCore import (
     Qt, pyqtSignal, QUrl, QTimer, QSize, QRect, QModelIndex, QPoint,
@@ -101,6 +102,7 @@ from src.shared.media.proxy import DiskProxyInfo, ProxyStatus
 from src.shared.video.frame_provider_service import get_frame_provider_service
 from src.features.edit.core.commands import (
     CreateBinCommand,
+    UpdateSmartBinRulesCommand,
     RelinkAssetCommand,
     BatchRelinkAssetsCommand,
     DeleteBinCommand,
@@ -700,6 +702,7 @@ class BinTreeWidget(QTreeWidget):
     bin_selected = pyqtSignal(str, bool)  # bin_id, is_smart_bin
     # P1-12: Smart Bin 管理（由面板执行命令走 undo 栈）
     create_smart_bin_requested = pyqtSignal()
+    edit_smart_bin_requested = pyqtSignal(str)    # bin_id（R14）
     delete_smart_bin_requested = pyqtSignal(str)  # bin_id
     create_bin_requested = pyqtSignal()
     create_bin_in_requested = pyqtSignal(str)  # explicit parent for tree context actions
@@ -1023,6 +1026,8 @@ class BinTreeWidget(QTreeWidget):
         elif bin_type == "section":
             menu.addAction(I18N.tr("edit.media_pool.new_smart_bin", "New Smart Bin…")).triggered.connect(self.create_smart_bin_requested.emit)
         elif bin_type == "smart_bin" and bool(item.data(0, self.BIN_USER_ROLE)):
+            menu.addAction(I18N.tr("edit.media_pool.edit_smart_bin", "Edit Smart Bin…")).triggered.connect(
+                lambda _checked=False: self.edit_smart_bin_requested.emit(bin_id))
             menu.addAction(I18N.tr("edit.media_pool.remove_from_project", "Remove from Media Pool")).triggered.connect(
                 lambda _checked=False: self.delete_smart_bin_requested.emit(bin_id))
         return menu
@@ -5474,6 +5479,7 @@ class MediaPoolPanel(QWidget):
         self.bin_tree.bin_selected.connect(self._on_bin_selected)
         self.bin_tree.create_smart_bin_requested.connect(self._on_create_smart_bin)
         self.bin_tree.delete_smart_bin_requested.connect(self._on_delete_smart_bin)
+        self.bin_tree.edit_smart_bin_requested.connect(self._on_edit_smart_bin)
         self.bin_tree.create_bin_requested.connect(self._on_new_bin_clicked)
         self.bin_tree.create_bin_in_requested.connect(lambda parent_id: self._create_bin(parent_id=parent_id))
         self.bin_tree.delete_bin_requested.connect(self._delete_bin)
@@ -5481,6 +5487,7 @@ class MediaPoolPanel(QWidget):
         self.smart_bin_tree.bin_selected.connect(self._on_bin_selected)
         self.smart_bin_tree.create_smart_bin_requested.connect(self._on_create_smart_bin)
         self.smart_bin_tree.delete_smart_bin_requested.connect(self._on_delete_smart_bin)
+        self.smart_bin_tree.edit_smart_bin_requested.connect(self._on_edit_smart_bin)
 
         # Grid view selection
         if self.grid_view:
@@ -6440,34 +6447,98 @@ class MediaPoolPanel(QWidget):
             "\n".join(lines),
         )
 
-    def _on_create_smart_bin(self) -> None:
-        """新建用户 Smart Bin：名称 + 关键词（任一命中）+ 最低评级。"""
-        if not self._project:
-            QMessageBox.warning(
-                self._get_top_level_widget(),
-                I18N.tr("edit.media_pool.no_project_title", "No Project"),
-                I18N.tr("edit.media_pool.no_project_message", "Please create or open a project first.")
-            )
-            return
+    def _smart_bin_dialog(self, existing: Any = None) -> Any:
+        """R14（媒体池复查）：Smart Bin 创建/编辑共用表单（能力分组）。
+
+        字段覆盖平铺 filter_params 的能力面：媒体类型 / 关键词（任一）
+        / 评级下限 / 旗标 / 颜色标签 / 注释包含 / 最小宽度 / 最小帧率
+        ——提交经 CreateSmartBinCommand / UpdateSmartBinRulesCommand
+        （单步撤销）。使用 v2 规则树（嵌套 AND/OR）的 Smart Bin 只允许
+        改名并明示"高级规则保持不变"（不静默降级）。
+        """
+        from src.features.edit.core.project import (
+            ASSET_COLOR_LABELS,
+            ASSET_FLAG_VALUES,
+        )
+        from src.features.edit.core.smart_bin_rules import has_rule_tree
+
+        params: dict = dict(getattr(existing, "filter_params", None) or {})
+        rule_tree_bin = has_rule_tree(params)
+        editing = existing is not None
 
         dialog = QDialog(self._get_top_level_widget())
-        dialog.setWindowTitle(I18N.tr("edit.media_pool.new_smart_bin", "新建 Smart Bin"))
+        dialog.setWindowTitle(
+            I18N.tr("edit.media_pool.edit_smart_bin", "编辑 Smart Bin")
+            if editing else
+            I18N.tr("edit.media_pool.new_smart_bin", "新建 Smart Bin"))
         form = QFormLayout(dialog)
+
         name_edit = QLineEdit()
         name_edit.setPlaceholderText(
-            I18N.tr("edit.media_pool.smart_bin_name_hint", "如：访谈精选")
-        )
-        keywords_edit = QLineEdit()
-        keywords_edit.setPlaceholderText(
-            I18N.tr("edit.media_pool.keywords_hint", "逗号或顿号分隔，如: 采访, 室内")
-        )
-        rating_combo = QComboBox()
-        rating_combo.addItem(I18N.tr("edit.media_pool.rating_any", "不限"), None)
-        for value in range(1, 6):
-            rating_combo.addItem("★" * value, value)
+            I18N.tr("edit.media_pool.smart_bin_name_hint", "如：访谈精选"))
+        name_edit.setText(getattr(existing, "name", "") or "")
         form.addRow(I18N.tr("edit.media_pool.smart_bin_name", "名称:"), name_edit)
-        form.addRow(I18N.tr("edit.media_pool.keywords", "关键词:"), keywords_edit)
-        form.addRow(I18N.tr("edit.media_pool.min_rating", "最低评级:"), rating_combo)
+
+        if rule_tree_bin:
+            # 能力声明式限制：规则树超出本表单能力面——诚实显示，
+            # 不把树降级成平铺参数（降级 = 静默丢规则）。
+            note = QLabel(I18N.tr(
+                "edit.media_pool.smart_bin_rule_tree_note",
+                "该 Smart Bin 使用高级规则树（嵌套 AND/OR），"
+                "此处仅可改名——规则保持不变。"))
+            note.setWordWrap(True)
+            form.addRow(note)
+        else:
+            def _combo(items: tuple, current: Any, any_label: str) -> QComboBox:
+                box = QComboBox()
+                box.addItem(I18N.tr("edit.media_pool.rating_any", any_label), None)
+                for value in items:
+                    box.addItem(str(value), value)
+                index = box.findData(current) if current is not None else 0
+                box.setCurrentIndex(index if index >= 0 else 0)
+                return box
+
+            media_combo = _combo(
+                ("video", "audio", "image"), params.get("media_type"),
+                "不限")
+            keywords_edit = QLineEdit()
+            keywords_edit.setPlaceholderText(I18N.tr(
+                "edit.media_pool.keywords_hint", "逗号或顿号分隔，如: 采访, 室内"))
+            keywords_edit.setText(
+                ", ".join(params.get("keywords") or ()))
+            rating_combo = QComboBox()
+            rating_combo.addItem(
+                I18N.tr("edit.media_pool.rating_any", "不限"), None)
+            for value in range(1, 6):
+                rating_combo.addItem("★" * value, value)
+            rating = params.get("min_rating")
+            rating_combo.setCurrentIndex(rating if isinstance(rating, int) else 0)
+            flag_combo = _combo(ASSET_FLAG_VALUES, params.get("flag"), "不限")
+            color_combo = _combo(tuple(ASSET_COLOR_LABELS),
+                                 params.get("color_label"), "不限")
+            comment_edit = QLineEdit()
+            comment_edit.setText(params.get("comment_contains") or "")
+            width_spin = QSpinBox()
+            width_spin.setRange(0, 16000)
+            width_spin.setValue(int(params.get("min_width") or 0))
+            width_spin.setSpecialValueText(
+                I18N.tr("edit.media_pool.unlimited", "不限"))
+            fps_spin = QDoubleSpinBox()
+            fps_spin.setRange(0.0, 240.0)
+            fps_spin.setDecimals(3)
+            fps_spin.setValue(float(params.get("min_fps") or 0.0))
+            fps_spin.setSpecialValueText(
+                I18N.tr("edit.media_pool.unlimited", "不限"))
+
+            form.addRow(I18N.tr("edit.media_pool.media_type", "媒体类型:"), media_combo)
+            form.addRow(I18N.tr("edit.media_pool.keywords", "关键词:"), keywords_edit)
+            form.addRow(I18N.tr("edit.media_pool.min_rating", "最低评级:"), rating_combo)
+            form.addRow(I18N.tr("edit.media_pool.flag", "旗标:"), flag_combo)
+            form.addRow(I18N.tr("edit.media_pool.color_label", "颜色标签:"), color_combo)
+            form.addRow(I18N.tr("edit.media_pool.comment_contains", "注释包含:"), comment_edit)
+            form.addRow(I18N.tr("edit.media_pool.min_width", "最小宽度:"), width_spin)
+            form.addRow(I18N.tr("edit.media_pool.min_fps", "最小帧率:"), fps_spin)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -6475,29 +6546,93 @@ class MediaPoolPanel(QWidget):
         buttons.rejected.connect(dialog.reject)
         form.addRow(buttons)
         if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
+            return None
 
         name = name_edit.text().strip()
         if not name:
-            return
+            return None
+
+        if rule_tree_bin:
+            # 仅改名；规则树原样保留
+            return SmartBin(
+                bin_id=getattr(existing, "bin_id", ""),
+                name=name,
+                filter_type=getattr(existing, "filter_type", "custom"),
+                filter_params=params,
+            )
+
+        # 平铺能力字段（None/空 = 不限，不落入 params）
+        media_type = media_combo.currentData()
         raw = keywords_edit.text().replace("、", ",")
         keywords = tuple(kw.strip() for kw in raw.split(",") if kw.strip())
         min_rating = rating_combo.currentData()
+        flag = flag_combo.currentData()
+        color_label = color_combo.currentData()
+        comment = comment_edit.text().strip()
+        min_width = width_spin.value()
+        min_fps = fps_spin.value()
 
         filter_params: dict = {}
+        if media_type:
+            filter_params["media_type"] = media_type
         if keywords:
             filter_params["keywords"] = list(keywords)
         if isinstance(min_rating, int):
             filter_params["min_rating"] = min_rating
+        if flag:
+            filter_params["flag"] = flag
+        if color_label:
+            filter_params["color_label"] = color_label
+        if comment:
+            filter_params["comment_contains"] = comment
+        if min_width > 0:
+            filter_params["min_width"] = min_width
+        if min_fps > 0.0:
+            filter_params["min_fps"] = min_fps
 
-        smart_bin = SmartBin(
-            bin_id=f"sb-{uuid.uuid4().hex[:8]}",
+        return SmartBin(
+            bin_id=(getattr(existing, "bin_id", None)
+                    or f"sb-{uuid.uuid4().hex[:8]}"),
             name=name,
             filter_type="custom",
             filter_params=filter_params,
         )
+
+    def _on_create_smart_bin(self) -> None:
+        """新建用户 Smart Bin（R14：能力分组表单，单步撤销）。"""
+        if not self._project:
+            QMessageBox.warning(
+                self._get_top_level_widget(),
+                I18N.tr("edit.media_pool.no_project_title", "No Project"),
+                I18N.tr("edit.media_pool.no_project_message", "Please create or open a project first.")
+            )
+            return
+        smart_bin = self._smart_bin_dialog()
+        if smart_bin is None:
+            return
         cmd = CreateSmartBinCommand.create(smart_bin)
         self._project = self._command_stack.execute(cmd, self._project)
+        self.project_changed.emit(self._project)
+        self._refresh_bin_tree()
+
+    def _on_edit_smart_bin(self, bin_id: str) -> None:
+        """R14：编辑用户 Smart Bin（UpdateSmartBinRulesCommand，单步撤销）。"""
+        if not self._project:
+            return
+        existing = self._project.smart_bins.get(bin_id)
+        if existing is None:
+            return
+        smart_bin = self._smart_bin_dialog(existing)
+        if smart_bin is None:
+            return
+        try:
+            cmd = UpdateSmartBinRulesCommand.create(smart_bin)
+            self._project = self._command_stack.execute(cmd, self._project)
+        except (ValueError, Exception) as exc:  # noqa: BLE001 — 规则校验失败明示
+            QMessageBox.warning(
+                self._get_top_level_widget(),
+                I18N.tr("edit.media_pool.error", "Error"), str(exc))
+            return
         self.project_changed.emit(self._project)
         self._refresh_bin_tree()
 
@@ -8237,13 +8372,13 @@ class MediaPoolPanel(QWidget):
     # ==================== P0-4 大数据池异步查询 ====================
 
     def _large_pool_query_active(self) -> bool:
-        """素材量达到阈值且非 Smart Bin 视图时启用异步查询路径。
+        """素材量达到阈值时启用异步查询路径（含 Smart Bin）。
 
-        Smart Bin 本身就是后端条件查询（get_smart_bin_assets），规模由
-        规则筛选限定，保持同步路径。
+        R10（媒体池复查）：Smart Bin 的规则求值进入同一异步查询
+        （scope=smart_bin），大数据池切 Smart Bin 不再在 UI 线程同步
+        全量求值；普通/Smart Bin 共用 latest-wins 会话与取消。
         """
         return (self._project is not None
-                and not self._current_bin_is_smart
                 and len(self._project.assets) >= MEDIA_POOL_ASYNC_QUERY_THRESHOLD)
 
     def _pool_query_fingerprint(self) -> tuple:
@@ -8263,12 +8398,17 @@ class MediaPoolPanel(QWidget):
         if (self._query_asset_ids is not None
                 and fingerprint == self._last_query_fingerprint):
             return
+        # R10：指纹变化即丢弃上一轮结果——加载期间素材区为空（不把
+        # 旧结果当作新搜索/Bin 范围的操作目标；bins/timelines 照常）。
+        self._query_asset_ids = None
         from src.features.edit.core.media_pool_query import (
             VALID_SORT_KEYS, MediaPoolQuery,
         )
         if self._search_text and self._search_all_bins:
             scope, bin_id = "all_bins", None
-        elif self._current_bin_id and not self._current_bin_is_smart:
+        elif self._current_bin_is_smart and self._current_bin_id:
+            scope, bin_id = "smart_bin", self._current_bin_id
+        elif self._current_bin_id:
             scope, bin_id = "bin", self._current_bin_id
         else:
             scope, bin_id = "unfiled", None
@@ -8297,6 +8437,13 @@ class MediaPoolPanel(QWidget):
         if self._project is None:
             return
         if getattr(result, "project_id", "") != self._project.project_id:
+            return
+        # R10：面板侧 revision 复验（会话在发射时校验；排队送达期间
+        # 工程可能又前进一步——晚到结果不得按新工程渲染）。
+        if getattr(result, "revision", None) != self._project.revision:
+            logger.info("Dropping pool query result (stale revision)")
+            return
+        if getattr(result, "cancelled", False):
             return
         self._query_asset_ids = tuple(result.asset_ids)
         self._last_query_fingerprint = self._pending_query_fingerprint
