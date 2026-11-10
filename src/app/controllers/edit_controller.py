@@ -7223,14 +7223,21 @@ class EditControllerMixin:
             return
 
         if asset.media_type == "video":
-            total = asset.total_frames
-            if total and total > 0:
-                in_frame, out_frame = 0, total - 1
+            # R08（媒体池复查）：经范围服务统一取插入窗口——子片段范围
+            # 与素材级 In/Out 都生效（此前这里固定 0..全长，媒体池里
+            # "添加到时间线"忽略子片段/入出点）。
+            effective = self._effective_insert_range(asset)
+            if effective is not None:
+                in_frame, out_frame = effective
             else:
-                fps = asset.fps or 24.0
-                duration = asset.duration_seconds or 1.0
-                total = int(fps * duration)
-                in_frame, out_frame = 0, max(0, total - 1)
+                total = asset.total_frames
+                if total and total > 0:
+                    in_frame, out_frame = 0, total - 1
+                else:
+                    fps = asset.fps or 24.0
+                    duration = asset.duration_seconds or 1.0
+                    total = int(fps * duration)
+                    in_frame, out_frame = 0, max(0, total - 1)
         elif asset.media_type == "image":
             in_frame, out_frame = 0, 0
         else:
@@ -7241,6 +7248,25 @@ class EditControllerMixin:
         # 手动追加一次音频，第二次 append 落在与刚插入的 A/V 组相同的音频
         # 轨区间，必然抛 ``ValueError: New clip overlaps`` 且无用户反馈。
         self._append_media_to_timeline_once(asset, asset_id, in_frame, out_frame)
+
+    def _effective_insert_range(self, asset) -> tuple[int, int] | None:
+        """R08：素材的有效插入窗口（含端点，源文件帧域）。
+
+        子片段范围 > 素材级 In/Out（asset_source_range 统一解释）；
+        无标记/数据不完整/服务异常返回 None（调用方回全长）。
+        """
+        try:
+            from src.features.edit.core.asset_source_range import (
+                SourceRangeError,
+                get_insert_range,
+            )
+            return get_insert_range(asset)
+        except SourceRangeError:
+            return None
+        except Exception:  # noqa: BLE001 — 范围服务异常回全长
+            logger.debug("effective insert range unavailable",
+                         exc_info=True)
+            return None
 
     def _append_media_to_timeline_once(
         self, asset, asset_id: str, in_frame: int, out_frame: int
@@ -7311,15 +7337,20 @@ class EditControllerMixin:
 
         # Determine frame range
         if asset.media_type == "video":
-            total = asset.total_frames
-            if total and total > 0:
-                in_frame, out_frame = 0, total - 1
+            # R08：与"添加到时间线"同一范围服务（子片段/素材级 In/Out）
+            effective = self._effective_insert_range(asset)
+            if effective is not None:
+                in_frame, out_frame = effective
             else:
-                # Fallback: 1 second at timeline fps
-                fps = asset.fps or 24.0
-                duration = asset.duration_seconds or 1.0
-                total = int(fps * duration)
-                in_frame, out_frame = 0, max(0, total - 1)
+                total = asset.total_frames
+                if total and total > 0:
+                    in_frame, out_frame = 0, total - 1
+                else:
+                    # Fallback: 1 second at timeline fps
+                    fps = asset.fps or 24.0
+                    duration = asset.duration_seconds or 1.0
+                    total = int(fps * duration)
+                    in_frame, out_frame = 0, max(0, total - 1)
         elif asset.media_type == "image":
             # Still image: 1 frame (user can extend)
             in_frame, out_frame = 0, 0

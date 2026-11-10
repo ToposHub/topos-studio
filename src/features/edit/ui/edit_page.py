@@ -3318,6 +3318,9 @@ class EditPage(QWidget):
                 # AttributeError 被外层吞掉——双击打开整体失效。
                 if _audio_path == getattr(asset, "path", None):
                     _audio_path = None  # 未绑定/保留机内声
+            from src.features.edit.core.interpretation import (
+                effective_asset_fps,
+            )
             self._source_viewer.open_asset(
                 asset,
                 # F4.1 顺手修复：duck-typed 工程无 source_patch_overrides
@@ -3328,6 +3331,11 @@ class EditPage(QWidget):
                 ).audio_channel_map if project is not None else None,
                 audio_source_path=_audio_path,
                 audio_offset_seconds=_audio_offset,
+                # R09：解释覆盖帧率随打开传入（监视器时基与时间线一致）
+                interpretation_fps=effective_asset_fps(
+                    asset,
+                    getattr(project, "interpretation_overrides", None))
+                if project is not None else None,
             )
             self._source_viewer.seek(max(0, int(source_frame)))
             viewport = getattr(self._main_window, "edit_viewport", None)

@@ -17735,9 +17735,31 @@ class TimelineView(QGraphicsView):
         return True
 
     def _timeline_fps_for_first_asset(self, asset: Optional[MediaAsset]) -> Rational:
-        """Return a precise sequence FPS for the first video asset."""
+        """Return a precise sequence FPS for the first video asset.
+
+        R09（媒体池复查）：解释覆盖优先——初始时间线时基与插入/导出
+        同口径消费 effective fps（此前只有插入分支消费，首个素材建
+        序列仍用原始探测帧率，解释了帧率的素材建出不一致的序列）。
+        """
         if asset is None or asset.media_type != "video":
             return Rational(25, 1)
+
+        if self._project is not None:
+            try:
+                from src.features.edit.core.interpretation import (
+                    effective_asset_fps,
+                )
+                effective = effective_asset_fps(
+                    asset,
+                    getattr(self._project, "interpretation_overrides",
+                            None))
+                if effective and effective > 0 and math.isfinite(effective):
+                    fps_fraction = Fraction(str(float(effective))).limit_denominator(100000)
+                    return Rational(fps_fraction.numerator,
+                                    fps_fraction.denominator)
+            except Exception:  # noqa: BLE001 — 解释读取异常回探测值
+                logger.debug("interpretation fps unavailable for sequence",
+                             exc_info=True)
 
         metadata = asset.metadata or {}
         try:
@@ -17827,6 +17849,31 @@ class TimelineView(QGraphicsView):
             snap_points = () if self._snap_manager else self._get_snap_points()
             frame, _ = self._snap_frame(frame, snap_points, show_indicator=show_indicator)
         return max(0, frame)
+
+    def _effective_asset_range(self, asset: MediaAsset) -> Optional[tuple[int, int]]:
+        """R08（媒体池复查）：master 素材的**素材级 In/Out** 有效窗口。
+
+        经 asset_source_range 统一解释（含端点，源文件帧域）；无标记
+        或数据不完整时返回 None（调用方回退全长插入，不假装成功）。
+        子片段范围不在此处理（元数据分支已消费）。
+        """
+        try:
+            from src.features.edit.core.asset_source_range import (
+                get_effective_source_range,
+            )
+            start, end = get_effective_source_range(asset)
+        except Exception:  # noqa: BLE001 — 范围服务异常回全长
+            return None
+        if (start is None or end is None
+                or isinstance(start, bool) or isinstance(end, bool)):
+            return None
+        try:
+            start_i, end_i = int(start), int(end)
+        except (TypeError, ValueError):
+            return None
+        if start_i < 0 or end_i < start_i:
+            return None
+        return (start_i, end_i)
 
     def _get_asset_duration_frames(self, asset: MediaAsset, *, fps: float | None = None) -> int:
         """Get the asset's duration at the current or prospective timeline rate."""
@@ -17957,8 +18004,17 @@ class TimelineView(QGraphicsView):
                 else self._get_asset_source_duration_frames(asset)
             )
         else:
-            subclip_source_start = 0
-            source_duration_frames = self._get_asset_source_duration_frames(asset)
+            # R08（媒体池复查）：master 素材的**素材级 In/Out** 同样进入
+            # 插入窗口——优先级：显式拖放窗口 > 子片段范围 > 素材级
+            # In/Out > 全长（get_effective_source_range 统一解释）。
+            effective = self._effective_asset_range(asset)
+            if effective is not None:
+                is_subclip = True  # 复用显式窗口的时间域换算分支
+                subclip_source_start = effective[0]
+                source_duration_frames = effective[1] - effective[0] + 1
+            else:
+                subclip_source_start = 0
+                source_duration_frames = self._get_asset_source_duration_frames(asset)
         if is_subclip:
             # Timeline duration: source range mapped to timeline fps
             if self._timeline is not None:
@@ -18425,8 +18481,14 @@ class TimelineView(QGraphicsView):
             if source_duration <= 0:
                 source_duration = self._get_asset_source_duration_frames(asset)
         else:
-            in_frame = 0
-            source_duration = self._get_asset_source_duration_frames(asset)
+            # R08：master 素材的素材级 In/Out 同样约束插入窗口
+            effective = self._effective_asset_range(asset)
+            if effective is not None:
+                in_frame = effective[0]
+                source_duration = effective[1] - effective[0] + 1
+            else:
+                in_frame = 0
+                source_duration = self._get_asset_source_duration_frames(asset)
         if source_duration <= 0:
             logger.warning(
                 "Insert-mode drop: no source duration for asset %s", asset.asset_id
