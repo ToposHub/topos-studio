@@ -1,0 +1,240 @@
+{
+  "stage": "CW-B10",
+  "generated_at": "2026-11-11T19:35:34.682543+00:00",
+  "environment": {
+    "pyav": "18.1.0",
+    "python": "3.12.14",
+    "platform": "Darwin 24.3.0 x86_64"
+  },
+  "fixtures": [
+    {
+      "file": "2K_h264.mp4",
+      "anchor": "first_frame",
+      "frame_index": 0,
+      "input_sha256": "a23c73591ead5e09d4513ffbcd56dadd66e94ff934b55ad1ed3e85d06f0c12a7",
+      "spaces": [
+        {
+          "space": "hsv",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2612.3
+        },
+        {
+          "space": "hsl",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2228.5
+        },
+        {
+          "space": "hsp",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 3670.2
+        }
+      ]
+    },
+    {
+      "file": "2K_h264.mp4",
+      "anchor": "mid_frame",
+      "frame_index": 786,
+      "input_sha256": "083820f0b2e9993b3969c1d1d67506123f6ff6ab1461f085d27979adf800e8f7",
+      "spaces": [
+        {
+          "space": "hsv",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2473.6
+        },
+        {
+          "space": "hsl",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2080.1
+        },
+        {
+          "space": "hsp",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 3008.3
+        }
+      ]
+    },
+    {
+      "file": "2K_prores422.mov",
+      "anchor": "first_frame",
+      "frame_index": 0,
+      "input_sha256": "61d5628de069546fbaabbbade465e8fe60bfc6a0d48e7bad50192507f1d4db29",
+      "spaces": [
+        {
+          "space": "hsv",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2495.4
+        },
+        {
+          "space": "hsl",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2305.2
+        },
+        {
+          "space": "hsp",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 3480.4
+        }
+      ]
+    },
+    {
+      "file": "2K_prores422.mov",
+      "anchor": "mid_frame",
+      "frame_index": 243,
+      "input_sha256": "2693d6d9a062082377535320a1b0ddb6d4e99c43d1338739b47de5c0b545db4f",
+      "spaces": [
+        {
+          "space": "hsv",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2516.8
+        },
+        {
+          "space": "hsl",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2221.7
+        },
+        {
+          "space": "hsp",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 3254.6
+        }
+      ]
+    },
+    {
+      "file": "2K_DNxHR HQX 10bit.mov",
+      "anchor": "first_frame",
+      "frame_index": 0,
+      "input_sha256": "843192fd63d035909af0bc24b69742098c6c7d31962728285df52bce25c875fb",
+      "spaces": [
+        {
+          "space": "hsv",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2246.2
+        },
+        {
+          "space": "hsl",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2237.3
+        },
+        {
+          "space": "hsp",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 3452.8
+        }
+      ]
+    },
+    {
+      "file": "2K_DNxHR HQX 10bit.mov",
+      "anchor": "mid_frame",
+      "frame_index": 243,
+      "input_sha256": "0ac4640b5d6beb15ca2c0509b77047d76f106dd466decf067d4b9dfb5964434d",
+      "spaces": [
+        {
+          "space": "hsv",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 2392.7
+        },
+        {
+          "space": "hsl",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 1772.5
+        },
+        {
+          "space": "hsp",
+          "sampled_pixels": 32400,
+          "identity_max_abs_diff": 0.0,
+          "identity_ok": true,
+          "warped_all_finite": true,
+          "warped_changed": true,
+          "deterministic": true,
+          "cpu_apply_ms": 3380.8
+        }
+      ]
+    }
+  ],
+  "all_passed": true
+}
