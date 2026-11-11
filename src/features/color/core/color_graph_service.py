@@ -1557,6 +1557,9 @@ class ColorGraphService:
         "bake": ("resources", None),
         "window": (None, "mask_shapes"),
         "effects": (None, "plugins"),
+        # CW-B09:warper 域 = legacy 方阵 + 空间变体 + v2 状态整体粘贴
+        # (与 GradeClipboard "warper" 类别同键;paste() 内特判三键齐写)
+        "warper": (None, "warper_params"),
     }
     #: 域粘贴时的资源引用校验域（fail-visible：缺资源拒绝而非植悬空引用）
     _RESOURCE_VALIDATED_DOMAINS = ("lut", "bake")
@@ -1675,6 +1678,20 @@ class ColorGraphService:
                     else:
                         resources.pop("bake_ref", None)
                     params["resources"] = resources
+                elif domain == "warper":
+                    # 三键齐写;空 Mapping = 整域清除(bypass)。注意通用
+                    # 循环对 None 载荷直接跳过,清除必须用 {} 表达。
+                    if isinstance(data, Mapping) and data:
+                        legacy["warper_params"] = unfreeze_params(
+                            data.get("warper_params"))
+                        legacy["warper_space"] = int(data.get("warper_space", 0) or 0)
+                        state = data.get("warper_state")
+                        legacy["warper_state"] = (
+                            unfreeze_params(state) if state is not None else None)
+                    else:
+                        legacy["warper_params"] = None
+                        legacy.pop("warper_space", None)
+                        legacy.pop("warper_state", None)
                 elif domain == "window":
                     shapes = []
                     for shape in data if isinstance(data, (list, tuple)) else ():
