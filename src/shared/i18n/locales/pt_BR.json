@@ -368,6 +368,7 @@
     "denoise": "Redução de Ruído",
     "deblur": "Redução de Desfoque",
     "color_wheel": "Rodas de Cor",
+    "color_bars": "Barras de cores",
     "curves": "Curvas",
     "hsl_curves": "Curvas HSL",
     "color_mapping": "Mapeamento de Cor",

@@ -371,6 +371,7 @@
     "denoise": "降噪",
     "deblur": "去模糊",
     "color_wheel": "色轮",
+    "color_bars": "颜色条",
     "curves": "曲线",
     "color_mapping": "色彩映射",
     "hsl_curves": "HSL曲线",
