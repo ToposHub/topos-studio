@@ -109,7 +109,8 @@
 | CW-B00 | 媒体基线完成;实机复核待人工 | 素材 probe/manifest/锚点帧/连续区间已冻结(`docs/validation/color_warper_b00/`);行为矩阵按「实测/Topos 声明/未确认」分级;待复核清单(`behavior_matrix.md` §4)补齐前不写成规范 |
 | CW-B01 | 完成 | `src/features/color/core/warper_state.py`(schema v2、稳定 ID、冻结数组、legacy_hsv_v1 桥、显式重采样、capability/请求契约);Layer/剪贴板集成(未知版本原文保留);41 项新测试 + 95 项回归全过 |
 | CW-B02 | 完成(standalone/legacy 上下文;图/时间线上下文待身份注入) | `warper_commands.py`(begin/update/commit/cancel、首个实质变更才压栈、revision 保护、legacy 投影桥)+ `warper_command_adapter.py`(UI 命令映射、legacy 去重、连续手势合并、索引身份如实拒绝)+ 控制器接线(undo/redo/切层取消钩子、800ms 静默收口);`HistoryManager.discard_last_snapshot`;73 项后端测试 + 110 项回归全过 |
-| CW-B03–B10 | 未开始 | — |
+| CW-B03 | 完成(GL 数值 parity 已测;MSL 数值 parity 待 B08 Metal 矩阵) | `warper_color.py`:HSV 逐句镜像 GLSL、HSL 域上限显式拒绝、HSP 常数冻结+齐次精确反演、零色度/负通道/HDR 政策、legacy apply 语义镜像(含 0 通道恒 0 固有行为);真实 GPU 执行生产 GLSL 的 parity 测试(fp32 噪声实测定容差);规范入 behavior_matrix §5;26 项测试全过 |
+| CW-B04–B10 | 未开始 | — |
 
 ## 4. 每阶段具体步骤与验证
 

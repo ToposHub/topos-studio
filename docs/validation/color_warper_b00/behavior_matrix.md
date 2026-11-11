@@ -103,14 +103,31 @@ Resolve Studio 20 实机观察部分引用计划 §1.2 已记录的截图与观�
 - [ ] 各 gesture 的撤销次数(预期每 gesture 1 次)
 - [ ] 密度云采样源(输入/输出)与刷新行为
 
-## 5. B03+ 生成夹具计划(声明,供后续阶段实现)
+## 5. CW-B03 冻结的色彩空间/坐标/HDR 规范
+
+实现:`src/features/color/core/warper_color.py`;测试:`tests/color/test_warper_color.py`
+(CPU golden)+ `tests/color/test_warper_color_parity.py`(真实 GPU 执行生产 GLSL 比对)。
+
+| 项 | 冻结规范 |
+| --- | --- |
+| HSV(legacy) | 逐句镜像 GLSL K 向量算法(含 1e-10 分母防护);红=0,向黄绿方向增大;六扇区 0,1/6,1/3,1/2,2/3,5/6 |
+| HSL | 标准精确公式;**域上限:非灰 mx+mn≥2(L≥1)显式拒绝**(分母≤0 无连续定义),超亮 HDR 用 HSV/HSP,不 clamp |
+| HSP | P=√(0.299R²+0.587G²+0.114B²)(常数冻结);H/S 同 HSV;反演用平方和齐次性,数学精确;灰的 P=值 |
+| 零色度 | H=S=0(定义值);legacy 另有 sat<0.02 bypass + smoothstep(0.02,0.15) 衰减双保险 |
+| 负通道 | 逐通道 sign/abs 包装(与 GLSL 一致);**固有行为:输入为 0 的通道输出恒为 0**(sign(0)=0),已冻结为 legacy 语义,修复它会改旧工程画面 |
+| HDR | 转换域=非负幅度、任意有限值;HSV/HSP 连续;不无理由 clamp;唯一 clamp 是 legacy 显式语义(sat∈[0,1]、hue fract) |
+| 纹理坐标 | U=hue(环绕经 fract),V=sat;LINEAR+CLAMP_TO_EDGE;接缝两侧取边缘纹素不跨缝混合(已知 legacy 特性) |
+| 管线位置 | blur→grading→curves→hsl→softclip→mixer→**WARPER**→lut3d→plugins→blend/mask→grain(shader_compiler 冻结序) |
+| GPU parity | 本机(AMD RX 6800/GL 4.1)实测 fp32 噪声:max abs≈1.2e-3、rel≈7.7e-3,均匀分布无离群;容差=噪声上界 1.6 倍 + 全局兜底;MSL 无本机执行入口,按源级 parity,数值 parity 留 B08 Metal 矩阵 |
+
+## 6. B03+ 生成夹具计划(声明,供后续阶段实现)
 
 hue sweep(含环绕两侧)、saturation ramp、luma ramp、灰阶、色卡(六主/次色)、
 肤色样张、负通道、RGB>1、极大/极小有限值——全部程序生成 float 线性小图,
 与三份真实素材 fixture 分开归档;B03 的 CPU/GLSL/MSL 三端比对以这些生成夹具为准,
 真实素材 fixture 用于 B02/B07/B08/B09 的链路与性能验证。
 
-## 6. 复核方式
+## 7. 复核方式
 
 ```sh
 .venv/bin/python scripts/probe_warper_fixtures_b00.py            # 全量(含 sha256)
