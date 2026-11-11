@@ -1064,6 +1064,9 @@ class GraphTransactionBuffer:
     def flush(self, stack_id: str) -> ApplyColorGraphCommand | None:
         """产出合并 command；无累积返回 None。"""
         if self._last_graph is None or self._first_graph is None:
+            # 空手势也必须结束事务，否则残留 tid 会让下一次 begin 抛
+            # "上一个事务未 flush"（面板节流晚到 changed 可触发）。
+            self.cancel()
             return None
         operations = "+".join(self._operations[:3]) + (
             f"+{len(self._operations) - 3}ops"
