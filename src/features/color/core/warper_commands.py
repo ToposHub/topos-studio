@@ -34,6 +34,7 @@ from typing import Any
 import numpy as np
 
 from src.features.color.core.layer import Layer
+from src.features.color.core.warper_cl import auto_pins
 from src.features.color.core.warper_hs_solver import (
     apply_move,
     pull_push,
@@ -60,17 +61,15 @@ __all__ = ["WarperCommandResult", "WarperGestureSession", "WarperCommandService"
 #: 内部哨兵:操作不产生变化(与"清空状态"的 None 返回值区分)。
 _NO_CHANGE = object()
 
-#: B02 机械操作 + CW-B04 HS 网格求解操作。
+#: B02 机械操作 + CW-B04 HS 求解 + CW-B05 CL Auto Pin。
 IMPLEMENTED_OPERATIONS = frozenset({
     "replace_state", "set_grid_offsets", "set_grid_resolution", "set_grid_pins",
     "add_stroke", "delete_objects", "set_stroke_params", "set_pin_params",
     "set_state_params", "activate_mode", "reset",
-    "move_points", "smooth_component", "pull_push",
+    "move_points", "smooth_component", "pull_push", "auto_pin",
 })
 #: 已知但后端未实现的操作(如实拒绝,不假装成功)。
-UNIMPLEMENTED_OPERATIONS = frozenset({
-    "auto_lock", "solve_strokes",
-})
+UNIMPLEMENTED_OPERATIONS = frozenset({"solve_strokes"})
 
 
 @dataclass(frozen=True)
@@ -319,6 +318,13 @@ class WarperCommandService:
             smoothed = smooth_component(grid, component, selected)
             return _grid_or_no_change(working, smoothed)
 
+        if operation == "auto_pin":
+            grid = _payload_grid(working, payload)
+            selected_raw = payload.get("selected")
+            selected = _payload_selection(payload) if selected_raw is not None else None
+            pinned = auto_pins(grid, str(payload.get("mode", "")), selected)
+            return _grid_or_no_change(working, pinned)
+
         if operation == "pull_push":
             grid = _payload_grid(working, payload)
             selected = _payload_selection(payload)
@@ -490,11 +496,12 @@ def _payload_selection(payload: Mapping[str, Any]) -> list[tuple[int, int]]:
 
 
 def _grid_or_no_change(working: WarperStateV2, grid: WarperGrid) -> WarperStateV2 | Any:
-    """派生网格与原网格数值一致时声明无变化(不产生历史)。"""
+    """派生网格与原网格完全一致(数值+语义+Pin)时声明无变化(不产生历史)。"""
     original = working.grids.get(grid.name)
     if original is not None and original is not grid and \
             np.array_equal(original.offsets, grid.offsets) and \
-            original.semantics == grid.semantics:
+            original.semantics == grid.semantics and \
+            original.pins == grid.pins:
         return _NO_CHANGE
     return working.with_grid(grid)
 
