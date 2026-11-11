@@ -2994,7 +2994,8 @@ class LayerOpsMixin:
             # 服务已写 layer.warper_params(legacy 可表达投影);此处复用
             # 既有 UPDATE_AUX_TEX + 渲染失效路径(与 on_warper_changed 同尾)
             if self.engine.get_current_image() is None: return
-            self.engine.set_warper_params(layer.warper_params)
+            self.engine.set_warper_params(
+                layer.warper_params, warper_space=int(getattr(layer, "warper_space", 0) or 0))
             self._invalidate_video_render_params_if_playing()
             if self._is_video_playing():
                 self._debounce_grading_render()

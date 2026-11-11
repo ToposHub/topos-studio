@@ -45,7 +45,12 @@ __all__ = [
     "smoothstep",
     "sample_warper_bilinear",
     "apply_warper_legacy_hsv",
+    "apply_warper_in_space",
+    "WARPER_SPACE_INDEX",
 ]
+
+#: CW-B08:shader ``u_warper_space`` 的取值(0=HSV/1=HSL/2=HSP)。
+WARPER_SPACE_INDEX = {"hsv": 0, "hsl": 1, "hsp": 2}
 
 #: HSP 感知权重(经典 NTSC 系数;冻结于测试,改动即破坏 round-trip 语义)。
 HSP_WEIGHTS = (0.299, 0.587, 0.114)
@@ -229,3 +234,41 @@ def apply_warper_legacy_hsv(
     out_hue = np.mod(hsv[0] + delta[0] * sat_fade, 1.0)
     out_sat = min(max(hsv[1] + delta[1] * sat_fade, 0.0), 1.0)
     return sign_c * hsv_to_rgb(np.array([out_hue, out_sat, hsv[2]]))
+
+
+def apply_warper_in_space(rgb, texels: np.ndarray, space: str) -> np.ndarray:
+    """CW-B08:多空间网格 warper 的 CPU 参考(镜像 WARPER_SPACE_SNIPPET)。
+
+    语义与 legacy 族一致:sign 乘法(0 通道输出恒 0)、sat<0.02 旁路、
+    smoothstep(0.02,0.15) 衰减、hue fract、sat clamp;HSL 非灰超亮域
+    (mx+mn>=2)与 shader 一致地旁路。space ∈ {"hsv","hsl","hsp"}。
+    """
+    index = WARPER_SPACE_INDEX.get(space)
+    if index is None:
+        raise ValueError(f"未知 warper 空间 {space!r}")
+    color = _as_float_array(rgb)
+    sign_c = np.sign(color)
+    magnitude = np.abs(color)
+    if index == 1:
+        mx, mn = magnitude.max(), magnitude.min()
+        if mx != mn and mx + mn >= 2.0:
+            return color  # HSL 声明域外:旁路(与 shader 一致)
+        coords = rgb_to_hsl(magnitude)
+    elif index == 2:
+        coords = rgb_to_hsp(magnitude)
+    else:
+        coords = rgb_to_hsv(magnitude)
+    if coords[1] < 0.02:
+        return color
+    delta = sample_warper_bilinear(texels, coords[0], coords[1])
+    fade = smoothstep(0.02, 0.15, coords[1])
+    out_hue = np.mod(coords[0] + delta[0] * fade, 1.0)
+    out_sat = min(max(coords[1] + delta[1] * fade, 0.0), 1.0)
+    warped = np.array([out_hue, out_sat, coords[2]])
+    if index == 1:
+        rgb_out = hsl_to_rgb(warped)
+    elif index == 2:
+        rgb_out = hsp_to_rgb(warped)
+    else:
+        rgb_out = hsv_to_rgb(warped)
+    return sign_c * rgb_out

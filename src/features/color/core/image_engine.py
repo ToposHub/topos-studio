@@ -135,6 +135,7 @@ def _layer_render_data(layer: Layer) -> Dict[str, Any]:
         "curves_lut": _copy_array_like(layer.curves_lut),
         "hsl_curve_lut": _copy_array_like(layer.hsl_curve_lut),
         "warper_params": _copy_array_like(layer.warper_params),
+        "warper_space": int(getattr(layer, "warper_space", 0) or 0),
         "mixer_params": layer.mixer_params.copy() if layer.mixer_params else None,
         "effects_params": layer.effects_params.copy() if layer.effects_params else None,
         "mask_shapes": mask_shapes,
@@ -1678,7 +1679,8 @@ class ImageEngine(QObject, WindowRasterizer):
                     'layer_id': layer.id,
                     'type': 'warper',
                     'data': layer.warper_params.astype(np.float32).tobytes(),
-                    'size': (w, h)
+                    'size': (w, h),
+                    'space': int(getattr(layer, 'warper_space', 0) or 0),
                 })
 
     def apply_curves(self, curves_lut: np.ndarray) -> None:
@@ -2453,21 +2455,26 @@ class ImageEngine(QObject, WindowRasterizer):
         self.set_reference_image(self.img_high)
         self.render_pipeline()
 
-    def set_warper_params(self, grid_data: Optional[np.ndarray]) -> None:
+    def set_warper_params(self, grid_data: Optional[np.ndarray],
+                          warper_space: int = 0) -> None:
         """Set the warper mesh (HxWx2 位移网格) on the active layer and preview.
 
         None 表示清除 warper；非 None 时归一为 float32 网格纹理上传。
+        CW-B08:``warper_space`` 选择色彩空间变体(0=legacy HSV/1=HSL/
+        2=HSP);space>0 时 composition shader 编译 apply_warper_v2。
         """
         layer = self.get_active_layer()
         if layer:
             layer.warper_params = grid_data
+            layer.warper_space = int(warper_space)
             if self.renderer and grid_data is not None:
                 h, w, c = grid_data.shape
                 self.renderer.submit(RenderCommand.UPDATE_AUX_TEX, {
                     'layer_id': layer.id,
                     'type': 'warper',
                     'data': grid_data.astype(np.float32).tobytes(),
-                    'size': (w, h)
+                    'size': (w, h),
+                    'space': int(warper_space),
                 })
             self.render_pipeline(render_reason='grading')
 
@@ -3414,6 +3421,8 @@ class ImageEngine(QObject, WindowRasterizer):
                         w_tex.use(tex_unit)
                         prog_comp['u_warper_tex'].value = tex_unit
                         prog_comp['u_warper_grid_size'].value = float(wh)
+                        if 'u_warper_space' in prog_comp:
+                            prog_comp['u_warper_space'].value = int(getattr(layer, 'warper_space', 0) or 0)
                         texture_garbage.append(w_tex)
                         tex_unit += 1
                 

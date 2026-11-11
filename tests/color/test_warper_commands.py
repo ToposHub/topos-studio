@@ -308,14 +308,22 @@ def test_legacy_bridge_updates_warper_params() -> None:
     assert h.applied and h.applied[-1][0] == layer.id
 
 
-def test_non_expressible_state_clears_legacy_projection() -> None:
+def test_projection_tracks_renderable_space_and_clears_for_luma() -> None:
     h = Harness()
     layer = _layer_with_legacy_state()
     svc = h.service
     svc.handle(h.request("begin", "replace_state", {}, layer=layer), layer)
-    # 切到 HSP:legacy 无法表达 → 投影清空(画面保持,不伪造旧效果)
+    # 切到 HSP:CW-B08 起 v2 管线可渲 → 投影带空间变体
     result = svc.handle(h.request("update", "activate_mode",
                                   {"mode": "hue_saturation", "color_space": "hsp"}, layer=layer), layer)
     assert result.ok
-    assert layer.warper_params is None
+    assert layer.warper_params is not None and layer.warper_space == 2
     assert layer.warper_state.color_space == "hsp"
+    # Luma 第三分量:无 GPU 后端 → 投影清空(画面保持,不伪造效果)
+    svc.handle(h.request("begin", "replace_state", {}, gesture="g2", layer=layer), layer)
+    luma = svc.handle(h.request("update", "move_points",
+                                {"grid": "hs", "selected": [[1, 1]], "deltas": {"dl": 0.2}},
+                                gesture="g2", layer=layer), layer)
+    assert luma.ok
+    assert layer.warper_params is None and layer.warper_space == 0
+    assert layer.warper_state.grids["hs"].components == 3

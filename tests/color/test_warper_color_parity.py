@@ -19,15 +19,16 @@ from src.features.color.core.warper_color import apply_warper_legacy_hsv
 
 from tests.color.test_warper_color import COLORS
 
-# 与生产纹理一致:RG32F、LINEAR、CLAMP_TO_EDGE
+# 与生产纹理一致:RG32F、LINEAR、CLAMP_TO_EDGE;网格种子固定,
+# 测试间无共享 RNG 状态(否则用例顺序改变网格,噪声不可比)
 GRID_SIZE = 8
-RNG = np.random.default_rng(20261112)
 
 
 def _make_grid(identity: bool) -> np.ndarray:
     if identity:
         return np.zeros((GRID_SIZE, GRID_SIZE, 2), dtype=np.float32)
-    grid = RNG.normal(0.0, 0.15, (GRID_SIZE, GRID_SIZE, 2)).astype(np.float32)
+    rng = np.random.default_rng(20261112)
+    grid = rng.normal(0.0, 0.15, (GRID_SIZE, GRID_SIZE, 2)).astype(np.float32)
     grid[..., 0] = np.clip(grid[..., 0], -0.3, 0.3)   # Δhue
     grid[..., 1] = np.clip(grid[..., 1], -0.4, 0.4)   # Δsat
     return np.ascontiguousarray(grid)
@@ -112,6 +113,95 @@ def test_gpu_identity_grid_returns_inputs() -> None:
     for index, color in enumerate(COLORS):
         # sat<0.02 的输入原样;其余经 rgb→hsv→rgb fp32 往返(ε 量级差)
         np.testing.assert_allclose(gpu[index], color, rtol=1e-4, atol=1e-5)
+
+
+def _gpu_apply_v2(colors: np.ndarray, grid: np.ndarray, space: int) -> np.ndarray:
+    """在生产 WARPER_SPACE_SNIPPET 上真实执行 apply_warper_v2(CW-B08)。"""
+    moderngl = pytest.importorskip("moderngl")
+    try:
+        ctx = moderngl.create_context(standalone=True)
+    except Exception as exc:
+        pytest.skip(f"no standalone GL context: {exc}")
+    from src.features.color.core.shader_nodes import WARPER_SPACE_SNIPPET
+
+    fragment = ("#version 330\n" + COMMON_DEFINITIONS + WARPER_SPACE_SNIPPET + """
+uniform sampler2D u_warper_tex;
+uniform sampler2D u_colors;
+uniform int u_space;
+out vec4 out_color;
+void main() {
+    vec3 c = texelFetch(u_colors, ivec2(int(gl_FragCoord.x), 0), 0).rgb;
+    out_color = vec4(apply_warper_v2(c, u_warper_tex, u_space), 1.0);
+}
+""")
+    vertex = """
+#version 330
+in vec2 in_pos;
+void main() { gl_Position = vec4(in_pos, 0.0, 1.0); }
+"""
+    program = ctx.program(vertex_shader=vertex, fragment_shader=fragment)
+    quad = ctx.buffer(np.array([-1, -1, 1, -1, -1, 1, 1, 1], dtype=np.float32).tobytes())
+    vao = ctx.vertex_array(program, [(quad, "2f", "in_pos")])
+    warper_tex = ctx.texture((GRID_SIZE, GRID_SIZE), 2, grid.tobytes(), dtype="f4")
+    warper_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+    warper_tex.repeat_x = warper_tex.repeat_y = False
+    colors_tex = ctx.texture((len(colors), 1), 4,
+                             np.ascontiguousarray(np.concatenate(
+                                 [colors, np.ones((len(colors), 1))], axis=1,
+                                 dtype=np.float32)).tobytes(), dtype="f4")
+    colors_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+    fbo = ctx.simple_framebuffer((len(colors), 1), components=4, dtype="f4")
+    fbo.use()
+    warper_tex.use(0)
+    program["u_warper_tex"].value = 0
+    colors_tex.use(1)
+    program["u_colors"].value = 1
+    program["u_space"].value = space
+    vao.render(moderngl.TRIANGLE_STRIP)
+    result = np.frombuffer(fbo.read(components=4, dtype="f4"), dtype=np.float32).reshape(1, len(colors), 4)
+    warper_tex.release(); colors_tex.release(); fbo.release()
+    quad.release(); vao.release(); program.release(); ctx.release()
+    return result[0, :, :3].copy()
+
+
+@pytest.mark.parametrize("space_name,space_index",
+                         [("hsv", 0), ("hsl", 1), ("hsp", 2)])
+def test_gpu_v2_space_matches_cpu(space_name: str, space_index: int) -> None:
+    from src.features.color.core.warper_color import apply_warper_in_space
+
+    grid = _make_grid(identity=False)
+    colors = np.array(COLORS, dtype=np.float32)
+    gpu = _gpu_apply_v2(colors, grid, space_index)
+    for index, color in enumerate(COLORS):
+        try:
+            cpu = apply_warper_in_space(color, grid, space_name)
+        except ValueError:
+            continue  # CPU 声明域外(HSL 超亮):shader 旁路,跳过比对
+        np.testing.assert_allclose(
+            gpu[index], cpu, rtol=1e-2, atol=2e-3,
+            err_msg=f"v2 {space_name} parity {color}")
+
+
+def test_v2_identity_grid_all_spaces() -> None:
+    from src.features.color.core.warper_color import apply_warper_in_space
+
+    grid = _make_grid(identity=True)
+    colors = np.array(COLORS, dtype=np.float32)
+    for space_name, space_index in (("hsv", 0), ("hsl", 1), ("hsp", 2)):
+        gpu = _gpu_apply_v2(colors, grid, space_index)
+        for index, color in enumerate(COLORS):
+            np.testing.assert_allclose(gpu[index], color, rtol=1e-2, atol=2e-3)
+
+
+def test_v2_hsl_bright_domain_bypass_matches_cpu() -> None:
+    from src.features.color.core.warper_color import apply_warper_in_space
+
+    grid = _make_grid(identity=False)
+    bright = np.array([(2.0, 1.5, 0.5), (100.0, 0.01, 3.0)], dtype=np.float32)
+    gpu = _gpu_apply_v2(bright, grid, 1)  # HSL 空间
+    for index, color in enumerate(bright):
+        cpu = apply_warper_in_space(color, grid, "hsl")  # 域外 → 原样返回
+        np.testing.assert_allclose(gpu[index], cpu, rtol=1e-2, atol=2e-3)
 
 
 def test_msl_source_parity_with_glsl() -> None:

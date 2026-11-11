@@ -676,6 +676,78 @@ vec3 apply_warper(vec3 color, sampler2D warper_tex, float grid_size) {
 }
 """
 
+# CW-B08:多色彩空间 warper(HSL/HSP;space: 0=HSV(legacy 路径)/1=HSL/2=HSP)。
+# 语义与 CPU 参考 src/features/color/core/warper_color.py apply_warper_in_space
+# 逐句对齐(含 HSL 超亮域 bypass、零色度旁路、fade、fract/clamp、sign 乘法)。
+WARPER_SPACE_SNIPPET = """
+const vec3 CW_HSP_WEIGHTS = vec3(0.299, 0.587, 0.114);
+
+vec3 cw_rgb2hsl(vec3 c) {
+    float mx = max(c.r, max(c.g, c.b));
+    float mn = min(c.r, min(c.g, c.b));
+    float l = (mx + mn) * 0.5;
+    if (mx == mn) return vec3(0.0, 0.0, l);
+    float d = mx - mn;
+    float s = (l > 0.5) ? d / max(2.0 - mx - mn, 1e-10) : d / (mx + mn);
+    float h;
+    if (mx == c.r) h = mod((c.g - c.b) / d, 6.0);
+    else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
+    else h = (c.r - c.g) / d + 4.0;
+    return vec3(h / 6.0, s, l);
+}
+
+vec3 cw_hsl2rgb(vec3 c) {
+    if (c.y <= 0.0) return vec3(c.z);
+    float chroma = (1.0 - abs(2.0 * c.z - 1.0)) * c.y;
+    float h6 = c.x * 6.0;
+    float x = chroma * (1.0 - abs(mod(h6, 2.0) - 1.0));
+    vec3 rgb0 = (h6 < 1.0) ? vec3(chroma, x, 0.0)
+               : (h6 < 2.0) ? vec3(x, chroma, 0.0)
+               : (h6 < 3.0) ? vec3(0.0, chroma, x)
+               : (h6 < 4.0) ? vec3(0.0, x, chroma)
+               : (h6 < 5.0) ? vec3(x, 0.0, chroma)
+               : vec3(chroma, 0.0, x);
+    return rgb0 + (c.z - chroma * 0.5);
+}
+
+vec3 cw_rgb2hsp(vec3 c) {
+    vec3 hsv = rgb2hsv(c);
+    float p = sqrt(dot(CW_HSP_WEIGHTS, c * c));
+    return vec3(hsv.x, hsv.y, p);
+}
+
+vec3 cw_hsp2rgb(vec3 c) {
+    if (c.y <= 0.0) return vec3(c.z);
+    vec3 base = hsv2rgb(vec3(c.x, c.y, 1.0));
+    float p0 = sqrt(dot(CW_HSP_WEIGHTS, base * base));
+    return base * (c.z / max(p0, 1e-10));
+}
+
+vec3 apply_warper_v2(vec3 color, sampler2D warper_tex, int space) {
+    vec3 sign_c = sign(color);
+    vec3 mag = abs(color);
+    // HSL 声明域:非灰 mx+mn>=2(L>=1 超亮)无连续定义 → 旁路(与 CPU 一致)
+    if (space == 1) {
+        float mx = max(mag.r, max(mag.g, mag.b));
+        float mn = min(mag.r, min(mag.g, mag.b));
+        if (mx != mn && mx + mn >= 2.0) return color;
+    }
+    vec3 coords = (space == 1) ? cw_rgb2hsl(mag)
+                : (space == 2) ? cw_rgb2hsp(mag)
+                : rgb2hsv(mag);
+    if (coords.y < 0.02) return color;
+    vec2 delta = texture(warper_tex, vec2(coords.x, coords.y)).rg;
+    float fade = smoothstep(0.02, 0.15, coords.y);
+    float out_h = fract(coords.x + delta.x * fade);
+    float out_s = clamp(coords.y + delta.y * fade, 0.0, 1.0);
+    vec3 warped = vec3(out_h, out_s, coords.z);
+    vec3 rgb_out = (space == 1) ? cw_hsl2rgb(warped)
+                 : (space == 2) ? cw_hsp2rgb(warped)
+                 : hsv2rgb(warped);
+    return sign_c * rgb_out;
+}
+"""
+
 BLEND_MODES_SNIPPET = """
 float blend_overlay(float b, float a) { return b < 0.5 ? (2.0 * b * a) : (1.0 - 2.0 * (1.0 - b) * (1.0 - a)); }
 float blend_soft_light(float b, float a) { return (a < 0.5) ? (2.0 * b * a + b * b * (1.0 - 2.0 * a)) : (sqrt(b) * (2.0 * a - 1.0) + 2.0 * b * (1.0 - a)); }

@@ -262,6 +262,7 @@ _MIXER_CHANNELS = ("red", "orange", "yellow", "green",
 def build_composition_uniform_manifest(
     *, has_curves: bool = False, has_hsl_curve: bool = False,
     has_warper: bool = False, has_lut3d: bool = False,
+    warper_space: int = 0,
     grain_enabled: bool = False,
     bindings: Sequence[PluginBinding] = (),
 ) -> CompositionUniformManifest:
@@ -292,6 +293,9 @@ def build_composition_uniform_manifest(
         decls.append(UniformDecl(name="u_warper_tex", glsl_type="sampler2D",
                                  kind="sampler2D"))
         decls.append(UniformDecl(name="u_warper_grid_size", glsl_type="float"))
+        # CW-B08:多空间 warper(HSL/HSP)变体;space>0 时 shader 走 apply_warper_v2
+        if warper_space:
+            decls.append(UniformDecl(name="u_warper_space", glsl_type="int"))
     if has_lut3d:
         decls.append(UniformDecl(name="u_lut_tex", glsl_type="sampler3D",
                                  kind="sampler3D"))
@@ -422,6 +426,8 @@ def composition_uniform_values(
     wp = _layer_get(layer, "warper_params")
     if wp is not None and hasattr(wp, "shape"):
         values["u_warper_grid_size"] = float(wp.shape[0])
+        # CW-B08:warper 色彩空间(0=HSV legacy/1=HSL/2=HSP);无值按 legacy
+        values["u_warper_space"] = int(_layer_get(layer, "warper_space", 0) or 0)
     values["u_lut_intensity"] = float(_layer_get(layer, "lut_intensity", 1.0))
 
     # fx/blur：总是写中性默认（共享缓存 program 的残留 uniforms 会被
