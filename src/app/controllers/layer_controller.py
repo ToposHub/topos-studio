@@ -177,6 +177,8 @@ class LayerOpsMixin:
             layer: 目标图层对象（None 时直接返回）。
         """
         if not layer: return
+        # CW-B02: 切层先取消未收口的 warper 手势(过期样本不得覆盖新目标)
+        self._cancel_warper_gestures()
         p = layer.grading_params
         self.grading_panel.set_params(
             p["lift"], p["gamma"], p["gain"], p["exposure"], p["temp"],
@@ -2958,6 +2960,107 @@ class LayerOpsMixin:
         else:
             self.request_render()
 
+    # ------------------------------------------------------------------
+    # CW-B02: Warper 命令通道(版本化模型;legacy ndarray 仍走上方的
+    # on_warper_changed,两路按 legacy_dedup 规则互斥,不双重提交)
+    # ------------------------------------------------------------------
+
+    _WARPER_FLUSH_INTERVAL_MS = 800
+
+    def _warper_command_adapter(self):
+        """惰性构建命令服务 + 适配器(回调镜像既有手势/历史入口)。"""
+        adapter = getattr(self, "_warper_command_adapter_obj", None)
+        if adapter is not None:
+            return adapter
+        from src.features.color.adapters.warper_command_adapter import WarperCommandAdapter
+        from src.features.color.core.warper_commands import WarperCommandService
+
+        def _push_history(layer) -> None:
+            # 镜像 MenuToolbar.on_interaction_started:手势前基线一次
+            self.engine.set_interaction_mode(True, "warper")
+            if self.engine.img_full_original is not None:
+                self.engine.history.push_state(
+                    self.engine.img_full_original,
+                    self.engine.layers,
+                    self.engine.active_layer_index,
+                    copy_image=False,
+                )
+
+        def _discard_history() -> None:
+            self.engine.history.discard_last_snapshot()
+            self.engine.set_interaction_mode(False)
+
+        def _on_applied(layer, state) -> None:
+            # 服务已写 layer.warper_params(legacy 可表达投影);此处复用
+            # 既有 UPDATE_AUX_TEX + 渲染失效路径(与 on_warper_changed 同尾)
+            if self.engine.get_current_image() is None: return
+            self.engine.set_warper_params(layer.warper_params)
+            self._invalidate_video_render_params_if_playing()
+            if self._is_video_playing():
+                self._debounce_grading_render()
+            else:
+                self.request_render()
+
+        def _gesture_finished(layer, committed: bool) -> None:
+            self.engine.set_interaction_mode(False)
+            idle = getattr(self, "idle_render_timer", None)
+            if idle is not None:
+                idle.start()
+            autosave = getattr(self, "_trigger_autosave", None)
+            if callable(autosave):
+                autosave()
+
+        service = WarperCommandService(
+            history_push=_push_history,
+            history_discard=_discard_history,
+            on_applied=_on_applied,
+            gesture_finished=_gesture_finished,
+        )
+        adapter = WarperCommandAdapter(
+            service, self._warper_command_target,
+            # B02: clip/corrector 身份注入点;接入时间线上下文后补
+            request_context=lambda: {},
+        )
+        self._warper_command_adapter_obj = adapter
+
+        from PyQt6.QtCore import QTimer
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(self._WARPER_FLUSH_INTERVAL_MS)
+        timer.timeout.connect(lambda: self._warper_command_adapter_obj.flush())
+        self._warper_flush_timer = timer
+        return adapter
+
+    def _warper_command_target(self):
+        """命令目标 = 当前活动层(无图/无层 → None,命令如实 no_target)。"""
+        if self.engine.get_current_image() is None: return None
+        try:
+            return self.engine.get_active_layer()
+        except (IndexError, ValueError):
+            return None
+
+    def on_warper_command_requested(self, command: dict) -> None:
+        """WarperPanel.command_requested → 命令服务(失败仅诊断,不抛出)。"""
+        adapter = self._warper_command_adapter()
+        try:
+            result = adapter.submit(command)
+        except Exception:
+            logger.warning("warper command failed: %s", command.get("action"), exc_info=True)
+            return
+        if result.get("handled"):
+            timer = getattr(self, "_warper_flush_timer", None)
+            if timer is not None:
+                timer.start()
+
+    def _cancel_warper_gestures(self) -> None:
+        """生命周期钩子:切层/undo/redo/reset/关面板时取消未收口手势。"""
+        timer = getattr(self, "_warper_flush_timer", None)
+        if timer is not None:
+            timer.stop()
+        adapter = getattr(self, "_warper_command_adapter_obj", None)
+        if adapter is not None:
+            adapter.cancel()
+
     def on_blur_sharpen_changed(self, params) -> None:
         """模糊/锐化（effects）参数变化：写引擎 + 播放态防抖渲染。"""
         if self.engine.get_current_image() is None: return
@@ -3313,6 +3416,8 @@ class LayerOpsMixin:
         """撤销：Composite 页激活时优先其 undo；SAM 模式撤销采样点；
         Edit 页时间线/媒体池命令栈有历史时驱动对应栈（E11）；
         否则回退引擎历史并同步 UI。"""
+        # CW-B02: 撤销前取消未收口的 warper 手势(基线恢复,不留脏状态)
+        self._cancel_warper_gestures()
         # E11: 时间线编辑此前只进 TimelineView 独立命令栈，全局菜单
         # Undo 永远 disabled 且不作用于时间线历史。
         versions = getattr(self, "_clip_version_request_host", None)
@@ -3352,6 +3457,8 @@ class LayerOpsMixin:
     def redo(self) -> None:
         """重做：Composite 页激活时优先其 redo；Edit 页命令栈有历史时
         驱动对应栈（E11）；否则引擎历史并同步 UI。"""
+        # CW-B02: 重做同样先取消未收口的 warper 手势
+        self._cancel_warper_gestures()
         versions = getattr(self, "_clip_version_request_host", None)
         version_target = versions.history_target(redo=True) if versions is not None else None
         if version_target is not None and not getattr(self.canvas, "sam_mode_active", False):

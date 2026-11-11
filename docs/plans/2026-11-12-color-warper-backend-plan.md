@@ -108,7 +108,8 @@
 | --- | --- | --- |
 | CW-B00 | 媒体基线完成;实机复核待人工 | 素材 probe/manifest/锚点帧/连续区间已冻结(`docs/validation/color_warper_b00/`);行为矩阵按「实测/Topos 声明/未确认」分级;待复核清单(`behavior_matrix.md` §4)补齐前不写成规范 |
 | CW-B01 | 完成 | `src/features/color/core/warper_state.py`(schema v2、稳定 ID、冻结数组、legacy_hsv_v1 桥、显式重采样、capability/请求契约);Layer/剪贴板集成(未知版本原文保留);41 项新测试 + 95 项回归全过 |
-| CW-B02–B10 | 未开始 | — |
+| CW-B02 | 完成(standalone/legacy 上下文;图/时间线上下文待身份注入) | `warper_commands.py`(begin/update/commit/cancel、首个实质变更才压栈、revision 保护、legacy 投影桥)+ `warper_command_adapter.py`(UI 命令映射、legacy 去重、连续手势合并、索引身份如实拒绝)+ 控制器接线(undo/redo/切层取消钩子、800ms 静默收口);`HistoryManager.discard_last_snapshot`;73 项后端测试 + 110 项回归全过 |
+| CW-B03–B10 | 未开始 | — |
 
 ## 4. 每阶段具体步骤与验证
 
