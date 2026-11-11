@@ -43,12 +43,28 @@ from src.features.color.core.curves_soft_clip import (
 logger = logging.getLogger(__name__)
 
 
-def _mutable_layer_snapshot(value: Any) -> Any:
-    """Detach immutable project containers before restoring editable Layer data."""
+def _mutable_layer_snapshot(value: Any, *, frozen: bool = False) -> Any:
+    """Detach immutable project containers before restoring editable Layer data.
+
+    两种来源、两种契约:
+    - ``freeze_params`` 产物(mappingproxy + tuple):恢复为可编辑
+      dict/list(不与冻结源共享任何引用)——tuple 是冻结时 list 的表示,
+      一并还原为 list;
+    - 普通 Layer dict(旧工程 / ``to_dict`` 输出):逐类型深拷贝,tuple
+      保持 tuple——旧字段(如 curves_data 控制点)from_dict→to_dict
+      重存不变的迁移契约(1771d6d2)。
+    判定:Mapping 但不是 dict 的子树视为冻结容器来源。
+    """
     if isinstance(value, Mapping):
-        return {key: _mutable_layer_snapshot(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_mutable_layer_snapshot(item) for item in value]
+        subtree_frozen = frozen or not isinstance(value, dict)
+        return {key: _mutable_layer_snapshot(item, frozen=subtree_frozen)
+                for key, item in value.items()}
+    if isinstance(value, tuple):
+        if frozen:
+            return [_mutable_layer_snapshot(item, frozen=frozen) for item in value]
+        return tuple(_mutable_layer_snapshot(item, frozen=frozen) for item in value)
+    if isinstance(value, list):
+        return [_mutable_layer_snapshot(item, frozen=frozen) for item in value]
     return copy.deepcopy(value)
 
 class MaskShape:

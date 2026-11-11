@@ -146,6 +146,41 @@ def test_pin_protects_nearby_chromaticity() -> None:
     assert displacement_pinned > 0  # 但不是硬夹死(权重平均)
 
 
+def test_pin_constraint_centers_at_its_true_chromaticity() -> None:
+    """Pin 的权重中心必须是其 (hue,sat) 直接换算的平面坐标。
+
+    回归:旧实现把平面坐标当 RGB 再经 rgb_to_hsp 重投影,Pin(0,1) 的
+    中心从 (1,0) 漂到 (0.866,-0.5),自身颜色处权重从 1.0 掉到 ~0.018。
+    """
+    from src.features.color.core.warper_cw_solver import _to_cartesian
+
+    params = {"chroma_range": 0.5}
+    bare = _state([_stroke(RED, YELLOW, params=params)])
+    # Pin 放在笔画源色(红:hue=0,sat=1)→ 平面 (1,0),权重=1
+    pinned = _state(
+        [_stroke(RED, YELLOW, params=params)],
+        pins=[WarperPinPoint(pin_id="p1", position=(0.0, 1.0), params=params)])
+
+    u, v = chroma_plane(RED)[:2]
+    assert np.allclose((u, v), _to_cartesian(0.0, 1.0))
+    # 权重平均:笔画位移与零位移 Pin 各占一半 → 平面位移精确减半
+    out_bare = np.array(chroma_plane(solve_chroma_warp(RED, bare))[:2])
+    out_pinned = np.array(chroma_plane(solve_chroma_warp(RED, pinned))[:2])
+    norm_bare = np.hypot(*(out_bare - np.array([u, v])))
+    norm_pinned = np.hypot(*(out_pinned - np.array([u, v])))
+    np.testing.assert_allclose(norm_pinned, 0.5 * norm_bare, rtol=1e-9)
+
+    # 远离笔画的 Pin(青处)不影响红像素:权重中心在自身位置才有此性质
+    far_pin = _state(
+        [_stroke(RED, YELLOW, params={"chroma_range": 0.2})],
+        pins=[WarperPinPoint(pin_id="far", position=(0.5, 1.0),
+                             params={"chroma_range": 0.2})])
+    np.testing.assert_allclose(
+        solve_chroma_warp(RED, far_pin),
+        solve_chroma_warp(RED, _state([_stroke(RED, YELLOW, params={"chroma_range": 0.2})])),
+        atol=1e-12)
+
+
 # ---- Range / Exposure ----
 
 def test_tiny_range_affects_only_immediate_neighborhood() -> None:

@@ -12,7 +12,8 @@ Topos 声明语义(B00:Resolve 私有求解不可考,本模块是可验证的 To
 2. **权重** ``w = w_chroma · w_tonal``:
    - ``w_chroma = exp(−(d/r)²)``,r = max(chroma_range, 1e-6)(默认
      0.040 实测值);d = 像素到约束中心的欧氏距离 —— Normal 中心=源色度
-     点;Point-to-Point 中心=源→目标线段的最近点(两端与之间均受影响)。
+     点;Point-to-Point 中心=源→目标线段的最近点(两端与之间均受影响);
+     Pin 中心=其 (hue, sat) 直接换算的平面坐标(不经 RGB 往返重投影)。
    - ``w_tonal``:亮度窗口 ``[pivot − low, pivot + high]``(low/high 单位
      = luma 距离,域 [0,1];默认 0.5/1/1 → [−0.5,1.5] 全域生效),窗口内
      1、边缘 0.1 luma 宽 smoothstep 滚降。
@@ -86,33 +87,41 @@ def _nearest_on_segment(px: float, py: float, ax: float, ay: float,
     return ax + t * dx, ay + t * dy
 
 
+def _chroma_weight(pixel_u: float, pixel_v: float,
+                   center_u: float, center_v: float, params: dict) -> float:
+    """高斯色度权重:中心是约束在色度平面上的位置(距像素的欧氏距离)。"""
+    distance = math.hypot(pixel_u - center_u, pixel_v - center_v)
+    radius = max(float(params.get("chroma_range",
+                                   STROKE_PARAM_DOMAINS["chroma_range"][2])), 1e-6)
+    return math.exp(-((distance / radius) ** 2))
+
+
+def _tonal_weight(pixel_luma: float, params: dict) -> float:
+    """亮度窗口权重:``[pivot−low, pivot+high]`` 内 1,边缘 0.1 luma 滚降。"""
+    pivot = float(params.get("pivot", 0.5))
+    low = float(params.get("tonal_low", 1.0))
+    high = float(params.get("tonal_high", 1.0))
+    lower, upper = pivot - low, pivot + high
+    if lower <= pixel_luma <= upper:
+        return 1.0
+    if pixel_luma < lower:
+        return float(smoothstep(lower - _TONAL_ROLLOFF, lower, pixel_luma))
+    return 1.0 - float(smoothstep(upper, upper + _TONAL_ROLLOFF, pixel_luma))
+
+
 def stroke_weight(
     pixel_u: float, pixel_v: float, pixel_luma: float,
     source_rgb, target_rgb, params: dict, mode: str,
 ) -> float:
-    """一条约束对像素的组合权重(chroma × tonal)。"""
+    """一条笔画约束对像素的组合权重(chroma × tonal)。"""
     s_u, s_v, _ = chroma_plane(source_rgb)
     if mode == "point_to_point":
         t_u, t_v, _ = chroma_plane(target_rgb)
         center_u, center_v = _nearest_on_segment(pixel_u, pixel_v, s_u, s_v, t_u, t_v)
     else:
         center_u, center_v = s_u, s_v
-    distance = math.hypot(pixel_u - center_u, pixel_v - center_v)
-    radius = max(float(params.get("chroma_range",
-                                   STROKE_PARAM_DOMAINS["chroma_range"][2])), 1e-6)
-    w_chroma = math.exp(-((distance / radius) ** 2))
-
-    pivot = float(params.get("pivot", 0.5))
-    low = float(params.get("tonal_low", 1.0))
-    high = float(params.get("tonal_high", 1.0))
-    lower, upper = pivot - low, pivot + high
-    if lower <= pixel_luma <= upper:
-        w_tonal = 1.0
-    elif pixel_luma < lower:
-        w_tonal = float(smoothstep(lower - _TONAL_ROLLOFF, lower, pixel_luma))
-    else:
-        w_tonal = 1.0 - float(smoothstep(upper, upper + _TONAL_ROLLOFF, pixel_luma))
-    return w_chroma * w_tonal
+    return (_chroma_weight(pixel_u, pixel_v, center_u, center_v, params)
+            * _tonal_weight(pixel_luma, params))
 
 
 def _constraint_terms(pixel_u: float, pixel_v: float, pixel_luma: float,
@@ -127,20 +136,13 @@ def _constraint_terms(pixel_u: float, pixel_v: float, pixel_luma: float,
                              stroke.params, stroke.mode),
                t_u - s_u, t_v - s_v, t_p * (2.0 ** exposure) - s_p)
     for pin in state.pin_points:
-        p_hue = pin.position[0]
-        p_sat = pin.position[1]
-        pin_rgb = _to_cartesian(p_hue, p_sat)
-        # Pin:零位移约束(该色度位置的颜色保持不动)
-        yield (stroke_weight(pixel_u, pixel_v, pixel_luma,
-                             (pin_rgb[0], pin_rgb[1], _sat_to_luma(p_sat)),
-                             (pin_rgb[0], pin_rgb[1], _sat_to_luma(p_sat)),
-                             pin.params, "normal"),
+        pin_u, pin_v = _to_cartesian(pin.position[0], pin.position[1])
+        # Pin:零位移约束,权重中心=自身色度平面位置(polar→笛卡尔即是
+        # 求解平面坐标,不得再经 RGB 往返重投影)。tonal 只看像素亮度
+        # 与参数,与笔画同一窗口函数。
+        yield (_chroma_weight(pixel_u, pixel_v, pin_u, pin_v, pin.params)
+               * _tonal_weight(pixel_luma, pin.params),
                0.0, 0.0, 0.0)
-
-
-def _sat_to_luma(sat: float) -> float:
-    """Pin 位置的 luma 近似(交互坐标只有 (hue, sat));权重窗口用。"""
-    return 0.5 + 0.0 * sat
 
 
 def solve_chroma_warp_pixel(rgb, state: WarperStateV2) -> np.ndarray:

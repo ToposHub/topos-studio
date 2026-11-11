@@ -17,12 +17,12 @@
 
 | 阶段 | 测试文件 | 数量 | 覆盖 |
 | --- | --- | --- | --- |
-| B01 模型/迁移 | test_warper_state.py / test_warper_state_layer.py | 41+9 | schema v2 round-trip、未知版本原文保留、冻结数组、重采样、capability、Layer 集成 |
+| B01 模型/迁移 | test_warper_state.py / test_warper_state_layer.py | 42+9 | schema v2 round-trip、未知版本原文保留、冻结数组、重采样、capability、Layer 集成 |
 | B02 命令/手势 | test_warper_commands.py / test_warper_command_adapter.py | 19+18 | 一次拖动一次 undo、零位移零历史、cancel 干净恢复、revision/目标保护、legacy 去重 |
 | B03 色彩科学 | test_warper_color.py / test_warper_color_parity.py | 26+9 | 冻结坐标/常数/域、GPU 真实执行 parity |
 | B04 HS 求解 | test_warper_hs_solver.py | 20 | 权重/AutoLock/接缝环绕/Pin/平滑/Pull-Push/Luma 升级 |
 | B05 CL 双网格 | test_warper_cl.py | 17 | 坐标/角度/合成次序/灰阶单调/Auto Pin |
-| B06 CW 求解 | test_warper_cw_solver.py | 16 | 权重/混合/Pin 保护/极端参数/确定性/HDR |
+| B06 CW 求解 | test_warper_cw_solver.py | 17 | 权重/混合/Pin 保护/Pin 中心精确落位/极端参数/确定性/HDR |
 | B07 密度云 | test_warper_density.py | 11 | 真实采样/标签/代际/节流/取色坐标 |
 | B08 渲染集成 | test_warper_render_integration.py | 6 | 管线编译/manifest/DTO/整管线 GPU parity |
 | B09 导出/粘贴 | test_warper_export_paste.py | 8 | LUT 点态烘焙逐点对照/不可表达拒绝/图粘贴域 |
@@ -49,3 +49,24 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/color/test_warper_*.p
 .venv/bin/python scripts/validate_warper_b10.py                                       # 真实素材冒烟
 .venv/bin/python scripts/probe_warper_fixtures_b00.py --skip-hash                      # 素材基线快速复核
 ```
+
+## 6. 同日全量复查补遗(2026-11-12)
+
+按计划从头到尾复核全部阶段后修复三处问题,均已附回归测试:
+
+1. **CW-B06 Pin 约束中心错误(真 BUG)**:Pin 的 (hue,sat) 平面坐标曾被
+   当作 RGB 再经 rgb_to_hsp 重投影,Pin(0,1) 的权重中心从 (1,0) 漂移到
+   (0.866,−0.5),Pin 自身颜色处权重从 1.0 跌至 ~0.018(保护几乎失效)。
+   修复:Pin 中心直接用平面坐标(`test_pin_constraint_centers_at_its_true_chromaticity`
+   断言源色上的 Pin 恰好把平面位移减半 + 远处 Pin 零影响)。
+2. **旧工程重存契约(warper 批次之前引入的存量 BUG)**:
+   `Layer._mutable_layer_snapshot` 把 tuple 一律递归规整为 list,违反
+   1771d6d2 的"旧字段重存不变"迁移契约(`test_legacy_v2_layer_dict_loads_identity_and_resaves_stable`
+   在 warper 基线 266dfb58 上同样失败)。修复:按来源判别——
+   `freeze_params` 产物(mappingproxy 子树)恢复为可编辑 list(冻结
+   防别名契约不变),普通 Layer dict 的 tuple 保持 tuple(重存契约);
+   两契约测试同时通过。
+3. **一致性补齐**:`legacy_ndarray` 对非 HSV 空间一律拒绝(此前标成
+   legacy 算法代数的矛盾载荷会被静默按 HSV 发布);`renderable_projection`
+   改用 `warper_color.WARPER_SPACE_INDEX` 单一事实源;控制器三处
+   UPDATE_AUX_TEX warper 重提交补 `space` 键(与引擎组包一致)。
