@@ -21,6 +21,7 @@ from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.chroma_warp_canvas import ChromaWarpCanvas
 from src.shared.ui.widgets.drag_value import DragValue
 from src.shared.ui.widgets.warper_canvas import WarperCanvas
+from src.shared.ui.widgets.warper_icons import warper_icon
 
 MODES = ("chroma_warp", "hue_saturation", "chroma_luma")
 MODE_LABELS = {"chroma_warp": "Chroma Warp", "hue_saturation": "Hue - Saturation", "chroma_luma": "Chroma - Luma"}
@@ -176,8 +177,8 @@ class WarperPanel(QWidget):
         footer.setSpacing(4)
         self.resolution_h_icon = tool_button("resolution_h", tr("hue_resolution", "Hue Resolution"))
         self.resolution_s_icon = tool_button("resolution_s", tr("sat_resolution", "Saturation Resolution"))
-        self.grid_combo = self._combo(["6", "8", "12", "16", "24"], 65)
-        self.saturation_combo = self._combo(["6", "8", "12", "16", "24"], 65)
+        self.grid_combo = self._combo(["6", "8", "12", "16", "24"], 59)
+        self.saturation_combo = self._combo(["6", "8", "12", "16", "24"], 59)
         self.grid_combo.currentIndexChanged.connect(self.on_grid_size_changed)
         self.saturation_combo.currentIndexChanged.connect(lambda index: self._resolution_changed(1))
         for icon, combo in ((self.resolution_h_icon, self.grid_combo), (self.resolution_s_icon, self.saturation_combo)):
@@ -192,16 +193,25 @@ class WarperPanel(QWidget):
         footer.addWidget(self.link_button)
         footer.addStretch()
         self._axis_group = QWidget()
-        axis_layout = QHBoxLayout(self._axis_group)
+        axis_group_layout = QVBoxLayout(self._axis_group)
+        axis_group_layout.setContentsMargins(0, 0, 0, 0)
+        axis_group_layout.setSpacing(1)
+        axis_layout = QHBoxLayout()
+        axis_group_layout.addLayout(axis_layout)
         axis_layout.setContentsMargins(0, 0, 0, 0)
         axis_layout.setSpacing(4)
         self.axis_label = QLabel(tr("axis_angle", "Axis Angle"))
+        self.axis_label.setStyleSheet(f"color: {C.TEXT_HINT}; font-size: 11px;")
         axis_layout.addWidget(self.axis_label)
         self.axis_angle = DragValue("", -180, 180, 0, 2, compact=True)
         self.axis_angle.setFixedWidth(60)
         self.axis_angle.setAccessibleName(tr("axis_angle", "Axis Angle"))
         self.axis_angle.valueChanged.connect(self._axis_changed)
         axis_layout.addWidget(self.axis_angle)
+        axis_spectrum = QWidget()
+        axis_spectrum.setFixedHeight(2)
+        axis_spectrum.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ba1741, stop:0.25 #dfb63a, stop:0.5 #42baa5, stop:0.75 #2990c3, stop:1 #ba1741);")
+        axis_group_layout.addWidget(axis_spectrum)
         footer.addWidget(self._axis_group)
         space_icon = tool_button("space", tr("color_space", "Color Space"))
         space_icon.setFixedWidth(20)
@@ -268,6 +278,9 @@ class WarperPanel(QWidget):
             self.axis_label.setVisible(rectangular)
             self.axis_angle.setVisible(rectangular)
             self._axis_group.setVisible(rectangular)
+            self.resolution_h_icon.setIcon(warper_icon("cl_columns" if rectangular else "resolution_h"))
+            self.resolution_s_icon.setIcon(warper_icon("cl_rows" if rectangular else "resolution_s"))
+            self.cl_tools.action_buttons["all"].setIcon(warper_icon("all_rect"))
             if mode != "chroma_warp":
                 items = ["4", "6", "8", "12", "16", "24"] if rectangular else ["6", "8", "12", "16", "24"]
                 for combo, value in zip((self.grid_combo, self.saturation_combo), self._resolutions[mode]):
@@ -302,7 +315,9 @@ class WarperPanel(QWidget):
 
     def _adapt_footer(self) -> None:
         sidebar_width = self.tools_scroll.width() if hasattr(self, "tools_scroll") else 253
-        narrow = self.mode == "chroma_luma" and self.surface.width() - sidebar_width < 580
+        # Shared Topos inputs need more width than Resolve's 44px fields, but
+        # should still keep Axis Angle inline in the usual 550–625px canvas.
+        narrow = self.mode == "chroma_luma" and self.surface.width() - sidebar_width < 480
         if narrow == self._footer_narrow:
             return
         self._footer_narrow = narrow

@@ -282,3 +282,73 @@ def test_large_canvas_background_uses_same_aspect_ratio_as_mesh(qtbot: QtBot) ->
     image = canvas._background_image()
     assert image.width() / image.height() == pytest.approx(4, rel=0.005)
     assert canvas._get_point_at(canvas.point_screen((5, 4))) == (5, 4)
+
+
+@pytest.mark.parametrize("dimensions", [(624, 343), (556, 270), (900, 350), (400, 600)])
+def test_chroma_luma_grid_is_square_and_hit_geometry_tracks_resize(
+        panel: WarperPanel, dimensions: tuple[int, int]) -> None:
+    canvas = panel.chroma_luma
+    canvas.resize(*dimensions)
+    for index in (0, 1):
+        rect = canvas.grid_rect(index)
+        assert rect.width() == pytest.approx(rect.height())
+        assert rect.center().y() == pytest.approx(canvas.height() / 2)
+        canvas.activate_grid(index)
+        point = canvas.point_screen((2, 3))
+        assert canvas._get_point_at(point) == (2, 3)
+        assert np.allclose(canvas._normalized(point), canvas.points[2, 3])
+
+
+def test_chroma_warp_has_colored_square_outside_gamut_and_unchanged_coordinates(panel: WarperPanel) -> None:
+    panel.set_mode("chroma_warp")
+    canvas = panel.chroma_warp
+    canvas.show_grid = False
+    image = canvas.grab().toImage()
+    a, b = canvas._screen([0.02, 0.15]), canvas._screen([0.98, 0.85])
+    outside_red = image.pixelColor(round(a.x()), round(a.y()))
+    outside_blue = image.pixelColor(round(b.x()), round(b.y()))
+    assert outside_red != outside_blue  # Both used to be a flat panel grey.
+    assert outside_red.red() > outside_red.blue()
+    assert outside_blue.blue() > outside_blue.red()
+    assert max(outside_red.getRgb()[:3]) < 60
+    assert np.allclose(canvas._normalized(canvas._screen([0.3, 0.7])), [0.3, 0.7])
+
+
+def test_chroma_luma_neutral_axis_and_monotone_luma_without_hue_bends(panel: WarperPanel) -> None:
+    canvas = panel.chroma_luma
+    canvas.resize(624, 343)
+    image = canvas._background_image()
+    for index in (0, 1):
+        field = canvas.field_rect(index)
+        x = round(field.center().x())
+        levels = [image.pixelColor(x, round(field.top() + field.height() * t)).getRgb()[:3]
+                  for t in (0.05, 0.35, 0.65, 0.95)]
+        assert all(max(rgb) - min(rgb) <= 1 for rgb in levels)
+        assert all(levels[i][0] > levels[i + 1][0] for i in range(3))
+    warm = image.pixelColor(8, 60)
+    cool = image.pixelColor(304, 60)
+    assert warm.red() > warm.blue() and warm.green() > warm.blue()
+    assert cool.blue() > cool.red() and cool.blue() > cool.green()
+
+
+def test_axis_angle_recolors_field_without_changing_grid_or_publishing_legacy(panel: WarperPanel) -> None:
+    panel.set_mode("chroma_luma")
+    canvas = panel.chroma_luma
+    before = canvas._background_image().copy()
+    points = canvas.points.copy()
+    emitted = []
+    panel.warper_changed.connect(emitted.append)
+    panel.axis_angle.setValue(90)
+    after = canvas._background_image()
+    assert before != after
+    assert np.array_equal(points, canvas.points)
+    assert not emitted
+
+
+def test_chroma_luma_footer_stays_inline_at_user_screenshot_width(panel: WarperPanel, qtbot: QtBot) -> None:
+    panel.resize(825, 380)
+    panel.set_mode("chroma_luma")
+    qtbot.wait(10)
+    assert panel.footer.height() == 47
+    assert panel._axis_group.parent() is panel._footer_row
+    assert panel._axis_group.geometry().right() < panel.space_combo.geometry().left()
