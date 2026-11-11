@@ -60,7 +60,8 @@ GRADE_CATEGORY_KEYS: Dict[str, Sequence[str]] = {
     "curves": ("curves_data", "curves_edit", "curves_soft_clip"),
     "hsl": ("hsl_curve_data",),
     "mixer": ("mixer_params",),
-    "warper": ("warper_params",),
+    # CW-B01: warper 域 = legacy 方阵 + 版本化状态整体粘贴(同一 serializer)
+    "warper": ("warper_params", "warper_state"),
     "effects": ("effects_params",),
     "lut": ("active_lut_path", "lut_intensity"),
     "soft_clip": ("soft_clip_params",),

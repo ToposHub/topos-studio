@@ -30,6 +30,7 @@ except ModuleNotFoundError:
     HAS_SCIPY = False
 
 from src.features.color.core.window_softness import normalize_edge_softness
+from src.features.color.core.warper_state import WarperStateV2, WarperStateError
 
 from src.features.color.core.curves_soft_clip import (
     curves_soft_clip_is_identity,
@@ -570,7 +571,14 @@ class Layer:
         self.hsl_curve_data = {} # { 'LumSat': [(x, y), ...], ... }
         
         self.mixer_params = {} # { 'red': [h, s, l], ... }
-        self.warper_params = None # np.ndarray grid
+        self.warper_params = None # np.ndarray grid (legacy HSV 方阵,CW-B01 起标 legacy_hsv_v1)
+        # CW-B01: 版本化 Warper 领域模型(新空间/非方阵/双网格/笔画/Pin)。
+        # warper_state 是新 schema 权威;渲染后端按能力消费,不支持的
+        # 模式如实报 unimplemented。warper_state_unparsed 保留无法解析
+        # (更高 schema 版本/损坏)的原文,保存时原样回写:不可编辑、
+        # 不可渲染,但绝不丢字段(计划 §2.3 禁止静默降级)。
+        self.warper_state: WarperStateV2 | None = None
+        self.warper_state_unparsed: Any = None
         self.effects_params = {
             'enabled': False,
             'mode': 0, 
@@ -719,6 +727,9 @@ class Layer:
         self.hsl_curve_data = {}
         self.mixer_params = {}
         self.warper_params = None
+        # CW-B01: 版本化 warper 状态一并清空(含未知版本原文)
+        self.warper_state = None
+        self.warper_state_unparsed = None
         # 插件实例一并清空：v1 栈回退/reset 后残留上一状态会导致插件
         # 效果"复活"（结构键参与合成 shader 缓存，残留即静默生效）
         self.plugins = []
@@ -882,6 +893,11 @@ class Layer:
             self.warper_params = source_layer.warper_params.copy()
         else:
             self.warper_params = None
+
+        # CW-B01: 版本化 warper 状态随层深拷贝(冻结数组重拷,不共享引用)
+        source_warper_state = getattr(source_layer, "warper_state", None)
+        self.warper_state = source_warper_state.copy() if source_warper_state is not None else None
+        self.warper_state_unparsed = copy.deepcopy(getattr(source_layer, "warper_state_unparsed", None))
         
         # 复制效果参数
         self.effects_params = copy.deepcopy(source_layer.effects_params)
@@ -1002,6 +1018,16 @@ class Layer:
             else:
                 self.warper_params = None
 
+        # CW-B01: warper 域粘贴同时携带版本化状态;载荷不可解析时抛
+        # WarperStateError(ValueError),不部分应用、不覆盖现值。
+        if "warper_state" in wanted and "warper_state" in patch:
+            if patch["warper_state"] is None:
+                self.warper_state = None
+                self.warper_state_unparsed = None
+            else:
+                self.warper_state = WarperStateV2.from_dict(copy.deepcopy(patch["warper_state"]))
+                self.warper_state_unparsed = None
+
         if "mask_shapes" in wanted and "mask_shapes" in patch:
             self.mask_shapes = [
                 (MaskGroup.from_dict(d) if d.get("type") == MaskGroup.TYPE
@@ -1105,6 +1131,12 @@ class Layer:
 
         # 检查色彩扭曲器参数
         if self.warper_params is not None:
+            return True
+        # CW-B01: 版本化状态有实质内容(非恒等)即算有调色;未知版本原文
+        # 同样算(宁可显示图标也不能静默丢效果)。
+        if self.warper_state is not None and not self.warper_state.is_identity():
+            return True
+        if self.warper_state_unparsed is not None:
             return True
 
         # 检查柔化裁切参数
@@ -1250,6 +1282,13 @@ class Layer:
                 data["warper_params"] = self.warper_params.tolist()
             else:
                 data["warper_params"] = self.warper_params # Assuming already list/dict if not ndarray
+
+        # CW-B01: 版本化 warper 状态序列化(schema_version 随载荷);无法解析
+        # 的原文(更高版本写入者)原样回写,不丢字段。
+        if self.warper_state is not None:
+            data["warper_state"] = self.warper_state.to_dict()
+        elif self.warper_state_unparsed is not None:
+            data["warper_state"] = copy.deepcopy(self.warper_state_unparsed)
         
         # Plugin Effect Stack
         data["plugins"] = self.plugins
@@ -1391,7 +1430,31 @@ class Layer:
 
         # Warper
         if "warper_params" in data:
-            layer.warper_params = np.array(data["warper_params"], dtype=np.float32)
+            if data["warper_params"] is None:
+                # CW-B01: 旧 None 保持 bypass(np.array(None) 会崩,历史隐患)
+                layer.warper_params = None
+            else:
+                try:
+                    layer.warper_params = np.array(data["warper_params"], dtype=np.float32)
+                except (TypeError, ValueError) as exc:
+                    logger.warning("Layer.from_dict: warper_params 非法 (%s),按无 warper 处理", exc)
+                    layer.warper_params = None
+
+        # CW-B01: 版本化 warper 状态。未知 schema 版本/损坏载荷 → 保留原文
+        # (不可编辑/不可渲染),不影响本层其余字段与旧渲染路径。
+        if "warper_state" in data:
+            raw_warper_state = data["warper_state"]
+            if raw_warper_state is None:
+                layer.warper_state = None
+                layer.warper_state_unparsed = None
+            else:
+                try:
+                    layer.warper_state = WarperStateV2.from_dict(raw_warper_state)
+                except WarperStateError as exc:
+                    layer.warper_state = None
+                    layer.warper_state_unparsed = raw_warper_state
+                    logger.warning(
+                        "Layer.from_dict: warper_state 不可解析 (%s),保留原文待高版本读取", exc)
             
         # Masks - support both MaskShape and MaskGroup (递归反序列化)
         # AUD-0701：单项蒙版结构非法只跳过并告警（局部降级），不再让
