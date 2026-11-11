@@ -12,10 +12,11 @@ from typing import TYPE_CHECKING, Callable
 from PyQt6.QtCore import QEvent, QObject, QPointF, QRectF, QSignalBlocker, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QResizeEvent
 from PyQt6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QSizePolicy, QSlider, QSplitter,
+    QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QSizePolicy, QSlider,
     QToolButton, QVBoxLayout, QWidget,
 )
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
 from src.shared.media.metadata import Rational
 from src.shared.media.timecode import Timecode
@@ -380,10 +381,8 @@ class EditViewport(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         self.splitter.setChildrenCollapsible(False)
-        self.splitter.setHandleWidth(1)
-        self.splitter.setStyleSheet("QSplitter::handle { background: #0d0d10; }")
         layout.addWidget(self.splitter)
         self.source_pane = QWidget(self.splitter)
         self.program_pane = QWidget(self.splitter)

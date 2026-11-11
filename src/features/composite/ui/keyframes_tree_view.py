@@ -653,10 +653,6 @@ class KeyframesTreeView(QWidget):
             self._draw_empty(p, w, h)
             return
 
-        # Vertical separator on the right edge
-        p.setPen(QPen(QColor(C.BORDER_SUBTLE)))
-        p.drawLine(w - 1, 0, w - 1, h)
-
         # Rows
         for i, row in enumerate(rows):
             y = self._header_height + i * _ROW_H - self._scroll_y

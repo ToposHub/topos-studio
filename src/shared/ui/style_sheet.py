@@ -1565,17 +1565,17 @@ QGraphicsView {
 */
 
 QSplitter::handle {
-    /* 与 Dock 分割器使用同一条项目自定义分割线 */
-    background-color: __PANEL_DIVIDER__;
+    /* PanelSplitter paints one center rule inside this transparent hit area. */
+    background-color: transparent;
     border: none;
 }
 
 QSplitter::handle:horizontal {
-    width: 1px;                  /* 水平分隔条宽度 */
+    width: 8px;
 }
 
 QSplitter::handle:vertical {
-    height: 1px;                 /* 垂直分隔条高度 */
+    height: 8px;
 }
 
 /* ============================================
@@ -1820,7 +1820,7 @@ COMPOSITE_KEYFRAMES_ICON_BTN_STYLE = f"""
 COMPOSITE_KEYFRAMES_TREE_STYLE = f"""
     QWidget#KeyframesTreeSide {{
         background-color: {C.KEYFRAMES_BG};
-        border-right: 1px solid {C.BORDER_SUBTLE};
+        border: none;
     }}
 """
 

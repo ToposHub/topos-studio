@@ -13,9 +13,10 @@ from PyQt6.QtGui import QAction, QCursor, QDesktopServices
 from PyQt6.QtCore import QUrl
 from PyQt6.QtWidgets import (
     QAbstractSpinBox, QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QInputDialog, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QSplitter, QStackedWidget,
+    QInputDialog, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QStackedWidget,
     QTabWidget, QTextEdit, QToolBar, QToolButton, QVBoxLayout, QWidget, QDialog,
 )
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
 from src.shared.assets.icon_manager import IconColors, get_icon, icon_circle, icon_pen, icon_rect, icon_select_tool
 from .mg_shortcuts import (
@@ -316,7 +317,7 @@ class MotionGraphicEditorWindow(QMainWindow):
         title = QLabel(I18N.tr("motion_graphic.panels.parameters", "Parameters"), attributes)
         title.setObjectName("mgSectionTitle")
         attributes_layout.addWidget(title)
-        self._attributes_splitter = QSplitter(Qt.Orientation.Vertical, attributes)
+        self._attributes_splitter = PanelSplitter(Qt.Orientation.Vertical, attributes)
         self._attributes_splitter.setObjectName("mgAttributesSplitter")
         self._attributes_splitter.addWidget(self.inspector_stack)
         self._attributes_splitter.addWidget(self.layer_tree)
@@ -363,7 +364,7 @@ class MotionGraphicEditorWindow(QMainWindow):
         preview_layout.addWidget(self._preview_stack, 1)
         self._preview_frame = preview
 
-        horizontal = QSplitter(Qt.Orientation.Horizontal, self)
+        horizontal = PanelSplitter(Qt.Orientation.Horizontal, self)
         horizontal.setObjectName("mgMainSplitter")
         horizontal.addWidget(preview)
         horizontal.addWidget(tabs)
@@ -384,7 +385,7 @@ class MotionGraphicEditorWindow(QMainWindow):
         # splitter handle; its visibility is toggled from the View menu.
         timeline_layout.addWidget(self.keyframes_panel, 1)
 
-        vertical = QSplitter(Qt.Orientation.Vertical, self)
+        vertical = PanelSplitter(Qt.Orientation.Vertical, self)
         vertical.setObjectName("mgVerticalSplitter")
         vertical.addWidget(horizontal)
         vertical.addWidget(timeline_panel)

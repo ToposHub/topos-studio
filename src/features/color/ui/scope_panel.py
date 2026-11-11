@@ -9,7 +9,7 @@ inspired by DaVinci Resolve professional UI.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
-    QStackedWidget, QPushButton, QMenu, QSplitter, QLabel, QDockWidget, QGridLayout
+    QStackedWidget, QPushButton, QMenu, QLabel, QDockWidget, QGridLayout
 )
 from PyQt6.QtCore import QTimer, QSize, Qt, pyqtSignal, QPointF, QRectF
 from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPen, QPaintEvent
@@ -18,6 +18,7 @@ import numpy as np
 import cv2
 import logging
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.ui.style_sheet import C
 
 logger = logging.getLogger(__name__)
@@ -448,15 +449,10 @@ class ScopePanel(QWidget):
         self.split_vectorscope = VectorscopeWidget()
 
         # Use splitter for resizable split view
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.splitter.setHandleWidth(1)
+        self.splitter = PanelSplitter(Qt.Orientation.Horizontal)
         self.splitter.setStyleSheet(f"""
             QSplitter {{
                 background-color: #050505;
-            }}
-            QSplitter::handle {{
-                background-color: {C.PANEL_DIVIDER};
-                width: 1px;
             }}
         """)
         self.splitter.addWidget(self.split_waveform)
@@ -495,11 +491,9 @@ class ScopePanel(QWidget):
                 show_vectorscope_targets=True,
             )
             # GPU split container mirrors the CPU splitter layout.
-            self._gpu_splitter = QSplitter(Qt.Orientation.Horizontal)
-            self._gpu_splitter.setHandleWidth(1)
+            self._gpu_splitter = PanelSplitter(Qt.Orientation.Horizontal)
             self._gpu_splitter.setStyleSheet(f"""
                 QSplitter {{ background-color: #050505; }}
-                QSplitter::handle {{ background-color: {C.PANEL_DIVIDER}; width: 1px; }}
             """)
 
             # Professional scope presenters (parade / luma / histogram /
@@ -690,11 +684,11 @@ class ScopePanel(QWidget):
         # The selector spans the panel header; the plot starts below it.
         main_layout.insertWidget(0, self.selector_container)
 
-        # Panel border
+        # The host owns the panel boundary.
         self.setStyleSheet("""
             ScopePanel {
                 background-color: #050505;
-                border: 1px solid #333;
+                border: none;
             }
         """)
 

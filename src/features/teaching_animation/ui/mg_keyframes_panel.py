@@ -24,10 +24,11 @@ from PyQt6.QtGui import (
     QShortcut,
 )
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QInputDialog, QMenu, QSizePolicy, QSlider, QSplitter,
+    QHBoxLayout, QInputDialog, QMenu, QSizePolicy, QSlider,
     QScrollBar, QToolButton, QVBoxLayout, QWidget,
 )
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.features.edit.ui.edit_style import EDIT_COLORS, EDIT_SIZES
 from src.shared.media.metadata import Rational
 from src.shared.media.timecode import Timecode
@@ -414,7 +415,7 @@ class MgKeyframesPanel(QWidget):
         track_layout.setContentsMargins(0, 0, 0, 0)
         track_layout.setSpacing(0)
         track_layout.addWidget(self._tracks, 1)
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         splitter.setObjectName("mgKeyframesSplitter")
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self._tree)

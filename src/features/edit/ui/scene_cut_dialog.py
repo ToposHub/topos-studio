@@ -69,7 +69,6 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QTableView,
     QHeaderView,
-    QSplitter,
     QProgressBar,
     QMessageBox,
     QSizePolicy,
@@ -99,6 +98,7 @@ from PyQt6.QtGui import (
     QShortcut,
 )
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.features.edit.core.scene_cut.models import (
     SceneCutSettings,
     SceneCutAnalysis,
@@ -1565,14 +1565,10 @@ class SceneCutDialog(QDialog):
         layout.addWidget(self._transport, stretch=1)
 
         # Middle: Splitter for graph + list (~38%)
-        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = PanelSplitter(Qt.Orientation.Horizontal)
         self._splitter.setStyleSheet("""
             QSplitter {
                 background-color: #1F1F22;
-            }
-            QSplitter::handle {
-                background-color: #2a2a2a;
-                width: 1px;
             }
         """)
 

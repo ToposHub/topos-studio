@@ -19,6 +19,7 @@ from src.features.edit.ai_editing.assistant_events import (
     ContextSummary,
 )
 from src.features.edit.ui.ai_edit_assistant_panel import AiEditAssistantPanel
+from src.shared.ui.panel_divider import PanelDockWidget
 
 
 @pytest.fixture
@@ -29,6 +30,7 @@ def panel(qapp):
 
 
 def test_panel_creates_with_object_name(panel):
+    assert isinstance(panel, PanelDockWidget)
     assert panel.objectName() == "dock_ai_edit_assistant"
     assert panel.windowTitle() == "AI assistant"
     assert panel.minimumWidth() < 360  # 不撑大共享的右侧标签组

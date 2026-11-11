@@ -15,11 +15,12 @@ from PyQt6.QtGui import QColor, QDrag, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QDoubleSpinBox, QFileDialog, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QSizePolicy,
-    QSlider, QSplitter, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
+    QSlider, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
     QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
     QWidget,
 )
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.assets.icon_manager import icon_folder, icon_grid, icon_list, icon_search
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, TOOLBAR_FLAT_BTN_STYLE
@@ -271,7 +272,7 @@ class ColorLutBrowser(QWidget):
         self.search_row.setVisible(False)
         layout.addWidget(search_row)
 
-        self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         self.folder_tree = QTreeWidget(self.splitter)
         self.folder_tree.setObjectName('LutFolderTree')
         self.folder_tree.setHeaderHidden(True)

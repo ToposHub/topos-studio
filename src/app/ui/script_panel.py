@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPlainTextEdit, QPushButton,
-    QSplitter, QFileDialog, QMenu, QApplication,
+    QFileDialog, QMenu, QApplication,
     QMessageBox, QLineEdit, QLabel, QToolButton, QCompleter,
 )
 from PyQt6.QtGui import (
@@ -23,6 +23,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSettings, QRect, QPointF, QObject
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.ui.style_sheet import (
     C,
     SCRIPT_TOOLBAR_BTN_STYLE,
@@ -1142,7 +1143,7 @@ class ScriptPanel(QWidget):
         layout.addLayout(toolbar)
 
         # ── Splitter: Editor + Console ──
-        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.splitter = PanelSplitter(Qt.Orientation.Vertical)
 
         # Editor container (editor + search bar)
         editor_container = QWidget()

@@ -280,8 +280,6 @@ QToolButton#mgPageTimingJump:hover {{
     background: {C.BG_BUTTON_HOVER};
     border-color: {C.BORDER_HOVER};
 }}
-QSplitter::handle {{ background: {C.PANEL_DIVIDER}; }}
-QSplitter::handle:hover {{ background: {C.PANEL_DIVIDER}; }}
 QStatusBar {{ background: {C.BG_DARK}; color: {C.TEXT_HINT}; border-top: 1px solid {C.BORDER_DARK}; }}
 QWebEngineView {{ background: {C.BG_DEEPEST}; border: none; }}
 QScrollBar:vertical, QScrollBar:horizontal {{
@@ -454,7 +452,6 @@ QSlider#mgKeyframesZoomSlider::handle:horizontal:hover,
 QSlider#mgLibraryZoom::handle:horizontal:hover {{
     background: {EDIT_COLORS["accent_hover"]};
 }}
-QSplitter::handle {{ background: {C.PANEL_DIVIDER}; }}
 """
 
 
