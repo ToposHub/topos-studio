@@ -525,7 +525,11 @@ class LayerOpsMixin:
                 self.engine.renderer.submit(RenderCommand.UPDATE_AUX_TEX, {
                     'layer_id': l_id, 'type': 'warper',
                     'data': layer.warper_params.astype(np.float32).tobytes(),
-                    'size': (w, h)
+                    'size': (w, h),
+                    # CW-B08:色彩空间变体随纹理载荷一起重提交(与引擎
+                    # set_warper_params 的组包一致;uniform/编译从层读取,
+                    # 此键供渲染线程诊断读取)
+                    'space': int(getattr(layer, 'warper_space', 0) or 0),
                 })
 
         # 同步所有 UI 面板
@@ -669,7 +673,11 @@ class LayerOpsMixin:
                 self.engine.renderer.submit(RenderCommand.UPDATE_AUX_TEX, {
                     'layer_id': l_id, 'type': 'warper',
                     'data': layer.warper_params.astype(np.float32).tobytes(),
-                    'size': (w, h)
+                    'size': (w, h),
+                    # CW-B08:色彩空间变体随纹理载荷一起重提交(与引擎
+                    # set_warper_params 的组包一致;uniform/编译从层读取,
+                    # 此键供渲染线程诊断读取)
+                    'space': int(getattr(layer, 'warper_space', 0) or 0),
                 })
 
         # 同步 UI 面板
@@ -1570,6 +1578,7 @@ class LayerOpsMixin:
                     'layer_id': layer_id, 'type': 'warper',
                     'data': layer.warper_params.astype(np.float32).tobytes(),
                     'size': (w, h),
+                    'space': int(getattr(layer, 'warper_space', 0) or 0),
                 })
 
         # 同步 UI 面板

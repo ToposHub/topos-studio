@@ -652,7 +652,10 @@ def legacy_ndarray(state: WarperStateV2 | None) -> np.ndarray | None:
     grid = state.grids.get(HS_GRID_NAME)
     if grid is None or grid.components != 2:
         return None
-    if state.algorithm_version != LEGACY_ALGORITHM and state.color_space != "hsv":
+    if state.color_space != "hsv":
+        # legacy 纹理语义=HSV。非 HSV 空间(即使 algorithm_version 标成
+        # legacy 的矛盾载荷)不得按 HSV 发布——那会把 HSL/HSP 网格静默
+        # 按 legacy 语义渲染,画面语义漂移。
         return None
     return np.array(grid.offsets, dtype=np.float32, copy=True)
 
@@ -669,7 +672,11 @@ def renderable_projection(state: WarperStateV2 | None) -> tuple[np.ndarray | Non
     grid = state.grids.get(HS_GRID_NAME)
     if grid is None or grid.components != 2:
         return None, 0
-    return np.array(grid.offsets, dtype=np.float32, copy=True),         {"hsv": 0, "hsl": 1, "hsp": 2}.get(state.color_space, 0)
+    # 空间索引与 warper_color.WARPER_SPACE_INDEX(shader u_warper_space
+    # 取值)同一事实源,避免两处字典漂移。
+    from src.features.color.core.warper_color import WARPER_SPACE_INDEX
+    return np.array(grid.offsets, dtype=np.float32, copy=True), \
+        WARPER_SPACE_INDEX.get(state.color_space, 0)
 
 
 # ---- 能力契约(计划 §2.3) ----

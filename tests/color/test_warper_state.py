@@ -341,6 +341,21 @@ def test_v2_hsv_square_is_legacy_expressible() -> None:
     assert caps.enabled and caps.reason in ("ok", "legacy_expressible")
 
 
+def test_legacy_ndarray_rejects_non_hsv_even_mislabeled_legacy() -> None:
+    """legacy 纹理语义=HSV:非 HSV 空间一律不发布,即使 algorithm_version
+    被矛盾地标成 legacy(静默按 HSV 渲染会漂移画面语义)。"""
+    hsl_state = _hs_state(space="hsl")
+    assert legacy_ndarray(hsl_state) is None
+    mislabeled = WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=LEGACY_ALGORITHM,
+        mode="hue_saturation", color_space="hsp", axis_angle=0.0,
+        grids={"hs": WarperGrid.identity("hs", 6, 6, ("dh", "ds"))})
+    assert legacy_ndarray(mislabeled) is None
+    # HSV 空间(无论算法代数)仍可无损发布
+    assert legacy_ndarray(_hs_state(space="hsv")) is not None
+    assert legacy_ndarray(legacy_from_ndarray(np.zeros((8, 8, 2), np.float32))) is not None
+
+
 # ---- 请求 envelope ----
 
 def test_command_request_diagnostics() -> None:
