@@ -78,6 +78,8 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
 
     has_curves = pipeline.has_active_curves_lut(_get('curves_lut'))
     has_warper = _get('warper_params') is not None
+    # CW-B08:warper 色彩空间变体(0=legacy HSV)
+    warper_space = int(_get('warper_space') or 0) if has_warper else 0
     has_lut3d = _get('active_lut_path') is not None
     scp = _get('soft_clip_params') or {}
     has_soft_clip = scp.get('enabled', False)
@@ -103,6 +105,7 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
 
     program = pipeline.build_composition_shader(
         has_curves=has_curves, has_warper=has_warper,
+        warper_space=warper_space,
         has_lut3d=has_lut3d, has_soft_clip=has_soft_clip,
         grain_enabled=False, has_hsl_curve=has_hsl_curve,
         has_mixer=has_mixer, has_curves_soft_clip=has_curves_soft_clip,
@@ -121,6 +124,7 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
         program=program,
         flags={
             "has_curves": has_curves, "has_warper": has_warper,
+            "warper_space": warper_space,
             "has_lut3d": has_lut3d, "has_soft_clip": has_soft_clip,
             "has_curves_soft_clip": has_curves_soft_clip,
             "has_hsl_curve": has_hsl_curve, "has_mixer": has_mixer,

@@ -318,8 +318,19 @@ def test_capabilities_reflect_backend_reality() -> None:
                                "backend": "none", "revision": 3}
     legacy = describe_warper_capabilities(legacy_from_ndarray(np.zeros((8, 8, 2), np.float32)))
     assert legacy.enabled and legacy.backend == "legacy_hsv_glsl"
+    # CW-B08:HSP/HSL 两分量网格经 v2 管线真实可渲
     new_space = describe_warper_capabilities(_hs_state(space="hsp"))
-    assert not new_space.enabled and new_space.reason == "backend_unimplemented"
+    assert new_space.enabled and new_space.backend == "warper_v2_glsl"
+    hsl_space = describe_warper_capabilities(_hs_state(space="hsl"))
+    assert hsl_space.enabled and hsl_space.backend == "warper_v2_glsl"
+    # 三分量(Luma)/CL/CW 仍无 GPU 后端:如实拒绝
+    luma_grid = WarperGrid.identity("hs", 6, 6, ("dh", "ds", "dl"))
+    luma_state = WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=CURRENT_ALGORITHM,
+        mode="hue_saturation", color_space="hsv", axis_angle=0.0,
+        grids={"hs": luma_grid})
+    luma_caps = describe_warper_capabilities(luma_state)
+    assert not luma_caps.enabled and luma_caps.reason == "backend_unimplemented"
     cl = describe_warper_capabilities(_cl_state())
     assert not cl.enabled and cl.reason == "backend_unimplemented"
 

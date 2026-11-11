@@ -169,7 +169,9 @@ def test_color_space_switch_maps_to_activate_mode() -> None:
     assert result["ok"]
     assert host.layer.warper_state.color_space == "hsp"
     assert host.layer.warper_state.mode == "hue_saturation"  # 保留当前模式
-    assert host.layer.warper_params is None  # legacy 无法表达 → 投影清空
+    # CW-B08:HSP 两分量网格可渲 → 投影携带空间变体(space=2)
+    assert host.layer.warper_params is not None
+    assert host.layer.warper_space == 2
 
 
 def test_reset_and_reset_all_clear_state_atomically() -> None:

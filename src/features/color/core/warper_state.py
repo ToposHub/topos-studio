@@ -46,6 +46,7 @@ __all__ = [
     "WarperCommandRequest",
     "legacy_from_ndarray",
     "legacy_ndarray",
+    "renderable_projection",
     "resample_grid",
     "describe_warper_capabilities",
 ]
@@ -637,15 +638,38 @@ def legacy_from_ndarray(array: np.ndarray | None) -> "WarperStateV2 | None":
 
 
 def legacy_ndarray(state: WarperStateV2 | None) -> np.ndarray | None:
-    """v2 状态若可无损表达为 legacy 方阵则导出,否则 None(调用方按能力拒绝)。"""
+    """v2 状态若可无损表达为 legacy 纹理载荷则导出,否则 None。
+
+    CW-B08:既有 UPDATE_AUX_TEX 路径的纹理尺寸是 ``(width, height)`` 元组,
+    非方阵 (rows≠cols) 的两分量 HSV 网格本就可被旧 shader 正确采样
+    (坐标是归一化 (hue, sat)),故放宽为任意 rows×cols;仍要求
+    hue_saturation 模式 + 2 分量 + HSV 空间。
+    """
     if state is None:
         return None
-    if state.algorithm_version != LEGACY_ALGORITHM or state.mode != "hue_saturation":
+    if state.mode != "hue_saturation":
         return None
     grid = state.grids.get(HS_GRID_NAME)
-    if grid is None or grid.rows != grid.cols or grid.components != 2:
+    if grid is None or grid.components != 2:
+        return None
+    if state.algorithm_version != LEGACY_ALGORITHM and state.color_space != "hsv":
         return None
     return np.array(grid.offsets, dtype=np.float32, copy=True)
+
+
+def renderable_projection(state: WarperStateV2 | None) -> tuple[np.ndarray | None, int]:
+    """CW-B08:把状态投影为可渲染纹理载荷 ``(offsets, space_index)``。
+
+    HS 模式两分量网格(任意空间)→ ``(rows, cols, 2)`` + 空间索引;
+    三分量(Luma)/CL/CW 尚无 GPU 后端 → ``(None, 0)``(capability 如实
+    unimplemented,不伪造 legacy 效果)。
+    """
+    if state is None or state.mode != "hue_saturation":
+        return None, 0
+    grid = state.grids.get(HS_GRID_NAME)
+    if grid is None or grid.components != 2:
+        return None, 0
+    return np.array(grid.offsets, dtype=np.float32, copy=True),         {"hsv": 0, "hsl": 1, "hsp": 2}.get(state.color_space, 0)
 
 
 # ---- 能力契约(计划 §2.3) ----
@@ -682,9 +706,11 @@ def describe_warper_capabilities(
         return WarperCapabilities(True, "bypass", supported, "none", revision)
     if state.algorithm_version == LEGACY_ALGORITHM:
         return WarperCapabilities(True, "ok", supported, "legacy_hsv_glsl", revision)
-    if state.mode == "hue_saturation" and state.color_space == "hsv" \
-            and legacy_ndarray(state) is not None:
-        return WarperCapabilities(True, "legacy_expressible", supported, "legacy_hsv_glsl", revision)
+    offsets, space = renderable_projection(state)
+    if offsets is not None:
+        backend = "legacy_hsv_glsl" if space == 0 else "warper_v2_glsl"
+        return WarperCapabilities(True, "ok" if space == 0 else "v2_space",
+                                  supported, backend, revision)
     return WarperCapabilities(
         False, "backend_unimplemented", supported, "none", revision)
 

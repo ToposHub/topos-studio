@@ -15,7 +15,8 @@ from src.features.color.core.shader_nodes import (COMMON_DEFINITIONS, GRADING_SN
                                     WARPER_SNIPPET, BLEND_MODES_SNIPPET,
                                     QUALIFIER_SNIPPET, FILM_GRAIN_SNIPPET,
                                     SOFT_CLIP_SNIPPET, CURVES_SOFT_CLIP_SNIPPET,
-                                    BLUR_SHARPEN_SNIPPET)
+                                    BLUR_SHARPEN_SNIPPET,
+    WARPER_SPACE_SNIPPET)
 from src.features.color.core.plugin_manager import get_plugin_manager
 from src.features.color.core.composition_uniforms import (
     build_composition_uniform_manifest,
@@ -283,6 +284,7 @@ class ShaderPipeline:
         self,
         has_curves: bool = False,
         has_warper: bool = False,
+        warper_space: int = 0,
         has_lut3d: bool = False,
         has_soft_clip: bool = False,
         grain_enabled: bool = False,
@@ -337,7 +339,7 @@ class ShaderPipeline:
              binding.enabled, _binding_structural_params(binding))
             for binding in bindings
         ) if bindings else ()
-        key = (has_curves, has_warper, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, has_curves_soft_clip, plugin_key)
+        key = (has_curves, has_warper, warper_space if has_warper else 0, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, has_curves_soft_clip, plugin_key)
         if key in self.comp_cache:
             # AUD-0831：LRU 命中刷新新旧顺序
             self.comp_cache.move_to_end(key)
@@ -350,6 +352,7 @@ class ShaderPipeline:
         uniform_manifest = build_composition_uniform_manifest(
             has_curves=has_curves, has_hsl_curve=has_hsl_curve,
             has_warper=has_warper, has_lut3d=has_lut3d,
+            warper_space=warper_space,
             grain_enabled=grain_enabled, bindings=bindings)
 
         shader_code = [
@@ -363,6 +366,7 @@ class ShaderPipeline:
             MIXER_SNIPPET,
             LUT3D_SNIPPET,
             WARPER_SNIPPET,
+            WARPER_SPACE_SNIPPET if (has_warper and warper_space) else "",
             BLEND_MODES_SNIPPET,
             BLUR_SHARPEN_SNIPPET,  # Must be before FILM_GRAIN_SNIPPET (declares u_tex_size)
             FILM_GRAIN_SNIPPET,
@@ -499,7 +503,10 @@ class ShaderPipeline:
             shader_code.append("    graded = apply_curves_soft_clip(graded, u_cs_low_clip, u_cs_low_soft, u_cs_high_clip, u_cs_high_soft);")
         if has_mixer:
             shader_code.append("    graded = apply_mixer(graded, u_red_p, u_orange_p, u_yellow_p, u_green_p, u_aqua_p, u_blue_p, u_purple_p, u_magenta_p);")
-        if has_warper: shader_code.append("    graded = apply_warper(graded, u_warper_tex, u_warper_grid_size);")
+        if has_warper and warper_space:
+            # CW-B08:多空间变体(HSL/HSP);legacy HSV(0)保持原调用逐位不变
+            shader_code.append("    graded = apply_warper_v2(graded, u_warper_tex, u_warper_space);")
+        elif has_warper: shader_code.append("    graded = apply_warper(graded, u_warper_tex, u_warper_grid_size);")
         if has_lut3d: shader_code.append("    graded = apply_3dlut(graded, u_lut_tex, u_lut_intensity);")
 
         # Apply Plugin Effects（P7-01：binding 由 from_instances 构造，

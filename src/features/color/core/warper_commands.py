@@ -42,6 +42,7 @@ from src.features.color.core.warper_hs_solver import (
     with_luma_component,
 )
 from src.features.color.core.warper_state import (
+    renderable_projection,
     CL_GRID_NAMES,
     CURRENT_ALGORITHM,
     HS_GRID_NAME,
@@ -257,9 +258,12 @@ class WarperCommandService:
 
     def _write(self, layer: Layer, state: WarperStateV2 | None) -> None:
         layer.warper_state = state.copy() if state is not None else None
-        # legacy 投影:可表达 → 旧 HSV 路径真实渲染;不可表达 → 清 legacy,
-        # 画面保持不变(capability 由宿主如实展示)
-        layer.warper_params = legacy_ndarray(state)
+        # CW-B08 渲染投影:HS 两分量网格(含 HSL/HSP)→ 纹理载荷 + 空间
+        # 变体;三分量/CL/CW 无 GPU 后端 → 清投影,画面保持不变
+        # (capability 由宿主如实展示,不伪造效果)
+        offsets, space = renderable_projection(state)
+        layer.warper_params = offsets
+        layer.warper_space = space
         self._on_applied(layer, state)
 
     # ---- 操作实现(机械;算法操作在 B04+) ----

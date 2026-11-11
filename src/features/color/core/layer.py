@@ -579,6 +579,9 @@ class Layer:
         # 不可渲染,但绝不丢字段(计划 §2.3 禁止静默降级)。
         self.warper_state: WarperStateV2 | None = None
         self.warper_state_unparsed: Any = None
+        # CW-B08:warper 纹理的色彩空间变体(0=legacy HSV/1=HSL/2=HSP);
+        # 只有 warper_params 非 None 时有意义,随层持久化/复制/粘贴。
+        self.warper_space: int = 0
         self.effects_params = {
             'enabled': False,
             'mode': 0, 
@@ -730,6 +733,7 @@ class Layer:
         # CW-B01: 版本化 warper 状态一并清空(含未知版本原文)
         self.warper_state = None
         self.warper_state_unparsed = None
+        self.warper_space = 0
         # 插件实例一并清空：v1 栈回退/reset 后残留上一状态会导致插件
         # 效果"复活"（结构键参与合成 shader 缓存，残留即静默生效）
         self.plugins = []
@@ -898,6 +902,7 @@ class Layer:
         source_warper_state = getattr(source_layer, "warper_state", None)
         self.warper_state = source_warper_state.copy() if source_warper_state is not None else None
         self.warper_state_unparsed = copy.deepcopy(getattr(source_layer, "warper_state_unparsed", None))
+        self.warper_space = int(getattr(source_layer, "warper_space", 0) or 0)
         
         # 复制效果参数
         self.effects_params = copy.deepcopy(source_layer.effects_params)
@@ -1017,6 +1022,8 @@ class Layer:
                 self.warper_params = np.array(patch["warper_params"], dtype=np.float32)
             else:
                 self.warper_params = None
+            # CW-B08:warper 域粘贴携带空间变体;缺省按 legacy HSV
+            self.warper_space = int(patch.get("warper_space", 0) or 0)
 
         # CW-B01: warper 域粘贴同时携带版本化状态;载荷不可解析时抛
         # WarperStateError(ValueError),不部分应用、不覆盖现值。
@@ -1282,6 +1289,8 @@ class Layer:
                 data["warper_params"] = self.warper_params.tolist()
             else:
                 data["warper_params"] = self.warper_params # Assuming already list/dict if not ndarray
+        if self.warper_params is not None and self.warper_space:
+            data["warper_space"] = int(self.warper_space)
 
         # CW-B01: 版本化 warper 状态序列化(schema_version 随载荷);无法解析
         # 的原文(更高版本写入者)原样回写,不丢字段。
@@ -1430,6 +1439,7 @@ class Layer:
 
         # Warper
         if "warper_params" in data:
+            layer.warper_space = int(data.get("warper_space", 0) or 0)
             if data["warper_params"] is None:
                 # CW-B01: 旧 None 保持 bypass(np.array(None) 会崩,历史隐患)
                 layer.warper_params = None

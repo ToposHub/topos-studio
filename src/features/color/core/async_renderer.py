@@ -4829,6 +4829,8 @@ class AsyncRenderer(QThread):
         elif tex_type == 'warper':
             w, h = data['size']
             tex_data = data['data']
+            # CW-B08:色彩空间变体随纹理槽位记录,供 uniform/诊断读取
+            self.layer_textures[l_id]['warper_space'] = int(data.get('space', 0) or 0)
             tex = self.layer_textures[l_id].get('warper')
             if not tex or tex.size != (w, h):
                 if tex: tex.release()
@@ -7265,9 +7267,13 @@ class AsyncRenderer(QThread):
                     layer_plugins = plugin_bindings_from_instances(
                         pl_plugins_instances)
 
+                    pl_warper_space = int(
+                        (prefix_layer.get('warper_space', 0) if pl_is_dict
+                         else getattr(prefix_layer, 'warper_space', 0)) or 0)
                     prog = self.pipeline.build_composition_shader(
                         has_curves=has_curves,
                         has_warper=has_warper,
+                        warper_space=pl_warper_space,
                         has_lut3d=has_lut3d,
                         has_soft_clip=has_soft_clip,
                         grain_enabled=False,
