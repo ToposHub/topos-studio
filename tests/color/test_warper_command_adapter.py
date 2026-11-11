@@ -81,12 +81,12 @@ def test_component_value_deduped_when_legacy_published() -> None:
     assert host.pushes == []
 
 
-def test_component_in_new_space_honestly_unimplemented() -> None:
+def test_component_in_new_space_uses_b04_solver() -> None:
+    # CW-B04 起,legacy 无法发布的新空间由网格求解操作真实处理
     host = _host_with_legacy()
-    state = Host._state("hue_saturation")
-    state["color_space"] = "HSP"  # legacy 无法发布 → 后端也不存在
+    state = _hsp_state([[2, 2]])
     result = host.submit("component", {"component": "hue", "value": 0.2}, state=state)
-    assert not result["ok"] and result["reason"] == "op_unimplemented"
+    assert result["ok"] and result["handled"] and result["dirty"]
 
 
 def test_cw_actions_need_stable_ids() -> None:
@@ -95,6 +95,58 @@ def test_cw_actions_need_stable_ids() -> None:
                             ("reset_pin", {}), ("stroke", {})):
         result = host.submit(action, payload, mode="chroma_warp")
         assert not result["ok"] and result["reason"] == "op_unimplemented", action
+
+
+# ---- CW-B04:component 手势 → 求解操作 ----
+
+def _hsp_state(selected: list) -> dict:
+    state = Host._state("hue_saturation")
+    state["color_space"] = "HSP"
+    state["falloff"] = 0.5
+    state["auto_lock"] = True
+    state["lock_points"] = 2
+    state["grids"]["0"]["selected"] = selected
+    return state
+
+
+def test_component_with_selection_maps_to_solver() -> None:
+    host = _host_with_legacy()
+    result = host.submit("component", {"component": "hue", "value": 0.2},
+                         state=_hsp_state([[2, 2]]))
+    assert result["ok"] and result["handled"]
+    grid = host.layer.warper_state.grids["hs"]
+    assert grid.offsets[2, 2, 0] == pytest.approx(0.2)   # absolute 模式:选点=目标值
+    # falloff 0.5:切比雪夫 1 邻域向目标值插值(0.1);AutoLock 2 锁曼哈顿 ≤2
+    assert grid.offsets[2, 1, 0] == pytest.approx(0.0)
+    # (4,4):切比雪夫 2 → 权重 0.25;曼哈顿 4 > AutoLock 2 → 未锁
+    assert grid.offsets[4, 4, 0] == pytest.approx(0.05)
+
+
+def test_component_smooth_maps_to_smooth_op() -> None:
+    host = _host_with_legacy()
+    state = _hsp_state([[1, 0], [1, 7]])
+    result = host.submit("component", {"component": "sat", "value": 0.0, "smooth": True},
+                         state=state)
+    assert result["ok"] and result["handled"]
+
+
+def test_component_without_selection_is_noop() -> None:
+    host = _host_with_legacy()
+    result = host.submit("component", {"component": "hue", "value": 0.2},
+                         state=_hsp_state([]))
+    assert result["reason"] == "ui_only_no_selection" and not result["handled"]
+    assert host.pushes == []
+
+
+def test_component_luma_upgrades_to_third_component() -> None:
+    host = _host_with_legacy()
+    result = host.submit("component", {"component": "luma", "value": 0.1},
+                         state=_hsp_state([[3, 3]]))
+    assert result["ok"]
+    grid = host.layer.warper_state.grids["hs"]
+    assert grid.semantics == ("dh", "ds", "dl")
+    assert grid.offsets[3, 3, 2] == pytest.approx(0.1)
+    assert host.layer.warper_params is None  # 三分量不再可 legacy 表达
 
 
 # ---- 离散命令 = 原子手势 ----
