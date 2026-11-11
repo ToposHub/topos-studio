@@ -150,10 +150,15 @@ class WarperCanvas(ColorWarper):
 
     def grid_rect(self, index: int = 0) -> QRectF:
         if self.mode == "chroma_luma":
-            half = self.width() / 2.0
-            return QRectF(index * half + 15, 30, max(1, half - 30), max(1, self.height() - 45))
+            return self.field_rect(index).adjusted(16, 16, -16, -16)
         side = max(1.0, min(self.width(), self.height()) - self._padding)
         return QRectF((self.width() - side) / 2, (self.height() - side) / 2, side, side)
+
+    def field_rect(self, index: int = 0) -> QRectF:
+        """Square color field, centered in either half of the CL canvas."""
+        half = self.width() / 2.0
+        side = max(33.0, min(half, self.height()))
+        return QRectF(index * half + (half - side) / 2, (self.height() - side) / 2, side, side)
 
     def point_screen(self, key: PointKey, index: int | None = None) -> QPointF:
         rect = self.grid_rect(self.active_grid if index is None else index)
@@ -187,11 +192,11 @@ class WarperCanvas(ColorWarper):
         # Fixed display raster: this is a color-field backdrop, never frame data.
         scale = min(1.0, 900 / max(1, self.width()), 700 / max(1, self.height()))
         width, height = max(1, round(self.width() * scale)), max(1, round(self.height() * scale))
-        cache_key = (width, height, self.mode, self.axis_angle)
+        cache_key = (self.width(), self.height(), self.mode, self.axis_angle)
         if self._background is not None and self._background[0] == cache_key:
             return self._background[1]
-        yy, xx = np.mgrid[0:height, 0:width]
         if self.mode == "hue_saturation":
+            yy, xx = np.mgrid[0:height, 0:width]
             side = max(1, min(self.width(), self.height()) - self._padding)
             x = (xx * self.width() / width - self.width() / 2) * 2 / side
             y = (yy * self.height() / height - self.height() / 2) * 2 / side
@@ -201,15 +206,56 @@ class WarperCanvas(ColorWarper):
             outside = np.abs(xx * self.width() / width - self.width() / 2) > square_half
             value = np.where(outside, 0.10, 0.32)
         else:
-            local_x = np.mod(xx / max(1, width / 2), 1.0)
-            hue = np.where(xx < width / 2, 0.16 + local_x * 0.5,
-                           0.46 + local_x * 0.5) + self.axis_angle / 360
-            sat = np.abs(local_x * 2 - 1) * 0.62
-            value = np.maximum(0.025, (1 - yy / max(1, height)) * 0.55)
-        rgb = np.ascontiguousarray(self._rgb(hue, sat, value))
+            rgb = self._chroma_luma_field(
+                np.arange(width, dtype=np.float32) * (self.width() / width),
+                np.arange(height, dtype=np.float32) * (self.height() / height),
+            )
+        if self.mode == "hue_saturation":
+            rgb = self._rgb(hue, sat, value)
+        rgb = np.ascontiguousarray(rgb)
         result = QImage(rgb.data, width, height, width * 3, QImage.Format.Format_RGB888).copy()
         self._background = (cache_key, result)
         return result
+
+    def _chroma_luma_field(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        # RGB display stops measured in clean parts of the reference field,
+        # normalized from the screenshot's monitor ICC profile to sRGB. The
+        # display calibration/profile itself is deliberately not embedded.
+        # A horizontal HSV sweep introduces extra hue bends and a grey seam;
+        # the reference instead has a neutral axis and a linear luma ramp.
+        palettes = np.array([
+            [[128, 131, 41], [126, 130, 65], [126, 129, 85], [125, 127, 105], [124, 124, 124],
+             [121, 122, 140], [118, 116, 164], [113, 110, 194], [104, 96, 232]],
+            [[0, 151, 103], [33, 145, 110], [77, 139, 115], [103, 132, 119], [124, 124, 124],
+             [141, 116, 124], [158, 104, 128], [178, 89, 129], [198, 65, 129]],
+        ], dtype=np.float32)
+        rgb = np.empty((y.size, x.size, 3), dtype=np.float32)
+        stops = np.linspace(0.0, 1.0, palettes.shape[1])
+        angle = math.radians(self.axis_angle)
+        weights = ((math.cos(angle), math.sin(angle)), (-math.sin(angle), math.cos(angle)))
+        for index in (0, 1):
+            rect = self.field_rect(index)
+            begin = int(np.searchsorted(x, index * self.width() / 2))
+            end = int(np.searchsorted(x, (index + 1) * self.width() / 2))
+            u = (x[begin:end] - rect.left()) / rect.width()
+            v = (y - rect.top()) / rect.height()
+            gain = np.maximum(0.0, 1.022 - 0.899 * v)
+            gain *= np.where((v >= 0) & (v <= 1), 1.0, 0.5)
+            for channel in range(3):
+                horizontal = np.full_like(u, 124.0)
+                for axis, weight in enumerate(weights[index]):
+                    if abs(weight) < 1e-7:
+                        continue
+                    axis_u = u if weight >= 0 else 1 - u
+                    horizontal += abs(weight) * (np.interp(axis_u, stops, palettes[axis, :, channel]) - 124.0)
+                horizontal *= np.where((u >= 0) & (u <= 1), 1.0, 0.5)
+                # Interpolate along x and compute luma along y only once,
+                # then broadcast; dragging Axis Angle never interpolates a
+                # full two-dimensional raster per color channel.
+                rgb[:, begin:end, channel] = horizontal[None, :] * gain[:, None]
+        np.rint(rgb, out=rgb)
+        np.clip(rgb, 0, 255, out=rgb)
+        return rgb.astype(np.uint8)
 
     def set_density_image(self, image: QImage | None) -> None:
         """Accept a backend-produced overlay; never fabricate a distribution."""
@@ -244,7 +290,12 @@ class WarperCanvas(ColorWarper):
 
     def _paint_mesh(self, p: QPainter, index: int) -> None:
         active = index == self.active_grid or self.mode == "hue_saturation"
-        p.setPen(QPen(QColor(205, 205, 210, 125 if active else 75), 0.75))
+        if self.mode == "chroma_luma":
+            rect = self.grid_rect(index)
+            p.setPen(QPen(QColor(0, 0, 0, 60), 0.75))
+            p.drawLine(rect.topLeft(), rect.bottomRight())
+            p.drawLine(rect.topRight(), rect.bottomLeft())
+        p.setPen(QPen(QColor(205, 205, 210, 125), 0.75))
         rows, cols = self.points.shape[:2]
         for r in range(rows):
             for t in range(cols):
@@ -258,11 +309,12 @@ class WarperCanvas(ColorWarper):
                     p.drawLine(current, self.point_screen((r, (t + 1) % cols), index))
         for key in self._keys():
             pos = self.point_screen(key, index)
-            outer = key[0] in {0, rows - 1} if self.mode == "chroma_luma" else key[0] == rows - 1
+            outer = (key[0] in {0, rows - 1} and key[1] in {0, cols - 1}
+                     if self.mode == "chroma_luma" else key[0] == rows - 1)
             selected, pinned = active and key in self.selected, active and key in self.pins
-            p.setPen(QPen(QColor("#111113"), 1 if outer or pinned else 0.3))
+            p.setPen(QPen(QColor("#111113"), 2 if outer else (1 if pinned else 0.3)))
             p.setBrush(QColor(C.ORANGE if selected else "#e1e1e3"))
-            radius = 3.5 if selected or key == self.hover_point else (3 if outer else 2)
+            radius = 3.5 if selected or (active and key == self.hover_point) else (3 if outer else 2)
             if pinned:
                 p.drawRect(QRectF(pos.x() - 3, pos.y() - 3, 6, 6))
             else:

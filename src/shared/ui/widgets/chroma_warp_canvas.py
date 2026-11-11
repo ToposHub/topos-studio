@@ -104,9 +104,13 @@ class ChromaWarpCanvas(QWidget):
     def _field(self) -> QImage:
         if self._background is None:
             yy, xx = np.mgrid[0:512, 0:512] / 511
-            hue = np.mod((-np.arctan2(yy - 0.5, xx - 0.45) - 2 * np.pi / 3) / (2 * np.pi), 1)
-            sat = np.minimum(1.0, np.hypot(xx - 0.45, yy - 0.5) * 2)
-            rgb = np.ascontiguousarray(WarperCanvas._rgb(hue, sat, np.full_like(xx, 0.52)))
+            # Display-only chromaticity backdrop: its neutral origin is offset
+            # from the square's geometric center. Keep the full field so the
+            # low-intensity area beyond the gamut outline remains visible.
+            dx, dy = (xx - 0.426) * 1.12, yy - 0.534
+            hue = np.mod((-np.arctan2(dy, dx) - 1.983) / (2 * np.pi), 1)
+            sat = np.minimum(1.0, np.hypot(dx, dy) * 2.40) ** 0.58
+            rgb = np.ascontiguousarray(WarperCanvas._rgb(hue, sat, np.full_like(xx, 0.5)))
             self._background = QImage(rgb.data, 512, 512, 512 * 3, QImage.Format.Format_RGB888).copy()
         return self._background
 
@@ -118,8 +122,15 @@ class ChromaWarpCanvas(QWidget):
         path.cubicTo(self._screen([0.04, 0.65]), self._screen([0.05, 0.18]), self._screen([0.25, 0.04]))
         path.cubicTo(self._screen([0.53, 0.12]), self._screen([0.88, 0.37]), self._screen([0.95, 0.55]))
         path.cubicTo(self._screen([0.90, 0.76]), self._screen([0.30, 0.91]), self._screen([0.10, 0.95]))
-        p.save(); p.setClipPath(path)
+        # Draw the square first, then attenuate only the region outside the
+        # gamut. Clipping the whole field used to remove the reference's
+        # defining square gradient and its faint background grid.
         p.drawImage(rect, self._field())
+        outside = QPainterPath()
+        outside.addRect(rect)
+        outside = outside.subtracted(path)
+        p.fillPath(outside, QColor(0, 0, 0, 170))
+        p.save(); p.setClipRect(rect)
         if self.show_grid:
             p.setPen(QPen(QColor(0, 0, 0, 60), 0.6))
             for n in range(11):

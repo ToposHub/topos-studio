@@ -119,6 +119,7 @@ class MeshTools(QWidget):
         self.action_buttons: dict[str, QToolButton] = {}
         self.values: dict[str, DragValue] = {}
         self.component_buttons: dict[str, list[QToolButton]] = {}
+        self.value_labels: dict[str, QLabel] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 7, 10, 10); layout.setSpacing(6)
         self.grid_buttons: list[QToolButton] = []
@@ -189,7 +190,11 @@ class MeshTools(QWidget):
         for name, label in components:
             col = QVBoxLayout(); col.setSpacing(3)
             number_row = QHBoxLayout(); number_row.setSpacing(2)
-            number_row.addWidget(QLabel(tr(name, label)))
+            value_label = QLabel(tr(name, label))
+            value_label.setStyleSheet(f"QLabel:disabled {{ color: {C.TEXT_HINT}; }}")
+            value_label.setEnabled(False)
+            self.value_labels[name] = value_label
+            number_row.addWidget(value_label)
             value = DragValue("", -1 if name == "chroma" else 0, 1, 0, 3, compact=True, stretchable=True)
             value.setFixedWidth(50)
             value.setAccessibleName(tr(name, label)); value.setMixedValue(True); value.setEnabled(False)
@@ -213,6 +218,7 @@ class MeshTools(QWidget):
     def sync_selection(self, values: dict[str, float | None]) -> None:
         for key, widget in self.values.items():
             widget.setEnabled(bool(values))
+            self.value_labels[key].setEnabled(bool(values))
             value = values.get(key)
             widget.setMixedValue(value is None)
             if value is not None:
@@ -233,8 +239,16 @@ class StrokeTools(QWidget):
         self.tool_buttons: dict[str, QToolButton] = {}
         self.values: dict[str, DragValue] = {}
         self.sliders: dict[str, QSlider] = {}
-        layout = QVBoxLayout(self); layout.setContentsMargins(10, 7, 10, 10); layout.setSpacing(4)
-        layout.addWidget(QLabel(tr("tools", "Tools")))
+        self.value_labels: dict[str, QLabel] = {}
+        self.setStyleSheet(f"""
+            QLabel {{ font-size: 11px; }}
+            QLabel:disabled {{ color: {C.TEXT_HINT}; }}
+            QSlider::handle:horizontal:disabled {{ background: {C.TEXT_HINT}; border-color: {C.BORDER_DARK}; }}
+        """)
+        layout = QVBoxLayout(self); layout.setContentsMargins(10, 7, 10, 10); layout.setSpacing(2)
+        title_label = QLabel(tr("tools", "Tools")); title_label.setFixedHeight(13)
+        layout.addWidget(title_label)
+        layout.addSpacing(4)
         row = QHBoxLayout(); row.setSpacing(0)
         group = QButtonGroup(self); group.setExclusive(True)
         for name, label in (("stroke", "Add Stroke - Normal Mode"), ("point_stroke", "Add Stroke - Point To Point Mode"),
@@ -245,8 +259,11 @@ class StrokeTools(QWidget):
             row.addWidget(button); self.tool_buttons[name] = button
         self.delete_button = tool_button("delete", tr("delete", "Delete the selected Strokes and Pin Points"))
         self.delete_button.setEnabled(False); self.delete_button.clicked.connect(lambda: self.action_requested.emit("delete"))
-        row.addWidget(self.delete_button); layout.addLayout(row); layout.addWidget(separator())
-        title = QHBoxLayout(); title.addWidget(QLabel(tr("pin_title", "Pin"))); title.addStretch()
+        row.addWidget(self.delete_button); layout.addLayout(row)
+        layout.addSpacing(6); layout.addWidget(separator()); layout.addSpacing(6)
+        title = QHBoxLayout()
+        self.pin_label = QLabel(tr("pin_title", "Pin")); self.pin_label.setEnabled(False)
+        title.addWidget(self.pin_label); title.addStretch()
         reset = tool_button("reset", tr("reset_pin", "Reset Pin")); reset.setFixedWidth(24)
         reset.clicked.connect(lambda: self.action_requested.emit("reset_pin")); title.addWidget(reset)
         layout.addLayout(title)
@@ -259,7 +276,9 @@ class StrokeTools(QWidget):
             ("exposure", "Exposure", -8.0, 8.0, 0.0),
         ):
             header = QHBoxLayout(); header.setSpacing(4)
-            header.addWidget(QLabel(tr(key, label))); header.addStretch()
+            value_label = QLabel(tr(key, label)); value_label.setEnabled(False)
+            self.value_labels[key] = value_label
+            header.addWidget(value_label); header.addStretch()
             value = DragValue("", low, high, default, 3, compact=True)
             value.setAccessibleName(tr(key, label)); value.setFixedWidth(62); value.setEnabled(False)
             header.addWidget(value); layout.addLayout(header)
@@ -268,7 +287,7 @@ class StrokeTools(QWidget):
             slider.setValue(round((default - low) / (high - low) * 1000))
             value.valueChanged.connect(lambda v, key=key: self.parameter_edited.emit(key, v))
             slider.valueChanged.connect(lambda v, key=key, low=low, high=high: self.parameter_edited.emit(key, low + v / 1000 * (high - low)))
-            layout.addWidget(slider); layout.addSpacing(4)
+            layout.addWidget(slider)
             self.values[key], self.sliders[key] = value, slider
         modes = QHBoxLayout(); modes.setSpacing(0)
         self.mode_buttons: dict[str, QToolButton] = {}
@@ -282,8 +301,10 @@ class StrokeTools(QWidget):
 
     def sync_selection(self, selected: bool, parameters: dict[str, float | str]) -> None:
         self.delete_button.setEnabled(selected); self.pin_reset.setEnabled(selected)
+        self.pin_label.setEnabled(selected)
         for key, value in self.values.items():
             value.setEnabled(selected)
+            self.value_labels[key].setEnabled(selected)
             value.blockSignals(True); value.setValue(float(parameters[key])); value.blockSignals(False)
             slider = self.sliders[key]; slider.setEnabled(selected)
             slider.blockSignals(True)
