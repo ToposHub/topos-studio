@@ -1,6 +1,6 @@
 # Color Warper 后端实施与验证计划
 
-日期：2026-11-12。状态：**全部为后续待实施任务，本文件不代表后端能力已经实现。**
+日期：2026-11-12。状态：**CW-B00–B10 已实施完毕(2026-11-12 同日),阶段状态见 §3.1;Metal 数值 parity、4K 性能矩阵与实机人工复核项仍为待验收,清单见`docs/validation/color_warper_b10/README.md` §4。**
 
 本轮范围是调色页 Color Warper UI 与交互。按用户后续要求，Warper和Mixer已从原Color Mapping容器拆成独立停靠面板；原有两个控件实例和信号继续复用。参考用户截图及本机已打开的 DaVinci Resolve Studio 20；面板背景、通用按钮、下拉与数值框使用 Topos 全局样式。本计划记录把这些 UI 接入真实图像处理、工程模型和渲染链所需工作。新模式的局部网格／笔画／Pin 显示不等于图像已生效；不得将 UI 展示状态误认为可保存或可导出的调色结果。
 
@@ -116,7 +116,7 @@
 | CW-B07 | 完成(核心契约;UI/worker 接线归 B08 集成批) | `warper_density.py`:确定性等步长降采样(无随机、max_samples 上限)、HS bin 云带 source/frame/revision/colorspace/generation 标签、黑白灰零色度不冒彩、no_data/black/uniform 诚实为空;代际守卫拒绝晚到旧结果;播放节流(限频+停止补精确刷新,可注入时钟);viewer 取色映射(zoom/pan/翻转/裁剪/DPR/越界 None)与最近邻取色;取色↔云坐标一致性;11 项测试通过 |
 | CW-B08 | 完成(HS 三空间 GL;CL/CW GPU 与 MSL v2 仍按能力拒绝;4K 实机性能与 100 轮资源矩阵待 B10 归档) | legacy 桥放宽:非方阵 2 分量 HSV 即可渲(既有管线纹理尺寸本就 (w,h));`WARPER_SPACE_SNIPPET`(HSL/HSP 转换+apply_warper_v2,HSL 超亮域旁路与 CPU 声明一致)+ `apply_warper_in_space` CPU 镜像;管线接线:manifest `u_warper_space`(仅 v2 变体声明,legacy 源逐字不变)、编译缓存键含 space、corrector/DTO/UPDATE_AUX_TEX/bake/全分辨率路径全链贯通;`renderable_projection` + capability(HS 2 分量任意空间→可渲,三分量/CL/CW→unimplemented);单函数与整管线的 GPU parity 测试(固定种子网格);MSL 保持 legacy-only,space>0 由 capability 拒绝;6 项集成 + 全量 309 项通过 |
 | CW-B09 | 完成(LUT 点态表达 + 图粘贴域;关键帧:warper 域声明不可插值,不在轨道域=现状拒绝) | 图 LUT 导出:HS 两分量 warper(legacy 方阵或 v2 状态,任意空间)真实烘焙进 cube(grading→curves→warper→LUT 位序与 shader 一致,125 点逐点对照 CPU 参考);三分量/CL/CW 显式拒绝不产出少效果 cube;图粘贴登记 `warper` 域(三键齐写/空 `{}` 整域清除,注意通用循环跳过 None 载荷);层持久化/剪贴板/Gallery 复用同一 serializer(B01 已覆盖,回归通过);8 项新测试 + 114 项回归通过 |
-| CW-B10 | 未开始 | — |
+| CW-B10 | 完成(自动验收;4K 性能/Metal/实机人工项如实待验收) | 真实素材冒烟(3 fixture × 首/中锚点 × 3 空间:identity/有限性/确定性全过,`docs/validation/color_warper_b10/`);验收报告按计划 §5.4 五类证据分级;warper 专项测试 208 项全过;待验收清单单列(实机复核/Metal parity/4K 基线/密度云 UI 接线/CW GPU 求解) |
 
 ## 4. 每阶段具体步骤与验证
 
