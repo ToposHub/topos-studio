@@ -113,7 +113,8 @@
 | CW-B04 | 完成(求解语义;GPU 新空间渲染归 B08) | `warper_hs_solver.py`:falloff 切比雪夫权重(色相列环绕)、AutoLock 1/2 曼哈顿邻域+Pin 恒锁、absolute/delta 位移、分量平滑(3×3 环绕均值)、Pull/Push、Luma 第三分量确定性升级(升级即失去 legacy 投影);服务新增 move_points/smooth_component/pull_push;适配器 component 手势接入(空选择 no-op);接缝连续性/重采样 Pin 往返/密集网格 20 项求解测试 + 适配器 4 项;全套 161 项通过 |
 | CW-B05 | 完成(求解/CL 参考;GPU 渲染归 B08) | `warper_cl.py`:chroma=HSV S、luma=HSP P 坐标冻结,Axis Angle 绕 (0.5,0.5) 旋转采样(0/±360 恒等、90° 换轴,方向测试冻结),grid1→grid2 顺序合成(非均匀网格下不可交换,显式次序断言),零色度只护 dc(灰阶亮度单调且不被染色)、dl 对任意像素生效、p≥0 下限;Auto Pin columns/rows/single(空选择=全列/行)与手动 Pin 取并集、`generated=auto` 标记 round-trip 保留;服务 auto_pin op + no-change 判定含 Pin;17 项测试通过 |
 | CW-B06 | 完成(求解器;异步/取消接线与 GPU 归 B02 手势 + B08) | `warper_cw_solver.py`:色度平面 (u,v)=sat·(cos,sin) 约束;权重=高斯 chroma_range(默认 0.040 实测)× tonal 窗 [pivot−low, pivot+high](默认全域);Normal 中心=源点、P2P=源→目标线段最近点;位移=加权平均(u,v,luma);Pin=零位移约束(保护=拉低平均);Exposure=目标亮度×2^e;输出经 HSP 反演、负通道翻转(不用 legacy sign 乘法,0 通道不被清零)、HDR 不截断;确定性重放、重复/零长度/同源异目标稳定退化+INFO 诊断;16 项测试(权重/混合/Pin 保护/极小 range/极端曝光/P2P 段权重/确定性/HDR);全套 194 项通过 |
-| CW-B07–B10 | 未开始 | — |
+| CW-B07 | 完成(核心契约;UI/worker 接线归 B08 集成批) | `warper_density.py`:确定性等步长降采样(无随机、max_samples 上限)、HS bin 云带 source/frame/revision/colorspace/generation 标签、黑白灰零色度不冒彩、no_data/black/uniform 诚实为空;代际守卫拒绝晚到旧结果;播放节流(限频+停止补精确刷新,可注入时钟);viewer 取色映射(zoom/pan/翻转/裁剪/DPR/越界 None)与最近邻取色;取色↔云坐标一致性;11 项测试通过 |
+| CW-B08–B10 | 未开始 | — |
 
 ## 4. 每阶段具体步骤与验证
 
