@@ -222,6 +222,18 @@ class TestTransactionMerging:
         bridge, coord, stack = _bridge(holder)
         assert bridge.flush_transaction() is False
 
+    def test_empty_gesture_flush_releases_transaction(self):
+        """空手势 flush 后不得残留 tid：新手势 begin 不抛"上一个事务未 flush"。"""
+        project, stack_id, graph = _project_with_graph_stack()
+        holder = {"project": project}
+        bridge, coord, stack = _bridge(holder)
+        bridge.begin_transaction("gesture-empty")
+        assert bridge.flush_transaction() is False
+        assert bridge._buffer.active is False
+        bridge.begin_transaction("gesture-next")
+        assert bridge._buffer.active is True
+        assert bridge.flush_transaction() is False
+
     def test_move_and_insert_single_command(self):
         """move_and_insert 经 command 栈只产生一个 undo 项。"""
         project, stack_id, graph = _project_with_graph_stack()
