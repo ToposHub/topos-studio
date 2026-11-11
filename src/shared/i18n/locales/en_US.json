@@ -371,6 +371,7 @@
     "denoise": "Denoise",
     "deblur": "Deblur",
     "color_wheel": "Color Wheel",
+    "color_bars": "Color Bars",
     "curves": "Curves",
     "hsl_curves": "HSL Curves",
     "color_mapping": "Color Mapping",

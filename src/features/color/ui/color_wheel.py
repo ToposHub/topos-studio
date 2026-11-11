@@ -53,7 +53,8 @@ class _BrightnessDial(ToposSlider):
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        groove = QRectF(1.0, 5.0, self.width() - 2.0, self.height() - 10.0)
+        top = round(self.height() * 0.23)
+        groove = QRectF(1.0, top, self.width() - 2.0, self.height() - 2.0 * top)
         painter.setPen(QPen(QColor(C.BORDER_DARK), 1.0))
         painter.setBrush(QColor(C.BG_DEEPEST))
         painter.drawRoundedRect(groove, 5.0, 5.0)
@@ -62,20 +63,22 @@ class _BrightnessDial(ToposSlider):
         painter.setClipPath(clip)
         spacing = 4.0
         phase = (self.value() / self.SCALE * 300.0) % spacing
+        ridge_inset = max(2.0, round(groove.height() * 0.25))
         for index in range(int(self.width() / spacing) + 1):
             x = index * spacing + phase
             distance = abs(x - self.width() / 2.0) / (self.width() / 2.0)
             color = QColor(C.TEXT_HINT)
             color.setAlpha(round(200.0 * (1.0 - min(distance, 1.0)) + 35.0))
             painter.setPen(QPen(color, 1.0))
-            painter.drawLine(QPointF(x, groove.top() + 3.0),
-                             QPointF(x, groove.bottom() - 3.0))
+            painter.drawLine(QPointF(x, groove.top() + ridge_inset),
+                             QPointF(x, groove.bottom() - ridge_inset))
         painter.setClipping(False)
         active = self.isSliderDown() or self.hasFocus() or self.value() != 0
         painter.setPen(QPen(QColor(C.ORANGE if active else C.TEXT_DIM), 2.0))
         center = self.width() / 2.0
-        painter.drawLine(QPointF(center, groove.top() + 2.0),
-                         QPointF(center, groove.bottom() - 2.0))
+        center_inset = max(2.0, round(groove.height() * 0.17))
+        painter.drawLine(QPointF(center, groove.top() + center_inset),
+                         QPointF(center, groove.bottom() - center_inset))
         painter.end()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -504,21 +507,25 @@ class ColorWheel(QWidget):
             self._update_timer.stop()
             self._emit_changed_signal()
 
-    def _update_rgb_values(self) -> None:
-        """从当前 hue/sat/brightness 计算 RGB 并更新 3 个 DragValue（防递归）。"""
-        brightness = self.brightness
+    @staticmethod
+    def rgb_multipliers(hue: float, sat: float,
+                        brightness: float) -> tuple[float, float, float]:
+        """Forward HSV→RGB multiplier math shared by wheels and bars."""
         stops = (brightness ** 2) * 6.0
         if brightness < 0:
             stops = -stops
         b_mult = math.pow(2.0, stops)
+        if sat == 0:
+            return b_mult, b_mult, b_mult
+        c = QColor.fromHsvF(hue / 360.0, sat, 1.0)
+        rf, gf, bf = c.redF(), c.greenF(), c.blueF()
+        avg = (rf + gf + bf) / 3.0
+        return (rf / avg) * b_mult, (gf / avg) * b_mult, (bf / avg) * b_mult
 
-        if self.sat == 0:
-            r, g, b = b_mult, b_mult, b_mult
-        else:
-            c = QColor.fromHsvF(self.hue / 360.0, self.sat, 1.0)
-            rf, gf, bf = c.redF(), c.greenF(), c.blueF()
-            avg = (rf + gf + bf) / 3.0
-            r, g, b = (rf / avg) * b_mult, (gf / avg) * b_mult, (bf / avg) * b_mult
+    def _update_rgb_values(self) -> None:
+        """从当前 hue/sat/brightness 计算 RGB 并更新 3 个 DragValue（防递归）。"""
+        r, g, b = self.rgb_multipliers(self.hue, self.sat, self.brightness)
+        b_mult = (r + g + b) / 3.0
 
         self._updating_rgb = True
         self._updating_brightness = True
@@ -787,6 +794,8 @@ class GradingPanel(QWidget):
         self._init_ui()
 
     def _init_ui(self) -> None:
+        from src.features.color.ui.color_bars_panel import ColorBarsPanel
+
         layout = QVBoxLayout()
         layout.setContentsMargins(8, 2, 8, 2)  # 增加左右内边距
         layout.setSpacing(1)  # 进一步减小纵向间距
@@ -849,9 +858,9 @@ class GradingPanel(QWidget):
             self.interaction_ended.emit)
 
         self._wheel_page = QWidget()
-        wheel_page_layout = QVBoxLayout(self._wheel_page)
-        wheel_page_layout.setContentsMargins(0, 0, 0, 0)
-        wheel_page_layout.setSpacing(1)
+        self._wheel_page_layout = QVBoxLayout(self._wheel_page)
+        self._wheel_page_layout.setContentsMargins(0, 0, 0, 0)
+        self._wheel_page_layout.setSpacing(1)
 
         self._grading_tabs = QTabWidget()
         self._grading_tabs.setObjectName("grading_tabs")
@@ -888,7 +897,9 @@ class GradingPanel(QWidget):
         for control in (self.temp_slider, self.tint_slider, self.contrast_slider,
                         self.exp_slider, self.mid_detail_slider):
             top_row.addWidget(control, 1)
-        wheel_page_layout.addLayout(top_row)
+        self._prim_top_row = QWidget()
+        self._prim_top_row.setLayout(top_row)
+        self._wheel_page_layout.addWidget(self._prim_top_row)
         wheels_layout = QHBoxLayout()
         wheels_layout.setContentsMargins(4, 6, 4, 8)
         wheels_layout.setSpacing(12)
@@ -898,14 +909,26 @@ class GradingPanel(QWidget):
         for wheel in (self.lift_wheel, self.gamma_wheel, self.gain_wheel):
             wheel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             wheels_layout.addWidget(wheel, 1)
-        wheel_page_layout.addLayout(wheels_layout, 1)
+        self._wheel_page_layout.addLayout(wheels_layout, 1)
         bottom_row = QHBoxLayout()
         bottom_row.setContentsMargins(4, 2, 4, 2)
         bottom_row.setSpacing(2)
         for control in (self.vibrance_slider, self.shadow_slider, self.highlights_slider,
                         self.sat_slider, self.hue_slider):
             bottom_row.addWidget(control, 1)
-        wheel_page_layout.addLayout(bottom_row)
+        self._prim_bottom_row = QWidget()
+        self._prim_bottom_row.setLayout(bottom_row)
+        self._wheel_page_layout.addWidget(self._prim_bottom_row)
+
+        # Color Bars 页：与色轮页共享上下两排参数行（切页时移动容器），
+        # 中间为达芬奇式 YRGB 竖直条。
+        self.color_bars_panel = ColorBarsPanel()
+        self._bars_page = QWidget()
+        self._bars_page.setStyleSheet("QWidget { background-color: #28282e; }")
+        self._bars_page_layout = QVBoxLayout(self._bars_page)
+        self._bars_page_layout.setContentsMargins(0, 0, 0, 0)
+        self._bars_page_layout.setSpacing(1)
+        self._bars_page_layout.addWidget(self.color_bars_panel, 1)
 
         kf_corner = QWidget()
         kf_corner_layout = QHBoxLayout(kf_corner)
@@ -929,14 +952,26 @@ class GradingPanel(QWidget):
         self._grading_tabs.addTab(
             self._wheel_page, I18N.tr("panel.color_wheel", "色轮"))
         self._grading_tabs.addTab(
+            self._bars_page, I18N.tr("panel.color_bars", "Color Bars"))
+        self._grading_tabs.addTab(
             self.tonal_saturation_panel,
             I18N.tr("panel.tonal_saturation", "色调饱和度"))
+        self._grading_tabs.currentChanged.connect(self._on_grading_tab_changed)
         layout.addWidget(self._grading_tabs, stretch=1)
 
         # Connections
         self.lift_wheel.changed.connect(self._on_param_changed)
         self.gamma_wheel.changed.connect(self._on_param_changed)
         self.gain_wheel.changed.connect(self._on_param_changed)
+
+        # 色轮 ↔ Color Bars 双向同步：同一组 (hue, sat, brightness)。
+        for wheel, column in ((self.lift_wheel, self.color_bars_panel.lift),
+                              (self.gamma_wheel, self.color_bars_panel.gamma),
+                              (self.gain_wheel, self.color_bars_panel.gain)):
+            wheel.changed.connect(lambda h, s, b, c=column: c.set_hsv(h, s, b))
+            column.changed.connect(lambda h, s, b, w=wheel: self._on_bars_changed(w, h, s, b))
+        self.color_bars_panel.interaction_started.connect(self.interaction_started.emit)
+        self.color_bars_panel.interaction_ended.connect(self.interaction_ended.emit)
 
         self.lift_wheel.interaction_started.connect(self.interaction_started.emit)
         self.lift_wheel.interaction_ended.connect(self.interaction_ended.emit)
@@ -961,6 +996,28 @@ class GradingPanel(QWidget):
         return _PrimaryValueRow(label, min_val, max_val, scale=scale,
                                 offset=offset, decimals=decimals, accent=accent)
 
+    def _on_grading_tab_changed(self, index: int) -> None:
+        """上下参数行在色轮页与 Color Bars 页之间移动；其余页隐藏。"""
+        page = self._grading_tabs.widget(index)
+        if page is self._wheel_page:
+            self._wheel_page_layout.insertWidget(0, self._prim_top_row)
+            self._wheel_page_layout.addWidget(self._prim_bottom_row)
+        elif page is self._bars_page:
+            self._bars_page_layout.insertWidget(0, self._prim_top_row)
+            self._bars_page_layout.addWidget(self._prim_bottom_row)
+        else:
+            self._prim_top_row.setParent(None)
+            self._prim_bottom_row.setParent(None)
+
+    def _on_bars_changed(self, wheel: ColorWheel, hue: float, sat: float,
+                         brightness: float) -> None:
+        wheel.blockSignals(True)
+        try:
+            wheel.set_hsv(hue, sat, brightness)
+        finally:
+            wheel.blockSignals(False)
+        self._on_param_changed()
+
     def _on_slider_value_changed(self) -> None:
         """滑块值变化时的节流处理。
         
@@ -982,6 +1039,7 @@ class GradingPanel(QWidget):
             return
         for wheel in (self.lift_wheel, self.gamma_wheel, self.gain_wheel):
             wheel.flush_pending_changes()
+        self.color_bars_panel.flush_pending_changes()
         if self._grading_update_timer.isActive():
             self._grading_update_timer.stop()
             self._emit_grading_changed()
@@ -1054,6 +1112,17 @@ class GradingPanel(QWidget):
         finally:
             wheel.blockSignals(False)
 
+        column = {
+            "lift": self.color_bars_panel.lift,
+            "gamma": self.color_bars_panel.gamma,
+            "gain": self.color_bars_panel.gain,
+        }[wheel_name]
+        column.blockSignals(True)
+        try:
+            column.set_hsv(hue, saturation, brightness)
+        finally:
+            column.blockSignals(False)
+
         if emit:
             self._emit_grading_changed()
 
@@ -1064,20 +1133,24 @@ class GradingPanel(QWidget):
                    *, highlights: float = 0.0) -> None:
         self._syncing_ui = True
         self._grading_update_timer.stop()
-        
+
         for w in [self.lift_wheel, self.gamma_wheel, self.gain_wheel]:
             w.blockSignals(True)
+        self.color_bars_panel.blockSignals(True)
         for s in [
             self.exp_slider, self.temp_slider, self.tint_slider,
             self.contrast_slider, self.shadow_slider, self.highlights_slider, self.sat_slider,
             self.vibrance_slider, self.mid_detail_slider, self.hue_slider
         ]:
             s.blockSignals(True)
-        
+
         self.lift_wheel.set_hsv(*lift)
         self.gamma_wheel.set_hsv(*gamma)
         self.gain_wheel.set_hsv(*gain)
-        
+        self.color_bars_panel.lift.set_hsv(*lift)
+        self.color_bars_panel.gamma.set_hsv(*gamma)
+        self.color_bars_panel.gain.set_hsv(*gain)
+
         for s, v in [
             (self.exp_slider, exp), (self.temp_slider, temp), (self.tint_slider, tint),
             (self.contrast_slider, contrast), (self.shadow_slider, shadow),
@@ -1086,54 +1159,60 @@ class GradingPanel(QWidget):
             (self.mid_detail_slider, mid_det), (self.hue_slider, hue)
         ]:
             s.setValue(v)
-            
+
         for w in [self.lift_wheel, self.gamma_wheel, self.gain_wheel]:
             w.blockSignals(False)
+        self.color_bars_panel.blockSignals(False)
         for s in [
             self.exp_slider, self.temp_slider, self.tint_slider,
             self.contrast_slider, self.shadow_slider, self.highlights_slider, self.sat_slider,
             self.vibrance_slider, self.mid_detail_slider, self.hue_slider
         ]:
             s.blockSignals(False)
-        
+
         self._syncing_ui = False
-        
+
         if emit:
             self._emit_grading_changed()
 
     def reset_all(self) -> None:
         self._syncing_ui = True
         self._grading_update_timer.stop()
-        
+
         for w in [self.lift_wheel, self.gamma_wheel, self.gain_wheel]:
             w.blockSignals(True)
+        self.color_bars_panel.blockSignals(True)
         for s in [
             self.exp_slider, self.temp_slider, self.tint_slider,
             self.contrast_slider, self.shadow_slider, self.highlights_slider, self.sat_slider,
             self.vibrance_slider, self.mid_detail_slider, self.hue_slider
         ]:
             s.blockSignals(True)
-        
+
         self.lift_wheel.reset()
         self.gamma_wheel.reset()
         self.gain_wheel.reset()
-        
+        self.color_bars_panel.lift.reset()
+        self.color_bars_panel.gamma.reset()
+        self.color_bars_panel.gain.reset()
+
         for s in [
             self.exp_slider, self.temp_slider, self.tint_slider,
             self.contrast_slider, self.shadow_slider, self.highlights_slider, self.sat_slider,
             self.vibrance_slider, self.mid_detail_slider, self.hue_slider
         ]:
             s.reset()
-        
+
         for w in [self.lift_wheel, self.gamma_wheel, self.gain_wheel]:
             w.blockSignals(False)
+        self.color_bars_panel.blockSignals(False)
         for s in [
             self.exp_slider, self.temp_slider, self.tint_slider,
             self.contrast_slider, self.shadow_slider, self.highlights_slider, self.sat_slider,
             self.vibrance_slider, self.mid_detail_slider, self.hue_slider
         ]:
             s.blockSignals(False)
-        
+
         self._syncing_ui = False
 
         self._on_param_changed()

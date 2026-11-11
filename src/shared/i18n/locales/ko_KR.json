@@ -368,6 +368,7 @@
     "denoise": "노이즈 감소",
     "deblur": "블러 제거",
     "color_wheel": "컬러 휠",
+    "color_bars": "컬러 바",
     "curves": "커브",
     "hsl_curves": "HSL 커브",
     "color_mapping": "컬러 매핑",

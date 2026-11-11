@@ -368,6 +368,7 @@
     "denoise": "Rauschreduzierung",
     "deblur": "Entschwächen",
     "color_wheel": "Farbräder",
+    "color_bars": "Farbbalken",
     "curves": "Kurven",
     "hsl_curves": "HSL-Kurven",
     "color_mapping": "Farbzuordnung",
