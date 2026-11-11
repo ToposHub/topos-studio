@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import QTabBar
 
+from src.shared.ui.panel_divider import install_tab_divider_overlay
+
 __all__ = [
     "DOCK_TAB_BAR_STYLE",
     "apply_dock_tab_bar_style",
@@ -76,3 +78,4 @@ def apply_dock_tab_bar_style(tab_bar: QTabBar) -> None:
         tab_bar.setProperty("_topos_dock_tab_style_applied", True)
     tab_bar.updateGeometry()
     tab_bar.update()
+    install_tab_divider_overlay(tab_bar)

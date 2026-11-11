@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSplitter, QWidget
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.features.deliver.core.video_batch_export_controller import (
     VideoBatchExportController,
 )
@@ -80,16 +81,9 @@ class DeliverWorkspace(QWidget):
         self._run_failed: bool = False
         # Top row: the real Edit viewer occupies the large area and the queue
         # sits in a narrower Resolve-style right column.
-        self._edit_preview_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self._edit_preview_splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         self._edit_preview_splitter.setObjectName("DeliverEditPreviewSplitter")
         self._edit_preview_splitter.setChildrenCollapsible(False)
-        self._edit_preview_splitter.setHandleWidth(1)
-        self._edit_preview_splitter.setStyleSheet(
-            f"QSplitter#DeliverEditPreviewSplitter::handle {{"
-            f"background: {C.PANEL_DIVIDER}; }}"
-            f"QSplitter#DeliverEditPreviewSplitter::handle:hover {{"
-            f"background: {C.PANEL_DIVIDER}; }}"
-        )
         self._edit_preview_placeholder = self._make_placeholder(
             "Edit Program Viewer will appear here"
         )
@@ -104,16 +98,9 @@ class DeliverWorkspace(QWidget):
         self._timeline_placeholder = self._make_placeholder(
             "Edit Timeline will appear here"
         )
-        self._right_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self._right_splitter = PanelSplitter(Qt.Orientation.Vertical, self)
         self._right_splitter.setObjectName("DeliverRightSplitter")
         self._right_splitter.setChildrenCollapsible(False)
-        self._right_splitter.setHandleWidth(1)
-        self._right_splitter.setStyleSheet(
-            f"QSplitter#DeliverRightSplitter::handle {{"
-            f"background: {C.PANEL_DIVIDER}; }}"
-            f"QSplitter#DeliverRightSplitter::handle:hover {{"
-            f"background: {C.PANEL_DIVIDER}; }}"
-        )
         self._right_splitter.addWidget(self._edit_preview_splitter)
         self._right_splitter.addWidget(self._timeline_placeholder)
         self._right_splitter.setStretchFactor(0, 0)
@@ -130,21 +117,14 @@ class DeliverWorkspace(QWidget):
         self._settings_panel.setMinimumWidth(420)
         self._batch_panel.setMinimumWidth(390)
 
-        self._splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self._splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         self._splitter.setObjectName("DeliverHorizontalSplitter")
         self._splitter.setChildrenCollapsible(False)
-        self._splitter.setHandleWidth(1)
         self._splitter.addWidget(self._settings_panel)
         self._splitter.addWidget(self._right_splitter)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
         self._splitter.setSizes([440, 1000])
-        self._splitter.setStyleSheet(
-            "QSplitter#DeliverHorizontalSplitter::handle {"
-            f"background: {C.PANEL_DIVIDER}; }}"
-            "QSplitter#DeliverHorizontalSplitter::handle:hover {"
-            f"background: {C.PANEL_DIVIDER}; }}"
-        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

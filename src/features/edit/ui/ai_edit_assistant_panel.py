@@ -37,7 +37,6 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QApplication,
-    QDockWidget,
     QFrame,
     QFileDialog,
     QHBoxLayout,
@@ -55,6 +54,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from src.shared.ui.panel_divider import PanelDockWidget
 
 from src.features.edit.ai_editing.assistant_events import (
     AssistantState,
@@ -434,7 +435,7 @@ class _AssistantMarkdownView(QTextBrowser):
         document_height = document.documentLayout().documentSize().height()
         self.setFixedHeight(max(1, int(math.ceil(document_height))))
 
-class AiEditAssistantPanel(QDockWidget):
+class AiEditAssistantPanel(PanelDockWidget):
     """AI 编辑助手主面板。
 
     只发 signal；不持有 AI session 业务状态（那在 controller/service 层）。

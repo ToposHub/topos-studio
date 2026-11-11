@@ -37,13 +37,13 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
     QPushButton,
-    QSplitter,
     QStackedLayout,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import tr
 from src.features.ai_workflow.ui.workflow_canvas_adapter import WorkflowCanvasAdapter
 
@@ -214,11 +214,11 @@ class WorkflowPanel(QWidget):
         layout.addWidget(self.plan_tabs)
 
         # 主区：左右分（左=画布+Run Drawer 上下分，右=Inspector）
-        outer_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        outer_splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         outer_splitter.setChildrenCollapsible(False)
 
         # 左：上下分（画布 / Run Drawer）
-        main_splitter = QSplitter(Qt.Orientation.Vertical, outer_splitter)
+        main_splitter = PanelSplitter(Qt.Orientation.Vertical, outer_splitter)
         main_splitter.setChildrenCollapsible(False)
 
         # 画布区：stacked（模板库 / 空态 / 参数表单 / 画布）

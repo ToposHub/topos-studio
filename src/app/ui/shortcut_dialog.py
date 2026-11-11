@@ -15,7 +15,7 @@ import logging
 from typing import List, Optional, Dict
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QTreeWidget,
+    QDialog, QVBoxLayout, QHBoxLayout, QTreeWidget,
     QTreeWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView,
     QPushButton, QLineEdit, QLabel, QKeySequenceEdit, QWidget,
     QAbstractItemView, QMessageBox, QStyledItemDelegate, QStyleOptionViewItem,
@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QKeySequence, QColor
 from PyQt6.QtCore import Qt
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.ui.shortcut_manager import ShortcutManager, ShortcutAction
 from src.shared.i18n.i18n import I18N
 
@@ -188,7 +189,7 @@ class ShortcutDialog(QDialog):
         main_layout.addWidget(search_container)
 
         # ── Main Content: Splitter ──
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = PanelSplitter(Qt.Orientation.Horizontal)
 
         # Left: Category Tree
         self._category_tree = QTreeWidget()
@@ -570,14 +571,6 @@ class ShortcutDialog(QDialog):
                 padding: 2px 4px;
                 background: transparent;
                 border: none;
-            }
-
-            /* === Splitter === */
-            QSplitter::handle {
-                background-color: #1a1a1a;
-            }
-            QSplitter::handle:horizontal {
-                width: 2px;
             }
 
             /* === Scrollbars (match global) === */

@@ -18,10 +18,11 @@ from typing import Optional
 from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QSplitter, QToolBar,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QToolBar,
     QToolButton, QVBoxLayout, QWidget,
 )
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.assets.icon_manager import get_icon, IconColors
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import (
@@ -77,8 +78,6 @@ class SplineCurveTree(QWidget):
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
                        I18N.tr("spline.empty", "No curves"))
             return
-        p.setPen(QPen(QColor(C.BORDER_DARK)))
-        p.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
         row_h = 22
         for i, c in enumerate(rows):
             y = i * row_h
@@ -217,10 +216,7 @@ class SplinePanel(QWidget):
 
         root.addWidget(self._build_toolbar())
 
-        self._splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        self._splitter.setHandleWidth(1)
-        self._splitter.setStyleSheet(
-            f"QSplitter::handle {{ background-color: {C.PANEL_DIVIDER}; }}")
+        self._splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
 
         self._tree = SplineCurveTree(self._model, parent=self._splitter)
         self._tree.setStyleSheet(COMPOSITE_KEYFRAMES_TREE_STYLE)

@@ -29,10 +29,11 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QComboBox, QFrame, QLabel, QLineEdit, QPushButton,
-    QSizePolicy, QSplitter, QMenu, QToolBar, QToolButton, QVBoxLayout,
+    QSizePolicy, QMenu, QToolBar, QToolButton, QVBoxLayout,
     QWidget,
 )
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import (
     C, COMPOSITE_KEYFRAMES_COMBO_STYLE, COMPOSITE_KEYFRAMES_ICON_BTN_STYLE,
@@ -780,10 +781,7 @@ class KeyframesPanel(QWidget):
         root.addWidget(self._toolbar)
 
         # Main area: left tree | right editor host, sharing vertical scroll.
-        self._splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        self._splitter.setHandleWidth(1)
-        self._splitter.setStyleSheet(
-            f"QSplitter::handle {{ background-color: {C.PANEL_DIVIDER}; }}")
+        self._splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         self._splitter_default_applied = False
         self._splitter_user_moved = False
         self._splitter_applying_defaults = False
@@ -793,12 +791,9 @@ class KeyframesPanel(QWidget):
         # expression editor. Keeping this vertical splitter inside the right
         # horizontal pane prevents the editor from taking any layer-column
         # space, while still allowing the user to resize it.
-        self._right_splitter = QSplitter(Qt.Orientation.Vertical, self._splitter)
+        self._right_splitter = PanelSplitter(Qt.Orientation.Vertical, self._splitter)
         self._right_splitter.setObjectName("KeyframesRightSplitter")
-        self._right_splitter.setHandleWidth(3)
         self._right_splitter.setChildrenCollapsible(True)
-        self._right_splitter.setStyleSheet(
-            f"QSplitter::handle {{ background-color: {C.PANEL_DIVIDER}; }}")
         self._right_splitter.splitterMoved.connect(
             self._on_right_splitter_moved)
 

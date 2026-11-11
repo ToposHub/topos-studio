@@ -15,7 +15,7 @@ Features:
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QWidget, QGroupBox,
-    QListWidget, QListWidgetItem, QStackedWidget, QSplitter,
+    QListWidget, QListWidgetItem, QStackedWidget,
     QScrollArea, QSpinBox, QSlider, QCheckBox, QLineEdit,
     QFileDialog, QMessageBox, QApplication
 )
@@ -30,6 +30,7 @@ import platform
 import subprocess
 import threading
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import apply_combo_dropdown_style, C
 from src.shared.ui.widgets import ChevronComboBox
@@ -257,7 +258,7 @@ class PreferencesDialog(QDialog):
         main_layout.addWidget(title_bar)
 
         # Splitter: category list | content pages
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = PanelSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("PrefSplitter")
         splitter.setChildrenCollapsible(False)
 
@@ -2616,17 +2617,10 @@ class PreferencesDialog(QDialog):
                 border: none;
             }}
 
-            /* === Splitter === */
-            QSplitter#PrefSplitter::handle {{
-                background-color: {C.BG_DARKEST};
-                width: 1px;
-            }}
-
             /* === Category List === */
             QListWidget#PrefCategoryList {{
                 background-color: {C.BG_DARK};
                 border: none;
-                border-right: 1px solid {C.BG_DARKEST};
                 outline: none;
                 padding: 8px 0px;
                 font-size: 13px;

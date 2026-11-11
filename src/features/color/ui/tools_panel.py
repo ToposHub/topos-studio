@@ -2,10 +2,11 @@
 # AUD-25708：LutPanel 的创建代码被注释停用后，信号连接与
 # update_from_layer 中残留的 lut_panel 引用会让类一旦实例化即抛
 # AttributeError；同步注释停用这些引用，保持"存档但可实例化"。
-from PyQt6.QtWidgets import QWidget, QTabWidget, QVBoxLayout, QSplitter, QLabel, QFrame
+from PyQt6.QtWidgets import QWidget, QTabWidget, QVBoxLayout, QLabel, QFrame
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 import numpy as np
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
 from src.features.color.ui.color_wheel import GradingPanel
 from src.features.color.ui.mixer_panel import MixerPanel
@@ -14,7 +15,6 @@ from src.features.color.ui.blur_sharpen_panel import BlurSharpenPanel
 from src.features.color.ui.mask_panel import MaskPanel
 from src.shared.ui.widgets.curves_widget import CurvesWidget
 from src.features.color.ui.scope_panel import ScopePanel
-from src.shared.ui.style_sheet import C
 
 class ToolsPanel(QWidget):
     # Proxy signals to MainWindow
@@ -44,16 +44,12 @@ class ToolsPanel(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(main_layout)
 
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.splitter.setHandleWidth(2)
-        self.splitter.setStyleSheet(
-            f"QSplitter::handle {{ background: {C.PANEL_DIVIDER}; }}"
-        )
+        self.splitter = PanelSplitter(Qt.Orientation.Horizontal)
 
         # Common tab style (Beautified with wider tabs)
         tab_style = """
             QTabWidget::pane { 
-                border-top: 2px solid #333; 
+                border: none;
                 background: #181818; 
             }
             QTabBar::tab { 

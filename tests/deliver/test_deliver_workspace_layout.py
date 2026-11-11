@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 
 from src.features.deliver.ui.deliver_workspace import DeliverWorkspace
 from src.shared.ui.widgets import ChevronComboBox
+from src.shared.ui.panel_splitter import PANEL_RESIZE_EXTENT, PanelSplitter
 
 
 @pytest.fixture(scope="module")
@@ -77,7 +78,8 @@ def test_deliver_workspace_contains_settings_left_of_queue(qapp):
         workspace.timeline_splitter,
         workspace.edit_preview_splitter,
     ):
-        assert splitter.handleWidth() == 1
+        assert isinstance(splitter, PanelSplitter)
+        assert splitter.handleWidth() == PANEL_RESIZE_EXTENT
         assert "margin:" not in splitter.styleSheet()
     assert workspace.settings_panel.objectName() == "VideoDeliverSettingsPanel"
     assert workspace.batch_panel.objectName() == "VideoBatchExportPanel"

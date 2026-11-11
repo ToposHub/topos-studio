@@ -13,9 +13,10 @@ from collections.abc import Callable
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from src.shared.ui.panel_splitter import PanelSplitter
 from src.features.color.core.curves_soft_clip import (
     normalize_curves_edit,
     normalize_curves_soft_clip,
@@ -98,14 +99,8 @@ class CurvesPanel(QWidget):
         curves_widget.btn_container.hide()
         layout.addLayout(toolbar)
 
-        self.body = QSplitter(Qt.Orientation.Horizontal, self)
+        self.body = PanelSplitter(Qt.Orientation.Horizontal, self)
         self.body.setChildrenCollapsible(False)
-        self.body.setHandleWidth(8)
-        self.body.setStyleSheet("""
-            QSplitter::handle { background: transparent; }
-            QSplitter::handle:hover { background: rgba(255, 122, 0, 72); }
-            QSplitter::handle:pressed { background: rgba(255, 122, 0, 128); }
-        """)
         self.pages = QStackedWidget(self)
         self.custom_page = QWidget(self.pages)
         custom_layout = QVBoxLayout(self.custom_page)
