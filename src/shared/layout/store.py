@@ -318,6 +318,20 @@ class LayoutStore:
             if migrated_id not in filtered:
                 filtered.append(migrated_id)
 
+        # Expand the retired Color Mapping container into independent tools.
+        if "color.mapping" in filtered:
+            filtered = list(dict.fromkeys(
+                replacement
+                for panel_id in filtered
+                for replacement in (("color.warper", "color.mixer")
+                                    if panel_id == "color.mapping" else (panel_id,))
+            ))
+        # Warper inherits the former container's floating geometry; a second
+        # overlapping Mixer window would not represent the saved layout.
+        floating = dict(profile.floating_panels)
+        if "color.mapping" in floating:
+            floating.setdefault("color.warper", floating.pop("color.mapping"))
+
         # Filter by enabled features (using panel_id prefix convention)
         # Panel IDs follow "{feature}.{panel_name}" format
         if enabled_features is not None:
@@ -337,10 +351,10 @@ class LayoutStore:
                     "Skipped %d missing panels during restore", skipped
                 )
 
-        if tuple(filtered) == profile.visible_panels:
+        if tuple(filtered) == profile.visible_panels and floating == profile.floating_panels:
             return profile
 
-        return profile.with_visible_panels(filtered)
+        return profile.with_visible_panels(filtered).with_floating_panels(floating)
 
     @staticmethod
     def _panel_feature_enabled(
@@ -380,7 +394,8 @@ class LayoutStore:
                 "workspace.layers",
                 "color.grading",
                 "color.curves",
-                "color.mapping",
+                "color.warper",
+                "color.mixer",
                 "color.lut",
                 "color.analysis",
                 "color.masks",
@@ -394,7 +409,8 @@ class LayoutStore:
                 "workspace.layers",
                 "color.grading",
                 "color.curves",
-                "color.mapping",
+                "color.warper",
+                "color.mixer",
                 "color.analysis",
             ],
             "Edit": [

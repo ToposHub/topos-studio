@@ -673,7 +673,7 @@ def test_switch_schedules_color_composite_deliver_migrations(
     monkeypatch.setattr(pc, "QTimer", recorder)
     host = _PageHost(current_page="Library")
     host._migrate_color_grading_dock_height = MagicMock()
-    host._migrate_color_mapping_dock_layout = MagicMock()
+    host._migrate_color_remapping_dock_layout = MagicMock()
     host._migrate_composite_scopes_dock_visibility = MagicMock()
     host._migrate_deliver_layout = MagicMock()
 
@@ -683,7 +683,7 @@ def test_switch_schedules_color_composite_deliver_migrations(
 
     scheduled = [callback for _ms, callback in recorder.calls]
     assert host._migrate_color_grading_dock_height in scheduled
-    assert host._migrate_color_mapping_dock_layout in scheduled
+    assert host._migrate_color_remapping_dock_layout in scheduled
     assert host._migrate_composite_scopes_dock_visibility in scheduled
     assert host._migrate_deliver_layout in scheduled
 

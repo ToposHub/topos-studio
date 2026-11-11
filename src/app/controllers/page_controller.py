@@ -472,8 +472,8 @@ class PageManagementMixin:
             # The Color Wheel dock needs the restored splitter geometry to
             # settle before the legacy height can be repaired.
             QTimer.singleShot(50, self._migrate_color_grading_dock_height)
-        if page_name == "Color" and hasattr(self, "_migrate_color_mapping_dock_layout"):
-            QTimer.singleShot(0, self._migrate_color_mapping_dock_layout)
+        if page_name == "Color" and hasattr(self, "_migrate_color_remapping_dock_layout"):
+            QTimer.singleShot(0, self._migrate_color_remapping_dock_layout)
         if page_name == "Composite" and hasattr(self, "_migrate_composite_scopes_dock_visibility"):
             # Scopes was available before it entered the panel registry. Add
             # it to existing Composite layouts once, after restoreState().

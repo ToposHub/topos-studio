@@ -2,7 +2,7 @@
 
 日期：2026-11-12。状态：**全部为后续待实施任务，本文件不代表后端能力已经实现。**
 
-本轮范围是调色页 Color Mapping 下的 Color Warper UI 与交互。参考用户截图及本机已打开的 DaVinci Resolve Studio 20；面板背景、通用按钮、下拉与数值框使用 Topos 全局样式。本计划记录把这些 UI 接入真实图像处理、工程模型和渲染链所需工作。新模式的局部网格／笔画／Pin 显示不等于图像已生效；不得将 UI 展示状态误认为可保存或可导出的调色结果。
+本轮范围是调色页 Color Warper UI 与交互。按用户后续要求，Warper和Mixer已从原Color Mapping容器拆成独立停靠面板；原有两个控件实例和信号继续复用。参考用户截图及本机已打开的 DaVinci Resolve Studio 20；面板背景、通用按钮、下拉与数值框使用 Topos 全局样式。本计划记录把这些 UI 接入真实图像处理、工程模型和渲染链所需工作。新模式的局部网格／笔画／Pin 显示不等于图像已生效；不得将 UI 展示状态误认为可保存或可导出的调色结果。
 
 ## 1. 当前事实、范围与实机基线
 
@@ -16,7 +16,7 @@
 | `src/features/color/ui/warper_tools.py` | MeshTools/StrokeTools、范围条、带component的数值手势信号 | 复用全局DragValue/ToggleSwitch/ChevronComboBox；不自行提交工程 |
 | `src/shared/ui/widgets/warper_icons.py` | Warper专用矢量图标绘制 | 无图像处理职责，不引入GPU资源 |
 | `src/features/color/ui/warper_panel.py` | Warper 控件封装、参数回填、reset、向外转发交互信号 | 新 UI 状态和命令经独立信号传递；保持旧信号兼容 |
-| `src/features/color/ui/color_mapping_panel.py` | 复用 Warper / Mixer 实例，管理外层页签 | 不新建第二套 Warper controller 或模型 |
+| `src/features/color/module.py`、`src/app/controllers/dock_layout_controller.py` | 独立注册`color.warper`/`color.mixer`与`dock_warper`/`dock_mixer`，管理停靠和布局迁移 | 组合容器已删除；不新建第二套Warper controller或模型 |
 | `src/app/main_window.py` | 创建面板；连接旧 warper_changed / interaction 信号 | 仅组装新的 host 适配；不嵌入色彩算法 |
 | `src/app/controllers/layer_controller.py` | `on_warper_changed` 调引擎，切层回填、预览请求、播放缓存失效 | 选择当前 clip / corrector / layer 的权威提交入口 |
 | `src/app/controllers/menu_toolbar_controller.py` | `on_interaction_started/ended`，历史快照、图手势结束、自动保存 | 新手势不能另做一套互相竞争的 undo 栈 |

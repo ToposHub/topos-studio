@@ -29,7 +29,7 @@ docks (no GL, no engine, no modal dialogs):
 * one-shot migrations not already covered elsewhere
   (``_migrate_edit_info_dock_visibility``,
   ``_migrate_composite_scopes_dock_visibility``,
-  ``_migrate_color_mapping_dock_layout``)
+  ``_migrate_color_remapping_dock_layout``)
 
 Suspected src bugs found while writing these tests are recorded in
 ``docs/testcoverage/2026-09-28/BUGS-agent-B4.md`` (BUG-B4-xx); nothing in
@@ -49,6 +49,7 @@ from typing import Any, Callable, Iterator, List, Optional, Sequence, Set, Tuple
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from pytestqt.qtbot import QtBot
 from PyQt6.QtCore import QByteArray, QPoint, Qt
 from PyQt6.QtWidgets import (QComboBox, QDockWidget, QMainWindow, QMenu,
                              QStatusBar, QTabBar, QToolButton, QWidget)
@@ -58,8 +59,8 @@ from src.app.controllers.dock_layout_controller import (
     DockLayoutMixin,
     FloatingDockTitleBar,
     _COLOR_TOOL_DOCK_MAX_HEIGHT,
-    _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY,
-    _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_VERSION,
+    _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_KEY,
+    _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION,
     _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY,
     _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_VERSION,
     _EDIT_INFO_DOCK_LAYOUT_MIGRATION_KEY,
@@ -141,7 +142,8 @@ _BASE_DOCKS: dict = {
     "dock_deblur": ("dockDeblur", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_grading": ("dockGrading", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_curves": ("dockCurves", Qt.DockWidgetArea.BottomDockWidgetArea),
-    "dock_color_mapping": ("dockColorMapping", Qt.DockWidgetArea.BottomDockWidgetArea),
+    "dock_warper": ("dockColorMapping", Qt.DockWidgetArea.BottomDockWidgetArea),
+    "dock_mixer": ("dockMixer", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_audio_mixer": ("dockAudioMixer", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_effects": ("dockBlurSharpen", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_grain": ("dockGrain", Qt.DockWidgetArea.BottomDockWidgetArea),
@@ -1260,7 +1262,7 @@ def test_restore_layout_state_geometry_and_page_state(
     _set_work_mode(host, "video", monkeypatch)
     host.current_page = "Color"
     # Keep the deferred Color migrations out of the picture.
-    host.config_manager.set(_COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY, 1)
+    host.config_manager.set(_COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_KEY, 1)
 
     host.dock_library.setVisible(False)
     state_hex = _hex_of(host.saveState())
@@ -1456,6 +1458,45 @@ def test_apply_layout_without_blob_is_noop(host: _DockHost) -> None:
     assert host.status_bar.currentMessage() == ""
 
 
+@pytest.mark.parametrize("page", ["Edit", "Composite"])
+def test_color_only_named_layout_cannot_expose_color_tools_on_other_pages(
+        layout_host: _DockHost, page: str) -> None:
+    layout_host.current_page = "Color"
+    layout_host.dock_warper.show()
+    layout_host.dock_mixer.show()
+    state_hex = _hex_of(layout_host.saveState())
+    layout_host.db.blob = (_hex_of(layout_host.saveGeometry()), state_hex, {"Color": state_hex})
+    layout_host.current_page = page
+    layout_host._enforce_page_dock_visibility()
+
+    layout_host.apply_layout("Legacy Color")
+
+    for dock in (layout_host.dock_warper, layout_host.dock_mixer):
+        assert dock.isHidden()
+        assert not dock.toggleViewAction().isEnabled()
+    assert layout_host.page_layouts["Color"] == _from_hex(state_hex)
+
+
+def test_leaving_color_collapses_expanded_warper_without_losing_selection(
+        layout_host: _DockHost) -> None:
+    from src.features.color.ui.warper_panel import WarperPanel
+
+    panel = WarperPanel()
+    layout_host.warper_panel = panel
+    layout_host.dock_warper.setWidget(panel)
+    panel.warper.selected = {(2, 1)}
+    panel.toggle_expanded()
+    assert panel._dialog is not None
+
+    layout_host.current_page = "Edit"
+    layout_host._enforce_page_dock_visibility()
+
+    assert panel._dialog is None
+    assert panel.surface.parent() is panel
+    assert panel.warper.selected == {(2, 1)}
+    assert layout_host.dock_warper.isHidden()
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # O. Dock context menu
 # ═══════════════════════════════════════════════════════════════════════
@@ -1607,29 +1648,89 @@ def test_migrate_composite_scopes_dock_visibility_one_shot(
     assert _hidden(host, "dock_composite_scope"), "one-shot: user choice survives"
 
 
-def test_migrate_color_mapping_dock_layout_force(
+def test_migrate_color_remapping_dock_layout_force(
         layout_host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Color-mapping migration tabifies docks, so it runs on an unshown host."""
+    """The split adds Mixer but preserves the former container's Warper layout."""
     _set_product_mode(layout_host, "studio", monkeypatch)
     layout_host.current_page = "Color"
     # Visible tab anchors (Qt only registers tab groups on shown docks in
     # the unshown-window regime this test runs in).
     layout_host.dock_curves.setVisible(True)
     layout_host.dock_effects.setVisible(True)
-    layout_host.dock_color_mapping.setVisible(False)
+    layout_host.dock_warper.setVisible(True)
+    layout_host.tabifyDockWidget(layout_host.dock_curves, layout_host.dock_warper)
+    layout_host.dock_mixer.setVisible(False)
     layout_host.config_manager.set("page_layouts", {"Color": "stale"})
 
-    layout_host._migrate_color_mapping_dock_layout(force=True)
+    layout_host._migrate_color_remapping_dock_layout(force=True)
 
-    assert not _hidden(layout_host, "dock_color_mapping")
-    assert (layout_host.dock_color_mapping
+    assert not _hidden(layout_host, "dock_warper")
+    assert (layout_host.dock_warper
             in layout_host.tabifiedDockWidgets(layout_host.dock_curves))
-    assert layout_host.config_manager.get(_COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY) == \
-        _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_VERSION
+    assert layout_host.dock_mixer in layout_host.tabifiedDockWidgets(layout_host.dock_warper)
+    assert not _hidden(layout_host, "dock_mixer")
+    assert layout_host.config_manager.get(_COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_KEY) == \
+        _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION
     assert layout_host.page_layouts.get("Color") is not None
     assert layout_host.config_manager.get("page_layouts", {}).get("Color") != "stale"
 
     # Already migrated (no force): user arrangement untouched.
-    layout_host.dock_color_mapping.setVisible(False)
-    layout_host._migrate_color_mapping_dock_layout()
-    assert _hidden(layout_host, "dock_color_mapping")
+    layout_host.dock_warper.setVisible(False)
+    layout_host.dock_mixer.setVisible(False)
+    layout_host._migrate_color_remapping_dock_layout()
+    assert _hidden(layout_host, "dock_warper")
+    assert _hidden(layout_host, "dock_mixer")
+
+
+def test_split_migration_preserves_hidden_floating_warper(layout_host: _DockHost) -> None:
+    layout_host.current_page = "Color"
+    layout_host.config_manager.set("color_resource_browser_layout_v1", 1)
+    layout_host.dock_warper.setFloating(True)
+    layout_host.dock_warper.resize(700, 450)
+    layout_host.dock_warper.hide()
+    geometry = layout_host.dock_warper.geometry()
+    layout_host._migrate_color_remapping_dock_layout()
+    assert layout_host.dock_warper.isFloating()
+    assert layout_host.dock_warper.isHidden()
+    assert layout_host.dock_warper.geometry() == geometry
+    assert not layout_host.dock_mixer.isFloating()
+    assert layout_host.dock_mixer not in layout_host.tabifiedDockWidgets(layout_host.dock_warper)
+
+
+def test_legacy_combined_qt_state_restores_directly_to_independent_warper(
+        layout_host: _DockHost, qtbot: QtBot) -> None:
+    legacy = QMainWindow()
+    qtbot.addWidget(legacy)
+    mapping = QDockWidget("Color Mapping", legacy)
+    mapping.setObjectName("dockColorMapping")
+    mapping.setWidget(QWidget())
+    legacy.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, mapping)
+    mapping.setFloating(True)
+    mapping.resize(700, 450)
+    mapping.hide()
+    state = legacy.saveState()
+    assert layout_host.restoreState(state)
+    assert layout_host.dock_warper.isFloating()
+    assert layout_host.dock_warper.isHidden()
+    assert layout_host.dock_warper.size() == mapping.size()
+
+
+@pytest.mark.parametrize("work_mode", ["image", "video"])
+def test_split_tools_visibility_survives_color_page_roundtrip(
+        layout_host: _DockHost, work_mode: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_work_mode(layout_host, work_mode, monkeypatch)
+    layout_host.current_page = "Color"
+    layout_host.dock_warper.show()
+    layout_host.dock_mixer.hide()
+    state = layout_host.saveState()
+    layout_host.current_page = "Edit"
+    layout_host._enforce_page_dock_visibility()
+    for dock in (layout_host.dock_warper, layout_host.dock_mixer):
+        assert dock.isHidden() and not dock.toggleViewAction().isEnabled()
+    layout_host.current_page = "Color"
+    assert layout_host.restoreState(state)
+    layout_host._enforce_page_dock_visibility()
+    assert not layout_host.dock_warper.isHidden()
+    assert layout_host.dock_mixer.isHidden()
+    assert layout_host.dock_warper.toggleViewAction().isEnabled()
+    assert layout_host.dock_mixer.toggleViewAction().isEnabled()

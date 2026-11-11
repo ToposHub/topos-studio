@@ -566,7 +566,7 @@ class WarperPanel(QWidget):
 
     def toggle_expanded(self) -> None:
         if self._dialog is not None:
-            self._dialog.close()
+            self.collapse_expanded()
             return
         dialog = QDialog(self.window())
         dialog.setWindowTitle("Color Warper")
@@ -581,6 +581,11 @@ class WarperPanel(QWidget):
         self._dialog = dialog
         dialog.finished.connect(self._restore_expanded)
         dialog.show()
+
+    def collapse_expanded(self) -> None:
+        """Return the palette to its dock when leaving the Color workspace."""
+        if self._dialog is not None:
+            self._dialog.close()
 
     def _raise_expanded(self) -> None:
         if self._dialog is not None:

@@ -68,12 +68,12 @@ _COLOR_GRADING_DOCK_MAX_HEIGHT = _COLOR_TOOL_DOCK_MAX_HEIGHT
 _UNRESTRICTED_DOCK_HEIGHT = 16777215  # Qt's QWIDGETSIZE_MAX
 _COLOR_TOOL_DOCK_NAMES = frozenset({
     "dockDenoise", "dockDeblur", "dockGrading", "dockCurves",
-    "dockColorMapping", "dockBlurSharpen", "dockGrain", "dockMasks",
+    "dockColorMapping", "dockMixer", "dockBlurSharpen", "dockGrain", "dockMasks",
     "dockQualifier", "dockRaw", "dockAnalysis", "dockCrop",
     "dockTracker", "dockColorKeyframes",
 })
-_COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY = "color_mapping_dock_layout_version"
-_COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_VERSION = 1
+_COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_KEY = "color_mapping_dock_layout_version"
+_COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION = 2
 _COLOR_KEYFRAMES_DOCK_PLACEMENT_KEY = "color_keyframes_dock_placed"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY = "composite_scopes_dock_layout_version"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_VERSION = 1
@@ -354,15 +354,22 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_curves)
         self.dock_curves.visibilityChanged.connect(self._on_curves_scope_visibility_changed)
 
-        self.dock_color_mapping = create_custom_dock(
-            I18N.tr("panel.color_mapping", "Color Mapping"),
-            self.color_mapping_panel,
+        self.dock_warper = create_custom_dock(
+            I18N.tr("panel.warper", "Warper"),
+            self.warper_panel,
+            # Retain the serialized identity so saved Color Mapping layouts
+            # restore Warper's exact tab position, hidden/floating state and
+            # geometry. This dock directly owns Warper; no combined UI remains.
             "dockColorMapping",
         )
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea,
-            self.dock_color_mapping,
+            self.dock_warper,
         )
+        self.dock_mixer = create_custom_dock(
+            I18N.tr("panel.mixer", "Mixer"), self.mixer_panel, "dockMixer"
+        )
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_mixer)
 
         self.dock_audio_mixer = create_custom_dock(I18N.tr("panel.audio_mixer", "Audio Mixer"), self.audio_mixer_panel, "dockAudioMixer")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_audio_mixer)
@@ -1216,7 +1223,7 @@ class DockLayoutMixin:
         self.all_docks = [
             self.dock_viewport, self.dock_library, self.dock_files, self.dock_info,
             self.dock_layers, self.dock_denoise, self.dock_deblur,
-            self.dock_grading, self.dock_curves, self.dock_color_mapping,
+            self.dock_grading, self.dock_curves, self.dock_warper, self.dock_mixer,
             self.dock_audio_mixer, self.dock_effects, self.dock_grain,
             self.dock_masks, self.dock_qualifier, self.dock_lut,
             self.dock_raw, self.dock_analysis, self.dock_export,
@@ -2249,40 +2256,43 @@ class DockLayoutMixin:
             target_height / available_height * 100.0,
         )
 
-    def _migrate_color_mapping_dock_layout(self, force: bool = False) -> None:
-        """Merge the legacy color-remapping docks into one tabbed dock once.
+    def _migrate_color_remapping_dock_layout(self, force: bool = False) -> None:
+        """Add the newly independent Mixer once, preserving Warper's layout.
 
-        ``QMainWindow.restoreState`` ignores docks that no longer exist and
-        hides newly created docks that are absent from an old state blob.  The
-        one-shot migration rehomes the new dock beside the existing Curves /
-        Effects tab stack, then persists the upgraded Color layout.  Later
-        launches leave the user's chosen dock arrangement untouched.
+        Version 1 merged the tools; version 2 splits them. Warper retains the
+        old serialized dock identity, including in named/factory Qt layouts.
+        Only Mixer needs initial placement. Later launches honor both docks'
+        independent visibility, floating geometry and user tab arrangements.
         """
         self._migrate_color_resource_dock_layout(force=force)
         migration_version = self.config_manager.get(
-            _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY
+            _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_KEY
         )
         if (
             not force
             and isinstance(migration_version, int)
-            and migration_version >= _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_VERSION
+            and migration_version >= _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION
         ):
             return
 
         if self.current_page != "Color":
             return
 
-        mapping_dock = getattr(self, "dock_color_mapping", None)
-        curves_dock = getattr(self, "dock_curves", None)
-        effects_dock = getattr(self, "dock_effects", None)
-        if mapping_dock is None or curves_dock is None:
+        warper = getattr(self, "dock_warper", None)
+        mixer = getattr(self, "dock_mixer", None)
+        if warper is None or mixer is None:
             return
 
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, mapping_dock)
-        self.tabifyDockWidget(curves_dock, mapping_dock)
-        if effects_dock is not None:
-            self.tabifyDockWidget(mapping_dock, effects_dock)
-        mapping_dock.setVisible(True)
+        was_hidden = warper.isHidden()
+        mixer.setFloating(False)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, mixer)
+        if not warper.isFloating():
+            self.tabifyDockWidget(warper, mixer)
+        mixer.setVisible(True)
+        if was_hidden:
+            warper.hide()
+        elif not warper.isFloating():
+            warper.raise_()
 
         color_state = self.saveState()
         self.page_layouts["Color"] = color_state
@@ -2296,13 +2306,13 @@ class DockLayoutMixin:
                 )
 
         self.config_manager.set(
-            _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_KEY,
-            _COLOR_MAPPING_DOCK_LAYOUT_MIGRATION_VERSION,
+            _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_KEY,
+            _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION,
             auto_save=False,
         )
         self._save_current_layout_to_store("Color")
         self.config_manager.save_config()
-        logger.info("Migrated legacy color remapping docks to Color Mapping")
+        logger.info("Split Color Mapping into independent Warper and Mixer docks")
 
     def _toggle_color_node_display_mode(self) -> None:
         self.dock_viewport.setVisible(self.dock_viewport.isHidden())
@@ -2480,7 +2490,7 @@ class DockLayoutMixin:
                 return
 
         # Skip context menu for docks that have their own internal menus
-        if dock.objectName() in ("dockCurves", "dockColorMapping", "dockMasks", "dockEditTimeline"):
+        if dock.objectName() in ("dockCurves", "dockMasks", "dockEditTimeline"):
             return
 
         menu = QMenu(self)
@@ -2662,7 +2672,8 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_denoise)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_deblur)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_curves)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_color_mapping)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_warper)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_mixer)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_effects)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_grain)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_masks)
@@ -2674,8 +2685,9 @@ class DockLayoutMixin:
         self.tabifyDockWidget(self.dock_denoise, self.dock_deblur)
         self.tabifyDockWidget(self.dock_deblur, self.dock_grading)
         self.tabifyDockWidget(self.dock_grading, self.dock_curves)
-        self.tabifyDockWidget(self.dock_curves, self.dock_color_mapping)
-        self.tabifyDockWidget(self.dock_color_mapping, self.dock_effects)
+        self.tabifyDockWidget(self.dock_curves, self.dock_warper)
+        self.tabifyDockWidget(self.dock_warper, self.dock_mixer)
+        self.tabifyDockWidget(self.dock_mixer, self.dock_effects)
         self.tabifyDockWidget(self.dock_effects, self.dock_grain)
         self.tabifyDockWidget(self.dock_grain, self.dock_masks)
         self.tabifyDockWidget(self.dock_masks, self.dock_qualifier)
@@ -2831,6 +2843,10 @@ class DockLayoutMixin:
             # 恢复所有页面的布局状态
             if panel_states:
                 self._apply_all_page_layouts(panel_states)
+            # A named layout may contain only a Color capture even while
+            # another page is active. Apply page rules after the final Qt
+            # restore so the independent tools cannot leak across pages.
+            self._enforce_page_dock_visibility()
             # Restore docked dock sizes
             QTimer.singleShot(60, self._restore_docked_sizes)
             # Sync floating docks tracking after restore
@@ -3104,7 +3120,7 @@ class DockLayoutMixin:
             if self.current_page == "Composite":
                 self._migrate_composite_scopes_dock_visibility()
             if self.current_page == "Color":
-                self._migrate_color_mapping_dock_layout(force=True)
+                self._migrate_color_remapping_dock_layout(force=True)
             self.status_bar.showMessage(I18N.tr("status.layout_reset", "Layout reset to default."), 3000)
             return
 
@@ -3121,7 +3137,7 @@ class DockLayoutMixin:
         if self.current_page == "Composite":
             self._migrate_composite_scopes_dock_visibility()
         if self.current_page == "Color":
-            self._migrate_color_mapping_dock_layout(force=True)
+            self._migrate_color_remapping_dock_layout(force=True)
         self.status_bar.showMessage(I18N.tr("status.layout_reset_hardcoded", "Layout reset to hardcoded default."), 3000)
 
     # ------------------------------------------------------------------
@@ -3240,7 +3256,7 @@ class DockLayoutMixin:
                 self._migrate_edit_timeline_dock_height,
             )
         elif self.current_page == "Color":
-            QTimer.singleShot(0, self._migrate_color_mapping_dock_layout)
+            QTimer.singleShot(0, self._migrate_color_remapping_dock_layout)
             QTimer.singleShot(
                 _EDIT_TIMELINE_DOCK_MIGRATION_DELAY_MS,
                 self._migrate_color_grading_dock_height,
@@ -3349,6 +3365,18 @@ class DockLayoutMixin:
                 self.dock_composite_scope.setVisible(False)
 
         # Color page docks — only visible on Color page
+        for attr in ("dock_warper", "dock_mixer"):
+            dock = getattr(self, attr, None)
+            if dock is not None:
+                allowed = self.current_page == "Color"
+                dock.toggleViewAction().setEnabled(allowed)
+                if not allowed:
+                    if attr == "dock_warper":
+                        panel = getattr(self, "warper_panel", None)
+                        collapse = getattr(panel, "collapse_expanded", None)
+                        if callable(collapse):
+                            collapse()
+                    dock.hide()
         keyframes = getattr(self, "dock_color_keyframes", None)
         if keyframes is not None:
             allowed = self.current_page == "Color" and work_mode != "image"
