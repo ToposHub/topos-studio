@@ -1,0 +1,23 @@
+[
+  {
+    "path": "tests/test_videos/2K_h264.mp4",
+    "codec": "h264",
+    "width": 1920,
+    "height": 1080,
+    "pixel_format": "yuv420p"
+  },
+  {
+    "path": "tests/test_videos/2K_prores422.mov",
+    "codec": "prores",
+    "width": 1920,
+    "height": 1080,
+    "pixel_format": "yuv422p10le"
+  },
+  {
+    "path": "tests/test_videos/2K_DNxHR HQX 10bit.mov",
+    "codec": "dnxhd",
+    "width": 1920,
+    "height": 1080,
+    "pixel_format": "yuv422p10le"
+  }
+]
