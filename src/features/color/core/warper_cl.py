@@ -69,7 +69,6 @@ def apply_cl_grid(rgb, grid: WarperGrid, *, axis_angle: float = 0.0) -> np.ndarr
     if grid.semantics[:2] != ("dc", "dl"):
         raise WarperStateError("invalid_semantics", f"CL 网格需要 (dc,dl),得到 {grid.semantics}")
     color = np.asarray(rgb, dtype=np.float64)
-    sign_c = np.sign(color)
     hue, chroma, luma = cl_coordinates(color)
     # luma 采样坐标钳制(超亮 HDR 在外圈行饱和);chroma 由转换保证 [0,1]
     sample_u, sample_v = _rotate(chroma, min(max(luma, 0.0), 1.0), axis_angle)
@@ -78,7 +77,9 @@ def apply_cl_grid(rgb, grid: WarperGrid, *, axis_angle: float = 0.0) -> np.ndarr
     fade = smoothstep(0.02, 0.15, chroma)
     out_chroma = min(max(chroma + float(delta[0]) * fade, 0.0), 1.0)
     out_luma = max(luma + float(delta[1]), 0.0)
-    return sign_c * hsp_to_rgb(np.array([hue, out_chroma, out_luma]))
+    # 负通道翻转(不用 legacy sign 乘法,避免 0 通道被清零)
+    reconstructed = hsp_to_rgb(np.array([hue, out_chroma, out_luma]))
+    return np.where(color < 0.0, -reconstructed, reconstructed)
 
 
 def apply_cl_grids(rgb, grid1: WarperGrid, grid2: WarperGrid,

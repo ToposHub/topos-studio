@@ -364,7 +364,7 @@ class WarperStroke:
     mode: str  # STROKE_MODES
     source_rgb: tuple[float, float, float]
     target_rgb: tuple[float, float, float]
-    params: dict[str, float]
+    params: dict[str, float] | None = None
     path: tuple[tuple[float, float], ...] = ()
     _extra_fields: dict = field(default_factory=dict, repr=False, compare=False)
 
@@ -427,7 +427,7 @@ class WarperPinPoint:
     """CW 独立 Pin(非网格点):chromaticity 位置 + 同域参数(B00 实测默认值)。"""
     pin_id: str
     position: tuple[float, float]
-    params: dict[str, float]
+    params: dict[str, float] | None = None
     _extra_fields: dict = field(default_factory=dict, repr=False, compare=False)
 
     _KNOWN_KEYS = ("pin_id", "position", "params")
