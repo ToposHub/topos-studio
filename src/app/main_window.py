@@ -1943,6 +1943,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.warper_panel.warper_changed.connect(self.on_warper_changed)
         self.warper_panel.interaction_started.connect(self.on_interaction_started)
         self.warper_panel.interaction_ended.connect(self.on_interaction_ended)
+        # CW-B02: 版本化 warper 命令通道(与 legacy warper_changed 互斥去重)
+        self.warper_panel.command_requested.connect(self.on_warper_command_requested)
         self.effects_panel.effects_changed.connect(self.on_blur_sharpen_changed)
         self.effects_panel.interaction_started.connect(self.on_interaction_started)
         self.effects_panel.interaction_ended.connect(self.on_interaction_ended)

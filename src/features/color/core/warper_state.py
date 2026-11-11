@@ -135,6 +135,13 @@ def _validate_param(name: str, value: Any) -> float:
     return number
 
 
+def _validate_params_dict(params: Mapping[str, Any]) -> None:
+    """已知参数键的域校验(构造路径与 from_dict 一致,不允许旁路)。"""
+    for name in STROKE_PARAM_DOMAINS:
+        if name in params:
+            _validate_param(name, params[name])
+
+
 def default_stroke_params() -> dict[str, float]:
     return {name: default for name, (_low, _high, default) in STROKE_PARAM_DOMAINS.items()}
 
@@ -368,6 +375,7 @@ class WarperStroke:
             raise WarperStateError("invalid_mode", f"stroke mode {self.mode!r} 非法")
         if self.params is None:
             object.__setattr__(self, "params", default_stroke_params())
+        _validate_params_dict(self.params)
         for label in ("source_rgb", "target_rgb"):
             values = getattr(self, label)
             if len(values) != 3 or not all(math.isfinite(v) for v in values):
@@ -427,6 +435,7 @@ class WarperPinPoint:
     def __post_init__(self) -> None:
         if self.params is None:
             object.__setattr__(self, "params", default_stroke_params())
+        _validate_params_dict(self.params)
         if not all(math.isfinite(v) for v in self.position):
             raise WarperStateError("not_finite", "pin position 必须有限")
         if not all(0.0 <= v <= 1.0 for v in self.position):

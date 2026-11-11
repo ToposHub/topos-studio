@@ -217,6 +217,17 @@ class HistoryManager:
         """
         return len(self.undo_stack) > 0
 
+    def discard_last_snapshot(self) -> Optional[Dict[str, Any]]:
+        """丢弃 undo 栈顶快照并移交调用方(CW-B02:取消的手势不留脏历史)。
+
+        仅用于"压栈后手势被取消"的回退:调用方须先恢复该快照对应的
+        状态再调用本方法,使 undo 栈与实际状态保持一致。不触碰 redo 栈
+        (被取消的手势不应留下任何一侧的痕迹)。
+        """
+        if not self.undo_stack:
+            return None
+        return self.undo_stack.pop()
+
     def can_redo(self) -> bool:
         """是否存在可重做状态。
 
