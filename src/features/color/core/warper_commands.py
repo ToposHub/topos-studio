@@ -34,6 +34,12 @@ from typing import Any
 import numpy as np
 
 from src.features.color.core.layer import Layer
+from src.features.color.core.warper_hs_solver import (
+    apply_move,
+    pull_push,
+    smooth_component,
+    with_luma_component,
+)
 from src.features.color.core.warper_state import (
     CL_GRID_NAMES,
     CURRENT_ALGORITHM,
@@ -54,15 +60,16 @@ __all__ = ["WarperCommandResult", "WarperGestureSession", "WarperCommandService"
 #: 内部哨兵:操作不产生变化(与"清空状态"的 None 返回值区分)。
 _NO_CHANGE = object()
 
-#: B02 实现的机械操作;算法操作在 B04–B06 登记。
+#: B02 机械操作 + CW-B04 HS 网格求解操作。
 IMPLEMENTED_OPERATIONS = frozenset({
     "replace_state", "set_grid_offsets", "set_grid_resolution", "set_grid_pins",
     "add_stroke", "delete_objects", "set_stroke_params", "set_pin_params",
     "set_state_params", "activate_mode", "reset",
+    "move_points", "smooth_component", "pull_push",
 })
 #: 已知但后端未实现的操作(如实拒绝,不假装成功)。
 UNIMPLEMENTED_OPERATIONS = frozenset({
-    "smooth_component", "pull_push", "auto_lock", "solve_strokes",
+    "auto_lock", "solve_strokes",
 })
 
 
@@ -288,6 +295,37 @@ class WarperCommandService:
             # 除 replace/activate 外的操作需要已存在状态
             raise WarperStateError("no_state", "目标层尚无 warper 状态,先 activate_mode")
 
+        if operation == "move_points":
+            grid = _payload_grid(working, payload)
+            selected = _payload_selection(payload)
+            deltas = {str(k): float(v) for k, v in (payload.get("deltas") or {}).items()}
+            if not deltas:
+                return _NO_CHANGE
+            # Luma 需要第三分量:首次 luma 编辑确定性升级网格语义(B04)
+            if "dl" in deltas and "dl" not in grid.semantics:
+                grid = with_luma_component(grid)
+            moved = apply_move(
+                grid, selected, deltas,
+                falloff=float(payload.get("falloff", 0.0)),
+                auto_lock=int(payload.get("auto_lock", 0)),
+                absolute=bool(payload.get("absolute", False)))
+            return _grid_or_no_change(working, moved)
+
+        if operation == "smooth_component":
+            grid = _payload_grid(working, payload)
+            component = str(payload.get("component", ""))
+            selected_raw = payload.get("selected")
+            selected = None if selected_raw is None else _payload_selection(payload)
+            smoothed = smooth_component(grid, component, selected)
+            return _grid_or_no_change(working, smoothed)
+
+        if operation == "pull_push":
+            grid = _payload_grid(working, payload)
+            selected = _payload_selection(payload)
+            factor = float(payload.get("factor", 1.0))
+            pulled = pull_push(grid, selected, factor)
+            return _grid_or_no_change(working, pulled)
+
         if operation == "set_grid_offsets":
             name = payload.get("grid")
             grid = working.grids.get(name) if isinstance(name, str) else None
@@ -431,6 +469,34 @@ def _states_equal(a: WarperStateV2 | None, b: WarperStateV2 | None) -> bool:
     if a is None or b is None:
         return a is b
     return a.to_dict() == b.to_dict()
+
+
+def _payload_grid(working: WarperStateV2, payload: Mapping[str, Any]) -> WarperGrid:
+    name = payload.get("grid")
+    grid = working.grids.get(name) if isinstance(name, str) else None
+    if grid is None:
+        raise WarperStateError("invalid_id", f"网格 {name!r} 不存在")
+    return grid
+
+
+def _payload_selection(payload: Mapping[str, Any]) -> list[tuple[int, int]]:
+    raw = payload.get("selected") or ()
+    selection: list[tuple[int, int]] = []
+    for item in raw:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise WarperStateError("corrupt_payload", f"selection 项非法: {item!r}")
+        selection.append((int(item[0]), int(item[1])))
+    return selection
+
+
+def _grid_or_no_change(working: WarperStateV2, grid: WarperGrid) -> WarperStateV2 | Any:
+    """派生网格与原网格数值一致时声明无变化(不产生历史)。"""
+    original = working.grids.get(grid.name)
+    if original is not None and original is not grid and \
+            np.array_equal(original.offsets, grid.offsets) and \
+            original.semantics == grid.semantics:
+        return _NO_CHANGE
+    return working.with_grid(grid)
 
 
 def _cancel_request(layer_id: str, gesture_id: str):

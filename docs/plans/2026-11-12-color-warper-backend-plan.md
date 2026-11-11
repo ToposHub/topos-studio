@@ -110,7 +110,8 @@
 | CW-B01 | 完成 | `src/features/color/core/warper_state.py`(schema v2、稳定 ID、冻结数组、legacy_hsv_v1 桥、显式重采样、capability/请求契约);Layer/剪贴板集成(未知版本原文保留);41 项新测试 + 95 项回归全过 |
 | CW-B02 | 完成(standalone/legacy 上下文;图/时间线上下文待身份注入) | `warper_commands.py`(begin/update/commit/cancel、首个实质变更才压栈、revision 保护、legacy 投影桥)+ `warper_command_adapter.py`(UI 命令映射、legacy 去重、连续手势合并、索引身份如实拒绝)+ 控制器接线(undo/redo/切层取消钩子、800ms 静默收口);`HistoryManager.discard_last_snapshot`;73 项后端测试 + 110 项回归全过 |
 | CW-B03 | 完成(GL 数值 parity 已测;MSL 数值 parity 待 B08 Metal 矩阵) | `warper_color.py`:HSV 逐句镜像 GLSL、HSL 域上限显式拒绝、HSP 常数冻结+齐次精确反演、零色度/负通道/HDR 政策、legacy apply 语义镜像(含 0 通道恒 0 固有行为);真实 GPU 执行生产 GLSL 的 parity 测试(fp32 噪声实测定容差);规范入 behavior_matrix §5;26 项测试全过 |
-| CW-B04–B10 | 未开始 | — |
+| CW-B04 | 完成(求解语义;GPU 新空间渲染归 B08) | `warper_hs_solver.py`:falloff 切比雪夫权重(色相列环绕)、AutoLock 1/2 曼哈顿邻域+Pin 恒锁、absolute/delta 位移、分量平滑(3×3 环绕均值)、Pull/Push、Luma 第三分量确定性升级(升级即失去 legacy 投影);服务新增 move_points/smooth_component/pull_push;适配器 component 手势接入(空选择 no-op);接缝连续性/重采样 Pin 往返/密集网格 20 项求解测试 + 适配器 4 项;全套 161 项通过 |
+| CW-B05–B10 | 未开始 | — |
 
 ## 4. 每阶段具体步骤与验证
 

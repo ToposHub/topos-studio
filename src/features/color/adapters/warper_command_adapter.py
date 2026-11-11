@@ -46,11 +46,14 @@ UI_ONLY_ACTIONS = frozenset({
     "all", "reset_selection", "falloff_add", "falloff_sub", "auto_lock", "range",
 })
 
-#: 有后端语义但尚未实现(B04/B06 接入后迁移到映射表)。
+#: 有后端语义但尚未实现(B06 接入后迁移到映射表)。
 UNIMPLEMENTED_ACTIONS = frozenset({
-    "component", "delete", "reset_pin", "stroke_parameter",
+    "delete", "reset_pin", "stroke_parameter",
     "stroke", "point_stroke", "add_pin", "smooth",
 })
+
+#: CW-B04:面板分量名 → 网格分量语义。
+_COMPONENT_SEMANTICS = {"hue": "dh", "sat": "ds", "luma": "dl", "chroma": "dc"}
 
 #: 连续数值动作:同一签名合并为一个手势,flush() 收口。
 CONTINUOUS_ACTIONS = frozenset({"axis_angle"})
@@ -99,11 +102,16 @@ class WarperCommandAdapter:
         if action in UI_ONLY_ACTIONS:
             return {"ok": True, "reason": "ui_only", "handled": False,
                     "revision": None, "dirty": False}
-        if action in UNIMPLEMENTED_ACTIONS:
-            if action == "component" and _legacy_published(command):
+        if action == "component":
+            if _legacy_published(command):
                 # legacy 已发布同一次编辑:命令层去重,不再二次提交
                 return {"ok": True, "reason": "legacy_dedup", "handled": False,
+                    "revision": None, "dirty": False}
+            # 工具无选择时不改模型(计划 CW-B04 验证项)
+            if not self._selection_cells(command.get("state") or {}):
+                return {"ok": True, "reason": "ui_only_no_selection", "handled": False,
                         "revision": None, "dirty": False}
+        if action in UNIMPLEMENTED_ACTIONS:
             return {"ok": False, "reason": "op_unimplemented", "handled": True,
                     "revision": None, "dirty": False}
 
@@ -200,6 +208,23 @@ class WarperCommandAdapter:
         if action == "axis_angle":
             return "set_state_params", {"axis_angle": float(payload_in.get("value", 0.0))}
 
+        if action == "component":
+            # CW-B04:数值/平滑手势 → 求解操作(falloff/Auto Lock 随快照携带)
+            semantic = _COMPONENT_SEMANTICS.get(str(payload_in.get("component", "")))
+            if semantic is None:
+                return None, {}
+            grid = self._grid_name(mode, state)
+            if grid is None:
+                return None, {}
+            selected = self._selection_cells(state)
+            auto_lock = int(state.get("lock_points", 1)) if state.get("auto_lock") else 0
+            common = {"grid": grid, "selected": selected}
+            if payload_in.get("smooth"):
+                return "smooth_component", {**common, "component": semantic}
+            return "move_points", {**common, "deltas": {semantic: float(payload_in.get("value", 0.0))},
+                                   "absolute": True, "falloff": float(state.get("falloff", 0.0)),
+                                   "auto_lock": auto_lock}
+
         if action == "convert_pin":
             grid = self._grid_name(mode, state)
             if grid is None:
@@ -229,6 +254,19 @@ class WarperCommandAdapter:
         if mode == "chroma_luma":
             return _GRID_BY_INDEX.get(int(state.get("active_grid", 0)))
         return HS_GRID_NAME
+
+    @staticmethod
+    def _selection_cells(state: Mapping[str, Any]) -> list[list[int]]:
+        """活动网格快照的选点 (row, col) 列表;结构不符返回空(按无选择处理)。"""
+        grids = state.get("grids") or {}
+        index = str(int(state.get("active_grid", 0) or 0))
+        snapshot = grids.get(index) or {}
+        selected = snapshot.get("selected") or []
+        cells = []
+        for item in selected:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                cells.append([int(item[0]), int(item[1])])
+        return cells
 
     @staticmethod
     def _selected_point_ids(state: Mapping[str, Any], grid: str) -> list[str] | None:

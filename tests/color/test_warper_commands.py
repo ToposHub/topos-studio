@@ -185,8 +185,8 @@ def test_unimplemented_algorithm_ops_refused() -> None:
     layer = _layer_with_legacy_state()
     svc = h.service
     svc.handle(h.request("begin", "replace_state", {}, layer=layer), layer)
-    result = svc.handle(h.request("update", "smooth_component",
-                                  {"grid": "hs", "component": "dh"}, layer=layer), layer)
+    # CW-B04 已实现 smooth_component;仍未实现的求解族如实拒绝
+    result = svc.handle(h.request("update", "solve_strokes", {}, layer=layer), layer)
     assert not result.ok and result.reason == "op_unimplemented"
     unknown = svc.handle(h.request("update", "magic", {}, layer=layer), layer)
     assert not unknown.ok and unknown.reason == "unknown_operation"
