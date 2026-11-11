@@ -86,7 +86,8 @@ def builtin_color_workspaces() -> List[ColorWorkspacePreset]:
                 "color.timeline_clips",
                 "color.qualifier",
                 "color.masks",
-                "color.mapping",
+                "color.warper",
+                "color.mixer",
                 "color.tracker",
             }),
         ),
@@ -325,7 +326,7 @@ def sanitize_preset(
     """Resolve a preset's panel list against the live panel registry.
 
     - drops panel ids that no longer exist (upgrade migration);
-    - promotes legacy HSL Curves/Mixer/Warper ids to Color Mapping;
+    - expands the former Color Mapping container into independent tools;
     - promotes the retired Soft Clip panel to the combined Curves palette;
     - drops panels disabled for the current work mode
       (video: image-only Library/export/Crop/Deblur/Info; image: timeline clips);
@@ -334,13 +335,9 @@ def sanitize_preset(
     registered = set(registered_panel_ids)
     resolved = set(preset.visible_panels) & registered
 
-    # Warper/Mixer moved into Color Mapping. HSL Curves now live in Curves.
-    if (
-        "color.mapping" in registered
-        and set(preset.visible_panels)
-        & {"color.mixer", "color.warper"}
-    ):
-        resolved.add("color.mapping")
+    # Combined workspaces open both; existing independent IDs stay independent.
+    if "color.mapping" in preset.visible_panels:
+        resolved.update({"color.warper", "color.mixer"} & registered)
     if "color.curves" in registered and set(preset.visible_panels) & {"color.soft_clip", "color.hsl_curves"}:
         resolved.add("color.curves")
     if work_mode == "video":

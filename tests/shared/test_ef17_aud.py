@@ -415,14 +415,15 @@ class TestAud1610LazyAcquireFailureLog:
 
 
 class TestAud25100PackageDocstring:
-    """AUD-25100: 模块 docstring 未列出导出的 ColorMappingPanel。"""
+    """AUD-25100: 模块 docstring 与实际导出的独立调色面板保持一致。"""
 
-    def test_docstring_lists_color_mapping_panel(self) -> None:
+    def test_docstring_lists_independent_color_tools(self) -> None:
         color_ui = importlib.import_module("src.features.color.ui")
         doc = color_ui.__doc__ or ""
-        # 回退（清单无 ColorMappingPanel）→ 失败
-        assert "ColorMappingPanel" in doc
-        assert "ColorMappingPanel" in color_ui.__all__
+        for name in ("WarperPanel", "MixerPanel"):
+            assert name in doc
+            assert name in color_ui.__all__
+        assert "ColorMappingPanel" not in color_ui.__all__
 
 
 def _class_defining(module_name: str, method_name: str):

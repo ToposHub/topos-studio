@@ -2,6 +2,8 @@
 
 参考：用户提供的877×425 Hue–Saturation截图，以及本机已打开的DaVinci Resolve Studio 20三种模式。仅实现UI、画布和局部交互；没有修改渲染器、shader、图层模型或工程格式。
 
+后续按用户要求，Warper与Mixer已拆成独立面板，组合Color Mapping容器已删除。该变更的布局兼容与315项回归结果见 [独立面板验证](independent_panels.md)。本页截图仍展示当前Warper控件本身。
+
 ## 已完成范围
 
 - 三种模式和独立工具页：Hue–Saturation六角网格；Chroma–Luma双网格/轴角度；Chroma Warp笔画与固定点。
@@ -22,7 +24,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
   tests/shared/test_ef14_aud.py::TestAud38209Padding -q
 ```
 
-**22 passed in 6.99s**。Python3.12.14、PyQt6 6.11.0、Qt6.11.2、offscreen。另通过compileall与git diff --check；独立Review完成两轮，发现的信号隔离、平滑分量、Pin参数、取消恢复、手势粒度、全局重置及大画布缩放问题已修复。此验证不包含完整主窗口端到端操作或图像处理质量验收。
+初始UI提交`372f491b`：**22 passed in 6.99s**。Python3.12.14、PyQt6 6.11.0、Qt6.11.2、offscreen。拆分后registry测试增加图片/视频模式覆盖，以上命令的当前用例数随之增加。另通过compileall与git diff --check；独立Review完成两轮，发现的信号隔离、平滑分量、Pin参数、取消恢复、手势粒度、全局重置及大画布缩放问题已修复。此验证不包含完整主窗口端到端操作或图像处理质量验收。
 
 ## 视觉复核与复现
 

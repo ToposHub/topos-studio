@@ -1256,7 +1256,6 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         from src.features.color.ui.color_wheel import GradingPanel
         from src.features.color.ui.denoise_panel import DenoisePanel
         from src.features.color.ui.deblur_panel import DeblurPanel
-        from src.features.color.ui.color_mapping_panel import ColorMappingPanel
         from src.features.color.ui.mixer_panel import MixerPanel
         from src.app.ui.audio_mixer import AudioMixerPanel
         from src.features.color.ui.warper_panel import WarperPanel
@@ -1357,10 +1356,6 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.curves_panel = CurvesPanel(self.curves_widget, hsl_panel=self.hsl_curves_panel)
         self.warper_panel = WarperPanel()
         self.mixer_panel = MixerPanel()
-        self.color_mapping_panel = ColorMappingPanel(
-            self.warper_panel,
-            self.mixer_panel,
-        )
         self.audio_mixer_panel = AudioMixerPanel()
         self.effects_panel = BlurSharpenPanel()
         self.film_grain_panel = FilmGrainPanel()

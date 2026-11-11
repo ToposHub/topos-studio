@@ -95,15 +95,22 @@ def test_sanitize_filters_and_migrates():
                                         "color.crop", "color.deblur",
                                         "workspace.info"})
 
-    # Legacy secondary-color workspaces promote any former remapping tool to
-    # the new combined Color Mapping dock.
+    # Legacy combined workspaces now open both independently registered tools.
     legacy = ColorWorkspacePreset(
         preset_id="user.legacy",
         name="Legacy",
-        visible_panels=frozenset({"color.warper"}),
+        visible_panels=frozenset({"color.mapping"}),
     )
-    assert sanitize_preset(legacy, ["color.mapping"], "all") == frozenset({
-        "workspace.viewport", "color.mapping",
+    assert sanitize_preset(legacy, ["color.warper", "color.mixer"], "all") == frozenset({
+        "workspace.viewport", "color.warper", "color.mixer",
+    })
+
+
+@pytest.mark.parametrize("tool", ["color.warper", "color.mixer"])
+def test_independent_tool_workspace_does_not_open_other_tool(tool: str) -> None:
+    preset = ColorWorkspacePreset(preset_id="user.tool", name="Tool", visible_panels=frozenset({tool}))
+    assert sanitize_preset(preset, ["color.warper", "color.mixer"], "video") == frozenset({
+        "workspace.viewport", tool,
     })
 
 

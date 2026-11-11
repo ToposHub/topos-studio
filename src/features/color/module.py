@@ -351,14 +351,25 @@ class ColorModule:
             default_visible=True,
         ))
         panel_registry.register(PanelDescriptor(
-            panel_id="color.mapping",
-            title_key="panel.color_mapping",
-            fallback_title="Color Mapping",
+            panel_id="color.warper",
+            title_key="panel.warper",
+            fallback_title="Warper",
             feature_id="color",
             category="Color",
             page_ids=("Color",),
-            dock_attr="dock_color_mapping",
+            dock_attr="dock_warper",
             order=300,
+            default_visible=False,
+        ))
+        panel_registry.register(PanelDescriptor(
+            panel_id="color.mixer",
+            title_key="panel.mixer",
+            fallback_title="Mixer",
+            feature_id="color",
+            category="Color",
+            page_ids=("Color",),
+            dock_attr="dock_mixer",
+            order=400,
             default_visible=False,
         ))
         panel_registry.register(PanelDescriptor(

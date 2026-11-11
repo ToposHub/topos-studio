@@ -18,6 +18,31 @@ from src.shared.layout.profile import LayoutProfile, LAYOUT_PROFILE_SCHEMA_VERSI
 from src.shared.layout.store import LayoutStore
 
 
+def test_combined_color_mapping_profile_expands_without_changing_qt_state() -> None:
+    profile = LayoutProfile(
+        product_mode="studio", page_id="Color",
+        visible_panels=("color.grading", "color.mapping", "color.warper"),
+        qt_state_hex="00aabb",
+        floating_panels={"color.mapping": {"x": 50, "y": 60, "w": 800, "h": 450}},
+    )
+    migrated = LayoutStore().filter_panels(
+        profile, enabled_features={"color"},
+        registered_panel_ids={"color.grading", "color.warper", "color.mixer"},
+    )
+    assert migrated.visible_panels == ("color.grading", "color.warper", "color.mixer")
+    assert migrated.floating_panels == {"color.warper": {"x": 50, "y": 60, "w": 800, "h": 450}}
+    assert migrated.qt_state_hex == profile.qt_state_hex
+    assert "color.mapping" in profile.visible_panels
+    assert "color.mapping" in profile.floating_panels
+
+
+@pytest.mark.parametrize("mode", ["color", "studio"])
+def test_default_color_profiles_offer_independent_tools(mode: str) -> None:
+    profile = LayoutStore().get_default_profile(mode, "Color")
+    assert {"color.warper", "color.mixer"} <= set(profile.visible_panels)
+    assert "color.mapping" not in profile.visible_panels
+
+
 @pytest.mark.parametrize("legacy_panels", [
     ("edit.program_viewer",),
     ("edit.source_viewer",),

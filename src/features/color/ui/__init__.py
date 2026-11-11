@@ -2,7 +2,8 @@
 
 This module contains all UI panels and widgets related to color grading:
 - ColorWheel: Primary color grading wheel (Lift/Gamma/Gain)
-- ColorMappingPanel: Color mapping management panel
+- WarperPanel: Independent Color Warper palette
+- MixerPanel: Independent channel mixer palette
 - CurvesPanel: RGB curves + four-parameter Soft Clip sidebar
 - HSLCurvesPanel: HSL curve adjustments
 - LUTPanel: LUT file loading and management
@@ -15,7 +16,8 @@ This module contains all UI panels and widgets related to color grading:
 """
 
 from .color_wheel import ColorWheel
-from .color_mapping_panel import ColorMappingPanel
+from .warper_panel import WarperPanel
+from .mixer_panel import MixerPanel
 from .curves_panel import CurvesPanel
 from .hsl_curves_panel import HSLCurvesPanel
 from .lut_panel import LutPanel
@@ -25,7 +27,8 @@ from .raw_panel import RawPanel
 
 __all__ = [
     "ColorWheel",
-    "ColorMappingPanel",
+    "WarperPanel",
+    "MixerPanel",
     "CurvesPanel",
     "HSLCurvesPanel",
     "LutPanel",

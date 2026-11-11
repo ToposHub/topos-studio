@@ -1,35 +1,30 @@
-"""Tests for the combined Color Mapping panel."""
+"""The retired Color Mapping container is replaced by two dock descriptors."""
 
-from PyQt6.QtWidgets import QWidget
+import pytest
 
 from src.features.color.module import ColorModule
-from src.features.color.ui.color_mapping_panel import ColorMappingPanel
 from src.shared.panels.registry import PanelRegistry
 
 
-def test_color_mapping_panel_uses_existing_child_panels(qapp):
-    warper = QWidget()
-    mixer = QWidget()
-
-    panel = ColorMappingPanel(warper, mixer)
-
-    assert panel.tabs.count() == 2
-    assert panel.tabs.widget(0) is warper
-    assert panel.tabs.widget(1) is mixer
-    assert [panel.tabs.tabText(i) for i in range(2)] == [
-        "Warper",
-        "Mixer",
-    ]
-
-
-def test_color_mapping_panel_is_registered_as_one_color_panel():
+def test_warper_and_mixer_are_registered_as_independent_panels() -> None:
     registry = PanelRegistry()
     ColorModule().register_panels(registry)
 
-    mapping = registry.get("color.mapping")
-    assert mapping is not None
-    assert mapping.title_key == "panel.color_mapping"
-    assert mapping.dock_attr == "dock_color_mapping"
+    assert registry.get("color.mapping") is None
+    warper = registry.get("color.warper")
+    mixer = registry.get("color.mixer")
+    assert warper is not None and mixer is not None
+    assert (warper.title_key, warper.dock_attr) == ("panel.warper", "dock_warper")
+    assert (mixer.title_key, mixer.dock_attr) == ("panel.mixer", "dock_mixer")
+    assert warper.page_ids == mixer.page_ids == ("Color",)
     assert registry.get("color.hsl_curves") is None
-    assert registry.get("color.mixer") is None
-    assert registry.get("color.warper") is None
+
+
+@pytest.mark.parametrize("work_mode", ["all", "image", "video"])
+def test_independent_color_tools_remain_available_in_both_work_modes(work_mode: str) -> None:
+    registry = PanelRegistry()
+    ColorModule().register_panels(registry)
+    panels = registry.get_panels_by_category(enabled_features={"color"}, work_mode=work_mode)
+    ids = {panel.panel_id for panel in panels["Color"]}
+    assert {"color.warper", "color.mixer"} <= ids
+    assert "color.mapping" not in ids
