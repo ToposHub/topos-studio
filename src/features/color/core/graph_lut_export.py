@@ -87,6 +87,16 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
         payload = dict(payload)
         lut_ref = payload.pop("active_lut_path", None)
         payload.pop("lut_intensity", None)
+        # CW-B09:HS 两分量 warper(legacy 方阵或 v2 状态,任意空间)是
+        # 纯点态效果——可表达时从域预检弹出,由 bake 路径真实应用;
+        # 不可表达(三分量/CL/CW)保留明确错误,不产出少效果的 cube
+        if _pointwise_warper(payload) is None and _has_warper(payload):
+            errors.append(f"{candidate.node_id}: warper 不在点态表达域"
+                          "（仅 HS 两分量网格;Luma/双网格/笔画无 LUT 后端）")
+        else:
+            payload.pop("warper_params", None)
+            payload.pop("warper_space", None)
+            payload.pop("warper_state", None)
         # N14-B：LUT 导出为点态 bake 语义——HSL/soft_clip/blend 等
         # 逐像素域不在 pointwise 表达域（backend 显式声明，不随 CPU
         # 图路径接线放开）
@@ -104,6 +114,34 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
             seen.add(item)
             unique.append(item)
     return unique
+
+
+def _has_warper(payload: Mapping[str, Any]) -> bool:
+    return (payload.get("warper_params") is not None
+            or payload.get("warper_state") is not None)
+
+
+def _pointwise_warper(payload: Mapping[str, Any]):
+    """可点态表达的 warper → (offsets ndarray, space int);否则 None。"""
+    from src.features.color.core.warper_state import (
+        WarperStateError,
+        WarperStateV2,
+        renderable_projection,
+    )
+    if payload.get("warper_params") is not None:
+        offsets = np.asarray(payload["warper_params"], dtype=np.float32)
+        if offsets.ndim == 3 and offsets.shape[2] == 2:
+            return offsets, int(payload.get("warper_space", 0) or 0)
+        return None
+    raw_state = payload.get("warper_state")
+    if isinstance(raw_state, Mapping):
+        try:
+            offsets, space = renderable_projection(
+                WarperStateV2.from_dict(raw_state))
+        except WarperStateError:
+            return None
+        return (offsets, space) if offsets is not None else None
+    return None
 
 
 def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
@@ -129,6 +167,22 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
     curves = layer.get("curves_lut")
     if curves is not None:
         out = apply_curves_cpu(out, curves)
+    # CW-B09:warper 在 grading/curves 之后、LUT 之前(与 composition
+    # 管线位序一致:... → mixer → WARPER → lut3d)
+    warper = _pointwise_warper(layer)
+    if warper is not None:
+        from src.features.color.core.warper_color import (
+            apply_warper_in_space,
+            apply_warper_legacy_hsv,
+        )
+        offsets, space = warper
+        space_names = {0: "hsv", 1: "hsl", 2: "hsp"}
+        if space == 0:
+            warper_apply = lambda c: apply_warper_legacy_hsv(c, offsets)
+        else:
+            warper_apply = lambda c: apply_warper_in_space(
+                c, offsets, space_names[space])
+        out = np.stack([warper_apply(pixel) for pixel in out]).astype(np.float64)
     lut_ref = layer.get("active_lut_path")
     if isinstance(lut_ref, str) and lut_ref:
         loaded = lut_cache.get(lut_ref)
