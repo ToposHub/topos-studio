@@ -537,8 +537,17 @@ def _iter_stem_pcm_chunks(
                     # 内的已注册 bus（集合外的 send 落空，由 stem 语义
                     # 决定——该 bus 不在本 stem 中）。
                     if node is not None:
-                        for send_bus_id, send_level in node.sends:
-                            if send_level <= 0.0 or send_bus_id not in stem_ids:
+                        for send_entry in node.sends:
+                            # MX-14: 4 元组 send（tap/muted）；stem 路径与
+                            # route_track_output 同语义取处理后的 post-fader
+                            # 输出，muted 只断开该 send
+                            from src.features.edit.core.audio_playback import (
+                                unpack_send,
+                            )
+                            send_bus_id, send_level, _tap, send_muted = (
+                                unpack_send(send_entry))
+                            if send_level <= 0.0 or send_muted \
+                                    or send_bus_id not in stem_ids:
                                 continue
                             if send_bus_id not in bus_bufs:
                                 bus_bufs[send_bus_id] = np.zeros(
