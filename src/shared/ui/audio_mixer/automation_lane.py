@@ -326,12 +326,21 @@ class AutomationLane(QDialog):
         total_frames: int = 1000,
         initial_param: str = "volume",
         parent: Optional[QWidget] = None,
+        fx_param_specs: Optional[list] = None,
     ) -> None:
+        """MX-10: fx_param_specs = [(param_key, label, min, max), ...]
+        （"fx/{instance_id}/{param_key}" 键的可自动化参数规格）。
+        """
         super().__init__(parent)
         self._track_id = track_id
         self._track_name = track_name
         self._total_frames = int(total_frames)
         self._current_param = initial_param
+        # MX-10: fx 参数规格 + 值域（与 PARAM_CONFIG 合并）
+        self._fx_specs = list(fx_param_specs or [])
+        self._param_config = dict(self.PARAM_CONFIG)
+        for _key, _label, mn, mx in self._fx_specs:
+            self._param_config[_key] = (mn, mx, 0.0)
         # 各参数的 KeyframeTrack（由 controller 同步进来）
         self._tracks: dict[str, Optional[KeyframeTrack]] = {}
 
@@ -354,9 +363,17 @@ class AutomationLane(QDialog):
 
         top.addWidget(QLabel(I18N.tr("audio.mixer.automation.param", "Parameter:")))
         self._param_combo = QComboBox()
-        self._param_combo.addItems(["volume", "pan", "mute"])
-        self._param_combo.setCurrentText(self._current_param)
-        self._param_combo.currentTextChanged.connect(self._on_param_changed)
+        self._param_combo.addItem("volume", "volume")
+        self._param_combo.addItem("pan", "pan")
+        self._param_combo.addItem("mute", "mute")
+        # MX-10: fx 参数（label 显示，itemData 存 "fx/{iid}/{key}"）
+        for key, label, _mn, _mx in self._fx_specs:
+            self._param_combo.addItem(label, key)
+        for i in range(self._param_combo.count()):
+            if self._param_combo.itemData(i) == self._current_param:
+                self._param_combo.setCurrentIndex(i)
+                break
+        self._param_combo.currentIndexChanged.connect(self._on_param_changed)
         top.addWidget(self._param_combo)
 
         top.addSpacing(20)
@@ -380,7 +397,7 @@ class AutomationLane(QDialog):
         layout.addLayout(top)
 
         # ── 曲线编辑器 ──
-        min_v, max_v, _ = self.PARAM_CONFIG.get(self._current_param, (0.0, 1.0, 0.0))
+        min_v, max_v, _ = self._param_config.get(self._current_param, (0.0, 1.0, 0.0))
         self._curve = AutomationCurveWidget(
             self._current_param, min_v, max_v, self._total_frames, self
         )
@@ -399,9 +416,10 @@ class AutomationLane(QDialog):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-    def _on_param_changed(self, param: str) -> None:
+    def _on_param_changed(self, _index: int) -> None:
+        param = str(self._param_combo.currentData() or "volume")
         self._current_param = param
-        min_v, max_v, _ = self.PARAM_CONFIG.get(param, (0.0, 1.0, 0.0))
+        min_v, max_v, _ = self._param_config.get(param, (0.0, 1.0, 0.0))
         self._curve._param_name = param
         self._curve._min_val = min_v
         self._curve._max_val = max_v
@@ -436,7 +454,8 @@ class AutomationLane(QDialog):
         Args:
             automation: {param: KeyframeTrack}
         """
-        self._tracks = {p: automation.get(p) for p in ["volume", "pan", "mute"]}
+        keys = ["volume", "pan", "mute"] + [k for k, _l, _mn, _mx in self._fx_specs]
+        self._tracks = {p: automation.get(p) for p in keys}
         self._curve.set_track(self._tracks.get(self._current_param))
         self._curve.update()
 

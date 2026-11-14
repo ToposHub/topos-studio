@@ -3877,6 +3877,7 @@ class EditTrack:
     AUTOMATION_PAN = "pan"
     AUTOMATION_MUTE = "mute"
 
+
     def get_automation_value(self, param: str, frame: int, default: float) -> float:
         """查询某参数在指定帧的自动化值（线性插值）。
 
@@ -4067,6 +4068,72 @@ class EditTrack:
             return NotImplemented
         return self.track_id == other.track_id
 
+
+
+
+# MX-10: FX 参数自动化命名空间。track.automation 的 key 采用
+# "fx/{instance_id}/{param_key}"（模型 dict key 天然泛型，序列化/快照/
+# 命令层零改动即支持）；块边界处由采样器按当前帧求值并覆盖链参数。
+AUTOMATION_FX_PREFIX = "fx/"
+
+
+def parse_fx_automation_key(key: str) -> Optional[tuple]:
+    """解析 "fx/{instance_id}/{param_key}" → (instance_id, param_key)。
+
+    非本命名空间（volume/pan/mute 或其他）返回 None。
+    instance_id 含 "/" 时按第一个 "/" 拆分（instance_id 由 uuid 生成，
+    不含 "/"；param_key 为 schema 键，同样不含 "/"）。
+    """
+    if not key.startswith(AUTOMATION_FX_PREFIX):
+        return None
+    rest = key[len(AUTOMATION_FX_PREFIX):]
+    if "/" not in rest:
+        return None
+    iid, _, pkey = rest.partition("/")
+    if not iid or not pkey:
+        return None
+    return iid, pkey
+
+
+def build_track_fx_sampler(track: Any) -> Optional[Any]:
+    """MX-10: 从 track.automation 的 fx/* 键构建 ``frame -> entries`` 采样器。
+
+    返回 None 当：automation_mode == "off" / 无 fx 键 / 无效果链。
+    采样器闭包捕获 track 快照（frozen dataclass）——链或曲线编辑产生新
+    track 对象，由调用方（edit_page 同步 / renderer 节点构建）重建采样器。
+
+    求值语义：块边界粒度（每块按起始帧求值一次，与 clip FX 的
+    animated_sampler 同型）；keyframe 插值由 KeyframeTrack.get_value 完成；
+    未知参数键（链参数里不存在）被忽略。
+    """
+    if str(getattr(track, "automation_mode", "off") or "off").lower() == "off":
+        return None
+    chain = getattr(track, "effect_chain", None)
+    if chain is None:
+        return None
+    fx_tracks: dict = {}
+    for key, kt in (getattr(track, "automation", None) or {}).items():
+        parsed = parse_fx_automation_key(str(key))
+        if parsed is not None and getattr(kt, "keyframes", None):
+            fx_tracks[parsed] = kt
+    if not fx_tracks:
+        return None
+    base_entries = chain.to_dsp_entries()
+
+    def _sampler(frame: int) -> list:
+        entries = []
+        for etype, params, enabled, iid in base_entries:
+            p = dict(params) if params else {}
+            for (eid, pkey), kt in fx_tracks.items():
+                if eid == iid and pkey in p:
+                    try:
+                        p[pkey] = kt.get_value(int(frame), p[pkey])
+                    except (TypeError, ValueError, KeyError):
+                        pass
+            entries.append((etype, p, enabled, iid))
+        return entries
+
+    return _sampler
 
 @dataclass(frozen=True)
 class TimelineClipboardPayload:

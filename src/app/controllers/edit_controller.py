@@ -3964,7 +3964,9 @@ class EditControllerMixin:
                 track_name = track.name or track_id
             total_frames = max(1, getattr(timeline, 'duration_frames', 1000) or 1000)
 
-        dlg = AutomationLane(track_id, track_name, total_frames=total_frames, parent=self._main_window_ref())
+        dlg = AutomationLane(track_id, track_name, total_frames=total_frames,
+                             parent=self._main_window_ref(),
+                             fx_param_specs=self._collect_fx_param_specs(track_id))
         # 连接信号
         dlg.add_keyframe.connect(self._on_mixer_automation_add)
         dlg.remove_keyframe.connect(self._on_mixer_automation_remove)
@@ -3988,15 +3990,70 @@ class EditControllerMixin:
         """获取主窗口引用（Automation Lane 的 parent）。"""
         return getattr(self, 'main_window', None) or None
 
+    def _collect_fx_param_specs(self, track_id: str) -> list:
+        """MX-10: 枚举该轨效果链的可自动化参数（Automation Lane 用）。
+
+        规格 = [("fx/{instance_id}/{param_key}", label, min, max), ...]，
+        值域优先 effect_registry 的 ParamSchema（min/max/step 数值型）；
+        schema 缺失时用实例当前值做保守数值域（0..max(2|v|,1)）。
+        仅数值型参数进入；bool/choice 等离散参数不开放曲线（事件语义，
+        计划 MX-10："离散开关使用事件"——后续任务）。
+        """
+        timeline = getattr(getattr(self, 'edit_page', None), '_current_timeline', None)
+        if timeline is None:
+            return []
+        track = timeline.get_track_by_id(track_id)
+        chain = getattr(track, "effect_chain", None) if track is not None else None
+        if chain is None:
+            return []
+        try:
+            from src.features.edit.core.effect_registry import get_effect_definition
+        except ImportError:
+            return []
+        specs = []
+        for inst in getattr(chain, "effects", ()) or ():
+            etype = getattr(inst, "effect_type", "")
+            iid = getattr(inst, "instance_id", "")
+            if not etype or not iid:
+                continue
+            definition = get_effect_definition(etype)
+            schema = getattr(definition, "params_schema", None) or {}
+            params = getattr(inst, "params", None) or {}
+            for key, current in params.items():
+                if not isinstance(current, (int, float)) or isinstance(current, bool):
+                    continue
+                ps = schema.get(key)
+                if ps is not None and getattr(ps, "min_value", None) is not None \
+                        and getattr(ps, "max_value", None) is not None \
+                        and ps.min_value != ps.max_value:
+                    mn, mx = float(ps.min_value), float(ps.max_value)
+                else:
+                    mn = 0.0
+                    mx = max(abs(float(current)) * 2.0, 1.0)
+                specs.append((
+                    f"fx/{iid}/{key}",
+                    f"{etype}.{key} [{iid[:8]}]", mn, mx))
+        return specs
+
+    def _fx_param_bounds(self, track_id: str, param: str) -> tuple:
+        """MX-10: fx/* 参数键的值域（与 Lane 规格同源）。"""
+        for key, _label, mn, mx in self._collect_fx_param_specs(track_id):
+            if key == param:
+                return mn, mx
+        return (0.0, 1.0)
+
     def _on_mixer_automation_add(self, track_id: str, param: str, frame: int, value: float) -> None:
-        """W20: 添加 automation 关键帧。"""
+        """W20: 添加 automation 关键帧（MX-10: fx/* 键同样走命令栈）。"""
         tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
         if tview is None:
             return
         try:
             from src.features.edit.core.commands import AddAutomationKeyframeCommand
             # 参数值域
-            min_v, max_v = {"volume": (0.0, 2.0), "pan": (-1.0, 1.0), "mute": (0.0, 1.0)}.get(param, (0.0, 1.0))
+            if param.startswith("fx/"):
+                min_v, max_v = self._fx_param_bounds(track_id, param)
+            else:
+                min_v, max_v = {"volume": (0.0, 2.0), "pan": (-1.0, 1.0), "mute": (0.0, 1.0)}.get(param, (0.0, 1.0))
             cmd = AddAutomationKeyframeCommand.create(track_id, param, frame, value,
                                                      min_val=min_v, max_val=max_v)
             tview._execute_command(cmd)

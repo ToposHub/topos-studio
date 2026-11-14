@@ -1794,7 +1794,18 @@ class EditPage(QWidget):
         set_chain = getattr(audio_mgr, "set_track_effect_chain", None)
         if callable(set_chain):
             try:
-                set_chain(track_id, effect_chain)
+                # MX-10: fx 参数自动化采样器（automation 含 fx/* 键且
+                # mode != off 时非 None；链/曲线变化经签名触发重建）
+                fx_sampler = None
+                try:
+                    from src.features.edit.core.timeline_v2 import (
+                        build_track_fx_sampler,
+                    )
+                    fx_sampler = build_track_fx_sampler(track)
+                except Exception:  # noqa: BLE001 — 采样器构建失败回退静态链
+                    fx_sampler = None
+                set_chain(track_id, track.effect_chain,
+                          animated_sampler=fx_sampler)
             except Exception as e:  # noqa: BLE001
                 logger.debug("set_track_effect_chain failed for %s: %s", track_id, e)
         # CW-A1: 空间声像器（spread/rotate/divergence/boom 立体声域矩阵）

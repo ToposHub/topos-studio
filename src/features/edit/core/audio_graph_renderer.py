@@ -106,7 +106,7 @@ class _TrackNode:
     __slots__ = (
         "track_id", "is_bus", "volume", "pan", "muted", "solo", "enabled",
         "output_bus_id", "sends", "automation", "automation_mode",
-        "eq_filter", "effect_chain", "panner",
+        "eq_filter", "effect_chain", "panner", "fx_sampler",
     )
 
     def __init__(self, track: Any, sample_rate: float) -> None:
@@ -143,6 +143,9 @@ class _TrackNode:
         chain = getattr(track, "effect_chain", None)
         if chain is not None and hasattr(chain, "to_dsp_entries"):
             self.effect_chain.set_params(chain.to_dsp_entries(), sample_rate=sample_rate)
+        # MX-10: fx 参数自动化采样器（frame -> entries；mode=off 或无 fx 键 → None）
+        from src.features.edit.core.timeline_v2 import build_track_fx_sampler
+        self.fx_sampler = build_track_fx_sampler(track)
 
         # CW-A1: 空间声像器（立体声域矩阵；lr 真源是上面的 track.pan）
         from src.features.edit.core.audio_dsp import SpatialPanner
@@ -492,6 +495,18 @@ class AudioGraphRenderer:
 
         # track FX（post-EQ；CW-A1: 外部侧链检源透传）
         if node.effect_chain is not None and node.effect_chain.is_active:
+            # MX-10: fx 参数自动化——块边界按当前帧重设链参数（与实时
+            # mix_samples / clip FX 的 animated_sampler 同型）
+            if node.fx_sampler is not None:
+                try:
+                    node.effect_chain.set_params(
+                        node.fx_sampler(int(current_frame)),
+                        sample_rate=self._sample_rate)
+                except Exception:  # noqa: BLE001 — 曲线求值失败回退静态
+                    logger.warning(
+                        "AudioGraphRenderer: fx automation sampler failed "
+                        "for track %s", track_id, exc_info=True)
+                    node.fx_sampler = None
             sc_map = None
             if sidechain_taps:
                 raw_map = node.effect_chain.sidechain_map(sidechain_taps)
