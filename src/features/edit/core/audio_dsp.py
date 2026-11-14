@@ -895,9 +895,19 @@ class AudioEffect:
         """重置内部状态（seek/暂停后调用，避免残留瞬态）。子类必须实现。"""
         raise NotImplementedError
 
+    def tail_estimate_samples(self) -> int:
+        """可闻尾音估计（样本数；MX-07 feed-zero drain 契约）。
+
+        有状态效果器（Delay/Reverb）在输入停止后仍会继续输出（回声/混响
+        尾巴）。引擎据此在"无 clip 但尾音未结束"时喂零块推进状态。
+        0 = 无尾音（静态/瞬时效果，输入停即输出停）。
+        上限由各效果器自行钳制（强反馈不得无限挂住调度）。
+        """
+        return 0
+
     @property
     def is_active(self) -> bool:
-        """是否启用并生效。子类必须实现。"""
+        """是否启用并生效（用于短路跳过无谓拷贝）。子类必须实现。"""
         raise NotImplementedError
 
 
@@ -2007,6 +2017,15 @@ class ReverbEffect(AudioEffect):
         self._er_shelf_zi = None
         self._rev_shelf_zi = None
 
+    def tail_estimate_samples(self) -> int:
+        """MX-07：混响尾音估计 = 2×RT60（-60dB 后自然不可闻），上限 8s。"""
+        sr = self._sample_rate
+        p = self._params or {}
+        rt60_s = float(p.get("reverb_time", 2000.0)) * 0.001
+        if sr <= 0 or rt60_s <= 0:
+            return 0
+        return int(min(rt60_s * 2.0, 8.0) * sr) + 1
+
     @property
     def is_active(self) -> bool:
         return self._enabled
@@ -2491,6 +2510,24 @@ class DelayEffect(AudioEffect):
         self._delay_idx = 0
         self._damp_prev = np.zeros(2, dtype=np.float64)
         self._in_zi = None
+
+    def tail_estimate_samples(self) -> int:
+        """MX-07：延迟尾音估计——最大延迟 × 反馈衰减到 -60dB 的圈数。
+
+        fb^n = 1e-3 → n = 3/|log10(fb)|；上限 4 秒（强反馈不得无限挂住
+        调度；更长尾音属可见交付策略，超出部分按上限截断）。
+        """
+        sr = self._sample_rate
+        if sr <= 0:
+            return 0
+        delay = max(self._left_delay, self._right_delay) * 0.001 * sr
+        if delay <= 0.0:
+            return 0
+        fb = max(abs(self._left_fb), abs(self._right_fb)) / 100.0
+        if fb < 0.01:
+            return int(delay) + 1
+        n_circles = 3.0 / max(0.0044, abs(float(np.log10(max(fb, 1e-4)))))
+        return int(min(delay * n_circles, 4.0 * sr)) + 1
 
     @property
     def is_active(self) -> bool:
@@ -3287,6 +3324,18 @@ class EffectChain:
         """重置所有效果器状态。"""
         for inst in self._effects:
             inst.reset_state()
+
+    def tail_estimate_samples(self) -> int:
+        """MX-07：链尾音估计 = 启用实例的最大尾音（调度 feed-zero 时长）。"""
+        est = 0
+        for inst, enabled in zip(self._effects, self._enabled_flags):
+            if not enabled:
+                continue
+            try:
+                est = max(est, int(inst.tail_estimate_samples()))
+            except (AttributeError, TypeError, ValueError):
+                continue
+        return est
 
     @property
     def is_active(self) -> bool:

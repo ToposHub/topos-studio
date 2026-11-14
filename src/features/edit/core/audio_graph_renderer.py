@@ -543,6 +543,7 @@ class AudioGraphRenderer:
         audible_solo: set = None,
         start_frame: int = 0,
         fps: float = 24.0,
+        sidechain_taps: Optional[dict] = None,
     ) -> None:
         """按拓扑序处理 Bus，累积到 output（与 mix_samples 阶段 2 一致）。
 
@@ -553,6 +554,8 @@ class AudioGraphRenderer:
                 Bus 必须在闭包内才保留，替代旧的 `not node.solo` 单点判断。
             start_frame/fps: RMA-06 Bus automation（volume/pan/mute）逐样本求值用。
                 Bus automation 此前完全被忽略（UI/模型可保存却无声跳过）。
+            sidechain_taps: MX-08 Bus 压缩器外部检源缓冲 {source_id: (ch, n)}
+                （与普通轨 render_track_block 同构）。
         """
         # RMA-04: 计算可听闭包（含普通轨 + Bus）。旧 `not node.solo` 会把 solo
         # 普通轨必经的 Bus 错误剔除。
@@ -666,9 +669,15 @@ class AudioGraphRenderer:
             # EQ
             if node.eq_filter is not None and node.eq_filter.is_active:
                 bus_samples = node.eq_filter.process(bus_samples)
-            # FX
+            # FX（MX-08: 外部侧链检源透传，与普通轨同构）
             if node.effect_chain is not None and node.effect_chain.is_active:
-                bus_samples = node.effect_chain.process(bus_samples)
+                sc_map = None
+                if sidechain_taps:
+                    raw_map = node.effect_chain.sidechain_map(sidechain_taps)
+                    if raw_map:
+                        cur_n = bus_samples.shape[-1]
+                        sc_map = {iid: buf[:, :cur_n] for iid, buf in raw_map.items()}
+                bus_samples = node.effect_chain.process(bus_samples, sidechain_by_id=sc_map)
             # 路由：Bus→Bus 或 →Master（output_bus_id）
             target = node.output_bus_id
             n = bus_samples.shape[-1]

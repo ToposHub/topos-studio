@@ -4129,6 +4129,40 @@ class TimelineExporter:
             logger.info("No renderable audio tracks, skipping audio export")
             return
 
+        # MX-08: 外部侧链——检源集合与轨处理顺序（检源先于被控轨，与实时
+        # _sidechain_track_order 同语义）。环依赖按原序放置（tap 不命中 →
+        # 压缩器回退内部检源）并告警一次。
+        export_sc_source_ids: set = set()
+        _sc_deps: Dict[str, set] = {}
+        for _t in list(audio_tracks) + list(bus_tracks):
+            _n = renderer.get_node(_t.track_id)
+            _srcs = (_n.effect_chain.sidechain_sources()
+                     if (_n is not None and _n.effect_chain is not None) else set())
+            export_sc_source_ids |= _srcs
+            if _t in audio_tracks:
+                _sc_deps[_t.track_id] = {s for s in _srcs if s != _t.track_id}
+        if _sc_deps and any(_sc_deps.values()):
+            _placed: set = set()
+            _ordered: List[Any] = []
+            _remaining = list(audio_tracks)
+            while _remaining:
+                _progressed = False
+                for _t in list(_remaining):
+                    if _sc_deps.get(_t.track_id, set()) <= _placed:
+                        _ordered.append(_t)
+                        _placed.add(_t.track_id)
+                        _remaining.remove(_t)
+                        _progressed = True
+                if not _progressed:
+                    _t = _remaining.pop(0)
+                    logger.warning(
+                        "audio export sidechain dependency cycle at track %s; "
+                        "falling back to internal detection", _t.track_id,
+                    )
+                    _ordered.append(_t)
+                    _placed.add(_t.track_id)
+            audio_tracks = _ordered
+
         if only_track_ids is not None:
             logger.info(
                 "Rendering audio stem: %d tracks (%d total), %d samples",
@@ -4143,6 +4177,9 @@ class TimelineExporter:
         # 混音输出缓冲区（master）+ bus 输入缓冲
         output = np.zeros((channels, total_samples), dtype=np.float32)
         bus_inputs: dict = {}
+        # MX-08: 跨轨共享的侧链检源帧缓存 {frame_idx: {source_track_id: block}}。
+        # 轨按 SC 依赖序 flush，被控轨在帧 f 能读到所有先处理检源轨的 f 帧输出。
+        sc_frame_outputs: dict = {}
 
         # 为每个 clip 打开 AudioDecoder 并解码
         decoders: Dict[str, AudioDecoder] = {}
@@ -4153,13 +4190,96 @@ class TimelineExporter:
                 clip_fx_cache: dict = {}
                 # D04：动画 FX 的逐帧参数采样器缓存（None=静态，无逐帧更新）
                 _clip_fx_cache_fx: dict = {}
+                # MX-04: 轨帧求和缓存——clip-major 解码后把 clip 阶段输出按帧
+                # 汇入 pending_frames，轨阶段（音量/pan/panner/EQ/FX）在 flush
+                # 时对求和后的输入**每帧只运行一次**（与实时 mix_samples 同构）。
+                # flush 按帧升序出队（内存 = 尚未 flush 的帧跨度，通常 = 最长
+                # 单 clip；见下方 suffix-min 提前 flush）。
+                pending_frames: dict = {}
+                # MX-07: 导出尾音 drain（选区内；不扩展选区长度）
+                track_tail_left = 0
+                # RMA-08: 轨级 pan 法则按轨内首个 clip 的源声道数选
+                # （同布局轨——绝大多数场景——与实时逐 clip 法则一致；
+                # 混合布局轨为显式近似，MX-15 声道矩阵统一后消除）
+                track_first_src_ch: Optional[int] = None
 
-                for clip in track.clips:
+                # MX-08: 本轨作为侧链检源时按帧缓存输出（供后续被控轨消费；
+                # dict 跨轨共享——见轨循环前的定义）
+                _track_node = renderer.get_node(track.track_id)
+                _track_tail_samples = (
+                    _track_node.effect_chain.tail_estimate_samples()
+                    if (_track_node is not None
+                        and _track_node.effect_chain is not None) else 0)
+                _track_state = {"tail_left": 0}
+                # MX-04: suffix-min 起点（未处理 clip 的最早 timeline_start），
+                # 供提前 flush 的安全边界（clip 列表乱序时也正确）。
+                _clip_starts = [c.timeline_start for c in track.clips]
+                _suffix_min_start = [0] * (len(_clip_starts) + 1)
+                _suffix_min_start[len(_clip_starts)] = end_frame
+                for _i in range(len(_clip_starts) - 1, -1, -1):
+                    _suffix_min_start[_i] = min(
+                        _clip_starts[_i], _suffix_min_start[_i + 1])
+
+                def _render_and_route(fidx: int, summed: np.ndarray) -> None:
+                    """MX-04/MX-08: 对求和后的轨帧一次应用轨阶段并路由。"""
+                    rel = fidx - start_frame
+                    if rel < 0 or rel + 1 >= len(frame_sample_bounds):
+                        return
+                    out_start = frame_sample_bounds[rel]
+                    out_end = frame_sample_bounds[rel + 1]
+                    taps = sc_frame_outputs.get(fidx) or None
+                    processed = renderer.render_track_block(
+                        track.track_id, summed, fidx,
+                        fps=fps,
+                        source_channels=int(track_first_src_ch or 2),
+                        sidechain_taps=taps,
+                    )
+                    if processed is None:
+                        return  # automation mute
+                    node = renderer.get_node(track.track_id)
+                    target = node.output_bus_id if node else None
+                    actual = min(processed.shape[-1], out_end - out_start)
+                    if target is not None:
+                        if target not in bus_inputs:
+                            bus_inputs[target] = np.zeros(
+                                (channels, total_samples), dtype=np.float32)
+                        bus_inputs[target][:, out_start:out_end] += processed[:channels, :actual]
+                    else:
+                        output[:, out_start:out_end] += processed[:channels, :actual]
+                    # sends（并行）
+                    if node is not None:
+                        for send_bus_id, send_level in node.sends:
+                            if send_level <= 0.0:
+                                continue
+                            if send_bus_id not in bus_inputs:
+                                bus_inputs[send_bus_id] = np.zeros(
+                                    (channels, total_samples), dtype=np.float32)
+                            bus_inputs[send_bus_id][:, out_start:out_end] += \
+                                processed[:channels, :actual] * send_level
+                    # MX-08: 检源轨按帧缓存输出（块宽补齐，供被控轨 tap）
+                    if track.track_id in export_sc_source_ids:
+                        blk = processed
+                        if blk.shape[-1] < out_end - out_start:
+                            blk = np.pad(blk, ((0, 0),
+                                               (0, out_end - out_start - blk.shape[-1])))
+                        sc_frame_outputs.setdefault(fidx, {})[track.track_id] = blk
+                    # MX-07: 内容帧刷新尾音预算
+                    _track_state["tail_left"] = _track_tail_samples
+
+                for _clip_i, clip in enumerate(track.clips):
                     clip_start = clip.timeline_start
                     clip_end = clip.timeline_start + clip.timeline_duration
 
                     overlap_start = max(clip_start, start_frame)
                     overlap_end = min(clip_end, end_frame)
+
+                    # MX-04: 提前 flush——早于 min(本 clip 起点, 未处理 clip
+                    # 最早起点) 的帧已不可能再被补充，按帧升序出队（限制
+                    # pending 内存；轨 DSP 状态按帧序推进不被乱序破坏）。
+                    _flush_bound = min(clip_start, _suffix_min_start[_clip_i + 1])
+                    for _pf in sorted(k for k in pending_frames
+                                      if k < _flush_bound):
+                        _render_and_route(_pf, pending_frames.pop(_pf))
 
                     if overlap_start >= overlap_end:
                         continue
@@ -4395,6 +4515,7 @@ class TimelineExporter:
                                         clip.clip_id, frame_idx, exc_info=True,
                                     )
 
+
                             # AM-08 阶段 4.1：声道映射用标准 downmix（替代 naive 截断）。
                             # 此前 samples[:channels] 直接丢弃 Center/LFE/Surround，
                             # 现用 ChannelLayout.downmix 保留全部声道贡献（ITUR BS.775）。
@@ -4447,7 +4568,9 @@ class TimelineExporter:
                             if abs(_clip_gain_db) > 1e-9:
                                 samples = samples * (10.0 ** (_clip_gain_db / 20.0))
 
-                            # AM-03/AM-06: 用共享 renderer 处理节点（clip 淡化/automation/clip-FX/volume/pan/EQ/FX）
+                            # MX-04: clip 阶段在 clip 循环内完成（fade/crossfade/
+                            # clip-FX 是 clip 级操作）；轨阶段（音量/pan/panner/
+                            # EQ/FX）延迟到 flush 对求和帧一次执行。
                             clip_fade = {
                                 "timeline_start": clip.timeline_start,
                                 "timeline_duration": clip.timeline_duration,
@@ -4468,9 +4591,8 @@ class TimelineExporter:
                                 "fade_curve_out": getattr(
                                     clip, "effective_fade_curve_out", None),
                             }
-                            # AT: 若该 clip 参与音频转场，附加 crossfade 参数供 renderer
-                            # 在 clip fade 之后叠加。一个 clip 理论上可能在多个转场中
-                            # 出现（一左一右），这里收集所有命中实例。
+                            # AT: 若该 clip 参与音频转场，附加 crossfade 参数。
+                            # 一个 clip 理论上可能在多个转场中出现（一左一右）。
                             if getattr(track, "transitions", None):
                                 from src.features.edit.core.audio_transition_catalog import (
                                     audio_curve_for,
@@ -4495,38 +4617,90 @@ class TimelineExporter:
                                     })
                                 if xfades:
                                     clip_fade["crossfade"] = xfades
-                            processed = renderer.render_track_block(
-                                track.track_id, samples, frame_idx,
-                                clip_fx_chain=clip_chain,
-                                clip_fade=clip_fade,
-                                fps=fps,
-                            )
-                            if processed is None:
-                                continue  # automation mute
 
-                            # 路由到该帧对应的 output 位置（bus_inputs 或 master）。
-                            # 直接累积到全局缓冲的 [out_start:out_end] 切片，避免每帧
-                            # 分配全长度缓冲（O(total_samples) per frame 的低效）。
-                            node = renderer.get_node(track.track_id)
-                            target = node.output_bus_id if node else None
-                            if target is not None:
-                                if target not in bus_inputs:
-                                    bus_inputs[target] = np.zeros((channels, total_samples), dtype=np.float32)
-                                bus_inputs[target][:, out_start:out_end] += processed[:channels, :actual]
-                            else:
-                                output[:, out_start:out_end] += processed[:channels, :actual]
-                            # sends（并行）
-                            if node is not None:
-                                for send_bus_id, send_level in node.sends:
-                                    if send_level <= 0.0:
-                                        continue
-                                    if send_bus_id not in bus_inputs:
-                                        bus_inputs[send_bus_id] = np.zeros((channels, total_samples), dtype=np.float32)
-                                    bus_inputs[send_bus_id][:, out_start:out_end] += processed[:channels, :actual] * send_level
+                            from src.features.edit.core.audio_dsp import (
+                                apply_clip_fade as _apply_clip_fade,
+                                apply_crossfade_block as _apply_xfade_block,
+                            )
+                            samples = _apply_clip_fade(
+                                samples,
+                                clip_timeline_start=int(clip_fade.get("timeline_start", 0)),
+                                clip_timeline_duration=int(clip_fade.get("timeline_duration", 0)),
+                                current_frame=frame_idx,
+                                fade_in_frames=int(clip_fade.get("fade_in_frames", 0)),
+                                fade_out_frames=int(clip_fade.get("fade_out_frames", 0)),
+                                fps=float(clip_fade.get("fps", 24.0)),
+                                sample_rate=float(sample_rate),
+                                fade_in_samples_override=clip_fade.get("fade_in_samples"),
+                                fade_out_samples_override=clip_fade.get("fade_out_samples"),
+                                audio_sample_offset=int(
+                                    clip_fade.get("audio_sample_offset", 0) or 0),
+                                fade_curve=clip_fade.get("fade_curve"),
+                                fade_curve_in=clip_fade.get("fade_curve_in"),
+                                fade_curve_out=clip_fade.get("fade_curve_out"),
+                            )
+                            for xf in clip_fade.get("crossfade", ()) or ():
+                                samples = _apply_xfade_block(
+                                    samples,
+                                    transition_start_frame=int(xf.get("start_frame", 0)),
+                                    transition_duration_frames=int(xf.get("duration", 0)),
+                                    current_frame=frame_idx,
+                                    role=str(xf.get("role", "")),
+                                    curve=str(xf.get("curve", "constant_power")),
+                                    fps=float(clip_fade.get("fps", 24.0)),
+                                    sample_rate=float(sample_rate),
+                                )
+                            # clip FX（pre-fader，在轨阶段 volume 之前）
+                            if clip_chain is not None and clip_chain.is_active:
+                                samples = clip_chain.process(samples)
+
+                            # 汇入该轨该帧的求和缓冲（MX-04）
+                            frame_buf = pending_frames.get(frame_idx)
+                            if frame_buf is None:
+                                frame_buf = np.zeros(
+                                    (channels, out_end - out_start),
+                                    dtype=np.float32,
+                                )
+                                pending_frames[frame_idx] = frame_buf
+                            _n = min(samples.shape[-1], frame_buf.shape[-1])
+                            frame_buf[:, :_n] += samples[:channels, :_n].astype(
+                                np.float32, copy=False)
+                            if track_first_src_ch is None:
+                                track_first_src_ch = int(
+                                    getattr(decoder, "_channels", 2) or 2)
+
 
                     except Exception as e:
                         logger.warning(f"Failed to decode audio for clip {clip.clip_id}: {e}")
                         continue
+
+                # MX-04/MX-07: 轨收尾 flush——选区内按帧升序出队全部剩余
+                # pending；clip 间隙与选区尾部按尾音预算喂零推进（导出选区
+                # 内 drain；不扩展选区长度——跨选区尾音交付策略见计划 MX-07）。
+                _last_content_frame = max(pending_frames) if pending_frames else -1
+                _drain_end = min(
+                    end_frame,
+                    _last_content_frame + 1
+                    + int(math.ceil(_track_tail_samples / max(1.0, float(sample_rate) / max(0.0001, float(fps))))),
+                )
+                for fidx in range(start_frame, _drain_end):
+                    rel = fidx - start_frame
+                    if rel < 0 or rel + 1 >= len(frame_sample_bounds):
+                        continue
+                    out_start = frame_sample_bounds[rel]
+                    out_end = frame_sample_bounds[rel + 1]
+                    block_len = out_end - out_start
+                    if block_len <= 0:
+                        continue
+                    if fidx in pending_frames:
+                        _render_and_route(fidx, pending_frames.pop(fidx))
+                    elif _track_state["tail_left"] > 0:
+                        _track_state["tail_left"] = max(
+                            0, _track_state["tail_left"] - block_len)
+                        _render_and_route(
+                            fidx, np.zeros((channels, block_len), dtype=np.float32))
+                    # 否则：间隙且无尾音 → 跳过（与实时无输入跳过一致）
+                pending_frames.clear()
 
         finally:
             # D07（第六轮审计）：取消（循环内 return None）与异常路径
@@ -4540,9 +4714,36 @@ class TimelineExporter:
         # AM-03/AM-14: Bus 阶段（拓扑序处理，支持多层 Bus→Bus）
         # RMA-04: 传入可听闭包，让 solo 普通轨必经的 Bus 也参与处理。
         # RMA-06: 传入 start_frame/fps 让 Bus automation（volume/pan/mute）逐样本求值。
+        # MX-08: Bus 阶段外部侧链 tap——把检源轨已 flush 的帧输出拼回
+        # 全选区缓冲（Bus 压缩器与普通轨同构消费）。
+        _bus_sc_taps: dict = {}
+        if export_sc_source_ids and bus_tracks:
+            _bus_sources: set = set()
+            for _b in bus_tracks:
+                _bn = renderer.get_node(_b.track_id)
+                if _bn is not None and _bn.effect_chain is not None:
+                    _bus_sources |= _bn.effect_chain.sidechain_sources()
+            for _src in _bus_sources:
+                _buf = np.zeros((channels, total_samples), dtype=np.float32)
+                _has_any = False
+                for _f, _m in sc_frame_outputs.items():
+                    _blk = _m.get(_src)
+                    if _blk is None:
+                        continue
+                    _rel = _f - start_frame
+                    if 0 <= _rel < len(frame_sample_bounds):
+                        _s = frame_sample_bounds[_rel]
+                        _e = frame_sample_bounds[_rel + 1]
+                        _w = min(_blk.shape[-1], _e - _s)
+                        _buf[:, _s:_s + _w] += _blk[:, :_w].astype(
+                            np.float32, copy=False)
+                        _has_any = True
+                if _has_any:
+                    _bus_sc_taps[_src] = _buf
         renderer.render_bus_stage(bus_inputs, output, has_solo=has_solo,
                                   audible_solo=audible_solo,
-                                  start_frame=start_frame, fps=fps)
+                                  start_frame=start_frame, fps=fps,
+                                  sidechain_taps=_bus_sc_taps or None)
 
         # AM-03: Master 阶段（volume/mute + 软限幅，替代此前的硬削波 np.clip）
         # §3.1: 传入 start_frame/fps 供 master automation ramp
