@@ -1718,6 +1718,8 @@ class AudioMixer:
         # D04（第六轮审计）：动画 FX 的逐帧参数采样器（frame -> entries）；
         # mix_samples 在处理该 clip 块前按当前帧更新链参数。
         self._clip_effect_samplers: Dict[str, Any] = {}
+        # MX-10: 轨级 fx 参数自动化采样器（track_id -> frame->entries）
+        self._track_effect_samplers: Dict[str, Any] = {}
         # clip_id → track_id 反查表，用于 remove_track 时清理对应 clip 链。
         self._clip_to_track: Dict[str, str] = {}
         # W11: 每轨一个 LUFS 响度计（EBU R128，跨样本块连续）
@@ -2122,6 +2124,8 @@ class AudioMixer:
                 self._clip_to_track.pop(cid, None)
             # W11: 清理 LUFS 响度计
             self._lufs_meters.pop(track_id, None)
+            # MX-10: 清理 fx 参数自动化采样器
+            self._track_effect_samplers.pop(track_id, None)
             # CW-A1: 清理空间声像器 / 频谱窗 / 侧链状态
             self._track_panner_params.pop(track_id, None)
             self._track_panners.pop(track_id, None)
@@ -2429,14 +2433,18 @@ class AudioMixer:
                 self._eq_filters[track_id] = StripEQFilter(self._sample_rate)
             self._eq_filters[track_id].set_params(params, sample_rate=self._sample_rate)
 
-    def set_track_effect_chain(self, track_id: str, chain_params: Optional[EffectChainParams]) -> None:
-        """设置某轨的 FX 机架效果器链（W26）。线程安全。
+    def set_track_effect_chain(self, track_id: str, chain_params: Optional[EffectChainParams],
+                               animated_sampler: Optional[Any] = None) -> None:
+        """设置某轨的 FX 机架效果器链（W26；MX-10 扩展采样器）。线程安全。
 
         在 strip EQ 之后应用（post-fader，post-EQ）。
 
         Args:
             track_id: 轨道 ID
             chain_params: EffectChainParams，None 表示清空链
+            animated_sampler: MX-10——``frame -> entries`` 采样器（fx 参数
+                关键帧）；提供时 mix_samples 在处理该轨每个块前按当前帧
+                重设链参数（块边界粒度，与 clip FX 同型）。None=静态。
         """
         entries = chain_params.to_dsp_entries() if chain_params is not None else None
         with QMutexLocker(self._mutex):
@@ -2445,6 +2453,11 @@ class AudioMixer:
             self._effect_chains[track_id].set_params(entries, sample_rate=self._sample_rate)
             # CW-A1: 链参数变化可能改变侧链依赖 → 失效排序缓存
             self._sc_order_cache = None
+            # MX-10: fx 参数自动化采样器（None/清链 → 移除）
+            if animated_sampler is not None and chain_params is not None:
+                self._track_effect_samplers[track_id] = animated_sampler
+            else:
+                self._track_effect_samplers.pop(track_id, None)
 
     def set_master_strip_eq(self, params: Optional[StripEQParams]) -> None:
         """MX-03: 设置 Master Strip EQ。线程安全。
@@ -3009,6 +3022,19 @@ class AudioMixer:
 
                 # W26: FX 机架效果器链（post-EQ；CW-A1 外部侧链检源透传）
                 if track_chain is not None and track_chain.is_active:
+                    # MX-10: fx 参数自动化——块边界按当前帧重设链参数
+                    # （与 clip FX 的 animated_sampler 同型；失败不阻断混音）
+                    fx_sampler = self._track_effect_samplers.get(track_id)
+                    if fx_sampler is not None:
+                        try:
+                            track_chain.set_params(
+                                fx_sampler(current_frame),
+                                sample_rate=self._sample_rate)
+                        except Exception:  # noqa: BLE001 — 曲线求值失败回退静态
+                            logger.warning(
+                                "fx automation sampler failed for track %s",
+                                track_id, exc_info=True)
+                            self._track_effect_samplers.pop(track_id, None)
                     sc_map = None
                     if sidechain_taps:
                         raw_map = track_chain.sidechain_map(sidechain_taps)
@@ -5264,14 +5290,17 @@ class AudioPlaybackManager(QObject):
         """
         self._mixer.set_track_strip_eq(track_id, params)
 
-    def set_track_effect_chain(self, track_id: str, chain_params: Optional[EffectChainParams]) -> None:
-        """设置某轨的 FX 机架效果器链（W26）。转发到 AudioMixer。
+    def set_track_effect_chain(self, track_id: str, chain_params: Optional[EffectChainParams],
+                               animated_sampler: Optional[Any] = None) -> None:
+        """设置某轨的 FX 机架效果器链（W26；MX-10 采样器）。转发到 AudioMixer。
 
         Args:
             track_id: 轨道 ID
             chain_params: EffectChainParams，None 表示清空链
+            animated_sampler: MX-10 fx 参数自动化采样器（None=静态）
         """
-        self._mixer.set_track_effect_chain(track_id, chain_params)
+        self._mixer.set_track_effect_chain(track_id, chain_params,
+                                            animated_sampler=animated_sampler)
 
     def set_track_panner(self, track_id: str, panner: Optional[dict]) -> None:
         """设置某轨的空间声像器参数（CW-A1）。转发到 AudioMixer。
