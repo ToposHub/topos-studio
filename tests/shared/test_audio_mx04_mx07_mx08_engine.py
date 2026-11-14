@@ -315,3 +315,59 @@ class TestMx08SidechainExportParity:
         assert p_ducked < p_plain * 0.7, (
             f"bus sidechain taps had no effect (plain={p_plain:.3f}, ducked={p_ducked:.3f})"
         )
+
+
+class TestMx02PerInstanceTaps:
+    """MX-02：链内按实例真实采样 in/out/GR/SC（不再冒充轨末端）。"""
+
+    def _delay_params(self, time_ms, fb=0.0):
+        return {"left_delay": time_ms, "right_delay": time_ms,
+                "left_feedback": fb, "right_feedback": fb,
+                "low_cut": 20.0, "high_cut": 18000.0,
+                "high_ratio": 0.0, "stereo_blend": 0.0,
+                "dry_wet": 100.0, "level_db": 0.0, "enabled": True}
+
+    def test_two_delays_have_distinct_taps(self):
+        """两个 Delay 实例各自携带 in/out tap；后者输入 = 前者输出链路。"""
+        chain = EffectChain(SR)
+        chain.set_params([
+            ("delay", self._delay_params(10.0), True, "DA"),
+            ("delay", self._delay_params(10.0), True, "DB"),
+        ], sample_rate=SR)
+        x = np.full((2, 2048), 0.5)
+        chain.process(x)
+        taps = chain.tap_levels()
+        assert set(taps) == {"DA", "DB"}
+        assert taps["DA"]["out_db"] > -20.0
+        # B 的输入是 A 的输出（串联结构可观测）
+        assert taps["DB"]["in_db"] == pytest.approx(taps["DA"]["out_db"], abs=1.0)
+
+    def test_bypassed_instance_reports_bypassed_tap(self):
+        chain = EffectChain(SR)
+        entry = ("compressor", {
+            "threshold_db": -30.0, "ratio": 4.0, "knee": 0.0,
+            "attack_ms": 0.7, "release_ms": 50.0, "mix": 100.0,
+            "makeup_gain": 0.0, "enabled": True,
+        }, True, "C1")
+        chain.set_params([entry], sample_rate=SR)
+        chain.process(np.full((2, 480), 0.9))
+        chain.set_params([("compressor", entry[1], False, "C1")], sample_rate=SR)
+        chain.process(np.zeros((2, 480)))
+        taps = chain.tap_levels()
+        assert taps["C1"]["bypassed"] is True
+        assert taps["C1"]["gr_db"] == 0.0
+
+    def test_track_level_carries_taps(self, qapp):
+        """mix_samples TrackLevel.taps 按实例分发（引擎→UI 契约）。"""
+        mixer = AudioMixer()
+        frames = (0, 1, 2)
+        mixer.add_track("t1", _GateDecoder(amp=0.8, frames=frames, seed=3),
+                        AudioTrackState(track_id="t1"))
+        mixer.set_track_effect_chain("t1", _delay_chain_params(fb=20.0, time_ms=5.0))
+        peaks = None
+        for f in frames:
+            _, peaks = mixer.mix_samples(f, FPS, BLOCK, 2)
+        taps = peaks["t1"].taps
+        assert "D1" in taps
+        assert taps["D1"]["effect_type"] == "delay"
+        assert taps["D1"]["out_db"] > -60.0

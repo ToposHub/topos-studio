@@ -948,6 +948,12 @@ class TrackMixerWidget(QWidget):
         self._dynamics_dialog.dynamics_committed.connect(
             lambda tid, c: self._on_dynamics_edited(c, commit=True)
         )
+        # MX-12: 生命周期绑定——用户关闭/销毁时清引用（滞留引用会让
+        # 遥测分发与后续编辑打到已销毁的 C++ 对象）
+        self._dynamics_dialog.finished.connect(
+            lambda _r: setattr(self, "_dynamics_dialog", None))
+        self._dynamics_dialog.destroyed.connect(
+            lambda *_: setattr(self, "_dynamics_dialog", None))
         self._dynamics_dialog.show()
 
     def _on_dynamics_edited(self, chain: Any, commit: bool) -> None:
@@ -1500,6 +1506,37 @@ class TrackMixerWidget(QWidget):
             dlg = dialogs.pop(instance_id, None)
             if dlg is not None:
                 dlg.deleteLater()
+
+    def close_all_dialogs(self) -> None:
+        """MX-12: 关闭本 strip 的全部效果器对话框（轨删除/工程切换时调用）。
+
+        清理单例（EQ/Dynamics/Panner）与多实例对话框字典，断开引用——
+        否则轨删除后对话框仍 parent 在主窗口上成为孤儿窗，继续接收
+        已删轨的迟到编辑并泄漏订阅。
+        """
+        for attr in ("_eq_dialog", "_dynamics_dialog", "_panner_dialog"):
+            dlg = getattr(self, attr, None)
+            if dlg is not None:
+                setattr(self, attr, None)
+                try:
+                    dlg.deleteLater()
+                except RuntimeError:
+                    pass  # C++ 对象已销毁
+        for attr in self._EFFECT_DIALOG_ATTRS:
+            dialogs = getattr(self, attr, None)
+            if not dialogs:
+                continue
+            for dlg in list(dialogs.values()):
+                try:
+                    dlg.deleteLater()
+                except RuntimeError:
+                    pass
+            dialogs.clear()
+        # 频谱/LUFS 门控随对话框关闭而解除
+        try:
+            self._update_spectrum_gating()
+        except (RuntimeError, AttributeError):
+            pass
 
     def _instance_in_chain(self, instance_id: str) -> bool:
         """AUD-37902: instance_id 是否仍存在于当前效果器链（删除后的编辑守卫）。"""
@@ -2140,12 +2177,21 @@ class TrackMixerWidget(QWidget):
         silent = bool(payload.get("silent"))
         gr = payload.get("gr") or {}
         sc = payload.get("sc") or {}
+        taps = payload.get("taps") or {}
         pre_db = payload.get("pre", -100.0)
         peak = payload.get("peak", [-100.0, -100.0])
         out_db = max(peak[0], peak[1]) if isinstance(peak, (list, tuple)) else -100.0
 
+        # MX-02: 按实例 tap 读取（缺失实例回退轨级末端读数——旧链/DSP 不可用）
+        def _tap_db(iid: str, key: str, fallback: float) -> float:
+            t = taps.get(iid)
+            if not t or t.get("bypassed"):
+                return fallback if not t else -100.0
+            return float(t.get(key, fallback))
+
         # EQ 对话框：频谱 + Master 输出表
         # MX-01: silent（spectrum=None）→ 清当前频谱显示与 peak hold 历史
+        # MX-02: 输出表优先用 EQ 实例自身的 out tap（非轨末端）
         spectrum = payload.get("spectrum")
         for dlg in self._iter_eq_dialogs():
             if silent:
@@ -2157,19 +2203,31 @@ class TrackMixerWidget(QWidget):
             elif spectrum:
                 dlg.update_spectrum(spectrum.get("freqs", []),
                                     spectrum.get("db", []))
-            dlg.update_output_meter(out_db)
+            eq_out = out_db
+            eq_iid = getattr(dlg, "_instance_id", "")
+            if eq_iid and eq_iid in taps and not taps[eq_iid].get("bypassed"):
+                eq_out = _tap_db(eq_iid, "out_db", out_db)
+            dlg.update_output_meter(eq_out)
 
         # Dynamics 面板：Input/GR×3/Output/Sidechain（按 panel="dynamics" 实例 id）
+        # MX-02: Input 表 = EG 实例真实输入 tap（pre-fader 语义保留为回退）
         if self._dynamics_dialog is not None:
             try:
                 iids = self._dynamics_instance_ids()
+                eg_iid = iids.get("expander", "")
+                lim_iid = iids.get("limiter", "")
+                comp_iid = iids.get("compressor", "")
+                dyn_input = _tap_db(eg_iid, "in_db", pre_db) if eg_iid else pre_db
+                dyn_output = _tap_db(lim_iid, "out_db", out_db) if lim_iid else out_db
                 self._dynamics_dialog.update_meters(
-                    input_db=pre_db,
-                    gr_eg_db=gr.get(iids.get("expander", ""), 0.0),
-                    gr_comp_db=gr.get(iids.get("compressor", ""), 0.0),
-                    gr_lim_db=gr.get(iids.get("limiter", ""), 0.0),
-                    output_db=out_db,
-                    sidechain_db=sc.get(iids.get("compressor", ""), -60.0),
+                    input_db=dyn_input,
+                    gr_eg_db=gr.get(eg_iid, 0.0),
+                    gr_comp_db=gr.get(comp_iid, 0.0),
+                    gr_lim_db=gr.get(lim_iid, 0.0),
+                    output_db=dyn_output,
+                    sidechain_db=(sc.get(comp_iid, -60.0)
+                                  if not (comp_iid in taps and taps[comp_iid].get("bypassed"))
+                                  else -60.0),
                 )
             except RuntimeError:
                 self._dynamics_dialog = None
@@ -2180,20 +2238,23 @@ class TrackMixerWidget(QWidget):
                 iid = getattr(dlg, "_instance_id", "")
                 if silent:
                     dlg.set_sidechain_level(-60.0)
+                elif iid in taps and taps[iid].get("bypassed"):
+                    dlg.set_sidechain_level(-60.0)
                 elif iid in sc:
                     dlg.set_sidechain_level(sc[iid])
             except (RuntimeError, AttributeError):
                 continue
 
-        # Reverb / Delay 输出表
-        for dlg in list(getattr(self, '_reverb_dialogs', {}).values()):
+        # Reverb / Delay 输出表（MX-02: 按实例自身 out tap；多实例不串读数）
+        for iid, dlg in list(getattr(self, '_reverb_dialogs', {}).items()):
             try:
-                dlg.update_output_meter(out_db)
+                dlg.update_output_meter(_tap_db(iid, "out_db", out_db))
             except RuntimeError:
                 continue
-        for dlg in list(getattr(self, '_delay_dialogs', {}).values()):
+        for iid, dlg in list(getattr(self, '_delay_dialogs', {}).items()):
             try:
-                dlg.update_output_meters(peak[0], peak[1])
+                delay_out = _tap_db(iid, "out_db", out_db)
+                dlg.update_output_meters(delay_out, delay_out)
             except RuntimeError:
                 continue
 

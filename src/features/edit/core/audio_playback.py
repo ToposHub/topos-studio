@@ -626,7 +626,8 @@ class TrackLevel:
         sc: {instance_id: 检源电平（dBFS）}——压缩器侧链探测遥测
     """
 
-    __slots__ = ("peak_l", "peak_r", "rms_l", "rms_r", "lufs", "pre_peak", "gr", "sc")
+    __slots__ = ("peak_l", "peak_r", "rms_l", "rms_r", "lufs", "pre_peak", "gr", "sc",
+                 "taps")
 
     def __init__(
         self,
@@ -638,6 +639,7 @@ class TrackLevel:
         pre_peak: float = 0.0,
         gr: Optional[dict] = None,
         sc: Optional[dict] = None,
+        taps: Optional[dict] = None,
     ) -> None:
         self.peak_l = float(peak_l)
         self.peak_r = float(peak_r)
@@ -647,6 +649,9 @@ class TrackLevel:
         self.pre_peak = float(pre_peak)
         self.gr = dict(gr) if gr else {}
         self.sc = dict(sc) if sc else {}
+        # MX-02: {instance_id: {"in_db","out_db","gr_db","sc_db","effect_type"}}——
+        # 链处理时按实例真实采样（不再把轨末端 peak 冒充插件输出）
+        self.taps = dict(taps) if taps else {}
 
     def __getitem__(self, index: int) -> float:
         """索引访问：[0]=peak_l, [1]=peak_r（向后兼容 (l, r) tuple）。"""
@@ -3005,6 +3010,8 @@ class AudioMixer:
                         peak_l=track_peak_l, peak_r=track_peak_r,
                         rms_l=rms_l, rms_r=rms_r, lufs=lufs_m,
                         pre_peak=track_pre_peak, gr=gr_map, sc=sc_levels,
+                        taps=(track_chain.tap_levels()
+                              if track_chain is not None else {}),
                     )
 
             # W25/AM-14: 阶段 2 — 按拓扑序处理 Bus 轨（支持多层 Bus→Bus）。
@@ -4164,6 +4171,11 @@ class AudioPlaybackThread(QThread):
                             payload["gr"] = dict(gr)
                         if sc:
                             payload["sc"] = dict(sc)
+                        # MX-02: 按实例 tap（in/out/GR/SC 真实采样）——对话框
+                        # 不再把轨末端 peak 冒充插件输出
+                        taps = getattr(lvl, "taps", None)
+                        if taps:
+                            payload["taps"] = dict(taps)
                         track_levels[tid] = payload
                 # CW-A1: 频谱（EQ 对话框打开时；非对话轨不出键）。
                 # 持 mixer 锁：_spectrum_windows 由 mix_samples 在锁内写入，
