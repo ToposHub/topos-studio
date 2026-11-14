@@ -377,7 +377,8 @@ class TestSoloOracle:
 
         out, peaks = mixer.mix_samples(0, FPS, N, 2)
         assert np.allclose(out[0], exp["l"], atol=WAVE_TOL)
-        assert set(peaks.keys()) == {"t1", "t2"}
+        # MX-03: master 遥测条目（"-1"=MASTER_BUS_KEY）随有声输出进入 peaks
+        assert set(peaks.keys()) == {"t1", "t2", "-1"}
 
     def test_no_solo_all_pass(self, qapp):
         """无 solo 时所有轨都贡献。"""
@@ -389,7 +390,8 @@ class TestSoloOracle:
         exp, _ = _expected(specs)
         out, peaks = mixer.mix_samples(0, FPS, N, 2)
         assert np.allclose(out[0], exp["l"], atol=WAVE_TOL)
-        assert set(peaks.keys()) == {"t1", "t2"}
+        # MX-03: master 遥测条目（"-1"=MASTER_BUS_KEY）随有声输出进入 peaks
+        assert set(peaks.keys()) == {"t1", "t2", "-1"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -428,7 +430,8 @@ class TestCombinedOracle:
         exp_r = 0.4 * 1.0 * ta_r + 0.5 * 0.6 * tb_r
         assert np.allclose(out[0], exp_l, atol=WAVE_TOL)
         assert np.allclose(out[1], exp_r, atol=WAVE_TOL)
-        assert set(peaks.keys()) == {"ta", "tb"}
+        # MX-03: master 遥测条目（"-1"=MASTER_BUS_KEY）
+        assert set(peaks.keys()) == {"ta", "tb", "-1"}
 
     def test_soft_limiter_engages(self, qapp):
         """多轨叠加超过 1.0 时软限幅整体缩放。"""

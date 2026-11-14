@@ -202,11 +202,29 @@ class AudioMixerPanel(QWidget):
         self._update_minimum_width()
 
     def _setup_master_connections(self) -> None:
-        """设置主混音器信号连接"""
+        """设置主混音器信号连接。
+
+        MX-03: Master strip 与普通轨同一信号集——EQ/FX 条带信号经 panel
+        转发（controller 按 track_id=="-1" 分流到 Master 命令），频谱/
+        LUFS 门控把 Master 纳入遍历。
+        """
         if self._master_mixer:
             self._master_mixer.mute_toggled.connect(lambda tid, muted: self.master_mute_toggled.emit(muted))
             self._master_mixer.volume_changed.connect(lambda tid, db: self.master_volume_changed.emit(db))
             self._master_mixer.show_effects.connect(lambda tid: self.show_effects_for_track.emit(tid))
+            # MX-03: Master EQ/FX 条带（与普通轨同一转发路径）
+            self._master_mixer.strip_eq_preview.connect(lambda tid, p: self.track_strip_eq_preview.emit(tid, p))
+            self._master_mixer.strip_eq_committed.connect(lambda tid, p: self.track_strip_eq_committed.emit(tid, p))
+            self._master_mixer.track_effects_preview.connect(lambda tid, c: self.track_effects_preview.emit(tid, c))
+            self._master_mixer.track_effects_committed.connect(lambda tid, c: self.track_effects_committed.emit(tid, c))
+            # MX-03: Master EQ 对话框打开 → 频谱门控包含 Master
+            self._master_mixer.spectrum_metering_changed.connect(
+                lambda on: self._recompute_spectrum_metering())
+            # MX-03: Master 表模式 → LUFS 门控包含 Master
+            master_meter = getattr(self._master_mixer, "_meter", None)
+            if master_meter is not None and hasattr(master_meter, "meter_mode_changed"):
+                master_meter.meter_mode_changed.connect(
+                    lambda _name: self._recompute_lufs_metering())
 
         # C4: panel 右键菜单提供批量操作
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -525,6 +543,10 @@ class AudioMixerPanel(QWidget):
                 pass
         if self._master_mixer is not None:
             self._master_mixer.reset_meter()
+            try:
+                self._master_mixer.update_track_telemetry(dict(silent_payload))
+            except (AttributeError, RuntimeError):
+                pass
 
     def on_engine_sample_rate(self, sample_rate: float) -> None:
         """MX-09: 引擎采样率下发（设备/工程切换）——推送到全部 strip。"""
@@ -533,11 +555,29 @@ class AudioMixerPanel(QWidget):
                 mixer.set_engine_sample_rate(float(sample_rate))
             except (AttributeError, RuntimeError):
                 continue
+        if self._master_mixer is not None:
+            try:
+                self._master_mixer.set_engine_sample_rate(float(sample_rate))
+            except (AttributeError, RuntimeError):
+                pass
 
     def set_master_volume_linear(self, volume: float) -> None:
         """W12: 用线性增益(0.0-1.0)静默回填 Master 推子（不发信号）。"""
         if self._master_mixer:
             self._master_mixer.set_volume_linear(volume)
+
+    def set_master_strip_state(self, strip_eq, effect_chain) -> None:
+        """MX-03: 静默回填 Master 条带（EQ/FX 列表与打开中的对话框）。"""
+        if not self._master_mixer:
+            return
+        try:
+            self._master_mixer.set_strip_eq(strip_eq)
+        except (AttributeError, RuntimeError):
+            pass
+        try:
+            self._master_mixer.set_effect_chain(effect_chain)
+        except (AttributeError, RuntimeError):
+            pass
 
     def set_master_muted(self, muted: bool) -> None:
         """W12: 静默回填 Master 静音状态（不发信号）。"""
@@ -609,6 +649,17 @@ class AudioMixerPanel(QWidget):
                         mixer.update_track_telemetry(vals)
                     except (AttributeError, RuntimeError):
                         pass
+
+        # MX-03: Master 遥测路由（payload 键 "-1"；只派发对话框读数，
+        # 电平表真源仍是 audio_level——两者同为 post-limiter，不双轨）
+        master_vals = levels.get(MASTER_TRACK_ID)
+        if (isinstance(master_vals, dict) and self._master_mixer is not None):
+            evt_gen = master_vals.get("generation")
+            if evt_gen is None or int(evt_gen) >= self._telemetry_generation:
+                try:
+                    self._master_mixer.update_track_telemetry(master_vals)
+                except (AttributeError, RuntimeError):
+                    pass
 
     def _probe_lufs_backend(self) -> bool:
         """探测 LUFS DSP 后端（scipy）是否可用（AUD-37621）。
@@ -891,7 +942,10 @@ class AudioMixerPanel(QWidget):
         有则开启。状态未变化时不重复 emit。
         """
         active = False
-        for mixer in self._track_mixers.values():
+        mixers = list(self._track_mixers.values())
+        if self._master_mixer is not None:
+            mixers.append(self._master_mixer)  # MX-03: Master 表纳入汇总
+        for mixer in mixers:
             meter = getattr(mixer, "_meter", None)
             mode = getattr(meter, "meter_mode", None)
             if mode is not None and getattr(mode, "name", "") == "LUFS":
@@ -912,8 +966,15 @@ class AudioMixerPanel(QWidget):
         有则开启。状态未变化时不重复 emit。
         """
         active = False
-        for mixer in self._track_mixers.values():
-            if mixer._iter_eq_dialogs():
+        mixers = list(self._track_mixers.values())
+        if self._master_mixer is not None:
+            mixers.append(self._master_mixer)  # MX-03: Master EQ 对话框纳入汇总
+        for mixer in mixers:
+            try:
+                has_dlg = bool(mixer._iter_eq_dialogs())
+            except (AttributeError, RuntimeError):
+                has_dlg = False
+            if has_dlg:
                 active = True
                 break
         if active != getattr(self, "_spectrum_metering_active", False):

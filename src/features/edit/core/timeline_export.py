@@ -4717,37 +4717,42 @@ class TimelineExporter:
         # MX-08: Bus 阶段外部侧链 tap——把检源轨已 flush 的帧输出拼回
         # 全选区缓冲（Bus 压缩器与普通轨同构消费）。
         _bus_sc_taps: dict = {}
+        _sc_needed_ids: set = set()
         if export_sc_source_ids and bus_tracks:
-            _bus_sources: set = set()
             for _b in bus_tracks:
                 _bn = renderer.get_node(_b.track_id)
                 if _bn is not None and _bn.effect_chain is not None:
-                    _bus_sources |= _bn.effect_chain.sidechain_sources()
-            for _src in _bus_sources:
-                _buf = np.zeros((channels, total_samples), dtype=np.float32)
-                _has_any = False
-                for _f, _m in sc_frame_outputs.items():
-                    _blk = _m.get(_src)
-                    if _blk is None:
-                        continue
-                    _rel = _f - start_frame
-                    if 0 <= _rel < len(frame_sample_bounds):
-                        _s = frame_sample_bounds[_rel]
-                        _e = frame_sample_bounds[_rel + 1]
-                        _w = min(_blk.shape[-1], _e - _s)
-                        _buf[:, _s:_s + _w] += _blk[:, :_w].astype(
-                            np.float32, copy=False)
-                        _has_any = True
-                if _has_any:
-                    _bus_sc_taps[_src] = _buf
+                    _sc_needed_ids |= _bn.effect_chain.sidechain_sources()
+        # MX-03: Master 链的外部检源与 Bus 同一 tap 池
+        if export_sc_source_ids:
+            _sc_needed_ids |= renderer.master_sidechain_sources()
+        for _src in _sc_needed_ids:
+            _buf = np.zeros((channels, total_samples), dtype=np.float32)
+            _has_any = False
+            for _f, _m in sc_frame_outputs.items():
+                _blk = _m.get(_src)
+                if _blk is None:
+                    continue
+                _rel = _f - start_frame
+                if 0 <= _rel < len(frame_sample_bounds):
+                    _s = frame_sample_bounds[_rel]
+                    _e = frame_sample_bounds[_rel + 1]
+                    _w = min(_blk.shape[-1], _e - _s)
+                    _buf[:, _s:_s + _w] += _blk[:, :_w].astype(
+                        np.float32, copy=False)
+                    _has_any = True
+            if _has_any:
+                _bus_sc_taps[_src] = _buf
         renderer.render_bus_stage(bus_inputs, output, has_solo=has_solo,
                                   audible_solo=audible_solo,
                                   start_frame=start_frame, fps=fps,
                                   sidechain_taps=_bus_sc_taps or None)
 
-        # AM-03: Master 阶段（volume/mute + 软限幅，替代此前的硬削波 np.clip）
+        # AM-03: Master 阶段（volume/mute + Master 条带 + 软限幅）
         # §3.1: 传入 start_frame/fps 供 master automation ramp
-        output = renderer.apply_master(output, start_frame=start_frame, fps=fps)
+        # MX-03: sidechain_taps 供 Master FX 链外部检源（与 Bus 同一 tap 池）
+        output = renderer.apply_master(output, start_frame=start_frame, fps=fps,
+                                       sidechain_taps=_bus_sc_taps or None)
 
         # AM-10 阶段 3.4：离线响度交付。
         # 若指定 loudness_target_lufs，则扫描 master PCM：

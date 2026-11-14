@@ -466,6 +466,123 @@ class SetTrackEffectChainCommand:
 
 
 @dataclass(frozen=True)
+class SetMasterStripEQCommand:
+    """Command to set the Master bus Strip EQ (MX-03).
+
+    Master EQ 与普通轨同一 StripEQParams 模型，在 master 音量后、限幅器前
+    应用（AudioMixer.mix_samples 阶段 3 / AudioGraphRenderer.apply_master）。
+    None 表示禁用。undo/redo/序列化与轨级命令同构。
+    """
+
+    command_id: str
+    label: str
+    strip_eq: Optional[Any]  # StripEQParams | None
+    _old_strip_eq: Optional[Any] = None  # StripEQParams | None
+
+    def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "SetMasterStripEQCommand"]:
+        old_strip_eq = timeline.master_strip_eq
+        new_timeline = timeline.with_master_strip_eq(self.strip_eq)
+        logger.debug("SetMasterStripEQCommand applied")
+        updated_cmd = SetMasterStripEQCommand(
+            command_id=self.command_id,
+            label=self.label,
+            strip_eq=self.strip_eq,
+            _old_strip_eq=old_strip_eq,
+        )
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        return timeline.with_master_strip_eq(self._old_strip_eq)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetMasterStripEQCommand",
+            "label": self.label,
+            "strip_eq": self.strip_eq.to_dict() if self.strip_eq is not None else None,
+            "old_strip_eq": self._old_strip_eq.to_dict() if self._old_strip_eq is not None else None,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetMasterStripEQCommand":
+        from src.features.edit.core.timeline_v2 import StripEQParams
+        se = data.get("strip_eq")
+        old = data.get("old_strip_eq")
+        return SetMasterStripEQCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Master Strip EQ"),
+            strip_eq=StripEQParams.from_dict(se) if se else None,
+            _old_strip_eq=StripEQParams.from_dict(old) if old else None,
+        )
+
+    @staticmethod
+    def create(strip_eq: Optional[Any]) -> "SetMasterStripEQCommand":
+        return SetMasterStripEQCommand(
+            command_id=str(uuid.uuid4()),
+            label="Set Master Strip EQ",
+            strip_eq=strip_eq,
+        )
+
+
+@dataclass(frozen=True)
+class SetMasterEffectChainCommand:
+    """Command to set the Master bus FX rack chain (MX-03).
+
+    Master FX 与普通轨同一 EffectChainParams 模型（instance_id 身份独立），
+    在 master EQ 后、限幅器前应用。None 表示清空链。
+    """
+
+    command_id: str
+    label: str
+    effect_chain: Optional[Any]  # EffectChainParams | None
+    _old_effect_chain: Optional[Any] = None  # EffectChainParams | None
+
+    def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "SetMasterEffectChainCommand"]:
+        old_chain = timeline.master_effect_chain
+        new_timeline = timeline.with_master_effect_chain(self.effect_chain)
+        logger.debug("SetMasterEffectChainCommand applied")
+        updated_cmd = SetMasterEffectChainCommand(
+            command_id=self.command_id,
+            label=self.label,
+            effect_chain=self.effect_chain,
+            _old_effect_chain=old_chain,
+        )
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        return timeline.with_master_effect_chain(self._old_effect_chain)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetMasterEffectChainCommand",
+            "label": self.label,
+            "effect_chain": self.effect_chain.to_dict() if self.effect_chain is not None else None,
+            "old_effect_chain": self._old_effect_chain.to_dict() if self._old_effect_chain is not None else None,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetMasterEffectChainCommand":
+        from src.features.edit.core.timeline_v2 import EffectChainParams
+        ec = data.get("effect_chain")
+        old = data.get("old_effect_chain")
+        return SetMasterEffectChainCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Master FX Chain"),
+            effect_chain=EffectChainParams.from_dict(ec) if ec else None,
+            _old_effect_chain=EffectChainParams.from_dict(old) if old else None,
+        )
+
+    @staticmethod
+    def create(effect_chain: Optional[Any]) -> "SetMasterEffectChainCommand":
+        return SetMasterEffectChainCommand(
+            command_id=str(uuid.uuid4()),
+            label="Set Master FX Chain",
+            effect_chain=effect_chain,
+        )
+
+
+@dataclass(frozen=True)
 class SetMasterVolumeCommand:
     """
     Command to set Master bus volume (W12).

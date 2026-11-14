@@ -1655,6 +1655,12 @@ TRACK_CHAIN_ORDER: tuple = (
 )
 ORDER_VERSION: int = 1
 
+# MX-03: Master 条带 DSP 的保留键（与 UI 的 MASTER_TRACK_ID="-1" 对齐；
+# 普通轨/Bus 的 track_id 永不取此值，注册/清理路径不会误碰）。
+# Master 链顺序：mute → volume → strip_eq → track_fx → limiter
+# （与轨链 strip_eq→track_fx 同构，音量后、限幅器前）。
+MASTER_BUS_KEY = "-1"
+
 
 class AudioMixer:
     """
@@ -1810,6 +1816,10 @@ class AudioMixer:
 
         order = list(keys)
         track_needed: set = set()
+        # MX-03: Bus/Master 链引用的检源若为普通轨，同样需要保留输出 tap——
+        # 此前 track_needed 只含"被普通轨链引用"的检源，Bus/Master 压缩器的
+        # 外部检源 tap 从未被记录（sidechain_map 不命中 → 回退内部检源）。
+        track_needed |= {s for s in all_sources if s in key_set}
         if deps:
             for srcs in deps.values():
                 track_needed |= srcs
@@ -2410,6 +2420,35 @@ class AudioMixer:
                 self._effect_chains[track_id] = EffectChain(self._sample_rate)
             self._effect_chains[track_id].set_params(entries, sample_rate=self._sample_rate)
             # CW-A1: 链参数变化可能改变侧链依赖 → 失效排序缓存
+            self._sc_order_cache = None
+
+    def set_master_strip_eq(self, params: Optional[StripEQParams]) -> None:
+        """MX-03: 设置 Master Strip EQ。线程安全。
+
+        在 master 音量后、限幅器前应用（与轨链 strip_eq 同构）。
+        None 表示禁用 EQ。
+        """
+        with QMutexLocker(self._mutex):
+            eqf = self._eq_filters.get(MASTER_BUS_KEY)
+            if eqf is None:
+                eqf = StripEQFilter(self._sample_rate)
+                self._eq_filters[MASTER_BUS_KEY] = eqf
+            eqf.set_params(params, sample_rate=self._sample_rate)
+
+    def set_master_effect_chain(self, chain_params: Optional[EffectChainParams]) -> None:
+        """MX-03: 设置 Master FX 机架链。线程安全。
+
+        在 master EQ 后、限幅器前应用；外部侧链检源与普通轨同一 tap 池
+        （Bus 检源天然一个块延迟，与被控轨消费 Bus tap 的语义一致）。
+        None 表示清空链。
+        """
+        entries = chain_params.to_dsp_entries() if chain_params is not None else None
+        with QMutexLocker(self._mutex):
+            chain = self._effect_chains.get(MASTER_BUS_KEY)
+            if chain is None:
+                chain = EffectChain(self._sample_rate)
+                self._effect_chains[MASTER_BUS_KEY] = chain
+            chain.set_params(entries, sample_rate=self._sample_rate)
             self._sc_order_cache = None
 
     def set_clip_effects(
@@ -3146,6 +3185,9 @@ class AudioMixer:
                     bus_samples = bus_input * bus_vol_ramp[np.newaxis, :]
                 else:
                     bus_samples = bus_input * bus_volume
+                # MX-03: Bus pre-fader 峰值（音量/EQ/FX 前；Dynamics Input 表）
+                bus_pre_peak = (float(np.max(np.abs(bus_input)))
+                                if bus_input.shape[-1] > 0 else 0.0)
                 # pan（RMA-08: Bus 输入是已混的立体声，用 balance unity-center，
                 # 保持 center 响度与声像；不再用 equal-power 把整体降 -3dB）
                 # AUD-15506: balance_gains 已提升为模块级导入。
@@ -3168,10 +3210,20 @@ class AudioMixer:
                 bus_eq = self._eq_filters.get(bus_id)
                 if bus_eq is not None and bus_eq.is_active:
                     bus_samples = bus_eq.process(bus_samples)
-                # W26: FX 机架效果器链（post-EQ）
+                # W26: FX 机架效果器链（post-EQ）。MX-03: 外部侧链检源透传——
+                # 此前只有导出（render_bus_stage sidechain_taps）接检源，
+                # 实时 Bus 链的压缩器外部检源被无声忽略（MX-08 残留缺口）。
                 bus_chain = self._effect_chains.get(bus_id)
                 if bus_chain is not None and bus_chain.is_active:
-                    bus_samples = bus_chain.process(bus_samples)
+                    bus_sc_map = None
+                    if sidechain_taps:
+                        raw_map = bus_chain.sidechain_map(sidechain_taps)
+                        if raw_map:
+                            cur_n = bus_samples.shape[-1]
+                            bus_sc_map = {iid: buf[:, :cur_n]
+                                          for iid, buf in raw_map.items()}
+                    bus_samples = bus_chain.process(
+                        bus_samples, sidechain_by_id=bus_sc_map)
                 # MX-07: Bus 尾音调度（有真实输入时刷新估计；drain 块已提前扣减）
                 if bus_had_input:
                     self._track_tail_remaining[bus_id] = (
@@ -3209,17 +3261,43 @@ class AudioMixer:
                                 "audio bus %s send targets unknown bus %s; send skipped",
                                 bus_id, send_bus_id,
                             )
-                # per-track peak（Bus 电平）
+                # per-track peak（Bus 电平；MX-03 补 pre/GR/SC/taps/频谱/LUFS，
+                # 与普通轨同一 TrackLevel 契约——Bus 上的 Dynamics/EQ 对话框
+                # 读数不再缺 GR/检源/频谱）
                 if bus_samples.shape[0] >= 2:
                     bl = float(np.max(np.abs(bus_samples[0])))
                     br = float(np.max(np.abs(bus_samples[1])))
                 else:
                     bl = br = float(np.max(np.abs(bus_samples[0])))
-                if bl > 0.0 or br > 0.0:
-                    rms_bl = float(np.sqrt(np.mean(bus_samples[0] ** 2))) if bus_samples.shape[-1] > 0 else 0.0
-                    rms_br = float(np.sqrt(np.mean(bus_samples[1] ** 2))) if bus_samples.shape[0] > 1 and bus_samples.shape[-1] > 0 else rms_bl
+                if bl > 0.0 or br > 0.0 or bus_pre_peak > 0.0:
+                    if bus_samples.shape[-1] > 0:
+                        rms_bl = float(np.sqrt(np.mean(bus_samples[0] ** 2)))
+                        rms_br = float(np.sqrt(np.mean(bus_samples[1] ** 2))) \
+                            if bus_samples.shape[0] > 1 else rms_bl
+                    else:
+                        rms_bl = rms_br = 0.0
+                    if self._spectrum_metering_enabled and bus_samples.shape[-1] > 0:
+                        self._push_spectrum_window(bus_id, bus_samples)
+                    bus_lufs = -70.0
+                    if self._lufs_metering_enabled and bus_samples.shape[-1] > 0:
+                        try:
+                            if bus_id not in self._lufs_meters:
+                                self._lufs_meters[bus_id] = LoudnessMeter(
+                                    self._sample_rate, output_channels)
+                            bmeter = self._lufs_meters[bus_id]
+                            bmeter.process(bus_samples)
+                            bus_lufs = bmeter.momentary_lufs
+                        except Exception:
+                            pass
                     per_track_peaks[bus_id] = TrackLevel(
-                        peak_l=bl, peak_r=br, rms_l=rms_bl, rms_r=rms_br, lufs=-70.0,
+                        peak_l=bl, peak_r=br, rms_l=rms_bl, rms_r=rms_br,
+                        lufs=bus_lufs, pre_peak=bus_pre_peak,
+                        gr=(bus_chain.collect_gain_reduction()
+                            if bus_chain is not None else {}),
+                        sc=(bus_chain.collect_detector_levels()
+                            if bus_chain is not None else {}),
+                        taps=(bus_chain.tap_levels()
+                              if bus_chain is not None else {}),
                     )
 
             # Master 总线增益 + 静音（在软限幅之前应用，让正增益真正放大信号）
@@ -3265,10 +3343,66 @@ class AudioMixer:
                 elif self._master_volume != 1.0:
                     output *= self._master_volume
 
+            # MX-03: Master 条带处理——EQ → FX（音量后、限幅器前；与轨链
+            # strip_eq→track_fx 同构）。外部侧链检源与普通轨同一 tap 池
+            # （Bus 检源天然一个块延迟，与被控轨消费 Bus tap 语义一致）。
+            master_eq = self._eq_filters.get(MASTER_BUS_KEY)
+            if master_eq is not None and master_eq.is_active:
+                output = master_eq.process(output)
+            master_chain = self._effect_chains.get(MASTER_BUS_KEY)
+            if master_chain is not None and master_chain.is_active:
+                master_sc_map = None
+                if sidechain_taps:
+                    raw_map = master_chain.sidechain_map(sidechain_taps)
+                    if raw_map:
+                        cur_n = output.shape[-1]
+                        master_sc_map = {iid: buf[:, :cur_n]
+                                         for iid, buf in raw_map.items()}
+                output = master_chain.process(
+                    output, sidechain_by_id=master_sc_map)
+
             # AM-09: 连续状态 Master 限幅器（替代无状态逐 buffer 峰值归一化）。
             # 跨 buffer 平滑增益包络，避免相邻 buffer 缩放比例不同造成的 pumping。
             # 在 master 增益之后跑，保护正增益（master_volume > 1.0）导致的削波。
             output = self._master_limiter.process(output)
+
+            # MX-03: Master 遥测——post-limiter 测量（与播放线程 ring peek 的
+            # audio_level 表同源，不双轨）；spectrum/GR/SC/taps 供 Master
+            # EQ/FX 对话框（payload 键 = MASTER_BUS_KEY，面板路由到 master strip）。
+            if output.shape[-1] > 0:
+                if output.shape[0] >= 2:
+                    m_peak_l = float(np.max(np.abs(output[0])))
+                    m_peak_r = float(np.max(np.abs(output[1])))
+                else:
+                    m_peak_l = m_peak_r = float(np.max(np.abs(output[0])))
+                if m_peak_l > 0.0 or m_peak_r > 0.0:
+                    m_cnt = output.shape[-1]
+                    m_rms_l = float(np.sqrt(np.dot(output[0], output[0]) / m_cnt))
+                    m_rms_r = (float(np.sqrt(np.dot(output[1], output[1]) / m_cnt))
+                               if output.shape[0] > 1 else m_rms_l)
+                    if self._spectrum_metering_enabled:
+                        self._push_spectrum_window(MASTER_BUS_KEY, output)
+                    m_lufs = -70.0
+                    if self._lufs_metering_enabled:
+                        try:
+                            if MASTER_BUS_KEY not in self._lufs_meters:
+                                self._lufs_meters[MASTER_BUS_KEY] = LoudnessMeter(
+                                    self._sample_rate, output_channels)
+                            mmeter = self._lufs_meters[MASTER_BUS_KEY]
+                            mmeter.process(output)
+                            m_lufs = mmeter.momentary_lufs
+                        except Exception:
+                            pass
+                    per_track_peaks[MASTER_BUS_KEY] = TrackLevel(
+                        peak_l=m_peak_l, peak_r=m_peak_r,
+                        rms_l=m_rms_l, rms_r=m_rms_r, lufs=m_lufs,
+                        gr=(master_chain.collect_gain_reduction()
+                            if master_chain is not None else {}),
+                        sc=(master_chain.collect_detector_levels()
+                            if master_chain is not None else {}),
+                        taps=(master_chain.tap_levels()
+                              if master_chain is not None else {}),
+                    )
 
             return output, per_track_peaks
 
@@ -5102,6 +5236,14 @@ class AudioPlaybackManager(QObject):
             panner: SpatialPannerParams.to_dict()；None/空 dict=未使用
         """
         self._mixer.set_track_panner(track_id, panner)
+
+    def set_master_strip_eq(self, params: Optional[StripEQParams]) -> None:
+        """MX-03: 设置 Master Strip EQ。转发到 AudioMixer。"""
+        self._mixer.set_master_strip_eq(params)
+
+    def set_master_effect_chain(self, chain_params: Optional[EffectChainParams]) -> None:
+        """MX-03: 设置 Master FX 机架链。转发到 AudioMixer。"""
+        self._mixer.set_master_effect_chain(chain_params)
 
     def set_spectrum_metering(self, enabled: bool) -> None:
         """开/关频谱仪计算（EQ 对话框打开状态驱动，CW-A1）。转发到 AudioMixer。"""

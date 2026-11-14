@@ -4215,6 +4215,11 @@ class TimelineSequence:
     # 引擎在 apply_master 阶段逐样本 ramp 应用（与轨级 automation 一致）。
     master_automation: dict = field(default_factory=dict)
     master_automation_mode: str = "off"  # off/read/write/touch/latch
+    # MX-03: Master 条带处理（EQ/FX 与普通轨同一参数模型）。引擎在 master
+    # 音量后、限幅器前应用（TRACK_CHAIN_ORDER 的 master 段）。立体声 Master
+    # 不建模 Panner（无意义），能力矩阵见计划 §5 MX-03。
+    master_strip_eq: Optional[StripEQParams] = None
+    master_effect_chain: Optional[EffectChainParams] = None
     # TAEP P0: 单调递增的乐观锁 revision。每次经统一提交入口（command /
     # EditProjectService）成功落地一次原子变更后递增。它不是序列化 schema 版本，
     # 而是 timeline 内容版本，用于 AI plan 的 base_revision 一致性检查
@@ -4231,7 +4236,8 @@ class TimelineSequence:
         "format_settings", "video_tracks", "audio_tracks", "subtitle_tracks",
         "caption_graphics", "markers", "range_start", "range_end",
         "master_volume", "master_muted", "master_automation",
-        "master_automation_mode", "revision",
+        "master_automation_mode", "master_strip_eq", "master_effect_chain",
+        "revision",
     })
 
     def __post_init__(self) -> None:
@@ -4532,7 +4538,10 @@ class TimelineSequence:
                  master_volume: float | None = None,
                  master_muted: bool | None = None,
                  master_automation: dict | None = None,
-                 master_automation_mode: str | None = None) -> TimelineSequence:
+                 master_automation_mode: str | None = None,
+                 # MX-03: None=清除条带，... 哨兵=不传（与 range_start 同语义）
+                 master_strip_eq: Any = ...,
+                 master_effect_chain: Any = ...) -> TimelineSequence:
         """Internal immutable rebuilder — centralizes field passing.
 
         保留 revision 不变（bump 只发生在提交边界，见 ``with_revision_bumped``）。
@@ -4562,6 +4571,8 @@ class TimelineSequence:
                 if master_automation is None else master_automation
             ),
             master_automation_mode=self.master_automation_mode if master_automation_mode is None else master_automation_mode,
+            master_strip_eq=(self.master_strip_eq if master_strip_eq is ... else master_strip_eq),
+            master_effect_chain=(self.master_effect_chain if master_effect_chain is ... else master_effect_chain),
             revision=self.revision,
             _extra_fields=dict(self._extra_fields),
         )
@@ -4728,6 +4739,8 @@ class TimelineSequence:
             "master_volume": self.master_volume, "master_muted": self.master_muted,
             "master_automation": {k: v.to_dict() for k, v in self.master_automation.items()} if self.master_automation else {},
             "master_automation_mode": self.master_automation_mode,
+            "master_strip_eq": self.master_strip_eq.to_dict() if self.master_strip_eq else None,
+            "master_effect_chain": self.master_effect_chain.to_dict() if self.master_effect_chain else None,
             "revision": self.revision,
             # R28/F-R09：未知字段保留
             **self._extra_fields}
@@ -4748,6 +4761,23 @@ class TimelineSequence:
                     param, exc,
                 )
         graphics_block = migrate_caption_graphics_block(data.get("caption_graphics"))
+        # MX-03: Master EQ/FX 反序列化（坏字段降级为 None，不阻断序列加载）
+        master_eq = None
+        eq_data = data.get("master_strip_eq")
+        if isinstance(eq_data, dict) and eq_data:
+            try:
+                master_eq = StripEQParams.from_dict(eq_data)
+            except (TypeError, ValueError, KeyError) as exc:
+                logger.warning(
+                    "TimelineSequence.from_dict: 丢弃损坏的 master_strip_eq: %s", exc)
+        master_chain = None
+        chain_data = data.get("master_effect_chain")
+        if isinstance(chain_data, dict) and chain_data:
+            try:
+                master_chain = EffectChainParams.from_dict(chain_data)
+            except (TypeError, ValueError, KeyError) as exc:
+                logger.warning(
+                    "TimelineSequence.from_dict: 丢弃损坏的 master_effect_chain: %s", exc)
         known_graphics = {
             "caption_graphics_schema_version", "caption_graphic_bindings",
             "caption_track_graphic_styles", "composite_templates",
@@ -4810,6 +4840,8 @@ class TimelineSequence:
             master_muted=bool(data.get("master_muted", False)),
             master_automation=master_auto,
             master_automation_mode=str(data.get("master_automation_mode", "off") or "off"),
+            master_strip_eq=master_eq,
+            master_effect_chain=master_chain,
             revision=int(data.get("revision", 0) or 0),
             # R28：未知键进 extras（caption_graphics 块的内部键除外——
             # 它们已由 migrate_caption_graphics_block 消化）
@@ -4844,6 +4876,14 @@ class TimelineSequence:
     def with_master_automation_mode(self, mode: str) -> TimelineSequence:
         """§3.1: 创建新实例，设置 Master automation 模式（off/read/write/touch/latch）。"""
         return self._rebuild(master_automation_mode=str(mode))
+
+    def with_master_strip_eq(self, params: Optional[StripEQParams]) -> TimelineSequence:
+        """MX-03: 创建新实例，设置 Master Strip EQ（None=禁用）。"""
+        return self._rebuild(master_strip_eq=params)
+
+    def with_master_effect_chain(self, chain: Optional[EffectChainParams]) -> TimelineSequence:
+        """MX-03: 创建新实例，设置 Master FX 机架链（None=清空）。"""
+        return self._rebuild(master_effect_chain=chain)
 
     def with_range(self, range_start: int | None, range_end: int | None) -> TimelineSequence:
         """Create new instance with updated In/Out range for range playback/export."""

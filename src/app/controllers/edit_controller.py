@@ -2731,6 +2731,11 @@ class EditControllerMixin:
                 panel.set_master_volume_linear(float(getattr(timeline, 'master_volume', 1.0)))
             if hasattr(panel, 'set_master_muted'):
                 panel.set_master_muted(bool(getattr(timeline, 'master_muted', False)))
+            # MX-03: Master 条带（EQ/FX）回填（undo/重开后 master strip 与模型一致）
+            if hasattr(panel, 'set_master_strip_state'):
+                panel.set_master_strip_state(
+                    getattr(timeline, 'master_strip_eq', None),
+                    getattr(timeline, 'master_effect_chain', None))
             mgr = self._get_mixer_audio_manager()
             # AM-05: 引擎同步的真相源现在是 edit_page._sync_audio_tracks_from_timeline
             # （它已同步 master/automation/routing/EQ/FX 到引擎）。此处的引擎同步是
@@ -4066,8 +4071,16 @@ class EditControllerMixin:
         """Strip EQ 对话框拖动期：实时更新 AudioPlaybackManager 的 EQ 滤波器（听感）。
 
         不进命令栈，参数变化时 DSP 系数立即重算。
+        MX-03: track_id == "-1"（MASTER_TRACK_ID）走 Master 条带入口。
         """
         mgr = self._get_mixer_audio_manager()
+        if track_id == "-1":
+            if mgr is not None and hasattr(mgr, 'set_master_strip_eq'):
+                try:
+                    mgr.set_master_strip_eq(params)
+                except Exception as e:
+                    logger.debug("mixer master strip eq preview failed: %s", e)
+            return
         if mgr is not None and hasattr(mgr, 'set_track_strip_eq'):
             try:
                 mgr.set_track_strip_eq(track_id, params)
@@ -4078,9 +4091,26 @@ class EditControllerMixin:
         """Strip EQ 松手/关闭：提交 SetTrackStripEQCommand（一次 undo）。
 
         同时更新 AudioPlaybackManager 做实时听感（与命令栈解耦）。
+        MX-03: track_id == "-1"（MASTER_TRACK_ID）提交 Master 版命令。
         """
         # 实时听感
         mgr = self._get_mixer_audio_manager()
+        if track_id == "-1":
+            if mgr is not None and hasattr(mgr, 'set_master_strip_eq'):
+                try:
+                    mgr.set_master_strip_eq(params)
+                except Exception as e:
+                    logger.debug("mixer master strip eq apply failed: %s", e)
+            tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
+            if tview is None:
+                logger.warning("No timeline_view for master strip eq commit")
+                return
+            try:
+                from src.features.edit.core.commands import SetMasterStripEQCommand
+                tview._execute_command(SetMasterStripEQCommand.create(params))
+            except Exception as e:
+                logger.warning("Failed to execute master strip eq command: %s", e)
+            return
         if mgr is not None and hasattr(mgr, 'set_track_strip_eq'):
             try:
                 mgr.set_track_strip_eq(track_id, params)
@@ -4396,8 +4426,16 @@ class EditControllerMixin:
         """W26: FX 机架拖动期：实时更新 AudioPlaybackManager 的效果器链（听感）。
 
         不进命令栈，参数变化时 DSP 立即重算。
+        MX-03: track_id == "-1"（MASTER_TRACK_ID）走 Master 条带入口。
         """
         mgr = self._get_mixer_audio_manager()
+        if track_id == "-1":
+            if mgr is not None and hasattr(mgr, 'set_master_effect_chain'):
+                try:
+                    mgr.set_master_effect_chain(chain)
+                except Exception as e:
+                    logger.debug("mixer master effects preview failed: %s", e)
+            return
         if mgr is not None and hasattr(mgr, 'set_track_effect_chain'):
             try:
                 mgr.set_track_effect_chain(track_id, chain)
@@ -4408,9 +4446,26 @@ class EditControllerMixin:
         """W26: FX 机架松手/关闭：提交 SetTrackEffectChainCommand（一次 undo）。
 
         同时更新 AudioPlaybackManager 做实时听感（与命令栈解耦）。
+        MX-03: track_id == "-1"（MASTER_TRACK_ID）提交 Master 版命令。
         """
         # 实时听感
         mgr = self._get_mixer_audio_manager()
+        if track_id == "-1":
+            if mgr is not None and hasattr(mgr, 'set_master_effect_chain'):
+                try:
+                    mgr.set_master_effect_chain(chain)
+                except Exception as e:
+                    logger.debug("mixer master effects apply failed: %s", e)
+            tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
+            if tview is None:
+                logger.warning("No timeline_view for master effects commit")
+                return
+            try:
+                from src.features.edit.core.commands import SetMasterEffectChainCommand
+                tview._execute_command(SetMasterEffectChainCommand.create(chain))
+            except Exception as e:
+                logger.warning("Failed to execute master effects command: %s", e)
+            return
         if mgr is not None and hasattr(mgr, 'set_track_effect_chain'):
             try:
                 mgr.set_track_effect_chain(track_id, chain)

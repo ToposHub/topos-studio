@@ -217,7 +217,8 @@ class TestMixSamplesPerTrackPeaks:
         audio_mixer.add_track("t2", _FakeDecoder(0.3),
                               AudioTrackState(track_id="t2", volume=1.0))
         _, peaks = audio_mixer.mix_samples(0, 24.0, 480, 2)
-        assert set(peaks.keys()) == {"t1", "t2"}
+        # MX-03: master 遥测条目（"-1"=MASTER_BUS_KEY）随有声输出进入 peaks
+        assert set(peaks.keys()) == {"t1", "t2", "-1"}
         assert abs(peaks["t1"][0] - 0.5) < 0.02
         assert abs(peaks["t2"][0] - 0.3) < 0.02
 
