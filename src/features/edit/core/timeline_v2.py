@@ -2803,6 +2803,13 @@ class ReverbParams:
         )
 
 
+# DL-01：Delay 输入选择矩阵（真实实现的能力面）。旧菜单的 LCR/Quad/5.0/5.1/7.1
+# 从未有真实多声道 Delay 实现（DSP 一直按立体声处理）——from_dict 迁移到
+# "Stereo"，不改变声音，同时移除假能力声明。
+_DELAY_INPUT_FORMATS = ("Stereo", "Mono", "Left", "Right")
+_DELAY_LEGACY_INPUT_FORMATS = ("LCR", "Quad", "5.0", "5.1", "7.1")
+
+
 @dataclass(frozen=True)
 class DelayParams:
     """立体声双线延迟器参数（FX 机架效果器之一，CW-A1 重构）。
@@ -2821,7 +2828,8 @@ class DelayParams:
         dry_wet: 湿信号比例（%，0..100）
         level_db: 输出电平（dB，-24..+6）
         link_lr: UI 联动开关（仅界面便利，DSP 不读）
-        input_format: 输入格式（"Mono" 求和单线，其余按立体声处理）
+        input_format: 输入格式（"Stereo"/"Mono"/"Left"/"Right"，DL-01 选择矩阵；
+            "Mono" = (L+R)/2 平均驱动双线；"Left"/"Right" = 单声道内容驱动双线）
         enabled: 是否启用（False=旁路直通）
     """
     low_cut: float = 108.0
@@ -2859,7 +2867,7 @@ class DelayParams:
             raise ValueError(f"dry_wet must be in [0, 100]: {self.dry_wet}")
         if not (-24.0 <= self.level_db <= 6.0):
             raise ValueError(f"level_db must be in [-24, 6]: {self.level_db}")
-        if self.input_format not in ("Mono", "Stereo", "LCR", "Quad", "5.0", "5.1", "7.1"):
+        if self.input_format not in _DELAY_INPUT_FORMATS:
             raise ValueError(f"invalid input_format: {self.input_format}")
 
     @staticmethod
@@ -2886,7 +2894,11 @@ class DelayParams:
                 return default
 
         fmt = str(data.get("input_format", "Stereo") or "Stereo")
-        if fmt not in ("Mono", "Stereo", "LCR", "Quad", "5.0", "5.1", "7.1"):
+        # DL-01：旧菜单从未有真实多声道 Delay 实现（DSP 一直按立体声处理），
+        # LCR/Quad/5.0/5.1/7.1 枚举迁移到 Stereo（不改变声音，移除假能力声明）
+        if fmt in _DELAY_LEGACY_INPUT_FORMATS:
+            fmt = "Stereo"
+        if fmt not in _DELAY_INPUT_FORMATS:
             fmt = "Stereo"
         return DelayParams(
             low_cut=_f("low_cut", 108.0), high_cut=_f("high_cut", 12500.0),

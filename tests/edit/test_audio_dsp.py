@@ -581,18 +581,18 @@ class TestCompressorEffect:
         comp = CompressorEffect(sr)
         comp.set_params(CompressorParams(threshold_db=-12.0, ratio=4.0).to_dict())
         comp.process(samples)
-        assert comp._env_db > -100.0
+        assert comp._env_lin > 0.0
         comp.reset_state()
-        assert comp._env_db < -150.0
+        assert comp._env_lin == 0.0
 
     def test_sidechain_listen_broadcasts_detector(self):
-        """CW-A1: sc_listen 输出检源广播。"""
+        """DY-04: sc_listen 输出检源**原始音频**（保留极性），不播整流检测量。"""
         comp = CompressorEffect(48000.0)
         comp.set_params({"threshold_db": -20.0, "sc_listen": True, "enabled": True})
         quiet = np.zeros((2, 256), dtype=np.float32) + 0.02
         det = np.zeros((2, 256), dtype=np.float32) + 0.6
         out = comp.process(quiet, sidechain=det)
-        assert np.allclose(out[0], np.max(np.abs(det), axis=0))
+        assert np.allclose(out, det)
 
 
 # =============================================================================

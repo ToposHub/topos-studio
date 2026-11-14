@@ -1182,15 +1182,30 @@ class DynamicsDialog(QDialog):
         lim_data = LimiterParams.from_dict(lim_inst.params).to_dict() if lim_inst \
             else LimiterParams().to_dict()
 
+        # DY-01：总电源 = 实例级旁路（TrackEffectInstance.enabled），
+        # 与三模块 params.enabled 的独立旁路组合分离。旧实现从模块开关
+        # OR 推导总电源——关→开会把 [False,True,False] 改写成全 True，
+        # 摧毁模块旁路组合。
+        existing = [inst for inst in (
+            self._find_effect(_DYN_EXPANDER),
+            self._find_effect(_DYN_COMPRESSOR),
+            self._find_effect(_DYN_LIMITER),
+        ) if inst is not None]
+        master_on = any(bool(inst.enabled) for inst in existing) if existing else False
+
         return {"eg": eg_data, "comp": comp_data, "lim": lim_data,
                 "makeup": comp_data.get("makeup_gain", 0.0),
-                "enabled": bool(eg_data.get("enabled", False)
-                                or comp_data.get("enabled", False)
-                                or lim_data.get("enabled", False))}
+                "enabled": master_on}
 
     def _write_instance(self, effect_type: str, params_dict: dict,
-                        ensure_exists: bool = True) -> None:
-        """更新 chain 中 DY 管理的实例（按 panel="dynamics" 匹配）。"""
+                        ensure_exists: bool = True,
+                        instance_enabled: Optional[bool] = None) -> None:
+        """更新 chain 中 DY 管理的实例（按 panel="dynamics" 匹配）。
+
+        Args:
+            instance_enabled: None=保留原实例级旁路；True/False=总电源切换
+                （DY-01：只动实例级，模块 params.enabled 不受影响）。
+        """
         effects = list(self._chain.effects) if self._chain is not None else []
         idx = next(
             (i for i, e in enumerate(effects)
@@ -1201,14 +1216,16 @@ class DynamicsDialog(QDialog):
             old = effects[idx]
             effects[idx] = TrackEffectInstance(
                 effect_type=effect_type, params=dict(params_dict),
-                enabled=old.enabled, order=old.order, instance_id=old.instance_id,
+                enabled=bool(old.enabled) if instance_enabled is None else bool(instance_enabled),
+                order=old.order, instance_id=old.instance_id,
                 panel="dynamics",
             )
         elif ensure_exists:
             new_order = max((e.order for e in effects), default=-1) + 1
             effects.append(TrackEffectInstance(
                 effect_type=effect_type, params=dict(params_dict),
-                enabled=bool(params_dict.get("enabled", True)),
+                # 新建实例：实例级旁路默认开（总电源语义），模块级由 params 承载
+                enabled=True if instance_enabled is None else bool(instance_enabled),
                 order=new_order, panel="dynamics",
             ))
         self._chain = EffectChainParams(effects=tuple(effects)) if effects else None
@@ -1245,13 +1262,14 @@ class DynamicsDialog(QDialog):
     # ── 事件处理 ─────────────────────────────────────────────
 
     def _on_power_toggled(self, enabled: bool) -> None:
+        # DY-01：总电源只翻转实例级旁路（TrackEffectInstance.enabled），
+        # 每模块 params.enabled 的独立旁路组合原样保留。
+        # 关→开后模块组合不变：[False,True,False] 仍是 [False,True,False]。
         state = self._panel_state()
-        state["eg"]["enabled"] = enabled
-        state["comp"]["enabled"] = enabled
-        state["lim"]["enabled"] = enabled
-        self._write_instance(_DYN_EXPANDER, state["eg"], ensure_exists=enabled)
-        self._write_instance(_DYN_COMPRESSOR, state["comp"], ensure_exists=enabled)
-        self._write_instance(_DYN_LIMITER, state["lim"], ensure_exists=enabled)
+        for key, etype in (("eg", _DYN_EXPANDER), ("comp", _DYN_COMPRESSOR),
+                           ("lim", _DYN_LIMITER)):
+            self._write_instance(etype, state[key], ensure_exists=True,
+                                 instance_enabled=enabled)
         self._refresh_all_views()
         self._emit(commit=True)
 
@@ -1310,13 +1328,15 @@ class DynamicsDialog(QDialog):
     def _on_preset_selected(self, combo_idx: int) -> None:
         if 0 <= combo_idx < len(self._presets):
             preset = self._presets[combo_idx]["params"]
-            # 面板总电源状态保留；各模块 enabled 跟随面板电源
+            # DY-01：预设保留自己的模块旁路状态（Flat Bypass 应用后三模块
+            # 保持 params.enabled=False，不因总电源开启被翻转）。
+            # 实例级旁路（总电源）不变：缺失实例按当前总电源创建。
             panel_on = self._panel_state()["enabled"]
             for key, etype in (("eg", _DYN_EXPANDER), ("comp", _DYN_COMPRESSOR),
                                ("lim", _DYN_LIMITER)):
                 data = dict(preset[key])
-                data["enabled"] = panel_on
-                self._write_instance(etype, data)
+                self._write_instance(etype, data, ensure_exists=True,
+                                     instance_enabled=panel_on)
             self._refresh_all_views()
             # 保留选中项显示（旧逻辑置 -1 会让预设名消失）
             self._emit(commit=True)
@@ -1342,19 +1362,19 @@ class DynamicsDialog(QDialog):
     # ── 公开 API ─────────────────────────────────────────────
 
     def reset_dynamics(self) -> None:
-        """重置为全旁路平直状态（保留实例存在性）。"""
-        state = self._panel_state()
+        """DY-01：Reset 依产品默认值——三模块参数回 Flat Bypass 默认且模块
+        开关关闭（params.enabled=False）；总电源（实例级旁路）不变；
+        已存在的实例保留（不删除重建）。"""
+        panel_on = self._panel_state()["enabled"]
         had = {etype: self._find_effect(etype) is not None
                for etype in (_DYN_EXPANDER, _DYN_COMPRESSOR, _DYN_LIMITER)}
         flat = DYNAMICS_PRESETS[1]["params"]
         for key, etype in (("eg", _DYN_EXPANDER), ("comp", _DYN_COMPRESSOR),
                            ("lim", _DYN_LIMITER)):
-            if had[etype]:
-                data = dict(flat[key])
-                data["enabled"] = bool(state["eg"].get("enabled")
-                                       or state["comp"].get("enabled")
-                                       or state["lim"].get("enabled"))
-                self._write_instance(etype, data)
+            data = dict(flat[key])
+            data["enabled"] = False  # 模块级默认旁路（产品默认值）
+            self._write_instance(etype, data, ensure_exists=had[etype],
+                                 instance_enabled=panel_on if had[etype] else None)
         self._refresh_all_views()
         self._emit(commit=True)
 

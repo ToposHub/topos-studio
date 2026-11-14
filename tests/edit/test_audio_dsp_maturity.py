@@ -54,7 +54,8 @@ def _mag_db_at(spec_db_freqs, f_hz, sr=SR):
 
 
 def _spectrum_db(signal, n=16384, sr=SR):
-    spec = np.abs(np.fft.rfft(signal)) * 2.0
+    # 冲激响应的频谱幅度 = |FFT|（无单边谱 ×2 补偿——那是正弦幅度的约定）
+    spec = np.abs(np.fft.rfft(signal))
     freqs = np.fft.rfftfreq(n, d=1.0 / sr)
     return freqs, 20.0 * np.log10(np.maximum(spec, 1e-12))
 
@@ -241,7 +242,7 @@ class TestPannerMatrixAlias:
             "divergence": 40.0, "fb": 50.0, "spread_auto": False,
         }
         pan = 0.3
-        sp = _SP(SR)
+        sp = SpatialPanner(SR)
         sp.set_params(panner_dict)
         y = sp.process(x.copy(), pan)
         m = spatial_panner_matrix(pan, panner_dict)
@@ -256,7 +257,7 @@ class TestPannerMatrixAlias:
         x[1] = 0.5
         panner_dict = {"enabled": True, "spread": 100.0, "rotate": 0.0,
                        "divergence": 0.0, "fb": 100.0, "spread_auto": False}
-        sp = _SP(SR)
+        sp = SpatialPanner(SR)
         sp.set_params(panner_dict)
         y = sp.process(x, 0.0)
         assert np.allclose(y[0], y[1], atol=1e-9)
