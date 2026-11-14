@@ -555,6 +555,13 @@ class DelayDialog(QDialog):
         clean = DelayParams.from_dict(DELAY_PRESETS[1]["params"])
         self._banks = {"A": self._current, "B": clean}
         self._presets: list[dict[str, Any]] = copy.deepcopy(DELAY_PRESETS)
+        # ST-01: 用户预设跨会话持久化（关窗口/重启/新工程均可加载）
+        self._effect_type = "delay"
+        try:
+            from src.features.edit.core.effect_preset import load_user_presets
+            self._presets.extend(load_user_presets(self._effect_type))
+        except Exception:  # noqa: BLE001 — 预设库不可读不阻断对话框
+            pass
         self._cells: dict[str, KnobParameterCell] = {}
 
         self._setup_ui(track_name)
@@ -996,6 +1003,12 @@ class DelayDialog(QDialog):
             data.pop("enabled", None)
             self._presets.append({"name": clean, "params": data})
             self.preset_combo.addItem(clean)
+            # ST-01: 原子持久化（失败仅内存，下次会话重试）
+            try:
+                from src.features.edit.core.effect_preset import save_user_preset
+                save_user_preset(self._effect_type, clean, data)
+            except Exception:  # noqa: BLE001
+                pass
 
     # ── 公开 API ─────────────────────────────────────────────
 

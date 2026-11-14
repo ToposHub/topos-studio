@@ -215,3 +215,51 @@ class TestMx13FaderHardZero:
             EditTrack(track_id="a1", name="A", track_type="audio", volume=1.0),
             state)
         assert t2.volume == 0.0, "hard zero must survive capture/apply"
+
+
+class TestSt01EffectPresetPersistence:
+    """ST-01：效果器用户预设原子持久化（跨会话加载、损坏隔离）。"""
+
+    def _store(self, tmp_path):
+        import src.features.edit.core.effect_preset as ep
+        orig = ep._store_path
+        ep._store_path = lambda: str(tmp_path / "effect_presets.json")
+        return ep, orig
+
+    def test_save_and_load_roundtrip(self, tmp_path):
+        ep, orig = self._store(tmp_path)
+        try:
+            assert ep.save_user_preset("delay", "My Slap", {"left_delay": 80.0})
+            loaded = ep.load_user_presets("delay")
+            assert len(loaded) == 1
+            assert loaded[0]["name"] == "My Slap"
+            assert loaded[0]["params"]["left_delay"] == 80.0
+        finally:
+            ep._store_path = orig
+
+    def test_corrupted_entry_skipped_library_survives(self, tmp_path):
+        ep, orig = self._store(tmp_path)
+        try:
+            ep.save_user_preset("delay", "Good", {"left_delay": 80.0})
+            # 手工注入损坏条目
+            path = tmp_path / "effect_presets.json"
+            import json
+            data = json.loads(path.read_text())
+            data["presets"]["delay"].append({"bad": "entry"})
+            data["presets"]["delay"].append({"name": "NoParams"})
+            path.write_text(json.dumps(data))
+            loaded = ep.load_user_presets("delay")
+            assert len(loaded) == 1 and loaded[0]["name"] == "Good"
+        finally:
+            ep._store_path = orig
+
+    def test_unreadable_library_rejects_overwrite(self, tmp_path):
+        ep, orig = self._store(tmp_path)
+        try:
+            path = tmp_path / "effect_presets.json"
+            path.write_text("{not valid json")
+            assert ep.save_user_preset("delay", "X", {}) is False
+            # 原文件保持原样（人工修复机会不被覆盖）
+            assert path.read_text() == "{not valid json"
+        finally:
+            ep._store_path = orig
