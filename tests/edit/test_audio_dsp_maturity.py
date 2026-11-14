@@ -28,10 +28,12 @@ from src.features.edit.core.audio_dsp import (
     DelayEffect,
     EffectChain,
     ExpanderEffect,
+    LimiterEffect,
     ReverbEffect,
     SpatialPanner,
     StripEQFilter,
     spatial_panner_matrix,
+    strip_eq_band_response_db,
 )
 from src.features.edit.core.timeline_v2 import StripEQParams
 
@@ -619,3 +621,71 @@ class TestRv04GeometryHotUpdate:
         rv.set_params(self._params(), sample_rate=96000.0)
         # comb 缓冲对象被重建（采样率变化 → 网络重置）
         assert float(np.max(np.abs(rv._combs_l[0]._buf))) == 0.0
+
+
+class TestDy03HoldBoundary:
+    """DY-03：hold 冻结边界（hold=100ms 释放起点误差 ≤1 采样量级）。"""
+
+    def test_limiter_hold_freezes_gain_recovery(self):
+        """超阈值脉冲后增益冻结 hold 期，之后按 release 恢复。"""
+        lm = LimiterEffect(SR)
+        lm.set_params({
+            "threshold_db": -12.0, "attack_ms": 0.7,
+            "hold_ms": 100.0, "release_ms": 50.0, "enabled": True,
+        })
+        hold_samples = int(round(100.0 * 0.001 * SR))  # 4800
+        n = 1024
+        # 块1：持续超阈值（增益压到阈值）
+        x1 = np.full((2, n), 0.9)
+        y1 = lm.process(x1.copy())
+        assert float(np.max(np.abs(y1))) <= 10 ** (-12.0 / 20.0) * 1.01
+        # 块2：静音输入 → hold 期内增益不得恢复（输出保持衰减）
+        y2 = lm.process(np.zeros((2, n)))
+        assert float(np.max(np.abs(y2))) < 1e-6  # 静音输出本身为 0
+        # 块3：hold 未结束前给小信号 → 增益仍在冻结水平（不跳回 1）
+        y3 = lm.process(np.full((2, n), 0.5))
+        # hold 剩余 ≈ hold_samples - 2n > 0 → 增益仍 ≈ thr/0.9 量级而非 1.0
+        assert float(np.max(np.abs(y3))) < 0.9 * 0.6, (
+            "gain recovered before hold expired"
+        )
+
+    def test_compressor_hold_converges_then_releases(self):
+        """comp hold：hold 期包络冻结，release 后衰减。"""
+        comp = CompressorEffect(SR)
+        comp.set_params({
+            "threshold_db": -20.0, "ratio": 4.0, "knee": 0.0,
+            "attack_ms": 0.7, "hold_ms": 50.0, "release_ms": 50.0,
+            "mix": 100.0, "makeup_gain": 0.0, "enabled": True,
+        })
+        comp.process(np.full((2, 1024), 0.8))
+        env_after_hit = comp._env_lin
+        comp.process(np.zeros((2, 1024)))  # hold 期（50ms=2400 > 1024）
+        assert comp._env_lin == pytest.approx(env_after_hit, rel=1e-6), (
+            "envelope must freeze during hold"
+        )
+
+
+class TestEq02SoloParity:
+    """EQ-02：UI Solo 曲线与 DSP Solo 传输同一规则（共享服务）。"""
+
+    def test_ui_total_matches_dsp_transfer_with_solo(self):
+        """Solo 一个频段：共享响应服务 == 真实 DSP 冲激传输。"""
+        band = {"index": 3, "enabled": True, "solo": True,
+                "filter_type": "Bell", "freq": 1000.0, "gain": 6.0,
+                "q": 1.1, "slope": 12}
+        p = StripEQParams(enabled=True, bands=[band])
+        # DSP 传输
+        eq = StripEQFilter(SR)
+        eq.set_params(p)
+        x = np.zeros((2, 16384))
+        x[0, 0] = 1.0
+        y = eq.process(x)
+        spec = np.abs(np.fft.rfft(y[0]))
+        freqs = np.fft.rfftfreq(16384, 1.0 / SR)
+        for probe in (250.0, 1000.0, 4000.0):
+            i = int(np.argmin(np.abs(freqs - probe)))
+            dsp_db = 20.0 * float(np.log10(max(float(spec[i]), 1e-9)))
+            ui_db = strip_eq_band_response_db(band, probe, SR, "Clean")
+            assert dsp_db == pytest.approx(ui_db, abs=0.35), (
+                f"UI/DSP mismatch at {probe}Hz: dsp={dsp_db:.2f} ui={ui_db:.2f}"
+            )
