@@ -1741,14 +1741,14 @@ def _db_to_lin_gain(db: float) -> float:
 class ReverbEffect(AudioEffect):
     """声学房间混响器（直达 / 早反射簇 / 晚期 FDN + 双级音色 + 微调制）。
 
-    拓扑（与 IR 衰减图谱一致）：
+    拓扑（与 IR 衰减图谱一致；RV-03 后晚期为 8 线正交 FDN）：
       input → [直达 direct_db ×(1-w)]
             → [湿输入环形缓冲（mono 求和）]
-              ├─ ER：predelay+距离延迟起始、房间均值决定跨距的 10 抽头簇
-              │   （L/R 抖动去相关）→ ER lo/hi shelf 染色 → er_db ×w
-              └─ Late：predelay+距离+ER 跨距起始（时间微调制 chorus）
-                  → 双 FDN（4 comb + 2 allpass ×2 声道去相关）
-                  → Rev lo/hi shelf 染色 → reverb_db ×w
+              ├─ ER：有效传播+镜像附加行程的 image-source 抽头簇（RV-02）
+              │   → ER lo/hi shelf 染色 → er_db ×w
+              └─ Late：pre_delay 起始（时间微调制 chorus，mod=0 无调制）
+                  → 8 线正交 FDN（Householder；每线 RT60 校准增益+阻尼）
+                  → L/R 互补线组去相关读出 → Rev lo/hi shelf 染色 → reverb_db ×w
     dry_wet 是直达声 vs (ER+Late) 的交叉淡化。负 pre_delay 有效值钳为 0
     （物理上早反射不可能先于直达声；UI 双极旋钮保留自由度）。
 
@@ -1774,6 +1774,9 @@ class ReverbEffect(AudioEffect):
         self._combs_r: list = []
         self._allpasses_l: list = []
         self._allpasses_r: list = []
+        # RV-03: 8 线正交 FDN（替代上面的双 Schroeder 组；字段保留仅为
+        # _rebuild 变更检测哨兵——见 _rebuild 注释）
+        self._fdn8: Optional[_FDNNetwork8] = None
         # 音色 shelf（每声道 [lo, hi] 两段）
         self._er_shelf_zi: Optional[np.ndarray] = None
         self._rev_shelf_zi: Optional[np.ndarray] = None
@@ -1875,11 +1878,11 @@ class ReverbEffect(AudioEffect):
         环形缓冲只增不缩（容量不足才重新分配）。
         """
         sr = self._sample_rate
-        if reset_network or not self._combs_l:
-            self._combs_l = [_CombFilter(int(round(d * 0.001 * sr))) for d in _COMB_DELAY_MS]
-            self._combs_r = [_CombFilter(int(round(d * 0.001 * sr))) for d in _COMB_DELAY_MS_R]
-            self._allpasses_l = [_AllpassFilter(int(round(d * 0.001 * sr))) for d in _ALLPASS_DELAY_MS]
-            self._allpasses_r = [_AllpassFilter(int(round(d * 0.001 * sr))) for d in _ALLPASS_DELAY_MS]
+        # RV-03: 晚期网络 = 8 线正交 FDN（重建仅发生在采样率变化/首次构建，
+        # RV-04 热更新语义保持：几何/RT60/brightness 拖动不清网络缓冲）
+        if reset_network or self._fdn8 is None or \
+                getattr(self._fdn8, "_min_delay", 0) <= 0:
+            self._fdn8 = _FDNNetwork8(sr)
             self._er_shelf_zi = None
             self._rev_shelf_zi = None
         (self._er_taps_l, self._er_taps_r,
@@ -1976,16 +1979,11 @@ class ReverbEffect(AudioEffect):
         return taps_l, taps_r, weights_l, weights_r, float(late_l), float(late_r)
 
     def _apply_fdn_params(self, p: dict) -> None:
-        """reverb_time(RT60) / brightness(阻尼) 应用到双 FDN。"""
+        """reverb_time(RT60) / brightness(阻尼) 就地应用到 8 线 FDN（RV-03）。"""
         rt60_s = p["reverb_time"] * 0.001
         damping_hz = 800.0 + (p["brightness"] / 100.0) * 15200.0
         damping_linear = _damping_hz_to_linear(damping_hz, self._sample_rate)
-        for i, comb in enumerate(self._combs_l):
-            comb.set_params(_decay_to_feedback(rt60_s, _COMB_DELAY_MS[i], self._sample_rate),
-                            damping_linear)
-        for i, comb in enumerate(self._combs_r):
-            comb.set_params(_decay_to_feedback(rt60_s, _COMB_DELAY_MS_R[i], self._sample_rate),
-                            damping_linear)
+        self._fdn8.set_params(rt60_s, damping_linear, self._sample_rate)
 
     def _rebuild_tone(self, p: dict) -> None:
         """重建 ER/Rev 音色 shelf（lo+hi 各两段，SOS）。"""
@@ -2045,16 +2043,6 @@ class ReverbEffect(AudioEffect):
         out, zf = sosfilt(sos, x, axis=-1, zi=zi)
         setattr(self, zi_store, zf)
         return out
-
-    def _fdn_process(self, x: np.ndarray, combs: list, allpasses: list) -> np.ndarray:
-        """单个 FDN 通道：4 comb 并联求和 → 2 allpass 串联 → 0.25 归一。"""
-        wet = np.zeros_like(x)
-        for comb in combs:
-            wet += comb.process_block(x)
-        for ap in allpasses:
-            wet = ap.process_block(wet)
-        wet *= 0.25
-        return wet
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         """对一块样本应用声学房间混响。
@@ -2127,10 +2115,11 @@ class ReverbEffect(AudioEffect):
         frac_r = mod_depth * (0.5 + 0.5 * np.sin(2.0 * np.pi * _MOD_LFO_HZ[1] * t + 1.3))
         late_in_l = self._ring_read_frac_single(self._late_offset_l, frac_l, n)
         late_in_r = self._ring_read_frac_single(self._late_offset_r, frac_r, n)
-        late_bus = np.stack((
-            self._fdn_process(late_in_l, self._combs_l, self._allpasses_l),
-            self._fdn_process(late_in_r, self._combs_r, self._allpasses_r),
-        )) * 0.8
+        # RV-03: 单一 8 线正交 FDN；L/R 从互补线组去相关读出
+        # （非交替复制）。调制读头两条仍提供（左右相位差 → 注入相关）。
+        late_mono = 0.5 * (late_in_l + late_in_r)
+        fdn_l, fdn_r = self._fdn8.process(late_mono)
+        late_bus = np.stack((fdn_l, fdn_r)) * 0.8
         late_bus = self._apply_tone(self._rev_sos, "_rev_shelf_zi", late_bus)
 
         # 4) 输出：直达 ×dry + (ER+Late) ×wet
@@ -2146,10 +2135,8 @@ class ReverbEffect(AudioEffect):
 
     def reset_state(self) -> None:
         """重置所有延迟线状态（seek/暂停后调用）。"""
-        for comb in self._combs_l + self._combs_r:
-            comb.reset()
-        for ap in self._allpasses_l + self._allpasses_r:
-            ap.reset()
+        if self._fdn8 is not None:
+            self._fdn8.reset()
         if self._ring is not None:
             self._ring.fill(0.0)
         self._ring_write = 0
@@ -2321,6 +2308,129 @@ class _AllpassFilter:
     def reset(self) -> None:
         self._buf.fill(0.0)
         self._idx = 0
+
+
+# RV-03: 8 线 FDN 延迟（互质比例；并集自原 L/R 梳延迟组）
+_FDN8_DELAY_MS = (29.7, 31.9, 37.1, 39.7, 41.1, 43.9, 43.7, 46.7)
+
+
+class _FDNNetwork8:
+    """8 线正交反馈 FDN（RV-03，Householder 反馈矩阵）。
+
+    每线：延迟 D_i、按 RT60 逐线校准的反馈增益 g_i = 10^(-3·D_i/(RT60·sr))
+    （延迟越长增益越小——同一 RT60 目标下所有线同步衰减到 -60dB）、
+    反馈回路单极点阻尼（brightness → damping_hz）。
+
+    反馈混合：Householder Q = I − (2/8)·J（正交，谱范数 1）→ 反馈环路
+    增益 ≤ max|g_i| < 1：长尾无能量增长；正交打散消除孤立梳的周期啸叫。
+
+    输入注入 b = (1,…,1)/√8（能量守恒）；输出去相关：L 取前 4 线均值、
+    R 取后 4 线均值（非交替复制）。
+
+    块处理：按 ≤ min(D_i) 子块推进（子块内读区与写区不重叠 → 无环内
+    反馈，精确等价逐样本）；阻尼低通每线一次 lfilter（zi 交接）。
+    确定性（无随机源）——预览/导出种子与时间轴天然一致。
+    """
+
+    __slots__ = ("_delays", "_bufs", "_idx", "_g", "_filt", "_damp1",
+                 "_damp2", "_b", "_a", "_min_delay")
+
+    def __init__(self, sample_rate: float) -> None:
+        self._delays = [max(2, int(round(d * 0.001 * sample_rate)))
+                        for d in _FDN8_DELAY_MS]
+        self._bufs = [np.zeros(D, dtype=np.float64) for D in self._delays]
+        self._idx = [0] * 8
+        self._g = [0.5] * 8
+        self._filt = [0.0] * 8
+        self._damp1 = 1.0
+        self._damp2 = 0.0
+        self._b = np.array([0.0], dtype=np.float64)
+        self._a = np.array([1.0, -1.0], dtype=np.float64)
+        self._min_delay = min(self._delays)
+
+    def set_params(self, rt60_s: float, damping_linear: float,
+                   sample_rate: float) -> None:
+        """RT60（秒）→ 每线反馈增益；damping_linear → 回路单极点阻尼。
+
+        RT60 语义按 RV-03 验收在"所定义中低频段"成立（阻尼拐角以下的
+        频段 |H|≈1，每圈仅 ×g_i → 包络严格按 RT60 衰减）；高频随
+        brightness 阻尼更快衰减（频谱倾斜，非校准误差）。g_i clamp
+        <0.99995 保稳定（正交 Householder → 谱半径 ≤ max|g_i|）。
+        """
+        self._damp1 = float(damping_linear)
+        self._damp2 = 1.0 - self._damp1
+        self._b = np.array([self._damp2], dtype=np.float64)
+        self._a = np.array([1.0, -self._damp1], dtype=np.float64)
+        if rt60_s <= 0.0 or sample_rate <= 0.0:
+            self._g = [0.0] * 8
+            return
+        self._g = [
+            min(0.99995,
+                float(10.0 ** (-3.0 * D / (rt60_s * sample_rate))))
+            for D in self._delays]
+
+    def process(self, x: np.ndarray) -> tuple:
+        """处理一块 mono 输入，返回 (out_l, out_r) 去相关立体声。"""
+        n = int(x.shape[-1])
+        out_l = np.empty(n, dtype=np.float64)
+        out_r = np.empty(n, dtype=np.float64)
+        g = self._g
+        binj = 1.0 / np.sqrt(8.0)
+        pos = 0
+        while pos < n:
+            m = min(n - pos, self._min_delay)
+            xs = x[pos:pos + m].astype(np.float64, copy=False)
+            # 1) 读各线本子块的延迟值（读区=即将被写的旧内容）
+            reads = []
+            for i in range(8):
+                buf = self._bufs[i]
+                D = self._delays[i]
+                idx = self._idx[i]
+                end = idx + m
+                if end <= D:
+                    reads.append(buf[idx:end].copy())
+                else:
+                    k = D - idx
+                    reads.append(np.concatenate((buf[idx:], buf[:m - k])))
+            # 2) 反馈回路阻尼（每线 lfilter，zi 交接）
+            damped = []
+            for i in range(8):
+                if self._damp2 > 1e-12 and lfilter is not None:
+                    y, zf = lfilter(self._b, self._a, reads[i],
+                                    zi=np.array([self._filt[i] * self._damp1]))
+                    self._filt[i] = float(zf[0]) / self._damp1 \
+                        if self._damp1 > 0.0 else 0.0
+                    damped.append(y)
+                else:
+                    damped.append(reads[i])
+                    self._filt[i] = 0.0
+            R = np.stack(damped)  # (8, m)
+            # 3) 输出 tap（去相关：前 4 线 → L，后 4 线 → R）
+            out_l[pos:pos + m] = 0.5 * R[:4].sum(axis=0)
+            out_r[pos:pos + m] = 0.5 * R[4:].sum(axis=0)
+            # 4) Householder 正交混合 + 每线增益 + 输入注入 → 写回
+            mixed = R - 0.25 * R.sum(axis=0, keepdims=True)  # Q @ R
+            for i in range(8):
+                newv = g[i] * mixed[i] + binj * xs
+                buf = self._bufs[i]
+                D = self._delays[i]
+                idx = self._idx[i]
+                end = idx + m
+                if end <= D:
+                    buf[idx:end] = newv
+                else:
+                    k = D - idx
+                    buf[idx:] = newv[:k]
+                    buf[:m - k] = newv[k:]
+                self._idx[i] = end % D
+            pos += m
+        return out_l, out_r
+
+    def reset(self) -> None:
+        for buf in self._bufs:
+            buf.fill(0.0)
+        self._idx = [0] * 8
+        self._filt = [0.0] * 8
 
 
 def _decay_to_feedback(decay_s: float, delay_ms: float, sample_rate: float) -> float:

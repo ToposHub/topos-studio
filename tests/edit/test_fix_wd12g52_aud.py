@@ -1026,51 +1026,43 @@ class TestAud15203OutputDeviceUnknownCache:
 
 
 class TestAud15300ReverbRebuildAppliesNewParams:
-    def test_predelay_plus_decay_change_applies_new_comb_params(self):
-        from src.features.edit.core.audio_dsp import (
-            ReverbEffect, _COMB_DELAY_MS, _damping_hz_to_linear, _decay_to_feedback,
-        )
+    """AUD-15300 契约（RV-03 后晚期网络为 8 线 FDN，按当前参数名锁定）。"""
+
+    def test_decay_and_damping_change_applied_in_place(self):
+        from src.features.edit.core.audio_dsp import ReverbEffect
 
         fx = ReverbEffect(sample_rate=48000.0)
-        fx.set_params({
-            "pre_delay_ms": 50.0,   # 触发 _rebuild_filters 分支
-            "decay": 5.0,           # 新 decay（默认 2.0）
-            "damping_hz": 12000.0,  # 新 damping（默认 5000.0）
-            "mix": 30.0, "enabled": True,
-        })
-        expected_fb = _decay_to_feedback(5.0, _COMB_DELAY_MS[0], 48000.0)
-        expected_damp = _damping_hz_to_linear(12000.0, 48000.0)
-        assert fx._combs[0]._feedback == pytest.approx(expected_fb)
-        assert fx._combs[0]._damp1 == pytest.approx(expected_damp)
+        fx.set_params({"reverb_time": 1000.0, "brightness": 50.0,
+                       "dry_wet": 100.0, "enabled": True})
+        g_before = fx._fdn8._g[0]
+        fx.set_params({"reverb_time": 5000.0, "brightness": 90.0,
+                       "dry_wet": 100.0, "enabled": True})
+        # RT60 变长 → 增益升高；brightness 变亮 → 阻尼极点变小
+        assert fx._fdn8._g[0] > g_before
+        assert fx._fdn8._damp1 < 0.9
 
-    def test_sample_rate_change_branch_applies_new_params(self):
-        from src.features.edit.core.audio_dsp import (
-            ReverbEffect, _COMB_DELAY_MS, _damping_hz_to_linear, _decay_to_feedback,
-        )
+    def test_sample_rate_change_branch_rebuilds_network(self):
+        from src.features.edit.core.audio_dsp import ReverbEffect
 
         fx = ReverbEffect(sample_rate=48000.0)
-        fx.set_params(
-            {"decay": 8.0, "damping_hz": 15000.0, "mix": 40.0, "enabled": True},
-            sample_rate=96000.0,  # 触发 sr_changed 重建分支
-        )
-        expected_fb = _decay_to_feedback(8.0, _COMB_DELAY_MS[0], 96000.0)
-        expected_damp = _damping_hz_to_linear(15000.0, 96000.0)
-        assert fx._combs[0]._feedback == pytest.approx(expected_fb)
-        assert fx._combs[0]._damp1 == pytest.approx(expected_damp)
+        fx.set_params({"reverb_time": 2000.0, "enabled": True, "dry_wet": 100.0})
+        fdn_before = fx._fdn8
+        fx.set_params({"reverb_time": 2000.0, "enabled": True, "dry_wet": 100.0},
+                      sample_rate=96000.0)
+        assert fx._fdn8 is not fdn_before
+        # 新采样率下延迟线长度翻倍（48k→96k 同毫秒延迟）
+        assert fx._fdn8._delays[0] == pytest.approx(fdn_before._delays[0] * 2,
+                                                    rel=0.01)
 
     def test_repeat_same_params_keeps_values(self):
-        from src.features.edit.core.audio_dsp import (
-            ReverbEffect, _COMB_DELAY_MS, _decay_to_feedback,
-        )
+        from src.features.edit.core.audio_dsp import ReverbEffect
 
         fx = ReverbEffect(sample_rate=48000.0)
-        params = {"pre_delay_ms": 50.0, "decay": 5.0, "damping_hz": 12000.0,
-                  "mix": 30.0, "enabled": True}
+        params = {"reverb_time": 3000.0, "brightness": 70.0,
+                  "dry_wet": 100.0, "enabled": True}
         fx.set_params(params)
-        fb_after_first = fx._combs[0]._feedback
-        # 同值重复 set_params（工程加载后 UI 重设同值）：值保持，不回退默认
+        g_first = fx._fdn8._g[0]
+        d_first = fx._fdn8._damp1
         fx.set_params(params)
-        assert fx._combs[0]._feedback == pytest.approx(fb_after_first)
-        assert fx._combs[0]._feedback == pytest.approx(
-            _decay_to_feedback(5.0, _COMB_DELAY_MS[0], 48000.0)
-        )
+        assert fx._fdn8._g[0] == g_first
+        assert fx._fdn8._damp1 == d_first

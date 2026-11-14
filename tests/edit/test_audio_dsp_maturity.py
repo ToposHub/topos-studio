@@ -618,9 +618,11 @@ class TestRv04GeometryHotUpdate:
         rv.set_params(self._params())
         rng = np.random.default_rng(23)
         rv.process(rng.standard_normal((2, 4800)) * 0.2)
+        fdn_before = rv._fdn8
         rv.set_params(self._params(), sample_rate=96000.0)
-        # comb 缓冲对象被重建（采样率变化 → 网络重置）
-        assert float(np.max(np.abs(rv._combs_l[0]._buf))) == 0.0
+        # RV-03 后晚期网络 = 8 线 FDN：采样率变化 → 网络对象重建且缓冲清零
+        assert rv._fdn8 is not fdn_before
+        assert all(float(np.max(np.abs(b))) == 0.0 for b in rv._fdn8._bufs)
 
 
 class TestDy03HoldBoundary:
