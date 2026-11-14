@@ -2133,8 +2133,11 @@ class TrackMixerWidget(QWidget):
         Args:
             payload: audio_track_levels 单轨载荷 {"peak","rms","lufs","pre",
                 "gr": {instance_id: dB}, "sc": {instance_id: dB},
-                "spectrum": {"freqs", "db"}}
+                "spectrum": {"freqs", "db"} | None}
+                MX-01: {"silent": True, "spectrum": None} = 停止/暂停/seek
+                清表事件——GR/SC/频谱/输出表全部归零，频谱历史轨迹清除。
         """
+        silent = bool(payload.get("silent"))
         gr = payload.get("gr") or {}
         sc = payload.get("sc") or {}
         pre_db = payload.get("pre", -100.0)
@@ -2142,9 +2145,16 @@ class TrackMixerWidget(QWidget):
         out_db = max(peak[0], peak[1]) if isinstance(peak, (list, tuple)) else -100.0
 
         # EQ 对话框：频谱 + Master 输出表
+        # MX-01: silent（spectrum=None）→ 清当前频谱显示与 peak hold 历史
         spectrum = payload.get("spectrum")
         for dlg in self._iter_eq_dialogs():
-            if spectrum:
+            if silent:
+                try:
+                    dlg.update_spectrum([], [])
+                    dlg.reset_peak_hold()
+                except (RuntimeError, AttributeError):
+                    pass
+            elif spectrum:
                 dlg.update_spectrum(spectrum.get("freqs", []),
                                     spectrum.get("db", []))
             dlg.update_output_meter(out_db)
@@ -2168,7 +2178,9 @@ class TrackMixerWidget(QWidget):
         for dlg in list(getattr(self, '_compressor_dialogs', {}).values()):
             try:
                 iid = getattr(dlg, "_instance_id", "")
-                if iid in sc:
+                if silent:
+                    dlg.set_sidechain_level(-60.0)
+                elif iid in sc:
                     dlg.set_sidechain_level(sc[iid])
             except (RuntimeError, AttributeError):
                 continue

@@ -4568,6 +4568,9 @@ class AudioPlaybackManager(QObject):
     end_reached = pyqtSignal()              # 播放到达终点
     audio_level_changed = pyqtSignal(list)  # [left_db, right_db] 电平
     audio_track_levels_changed = pyqtSignal(dict)  # {track_id: [l_db, r_db]} per-track 电平
+    # MX-01: 播放代数复位（play/pause/resume/stop/seek）。订阅者丢弃
+    # generation < 当前代的排队遥测（旧代事件不得回亮表计/频谱）。
+    audio_telemetry_reset = pyqtSignal(int)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         """
@@ -4577,6 +4580,10 @@ class AudioPlaybackManager(QObject):
             parent: QObject 父对象
         """
         super().__init__(parent)
+
+        # MX-01: 播放代数（每次 play/pause/resume/stop/seek 递增；
+        # 停止/暂停的静音 payload 携带该代，面板丢弃旧代排队事件）
+        self._telemetry_generation: int = 0
 
         # 组件
         self._clock: AudioClock = AudioClock()
@@ -5340,6 +5347,8 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.PLAYING.value)
+        # MX-01: 新播放代（丢弃停止/暂停期排队的旧代静音与表计事件）
+        self._bump_telemetry_generation()
         playback_trace(
             "audio_manager.play",
             start_frame=start_frame,
@@ -5366,6 +5375,8 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.PAUSED.value)
+        # MX-01: 暂停 = 新播放代 + 完整静音事件（GR/SC/频谱一并清空）
+        self._bump_telemetry_generation()
         # B13：暂停的瞬时电平 = 静音（与播放线程 -100dB 钳制地板一致）；
         # peak-hold 衰减由各电平表自行处理，这里只提供真实状态 feed
         self._emit_silent_levels()
@@ -5395,6 +5406,8 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.PLAYING.value)
+        # MX-01: 新播放代
+        self._bump_telemetry_generation()
 
         logger.debug("Audio playback resumed")
 
@@ -5429,28 +5442,47 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.STOPPED.value)
+        # MX-01: 停止 = 新播放代 + 完整静音事件（GR/SC/频谱/轨迹清空；
+        # 迟到的旧代排队事件被面板代数守卫丢弃）
+        self._bump_telemetry_generation()
         # B13：停止（含 EOF→stop）后瞬时电平归静音——不伪造音频、不改
-        # 表控件，只把真实生命周期状态 feed 给订阅者；迟到的线程回调
-        # 由 _on_audio_* 的播放态守卫丢弃
+        # 表控件，只把真实生命周期状态 feed 给订阅者
         self._emit_silent_levels()
         self.frame_changed.emit(0)
         playback_trace("audio_manager.stop")
 
         logger.debug("Audio playback stopped")
 
-    def _emit_silent_levels(self) -> None:
-        """B13：向全部电平订阅者广播静音（master + per-track）。
+    def _bump_telemetry_generation(self) -> int:
+        """MX-01: 递增播放代数并广播复位（play/pause/resume/stop/seek 调用）。"""
+        self._telemetry_generation = int(getattr(self, "_telemetry_generation", 0)) + 1
+        try:
+            self.audio_telemetry_reset.emit(self._telemetry_generation)
+        except (RuntimeError, AttributeError):
+            pass  # QObject 已析构/无订阅者的测试环境
+        return self._telemetry_generation
 
-        master 用双声道 [silent, silent]；per-track 用最近一次 feed 出现
-        的轨集合（各表按既有衰减/peak-hold 规则回落）。静音地板与播放
-        线程的 dB 钳制一致（-100dB），不引入第二套"无声"语义。
+    def _emit_silent_levels(self) -> None:
+        """B13/MX-01：向全部电平订阅者广播**版本化完整静音事件**。
+
+        master 用双声道 [silent, silent]；per-track 用统一 payload dict：
+        电平地板 + GR/SC 清空 + spectrum=None（对话框清当前频谱/轨迹）+
+        silent 标记 + 播放代数（面板据此丢弃旧代排队事件）。stop/pause/
+        seek/缺轨共用同一"无声"语义，不再残留最后一帧读数。
         """
         silent = [LEVEL_SILENT_DB, LEVEL_SILENT_DB]
         self.audio_level_changed.emit(list(silent))
         track_ids = getattr(self, "_last_track_level_ids", None) or ()
         if track_ids:
+            gen = int(getattr(self, "_telemetry_generation", 0))
+            silent_payload = {
+                "peak": list(silent), "rms": list(silent),
+                "lufs": -70.0, "pre": LEVEL_SILENT_DB,
+                "gr": {}, "sc": {}, "spectrum": None,
+                "silent": True, "generation": gen,
+            }
             self.audio_track_levels_changed.emit({
-                track_id: list(silent) for track_id in track_ids})
+                track_id: dict(silent_payload) for track_id in track_ids})
 
     def seek(self, frame: int) -> None:
         """
@@ -5475,6 +5507,10 @@ class AudioPlaybackManager(QObject):
         # owns the live decode cadence; the next mix_samples() call will seek
         # each decoder under the mixer lock when it observes the new frame.
         playback_trace("audio_manager.seek_deferred_to_audio_thread", frame=frame)
+
+        # MX-01: seek = 新播放代（旧位置频谱/轨迹/排队事件全部失效；
+        # DSP 状态由播放线程的 reset_dsp_states 统一清）
+        self._bump_telemetry_generation()
 
         # 发射帧变化
         self.frame_changed.emit(frame)
