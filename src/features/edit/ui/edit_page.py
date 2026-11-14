@@ -865,6 +865,10 @@ class EditPage(QWidget):
             self._audio_manager.audio_track_levels_changed.connect(
                 mixer_panel.update_per_track_levels
             )
+            # MX-01: 播放代数复位（stop/pause/seek 清全部读数 + 丢弃旧代事件）
+            self._audio_manager.audio_telemetry_reset.connect(
+                mixer_panel.on_telemetry_reset
+            )
             self._mixer_signals_connected = True
             # W11: LUFS 按需计算——表模式驱动（无 LUFS 表时省掉 K-weighting，
             # 占混音热路径近一半耗时）。先同步当前状态再监听变化。

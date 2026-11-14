@@ -352,6 +352,11 @@ class ProEQGraphWidget(QWidget):
     def has_spectrum(self) -> bool:
         return bool(self._spec_post)
 
+    def reset_peak_hold(self) -> None:
+        """MX-01/EQ-03：清空频谱 peak hold 历史轨迹（停止/seek/手动重置）。"""
+        self._spec_peak = []
+        self.update()
+
     # ── 坐标映射 ─────────────────────────────────────────────
 
     def _plot_rect(self) -> QRectF:
@@ -1797,6 +1802,10 @@ class ParametricEQDialog(QDialog):
     def update_spectrum(self, freqs_hz: list, post_db: list,
                         peak_db: Optional[list] = None) -> None:
         self.eq_graph.update_spectrum(freqs_hz, post_db, peak_db)
+
+    def reset_peak_hold(self) -> None:
+        """MX-01/EQ-03：清空频谱 peak hold（停止/seek 清表事件）。"""
+        self.eq_graph.reset_peak_hold()
 
     def update_output_meter(self, level_db: float) -> None:
         self.master_strip.setMeterLevel(level_db)

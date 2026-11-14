@@ -93,6 +93,9 @@ class AudioMixerPanel(QWidget):
         # （update_per_track_levels 每帧逐轨）不再重复 import + 探测；
         # 进程内 scipy 可用性不会变化，探测一次即可。
         self._lufs_backend_ok: Optional[bool] = None
+        # MX-01: 当前播放代数（audio_telemetry_reset 更新；低于它的
+        # 排队遥测载荷直接丢弃，旧代事件不得回亮表计/频谱）
+        self._telemetry_generation: int = 0
 
         self._init_ui()
 
@@ -495,6 +498,28 @@ class AudioMixerPanel(QWidget):
         if self._master_mixer:
             self._master_mixer.update_audio_level(levels)
 
+    def on_telemetry_reset(self, generation: int) -> None:
+        """MX-01: 播放代数复位（stop/pause/seek）——统一清表。
+
+        所有当前电平/GR/SC/频谱立即清零（两 UI 周期内可见），并记录
+        新代数：后续到达的旧代排队载荷在 update_per_track_levels 丢弃。
+        """
+        self._telemetry_generation = max(self._telemetry_generation, int(generation))
+        silent_payload = {
+            "peak": [-100.0, -100.0], "rms": [-100.0, -100.0],
+            "lufs": -70.0, "pre": -100.0,
+            "gr": {}, "sc": {}, "spectrum": None,
+            "silent": True, "generation": int(generation),
+        }
+        for track_id, mixer in self._track_mixers.items():
+            mixer.reset_meter()
+            try:
+                mixer.update_track_telemetry(dict(silent_payload))
+            except (AttributeError, RuntimeError):
+                pass
+        if self._master_mixer is not None:
+            self._master_mixer.reset_meter()
+
     def set_master_volume_linear(self, volume: float) -> None:
         """W12: 用线性增益(0.0-1.0)静默回填 Master 推子（不发信号）。"""
         if self._master_mixer:
@@ -514,6 +539,8 @@ class AudioMixerPanel(QWidget):
                     电平表清零（衰减），实现"无信号时表归零"。
 
                     向后兼容：若值为 list [l_db, r_db]（旧格式），直接用。
+                    MX-01：载荷携带 generation 时低于当前代的事件直接丢弃
+                    （stop/pause/seek 后排队的旧代静音/读数不得回亮）。
         """
         for track_id, mixer in self._track_mixers.items():
             vals = levels.get(track_id)
@@ -521,6 +548,11 @@ class AudioMixerPanel(QWidget):
                 # 该轨无信号（静音/非 solo），清零电平表
                 mixer.reset_meter()
             else:
+                # MX-01: 旧代排队事件丢弃（含 silent payload 的迟到回放）
+                if isinstance(vals, dict):
+                    evt_gen = vals.get("generation")
+                    if evt_gen is not None and int(evt_gen) < self._telemetry_generation:
+                        continue
                 # W9/W11: 根据 meter_mode 选择 peak / rms / lufs
                 if isinstance(vals, dict):
                     # 获取该 strip 的电平表模式
