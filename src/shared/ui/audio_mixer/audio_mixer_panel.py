@@ -567,6 +567,13 @@ class AudioMixerPanel(QWidget):
                     evt_gen = vals.get("generation")
                     if evt_gen is not None and int(evt_gen) < self._telemetry_generation:
                         continue
+                    # 审查容错：lufs 异常标量（应为 [l, r]）归一为列表，
+                    # 不让单个坏载荷中断批量清表循环
+                    if isinstance(vals.get("lufs"), float):
+                        vals = {**vals, "lufs": [vals["lufs"], vals["lufs"]]}
+                # 容错：异常载荷的 lufs 标量（应为 [l, r] 列表）不中断批量清表
+                if isinstance(vals, dict) and isinstance(vals.get("lufs"), float):
+                    vals = {**vals, "lufs": [vals["lufs"], vals["lufs"]]}
                 # W9/W11: 根据 meter_mode 选择 peak / rms / lufs
                 if isinstance(vals, dict):
                     # 获取该 strip 的电平表模式

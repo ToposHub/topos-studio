@@ -1760,6 +1760,15 @@ class AudioMixer:
         self._sc_order_cache: Optional[tuple] = None
         # MX-07: 每轨尾音剩余样本（feed-zero drain 调度；seek/remove_track 清）
         self._track_tail_remaining: Dict[str, int] = {}
+        # MX-01: 播放代数（manager 在 play/pause/resume/stop/seek 时 bump；
+        # 播放线程构造遥测载荷时读取盖章——面板据此丢弃旧代排队事件）
+        self._telemetry_generation: int = 0
+
+    def bump_telemetry_generation(self) -> int:
+        """MX-01: 递增播放代数（manager 生命周期事件调用，持锁）。"""
+        with QMutexLocker(self._mutex):
+            self._telemetry_generation += 1
+            return self._telemetry_generation
 
     def _sidechain_track_order(self) -> tuple:
         """按外部侧链依赖对普通轨排序（调用方持锁）。
@@ -4215,6 +4224,10 @@ class AudioPlaybackThread(QThread):
                         taps = getattr(lvl, "taps", None)
                         if taps:
                             payload["taps"] = dict(taps)
+                        # MX-01: 实时载荷同样盖播放代——stop/pause 后已入队
+                        # 的旧代事件被面板守卫丢弃，不再回亮表计/频谱
+                        payload["generation"] = int(
+                            getattr(self._mixer, "_telemetry_generation", 0))
                         track_levels[tid] = payload
                 # CW-A1: 频谱（EQ 对话框打开时；非对话轨不出键）。
                 # 持 mixer 锁：_spectrum_windows 由 mix_samples 在锁内写入，
@@ -4633,10 +4646,6 @@ class AudioPlaybackManager(QObject):
             parent: QObject 父对象
         """
         super().__init__(parent)
-
-        # MX-01: 播放代数（每次 play/pause/resume/stop/seek 递增；
-        # 停止/暂停的静音 payload 携带该代，面板丢弃旧代排队事件）
-        self._telemetry_generation: int = 0
 
         # 组件
         self._clock: AudioClock = AudioClock()
@@ -5515,13 +5524,16 @@ class AudioPlaybackManager(QObject):
         logger.debug("Audio playback stopped")
 
     def _bump_telemetry_generation(self) -> int:
-        """MX-01: 递增播放代数并广播复位（play/pause/resume/stop/seek 调用）。"""
-        self._telemetry_generation = int(getattr(self, "_telemetry_generation", 0)) + 1
+        """MX-01: 递增播放代数并广播复位（play/pause/resume/stop/seek 调用）。
+
+        计数器真源在 AudioMixer（播放线程构造载荷时读取同一值盖章）。
+        """
+        gen = self._mixer.bump_telemetry_generation()
         try:
-            self.audio_telemetry_reset.emit(self._telemetry_generation)
+            self.audio_telemetry_reset.emit(gen)
         except (RuntimeError, AttributeError):
             pass  # QObject 已析构/无订阅者的测试环境
-        return self._telemetry_generation
+        return gen
 
     def _emit_silent_levels(self) -> None:
         """B13/MX-01：向全部电平订阅者广播**版本化完整静音事件**。
@@ -5535,10 +5547,12 @@ class AudioPlaybackManager(QObject):
         self.audio_level_changed.emit(list(silent))
         track_ids = getattr(self, "_last_track_level_ids", None) or ()
         if track_ids:
-            gen = int(getattr(self, "_telemetry_generation", 0))
+            gen = int(getattr(self._mixer, "_telemetry_generation", 0))
             silent_payload = {
                 "peak": list(silent), "rms": list(silent),
-                "lufs": -70.0, "pre": LEVEL_SILENT_DB,
+                # lufs 与实时 payload 同构（[l, r] 列表——面板 LUFS 表模式
+                # 会 list() 该值，标量会抛 TypeError 中断清表循环）
+                "lufs": [-70.0, -70.0], "pre": LEVEL_SILENT_DB,
                 "gr": {}, "sc": {}, "spectrum": None,
                 "silent": True, "generation": gen,
             }

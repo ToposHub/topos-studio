@@ -87,9 +87,11 @@ def save_user_preset(effect_type: str, name: str, params: dict[str, Any],
     if raw is None:
         logger.error("save_user_preset: library unreadable, skip persisting")
         return False
+    from src.features.edit.core.audio_dsp import ALGORITHM_VERSION
     entry = {
         "preset_id": preset_id or str(uuid.uuid4()),
         "name": str(name),
+        "algorithm_version": ALGORITHM_VERSION,
         "params": dict(params),
     }
     entries = [e for e in (raw.get(effect_type) or [])
