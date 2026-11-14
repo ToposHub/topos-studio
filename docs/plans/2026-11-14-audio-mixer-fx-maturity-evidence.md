@@ -52,6 +52,7 @@
 | DL-02 | 延迟环形缓冲按最大容量 1200ms 预分配（参数时间变化不重建不清历史）；分数读头（线性插值，60.5ms 冲激峰位误差 ≤1 采样）；负反馈极性交替、强反馈有界锁定 | TestDl02FractionalDelay |
 | RV-04 | 几何变化不重建网络（拓扑固定常量；尺寸/距离只影响 ER 抽头与晚期偏移）；ring 只增不缩；采样率变化重置网络（防护语义保留）；拖尺寸/距离尾音不归零 | TestRv04GeometryHotUpdate |
 | DL-03 | 尾音经 MX-07 契约成立（§1.3 后块 peak≈0.29 场景）；输出表经 MX-02 读实例 tap；tap_graph 参数图保持既有实现 | TestMx07TailDrain + TestMx02 |
+| ST-01 | 五款对话框全部接入 `effect_preset` 用户库（~/.topos/effect_presets.json，原子写、单条损坏跳过、整库不可读拒绝覆写）；Dynamics/Delay/Reverb 预设条目、EQ（strip_eq）预设条目、Panner 完整 state 均跨会话加载；库不可读时对话框降级可用 | tests/shared/test_audio_mx01_telemetry_lifecycle.py（存储 3 项）+ tests/shared/test_audio_st01_eq_panner_presets.py（EQ/Panner 5 项） |
 
 ### 核心已实现（边界明确）
 

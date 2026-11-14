@@ -19,6 +19,7 @@ Shift/滚轮调高度、Ctrl/Alt 锁轴、双击复位、右键预设菜单）+ 
 from __future__ import annotations
 
 import copy
+import logging
 import math
 from typing import Any, Optional
 
@@ -57,6 +58,8 @@ from src.shared.ui.audio_mixer.pro_widgets import (
     parse_float_clean,
 )
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+
+logger = logging.getLogger(__name__)
 
 PALETTE = {
     "cyan":   "#28D8F0",  # 主声像锚点 / 纵深
@@ -780,6 +783,18 @@ class SpatialPannerDialog(QDialog):
         self._track_id = track_id
         self._dragging = False
         self._updating = False
+        # ST-01: 用户预设跨会话持久化（关窗口/重启/新工程均可加载）
+        self._effect_type = "panner"
+        self._custom_presets: list = []
+        try:
+            from src.features.edit.core.effect_preset import load_user_presets
+            for entry in load_user_presets(self._effect_type):
+                state = dict(entry["params"])
+                if isinstance(state, dict) and state:
+                    self._custom_presets.append(
+                        {"name": str(entry["name"]), "state": state})
+        except Exception as exc:  # noqa: BLE001 — 预设库不可读不阻断对话框
+            logger.warning("panner dialog: user presets unavailable: %r", exc)
 
         panner = initial_panner if isinstance(initial_panner, dict) and initial_panner \
             else SpatialPannerParams.default().to_dict()
@@ -1336,10 +1351,15 @@ class SpatialPannerDialog(QDialog):
             I18N.tr("audio.fx.preset_name_prompt", "输入预设名称:"))
         if ok and name.strip():
             clean = name.strip()
-            if not hasattr(self, "_custom_presets"):
-                self._custom_presets = []
-            self._custom_presets.append({"name": clean, "state": copy.deepcopy(self._state)})
-            self.preset_combo.addItem(clean, copy.deepcopy(self._state))
+            state = copy.deepcopy(self._state)
+            self._custom_presets.append({"name": clean, "state": state})
+            self.preset_combo.addItem(clean, copy.deepcopy(state))
+            # ST-01: 原子落盘到用户库
+            try:
+                from src.features.edit.core.effect_preset import save_user_preset
+                save_user_preset(self._effect_type, clean, state)
+            except Exception as exc:  # noqa: BLE001 — 落盘失败不阻断内存视图
+                logger.warning("panner dialog: persist preset failed: %r", exc)
 
     # ── 公开 API ─────────────────────────────────────────────
 
