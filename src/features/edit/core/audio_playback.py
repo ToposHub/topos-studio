@@ -1844,6 +1844,10 @@ class AudioMixer:
     def collect_spectra(self) -> Dict[str, tuple]:
         """计算并返回每轨频谱（调用点：播放线程表计节流 ~33Hz，持锁）。
 
+        MX-09: 窗缓存按写入指针重排后加窗（环窗跨界不再产生伪瞬态）；
+        L/R 按**功率合成**（mean(|L|²,|R|²)），L=-R 反相立体声仍显示双声道
+        能量（旧的 (L+R)/2 mono 折叠会完全相消）。
+
         Returns:
             {track_id: (freqs list[float], db list[float])}——96 个对数 bins
             （20Hz..20kHz，峰值归一 dB，满量程 0dB 附近、地板 -120dB）。
@@ -1853,13 +1857,18 @@ class AudioMixer:
             return result
         n = self.SPECTRUM_WINDOW_SAMPLES
         freqs = self._spectrum_bin_freqs()
+        win_fn = np.hanning(n)
+        bin_hz = np.fft.rfftfreq(n, d=1.0 / self._sample_rate)
         for tid, window in self._spectrum_windows.items():
             try:
-                spec = np.fft.rfft(window * np.hanning(n))
-                mag = np.abs(spec) / max(n, 1) * 2.0
+                widx = self._spectrum_write.get(tid, 0)
+                # MX-09: 按环窗 write 指针重排（时间顺序恢复），跨界无伪瞬态
+                ordered = np.roll(window, -widx, axis=-1)
+                spectra = np.fft.rfft(ordered * win_fn, axis=-1)
+                # 功率合成（L=-R 不相消）；幅度归一 = 相干增益校正
+                mag = np.sqrt(np.mean(np.abs(spectra) ** 2, axis=0))                     / max(n, 1) * 2.0
                 # 对数 bins 聚合（取 bin 内最大）
                 db = np.full(len(freqs), -120.0)
-                bin_hz = np.fft.rfftfreq(n, d=1.0 / self._sample_rate)
                 bin_idx = np.clip(np.searchsorted(bin_hz, freqs), 0, len(mag) - 1)
                 for k in range(len(freqs)):
                     lo = bin_idx[max(k - 1, 0)]
@@ -1884,20 +1893,29 @@ class AudioMixer:
         return freqs
 
     def _push_spectrum_window(self, track_id: str, track_output: np.ndarray) -> None:
-        """把该轨完整输出（post-chain mono）推入 2048 样本环形窗。"""
+        """把该轨完整输出（post-chain，立体声）推入 2048 样本环形窗。
+
+        MX-09: 缓存立体声（L/R 两行），collect_spectra 做功率合成；
+        write 指针记录环窗写入位置供时间序重排。
+        """
         n = self.SPECTRUM_WINDOW_SAMPLES
-        mono = np.mean(track_output, axis=0) if track_output.shape[0] > 1 else track_output[0]
+        ch = track_output.shape[0]
+        if ch >= 2:
+            stereo = track_output[:2].astype(np.float64, copy=False)
+        else:
+            stereo = np.repeat(track_output[:1].astype(np.float64, copy=False),
+                               2, axis=0)
         win = self._spectrum_windows.get(track_id)
-        if win is None or win.shape[0] != n:
-            win = np.zeros(n, dtype=np.float64)
+        if win is None or win.shape[0] != 2 or win.shape[1] != n:
+            win = np.zeros((2, n), dtype=np.float64)
             self._spectrum_windows[track_id] = win
             self._spectrum_write[track_id] = 0
         idx = self._spectrum_write.get(track_id, 0)
-        m = mono.shape[0]
+        m = stereo.shape[1]
         pos = 0
         while pos < m:
             take = min(m - pos, n - idx)
-            win[idx:idx + take] = mono[pos:pos + take]
+            win[:, idx:idx + take] = stereo[:, pos:pos + take]
             pos += take
             idx = (idx + take) % n
         self._spectrum_write[track_id] = idx
@@ -4583,6 +4601,8 @@ class AudioPlaybackManager(QObject):
     # MX-01: 播放代数复位（play/pause/resume/stop/seek）。订阅者丢弃
     # generation < 当前代的排队遥测（旧代事件不得回亮表计/频谱）。
     audio_telemetry_reset = pyqtSignal(int)
+    # MX-09: 引擎采样率下发（设备/工程切换时 EQ 曲线与频谱轴同步重算）
+    sample_rate_changed = pyqtSignal(float)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         """
@@ -4650,6 +4670,14 @@ class AudioPlaybackManager(QObject):
 
         self._sample_rate = sample_rate
         self._clock.set_sample_rate(sample_rate)
+        # MX-09: 采样率下发（UI 曲线/频谱轴同一真源）
+        try:
+            self.sample_rate_changed.emit(float(sample_rate))
+        except (RuntimeError, AttributeError):
+            pass
+        # DSP 状态按采样率重置（IIR 系数失配会产生咔哒声）；
+        # mixer.set_sample_rate 自带锁（QMutex 非递归，外层不得再包）
+        self._mixer.set_sample_rate(float(sample_rate))
 
         if self._playback_thread is not None:
             logger.debug("Sample rate changed while playback thread exists; restart required")

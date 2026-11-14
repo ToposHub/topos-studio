@@ -371,3 +371,65 @@ class TestMx02PerInstanceTaps:
         assert "D1" in taps
         assert taps["D1"]["effect_type"] == "delay"
         assert taps["D1"]["out_db"] > -60.0
+
+
+class TestMx09SpectrumCorrectness:
+    """MX-09：环窗 write 重排 + L/R 功率合成（反相不相消）+ 采样率下发。"""
+
+    def test_antiphase_stereo_keeps_energy(self, qapp):
+        """L=-R 反相立体声：功率合成显示双声道能量（mono 折叠会相消）。"""
+        mixer = AudioMixer()
+        n = mixer.SPECTRUM_WINDOW_SAMPLES
+        t = np.arange(n) / SR
+        sig = 0.5 * np.sin(2.0 * np.pi * 1000.0 * t)
+        mixer.set_spectrum_metering(True)
+        mixer._push_spectrum_window("t1", np.stack((sig, -sig)))
+        spectra = mixer.collect_spectra()
+        freqs, db = spectra["t1"]
+        idx_1k = int(np.argmin(np.abs(np.asarray(freqs) - 1000.0)))
+        assert db[idx_1k] > -20.0, (
+            f"anti-phase L=-R collapsed (1kHz bin {db[idx_1k]:.1f} dB) — "
+            "must use stereo power synthesis"
+        )
+
+    def test_ring_window_reorder_no_split_transient(self, qapp):
+        """环窗跨界（write 指针非 0）：时间序重排后频谱稳定。"""
+        mixer = AudioMixer()
+        n = mixer.SPECTRUM_WINDOW_SAMPLES
+        t = np.arange(n) / SR
+        sig = 0.5 * np.sin(2.0 * np.pi * 1000.0 * t)
+        # 整窗一次性推入（write 指针回到 0）
+        mixer.set_spectrum_metering(True)
+        mixer._push_spectrum_window("t1", np.stack((sig, sig)))
+        _, db_a = mixer.collect_spectra()["t1"]
+        # 分两半推入（第二次跨界，write 指针 = n/2）
+        mixer._spectrum_windows.clear()
+        mixer._push_spectrum_window("t1", np.stack((sig[:n // 2], sig[:n // 2])))
+        mixer._push_spectrum_window("t1", np.stack((sig[n // 2:], sig[n // 2:])))
+        _, db_b = mixer.collect_spectra()["t1"]
+        idx_1k = int(np.argmin(np.abs(np.asarray(mixer._spectrum_bin_freqs()) - 1000.0)))
+        assert abs(db_a[idx_1k] - db_b[idx_1k]) < 1.0, (
+            f"ring-window split changed spectrum by "
+            f"{abs(db_a[idx_1k]-db_b[idx_1k]):.2f} dB (reorder missing)"
+        )
+
+    def test_sample_rate_chain_reaches_dialog(self, qapp):
+        """engine.sample_rate_changed → panel → strip → EQ 对话框。"""
+        from src.shared.ui.audio_mixer.audio_mixer_panel import AudioMixerPanel
+        from src.shared.ui.audio_mixer.track_mixer_widget import TrackMixerWidget
+
+        panel = AudioMixerPanel()
+        try:
+            pushed = []
+            strip = TrackMixerWidget.__new__(TrackMixerWidget)
+            from PyQt6.QtWidgets import QWidget
+            QWidget.__init__(strip)
+            strip._eq_dialog = None
+            strip._strip_eq_dialogs = {}
+            strip._engine_sample_rate = 48000.0
+            strip._iter_eq_dialogs = lambda: []  # 无打开对话框
+            panel._track_mixers["t1"] = strip
+            panel.on_engine_sample_rate(96000.0)
+            assert strip._engine_sample_rate == 96000.0
+        finally:
+            panel.deleteLater()

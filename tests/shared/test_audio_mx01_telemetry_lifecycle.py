@@ -174,3 +174,44 @@ class TestMx01WidgetSilentTelemetry:
         assert eq.reset_called, "peak hold history must be cleared"
         assert eq.out == -100.0
         assert dd.levels == (-100.0, -100.0)
+
+
+class TestMx13FaderHardZero:
+    """MX-13：推子底端 = 硬零端点；连续区映射冻结；0dB 直通。"""
+
+    def test_db_min_is_hard_zero(self):
+        from src.shared.ui.audio_mixer.track_mixer_widget import (
+            db_to_linear, VOLUME_DB_MIN)
+        assert db_to_linear(VOLUME_DB_MIN) == 0.0
+        assert db_to_linear(-1000.0) == 0.0
+
+    def test_continuous_zone_mapping_frozen(self):
+        """中间值映射不变（旧工程 linear↔dB 兼容）。"""
+        from src.shared.ui.audio_mixer.track_mixer_widget import (
+            db_to_linear, VOLUME_DB_MAX)
+        assert db_to_linear(0.0) == pytest.approx(1.0)
+        assert db_to_linear(6.0) == pytest.approx(10.0 ** 0.3, rel=1e-6)
+        assert db_to_linear(-20.0) == pytest.approx(0.1, abs=1e-6)
+        # -60 以上一点仍是连续区（非硬零）
+        assert db_to_linear(-59.9) > 0.0
+
+    def test_linear_zero_maps_to_min_label(self):
+        """volume=0 显示为底端刻度（-60dB 标签 = 硬零）。"""
+        from src.shared.ui.audio_mixer.track_mixer_widget import (
+            linear_to_db, VOLUME_DB_MIN)
+        assert linear_to_db(0.0) == VOLUME_DB_MIN
+
+    def test_volume_zero_survives_model_roundtrip(self):
+        """volume=0 经 with_volume/undo/快照往返保持严格 0。"""
+        from src.features.edit.core.commands.audio_commands import (
+            _capture_strip_state, _apply_strip_state)
+        from src.features.edit.core.timeline_v2 import EditTrack
+
+        t = EditTrack(track_id="a1", name="A", track_type="audio", volume=0.0)
+        assert t.volume == 0.0
+        state = _capture_strip_state(t)
+        assert state["volume"] == 0.0
+        t2 = _apply_strip_state(
+            EditTrack(track_id="a1", name="A", track_type="audio", volume=1.0),
+            state)
+        assert t2.volume == 0.0, "hard zero must survive capture/apply"

@@ -2314,11 +2314,15 @@ class DelayEffect(AudioEffect):
         self._rebuild_input_filters()
         self._recompute_damp_coeff()
 
+    # DL-02: 环形缓冲按最大延迟（1200ms）一次性预分配——参数时间变化
+    # 不再重建（拖动不清空整段历史/尾音）；容量只在采样率变化时重置。
+    _MAX_DELAY_MS = 1200.0
+
     def _rebuild_delay_line(self) -> None:
-        """按 max(L, R) 延迟重建环形缓冲。"""
+        """按最大延迟容量预分配环形缓冲（仅采样率变化/首建时调用）。"""
         sr = self._sample_rate
-        delay_samples = int(round(max(self._left_delay, self._right_delay) * 0.001 * sr))
-        self._delay_size = max(delay_samples + 1, 2)
+        capacity = int(round(self._MAX_DELAY_MS * 0.001 * sr)) + 8
+        self._delay_size = max(capacity, 2)
         self._buf_l = np.zeros(self._delay_size, dtype=np.float64)
         self._buf_r = np.zeros(self._delay_size, dtype=np.float64)
         self._delay_idx = 0
@@ -2369,13 +2373,13 @@ class DelayEffect(AudioEffect):
         new_hc = _clamp_finite(params.get("high_cut", _DELAY_DEFAULT_HIGH_CUT),
                                100.0, 20000.0, _DELAY_DEFAULT_HIGH_CUT)
 
-        time_changed = (abs(new_left - self._left_delay) > 0.1
-                        or abs(new_right - self._right_delay) > 0.1)
         filter_changed = (abs(new_lc - self._low_cut) > 1e-6
                           or abs(new_hc - self._high_cut) > 1e-6)
 
         self._low_cut = new_lc
         self._high_cut = new_hc
+        # DL-02: 时间参数就地生效（分数读头平滑过渡），不清环形缓冲——
+        # 旧实现 time_changed → _rebuild_delay_line 会把整段历史/尾音清零
         self._left_delay = new_left
         self._right_delay = new_right
         self._left_fb = _clamp_finite(params.get("left_feedback", _DELAY_DEFAULT_LEFT_FB),
@@ -2387,7 +2391,7 @@ class DelayEffect(AudioEffect):
         hr_changed = abs(new_hr - self._high_ratio) > 1e-6
         self._high_ratio = new_hr
 
-        if sr_changed or time_changed:
+        if sr_changed:
             self._rebuild_delay_line()
         if sr_changed or filter_changed:
             self._rebuild_input_filters()
@@ -2460,8 +2464,11 @@ class DelayEffect(AudioEffect):
         in_l, in_r = st[0], st[1]
 
         sr = self._sample_rate
-        delay_l = max(1, int(round(self._left_delay * 0.001 * sr))) % self._delay_size
-        delay_r = max(1, int(round(self._right_delay * 0.001 * sr))) % self._delay_size
+        # DL-02: 分数延迟（样本域浮点，线性插值读头）——121ms 时间误差
+        # ≤1 采样由连续读头保证；最小 1.0 样本（0ms → 直通语义由 wet 路径
+        # 的读位=写位决定，此处钳到 1.0 保持段切分正确性）。
+        delay_l = max(1.0, self._left_delay * 0.001 * sr)
+        delay_r = max(1.0, self._right_delay * 0.001 * sr)
         fb_l = self._left_fb / 100.0
         fb_r = self._right_fb / 100.0
         blend = self._blend / 100.0
@@ -2474,17 +2481,24 @@ class DelayEffect(AudioEffect):
         idx = self._delay_idx
         size = self._delay_size
         while pos < n:
-            # 段长不得超过最小延迟：保证段内所有读位落在段起始之前
-            # （读位 = 段起始 + j - delay < 段起始 ⟺ j < delay），
-            # 否则先读后写会漏掉本段先前写入的反馈值。
-            m = min(n - pos, delay_l, delay_r)
+            # 段长不得超过最小整数延迟：保证段内所有读位（含插值的
+            # pos+1 样本）落在段起始之前（先读后写语义完整）。
+            m = min(n - pos, int(delay_l), int(delay_r))
+            m = max(1, m)
             end = idx + m
-            # 1) 整段读出延迟值：样本 j 的读位 = (段起始写位 + j - delay) mod size
+            # 1) 分数读头：读位 = (段起始写位 + j - delay) mod size，
+            #    i0/i0+1 线性插值（i0+1 ≤ 段起始，读先于写）。
             base_idx = (idx + np.arange(m)) % size
-            seg_l = self._buf_l[(base_idx - delay_l) % size]
-            seg_r = self._buf_r[(base_idx - delay_r) % size]
-            wet_l[pos:pos + m] = seg_l
-            wet_r[pos:pos + m] = seg_r
+            for buf, delay, out_seg in (
+                    (self._buf_l, delay_l, wet_l),
+                    (self._buf_r, delay_r, wet_r)):
+                rpos = (base_idx - delay).astype(np.float64)
+                i0 = np.floor(rpos).astype(np.int64) % size
+                i1 = (i0 + 1) % size
+                w = rpos - np.floor(rpos)
+                out_seg[pos:pos + m] = buf[i0] * (1.0 - w) + buf[i1] * w
+            seg_l = wet_l[pos:pos + m]
+            seg_r = wet_r[pos:pos + m]
 
             # 2) 反馈矩阵：own×(1-blend) + cross×blend（负号=相位反转）
             fb_src_l = seg_l * (1.0 - blend) * fb_l + seg_r * blend * fb_r
