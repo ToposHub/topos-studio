@@ -517,6 +517,9 @@ class AudioLevelMeter(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_layout()
+        # Keep the current reading at the same dB position when the dock or
+        # rack layout changes, even if no new audio packet arrives afterwards.
+        self._update_positions()
         self._draw_background()
 
     def paintEvent(self, event) -> None:

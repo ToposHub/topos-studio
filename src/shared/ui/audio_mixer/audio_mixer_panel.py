@@ -1,5 +1,5 @@
 """
-Audio Mixer Panel - 完整复刻 Kdenlive Audio Mixer
+Topos Audio Mixer - compact track strips with a pinned master.
 
 完整的音频混音器面板，包含：
 - Master 主混音器
@@ -14,7 +14,7 @@ import logging
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QScrollArea,
-    QFrame, QApplication
+    QFrame, QApplication, QVBoxLayout, QToolButton, QLabel
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
@@ -88,6 +88,7 @@ class AudioMixerPanel(QWidget):
         # W15: 逐轨隐藏 + 窄/宽布局
         self._hidden_track_ids: set[str] = set()
         self._narrow_layout: bool = False
+        self._inserts_visible = True
         # AUD-37621: LUFS 后端（scipy）可用性缓存。None=未探测。热路径
         # （update_per_track_levels 每帧逐轨）不再重复 import + 探测；
         # 进程内 scipy 可用性不会变化，探测一次即可。
@@ -97,7 +98,44 @@ class AudioMixerPanel(QWidget):
 
     def _init_ui(self) -> None:
         """初始化 UI"""
-        main_layout = QHBoxLayout(self)
+        panel_layout = QVBoxLayout(self)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
+        toolbar = QWidget(self)
+        toolbar.setObjectName("mixer_toolbar")
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(6, 3, 4, 3)
+        toolbar_layout.setSpacing(4)
+        self._track_count_label = QLabel()
+        self._track_count_label.setStyleSheet("color: #919ba9; font-size: 10px;")
+        toolbar_layout.addWidget(self._track_count_label)
+        toolbar_layout.addStretch()
+        self._inserts_btn = QToolButton()
+        self._inserts_btn.setText(I18N.tr("audio.mixer.inserts", "Inserts"))
+        self._inserts_btn.setCheckable(True)
+        self._inserts_btn.setChecked(True)
+        self._inserts_btn.setToolTip(I18N.tr("audio.mixer.inserts_visibility", "Show / hide insert racks"))
+        self._inserts_btn.toggled.connect(self.set_inserts_visible)
+        toolbar_layout.addWidget(self._inserts_btn)
+        self._compact_btn = QToolButton()
+        self._compact_btn.setText(I18N.tr("audio.mixer.compact", "Compact"))
+        self._compact_btn.setCheckable(True)
+        self._compact_btn.setToolTip(I18N.tr("audio.mixer.compact_tip", "Compact strips · keep more tracks in view"))
+        self._compact_btn.toggled.connect(self.set_narrow_layout)
+        toolbar_layout.addWidget(self._compact_btn)
+        self._options_btn = QToolButton()
+        self._options_btn.setText("⋯")
+        self._options_btn.setAccessibleName(I18N.tr("audio.mixer.options", "Mixer options"))
+        self._options_btn.setToolTip(I18N.tr("audio.mixer.options", "Mixer options"))
+        self._options_btn.clicked.connect(lambda: self._show_batch_menu(
+            self._options_btn.mapTo(self, self._options_btn.rect().bottomLeft())))
+        toolbar_layout.addWidget(self._options_btn)
+        for button in (self._inserts_btn, self._compact_btn, self._options_btn):
+            button.setFixedHeight(22)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+        panel_layout.addWidget(toolbar)
+        main_layout = QHBoxLayout()
+        panel_layout.addLayout(main_layout, 1)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
@@ -106,7 +144,9 @@ class AudioMixerPanel(QWidget):
         self._scroll_area.setContentsMargins(0, 0, 0, 0)
         self._scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll_area.setWidgetResizable(True)
-        self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Reserve the same footer at every track count so fader travel never jumps.
+        self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         # 滚动区域容器
         scroll_container = QWidget()
@@ -114,9 +154,8 @@ class AudioMixerPanel(QWidget):
         self._tracks_layout = QHBoxLayout(scroll_container)
         self._tracks_layout.setContentsMargins(0, 0, 0, 0)
         self._tracks_layout.setSpacing(0)
-        # 子轨道靠右排列：strip 是 Fixed 宽度，多余空间留在左侧，
-        # 使所有轨道（含 Master）视觉上右对齐、紧凑排列。
-        self._tracks_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+        # Start tracks at the leading edge; Master remains pinned outside the scroll area.
+        self._tracks_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self._scroll_area.setWidget(scroll_container)
         main_layout.addWidget(self._scroll_area, 1)
@@ -145,9 +184,19 @@ class AudioMixerPanel(QWidget):
         self._uniform_strip_width = self._master_mixer.maximumWidth()
         self._setup_master_connections()
         master_container.addWidget(self._master_mixer)
-        main_layout.addLayout(master_container)
+        master_column = QVBoxLayout()
+        master_column.setContentsMargins(0, 0, 0, 0)
+        master_column.setSpacing(0)
+        master_column.addLayout(master_container, 1)
+        self._master_scroll_gutter = QWidget()
+        master_column.addWidget(self._master_scroll_gutter)
+        main_layout.addLayout(master_column)
 
         self._apply_styles()
+        self._scroll_area.ensurePolished()
+        self._master_scroll_gutter.setFixedHeight(
+            self._scroll_area.horizontalScrollBar().sizeHint().height())
+        self._update_minimum_width()
 
     def _setup_master_connections(self) -> None:
         """设置主混音器信号连接"""
@@ -173,12 +222,20 @@ class AudioMixerPanel(QWidget):
             QWidget#mixer_tracks {{
                 background-color: {C.BG_PANEL};
             }}
-            QWidget#mixer_base {{
-                background-color: {C.BG_PANEL};
-            }}
             QWidget#mixer_alternate {{
-                background-color: {C.BG_PANEL};
+                background-color: #20242b;
             }}
+            QWidget#mixer_base {{ background-color: #1c2027; }}
+            QWidget#mixer_toolbar {{ background-color: #1d232b; border-bottom: 1px solid #303944; }}
+            QWidget#mixer_toolbar QToolButton {{ color: #aab5c2; background: #272f39;
+                border: 1px solid #37424e; border-radius: 4px; padding: 0 5px; font-size: 10px; }}
+            QWidget#mixer_toolbar QToolButton:checked {{ background: #203d45; color: #9ce3e4;
+                border-color: #3a626b; }}
+            QWidget#mixer_toolbar QToolButton:hover, QWidget#mixer_toolbar QToolButton:focus {{
+                border-color: #66848e; color: #ffffff; }}
+            QScrollBar:horizontal {{ height: 7px; background: #1a1f25; margin: 0; }}
+            QScrollBar::handle:horizontal {{ background: #4a5663; border-radius: 3px; min-width: 20px; }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
         """)
 
     # ========== 公共接口 ==========
@@ -210,6 +267,7 @@ class AudioMixerPanel(QWidget):
         # 应用，窄布局流中会插入一条按宽模式固定宽度的异常宽 strip。
         if self._narrow_layout:
             self._apply_layout_mode(mixer, True)
+        mixer.set_inserts_visible(self._inserts_visible)
 
         # 交替背景色
         color_role = "base" if len(self._track_mixers) % 2 == 0 else "alternate"
@@ -224,6 +282,13 @@ class AudioMixerPanel(QWidget):
         # 添加到布局末尾（tracks 从左到右排列，新轨道在最右、靠近 Master）
         self._tracks_layout.addWidget(mixer)
         self._track_mixers[track_id] = mixer
+        # Undo can re-register a previously hidden track with the same identity.
+        # Preserve that view preference and keep the count consistent with the widgets.
+        if track_id in self._hidden_track_ids:
+            mixer.hide()
+            separator = self._track_separators.get(track_id)
+            if separator is not None:
+                separator.hide()
 
         # 设置信号连接
         self._setup_track_connections(track_id, mixer)
@@ -328,6 +393,9 @@ class AudioMixerPanel(QWidget):
         act_clear_solo.setEnabled(has_tracks and bool(self._solo_tracks))
         act_mute_all.setEnabled(has_tracks)
         act_unmute_all.setEnabled(has_tracks)
+        menu.addSeparator()
+        act_show_all = menu.addAction(I18N.tr("audio.mixer.show_all_tracks", "Show all tracks"))
+        act_show_all.setEnabled(bool(self._hidden_track_ids))
 
         chosen = menu.exec(self.mapToGlobal(pos))
         if chosen is act_clear_solo:
@@ -336,6 +404,8 @@ class AudioMixerPanel(QWidget):
             self.mute_all()
         elif chosen is act_unmute_all:
             self.unmute_all()
+        elif chosen is act_show_all:
+            self.show_all_tracks()
 
     def set_track_name(self, track_id: str, name: str) -> None:
         """设置轨道名称"""
@@ -507,6 +577,7 @@ class AudioMixerPanel(QWidget):
         """折叠/展开混音器"""
         self._collapsed = collapse
         self._scroll_area.setVisible(not collapse)
+        self._master_scroll_gutter.setVisible(not collapse)
         if self._master_separator:
             self._master_separator.setVisible(not collapse)
 
@@ -538,6 +609,7 @@ class AudioMixerPanel(QWidget):
             mixer.setVisible(False)
         if sep is not None:
             sep.setVisible(False)
+        self._update_minimum_width()
 
     def show_track(self, track_id: str) -> None:
         """显示之前隐藏的 strip。"""
@@ -550,6 +622,7 @@ class AudioMixerPanel(QWidget):
             mixer.setVisible(True)
         if sep is not None:
             sep.setVisible(True)
+        self._update_minimum_width()
 
     def show_all_tracks(self) -> None:
         """显示所有被隐藏的 strip。"""
@@ -566,15 +639,30 @@ class AudioMixerPanel(QWidget):
     def set_narrow_layout(self, narrow: bool) -> None:
         """切换窄/宽 strip 布局（W15）。
 
-        窄布局：strip 宽度收缩到紧凑模式（~60px），适合多轨项目；
-        宽布局：完整模式（~110px），所有控件可见。
+        窄布局：70px，隐藏轨名/Pan，显示两行 inserts；
+        标准布局：112px，显示完整控制区与三行 inserts。
         """
         self._narrow_layout = narrow
+        self._compact_btn.blockSignals(True)
+        self._compact_btn.setChecked(narrow)
+        self._compact_btn.blockSignals(False)
         # 遍历所有 strip 应用窄/宽
         for mixer in self._track_mixers.values():
             self._apply_layout_mode(mixer, narrow)
         if self._master_mixer is not None:
             self._apply_layout_mode(self._master_mixer, narrow)
+        self._update_minimum_width()
+
+    def set_inserts_visible(self, visible: bool) -> None:
+        """Change rack visibility without bypassing or changing any effect."""
+        self._inserts_visible = visible
+        self._inserts_btn.blockSignals(True)
+        self._inserts_btn.setChecked(visible)
+        self._inserts_btn.blockSignals(False)
+        for mixer in self._track_mixers.values():
+            mixer.set_inserts_visible(visible)
+        if self._master_mixer is not None:
+            self._master_mixer.set_inserts_visible(visible)
 
     def _apply_layout_mode(self, mixer: TrackMixerWidget, narrow: bool) -> None:
         """对单个 strip 应用窄/宽布局。"""
@@ -824,14 +912,13 @@ class AudioMixerPanel(QWidget):
 
     def _update_minimum_width(self) -> None:
         """更新最小宽度"""
-        if self._track_mixers:
-            first_mixer = next(iter(self._track_mixers.values()))
-            mixer_width = first_mixer.minimumWidth() + 1
-            visible_count = min(2, len(self._track_mixers))
-            recommended_width = mixer_width * visible_count + 3
-
-            if not self._collapsed:
-                self._scroll_area.setMinimumWidth(recommended_width)
+        visible = [mixer for tid, mixer in self._track_mixers.items()
+                   if tid not in self._hidden_track_ids]
+        count = len(visible)
+        self._track_count_label.setText(str(count))
+        self._track_count_label.setToolTip(I18N.tr("audio.mixer.visible_tracks", "Visible audio tracks"))
+        # One scrollable strip is enough; Master always stays pinned outside.
+        self._scroll_area.setMinimumWidth(visible[0].minimumWidth() + 2 if visible else 30)
 
     def sizeHint(self) -> QSize:
         if self._track_mixers:
