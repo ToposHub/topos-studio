@@ -1,5 +1,5 @@
 """
-Track Mixer Widget - 复刻 Kdenlive MixerWidget
+Topos compact audio channel strip.
 
 单个音频轨道的混音器控件，包含：
 - 音轨标签
@@ -24,13 +24,13 @@ from PyQt6.QtWidgets import (
     QMenu, QInputDialog, QColorDialog, QPushButton,
     QListWidget, QListWidgetItem,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint
-from PyQt6.QtGui import QColor, QAction
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize
+from PyQt6.QtGui import QColor, QAction, QIcon, QPainter, QPixmap, QResizeEvent
 
 from src.shared.ui.audio_mixer.audio_fader import AudioFader
 from src.shared.ui.audio_mixer.audio_level_meter import AudioLevelMeter, TickLabelsMode, iec_scale, iec_inverse
 from src.shared.i18n.i18n import I18N
-from src.shared.ui.style_sheet import MIXER_TRACK_BTN_STYLE, MIXER_SPIN_STYLE
+from src.shared.ui.style_sheet import MIXER_SPIN_STYLE
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +210,7 @@ class TrackMixerWidget(QWidget):
         self._panner_dialog: Optional[Any] = None
         # W15: 窄/宽布局模式
         self._is_narrow: bool = False
+        self._inserts_visible = True
         # W16: 轨道颜色（hex 字符串，None=默认）
         self._track_color: Optional[str] = None
         # 推子拖动状态（可变闭包，参照 properties 面板三段式节流模式）
@@ -230,12 +231,14 @@ class TrackMixerWidget(QWidget):
 
         # 1. 达芬奇 Header 区域 (Top Tag + Status Badges + Track Name)
         header_widget = QWidget(self)
+        header_widget.setObjectName("mixer_header")
         header_layout = QVBoxLayout(header_widget)
         header_layout.setContentsMargins(1, 2, 1, 1)
         header_layout.setSpacing(1)
 
         # 顶部 Track Tag (A1 / Master / Bus1)
         self._track_tag_label = QLabel()
+        self._track_tag_label.setFixedHeight(26)
         self._track_tag_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         # 轨道编号 / Master 标题行：
         # 用 stylesheet 的 min-height + 较大 padding 让 Qt 按内容自然撑开，
@@ -272,7 +275,8 @@ class TrackMixerWidget(QWidget):
         self._eq_badge.setText(I18N.tr("audio.mixer.eq_badge", "EQ"))
 
         for badge in (self._fx_badge, self._dy_badge, self._eq_badge):
-            badge.setFixedHeight(14)
+            badge.setFixedHeight(18)
+            badge.setCursor(Qt.CursorShape.PointingHandCursor)
             badge_layout.addWidget(badge)
 
         # FX 胶囊：一键全开/全关列表里的效果器。
@@ -294,36 +298,78 @@ class TrackMixerWidget(QWidget):
         # 空列表时在内部居中显示 "+" 占位项（点击弹 Add Effect 菜单，添加后消失）。
         # 右键空白=添加效果器，右键项=删除/旁路/移动，点击项=打开编辑。
         # 高度自适应：由 _refresh_effect_list 按项数动态计算（空列表给一行高度）。
+        self._effects_container = QWidget()
+        effects_layout = QVBoxLayout(self._effects_container)
+        effects_layout.setContentsMargins(0, 2, 0, 2)
+        effects_layout.setSpacing(2)
+        effects_heading = QHBoxLayout()
+        effects_heading.setContentsMargins(3, 0, 1, 0)
+        self._inserts_label = QLabel(I18N.tr("audio.mixer.inserts", "Inserts"))
+        self._inserts_label.setStyleSheet("color: #858b98; font-size: 9px;")
+        effects_heading.addWidget(self._inserts_label)
+        effects_heading.addStretch()
+        self._add_effect_btn = QToolButton()
+        self._add_effect_btn.setText("+")
+        self._add_effect_btn.setFixedSize(18, 18)
+        self._add_effect_btn.setAccessibleName(I18N.tr("audio.mixer.add_effect", "Add effect"))
+        self._add_effect_btn.setToolTip(I18N.tr("audio.mixer.add_effect", "Add effect"))
+        self._add_effect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._add_effect_btn.setStyleSheet("""
+            QToolButton { color: #a6d9d9; background: #272e37;
+                border: 1px solid #36434d; border-radius: 3px; padding: 0; }
+            QToolButton:hover, QToolButton:focus { color: #ffffff; border-color: #28D8F0; }
+        """)
+        self._add_effect_btn.clicked.connect(self._show_add_effect_menu)
+        effects_heading.addWidget(self._add_effect_btn)
+        effects_layout.addLayout(effects_heading)
         self._effect_list = QListWidget()
+        self._effect_list.setObjectName("mixer_inserts")
+        self._effect_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self._effect_list.setIconSize(QSize(6, 6))
+        self._effect_list.setUniformItemSizes(True)
+        self._effect_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         # 长效果器名直接遮挡（clip），不触发横向滚动条；垂直滚动条仍按需出现
         self._effect_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._effect_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._effect_list.customContextMenuRequested.connect(self._on_effect_list_context_menu)
         self._effect_list.itemClicked.connect(self._on_effect_item_clicked)
+        self._effect_list.itemActivated.connect(self._on_effect_item_clicked)
+        for keys, action_name in ((["Space"], "bypass"), (["Delete", "Backspace"], "remove")):
+            action = QAction(self._effect_list)
+            action.setShortcuts(keys)
+            action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+            action.triggered.connect(lambda _checked=False, name=action_name: self._on_effect_key_action(name))
+            self._effect_list.addAction(action)
         self._effect_list.setStyleSheet("""
             QListWidget {
-                background-color: #16161a;
-                border: 1px solid #2a2a2e;
-                border-radius: 2px;
+                background-color: #171b21;
+                border: 1px solid #2b333d;
+                border-radius: 3px;
                 font-size: 10px;
                 color: #c0c0c8;
                 outline: none;
             }
             QListWidget::item {
-                padding: 2px 4px;
+                padding: 1px 3px;
                 border-radius: 2px;
             }
             QListWidget::item:selected {
-                background-color: #2a4a48;
-                color: #00d2c1;
+                background-color: #25434b;
+                color: #b5eeee;
             }
+            QListWidget::item:hover { background-color: #29333e; }
+            QScrollBar:vertical { width: 4px; background: transparent; margin: 0; }
+            QScrollBar::handle:vertical { background: #48535f; border-radius: 2px; min-height: 12px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         """)
-        header_layout.addWidget(self._effect_list)
+        effects_layout.addWidget(self._effect_list)
+        header_layout.addWidget(self._effects_container)
         # 初始刷新一次，设置空列表的自适应高度 + 占位 "+" 项
         self._refresh_effect_list()
 
         # 轨道名称标签（如 "音频 1"）
         self._track_label = QLabel()
+        self._track_label.setFixedHeight(16)
         self._track_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self._update_track_label()
         if not self._is_master:
@@ -336,7 +382,7 @@ class TrackMixerWidget(QWidget):
             self._track_tag_label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             self._track_tag_label.customContextMenuRequested.connect(self._on_label_context_menu)
             self._track_tag_label.mouseDoubleClickEvent = self._on_label_double_clicked
-        header_layout.addWidget(self._track_label)
+        header_layout.insertWidget(1, self._track_label)
 
         main_layout.addWidget(header_widget)
 
@@ -387,10 +433,9 @@ class TrackMixerWidget(QWidget):
             button_layout.addWidget(self._monitor_btn)
 
         # 注：原 FX 按钮已移除，EQ 功能迁移到 header 的 EQ 胶囊（_eq_badge）。
-        # AlignLeft：QVBoxLayout 默认水平居中子布局，Master 只有 1 个按钮时会居中，
-        # 与 meter+fader（左对齐）错位。强制左对齐让按钮行与 meter+fader 对齐。
+        # Center the compact controls beneath the wider, readable rack header.
         main_layout.addLayout(button_layout)
-        main_layout.setAlignment(button_layout, Qt.AlignmentFlag.AlignLeft)
+        main_layout.setAlignment(button_layout, Qt.AlignmentFlag.AlignHCenter)
 
         # 平衡控制（仅立体声）
         self._balance_widget = self._create_balance_widget()
@@ -439,15 +484,13 @@ class TrackMixerWidget(QWidget):
             -60.0, -50.0, -40.0, -30.0, -20.0, -12.0, -6.0, 0.0, 3.0, 6.0
         ]
         self._volume_fader.set_tick_positions(gain_values)
-        self._volume_fader.set_label_formatter(lambda v: f"{abs(int(v))}" if v <= 0 else f"+{int(v)}")
+        self._volume_fader.set_label_formatter(lambda v: f"{int(v)}" if v <= 0 else f"+{int(v)}")
         self._volume_fader.set_value_to_slider_function(lambda db: self._db_to_slider(db))
 
         meter_fader_layout.addWidget(self._volume_fader, 0)
-        # 整个 meter+fader 块在 main_layout(QVBoxLayout) 里靠左对齐 ——
-        # 不给 stretch 让 QVBoxLayout 水平拉伸此 layout，否则 meter/fader
-        # 会因 spacing 被拉开、推子偏右被裁切。Master 宽度刚好没暴露此问题。
+        # Keep meter and fader together; center the pair without stretching its gap.
         main_layout.addLayout(meter_fader_layout, 1)
-        main_layout.setAlignment(meter_fader_layout, Qt.AlignmentFlag.AlignLeft)
+        main_layout.setAlignment(meter_fader_layout, Qt.AlignmentFlag.AlignHCenter)
 
         # 音量显示
         vol_display_layout = QHBoxLayout()
@@ -463,6 +506,9 @@ class TrackMixerWidget(QWidget):
         self._volume_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._volume_spin.setFixedWidth(46)
         self._volume_spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._volume_spin.setKeyboardTracking(False)
+        self._volume_spin.setToolTip(I18N.tr("audio.mixer.gain_tip", "Channel gain (dB) · double-click the fader to reset"))
+        self._volume_fader.setAccessibleName(I18N.tr("audio.mixer.gain", "Channel gain"))
         vol_display_layout.addStretch()
         vol_display_layout.addWidget(self._volume_spin)
 
@@ -512,6 +558,8 @@ class TrackMixerWidget(QWidget):
         self._balance_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._balance_spin.setFixedWidth(40)
         self._balance_spin.setFixedHeight(17)
+        self._balance_spin.setKeyboardTracking(False)
+        self._balance_spin.setToolTip(I18N.tr("audio.mixer.balance_tip", "Stereo balance · 0 is center"))
 
         r_label = QLabel(I18N.tr("audio.mixer.right_short", "R"))
         r_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -520,7 +568,6 @@ class TrackMixerWidget(QWidget):
         label_layout.addWidget(l_label)
         label_layout.addWidget(self._balance_spin)
         label_layout.addWidget(r_label)
-        layout.addLayout(label_layout)
 
         # CW-A1: ⤢ 展开按钮 → 空间声像器对话框（立体声域：spread/rotate/
         # divergence/boom 真实可听；F/B、高度、制式持久化待多声道引擎）
@@ -542,22 +589,26 @@ class TrackMixerWidget(QWidget):
             QPushButton:hover { color: #28D8F0; border-color: #28D8F0; }
         """)
         self._panner_expand_btn.clicked.connect(self._open_panner_dialog)
-        overlay = QHBoxLayout()
-        overlay.setContentsMargins(0, 1, 0, 0)
-        overlay.addStretch()
-        overlay.addWidget(self._panner_expand_btn)
-        layout.addLayout(overlay)
+        label_layout.addWidget(self._panner_expand_btn)
+        layout.addLayout(label_layout)
 
         return widget
 
     def _apply_styles(self) -> None:
         """应用样式"""
-        # 使用集中定义的按钮样式
-        self._mute_btn.setStyleSheet(MIXER_TRACK_BTN_STYLE)
-        if hasattr(self, '_solo_btn'):
-            self._solo_btn.setStyleSheet(MIXER_TRACK_BTN_STYLE)
-        if hasattr(self, '_monitor_btn'):
-            self._monitor_btn.setStyleSheet(MIXER_TRACK_BTN_STYLE)
+        for name, accent in (("_mute_btn", "#dfa359"), ("_solo_btn", "#72d6b1"),
+                             ("_monitor_btn", "#ed7b82")):
+            button = getattr(self, name, None)
+            if button is not None:
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+                button.setStyleSheet(f"""
+                    QToolButton {{ background: #272d36; color: #b6becb;
+                        border: 1px solid #353e49; border-radius: 3px;
+                        font-size: 10px; font-weight: 600; padding: 0; }}
+                    QToolButton:hover, QToolButton:focus {{ border-color: #778896; color: #ffffff; }}
+                    QToolButton:checked {{ color: #15191f; background: {accent}; border-color: {accent}; }}
+                    QToolButton:disabled {{ color: #525a65; border-color: #292f38; }}
+                """)
         # 注：_effects_btn 已移除，EQ 入口改由 header 的 _eq_badge 胶囊承担。
 
         # 轨道标签样式
@@ -586,7 +637,7 @@ class TrackMixerWidget(QWidget):
         # 紧凑 strip：3 个 20px 按钮 + 2×1px spacing + 2×1px layout margins = 64px。
         btn_row_w = 20 * 3 + 2 * 1 + 2 * 1
 
-        content_width = max(meter_fader_w, btn_row_w, 70)
+        content_width = max(meter_fader_w, btn_row_w, 108)
         strip_width = content_width + h_margins
         self.setFixedWidth(strip_width)
 
@@ -610,7 +661,18 @@ class TrackMixerWidget(QWidget):
             self.setFixedWidth(70)
         else:
             self._update_size_constraints()
+        self._refresh_effect_list()
         self.update()
+
+    def set_inserts_visible(self, visible: bool) -> None:
+        """Show or hide only the rack, preserving its effects and open editors."""
+        self._inserts_visible = visible
+        self._effects_container.setVisible(visible)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_track_label"):
+            self._update_track_label()
 
     def _setup_connections(self) -> None:
         """设置信号连接（三段式节流：拖动期发 preview，松手发 changed）"""
@@ -948,6 +1010,9 @@ class TrackMixerWidget(QWidget):
         DY 胶囊（panel="dynamics"）和 EQ 胶囊（panel="eq"）管理的实例不在此显示，
         它们是独立的快捷单例入口，与 FX 列表互不干扰。
         """
+        selected = self._effect_list.currentItem()
+        selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected is not None else None
+        scroll_position = self._effect_list.verticalScrollBar().value()
         self._effect_list.blockSignals(True)
         self._effect_list.clear()
         effects = self._effect_chain.effects if self._effect_chain else ()
@@ -963,6 +1028,7 @@ class TrackMixerWidget(QWidget):
             dyn_item = QListWidgetItem(I18N.tr("audio.fx.dynamics", "Dynamics"))
             dyn_item.setData(Qt.ItemDataRole.UserRole, dyn_insts[0].instance_id)
             dyn_item.setData(Qt.ItemDataRole.UserRole + 1, "dynamics")
+            dyn_item.setData(Qt.ItemDataRole.UserRole + 2, group_enabled)
             if not group_enabled:
                 dyn_item.setForeground(QColor("#666670"))
             self._effect_list.addItem(dyn_item)
@@ -979,6 +1045,7 @@ class TrackMixerWidget(QWidget):
             # 存 instance_id 到 data，供点击/右键定位
             item.setData(Qt.ItemDataRole.UserRole, inst.instance_id)
             item.setData(Qt.ItemDataRole.UserRole + 1, inst.effect_type)
+            item.setData(Qt.ItemDataRole.UserRole + 2, p_enabled)
             if not p_enabled:
                 # 旁路项灰色
                 item.setForeground(QColor("#666670"))
@@ -994,15 +1061,62 @@ class TrackMixerWidget(QWidget):
             add_item.setData(Qt.ItemDataRole.UserRole, _ADD_PLACEHOLDER)
             add_item.setForeground(QColor("#88888f"))
             self._effect_list.addItem(add_item)
-            self._effect_list.setFixedHeight(24)
-        else:
-            row_h = self._effect_list.sizeHintForRow(0)
-            # 2× frameWidth（边框）+ 项数 × 行高；多留一行高度方便右键空白
-            frame = self._effect_list.frameWidth() * 2
-            self._effect_list.setFixedHeight(frame + row_h * count + 4)
+            add_item.setToolTip(I18N.tr("audio.mixer.add_effect", "Add effect"))
+        # All strips share the same rack height, including Master and empty racks.
+        # Extra inserts scroll inside the rack instead of shortening one fader.
+        for row in range(self._effect_list.count()):
+            item = self._effect_list.item(row)
+            item.setSizeHint(QSize(0, 20))
+            iid = item.data(Qt.ItemDataRole.UserRole)
+            if iid != _ADD_PLACEHOLDER:
+                active = bool(item.data(Qt.ItemDataRole.UserRole + 2))
+                item.setIcon(self._effect_status_icon(active))
+                effect_type = item.data(Qt.ItemDataRole.UserRole + 1)
+                state = I18N.tr("audio.mixer.active", "Active") if active else I18N.tr("audio.mixer.bypassed", "Bypassed")
+                item.setToolTip(f"{_effect_display_name(effect_type)} · {state}\n" + I18N.tr(
+                    "audio.mixer.insert_tip", "Click / Enter: edit · Space: bypass · Delete: remove · Right-click: more"))
+            if iid == selected_id:
+                self._effect_list.setCurrentItem(item)
+        self._effect_list.setFixedHeight(42 if self._is_narrow else 62)
+        self._effect_list.verticalScrollBar().setValue(scroll_position)
         # 胶囊高亮同样依赖 params.enabled，与列表显示同源，一并刷新保持同步
         if hasattr(self, '_fx_badge'):
             self._update_badges_style()
+
+    def _effect_status_icon(self, active: bool) -> QIcon:
+        """Cache small status dots instead of constructing widgets for every insert."""
+        if not hasattr(self, "_effect_status_icons"):
+            self._effect_status_icons: dict[bool, QIcon] = {}
+        if active not in self._effect_status_icons:
+            pixmap = QPixmap(6, 6)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#61cfc5" if active else "#65707d"))
+            painter.drawEllipse(0, 0, 6, 6)
+            painter.end()
+            self._effect_status_icons[active] = QIcon(pixmap)
+        return self._effect_status_icons[active]
+
+    def _on_effect_key_action(self, action: str) -> None:
+        """Route focused rack shortcuts through the existing command signals."""
+        item = self._effect_list.currentItem()
+        if item is None or self._effect_chain is None:
+            return
+        iid = item.data(Qt.ItemDataRole.UserRole)
+        if item.data(Qt.ItemDataRole.UserRole + 1) == "dynamics":
+            if action == "bypass":
+                self._effect_bypass_dynamics()
+            elif action == "remove":
+                self._effect_remove_dynamics()
+            return
+        inst = next((e for e in self._effect_chain.effects if e.instance_id == iid), None)
+        if inst is not None:
+            if action == "bypass":
+                self._effect_bypass(inst)
+            elif action == "remove":
+                self._effect_remove(inst)
 
     def _on_fx_clicked(self) -> None:
         """FX 胶囊点击：一键全开/全关 FX 列表里的效果器（panel="fx"）。
@@ -2361,10 +2475,10 @@ class TrackMixerWidget(QWidget):
             QToolButton {
                 font-size: 9px;
                 font-weight: bold;
-                background-color: #222226;
-                color: #555560;
-                border-radius: 2px;
-                border: none;
+                background-color: #242b34;
+                color: #919eae;
+                border-radius: 3px;
+                border: 1px solid #323c48;
                 padding: 0px;
             }
             QToolButton:disabled {
@@ -2379,14 +2493,14 @@ class TrackMixerWidget(QWidget):
             QToolButton {
                 font-size: 9px;
                 font-weight: bold;
-                background-color: #00d2c1;
-                color: #121214;
-                border-radius: 2px;
-                border: none;
+                background-color: #1b3b41;
+                color: #00d2c1;
+                border-radius: 3px;
+                border: 1px solid #32646c;
                 padding: 0px;
             }
             QToolButton:hover {
-                background-color: #00e5d1;
+                background-color: #28535b;
             }
         """
         # AM-01: 后端不可用时的降级告警色（橙色 + 虚线边框），
@@ -2421,25 +2535,26 @@ class TrackMixerWidget(QWidget):
             else:
                 self._eq_badge.setStyleSheet(cyan_active_style if eq_active else inactive_style)
                 # 清除降级 tooltip，避免状态切换后残留
-                self._eq_badge.setToolTip("")
+                self._eq_badge.setToolTip(I18N.tr("audio.mixer.open_parametric_eq", "Open parametric EQ"))
 
     def _update_track_label(self) -> None:
         """更新轨道名标签，避免与顶部 tag 重复显示。
 
-        - Master：tag 已是 "Master"，隐藏下方标签避免重复。
-        - 普通轨道 track_name 与 tag 相同（如都是 "A1"）：隐藏避免重复。
-        - 普通轨道无 track_name 或窄模式：tag 已显示，隐藏避免重复。
-        - 普通轨道有独立 track_name（如 "音频 1"）且非窄模式：显示 track_name。
+        标准布局始终保留一行轨名高度，空名/Master 不重复文字。
+        长名称省略并保留完整 tooltip；紧凑模式统一隐藏该行。
         """
         tag = self._track_tag or ("Master" if self._is_master else "")
         name = self._track_name or ""
         narrow = getattr(self, '_is_narrow', False)
         # tag 已表达身份（Master / A1）或 name 与 tag 重复时，隐藏下方标签。
-        if self._is_master or not name or name == tag or narrow:
-            self._track_label.setVisible(False)
-        else:
-            self._track_label.setVisible(True)
-            self._track_label.setText(name)
+        full_name = name if name and name != tag else ""
+        self._track_tag_label.setToolTip(f"{tag}\n{name}" if name and name != tag else tag)
+        self._track_label.setToolTip(full_name)
+        self._track_label.setVisible(not narrow)
+        available = max(20, self.width() - self.contentsMargins().left()
+                        - self.contentsMargins().right() - 6)
+        self._track_label.setText(self._track_label.fontMetrics().elidedText(
+            full_name, Qt.TextElideMode.ElideRight, available))
 
     def _update_track_label_style(self) -> None:
         """更新标签样式以反映状态（达芬奇风格无框高亮文本）"""
@@ -2459,18 +2574,25 @@ class TrackMixerWidget(QWidget):
             f"padding: 1px; margin: 0;"
         )
         self._track_label.setStyleSheet(style)
+        accent = getattr(self, '_track_color', None) or ("#43c9c0" if self._is_master else "#647c9a")
+        self._track_tag_label.setStyleSheet(f"""
+            QLabel {{ background: #20262e; color: #e0e6ee; font-size: 10px;
+                font-weight: 600; border-top: 2px solid {accent};
+                padding: 4px 2px; min-height: 12px; }}
+        """)
 
     def _update_controls_enabled(self) -> None:
         """更新控件启用状态"""
-        self._volume_fader.setEnabled(not self._is_muted)
-        self._volume_spin.setEnabled(not self._is_muted)
+        # Mute gates sound, while controls remain editable for preparing the mix.
+        self._volume_fader.setEnabled(True)
+        self._volume_spin.setEnabled(True)
         self._meter.setEnabled(not self._is_muted)
-        self._db_label.setEnabled(not self._is_muted)
+        self._db_label.setEnabled(True)
 
         if hasattr(self, '_balance_fader'):
-            self._balance_fader.setEnabled(not self._is_muted)
+            self._balance_fader.setEnabled(True)
         if hasattr(self, '_balance_spin'):
-            self._balance_spin.setEnabled(not self._is_muted)
+            self._balance_spin.setEnabled(True)
 
     def _db_to_slider(self, db: float) -> int:
         """dB 值转换为滑块位置（0-10000）。

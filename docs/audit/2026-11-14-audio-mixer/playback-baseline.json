@@ -1,0 +1,72 @@
+{
+  "emissions": 211,
+  "first": {
+    "frame": 5,
+    "eq": -24.014162731278063,
+    "spectrum_bins": 96,
+    "dynamics_in": -25.309888894299178,
+    "dynamics_out": -24.014162731278063,
+    "reverb": -24.014162731278063,
+    "delay_l": -25.28298355907824,
+    "delay_r": -24.014162731278063
+  },
+  "last": {
+    "frame": 286,
+    "eq": -6.200649098603357,
+    "spectrum_bins": 96,
+    "dynamics_in": -9.71980438913609,
+    "dynamics_out": -6.200649098603357,
+    "reverb": -6.200649098603357,
+    "delay_l": -6.200649098603357,
+    "delay_r": -7.363289119293055
+  },
+  "ranges": {
+    "frame": [
+      5,
+      286
+    ],
+    "eq": [
+      -39.73635934088184,
+      -0.15829541947921832
+    ],
+    "spectrum_bins": [
+      96,
+      96
+    ],
+    "dynamics_in": [
+      -28.827240550548513,
+      -4.434513240480873
+    ],
+    "dynamics_out": [
+      -39.73635934088184,
+      -0.15829541947921832
+    ],
+    "reverb": [
+      -39.73635934088184,
+      -0.15829541947921832
+    ],
+    "delay_l": [
+      -39.73635934088184,
+      -0.15829541947921832
+    ],
+    "delay_r": [
+      -41.3882153088316,
+      -0.7365314989953141
+    ]
+  },
+  "registered": [
+    "11ee16c4-1afc-431f-9f44-bc3f1c673bc0"
+  ],
+  "strip_track": "11ee16c4-1afc-431f-9f44-bc3f1c673bc0",
+  "connected": true,
+  "last_payload_on_pause": [
+    -100.0,
+    -100.0
+  ],
+  "notes": [
+    "Recorded before UI-only changes; real MainWindow/decoder/DSP/AudioSink.",
+    "211 includes the pause lifecycle event; 12 seconds wall time, frames 5 through 286.",
+    "Pause emits a legacy list rather than structured effect telemetry; recorded separately, not counted as keys.",
+    "EQ/Reverb/Delay currently consume shared final-track output, not independent per-instance taps."
+  ]
+}
