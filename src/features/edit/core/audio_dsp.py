@@ -36,6 +36,30 @@ except ImportError:  # pragma: no cover
     lfilter = None  # type: ignore[assignment]
     sosfilt = None  # type: ignore[assignment]
 
+# ST-03: 音频算法版本。语义/数学修正会改变旧工程声音——版本号用于
+# 诊断与兼容决策（"保持旧声音" vs "显式升级到新语义"），不做静默改写。
+# v2（2026-11，音频成熟化计划）：
+#   - EQ-01: HPF/LPF 真 N 阶 Butterworth（旧实现斜率加倍）；Shelf Q 实际生效
+#   - DY-02: Expander 标准 (ratio-1) 下扩斜率；Gate 独立迟滞状态机
+#   - DY-02/03: Compressor 检测域固定为线性峰值跟随；Make Up 移到
+#     dynamics 之后（post-dynamics）
+#   - DY-04: SC Listen 输出原始检源（旧实现播放整流检测量）
+#   - PAN-01: SpatialPanner 矩阵别名修复（R 计算不再读被污染的 L）
+#   - RV-01: Brightness 就地更新 comb 阻尼（运行中生效，不清尾音）
+#   - DL-01: Delay 输入矩阵 Stereo/Mono/Left/Right（旧 LCR/Quad/5.x 枚举
+#     从未实现，迁移为 Stereo，声音不变）
+#   - MX-04: 同轨多 clip 先求和、轨 DSP 一次处理（重叠 clip 区间声音改变
+#     ——这是缺陷修复而非回归）
+ALGORITHM_VERSION = 2
+
+ALGORITHM_CHANGELOG = {
+    1: "初始版本（CW-A1）",
+    2: "EQ 斜率/Shelf Q、Expander 斜率/Gate 状态机、压缩检测域、Make Up "
+       "位置、SC Listen、Panner 矩阵、Reverb 阻尼热更新、Delay 输入矩阵、"
+       "同轨 clip 求和",
+}
+
+
 # AM-01: scipy 可用性收口到 audio_capabilities 单一真相源，
 # DSP 层不再各自 import-guard，避免定义漂移与 UI 无法感知降级。
 # 运行时查询（而非加载时缓存）：使测试可 monkeypatch capabilities 而无需

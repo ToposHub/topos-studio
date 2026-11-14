@@ -57,6 +57,9 @@ class ChannelStripPreset:
     strip_eq: Optional[Any] = None  # StripEQParams | None
     # AM-13: 补齐 effect_chain 与 routing，使预设覆盖完整 strip 状态
     effect_chain: Optional[Any] = None  # EffectChainParams | None
+    # MX-11: 空间声像器（SpatialPannerParams.to_dict()）；缺 panner 的旧预设
+    # 反序列化为 None → 应用时保留目标轨当前 panner
+    panner: Optional[dict] = None
     output_bus_id: Optional[str] = None
     sends: tuple = ()  # tuple[Send, ...]
     is_bus: bool = False
@@ -70,8 +73,10 @@ class ChannelStripPreset:
         ec = None
         if self.effect_chain is not None and hasattr(self.effect_chain, 'to_dict'):
             ec = self.effect_chain.to_dict()
+        from src.features.edit.core.audio_dsp import ALGORITHM_VERSION
         return {
             "preset_id": self.preset_id,
+            "algorithm_version": ALGORITHM_VERSION,
             "name": self.name,
             "volume": self.volume,
             "pan": self.pan,
@@ -79,6 +84,7 @@ class ChannelStripPreset:
             "is_solo": self.is_solo,
             "strip_eq": se,
             "effect_chain": ec,
+            "panner": dict(self.panner) if self.panner else None,
             "output_bus_id": self.output_bus_id,
             "sends": [s.to_dict() if hasattr(s, 'to_dict') else s for s in self.sends],
             "is_bus": self.is_bus,
@@ -116,6 +122,7 @@ class ChannelStripPreset:
                 )
             except Exception:
                 sends = ()
+        panner_data = data.get("panner")
         return ChannelStripPreset(
             preset_id=data.get("preset_id", str(uuid.uuid4())),
             name=data.get("name", "Untitled Preset"),
@@ -125,6 +132,7 @@ class ChannelStripPreset:
             is_solo=bool(data.get("is_solo", False)),
             strip_eq=strip_eq,
             effect_chain=effect_chain,
+            panner=dict(panner_data) if isinstance(panner_data, dict) else None,
             output_bus_id=data.get("output_bus_id"),
             sends=sends,
             is_bus=bool(data.get("is_bus", False)),
@@ -144,6 +152,8 @@ class ChannelStripPreset:
             strip_eq=getattr(track, 'strip_eq', None),
             # AM-13: 补齐 effect_chain 与 routing
             effect_chain=getattr(track, 'effect_chain', None),
+            # MX-11: 空间声像器一并捕获
+            panner=(dict(track.panner) if getattr(track, 'panner', None) else None),
             output_bus_id=getattr(track, 'output_bus_id', None),
             sends=tuple(getattr(track, 'sends', ()) or ()),
             is_bus=bool(getattr(track, 'is_bus', False)),
