@@ -38,7 +38,7 @@ from typing import Any, Optional
 import numpy as np
 
 from src.features.edit.core.audio_dsp import EffectChain, StripEQFilter
-from src.features.edit.core.audio_playback import topological_sort_buses
+from src.features.edit.core.audio_playback import topological_sort_buses, unpack_send
 
 logger = logging.getLogger(__name__)
 
@@ -120,10 +120,13 @@ class _TrackNode:
         # AM-07: 自动化模式（off/read/write/touch/latch）
         self.automation_mode = str(getattr(track, "automation_mode", "off") or "off").lower()
         self.output_bus_id = getattr(track, "output_bus_id", None)
-        # sends: [(target_bus_id, level), ...] 仅 enabled 的
+        # sends: [(target_bus_id, level, tap, muted), ...] 仅 enabled 的（MX-14 4 元组）
         raw_sends = getattr(track, "sends", ()) or ()
         self.sends = [
-            (getattr(s, "target_bus_id", ""), float(getattr(s, "level", 0.0)))
+            (getattr(s, "target_bus_id", ""),
+             float(getattr(s, "level", 0.0)),
+             str(getattr(s, "tap", "post_fader") or "post_fader"),
+             bool(getattr(s, "muted", False)))
             for s in raw_sends if getattr(s, "enabled", True)
         ]
         # AUD-15400: 深拷贝关键帧数据，切断节点与 UI 模型 KeyframeTrack 的活引用
@@ -518,11 +521,14 @@ class AudioGraphRenderer:
         samples: np.ndarray,
         output: np.ndarray,
         bus_inputs: dict,
+        pre_fader_samples: Optional[np.ndarray] = None,
     ) -> None:
-        """把普通轨处理后的样本路由到 bus_inputs 或 master（与 mix_samples:1652-1668 一致）。
+        """把普通轨处理后的样本路由到 bus_inputs 或 master（与 mix_samples 一致）。
 
         output_bus_id 非 None → 累积到 bus_inputs[output_bus_id]
         并行处理 sends → bus_inputs[send_bus_id] *= level
+        MX-14: pre_fader send 消费 pre_fader_samples（轨链前输入）；未提供时
+        降级用处理后样本并告警（不静默给错 tap 位置）。
         """
         node = self._nodes.get(track_id)
         target = node.output_bus_id if node else None
@@ -544,10 +550,12 @@ class AudioGraphRenderer:
                 output[:, :n] += samples
         else:
             output[:, :n] += samples
-        # sends（并行）
+        # sends（并行；MX-14 4 元组 + 独立 mute + pre/post tap）
         if node is not None:
-            for send_bus_id, send_level in node.sends:
-                if send_level <= 0.0:
+            for send_entry in node.sends:
+                send_bus_id, send_level, send_tap, send_muted = (
+                    unpack_send(send_entry))
+                if send_level <= 0.0 or send_muted:
                     continue
                 if not self._is_known_bus(send_bus_id):
                     # AUD-15402: send 指向未注册 bus——并行 tap 落空，跳过并
@@ -559,7 +567,20 @@ class AudioGraphRenderer:
                     continue
                 if send_bus_id not in bus_inputs:
                     bus_inputs[send_bus_id] = np.zeros_like(output)
-                bus_inputs[send_bus_id][:, :n] += samples * send_level
+                if send_tap == "pre_fader":
+                    if pre_fader_samples is None:
+                        logger.warning(
+                            "AudioGraphRenderer: track %r has pre_fader send to "
+                            "%r but no pre-fader source provided; falling back "
+                            "to post-fader tap", track_id, send_bus_id,
+                        )
+                        src = samples
+                    else:
+                        src = pre_fader_samples
+                    sn = min(src.shape[-1], n)
+                    bus_inputs[send_bus_id][:, :sn] += src[:, :sn] * send_level
+                else:
+                    bus_inputs[send_bus_id][:, :n] += samples * send_level
 
     # ── Bus 阶段（拓扑序，与 mix_samples 阶段 2 一致）──
 
@@ -721,11 +742,15 @@ class AudioGraphRenderer:
                 output[:, :n] += bus_samples
             # RMA-06: Bus sends（Bus 也可 send 到其他 Bus，并行 tap）。
             # 此前 Bus 阶段只处理 output_bus_id，sends 被无声忽略。
-            for send_bus_id, send_level in node.sends:
-                if send_level <= 0.0:
+            # MX-14: pre_fader tap 取 Bus 输入（音量/EQ/FX 前）+ 独立 mute。
+            for send_entry in node.sends:
+                send_bus_id, send_level, send_tap, send_muted = (
+                    unpack_send(send_entry))
+                if send_level <= 0.0 or send_muted:
                     continue
                 if send_bus_id in bus_inputs:
-                    bus_inputs[send_bus_id][:, :n] += bus_samples * send_level
+                    send_src = bus_input if send_tap == "pre_fader" else bus_samples
+                    bus_inputs[send_bus_id][:, :send_src.shape[-1]] += send_src * send_level
                 elif not self._is_known_bus(send_bus_id):
                     # AUD-15402: Bus send 指向未注册 bus——并行 tap 落空，告警
                     logger.warning(

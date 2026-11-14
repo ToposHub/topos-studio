@@ -1706,12 +1706,14 @@ class SetTrackOutputBusCommand:
 
 @dataclass(frozen=True)
 class AddSendCommand:
-    """Add a send to a track (W27)."""
+    """Add a send to a track (W27; MX-14 扩展 tap/muted)."""
     command_id: str
     label: str
     track_id: str
     target_bus_id: str
     level: float = 1.0
+    tap: str = "post_fader"   # MX-14
+    muted: bool = False       # MX-14
     _new_send_id: Optional[str] = None
 
     def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "AddSendCommand"]:
@@ -1719,12 +1721,14 @@ class AddSendCommand:
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
-        send = Send(target_bus_id=self.target_bus_id, level=self.level)
+        send = Send(target_bus_id=self.target_bus_id, level=self.level,
+                    tap=self.tap, muted=self.muted)
         new_track = track.with_send_added(send)
         new_timeline = timeline.with_track_updated(new_track)
         updated_cmd = AddSendCommand(
             command_id=self.command_id, label=self.label, track_id=self.track_id,
             target_bus_id=self.target_bus_id, level=self.level,
+            tap=self.tap, muted=self.muted,
             _new_send_id=send.send_id,
         )
         return new_timeline, updated_cmd
@@ -1742,6 +1746,7 @@ class AddSendCommand:
             "command_id": self.command_id, "command_type": "AddSendCommand",
             "label": self.label, "track_id": self.track_id,
             "target_bus_id": self.target_bus_id, "level": self.level,
+            "tap": self.tap, "muted": self.muted,
             "new_send_id": self._new_send_id,
         }
 
@@ -1753,15 +1758,19 @@ class AddSendCommand:
             track_id=data.get("track_id", ""),
             target_bus_id=data.get("target_bus_id", ""),
             level=float(data.get("level", 1.0)),
+            tap=str(data.get("tap", "post_fader") or "post_fader"),
+            muted=bool(data.get("muted", False)),
             _new_send_id=data.get("new_send_id"),
         )
 
     @staticmethod
-    def create(track_id: str, target_bus_id: str, level: float = 1.0) -> "AddSendCommand":
+    def create(track_id: str, target_bus_id: str, level: float = 1.0,
+               tap: str = "post_fader", muted: bool = False) -> "AddSendCommand":
         return AddSendCommand(
             command_id=str(uuid.uuid4()),
             label=f"Add Send → {target_bus_id}",
             track_id=track_id, target_bus_id=target_bus_id, level=level,
+            tap=tap, muted=muted,
         )
 
 
@@ -1834,10 +1843,12 @@ class RemoveSendCommand:
 
 @dataclass(frozen=True)
 class UpdateSendCommand:
-    """Update a send's level/enabled (AM-08 阶段 4.2 Routing UI).
+    """Update a send's level/enabled/target/tap/muted（AM-08 + MX-14）。
 
     此前缺此命令：send level/enabled 变更无独立 undo entry。
-    现由 Routing UI 的 send-level slider / enable toggle 提交。
+    现由 Routing UI 的 send-level slider / enable toggle / tap 选择 / mute 提交。
+    MX-14: apply/undo 重建 Send 时保留未变更字段（含 tap/muted）——旧实现
+    重建丢字段，改 level 会把 pre_fader/muted 静默复位。
     """
     command_id: str
     label: str
@@ -1846,9 +1857,13 @@ class UpdateSendCommand:
     new_level: Optional[float] = None      # None=不改 level
     new_enabled: Optional[bool] = None     # None=不改 enabled
     new_target_bus_id: Optional[str] = None  # None=不改目标
+    new_tap: Optional[str] = None          # MX-14: None=不改 tap 位置
+    new_muted: Optional[bool] = None       # MX-14: None=不改独立 mute
     _old_level: Optional[float] = None
     _old_enabled: Optional[bool] = None
     _old_target_bus_id: Optional[str] = None
+    _old_tap: Optional[str] = None
+    _old_muted: Optional[bool] = None
 
     def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "UpdateSendCommand"]:
         from src.features.edit.core.timeline_v2 import Send
@@ -1863,13 +1878,16 @@ class UpdateSendCommand:
         if old_send is None:
             raise ValueError(f"Send not found: {self.send_id}")
 
-        # 构造新 Send（不可变，逐字段替换）
+        # 构造新 Send（不可变，逐字段替换；未指定字段保留旧值）
         new_level = self.new_level if self.new_level is not None else old_send.level
         new_enabled = self.new_enabled if self.new_enabled is not None else old_send.enabled
         new_target = self.new_target_bus_id if self.new_target_bus_id is not None else old_send.target_bus_id
+        new_tap = self.new_tap if self.new_tap is not None else old_send.tap
+        new_muted = self.new_muted if self.new_muted is not None else old_send.muted
         new_send = Send(
             send_id=old_send.send_id, target_bus_id=new_target,
             level=float(new_level), enabled=bool(new_enabled),
+            tap=str(new_tap), muted=bool(new_muted),
         )
         new_track = track.with_send_updated(new_send)
         new_timeline = timeline.with_track_updated(new_track)
@@ -1878,8 +1896,10 @@ class UpdateSendCommand:
             send_id=self.send_id,
             new_level=self.new_level, new_enabled=self.new_enabled,
             new_target_bus_id=self.new_target_bus_id,
+            new_tap=self.new_tap, new_muted=self.new_muted,
             _old_level=old_send.level, _old_enabled=old_send.enabled,
             _old_target_bus_id=old_send.target_bus_id,
+            _old_tap=old_send.tap, _old_muted=old_send.muted,
         )
         return new_timeline, updated_cmd
 
@@ -1888,7 +1908,7 @@ class UpdateSendCommand:
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             return timeline
-        # 还原到旧值
+        # 还原到旧值（未捕获的旧字段保持当前值）
         old_send = None
         for s in track.sends:
             if s.send_id == self.send_id:
@@ -1900,6 +1920,8 @@ class UpdateSendCommand:
             send_id=old_send.send_id, target_bus_id=self._old_target_bus_id or old_send.target_bus_id,
             level=self._old_level if self._old_level is not None else old_send.level,
             enabled=self._old_enabled if self._old_enabled is not None else old_send.enabled,
+            tap=self._old_tap if self._old_tap is not None else old_send.tap,
+            muted=self._old_muted if self._old_muted is not None else old_send.muted,
         )
         return timeline.with_track_updated(track.with_send_updated(restored))
 
@@ -1909,8 +1931,10 @@ class UpdateSendCommand:
             "label": self.label, "track_id": self.track_id, "send_id": self.send_id,
             "new_level": self.new_level, "new_enabled": self.new_enabled,
             "new_target_bus_id": self.new_target_bus_id,
+            "new_tap": self.new_tap, "new_muted": self.new_muted,
             "old_level": self._old_level, "old_enabled": self._old_enabled,
             "old_target_bus_id": self._old_target_bus_id,
+            "old_tap": self._old_tap, "old_muted": self._old_muted,
         }
 
     @staticmethod
@@ -1923,14 +1947,20 @@ class UpdateSendCommand:
             new_level=data.get("new_level"),
             new_enabled=data.get("new_enabled"),
             new_target_bus_id=data.get("new_target_bus_id"),
+            new_tap=data.get("new_tap"),
+            new_muted=data.get("new_muted"),
             _old_level=data.get("old_level"),
             _old_enabled=data.get("old_enabled"),
             _old_target_bus_id=data.get("old_target_bus_id"),
+            _old_tap=data.get("old_tap"),
+            _old_muted=data.get("old_muted"),
         )
 
     @staticmethod
     def create(track_id: str, send_id: str, *, level: Optional[float] = None,
-               enabled: Optional[bool] = None, target_bus_id: Optional[str] = None) -> "UpdateSendCommand":
+               enabled: Optional[bool] = None, target_bus_id: Optional[str] = None,
+               tap: Optional[str] = None, muted: Optional[bool] = None,
+               ) -> "UpdateSendCommand":
         parts = []
         if level is not None:
             parts.append(f"level={level}")
@@ -1938,9 +1968,14 @@ class UpdateSendCommand:
             parts.append(f"enabled={enabled}")
         if target_bus_id is not None:
             parts.append(f"target={target_bus_id}")
+        if tap is not None:
+            parts.append(f"tap={tap}")
+        if muted is not None:
+            parts.append(f"muted={muted}")
         return UpdateSendCommand(
             command_id=str(uuid.uuid4()),
             label=f"Update Send ({', '.join(parts) or 'no-op'})",
             track_id=track_id, send_id=send_id,
             new_level=level, new_enabled=enabled, new_target_bus_id=target_bus_id,
+            new_tap=tap, new_muted=muted,
         )

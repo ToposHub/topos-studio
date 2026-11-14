@@ -64,6 +64,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from src.features.edit.core.proxy_policy import export_source_path
+from src.features.edit.core.audio_playback import unpack_send
 from src.features.color.core.curves_soft_clip import (
     curves_edit_is_default,
     curves_soft_clip_is_identity,
@@ -4246,16 +4247,26 @@ class TimelineExporter:
                         bus_inputs[target][:, out_start:out_end] += processed[:channels, :actual]
                     else:
                         output[:, out_start:out_end] += processed[:channels, :actual]
-                    # sends（并行）
+                    # sends（并行；MX-14: pre_fader tap 取 clip 求和块 summed，
+                    # post_fader 取处理后输出；独立 mute 只断开 send）
                     if node is not None:
-                        for send_bus_id, send_level in node.sends:
-                            if send_level <= 0.0:
+                        for send_entry in node.sends:
+                            send_bus_id, send_level, send_tap, send_muted = (
+                                unpack_send(send_entry))
+                            if send_level <= 0.0 or send_muted:
                                 continue
                             if send_bus_id not in bus_inputs:
                                 bus_inputs[send_bus_id] = np.zeros(
                                     (channels, total_samples), dtype=np.float32)
-                            bus_inputs[send_bus_id][:, out_start:out_end] += \
-                                processed[:channels, :actual] * send_level
+                            if send_tap == "pre_fader":
+                                pre_actual = min(summed.shape[-1],
+                                                 out_end - out_start)
+                                bus_inputs[send_bus_id][
+                                    :, out_start:out_start + pre_actual] += \
+                                    summed[:channels, :pre_actual] * send_level
+                            else:
+                                bus_inputs[send_bus_id][:, out_start:out_end] += \
+                                    processed[:channels, :actual] * send_level
                     # MX-08: 检源轨按帧缓存输出（块宽补齐，供被控轨 tap）
                     if track.track_id in export_sc_source_ids:
                         blk = processed

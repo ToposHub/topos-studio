@@ -250,7 +250,7 @@ class TestAud37810RoutingSnapshotAndGate:
         assert snap["B2"]["output_bus_id"] == "B1"
         assert snap["B2"]["is_bus"] is True
         # enabled send 计入，disabled send 不计
-        assert snap["vox"]["sends"] == [("B2", 0.5)]
+        assert snap["vox"]["sends"] == [("B2", 0.5, "post_fader", False)]
         assert snap["vox"]["is_bus"] is False
         # 当前 Bus 轨（B1）纳入图节点，否则经它的环不可检出
         bus_ids = {bid for bid, _ in dlg._bus_tracks}
@@ -266,7 +266,7 @@ class TestAud37810RoutingSnapshotAndGate:
             [Send(target_bus_id="B2", level=0.8)])
         assert bus_ids == ["B1", "B2"]
         assert routing["vox"]["output_bus_id"] == "B1"
-        assert routing["vox"]["sends"] == [("B2", 0.8)]
+        assert routing["vox"]["sends"] == [("B2", 0.8, "post_fader", False)]
         assert routing["vox"]["is_bus"] is False
         assert routing["B2"]["output_bus_id"] == "B1"
         assert routing["B1"]["is_bus"] is True
@@ -307,7 +307,7 @@ class TestAud37810RoutingSnapshotAndGate:
         })
         assert ctl.tview.undo_count == 1
         # 实时听感：enabled send 才进引擎
-        assert mgr.routing_calls == [("vox", "B1", (("B2", 0.5),), False)]
+        assert mgr.routing_calls == [("vox", "B1", (("B2", 0.5, "post_fader", False),), False)]
         assert (ctl.tview.timeline.get_track_by_id("vox").output_bus_id
                 == "B1")
         ctl.tview.undo()

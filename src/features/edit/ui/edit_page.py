@@ -1820,13 +1820,15 @@ class EditPage(QWidget):
                 set_auto_mode(track_id, str(getattr(track, "automation_mode", "off") or "off"))
             except Exception as e:  # noqa: BLE001
                 logger.debug("set_track_automation_mode failed for %s: %s", track_id, e)
-        # 路由（output_bus_id + sends + is_bus）
+        # 路由（output_bus_id + sends + is_bus；MX-14: send 4 元组带 tap/mute）
         set_routing = getattr(audio_mgr, "set_track_routing", None)
         if callable(set_routing):
             try:
                 sends = getattr(track, "sends", ()) or ()
                 sends_list = [
-                    (s.target_bus_id, s.level)
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
                     for s in sends if getattr(s, "enabled", True)
                 ]
                 set_routing(

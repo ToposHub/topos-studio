@@ -2757,7 +2757,10 @@ class EditControllerMixin:
                         logger.debug("automation sync failed: %s", e)
                     # W24/W25: 同步路由信息（output_bus_id + sends + is_bus）
                     try:
-                        sends_list = [(s.target_bus_id, s.level) for s in track.sends if s.enabled]
+                        sends_list = [(s.target_bus_id, s.level,
+                                       str(getattr(s, 'tap', 'post_fader') or 'post_fader'),
+                                       bool(getattr(s, 'muted', False)))
+                                      for s in track.sends if s.enabled]
                         mgr.set_track_routing(track.track_id, track.output_bus_id,
                                               sends_list, is_bus=track.is_bus)
                     except Exception as e:
@@ -4165,7 +4168,9 @@ class EditControllerMixin:
             t.track_id: {
                 "output_bus_id": getattr(t, "output_bus_id", None),
                 "sends": [
-                    (s.target_bus_id, s.level)
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
                     for s in (getattr(t, "sends", ()) or ())
                     if getattr(s, "enabled", True)
                 ],
@@ -4209,7 +4214,9 @@ class EditControllerMixin:
         self._routing_dialog_baseline = {
             "output_bus_id": getattr(track, "output_bus_id", None),
             "sends": [
-                (s.target_bus_id, s.level)
+                (s.target_bus_id, s.level,
+                 str(getattr(s, "tap", "post_fader") or "post_fader"),
+                 bool(getattr(s, "muted", False)))
                 for s in (getattr(track, "sends", ()) or ())
                 if getattr(s, "enabled", True)
             ],
@@ -4236,7 +4243,9 @@ class EditControllerMixin:
             routing[t.track_id] = {
                 "output_bus_id": getattr(t, "output_bus_id", None),
                 "sends": [
-                    (s.target_bus_id, s.level)
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
                     for s in (getattr(t, "sends", ()) or ())
                     if getattr(s, "enabled", True)
                 ],
@@ -4246,7 +4255,9 @@ class EditControllerMixin:
         routing[track_id] = {
             "output_bus_id": output_bus_id,
             "sends": [
-                (s.target_bus_id, s.level)
+                (s.target_bus_id, s.level,
+                 str(getattr(s, "tap", "post_fader") or "post_fader"),
+                 bool(getattr(s, "muted", False)))
                 for s in (sends or ())
                 if getattr(s, "enabled", True)
             ],
@@ -4285,7 +4296,12 @@ class EditControllerMixin:
         mgr = self._get_mixer_audio_manager()
         if mgr is not None and hasattr(mgr, 'set_track_routing'):
             try:
-                sends_list = [(s.target_bus_id, s.level) for s in new_sends if getattr(s, "enabled", True)]
+                sends_list = [
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
+                    for s in new_sends if getattr(s, "enabled", True)
+                ]
                 mgr.set_track_routing(track_id, output_bus_id, sends_list, is_bus=False)
                 self._routing_dialog_preview_dirty = True
             except Exception as e:
@@ -4329,7 +4345,9 @@ class EditControllerMixin:
             self._routing_dialog_baseline = {
                 "output_bus_id": output_bus_id,
                 "sends": [
-                    (s.target_bus_id, s.level)
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
                     for s in new_sends if getattr(s, "enabled", True)
                 ],
             }
@@ -4366,11 +4384,16 @@ class EditControllerMixin:
                 ), 5000)
             return
 
-        # 实时听感
+        # 实时听感（MX-14: 4 元组带 tap/muted）
         mgr = self._get_mixer_audio_manager()
         if mgr is not None and hasattr(mgr, 'set_track_routing'):
             try:
-                sends_list = [(s.target_bus_id, s.level) for s in new_sends if getattr(s, "enabled", True)]
+                sends_list = [
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
+                    for s in new_sends if getattr(s, "enabled", True)
+                ]
                 mgr.set_track_routing(track_id, output_bus_id, sends_list, is_bus=False)
             except Exception as e:
                 logger.debug("routing apply failed: %s", e)
@@ -4404,19 +4427,26 @@ class EditControllerMixin:
             track = tview.timeline.get_track_by_id(track_id)
             old_sends = {s.target_bus_id: s for s in (track.sends or ())}
 
-            # 添加新的 + 更新已变化的
+            # 添加新的 + 更新已变化的（MX-14: tap/muted 参与 diff 与提交）
             for target, new_s in new_sends_map.items():
+                new_tap = str(getattr(new_s, "tap", "post_fader") or "post_fader")
+                new_muted = bool(getattr(new_s, "muted", False))
                 if target not in old_sends:
-                    cmd = AddSendCommand.create(track_id, target, level=float(new_s.level))
+                    cmd = AddSendCommand.create(
+                        track_id, target, level=float(new_s.level),
+                        tap=new_tap, muted=new_muted)
                     tview._execute_command(cmd)
                 else:
                     old_s = old_sends[target]
                     if (abs(old_s.level - new_s.level) > 1e-6
-                            or old_s.enabled != new_s.enabled):
+                            or old_s.enabled != new_s.enabled
+                            or str(getattr(old_s, "tap", "post_fader")) != new_tap
+                            or bool(getattr(old_s, "muted", False)) != new_muted):
                         cmd = UpdateSendCommand.create(
                             track_id, old_s.send_id,
                             level=float(new_s.level),
                             enabled=bool(new_s.enabled),
+                            tap=new_tap, muted=new_muted,
                         )
                         tview._execute_command(cmd)
         except Exception as e:
