@@ -106,7 +106,7 @@ class _TrackNode:
     __slots__ = (
         "track_id", "is_bus", "volume", "pan", "muted", "solo", "enabled",
         "output_bus_id", "sends", "automation", "automation_mode",
-        "eq_filter", "effect_chain",
+        "eq_filter", "effect_chain", "panner",
     )
 
     def __init__(self, track: Any, sample_rate: float) -> None:
@@ -140,6 +140,13 @@ class _TrackNode:
         chain = getattr(track, "effect_chain", None)
         if chain is not None and hasattr(chain, "to_dsp_entries"):
             self.effect_chain.set_params(chain.to_dsp_entries(), sample_rate=sample_rate)
+
+        # CW-A1: 空间声像器（立体声域矩阵；lr 真源是上面的 track.pan）
+        from src.features.edit.core.audio_dsp import SpatialPanner
+        self.panner = SpatialPanner(sample_rate)
+        panner_params = getattr(track, "panner", None)
+        if panner_params:
+            self.panner.set_params(panner_params, sample_rate=sample_rate)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -287,12 +294,13 @@ class AudioGraphRenderer:
         clip_fade: Optional[dict] = None,
         source_channels: int = 2,
         fps: Optional[float] = None,
+        sidechain_taps: Optional[dict] = None,
     ) -> Optional[np.ndarray]:
         """处理单个普通轨的一个样本块。
 
         节点顺序（与 AudioMixer.mix_samples 阶段 1 一致）：
         clip fade → automation(mute gate) → clip FX → automation(volume/pan)
-        → volume → pan → strip EQ → track FX
+        → volume → pan → spatial panner → strip EQ → track FX
 
         Args:
             track_id: 轨道 ID
@@ -306,6 +314,9 @@ class AudioGraphRenderer:
                 2=stereo→balance unity-center，>2=surround→trim）。默认 2。
             fps: 时间线帧率（P1-20：automation ramp 的帧→样本换算基准）。
                 显式传入优先；未传时回退 clip_fade["fps"]，再退 24.0。
+            sidechain_taps: CW-A1 外部侧链检源缓冲 {source_track_id: (ch, n)}，
+                None=内部检源。当前导出循环按"轨-外层"迭代，跨轨 tap 不可
+                用 → 默认内部检源（压缩器仍正常工作）。
 
         Returns:
             处理后的样本；若整块被 mute automation 静音则返回 None。
@@ -434,13 +445,29 @@ class AudioGraphRenderer:
             if samples.shape[0] > 1:
                 samples[1] *= right_gain
 
+        # CW-A1: 空间声像器（spread/rotate/divergence/boom 立体声域矩阵，
+        # 与 mix_samples 同级：pan/balance 增益之后、strip EQ 之前）
+        if node.panner is not None and node.panner.is_active:
+            if pan_ramp is not None and len(pan_ramp) > 0:
+                mid = min(len(pan_ramp) - 1, samples.shape[-1] // 2)
+                pan_eff = float(np.clip(pan_ramp[mid], -1.0, 1.0))
+            else:
+                pan_eff = pan
+            samples = node.panner.process(samples, pan_eff)
+
         # strip EQ（post-fader）
         if node.eq_filter is not None and node.eq_filter.is_active:
             samples = node.eq_filter.process(samples)
 
-        # track FX（post-EQ）
+        # track FX（post-EQ；CW-A1: 外部侧链检源透传）
         if node.effect_chain is not None and node.effect_chain.is_active:
-            samples = node.effect_chain.process(samples)
+            sc_map = None
+            if sidechain_taps:
+                raw_map = node.effect_chain.sidechain_map(sidechain_taps)
+                if raw_map:
+                    cur_n = samples.shape[-1]
+                    sc_map = {iid: buf[:, :cur_n] for iid, buf in raw_map.items()}
+            samples = node.effect_chain.process(samples, sidechain_by_id=sc_map)
 
         # 与实时路径保持一致：mute gate 位于 strip 输出端，静音时不泄漏 FX 尾音。
         if mute_gate is not None:
@@ -633,6 +660,9 @@ class AudioGraphRenderer:
                 bus_samples[0] *= lg
                 if bus_samples.shape[0] > 1:
                     bus_samples[1] *= rg
+            # CW-A1: Bus 空间声像器（与 mix_samples Bus 阶段同级）
+            if node.panner is not None and node.panner.is_active:
+                bus_samples = node.panner.process(bus_samples, bus_pan)
             # EQ
             if node.eq_filter is not None and node.eq_filter.is_active:
                 bus_samples = node.eq_filter.process(bus_samples)

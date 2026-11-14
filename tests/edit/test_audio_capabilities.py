@@ -149,12 +149,7 @@ def test_strip_eq_reports_backend_unavailable(scipy_unavailable):
     from src.features.edit.core.timeline_v2 import StripEQParams
 
     eq = StripEQFilter(sample_rate=48000.0)
-    params = StripEQParams(
-        enabled=True, mode="3-band",
-        bands=(6.0, 0.0, -3.0), gain=0.0,
-        low_cut_enable=False, low_cut=20.0,
-        high_cut_enable=False, high_cut=20000.0,
-    )
+    params = StripEQParams(enabled=True)  # CW-A1: 参数化 EQ
     eq.set_params(params)
 
     assert eq.is_backend_available is False
@@ -190,12 +185,7 @@ def test_strip_eq_active_when_backend_available():
     # 无参数时不 active
     assert eq.is_active is False
 
-    params = StripEQParams(
-        enabled=True, mode="3-band",
-        bands=[6.0, 0.0, 0.0], gain=0.0,
-        low_cut_enable=False, low_cut=20.0,
-        high_cut_enable=False, high_cut=20000.0,
-    )
+    params = StripEQParams(enabled=True)  # CW-A1: 参数化 EQ
     eq.set_params(params)
     assert eq.is_active is True
     assert eq.is_backend_available is True

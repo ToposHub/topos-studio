@@ -106,12 +106,7 @@ class TestPreflightAudioExport:
         from src.features.edit.core.timeline_v2 import (
             EditTrack, StripEQParams, TimelineSequence,
         )
-        eq = StripEQParams(
-            enabled=True, mode="3-band",
-            bands=(6.0, 0.0, -3.0), gain=0.0,
-            low_cut_enable=False, low_cut=20.0,
-            high_cut_enable=False, high_cut=20000.0,
-        )
+        eq = StripEQParams(enabled=True)  # CW-A1: 参数化 EQ
         track = EditTrack(
             track_id="t1", track_type="audio", index=0,
             strip_eq=eq,

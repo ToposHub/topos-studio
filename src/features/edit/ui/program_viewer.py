@@ -2462,9 +2462,11 @@ class ProgramViewer(QOpenGLWidget):
         self._fullscreen_window = QWidget()
         self._fullscreen_window.setObjectName("ProgramViewerFullscreen")
         self._fullscreen_window.setStyleSheet("background-color: #1a1a1a;")
+        # 置顶：播放监视期间不被主窗口/效果器面板压底（Da Vinci 全屏监看语义）
         self._fullscreen_window.setWindowFlags(
             Qt.WindowType.Window |
-            Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint
         )
         self._fullscreen_window.setWindowState(Qt.WindowState.WindowFullScreen)
 

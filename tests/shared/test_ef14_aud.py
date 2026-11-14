@@ -147,58 +147,56 @@ class TestAud37805PresetDialogErrors:
 # ---------------------------------------------------------------------------
 
 class TestAud37819EqResponseCache:
+    """CW-A1: 缓存迁移到 ProEQGraphWidget._total_curve_points。"""
+
     def _widget(self, qapp):
-        from src.shared.ui.audio_mixer.strip_eq_dialog import (
-            FrequencyResponseWidget,
-        )
-        from src.features.edit.core.timeline_v2 import StripEQParams
-        w = FrequencyResponseWidget()
+        from src.shared.ui.audio_mixer.strip_eq_dialog import ProEQGraphWidget
+        from src.features.edit.core.timeline_v2 import default_eq_bands_demo
+        w = ProEQGraphWidget()
         w.resize(400, 180)
-        params = StripEQParams(mode='3-band', bands=(1.0, -2.0, 3.0), gain=0.0)
-        return w, params
+        return w, [dict(b) for b in default_eq_bands_demo()]
 
     def test_paint_reuses_cached_response(self, qapp):
-        """参数不变时连续两次重绘只计算一次频响。"""
-        import src.shared.ui.audio_mixer.strip_eq_dialog as eq_mod
-        w, params = self._widget(qapp)
-        w.set_params(params, 48000.0)
+        """状态不变时连续两次取点只重算一次频响。"""
+        w, bands = self._widget(qapp)
+        w.setState(bands, True, "Clean", 0.0)
 
         calls = []
-        real = eq_mod.compute_eq_response
+        real = w._total_db_at
 
-        def counting(*a, **k):
+        def counting(f):
             calls.append(1)
-            return real(*a, **k)
+            return real(f)
 
-        with patch.object(eq_mod, 'compute_eq_response', counting):
-            w._params = params  # set_params 已作废缓存
-            w._resp_cache_key = None
-            w.paintEvent(type('E', (), {'rect': lambda self: w.rect()})())
-            assert len(calls) == 1
-            w.paintEvent(type('E', (), {'rect': lambda self: w.rect()})())
-            assert len(calls) == 1, '第二次重绘不应重算频响'
+        w._total_db_at = counting
+        pts1 = w._total_curve_points()
+        assert calls, "首次取点必须计算频响"
+        first_calls = len(calls)
+        pts2 = w._total_curve_points()
+        assert len(calls) == first_calls, "状态未变不应重算频响"
+        assert pts1 == pts2
 
     def test_param_change_recomputes(self, qapp):
-        """参数变化后重算。"""
-        import src.shared.ui.audio_mixer.strip_eq_dialog as eq_mod
-        from src.features.edit.core.timeline_v2 import StripEQParams
-        w, params = self._widget(qapp)
-        w.set_params(params, 48000.0)
+        """状态变化后重算。"""
+        w, bands = self._widget(qapp)
+        w.setState(bands, True, "Clean", 0.0)
 
         calls = []
-        real = eq_mod.compute_eq_response
+        real = w._total_db_at
 
-        def counting(*a, **k):
+        def counting(f):
             calls.append(1)
-            return real(*a, **k)
+            return real(f)
 
-        with patch.object(eq_mod, 'compute_eq_response', counting):
-            w.paintEvent(type('E', (), {'rect': lambda self: w.rect()})())
-            new_params = StripEQParams(
-                mode='3-band', bands=(5.0, -2.0, 3.0), gain=0.0)
-            w.set_params(new_params, 48000.0)
-            w.paintEvent(type('E', (), {'rect': lambda self: w.rect()})())
-            assert len(calls) == 2, '参数变化必须重算'
+        w._total_db_at = counting
+        w._total_curve_points()
+        n1 = len(calls)
+
+        bands2 = [dict(b) for b in bands]
+        bands2[3]["gain"] = 6.0
+        w.setState(bands2, True, "Clean", 0.0)
+        w._total_curve_points()
+        assert len(calls) > n1, "参数变化后必须重算"
 
 
 # ---------------------------------------------------------------------------

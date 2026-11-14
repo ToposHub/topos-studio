@@ -31,7 +31,7 @@ from src.features.edit.core.timeline_v2 import (
 
 def _track_with_full_state() -> EditTrack:
     """构造带 EQ + FX + routing 的完整 strip 轨道。"""
-    eq = StripEQParams.default("3-band")
+    eq = StripEQParams.default()
     chain = EffectChainParams(effects=(
         TrackEffectInstance(
             effect_type="strip_eq", params=eq.to_dict(),

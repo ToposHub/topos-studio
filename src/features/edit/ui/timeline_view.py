@@ -17022,6 +17022,14 @@ class TimelineView(QGraphicsView):
             event.ignore()
             return
 
+        # CW-A1: 完整单元的特殊拖放路由（Da Vinci Fairlight 语义）。
+        # spatial_panner 是轨级声像器（非链效果），写入轨的 panner 字段；
+        # dynamics 已是常规单实例复合效果器，走通用 AddEffectCommand。
+        if effect_type == "spatial_panner":
+            self._handle_unit_effect_drop(
+                event, effect_type, target_track, target_clip)
+            return
+
         # Import AddEffectCommand
         from src.features.edit.core.commands import AddEffectCommand
 
@@ -17057,6 +17065,35 @@ class TimelineView(QGraphicsView):
         # Emit signal for UI update — second arg is now the effect_id (was
         # effect_type) so the controller can scroll_to_effect(id).
         self.effect_added.emit(target_clip.clip_id, new_effect_id)
+
+    def _handle_unit_effect_drop(
+        self,
+        event: QDropEvent,
+        effect_type: str,
+        target_track: EditTrack,
+        target_clip: ClipInstance,
+    ) -> None:
+        """CW-A1: Spatial Panner 完整单元的拖放落地。
+
+        spatial_panner 是轨级声像器（非链效果）——对目标轨提交
+        SetTrackPannerCommand（默认启用参数），混音条随后显示声像器激活。
+        dynamics 已注册为常规单实例复合效果器（DynamicsEffect，EG→Comp→Lim
+        单实例），走通用 AddEffectCommand 路径，不再需要特殊路由。
+        """
+        self._drag_effect_type = None
+        from src.features.edit.core.commands import SetTrackPannerCommand
+        from src.features.edit.core.timeline_v2 import SpatialPannerParams
+        cmd = SetTrackPannerCommand.create(
+            target_track.track_id,
+            SpatialPannerParams.default().to_dict(),
+        )
+        self._execute_command(cmd)
+        self.status_message_requested.emit(
+            "Spatial Panner enabled — adjust in Mixer (⤢ next to Pan)")
+        logger.info(
+            "Spatial Panner enabled on track %s", target_track.track_id,
+        )
+        event.acceptProposedAction()
 
     def _resolve_effect_drop_target(
         self,

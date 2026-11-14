@@ -115,13 +115,13 @@ class TestTrackLevelFields:
     def test_strip_eq_change(self, edit_page):
         """轨道级 EQ 变化 → 签名变化（此前完全未纳入）。"""
         t = _base_track()
-        eq = StripEQParams.default("3-band")
+        eq = StripEQParams.default()
         assert _sig(edit_page, (t,)) != _sig(edit_page, (t.with_strip_eq(eq),))
 
     def test_strip_eq_param_change(self, edit_page):
         """EQ 内部频段增益变化 → 签名变化。"""
-        eq1 = StripEQParams(mode="3-band", bands=(0.0, 0.0, 0.0))
-        eq2 = StripEQParams(mode="3-band", bands=(6.0, 0.0, 0.0))
+        eq1 = StripEQParams()
+        eq2 = StripEQParams(master_gain=6.0)
         t1 = _base_track().with_strip_eq(eq1)
         t2 = _base_track().with_strip_eq(eq2)
         assert _sig(edit_page, (t1,)) != _sig(edit_page, (t2,))
@@ -129,7 +129,7 @@ class TestTrackLevelFields:
     def test_effect_chain_change(self, edit_page):
         """FX 机架链变化 → 签名变化。"""
         t = _base_track()
-        chain = EffectChainParams.from_strip_eq(StripEQParams.default("3-band"))
+        chain = EffectChainParams.from_strip_eq(StripEQParams.default())
         assert _sig(edit_page, (t,)) != _sig(edit_page, (t.with_effect_chain(chain),))
 
 
