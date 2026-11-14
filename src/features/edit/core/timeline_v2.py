@@ -2271,24 +2271,33 @@ class SubtitleClip:
 
 @dataclass(frozen=True)
 class Send:
-    """音频发送（W24）— 把一条 strip 的信号（post-fader）发送到 Bus/Aux。
+    """音频发送（W24/MX-14）— 把一条 strip 的信号发送到 Bus/Aux。
 
     Attributes:
         send_id: 唯一标识
         target_bus_id: 目标 Bus 轨的 track_id
-        level: 发送电平（0.0-1.0，post-fader 线性增益）
+        level: 发送电平（0.0-1.0，线性增益）
         enabled: 是否启用
+        tap: 取样位置（MX-14，Send 模型 v2）。"post_fader"=轨链输出端
+            （音量/pan/EQ/FX 之后，默认——旧工程即此行为，声音不变）；
+            "pre_fader"=clip 求和后、音量/EQ/FX 之前（不随推子变化）。
+        muted: 独立静音（MX-14）——只断开该 send 的贡献，不影响主输出，
+            也不清空 send 配置（区别于 enabled=False 的移除语义）。
     """
     send_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     target_bus_id: str = ""
     level: float = 1.0
     enabled: bool = True
+    tap: str = "post_fader"
+    muted: bool = False
 
     def __post_init__(self) -> None:
         if not self.target_bus_id:
             raise ValueError("target_bus_id cannot be empty")
         if self.level < 0.0 or self.level > 1.0:
             raise ValueError(f"level must be in [0.0, 1.0]: {self.level}")
+        if self.tap not in _SEND_TAPS:
+            raise ValueError(f"tap must be one of {_SEND_TAPS}: {self.tap}")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2296,16 +2305,30 @@ class Send:
             "target_bus_id": self.target_bus_id,
             "level": self.level,
             "enabled": self.enabled,
+            "tap": self.tap,
+            "muted": self.muted,
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "Send":
+        # MX-14: 未知 tap 值降级为默认 post_fader（保持旧声音，不阻断加载）
+        tap = str(data.get("tap", "post_fader") or "post_fader")
+        if tap not in _SEND_TAPS:
+            logger.warning(
+                "Send.from_dict: unknown tap %r → post_fader (default)", tap)
+            tap = "post_fader"
         return Send(
             send_id=data.get("send_id", str(uuid.uuid4())),
             target_bus_id=data.get("target_bus_id", ""),
             level=float(data.get("level", 1.0)),
             enabled=bool(data.get("enabled", True)),
+            tap=tap,
+            muted=bool(data.get("muted", False)),
         )
+
+
+# MX-14: Send 取样位置合法集合（版本化契约；默认 post_fader=旧行为）
+_SEND_TAPS = ("post_fader", "pre_fader")
 
 
 # ── 参数化 EQ 频段模型（CW-A1 重构：6 频段全参量）──────────────────────────────

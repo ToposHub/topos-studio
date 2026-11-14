@@ -354,10 +354,10 @@ def topological_sort_buses(
         if output_target in bus_set:
             targets.add(output_target)
         for send in r.get("sends", []) or []:
-            if not isinstance(send, (tuple, list)) or len(send) < 2:
-                continue
-            send_target, send_level = send[0], send[1]
-            if send_target in bus_set and float(send_level) > 0.0:
+            # MX-14: 4 元组/2 元组/dict 兼容；muted 的 send 不贡献信号，
+            # 不构成排序边（否则静音的 send 会造成假环告警）
+            send_target, send_level, _tap, send_muted = unpack_send(send)
+            if send_target in bus_set and send_level > 0.0 and not send_muted:
                 targets.add(send_target)
         for target in targets:
             downstream[bid].append(target)
@@ -378,6 +378,29 @@ def topological_sort_buses(
     # 剩余 in_degree > 0 的节点在环中
     cycle_ids = [bid for bid in bus_ids if in_degree[bid] > 0]
     return sorted_ids, cycle_ids
+
+
+def unpack_send(entry: Any) -> tuple:
+    """MX-14: 把一条 send 条目解包为 (target_bus_id, level, tap, muted)。
+
+    兼容三种形态：
+    - 旧 2 元组 (target, level) → ("post_fader", False)（旧行为，声音不变）
+    - 新 4 元组 (target, level, tap, muted)
+    - dict {"target_bus_id", "level", "tap", "muted"}
+    """
+    if isinstance(entry, dict):
+        return (
+            entry.get("target_bus_id"),
+            float(entry.get("level", 0.0) or 0.0),
+            str(entry.get("tap", "post_fader") or "post_fader"),
+            bool(entry.get("muted", False)),
+        )
+    seq = tuple(entry)
+    target = seq[0] if seq else None
+    level = float(seq[1]) if len(seq) > 1 else 0.0
+    tap = str(seq[2]) if len(seq) > 2 and seq[2] else "post_fader"
+    muted = bool(seq[3]) if len(seq) > 3 else False
+    return (target, level, tap, muted)
 
 
 def compute_audible_solo_closure(
@@ -1647,8 +1670,9 @@ class AudioDecoder:
 #   5. track_fx     FX 机架链（外部侧链检源透传，状态化，一次）
 #   6. mute_gate    自动化静音门控（链输出端，同时门控 EQ/FX 尾音泄漏）
 # 之后进入路由（output_bus_id / sends → Bus 或 Master）。
-# Send tap 位置当前固定 post-fader（E12 Send 模型契约）；pre-send/
-# pre-FX tap 位置为 MX-05 后续工作（需 Send 模型扩展，见计划表）。
+# Send tap 位置（MX-14，Send 模型 v2）：post_fader=链后推子后（默认，
+# 旧工程即此行为）；pre_fader=clip 求和后、音量/pan/EQ/FX 前（不随推子
+# 变化）。pre/post-FX 更细粒度 tap 仍为后续工作（需 MX-05 图扩展）。
 # 版本：ORDER_VERSION = 1（当前唯一受支持组合；旧工程即此顺序）。
 TRACK_CHAIN_ORDER: tuple = (
     "clip_stage", "volume", "panner", "strip_eq", "track_fx", "mute_gate",
@@ -3042,9 +3066,12 @@ class AudioMixer:
                 else:
                     # 直接到 Master
                     output += samples
-                # 处理 sends（post-fader，并行发送到多个 Bus）
-                for send_bus_id, send_level in routing.get("sends", []):
-                    if send_level <= 0.0:
+                # 处理 sends（MX-14: post-fader 默认 / pre-fader 可选 + 独立
+                # mute；并行发送到多个 Bus）
+                for send_entry in routing.get("sends", []):
+                    send_bus_id, send_level, send_tap, send_muted = (
+                        unpack_send(send_entry))
+                    if send_level <= 0.0 or send_muted:
                         continue
                     if send_bus_id not in registered_bus_set:
                         # AUD-15402: send 指向未注册 bus——并行 tap 落空，
@@ -3059,7 +3086,16 @@ class AudioMixer:
                             self._mix_bus_scratch, send_bus_id,
                             output_channels, num_samples,
                         )
-                    bus_inputs[send_bus_id][:, :samples.shape[-1]] += samples * send_level
+                    if send_tap == "pre_fader":
+                        # MX-14: 推子前 tap——clip 求和块（音量/pan/EQ/FX 前），
+                        # 不随推子变化；自动化静音门控同时门控 pre send
+                        pre_src = track_input
+                        pre_n = pre_src.shape[-1]
+                        if mute_gate is not None:
+                            pre_src = pre_src * mute_gate[np.newaxis, :pre_n]
+                        bus_inputs[send_bus_id][:, :pre_n] += pre_src * send_level
+                    else:
+                        bus_inputs[send_bus_id][:, :samples.shape[-1]] += samples * send_level
 
                 if track_peak_l > 0.0 or track_peak_r > 0.0 or track_pre_peak > 0.0:
                     # CW-A1: 侧链 tap（该轨完整输出，推子后；仅在本块内消费）
@@ -3249,12 +3285,21 @@ class AudioMixer:
                     output += bus_samples
                 # RMA-06: Bus sends（Bus 也可 send 到其他 Bus，并行 tap）。
                 # 此前实时 Bus 阶段只处理 output_bus_id，sends 被无声忽略。
+                # MX-14: pre_fader tap 取 Bus 输入（音量/EQ/FX 前）+ 独立 mute。
                 if isinstance(bus_routing, dict):
-                    for send_bus_id, send_level in bus_routing.get("sends", []) or []:
-                        if send_level <= 0.0:
+                    for send_entry in bus_routing.get("sends", []) or []:
+                        send_bus_id, send_level, send_tap, send_muted = (
+                            unpack_send(send_entry))
+                        if send_level <= 0.0 or send_muted:
                             continue
+                        if send_bus_id not in bus_inputs and send_bus_id in registered_bus_set:
+                            bus_inputs[send_bus_id] = self._mix_scratch(
+                                self._mix_bus_scratch, send_bus_id,
+                                output_channels, num_samples,
+                            )
                         if send_bus_id in bus_inputs:
-                            bus_inputs[send_bus_id][:, :bus_samples.shape[-1]] += bus_samples * send_level
+                            send_src = bus_input if send_tap == "pre_fader" else bus_samples
+                            bus_inputs[send_bus_id][:, :send_src.shape[-1]] += send_src * send_level
                         elif send_bus_id not in registered_bus_set:
                             # AUD-15402: Bus send 指向未注册 bus——并行 tap 落空，告警
                             logger.warning(
