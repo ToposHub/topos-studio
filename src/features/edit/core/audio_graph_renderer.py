@@ -177,6 +177,9 @@ class AudioGraphRenderer:
         # §3.1: master automation（{param: KeyframeTrack}）+ 模式
         self._master_automation: dict = {}
         self._master_automation_mode: str = "off"
+        # MX-03: Master 条带（EQ/FX；音量后、限幅器前，与 mix_samples 同构）
+        self._master_eq: Optional[StripEQFilter] = None
+        self._master_chain: Optional[EffectChain] = None
         # AM-09: 连续状态 Master 限幅器（与 mix_samples 一致）
         from src.features.edit.core.audio_dsp import MasterLimiter
         self._master_limiter = MasterLimiter(self._sample_rate, threshold=1.0)
@@ -234,6 +237,31 @@ class AudioGraphRenderer:
         self._master_automation_mode = str(
             getattr(sequence, "master_automation_mode", "off") or "off"
         ).lower()
+        # MX-03: Master 条带（EQ/FX）。旧序列无这两个字段 → None（直通）。
+        master_eq_params = getattr(sequence, "master_strip_eq", None)
+        if master_eq_params is not None:
+            self._master_eq = StripEQFilter(self._sample_rate)
+            self._master_eq.set_params(master_eq_params,
+                                       sample_rate=self._sample_rate)
+        else:
+            self._master_eq = None
+        master_chain_params = getattr(sequence, "master_effect_chain", None)
+        if master_chain_params is not None:
+            self._master_chain = EffectChain(self._sample_rate)
+            self._master_chain.set_params(
+                master_chain_params.to_dsp_entries(),
+                sample_rate=self._sample_rate)
+        else:
+            self._master_chain = None
+
+    def master_sidechain_sources(self) -> set:
+        """MX-03: Master 链引用的外部侧链检源 track_id 集合（导出拼 tap 用）。"""
+        if self._master_chain is not None:
+            try:
+                return set(self._master_chain.sidechain_sources())
+            except Exception:  # noqa: BLE001 — 诊断性查询失败按空集处理
+                return set()
+        return set()
 
     def _build_routing_dict(self) -> dict:
         """从 self._nodes 构建 routing dict（供闭包/拓扑排序复用）。"""
@@ -708,19 +736,23 @@ class AudioGraphRenderer:
     # ── Master 阶段（与 mix_samples 阶段 3 一致）──
 
     def apply_master(self, output: np.ndarray, skip_volume: bool = False,
-                     start_frame: int = 0, fps: float = 24.0) -> np.ndarray:
-        """应用 master volume/mute + 连续状态限幅（AM-09，与 mix_samples 一致）。
+                     start_frame: int = 0, fps: float = 24.0,
+                     sidechain_taps: Optional[dict] = None) -> np.ndarray:
+        """应用 master volume/mute + Master 条带（EQ/FX）+ 连续状态限幅。
 
         AM-09: 用连续状态 MasterLimiter 替代无状态峰值归一化，
         跨 buffer 平滑增益包络，避免 block-boundary gain jump（pumping）。
 
         §3.1: master automation（volume ramp + mute 判定），需 start_frame/fps。
+        MX-03: master strip_eq → master FX（音量后、限幅器前，与 mix_samples
+        阶段 3 同构）；sidechain_taps 为 {source_track_id: ndarray} 检源池。
 
         Args:
-            skip_volume: 跳过 master volume/mute/automation，仅应用限幅。
+            skip_volume: 跳过 master volume/mute/automation，仅应用条带+限幅。
                 用于 AM-10 阶段 3.4 normalize 二次过 limiter（避免重复施加 master 增益）。
             start_frame: output 起始帧（master automation ramp 用）
             fps: 帧率（master automation ramp 用）
+            sidechain_taps: Master FX 链的外部侧链检源输出（导出方拼接）
         """
         if not skip_volume:
             # §3.1: master automation
@@ -765,6 +797,19 @@ class AudioGraphRenderer:
                     output = output * vol_ramp[np.newaxis, :]
                 elif self._master_volume != 1.0:
                     output = output * self._master_volume
+        # MX-03: Master 条带——EQ → FX（音量后、限幅器前；与轨链
+        # strip_eq→track_fx 同构；与 mix_samples 阶段 3 parity）
+        if self._master_eq is not None and self._master_eq.is_active:
+            output = self._master_eq.process(output)
+        if self._master_chain is not None and self._master_chain.is_active:
+            sc_map = None
+            if sidechain_taps:
+                raw_map = self._master_chain.sidechain_map(sidechain_taps)
+                if raw_map:
+                    cur_n = output.shape[-1]
+                    sc_map = {iid: buf[:, :cur_n]
+                              for iid, buf in raw_map.items()}
+            output = self._master_chain.process(output, sidechain_by_id=sc_map)
         # AM-09: 连续状态限幅
         output = self._master_limiter.process(output)
         return output

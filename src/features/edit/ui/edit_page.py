@@ -1691,6 +1691,13 @@ class EditPage(QWidget):
                 set_master_auto_mode = getattr(audio_mgr, "set_master_automation_mode", None)
                 if set_master_auto_mode is not None:
                     set_master_auto_mode(str(getattr(self._current_timeline, "master_automation_mode", "off") or "off"))
+                # MX-03: Master 条带（EQ/FX）同步到引擎
+                set_master_eq = getattr(audio_mgr, "set_master_strip_eq", None)
+                if set_master_eq is not None:
+                    set_master_eq(getattr(self._current_timeline, "master_strip_eq", None))
+                set_master_chain = getattr(audio_mgr, "set_master_effect_chain", None)
+                if set_master_chain is not None:
+                    set_master_chain(getattr(self._current_timeline, "master_effect_chain", None))
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to sync master state to engine: %s", e)
 
@@ -2008,6 +2015,13 @@ class EditPage(QWidget):
             _sig_value(master_auto) if master_auto else None,
             master_auto_mode,
         )
+        # MX-03: Master 条带（EQ/FX）纳入签名（修改触发重同步）
+        master_strip_sig = (
+            _sig_value(getattr(timeline, "master_strip_eq", None))
+            if timeline is not None else None,
+            _sig_value(getattr(timeline, "master_effect_chain", None))
+            if timeline is not None else None,
+        )
 
         return (
             round(float(timeline_fps), 6),
@@ -2015,6 +2029,7 @@ class EditPage(QWidget):
             bool(master_muted),
             tuple(track_entries),
             master_auto_sig,
+            master_strip_sig,
         )
 
     def _build_timeline_preview_signature(self, timeline: Any) -> tuple[Any, ...]:
