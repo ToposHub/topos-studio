@@ -103,6 +103,7 @@
 - 新增 focused 回归（2026-11-15 续批）：149 项（ST-01 EQ/Panner 5 + MX-03 13 + MX-14 16 + MX-15 18 + DY-03 16 + RV-02 9 + MX-16 9 + EQ-02/03 12 + MX-10 9 + RV-03 11 + PAN-02/03 32）。
 - 更新为旧缺陷契约的测试：B13 静音广播（→版本化 payload）、SC Listen 广播（→原始检源）、EQ 身份段数（→真 Butterworth 段数）、graph parity/mixer units 键集（→含 master "-1" 遥测条目）、wd17w2 路由快照（→4 元组 send）、dsp_pro 首反射（→image-source 物理值）、wd12g52 ReverbRebuild 3 项（→当前参数名与 FDN 网络，修复基线失败）。
 - 宽回归基线（2026-11-14 轮）：15929 通过 / 30 失败，30 个失败经干净基线 worktree（df749759）复跑确认全部为既有问题。续批（2026-11-15）修复了其中音频域 3 项（wd12g52 ReverbRebuild）与 2 项（channel_layout_import 的 MagicMock 探测，经 stash 验证为环境相关既有失败，未计入修复）。
+- 宽回归（2026-11-15 续批后全量）：**16107 通过 / 33 失败 / 57 跳过**。33 个失败逐一分类（对照 ac938863 干净 worktree 复跑）：18 项确定性既有（catalog×3、n03 keyer/mask×8、channel_layout_import×2、ef01×1、linked_ripple×1、ef17×1、ui2_aud3×1、wd12g65×1）；11 项顺序/UI 闪失（timeline 手势×8、指针×1、快捷键×1、core_aud4 显示配置×1——两树上单独运行均通过，属全量负载下的既有 flake）；4 项为本批引入的回归（stem send 解包×2、solo 闭包键集×1、wd9g55 send 序列化契约×1）——**已全部修复**（stem_export 改 unpack_send + muted 语义；两处测试契约更新到 master 遥测条目与 Send v2 字段）。修复后零确定性回归残留。
 - 独立 Review（general-purpose agent，首轮）：3 Critical 已全部修复；剩余建议（Gate 逐样本循环优化、tap 采样免分配、导出侧链缓存滚动窗口、A3 懒分配恢复等）为性能卫生待办。
 - 真实主窗播放/导出的端到端验证不在自动化范围内（计划 §13：合成信号侧已全覆盖，实播回归建议按 §13 测试工程清单执行一次）。
 
