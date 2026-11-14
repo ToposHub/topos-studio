@@ -20,6 +20,10 @@
 | d241fc86 | MX-09 频谱正确性 + MX-13 推子硬零 + DL-02 分数延迟 |
 | d6c6839c | 生命周期绑定修复（destroyed 闭包 NameError 根治） |
 | 545ef546 | RV-04：几何热更新（网络缓冲保留） |
+| de406f6f | 阶段I：证据文档 + MX-05 处理顺序契约（TRACK_CHAIN_ORDER/ORDER_VERSION） |
+| 67870f81 | 独立审查修复：3 Critical（reverb 预设回填/lufs 类型/旧预设清路由）+ 3 建议 |
+| c2ebee02 | DY-03 hold 边界 + EQ-02 Solo 同源锁 |
+| d29bc44c | ST-01：Dynamics/Delay/Reverb 用户预设原子持久化 |
 
 ## 2. 逐项交付状态（对齐计划 §4.1 总表）
 
@@ -77,10 +81,23 @@
 
 ## 3. 回归状态
 
-- 新增 focused 回归：60+（阶段A 18 项 + DY-01/DL-01 11 项 + MX-04/07/08/02/09 引擎 15 项 + MX-01/13 生命周期 9 项 + MX-11/ST-03 6 项 + DL-02 4 项 + RV-04 3 项）。
+- 新增 focused 回归：70+（阶段A 18 项 + DY-01/DL-01 11 项 + MX-04/07/08/02/09 引擎 15 项 + MX-01/13 生命周期 12 项 + MX-11/ST-03 6 项 + DL-02 4 项 + RV-04 3 项 + DY-03/EQ-02 锁 5 项 + ST-01 存储 3 项）。
 - 更新为旧缺陷契约的测试：B13 静音广播（→版本化 payload）、SC Listen 广播（→原始检源）、EQ 身份段数（→真 Butterworth 段数）。
-- 全量：`tests/edit` + `tests/shared` 音频相关套件 452+ 通过（最后一次全量见提交 d6c6839c；宽回归见本文档提交）。
-- 真实主窗播放/导出的端到端验证不在本次自动化范围内（计划 §13 要求真实视频 + 合成信号互补；合成信号侧已全部覆盖）。
+- 音频域全量：`tests/edit` + `tests/shared` 音频相关套件 452+ 通过。
+- 宽回归（tests/edit + tests/shared 全量）：**15929 通过 / 30 失败**；经干净基线
+  worktree（df749759）抽样复跑确认，30 个失败全部为既有问题（effect_catalog 契约、
+  n03 keyer/mask、timeline 手势/指针、ReverbRebuild 引用不存在的 `_combs` 旧属性、
+  ef01 参数缓存计数等），与本次改动无关——本次改动零新增回归。
+- 独立 Review（general-purpose agent）发现 3 Critical + 10 Suggestion/Nice：
+  3 Critical 已全部修复（reverb 用户预设丢失回填、静音 payload lufs 类型、
+  旧版预设清空 Panner/路由），并采纳 3 项建议（UI 多 Solo 对齐 DSP、实时
+  载荷盖播放代、效果预设盖算法版本）；审查同时确认分数读头越界、ring 回绕、
+  导出 flush 帧序、链身份往返、锁边界均正确。剩余建议（Gate 逐样本循环
+  优化、tap 采样免分配、导出侧链缓存滚动窗口、A3 懒分配恢复等）记录为
+  性能卫生待办，不阻塞正确性。
+- 真实主窗播放/导出的端到端验证不在本次自动化范围内（计划 §13 要求真实视频
+  + 合成信号互补；合成信号侧已全部覆盖，集成侧建议按 §13 测试工程清单跑一次
+  实播回归）。
 
 ## 4. 遗留风险与建议
 
