@@ -1808,7 +1808,10 @@ class ReverbEffect(AudioEffect):
         self._params = p
         self._enabled = p["enabled"]
         if geometry_changed:
-            self._rebuild(p)
+            # RV-04: 几何变化不再整体重建网络——comb/allpass 拓扑由固定
+            # 常量决定（房间尺寸只影响 ER 抽头/晚期偏移），缓冲与尾音
+            # 原样保留；仅在采样率变化（系数失配）时才重置网络。
+            self._rebuild(p, reset_network=sr_changed)
         elif brightness_changed:
             # 就地更新 RT60/阻尼（comb 缓冲与 allpass 状态全部保留）
             self._apply_fdn_params(p)
@@ -1819,27 +1822,35 @@ class ReverbEffect(AudioEffect):
 
     # ── 结构重建 ─────────────────────────────────────────────────
 
-    def _rebuild(self, p: dict) -> None:
-        """按当前参数重建延迟结构（FDN / 环形缓冲 / ER 抽头 / 音色）。"""
+    def _rebuild(self, p: dict, reset_network: bool = False) -> None:
+        """按当前参数重建延迟结构（RV-04：网络缓冲跨几何变化保留）。
+
+        comb/allpass 拓扑由固定常量决定，几何参数只影响 ER 抽头与晚期
+        偏移——重置网络仅在采样率变化（系数失配）或首次构建时发生。
+        环形缓冲只增不缩（容量不足才重新分配）。
+        """
         sr = self._sample_rate
-        self._combs_l = [_CombFilter(int(round(d * 0.001 * sr))) for d in _COMB_DELAY_MS]
-        self._combs_r = [_CombFilter(int(round(d * 0.001 * sr))) for d in _COMB_DELAY_MS_R]
-        self._allpasses_l = [_AllpassFilter(int(round(d * 0.001 * sr))) for d in _ALLPASS_DELAY_MS]
-        self._allpasses_r = [_AllpassFilter(int(round(d * 0.001 * sr))) for d in _ALLPASS_DELAY_MS]
+        if reset_network or not self._combs_l:
+            self._combs_l = [_CombFilter(int(round(d * 0.001 * sr))) for d in _COMB_DELAY_MS]
+            self._combs_r = [_CombFilter(int(round(d * 0.001 * sr))) for d in _COMB_DELAY_MS_R]
+            self._allpasses_l = [_AllpassFilter(int(round(d * 0.001 * sr))) for d in _ALLPASS_DELAY_MS]
+            self._allpasses_r = [_AllpassFilter(int(round(d * 0.001 * sr))) for d in _ALLPASS_DELAY_MS]
+            self._er_shelf_zi = None
+            self._rev_shelf_zi = None
         self._er_taps_l, self._er_taps_r, self._late_offset_l, self._late_offset_r = \
             self._compute_taps(p)
         # 环形缓冲：覆盖最大延迟（predelay 200 + 距离 87 + ER 跨距 ~300 + 调制余量）
         room_mean = (p["height"] + p["length"] + p["width"]) / 3.0
         max_ms = 200.0 + (p["distance"] / _SPEED_OF_SOUND) * 1000.0 + \
             max(45.0, room_mean * 3.8) + 100.0
-        self._ring_size = max(int(round(max_ms * 0.001 * sr)) + 8, 4096)
-        self._ring = np.zeros(self._ring_size, dtype=np.float64)
-        self._ring_write = 0
-        self._mod_phase = 0.0
+        needed = max(int(round(max_ms * 0.001 * sr)) + 8, 4096)
+        if self._ring is None or self._ring_size < needed:
+            self._ring_size = needed
+            self._ring = np.zeros(self._ring_size, dtype=np.float64)
+            self._ring_write = 0
+            self._mod_phase = 0.0
         self._apply_fdn_params(p)
         self._rebuild_tone(p)
-        self._er_shelf_zi = None
-        self._rev_shelf_zi = None
 
     def _compute_taps(self, p: dict) -> tuple:
         """由房间几何计算 ER 抽头（样本）与晚期起始偏移（样本）。"""

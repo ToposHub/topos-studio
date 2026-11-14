@@ -572,3 +572,50 @@ class TestDl02FractionalDelay:
         assert np.isfinite(out_peak) and out_peak < 10.0, (
             f"high feedback diverged (peak={out_peak})"
         )
+
+
+class TestRv04GeometryHotUpdate:
+    """RV-04：几何参数（尺寸/距离）拖动不重建网络——湿声不突然归零。"""
+
+    def _params(self, **over):
+        p = {
+            "height": 10.0, "length": 30.0, "width": 40.0,
+            "pre_delay": 20.0, "reverb_time": 2000.0, "distance": 10.0,
+            "brightness": 50.0, "modulation": 0.0,
+            "dry_wet": 100.0, "direct_db": -60.0, "er_db": -60.0,
+            "reverb_db": 0.0, "enabled": True,
+        }
+        p.update(over)
+        return p
+
+    def test_geometry_drag_keeps_tail(self):
+        """建立尾音后拖动尺寸：晚期网络缓冲保留，尾音不归零。"""
+        rng = np.random.default_rng(21)
+        rv = ReverbEffect(SR)
+        rv.set_params(self._params())
+        rv.process(rng.standard_normal((2, 48000)) * 0.2)
+        rv.set_params(self._params(length=60.0))  # 几何变化
+        tail = rv.process(np.zeros((2, 48000)))
+        peak = float(np.max(np.abs(tail)))
+        assert peak > 1e-3, (
+            f"geometry change cleared the reverb tail (peak={peak})"
+        )
+
+    def test_distance_change_keeps_tail(self):
+        rv = ReverbEffect(SR)
+        rv.set_params(self._params())
+        rng = np.random.default_rng(22)
+        rv.process(rng.standard_normal((2, 48000)) * 0.2)
+        rv.set_params(self._params(distance=25.0))
+        tail = rv.process(np.zeros((2, 48000)))
+        assert float(np.max(np.abs(tail))) > 1e-3
+
+    def test_sample_rate_change_resets_network(self):
+        """采样率变化必须重置网络（系数失配防护语义保留）。"""
+        rv = ReverbEffect(SR)
+        rv.set_params(self._params())
+        rng = np.random.default_rng(23)
+        rv.process(rng.standard_normal((2, 4800)) * 0.2)
+        rv.set_params(self._params(), sample_rate=96000.0)
+        # comb 缓冲对象被重建（采样率变化 → 网络重置）
+        assert float(np.max(np.abs(rv._combs_l[0]._buf))) == 0.0
