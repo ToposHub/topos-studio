@@ -293,16 +293,18 @@ class TestAud15302EqModeSwitchState:
                      "slope": 18, "enabled": True}
         fx.set_params({"enabled": True, "bands": bands2})
         fx.process(np.zeros((2, 64), dtype=np.float32))
-        # 18dB/oct = 3 阶级联 → b1h0/b1h1/b1h2 三段，全部归 Band 1 身份
-        assert set(fx._zi_by_key.keys()) == {"b1h0", "b1h1", "b1h2"}
+        # EQ-01: 18dB/oct = 3 阶真 Butterworth → 2 行 SOS（一阶段+二阶段），
+        # 全部归 Band 1 身份（旧实现是 3 个相同 biquad 级联 = 6 阶错误）
+        assert set(fx._zi_by_key.keys()) == {"b1h0", "b1h1"}
         # 切换为 LPF 12dB/oct（身份不变 Band 1）：状态键仍归 b1 前缀
         bands3 = [dict(b) for b in bands]
         bands3[0] = {**bands3[0], "filter_type": "LPF", "freq": 8000.0,
                      "slope": 12, "enabled": True}
         fx.set_params({"enabled": True, "bands": bands3})
         fx.process(np.zeros((2, 64), dtype=np.float32))
-        # 旧键按身份对位保留（h2 残留但不再被引用），新链只用 h0/h1
-        assert {"b1h0", "b1h1"} <= set(fx._zi_by_key.keys())
+        # 12dB/oct = 2 阶 → 1 行 SOS（b1h0）；旧键按身份对位保留
+        #（b1h1 残留但不再被引用），新链只用 b1h0
+        assert {"b1h0"} <= set(fx._zi_by_key.keys())
 
 
 # ================================================================
