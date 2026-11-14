@@ -1635,6 +1635,27 @@ class AudioDecoder:
 # AudioMixer
 # =============================================================================
 
+# MX-05: 轨道处理顺序（版本化契约，实时 mix_samples 与离线
+# AudioGraphRenderer.render_track_block 严格同序）：
+#   1. clip_stage   逐 clip：decode → source patch → 声道适配 → clip fade
+#                   → crossfade → clip gain → clip FX → 逐 clip pan/balance
+#                   （RMA-08 按源布局选法则）→ 汇入轨输入块（MX-04 求和）
+#   2. volume       轨音量/自动化 ramp（对求和块一次）
+#   3. panner       SpatialPanner 矩阵 + boom（状态化，一次；pan/balance
+#                   逐样本增益已在其前的 clip 阶段施加）
+#   4. strip_eq     6 频段参量 EQ（post-fader，状态化，一次）
+#   5. track_fx     FX 机架链（外部侧链检源透传，状态化，一次）
+#   6. mute_gate    自动化静音门控（链输出端，同时门控 EQ/FX 尾音泄漏）
+# 之后进入路由（output_bus_id / sends → Bus 或 Master）。
+# Send tap 位置当前固定 post-fader（E12 Send 模型契约）；pre-send/
+# pre-FX tap 位置为 MX-05 后续工作（需 Send 模型扩展，见计划表）。
+# 版本：ORDER_VERSION = 1（当前唯一受支持组合；旧工程即此顺序）。
+TRACK_CHAIN_ORDER: tuple = (
+    "clip_stage", "volume", "panner", "strip_eq", "track_fx", "mute_gate",
+)
+ORDER_VERSION: int = 1
+
+
 class AudioMixer:
     """
     音频混合器。
