@@ -162,7 +162,7 @@ class TrackMixerWidget(QWidget):
     # 信号（track_id 统一为 str，与 EditTrack.track_id UUID 一致）
     mute_toggled = pyqtSignal(str, bool)      # track_id, muted
     solo_toggled = pyqtSignal(str, bool)      # track_id, solo
-    record_arm_toggled = pyqtSignal(str, bool)  # track_id, armed（Record Arm 占位，录音路由待实现）
+    record_arm_toggled = pyqtSignal(str, bool)  # track_id, armed（R 按钮=开始/停止录音开关；arm 待命分层为 MX-18 待办）
     volume_changed = pyqtSignal(str, float)   # track_id, db_value（松手时最终提交）
     balance_changed = pyqtSignal(str, int)    # track_id, balance_value（松手时最终提交）
     # 拖动期间的纯视觉预览（实时听感 + 视觉联动，不进命令栈）

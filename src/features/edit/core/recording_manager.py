@@ -1058,6 +1058,14 @@ class RecordingManager:
             if device is not None:
                 self._audio_source = QAudioSource(device, fmt)
             else:
+                # MX-18 审计：配置的输入设备不可用——回退系统默认设备并
+                # 记警告（不静默回退；计划 §2.3 约束 7：故障可定位）
+                if self._config.device_id:
+                    logger.warning(
+                        "RecordingManager: configured input device %r not "
+                        "found; falling back to system default input",
+                        self._config.device_id,
+                    )
                 self._audio_source = QAudioSource(fmt)
             self._io_device = self._audio_source.start()
             if self._io_device is not None:
