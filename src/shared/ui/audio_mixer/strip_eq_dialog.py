@@ -403,10 +403,12 @@ class ProEQGraphWidget(QWidget):
         if not self._eq_enabled:
             return 0.0
         total = self._master_gain
-        solo_idx = next((i for i, b in enumerate(self._bands)
-                         if b["enabled"] and b.get("solo", False)), -1)
-        for i, b in enumerate(self._bands):
-            if solo_idx >= 0 and i != solo_idx:
+        # EQ-02 审查修正：与 DSP/共享服务一致——Solo 时累加**全部** solo
+        # 频段（UI 正常互斥，但手工编辑的工程文件可能带多个 solo 标志）
+        solo_active = any(b["enabled"] and b.get("solo", False)
+                          for b in self._bands)
+        for b in self._bands:
+            if solo_active and not (b["enabled"] and b.get("solo", False)):
                 continue
             total += self._band_magnitude_db(b, freq)
         return total

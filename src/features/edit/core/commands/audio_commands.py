@@ -618,16 +618,26 @@ def _capture_strip_state(track: Any) -> dict:
         "effect_chain": (track.effect_chain.to_dict()
                          if getattr(track, "effect_chain", None) is not None
                          else None),
-        "panner": (dict(track.panner)
-                   if getattr(track, "panner", None) else None),
+        # 全量快照语义：空 dict = 目标轨当前无 panner（undo 据此精确恢复）；
+        # 与预设文件的 panner=None（未捕获→保留现状）显式区分。
+        "panner": dict(getattr(track, "panner", {}) or {}),
         "output_bus_id": getattr(track, "output_bus_id", None),
         "sends": [s.to_dict() if hasattr(s, "to_dict") else dict(s)
                   for s in (getattr(track, "sends", ()) or ())],
     }
 
 
-def _apply_strip_state(track: Any, ts: dict) -> Any:
-    """把 strip 状态 dict 应用到 track（缺失字段保留当前值，未知字段忽略）。"""
+def _apply_strip_state(track: Any, ts: dict, full_snapshot: bool = False) -> Any:
+    """把 strip 状态 dict 应用到 track。
+
+    两种语义（MX-11 审查修正）：
+    - full_snapshot=True（快照 apply/undo、预设 undo 的 _old_state）：
+      capture 总是写全字段（panner 捕获为 dict 可空、sends 捕获实际
+      元组）——空值就是被捕获的真实状态，逐字段精确恢复（A→B→A）。
+    - full_snapshot=False（通道预设 apply，默认）：键缺失或值为 None/
+      空表示"预设未捕获该字段"（旧版预设文件只有五字段）——保留目标
+      轨现状，不得清掉活动 Panner/路由/Sends。
+    """
     from src.features.edit.core.timeline_v2 import (
         EffectChainParams, Send, StripEQParams,
     )
@@ -654,18 +664,18 @@ def _apply_strip_state(track: Any, ts: dict) -> Any:
                 EffectChainParams.from_dict(ec) if ec else None)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"effect_chain parse failed: {e}")
-    if "panner" in ts:
-        panner = ts.get("panner")
+    if "panner" in ts and (ts.get("panner") is not None or full_snapshot):
         try:
-            new_track = new_track.with_panner(dict(panner) if panner else {})
+            new_track = new_track.with_panner(dict(ts.get("panner") or {}))
         except Exception as e:  # noqa: BLE001
             logger.warning(f"panner parse failed: {e}")
-    if "output_bus_id" in ts:
+    if "output_bus_id" in ts and (ts.get("output_bus_id") is not None
+                                  or full_snapshot):
         try:
             new_track = new_track.with_output_bus(ts.get("output_bus_id"))
         except Exception as e:  # noqa: BLE001
             logger.warning(f"output_bus parse failed: {e}")
-    if "sends" in ts:
+    if "sends" in ts and (ts.get("sends") or full_snapshot):
         try:
             sends = tuple(
                 Send.from_dict(sd) if isinstance(sd, dict) else sd
@@ -722,17 +732,25 @@ class ApplyChannelStripPresetCommand:
         # MX-11: 记录完整旧状态（undo 逐字段恢复）
         old_state = _capture_strip_state(track)
 
+        # MX-11 审查修正：预设未携带的字段（None/空）从 new_state 省略——
+        # 旧版预设文件只有五字段，应用时不得清掉目标轨的活动
+        # Panner/路由/Sends（"预设没存的状态保留现状"）。
         new_state = {
             "volume": self.volume, "pan": self.pan,
             "is_muted": self.is_muted, "is_solo": self.is_solo,
-            "strip_eq": self.strip_eq.to_dict() if self.strip_eq is not None else None,
-            "effect_chain": (self.effect_chain.to_dict()
-                             if self.effect_chain is not None else None),
-            "panner": self.panner,
-            "output_bus_id": self.output_bus_id,
-            "sends": [s.to_dict() if hasattr(s, "to_dict") else dict(s)
-                      for s in self.sends],
         }
+        if self.strip_eq is not None:
+            new_state["strip_eq"] = self.strip_eq.to_dict()
+        if self.effect_chain is not None:
+            new_state["effect_chain"] = self.effect_chain.to_dict()
+        if self.panner:
+            new_state["panner"] = dict(self.panner)
+        if self.output_bus_id:
+            new_state["output_bus_id"] = self.output_bus_id
+        if self.sends:
+            new_state["sends"] = [
+                s.to_dict() if hasattr(s, "to_dict") else dict(s)
+                for s in self.sends]
         new_track = _apply_strip_state(track, new_state)
 
         new_timeline = timeline.with_track_updated(new_track)
@@ -757,7 +775,9 @@ class ApplyChannelStripPresetCommand:
         # MX-11: 旧状态存在时逐字段恢复（含 EQ/FX/Panner/routing）；
         # 旧命令序列化（无 _old_state）回退到仅五字段恢复。
         if self._old_state is not None:
-            new_track = _apply_strip_state(track, self._old_state)
+            # _old_state 是全量 capture（含空 dict/空 tuple 的真实状态）
+            new_track = _apply_strip_state(track, self._old_state,
+                                           full_snapshot=True)
             return timeline.with_track_updated(new_track)
         new_track = track.with_volume(self._old_volume).with_pan(self._old_pan)
         new_track = new_track.with_muted(self._old_muted).with_solo(self._old_solo)
@@ -881,7 +901,9 @@ class ApplyMixSnapshotCommand:
             ts = self.track_states.get(track.track_id)
             if ts is None:
                 continue
-            new_track = _apply_strip_state(track, ts)
+            # MixSnapshot.track_states 来自全量 capture（ChannelStripPreset
+            # .from_track）：空值 = 被捕获的真实状态
+            new_track = _apply_strip_state(track, ts, full_snapshot=True)
             new_timeline = new_timeline.with_track_updated(new_track)
         # Master
         new_timeline = new_timeline.with_master_volume(self.master_volume)
@@ -905,7 +927,7 @@ class ApplyMixSnapshotCommand:
             if ts is None:
                 continue
             # MX-11: undo 与 apply 同一字段集（旧实现漏恢复 strip_eq/FX）
-            new_track = _apply_strip_state(track, ts)
+            new_track = _apply_strip_state(track, ts, full_snapshot=True)
             new_timeline = new_timeline.with_track_updated(new_track)
         new_timeline = new_timeline.with_master_volume(self._old_snapshot.get("master_volume", 1.0))
         new_timeline = new_timeline.with_master_muted(self._old_snapshot.get("master_muted", False))

@@ -152,8 +152,9 @@ class ChannelStripPreset:
             strip_eq=getattr(track, 'strip_eq', None),
             # AM-13: 补齐 effect_chain 与 routing
             effect_chain=getattr(track, 'effect_chain', None),
-            # MX-11: 空间声像器一并捕获
-            panner=(dict(track.panner) if getattr(track, 'panner', None) else None),
+            # MX-11: 空间声像器一并捕获（全量快照语义：空 dict=无 panner；
+            # 旧版预设文件缺该键 → from_dict 得 None → 应用时保留目标轨现状）
+            panner=dict(getattr(track, 'panner', {}) or {}),
             output_bus_id=getattr(track, 'output_bus_id', None),
             sends=tuple(getattr(track, 'sends', ()) or ()),
             is_bus=bool(getattr(track, 'is_bus', False)),

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import math
 from typing import Any, Optional
 
@@ -743,6 +744,9 @@ class ReverbOutputMeter(QWidget):
 # 主对话框
 # ═════════════════════════════════════════════════════════════════════════════
 
+logger = logging.getLogger(__name__)
+
+
 class ReverbDialog(QDialog):
     """声学房间混响器对话框（3D 房间 + IR 图谱 + 4 模块卡片）。"""
 
@@ -778,6 +782,13 @@ class ReverbDialog(QDialog):
             "B": ReverbParams.from_dict(REVERB_PRESETS[1]["params"]),
         }
         self._presets: list[dict[str, Any]] = copy.deepcopy(REVERB_PRESETS)
+        # ST-01: 用户预设跨会话持久化（关窗口/重启/新工程均可加载）
+        self._effect_type = "reverb"
+        try:
+            from src.features.edit.core.effect_preset import load_user_presets
+            self._presets.extend(load_user_presets(self._effect_type))
+        except Exception as exc:  # noqa: BLE001 — 预设库不可读不阻断对话框
+            logger.warning("reverb dialog: user presets unavailable: %r", exc)
         self._cells: dict[str, KnobParameterCell] = {}
         self._cards: list[ProModuleCard] = []
 
