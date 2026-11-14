@@ -50,13 +50,16 @@ except ImportError:  # pragma: no cover
 #     从未实现，迁移为 Stereo，声音不变）
 #   - MX-04: 同轨多 clip 先求和、轨 DSP 一次处理（重叠 clip 区间声音改变
 #     ——这是缺陷修复而非回归）
-ALGORITHM_VERSION = 2
+ALGORITHM_VERSION = 3
 
 ALGORITHM_CHANGELOG = {
     1: "初始版本（CW-A1）",
     2: "EQ 斜率/Shelf Q、Expander 斜率/Gate 状态机、压缩检测域、Make Up "
        "位置、SC Listen、Panner 矩阵、Reverb 阻尼热更新、Delay 输入矩阵、"
        "同轨 clip 求和",
+    3: "EQ-02 非 Clean Voicing 的带宽/增益耦合（boost→Q 窄/cut→Q 宽；"
+       "Clean 与 0dB 不变）；DY-03 Limiter 过冲遥测；RV-02 image-source "
+       "ER/负 Pre Delay 传播/Distance 只动 ER",
 }
 
 
@@ -287,10 +290,12 @@ def strip_eq_band_sections(band: dict, sample_rate: float,
     freq = min(max(10.0, float(band.get("freq", 1000.0))), sample_rate * 0.45)
     gain = float(band.get("gain", 0.0))
     q = max(0.1, float(band.get("q", 1.1))) * VOICING_Q_SCALE.get(voicing, 1.0)
+    # EQ-02: 带宽/增益耦合（非 Clean voicing；带增益形状；0dB/无耦合直通）
+    q = _effective_band_q(q, gain, voicing, ftype)
     slope = int(band.get("slope", 12))
 
     cache_key = (ftype, round(freq, 6), round(gain, 6), round(q, 6),
-                 slope, round(sample_rate, 3))
+                 slope, round(sample_rate, 3), voicing)
     cached = _EQ_SECTION_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -398,6 +403,33 @@ VOICING_Q_SCALE: dict = {
     "Warm":    0.92,  # 宽厚模拟润色
     "Punch":   0.85,  # 现代紧凑聚焦
 }
+
+# EQ-02: 带宽/增益耦合（自有可测模型，非任何专有模拟音色复刻）。
+# 模拟调音台带宽行为：boost 增益越高 Q 越窄（能量聚焦），cut 越深 Q 越
+# 宽（宽切更音乐性）。耦合因子 = 10^(k·gain_db/60)，k 每 voicing 不同；
+# |gain|≤24dB 时因子有界于 [0.67, 1.50]。Clean k=0（纯数字、无耦合，
+# 默认工程声音不变）。只作用于带增益的形状（Bell/Low Shelf/High Shelf）。
+VOICING_GAIN_Q_COUPLING: dict = {
+    "Clean":   0.00,
+    "British": 0.30,
+    "Warm":    0.22,
+    "Punch":   0.36,
+}
+
+
+def _effective_band_q(base_q: float, gain_db: float, voicing: str,
+                      shape: str) -> float:
+    """EQ-02: 有效 Q = 基础 Q × voicing 比例 × 增益耦合因子。
+
+    仅对带增益的形状（Bell/Low Shelf/High Shelf）生效；gain=0 或 Clean
+    恒为直通（因子 1）。单调：gain ↑ → Q ↑（带宽窄）；有界；可测。
+    """
+    if shape not in ("Bell", "Low Shelf", "High Shelf") or gain_db == 0.0:
+        return base_q
+    k = VOICING_GAIN_Q_COUPLING.get(voicing, 0.0)
+    if k == 0.0:
+        return base_q
+    return base_q * 10.0 ** (k * float(gain_db) / 60.0)
 
 # Butterworth 平滑 Q 值（HPF/LPF 级联用）
 _BUTTERWORTH_Q = 0.7071
