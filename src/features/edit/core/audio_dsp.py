@@ -1234,6 +1234,9 @@ class LimiterEffect(AudioEffect):
         self._attack_coeff: float = self._compute_release_coeff(self._attack_ms)
         # GR 遥测（块内最大衰减，正 dB）
         self.last_gr_db: float = 0.0
+        # DY-03: 过冲报告（正 dB）——attack 平滑期间瞬态超出阈值的量，
+        # 硬保护钳制介入时记录（0=未触发）。供面板/诊断显示失真风险。
+        self.last_overshoot_db: float = 0.0
 
     @staticmethod
     def _compute_release_coeff(release_ms: float, sample_rate: float = 48000.0) -> float:
@@ -1316,6 +1319,7 @@ class LimiterEffect(AudioEffect):
             限幅后的 samples，同 shape（旁路时原样返回）。
         """
         self.last_gr_db = 0.0
+        self.last_overshoot_db = 0.0
         if not self._enabled or samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
             return samples
 
@@ -1360,7 +1364,13 @@ class LimiterEffect(AudioEffect):
         # 硬保护：attack 期间瞬态可能短时超阈值（attack limiter 固有特性，
         # 完全消除需 look-ahead）。逐样本钳制（块无关——整块统一缩放会让
         # 保护量依赖块边界，破坏分块等价性）；增益已平滑，钳制极少触发。
-        np.clip(out, -threshold_linear * 1.0001, threshold_linear * 1.0001, out=out)
+        clip_ceiling = threshold_linear * 1.0001
+        pre_clip_peak = float(np.max(np.abs(out))) if out.size else 0.0
+        np.clip(out, -clip_ceiling, clip_ceiling, out=out)
+        # DY-03: 过冲报告（钳制介入 = 增益未及收敛的超阈瞬态）
+        if pre_clip_peak > threshold_linear:
+            self.last_overshoot_db = 20.0 * float(np.log10(
+                pre_clip_peak / threshold_linear))
         return out.astype(samples.dtype, copy=False)
 
     def reset_state(self) -> None:
@@ -1369,6 +1379,7 @@ class LimiterEffect(AudioEffect):
         self._gain_state = 1.0
         self._hold_remaining = 0
         self.last_gr_db = 0.0
+        self.last_overshoot_db = 0.0
 
     @property
     def is_active(self) -> bool:
@@ -1739,7 +1750,9 @@ class ReverbEffect(AudioEffect):
         # 当前生效的派生量（变更检测）
         self._er_taps_l: np.ndarray = np.zeros(0, dtype=np.int64)
         self._er_taps_r: np.ndarray = np.zeros(0, dtype=np.int64)
-        self._er_weights: np.ndarray = np.array(_ER_TAP_WEIGHTS)
+        # RV-02: L/R 独立权重（镜像源横向位置决定方向分配）
+        self._er_weights_l: np.ndarray = np.array(_ER_TAP_WEIGHTS)
+        self._er_weights_r: np.ndarray = np.array(_ER_TAP_WEIGHTS)
         self._late_offset_l: float = 0.0
         self._late_offset_r: float = 0.0
         self._mod_phase: float = 0.0
@@ -1837,8 +1850,9 @@ class ReverbEffect(AudioEffect):
             self._allpasses_r = [_AllpassFilter(int(round(d * 0.001 * sr))) for d in _ALLPASS_DELAY_MS]
             self._er_shelf_zi = None
             self._rev_shelf_zi = None
-        self._er_taps_l, self._er_taps_r, self._late_offset_l, self._late_offset_r = \
-            self._compute_taps(p)
+        (self._er_taps_l, self._er_taps_r,
+         self._er_weights_l, self._er_weights_r,
+         self._late_offset_l, self._late_offset_r) = self._compute_taps(p)
         # 环形缓冲：覆盖最大延迟（predelay 200 + 距离 87 + ER 跨距 ~300 + 调制余量）
         room_mean = (p["height"] + p["length"] + p["width"]) / 3.0
         max_ms = 200.0 + (p["distance"] / _SPEED_OF_SOUND) * 1000.0 + \
@@ -1853,22 +1867,81 @@ class ReverbEffect(AudioEffect):
         self._rebuild_tone(p)
 
     def _compute_taps(self, p: dict) -> tuple:
-        """由房间几何计算 ER 抽头（样本）与晚期起始偏移（样本）。"""
+        """RV-02：矩形房间 image-source ER + 正负 Pre Delay 传播模型。
+
+        - 一阶镜像（每维近/远墙，6 个）+ 有限阶角镜像（xy/xz/yz/xyz，4 个）
+          共 10 个抽头，按附加路径排序；各维独立决定反射路径与延迟
+          （同均值不同形状产生不同 ER 分布）；
+        - 抽头延迟 = 有效传播 + (镜像路径 − 直达几何路径)/c（反射相对直达
+          的附加行程；不与 distance 重复计程）；
+        - 有效传播时间 effective = max(0, pre_delay_s + distance/c)：负
+          pre-delay 抵消距离传播时延（旧实现把整个负区间钳 0）；
+        - 权重 ∝ 1/镜像路径（几何扩散），整体能量归一到 _ER_TAP_WEIGHTS
+          尺度；L/R 对称权重 + ±2% 确定性延迟去相关（对称输入对称输出，
+          结构对称契约保持）；
+        - 晚期起始只随 pre_delay（Distance 只改 ER，不移动 Late——旧实现
+          无意中把整个晚期随距离平移）。
+
+        Returns:
+            (taps_l, taps_r, weights_l, weights_r, late_offset_l, late_offset_r)
+        """
         sr = self._sample_rate
-        room_mean = (p["height"] + p["length"] + p["width"]) / 3.0
-        pre = max(0.0, p["pre_delay"]) * 0.001
-        dist = (p["distance"] / _SPEED_OF_SOUND)
-        er_start = pre + dist
+        h, l, w = float(p["height"]), float(p["length"]), float(p["width"])
+        room = np.array([l, w, h])
+        src = np.array([l * 0.4, w * 0.5, h * 0.5])
+        lis = np.array([l * 0.6, w * 0.5, h * 0.5])
+        # 一阶镜像（每维近/远墙）
+        images = []
+        for axis in range(3):
+            for far_wall in (False, True):
+                img = src.copy()
+                img[axis] = (2.0 * room[axis] - src[axis] if far_wall
+                             else -src[axis])
+                images.append(img)
+        # 有限阶补充：角镜像（xy/xz/yz 面 + xyz 体对角，取远墙角）
+        for axes in ((0, 1), (0, 2), (1, 2), (0, 1, 2)):
+            img = src.copy()
+            for axis in axes:
+                img[axis] = 2.0 * room[axis] - src[axis]
+            images.append(img)
+        imgs = np.array(images)
+        paths = np.linalg.norm(imgs - lis, axis=1)
+        direct = float(np.linalg.norm(lis - src))
+        extra = paths - direct  # 反射相对直达的附加行程
+        order = np.argsort(extra)
+        extra_sorted = extra[order]
+        paths_sorted = paths[order]
+
+        # 权重：几何扩散 1/path × 抽头序曲线，整体能量归一；L/R 对称
+        base_w = np.array(_ER_TAP_WEIGHTS, dtype=np.float64)
+        weights = base_w * (paths_sorted[0] / np.maximum(paths_sorted, 1e-6))
+        wsum = float(weights.sum())
+        if wsum > 0.0:
+            weights = weights * (float(base_w.sum()) / wsum)
+        weights_l = weights
+        weights_r = weights.copy()
+
+        # 有效传播：负 pre-delay 抵消距离时延（RV-02 候选公式）
+        pre_s = float(p["pre_delay"]) * 0.001
+        dist_s = float(p["distance"]) / _SPEED_OF_SOUND
+        effective = max(0.0, pre_s + dist_s)
+        delays_s = effective + extra_sorted / _SPEED_OF_SOUND
+        # L/R ±2% 确定性延迟去相关（对称权重 + 延迟抖动；与旧实现同型）
+        k = np.arange(1, len(delays_s) + 1)
+        taps_l = np.maximum(
+            1, np.round(delays_s * (1.0 + 0.02 * np.sin(k * 2.1))
+                        * sr)).astype(np.int64)
+        taps_r = np.maximum(
+            1, np.round(delays_s * (1.0 - 0.02 * np.cos(k * 1.7))
+                        * sr)).astype(np.int64)
+
+        # 晚期起始：只随 pre_delay（distance 不移动晚期）+ 房间自然建声
+        room_mean = (h + l + w) / 3.0
         span = max(0.045, room_mean * 3.8 * 0.001)
-        n_taps = len(_ER_TAP_WEIGHTS)
-        k = np.arange(1, n_taps + 1)
-        base_ms = (er_start + (k / n_taps) * span) * sr
-        # L/R 抖动去相关（±2%，确定性）
-        taps_l = np.round(base_ms * (1.0 + 0.02 * np.sin(k * 2.1))).astype(np.int64)
-        taps_r = np.round(base_ms * (1.0 - 0.02 * np.cos(k * 1.7))).astype(np.int64)
-        late_l = (er_start + span * 0.88) * sr
-        late_r = (er_start + span * 0.88) * sr * 1.007
-        return taps_l, taps_r, float(late_l), float(late_r)
+        late_base = max(0.0, pre_s) + span * 0.88
+        late_l = late_base * sr
+        late_r = late_l * 1.007
+        return taps_l, taps_r, weights_l, weights_r, float(late_l), float(late_r)
 
     def _apply_fdn_params(self, p: dict) -> None:
         """reverb_time(RT60) / brightness(阻尼) 应用到双 FDN。"""
@@ -2007,8 +2080,8 @@ class ReverbEffect(AudioEffect):
 
         # 2) ER 总线：抽头读取（块末写位先行更新，读取以块起始为基准回溯）
         self._ring_write = write
-        er_l = (self._ring_read_fixed(self._er_taps_l, n) * self._er_weights[:, np.newaxis]).sum(axis=0)
-        er_r = (self._ring_read_fixed(self._er_taps_r, n) * self._er_weights[:, np.newaxis]).sum(axis=0)
+        er_l = (self._ring_read_fixed(self._er_taps_l, n) * self._er_weights_l[:, np.newaxis]).sum(axis=0)
+        er_r = (self._ring_read_fixed(self._er_taps_r, n) * self._er_weights_r[:, np.newaxis]).sum(axis=0)
         er_bus = np.stack((er_l, er_r)) * (1.0 / 6.0)
         er_bus = self._apply_tone(self._er_sos, "_er_shelf_zi", er_bus)
 
@@ -3322,7 +3395,7 @@ class EffectChain:
             out_peak = float(np.max(np.abs(out))) if out.size else 0.0
             out_db = max(-100.0, 20.0 * float(np.log10(max(out_peak, 1e-9))))
             if iid:
-                self._tap_levels[iid] = {
+                tap = {
                     "effect_type": etype,
                     "in_db": in_db, "out_db": out_db,
                     "gr_db": float(getattr(inst, "last_gr_db", 0.0) or 0.0),
@@ -3330,6 +3403,11 @@ class EffectChain:
                                    if sc_buf is not None else -100.0),
                     "bypassed": False,
                 }
+                # DY-03: Limiter 过冲报告（有该遥测的实例才出键）
+                overshoot = getattr(inst, "last_overshoot_db", None)
+                if overshoot is not None:
+                    tap["overshoot_db"] = float(overshoot)
+                self._tap_levels[iid] = tap
         return out
 
     def tap_levels(self) -> dict:
