@@ -1172,8 +1172,15 @@ class ReverbDialog(QDialog):
             I18N.tr("audio.fx.preset_name_prompt", "输入预设名称:"))
         if ok and name.strip():
             clean = name.strip()
-            self._presets.append({"name": clean, "params": self._st().to_dict()})
+            data = self._st().to_dict()
+            self._presets.append({"name": clean, "params": data})
             self.preset_combo.addItem(clean)
+            # ST-01: 原子持久化（失败仅内存，下次会话重试）
+            try:
+                from src.features.edit.core.effect_preset import save_user_preset
+                save_user_preset(self._effect_type, clean, data)
+            except Exception:  # noqa: BLE001
+                pass
 
     # ── 公开 API ─────────────────────────────────────────────
 

@@ -984,6 +984,13 @@ class DynamicsDialog(QDialog):
         self.setMinimumSize(900, 620)
 
         self._presets: list[dict[str, Any]] = copy.deepcopy(DYNAMICS_PRESETS)
+        # ST-01: 用户预设跨会话持久化
+        self._effect_type = "dynamics"
+        try:
+            from src.features.edit.core.effect_preset import load_user_presets
+            self._presets.extend(load_user_presets(self._effect_type))
+        except Exception:  # noqa: BLE001
+            pass
         self._setup_ui(track_name)
         self._refresh_all_views()
 
@@ -1355,9 +1362,16 @@ class DynamicsDialog(QDialog):
         if ok and name.strip():
             state = self._panel_state()
             clean = name.strip()
-            self._presets.append({"name": clean, "params": {
-                "eg": state["eg"], "comp": state["comp"], "lim": state["lim"]}})
+            params = {
+                "eg": state["eg"], "comp": state["comp"], "lim": state["lim"]}
+            self._presets.append({"name": clean, "params": params})
             self.preset_combo.addItem(clean)
+            # ST-01: 原子持久化
+            try:
+                from src.features.edit.core.effect_preset import save_user_preset
+                save_user_preset(self._effect_type, clean, params)
+            except Exception:  # noqa: BLE001
+                pass
 
     # ── 公开 API ─────────────────────────────────────────────
 
