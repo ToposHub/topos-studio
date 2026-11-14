@@ -167,8 +167,12 @@ def _get_audio_default_params() -> dict:
             if _AUDIO_DEFAULT_PARAMS is None:
                 from src.features.edit.core.timeline_v2 import (
                     StripEQParams, LimiterParams, CompressorParams, ReverbParams,
-                    DelayParams, SaturationParams, ImagerParams, NoiseGateParams,
+                    DelayParams, SaturationParams, ImagerParams, ExpanderParams,
+                    DynamicsParams,
                 )
+                # CW-A1: Expander/Gate 接替 Noise Gate；noise_gate 键保持注册
+                #（旧数据无损承接为 Gate），新增 expander 类型。
+                gate_default = {**ExpanderParams.default().to_dict(), "mode": "Gate"}
                 _AUDIO_DEFAULT_PARAMS = {
                     "strip_eq": StripEQParams.default().to_dict(),
                     "limiter": LimiterParams.default().to_dict(),
@@ -177,7 +181,9 @@ def _get_audio_default_params() -> dict:
                     "delay": DelayParams.default().to_dict(),
                     "saturation": SaturationParams.default().to_dict(),
                     "imager": ImagerParams.default().to_dict(),
-                    "noise_gate": NoiseGateParams.default().to_dict(),
+                    "expander": ExpanderParams.default().to_dict(),
+                    "noise_gate": gate_default,
+                    "dynamics": DynamicsParams.default().to_dict(),
                 }
     return _AUDIO_DEFAULT_PARAMS
 
@@ -186,7 +192,8 @@ def _get_audio_default_params() -> dict:
 # "打开面板" button and by the DSP layer to filter clip.effects.
 AUDIO_MIXER_EFFECT_TYPES = frozenset({
     "strip_eq", "limiter", "compressor", "reverb",
-    "delay", "saturation", "imager", "noise_gate",
+    "delay", "saturation", "imager", "expander", "noise_gate",
+    "dynamics",  # CW-A1: Dynamics 完整单元（EG→Comp→Lim 单实例复合）
 })
 
 
@@ -211,18 +218,19 @@ _CATEGORY_ORDER: Tuple[str, ...] = (
 
 STRIP_EQ_EFFECT = EffectDefinition(
     effect_type="strip_eq",
-    name="Graphic EQ",
+    name="Parametric EQ",
     category="audio",
-    description="Multi-band graphic equalizer (open panel for full curve)",
-    # 频段太多，基础区只暴露整体增益；频段/高低切全在独立 dialog
+    description="6-band parametric equalizer (open panel for full curve)",
+    # 频段形状复杂（每段形/频/增益/Q/斜率），基础区只暴露整体增益；
+    # 完整编辑在 ParametricEQDialog
     params_schema={
-        "gain": ParamSchema(
+        "master_gain": ParamSchema(
             type="float",
             default=0.0,
-            min_value=-12.0,
-            max_value=12.0,
+            min_value=-20.0,
+            max_value=20.0,
             step=0.1,
-            label="Gain",
+            label="Master Gain",
             unit="dB",
         ),
     },
@@ -237,8 +245,8 @@ LIMITER_EFFECT = EffectDefinition(
     params_schema={
         "threshold_db": ParamSchema(
             type="float",
-            default=-3.0,
-            min_value=-20.0,
+            default=-6.0,
+            min_value=-30.0,
             max_value=0.0,
             step=0.1,
             label="Threshold",
@@ -246,9 +254,9 @@ LIMITER_EFFECT = EffectDefinition(
         ),
         "release_ms": ParamSchema(
             type="float",
-            default=100.0,
-            min_value=10.0,
-            max_value=1000.0,
+            default=93.0,
+            min_value=50.0,
+            max_value=4000.0,
             step=1.0,
             label="Release",
             unit="ms",
@@ -261,11 +269,11 @@ COMPRESSOR_EFFECT = EffectDefinition(
     effect_type="compressor",
     name="Compressor",
     category="audio",
-    description="Dynamic range compressor",
+    description="Dynamic range compressor with sidechain",
     params_schema={
         "threshold_db": ParamSchema(
             type="float",
-            default=-24.0,
+            default=-15.0,
             min_value=-60.0,
             max_value=0.0,
             step=0.5,
@@ -274,8 +282,8 @@ COMPRESSOR_EFFECT = EffectDefinition(
         ),
         "ratio": ParamSchema(
             type="float",
-            default=4.0,
-            min_value=1.0,
+            default=2.5,
+            min_value=1.2,
             max_value=20.0,
             step=0.1,
             label="Ratio",
@@ -296,27 +304,27 @@ COMPRESSOR_EFFECT = EffectDefinition(
 
 REVERB_EFFECT = EffectDefinition(
     effect_type="reverb",
-    name="Reverb",
+    name="Acoustic Reverb",
     category="audio",
-    description="Schroeder FDN reverb (room / hall / plate)",
+    description="Acoustic room reverb (direct / ER / late FDN)",
     params_schema={
-        "mix": ParamSchema(
+        "dry_wet": ParamSchema(
             type="float",
-            default=30.0,
+            default=100.0,
             min_value=0.0,
             max_value=100.0,
             step=0.5,
-            label="Mix",
+            label="Dry/Wet",
             unit="%",
         ),
-        "decay": ParamSchema(
+        "reverb_time": ParamSchema(
             type="float",
-            default=2.0,
-            min_value=0.1,
-            max_value=10.0,
-            step=0.05,
-            label="Decay",
-            unit="s",
+            default=2730.0,
+            min_value=100.0,
+            max_value=4000.0,
+            step=10.0,
+            label="Reverb Time",
+            unit="ms",
         ),
     },
     icon="audio_track",
@@ -324,35 +332,35 @@ REVERB_EFFECT = EffectDefinition(
 
 DELAY_EFFECT = EffectDefinition(
     effect_type="delay",
-    name="Delay",
+    name="Stereo Delay",
     category="audio",
-    description="Delay with feedback and ping-pong",
+    description="Dual-line stereo delay with cross feedback",
     params_schema={
-        "time_ms": ParamSchema(
+        "left_delay": ParamSchema(
             type="float",
-            default=300.0,
-            min_value=1.0,
-            max_value=2000.0,
+            default=121.0,
+            min_value=0.0,
+            max_value=1200.0,
             step=1.0,
-            label="Time",
+            label="L Time",
             unit="ms",
         ),
-        "feedback": ParamSchema(
+        "right_delay": ParamSchema(
             type="float",
-            default=40.0,
+            default=135.0,
             min_value=0.0,
-            max_value=90.0,
-            step=0.5,
-            label="Feedback",
-            unit="%",
+            max_value=1200.0,
+            step=1.0,
+            label="R Time",
+            unit="ms",
         ),
-        "mix": ParamSchema(
+        "dry_wet": ParamSchema(
             type="float",
             default=30.0,
             min_value=0.0,
             max_value=100.0,
             step=0.5,
-            label="Mix",
+            label="Dry/Wet",
             unit="%",
         ),
     },
@@ -406,31 +414,85 @@ IMAGER_EFFECT = EffectDefinition(
     icon="audio_track",
 )
 
-NOISE_GATE_EFFECT = EffectDefinition(
-    effect_type="noise_gate",
-    name="Noise Gate",
+EXPANDER_EFFECT = EffectDefinition(
+    effect_type="expander",
+    name="Expander / Gate",
     category="audio",
-    description="Gate signals below a threshold",
+    description="Downward expander with gate mode",
     params_schema={
         "threshold_db": ParamSchema(
             type="float",
-            default=-40.0,
-            min_value=-60.0,
+            default=-35.0,
+            min_value=-50.0,
             max_value=0.0,
             step=0.5,
             label="Threshold",
             unit="dB",
         ),
+        "range_db": ParamSchema(
+            type="float",
+            default=18.0,
+            min_value=0.0,
+            max_value=60.0,
+            step=0.5,
+            label="Range",
+            unit="dB",
+        ),
         "release_ms": ParamSchema(
             type="float",
-            default=100.0,
-            min_value=10.0,
-            max_value=1000.0,
+            default=93.0,
+            min_value=50.0,
+            max_value=4000.0,
             step=1.0,
             label="Release",
             unit="ms",
         ),
     },
+    icon="audio_track",
+)
+
+# CW-A1: noise_gate 类型键保留为 Expander(Gate) 别名——旧工程数据的
+# effect_type 不变，参数经 ExpanderParams.from_dict 无损承接。
+NOISE_GATE_EFFECT = EffectDefinition(
+    effect_type="noise_gate",
+    name="Expander / Gate",
+    category="audio",
+    description="Legacy noise gate (alias of expander in Gate mode)",
+    params_schema=dict(EXPANDER_EFFECT.params_schema),
+    icon="audio_track",
+)
+
+# CW-A1: Da Vinci Fairlight 式完整单元——Dynamics（Expander/Gate →
+# Compressor → Limiter 三合一）与 Spatial Panner（轨级声像器）。
+# 二者不进 AUDIO_MIXER_EFFECT_TYPES（DSP 链没有同名效果器）：拖放到音频
+# 轨时由 timeline_view 的 drop 路由特殊处理——dynamics 展开为三实例、
+# spatial_panner 写入轨的 panner 字段。
+DYNAMICS_EFFECT = EffectDefinition(
+    effect_type="dynamics",
+    name="Dynamics",
+    category="audio",
+    description="Expander/Gate + Compressor + Limiter as one Dynamics unit",
+    # 基础区只暴露 Make Up（EG/Comp/Lim 细项在完整 Dynamics 面板编辑）
+    params_schema={
+        "makeup": ParamSchema(
+            type="float",
+            default=0.0,
+            min_value=0.0,
+            max_value=24.0,
+            step=0.1,
+            label="Make Up",
+            unit="dB",
+        ),
+    },
+    icon="audio_track",
+)
+
+SPATIAL_PANNER_EFFECT = EffectDefinition(
+    effect_type="spatial_panner",
+    name="Spatial Panner",
+    category="audio",
+    description="2D/3D spatial panner (L/R, F/B, elevation, spread, boom)",
+    params_schema={},
     icon="audio_track",
 )
 
@@ -564,7 +626,11 @@ class EffectRegistry:
         self.register(DELAY_EFFECT)
         self.register(SATURATION_EFFECT)
         self.register(IMAGER_EFFECT)
+        self.register(EXPANDER_EFFECT)
         self.register(NOISE_GATE_EFFECT)
+        # CW-A1: 完整单元条目（拖放路由特殊处理，见 timeline_view）
+        self.register(DYNAMICS_EFFECT)
+        self.register(SPATIAL_PANNER_EFFECT)
 
         # Generator category — clip templates (Adjustment Clip / Solid Color).
         # These are dragged from the panel to CREATE a new clip, not attach an

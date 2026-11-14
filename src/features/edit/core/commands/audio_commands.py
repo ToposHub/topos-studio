@@ -207,6 +207,95 @@ class SetTrackPanCommand:
 
 
 @dataclass(frozen=True)
+class SetTrackPannerCommand:
+    """
+    Command to set track spatial panner params (CW-A1).
+
+    Panner is stored as a dict (SpatialPannerParams.to_dict()); empty dict
+    means "not in use" (fallback to plain pan/balance). The lr value itself
+    lives in EditTrack.pan (see SetTrackPanCommand) — this command only
+    covers the remaining panner fields.
+
+    Attributes:
+        command_id: Unique identifier
+        label: Human-readable label
+        track_id: Track ID to set panner
+        panner: New panner dict ({} = disable)
+        _old_panner: Old panner dict (for undo)
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    panner: dict
+    _old_panner: dict | None = None
+
+    def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "SetTrackPannerCommand"]:
+        """Apply the command: set panner."""
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+
+        old_panner = dict(track.panner or {})
+        new_track = track.with_panner(self.panner)
+
+        new_timeline = timeline.with_track_updated(new_track)
+        logger.debug(
+            "SetTrackPannerCommand applied: track %s panner keys=%d",
+            self.track_id, len(self.panner or {}),
+        )
+        updated_cmd = SetTrackPannerCommand(
+            command_id=self.command_id,
+            label=self.label,
+            track_id=self.track_id,
+            panner=self.panner,
+            _old_panner=old_panner,
+        )
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        """Undo the command: restore old panner."""
+        if self._old_panner is None:
+            logger.warning("SetTrackPannerCommand undo: old_panner not stored")
+            return timeline
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        new_timeline = timeline.with_track_updated(track.with_panner(self._old_panner))
+        logger.debug("SetTrackPannerCommand undone: track %s", self.track_id)
+        return new_timeline
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetTrackPannerCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "panner": dict(self.panner or {}),
+            "old_panner": dict(self._old_panner or {}) if self._old_panner else {},
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> SetTrackPannerCommand:
+        return SetTrackPannerCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Spatial Panner"),
+            track_id=data.get("track_id", ""),
+            panner=dict(data.get("panner") or {}),
+            _old_panner=dict(data.get("old_panner") or {}) if data.get("old_panner") else None,
+        )
+
+    @staticmethod
+    def create(track_id: str, panner: dict) -> SetTrackPannerCommand:
+        return SetTrackPannerCommand(
+            command_id=str(uuid.uuid4()),
+            label="Set Spatial Panner",
+            track_id=track_id,
+            panner=dict(panner or {}),
+        )
+
+
+@dataclass(frozen=True)
 class SetTrackStripEQCommand:
     """
     Command to set a track's Strip EQ parameters (W6).

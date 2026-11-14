@@ -612,10 +612,10 @@ class TestStripEQOracle:
         mixer = AudioMixer()
         mixer.add_track("t1", _DCDecoder(0.5), AudioTrackState(track_id="t1", volume=1.0))
         # 给 t1 设置一个非平直 EQ（整体增益 +6dB → linear ≈ 2.0）
+        from src.features.edit.core.timeline_v2 import default_eq_bands_flat
         eq_params = StripEQParams(
-            enabled=True, mode="3-band", bands=(0.0, 0.0, 0.0),
-            gain=6.0, low_cut_enable=False, low_cut=20.0,
-            high_cut_enable=False, high_cut=20000.0,
+            enabled=True, voicing="Clean", master_gain=6.0,
+            bands=tuple(dict(b) for b in default_eq_bands_flat()),
         )
         mixer.set_track_strip_eq("t1", eq_params)
         out, _ = mixer.mix_samples(0, FPS, N, 2)
@@ -630,10 +630,10 @@ class TestStripEQOracle:
 
         mixer = AudioMixer()
         mixer.add_track("t1", _DCDecoder(0.5), AudioTrackState(track_id="t1", volume=1.0))
+        from src.features.edit.core.timeline_v2 import default_eq_bands_flat
         eq_params = StripEQParams(
-            enabled=False, mode="3-band", bands=(0.0, 0.0, 0.0),
-            gain=6.0, low_cut_enable=False, low_cut=20.0,
-            high_cut_enable=False, high_cut=20000.0,
+            enabled=False, voicing="Clean", master_gain=6.0,
+            bands=tuple(dict(b) for b in default_eq_bands_flat()),
         )
         mixer.set_track_strip_eq("t1", eq_params)
         out, _ = mixer.mix_samples(0, FPS, N, 2)

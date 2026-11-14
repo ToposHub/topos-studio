@@ -25,10 +25,11 @@ from src.features.edit.core.timeline_v2 import ReverbParams
 class TestDialogRegistry:
     """The lazy dialog registry covers all 8 mixer effect_types."""
 
-    def test_registry_has_eight_entries(self):
+    def test_registry_covers_all_types(self):
+        """CW-A1: 注册表覆盖全部 mixer 类型（expander 新增，noise_gate 别名）。"""
         reg = _ensure_dialog_registry()
         assert set(reg.keys()) == set(AUDIO_MIXER_EFFECT_TYPES)
-        assert len(reg) == 8
+        assert len(reg) == len(AUDIO_MIXER_EFFECT_TYPES)
 
     def test_registry_metadata_shape(self):
         reg = _ensure_dialog_registry()
@@ -36,9 +37,10 @@ class TestDialogRegistry:
             assert dialog_cls is not None
             assert params_cls is not None
             # committed signal attribute name follows <type>_committed convention
+            # （noise_gate 别名 → expander_committed）
             assert "_committed" in committed_attr
-            # only StripEQDialog lacks instance_id (capsule-style ctor)
-            assert isinstance(has_iid, bool)
+            # CW-A1: 全部对话框统一带 instance_id 构造
+            assert has_iid is True
 
 
 class TestOpenDialog:
@@ -60,8 +62,7 @@ class TestOpenDialog:
 
     def test_open_caches_dialog(self, qapp):
         mgr = ClipAudioEffectDialogManager()
-        params = {"mix": 30.0, "decay": 2.0, "pre_delay_ms": 0.0,
-                  "damping_hz": 5000.0, "enabled": True}
+        params = ReverbParams.default().to_dict()
         d1 = mgr.open_dialog("reverb", "clip_2", "fx_2", params)
         d2 = mgr.open_dialog("reverb", "clip_2", "fx_2", params)
         # 同一 (clip_id, effect_id) 复用同一窗口
@@ -88,11 +89,11 @@ class TestCommittedRoundTrip:
             lambda cid, eid, p: received.append((cid, eid, p))
         )
 
-        params = ReverbParams(mix=50.0, decay=3.0).to_dict()
+        params = ReverbParams(dry_wet=50.0).to_dict()
         dialog = mgr.open_dialog("reverb", "clip_4", "fx_4", params)
 
         # 模拟 dialog emit committed（传 *Params dataclass）
-        new_params = ReverbParams(mix=80.0, decay=4.0)
+        new_params = ReverbParams(dry_wet=80.0, reverb_time=1500.0)
         dialog.reverb_committed.emit("clip_4", new_params)
 
         assert len(received) == 1
@@ -100,8 +101,8 @@ class TestCommittedRoundTrip:
         assert cid == "clip_4"
         assert eid == "fx_4"
         # dict 与 *Params.to_dict() 一致
-        assert emitted_dict["mix"] == 80.0
-        assert emitted_dict["decay"] == 4.0
+        assert emitted_dict["dry_wet"] == 80.0
+        assert emitted_dict["reverb_time"] == 1500.0
         assert emitted_dict["enabled"] is True
         dialog.close()
 
@@ -125,11 +126,11 @@ class TestParamsDictConversion:
     def test_partial_dict_uses_defaults(self, qapp):
         """from_dict tolerates missing fields (uses *Params defaults)."""
         mgr = ClipAudioEffectDialogManager()
-        # 只给 mix，其它字段缺失 → from_dict 用默认值兜底
-        partial = {"mix": 60.0}
+        # 只给 dry_wet，其它字段缺失 → from_dict 用默认值兜底
+        partial = {"dry_wet": 60.0}
         dialog = mgr.open_dialog("reverb", "clip_6", "fx_6", partial)
         assert dialog is not None
         # dialog 内部 _current 是完整 ReverbParams
-        assert dialog._current.mix == 60.0
-        assert dialog._current.decay == 2.0  # 默认值
+        assert dialog._current.dry_wet == 60.0
+        assert dialog._current.reverb_time == 2730.0  # 默认值
         dialog.close()

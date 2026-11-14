@@ -95,7 +95,7 @@ def _populated_audio_track(clips: tuple[ClipInstance, ...]) -> EditTrack:
         volume=1.5,
         pan=-0.5,
         color="#ff5722",
-        strip_eq=StripEQParams(mode="3-band", bands=(1.5, 0.0, -2.0), gain=2.0),
+        strip_eq=StripEQParams(master_gain=2.0),  # CW-A1: 参数化 EQ
         automation={
             "volume": KeyframeTrack(param_name="volume", min_val=0.0, max_val=2.0),
         },

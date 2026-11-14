@@ -41,6 +41,10 @@ class AudioMixerPanel(QWidget):
     master_volume_changed = pyqtSignal(float)          # dB
     # W11: 是否存在 LUFS 模式的表（AudioMixer 据此开/关 K-weighting 计算）
     lufs_metering_changed = pyqtSignal(bool)
+    # CW-A1: 空间声像器（payload {"pan": -1..1, "panner": dict}）+ 频谱门控
+    track_panner_preview = pyqtSignal(str, object)    # 实时听感
+    track_panner_committed = pyqtSignal(str, object)  # 命令栈
+    spectrum_metering_changed = pyqtSignal(bool)
     track_mute_toggled = pyqtSignal(str, bool)
     track_solo_toggled = pyqtSignal(str, bool)
     track_volume_changed = pyqtSignal(str, float)      # dB（松手时最终提交）
@@ -249,6 +253,8 @@ class AudioMixerPanel(QWidget):
 
         # LUFS 消费状态可能随 strip 移除而关闭
         self._recompute_lufs_metering()
+        # CW-A1: 频谱门控同理——strip 移除后其 EQ 对话框不再参与聚合
+        self._recompute_spectrum_metering()
 
         # 更新背景色
         self._update_alternating_colors()
@@ -471,6 +477,15 @@ class AudioMixerPanel(QWidget):
                 else:
                     meter_vals = vals
                 mixer.update_audio_level(list(meter_vals))
+                # CW-A1: 遥测分发给已打开对话框。任何 dict 载荷都要派发——
+                # Reverb/Delay/EQ 输出表只吃 peak，Dynamics Input 表吃 pre；
+                # 仅按 gr/sc/spectrum 存在与否派发会让这些表在无动态链的轨上
+                # 永久冻结。
+                if isinstance(vals, dict):
+                    try:
+                        mixer.update_track_telemetry(vals)
+                    except (AttributeError, RuntimeError):
+                        pass
 
     def _probe_lufs_backend(self) -> bool:
         """探测 LUFS DSP 后端（scipy）是否可用（AUD-37621）。
@@ -660,6 +675,9 @@ class AudioMixerPanel(QWidget):
             # W8: Strip EQ 回填（若 timeline 提供 strip_eq 字段）
             if "strip_eq" in t:
                 mixer.set_strip_eq(t.get("strip_eq"))
+            # CW-A1: 空间声像器回填（pan + panner dict）
+            if "panner" in t:
+                mixer.set_pan_and_panner(new_pan, t.get("panner") or {})
             # W26: FX 机架效果器链回填（EQ/Dynamics/FX 列表效果器都存这里）
             if "effect_chain" in t:
                 mixer.set_effect_chain(t.get("effect_chain"))
@@ -711,6 +729,12 @@ class AudioMixerPanel(QWidget):
         mixer.show_automation.connect(lambda tid: self.track_show_automation.emit(tid))
         # AM-08 阶段 4.2: Routing 请求转发（panel 打开 RoutingDialog）
         mixer.show_routing.connect(lambda tid: self.track_show_routing.emit(tid))
+        # CW-A1: 空间声像器信号转发
+        mixer.panner_preview.connect(lambda tid, p: self.track_panner_preview.emit(tid, p))
+        mixer.panner_committed.connect(lambda tid, p: self.track_panner_committed.emit(tid, p))
+        # CW-A1: 频谱仪门控（任一 EQ 对话框打开 → 引擎开 FFT）
+        mixer.spectrum_metering_changed.connect(
+            lambda on: self._recompute_spectrum_metering())
         # W15: 隐藏 strip 请求
         mixer.hide_requested.connect(self.hide_track)
         # W11: 表模式变化 → 汇总 LUFS 消费状态（AudioMixer 按需计算）
@@ -739,6 +763,34 @@ class AudioMixerPanel(QWidget):
     def is_lufs_metering_active(self) -> bool:
         """当前是否有 strip 处于 LUFS 表模式（供初始化时同步开关）。"""
         return bool(getattr(self, "_lufs_metering_active", False))
+
+    def _recompute_spectrum_metering(self) -> None:
+        """CW-A1: 汇总所有 strip 的 EQ 对话框打开状态，通知频谱计算开关。
+
+        无任何 EQ 对话框时关闭（FFT 占播放线程表计点开销），
+        有则开启。状态未变化时不重复 emit。
+        """
+        active = False
+        for mixer in self._track_mixers.values():
+            if mixer._iter_eq_dialogs():
+                active = True
+                break
+        if active != getattr(self, "_spectrum_metering_active", False):
+            self._spectrum_metering_active = active
+            self.spectrum_metering_changed.emit(active)
+
+    def is_spectrum_metering_active(self) -> bool:
+        """当前是否有 EQ 对话框打开（供初始化时同步开关）。"""
+        return bool(getattr(self, "_spectrum_metering_active", False))
+
+    def set_sidechain_sources_all(self, sources: list) -> None:
+        """CW-A1: 把侧链源列表 [(track_id, name), ...] 下发到所有 strip 的
+        动态对话框（压缩器外部检源选择用）。轨列表变化时由宿主调用。"""
+        for mixer in self._track_mixers.values():
+            try:
+                mixer.set_sidechain_sources(sources)
+            except (AttributeError, RuntimeError):
+                continue
 
     def _on_solo_toggled(self, track_id: str, solo: bool) -> None:
         """处理独奏切换"""

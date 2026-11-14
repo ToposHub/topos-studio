@@ -138,7 +138,8 @@ def test_audio_effect_tree_uses_svg_preview_icons(qapp):
         for index in range(category.childCount())
         if category.child(index).data(0, Qt.ItemDataRole.UserRole) == "effect"
     ]
-    assert len(effect_items) >= 8
+    # CW-A1: Dynamics 三合一替代拆分 trio → Audio 页 7 项
+    assert len(effect_items) >= 7
     assert all(not item.icon(0).isNull() for item in effect_items)
 
 

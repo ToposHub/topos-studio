@@ -2714,11 +2714,18 @@ class EditControllerMixin:
                 "strip_eq": getattr(track, 'strip_eq', None),
                 # W26: FX 机架效果器链（None=未使用）。EQ/Dynamics/FX 列表效果器都存这里。
                 "effect_chain": getattr(track, 'effect_chain', None),
+                # CW-A1: 空间声像器（空 dict=未使用）
+                "panner": getattr(track, 'panner', None),
                 # W16: 轨道颜色
                 "color": getattr(track, 'color', None),
             })
         try:
             panel.sync_tracks(tracks)
+            # CW-A1: 侧链源列表下发（压缩器外部检源选择器：任意轨可选）
+            if hasattr(panel, 'set_sidechain_sources_all'):
+                panel.set_sidechain_sources_all([
+                    (t["track_id"], t["name"]) for t in tracks
+                ])
             # W12: 同步 Master 总线音量/静音（持久化字段，重开恢复）
             if hasattr(panel, 'set_master_volume_linear'):
                 panel.set_master_volume_linear(float(getattr(timeline, 'master_volume', 1.0)))
@@ -2960,6 +2967,46 @@ class EditControllerMixin:
             logger.warning("Invalid mixer balance %s: %s", balance, e)
             return
         tview._execute_command(cmd)
+
+    def _on_mixer_panner_preview(self, track_id: str, payload: dict) -> None:
+        """CW-A1: 空间声像器拖动期——实时听感预览（不进命令栈）。
+
+        payload {"pan": -1..1, "panner": dict}：pan 部分走引擎 set_track_pan
+        （含自动化录制采集），panner 部分走 set_track_panner。
+        """
+        if not isinstance(payload, dict):
+            return
+        pan = max(-1.0, min(1.0, float(payload.get("pan", 0.0))))
+        # §3.1: 自动化录制采集 pan
+        self._record_fader_sample(track_id, "pan", pan, fader_down=True)
+        mgr = self._get_mixer_audio_manager()
+        if mgr is not None:
+            try:
+                mgr.set_track_pan(track_id, pan)
+                set_panner = getattr(mgr, "set_track_panner", None)
+                if callable(set_panner):
+                    set_panner(track_id, payload.get("panner") or None)
+            except Exception as e:
+                logger.debug("mixer panner preview failed: %s", e)
+
+    def _on_mixer_panner_committed(self, track_id: str, payload: dict) -> None:
+        """CW-A1: 空间声像器松手——SetTrackPanCommand + SetTrackPannerCommand
+        聚合为单个 MacroCommand（一次 undo）。"""
+        if not isinstance(payload, dict):
+            return
+        tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
+        if tview is None:
+            return
+        from src.features.edit.core.commands import (
+            SetTrackPanCommand, SetTrackPannerCommand, MacroCommand,
+        )
+        pan = max(-1.0, min(1.0, float(payload.get("pan", 0.0))))
+        panner = dict(payload.get("panner") or {})
+        macro = MacroCommand.create("Set Spatial Panner", [
+            SetTrackPanCommand.create(track_id, pan),
+            SetTrackPannerCommand.create(track_id, panner),
+        ])
+        tview._execute_command(macro)
 
     def _on_mixer_mute_toggled(self, track_id: str, muted: bool) -> None:
         """混音器 M 按钮：实时听感 + 提交 SetTrackMuteCommand。

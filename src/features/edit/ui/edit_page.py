@@ -875,6 +875,13 @@ class EditPage(QWidget):
                 self._audio_manager.set_lufs_metering(
                     mixer_panel.is_lufs_metering_active()
                 )
+            # CW-A1: 频谱仪按需计算——EQ 对话框打开状态驱动（无对话框时
+            # 播放线程不做 FFT）。先同步当前状态再监听变化。
+            if hasattr(mixer_panel, "spectrum_metering_changed"):
+                set_spectrum = getattr(self._audio_manager, "set_spectrum_metering", None)
+                if callable(set_spectrum):
+                    mixer_panel.spectrum_metering_changed.connect(set_spectrum)
+                    set_spectrum(mixer_panel.is_spectrum_metering_active())
             logger.debug("Audio level signals connected to mixer_panel")
 
     # ==================== Transport Bar Wiring ====================
@@ -1775,6 +1782,14 @@ class EditPage(QWidget):
                 set_chain(track_id, effect_chain)
             except Exception as e:  # noqa: BLE001
                 logger.debug("set_track_effect_chain failed for %s: %s", track_id, e)
+        # CW-A1: 空间声像器（spread/rotate/divergence/boom 立体声域矩阵）
+        panner = getattr(track, "panner", None)
+        set_panner = getattr(audio_mgr, "set_track_panner", None)
+        if callable(set_panner):
+            try:
+                set_panner(track_id, panner if panner else None)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("set_track_panner failed for %s: %s", track_id, e)
         # 自动化（Read 模式回放）
         automation = getattr(track, "automation", None)
         set_auto = getattr(audio_mgr, "set_track_automation", None)
@@ -1867,6 +1882,11 @@ class EditPage(QWidget):
                  bool(getattr(s, "enabled", True)))
                 for s in sends
             )
+
+        def _panner_sig(track: Any) -> Any:
+            """CW-A1: 轨道级空间声像器签名（空 dict=未使用）。"""
+            panner = getattr(track, "panner", None)
+            return _sig_value(panner) if panner else None
 
         def _audio_transitions_sig(track: Any) -> Any:
             """AT: 该轨音频转场签名（仅 audio:* 实例影响声音）。
@@ -1965,6 +1985,8 @@ class EditPage(QWidget):
                 _sends_sig(track),
                 # AT: 音频转场（audio:* 实例）变化需重新下发 crossfade 到引擎
                 _audio_transitions_sig(track),
+                # CW-A1: 空间声像器（spread/rotate/divergence/boom）
+                _panner_sig(track),
                 tuple(clip_entries),
             ))
 

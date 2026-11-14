@@ -36,7 +36,7 @@ from src.features.edit.core.timeline_v2 import (
 
 def _make_fx_chain() -> EffectChainParams:
     """构造含 2 个 FX 的效果链（strip_eq + limiter），满足"≥2 FX"验收要求。"""
-    eq_params = StripEQParams.default("3-band")
+    eq_params = StripEQParams.default()
     return EffectChainParams(effects=(
         TrackEffectInstance(
             effect_type="strip_eq",

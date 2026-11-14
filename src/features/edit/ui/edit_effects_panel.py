@@ -1747,8 +1747,15 @@ class EditEffectsPanel(QWidget):
         self._unbind_responsive_sections(tree)
         tree.clear()
 
-        # Get audio effects from registry
-        audio_effects = self._registry.get_effects_by_category("audio")
+        # Get audio effects from registry.
+        # CW-A1: Dynamics（三合一完整单元）替代拆分的 limiter/compressor/
+        # expander 条目——Da Vinci Fairlight 语义，不把 Dynamics 拆开显示。
+        # （注册表条目保留：clip 级旧数据兼容 + DSP 链照常消费。）
+        hidden_in_panel = {"limiter", "compressor", "expander", "noise_gate"}
+        audio_effects = [
+            d for d in self._registry.get_effects_by_category("audio")
+            if d.effect_type not in hidden_in_panel
+        ]
 
         if not audio_effects:
             self._show_audio_effect_diagnostics(tree)

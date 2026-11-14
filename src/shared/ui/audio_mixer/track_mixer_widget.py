@@ -21,7 +21,7 @@ from typing import Optional, Any
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QToolButton, QSpinBox, QDoubleSpinBox,
-    QMenu, QInputDialog, QColorDialog,
+    QMenu, QInputDialog, QColorDialog, QPushButton,
     QListWidget, QListWidgetItem,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
@@ -37,14 +37,15 @@ logger = logging.getLogger(__name__)
 
 # W26: 效果器目录（effect_type → 列表显示名）。用于内嵌列表 + 添加菜单。
 EFFECT_SHORT_NAMES = {
-    "strip_eq": "Graphic EQ",
+    "strip_eq": "Parametric EQ",
     "limiter": "Limiter",
     "compressor": "Compressor",
+    "expander": "Exp/Gate",
     "reverb": "Reverb",
     "delay": "Delay",
     "saturation": "Saturation",
     "imager": "Imager",
-    "noise_gate": "Noise Gate",
+    "noise_gate": "Exp/Gate",  # CW-A1: 旧类型沿用 Exp/Gate 编辑器
 }
 
 # 空列表时插入的 "+" 占位项的 UserRole 标记值（用于区分真实效果器实例）
@@ -55,7 +56,7 @@ def _effect_default_params(effect_type: str) -> dict:
     """效果器默认参数工厂（延迟 import 避免 timeline_v2 前向引用）。"""
     from src.features.edit.core.timeline_v2 import (
         StripEQParams, LimiterParams, CompressorParams, ReverbParams,
-        DelayParams, SaturationParams, ImagerParams, NoiseGateParams,
+        DelayParams, SaturationParams, ImagerParams, ExpanderParams,
     )
     if effect_type == "strip_eq":
         return StripEQParams.default().to_dict()
@@ -71,22 +72,28 @@ def _effect_default_params(effect_type: str) -> dict:
         return SaturationParams.default().to_dict()
     elif effect_type == "imager":
         return ImagerParams.default().to_dict()
-    elif effect_type == "noise_gate":
-        return NoiseGateParams.default().to_dict()
+    elif effect_type in ("expander", "noise_gate"):
+        # CW-A1: Expander/Gate 接替 Noise Gate（旧类型键经 from_dict 无损转 Gate）
+        params = ExpanderParams.default().to_dict()
+        if effect_type == "noise_gate":
+            params["mode"] = "Gate"
+        return params
     return {}
 
 
 def _effect_display_name(effect_type: str) -> str:
     """效果器完整显示名（用于菜单/对话框标题）。"""
     names = {
-        "strip_eq": I18N.tr("audio.fx.strip_eq", "Graphic EQ"),
+        "dynamics": I18N.tr("audio.fx.dynamics", "Dynamics"),
+        "strip_eq": I18N.tr("audio.fx.parametric_eq", "Parametric EQ"),
         "limiter": I18N.tr("audio.fx.limiter", "Limiter"),
         "compressor": I18N.tr("audio.fx.compressor", "Compressor"),
-        "reverb": I18N.tr("audio.fx.reverb", "Reverb"),
-        "delay": I18N.tr("audio.fx.delay", "Delay"),
+        "expander": I18N.tr("audio.fx.expander_gate", "Expander / Gate"),
+        "reverb": I18N.tr("audio.fx.acoustic_reverb", "Acoustic Reverb"),
+        "delay": I18N.tr("audio.fx.stereo_delay", "Stereo Delay"),
         "saturation": I18N.tr("audio.fx.saturation", "Saturation"),
         "imager": I18N.tr("audio.fx.imager", "Imager"),
-        "noise_gate": I18N.tr("audio.fx.noise_gate", "Noise Gate"),
+        "noise_gate": I18N.tr("audio.fx.expander_gate", "Expander / Gate"),
     }
     return names.get(effect_type, effect_type)
 
@@ -165,6 +172,12 @@ class TrackMixerWidget(QWidget):
     show_automation = pyqtSignal(str)             # track_id
     # AM-08 阶段 4.2: 打开 Routing 对话框请求（上抛给 panel）
     show_routing = pyqtSignal(str)                # track_id
+    # CW-A1: 空间声像器信号。payload {"pan": -1..1, "panner": dict}——
+    # pan 走 SetTrackPanCommand，panner 走 SetTrackPannerCommand（宿主聚合 Macro）
+    panner_preview = pyqtSignal(str, object)    # track_id, payload（拖动期实时听感）
+    panner_committed = pyqtSignal(str, object)  # track_id, payload（命令栈）
+    # CW-A1: 频谱仪门控（任一 EQ 对话框打开 → True；全部关闭 → False）
+    spectrum_metering_changed = pyqtSignal(bool)
 
     def __init__(
         self,
@@ -191,6 +204,10 @@ class TrackMixerWidget(QWidget):
         self._effect_chain: Optional[Any] = None  # EffectChainParams | None
         self._limiter_dialogs: dict = {}  # {instance_id: LimiterDialog}
         self._dynamics_dialog: Optional[Any] = None  # DynamicsDialog | None（DY 胶囊单例）
+        # CW-A1: 空间声像器当前状态（pan float + panner dict）+ 对话框实例引用
+        self._pan: float = 0.0
+        self._panner: dict = {}
+        self._panner_dialog: Optional[Any] = None
         # W15: 窄/宽布局模式
         self._is_narrow: bool = False
         # W16: 轨道颜色（hex 字符串，None=默认）
@@ -505,6 +522,32 @@ class TrackMixerWidget(QWidget):
         label_layout.addWidget(r_label)
         layout.addLayout(label_layout)
 
+        # CW-A1: ⤢ 展开按钮 → 空间声像器对话框（立体声域：spread/rotate/
+        # divergence/boom 真实可听；F/B、高度、制式持久化待多声道引擎）
+        self._panner_expand_btn = QPushButton("⤢")
+        self._panner_expand_btn.setFixedSize(18, 16)
+        self._panner_expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._panner_expand_btn.setToolTip(
+            I18N.tr("audio.fx.open_panner_tip", "打开空间声像器 (Spatial Panner)"))
+        self._panner_expand_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #22252E;
+                color: #8E94A4;
+                border: 1px solid #303440;
+                border-radius: 3px;
+                font-size: 10px;
+                font-weight: 700;
+                padding: 0px;
+            }
+            QPushButton:hover { color: #28D8F0; border-color: #28D8F0; }
+        """)
+        self._panner_expand_btn.clicked.connect(self._open_panner_dialog)
+        overlay = QHBoxLayout()
+        overlay.setContentsMargins(0, 1, 0, 0)
+        overlay.addStretch()
+        overlay.addWidget(self._panner_expand_btn)
+        layout.addLayout(overlay)
+
         return widget
 
     def _apply_styles(self) -> None:
@@ -698,12 +741,13 @@ class TrackMixerWidget(QWidget):
             self._update_badges_style()
 
     def _open_eq_from_badge(self) -> None:
-        """EQ 胶囊点击：打开 Graphic EQ 单例对话框（从 chain 找/创建首个 strip_eq 实例）。
+        """EQ 胶囊点击：打开 Parametric EQ 单例对话框（chain 找/创建 panel="eq" 实例）。
 
         这是 EQ 的快捷单例入口；FX 列表里的 strip_eq 实例（多实例）由
         _open_strip_eq_editor 单独打开，两者共享同一个 effect_chain 存储。
+        CW-A1: 参数化 EQ；preview 路径接活（拖动期实时可听）。
         """
-        from src.shared.ui.audio_mixer.strip_eq_dialog import StripEQDialog
+        from src.shared.ui.audio_mixer.strip_eq_dialog import ParametricEQDialog
         from src.features.edit.core.timeline_v2 import (
             StripEQParams,
         )
@@ -721,15 +765,67 @@ class TrackMixerWidget(QWidget):
             None,
         )
         eq_params = StripEQParams.from_dict(eq_inst.params) if (eq_inst and eq_inst.params) else StripEQParams.default()
-        self._eq_dialog = StripEQDialog(
+        self._eq_dialog = ParametricEQDialog(
             track_id=self._track_id,
             track_name=self._track_name,
+            instance_id=eq_inst.instance_id if eq_inst is not None else "",
             initial_params=eq_params,
             parent=self.window(),
         )
         # EQ 提交：更新 chain 中 strip_eq 实例（找不到则创建）
+        self._eq_dialog.strip_eq_preview.connect(
+            lambda tid, p: self._on_eq_preview_from_badge(p))
         self._eq_dialog.strip_eq_committed.connect(self._on_eq_committed_from_badge)
+        # 绑定方法连接（而非 lambda）：strip 销毁时 PyQt 自动断连，
+        # 避免 destroyed 在 GC 期触发已清空闭包的 NameError。
+        # finished：QDialog 点 ✕/Esc 只是 hide（非 destroy）——hide 后也要
+        # 重算门控，否则引擎频谱计算带着无消费者常开。
+        self._eq_dialog.destroyed.connect(self._safe_spectrum_gating)
+        self._eq_dialog.finished.connect(self._safe_spectrum_gating)
         self._eq_dialog.show()
+        self._update_spectrum_gating()
+
+    def _on_eq_preview_from_badge(self, eq_params: Any) -> None:
+        """EQ 对话框拖动期预览：本地更新/惰性创建 chain 实例 + preview 信号。
+
+        首次拖动即创建实例（panel="eq"），保证第一下调整就实时可听；
+        命令栈仍只在 committed 信号写入（松手/预设/开关）。
+        """
+        chain = self._rebuild_chain_with_eq(eq_params, create=True)
+        if chain is None:
+            return
+        self._effect_chain = chain
+        self._strip_eq = eq_params
+        self._update_badges_style()
+        self.track_effects_preview.emit(self._track_id, self._effect_chain)
+
+    def _rebuild_chain_with_eq(self, eq_params: Any, create: bool = False) -> Any:
+        """把 EQ 胶囊实例替换为给定参数（create=True 时惰性新建）。"""
+        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        effects = list(self._effect_chain.effects) if self._effect_chain is not None else []
+        new_params = eq_params.to_dict() if eq_params is not None else None
+        idx = next(
+            (i for i, e in enumerate(effects)
+             if e.effect_type == "strip_eq" and getattr(e, "panel", "fx") == "eq"),
+            -1,
+        )
+        if idx >= 0:
+            old = effects[idx]
+            effects[idx] = TrackEffectInstance(
+                effect_type="strip_eq", params=new_params or old.params,
+                enabled=bool(getattr(eq_params, 'enabled', old.enabled)),
+                order=old.order, instance_id=old.instance_id, panel="eq",
+            )
+        elif create:
+            new_order = max((e.order for e in effects), default=-1) + 1
+            effects.append(TrackEffectInstance(
+                effect_type="strip_eq", params=new_params or {},
+                enabled=bool(getattr(eq_params, 'enabled', True)),
+                order=new_order, panel="eq",
+            ))
+        else:
+            return None
+        return EffectChainParams(effects=tuple(effects))
 
     def _on_eq_committed_from_badge(self, track_id: str, eq_params: Any) -> None:
         """EQ 对话框提交：更新 chain 中 EQ 胶囊管理的 strip_eq 实例 + emit。"""
@@ -751,6 +847,9 @@ class TrackMixerWidget(QWidget):
                     order=old.order, instance_id=old.instance_id,
                     panel="eq",
                 )
+                # 同步对话框的 instance_id（首次提交新建实例后回填）
+                if self._eq_dialog is not None and not getattr(self._eq_dialog, "_instance_id", ""):
+                    self._eq_dialog._instance_id = old.instance_id
             else:
                 # None 表示禁用 → 从 chain 移除 EQ
                 effects.pop(idx)
@@ -829,8 +928,8 @@ class TrackMixerWidget(QWidget):
                     None,
                 )
                 if eq_inst is not None and eq_inst.params:
-                    self._eq_dialog._current = StripEQParams.from_dict(eq_inst.params)
-                    self._eq_dialog._load_params_to_ui()
+                    self._eq_dialog.set_current_params(
+                        StripEQParams.from_dict(eq_inst.params))
             except (AttributeError, KeyError, TypeError, ValueError):
                 # AUD-37903: 同上 —— 具体异常类型 + 日志，不再静默吞掉
                 logger.warning(
@@ -852,8 +951,24 @@ class TrackMixerWidget(QWidget):
         self._effect_list.blockSignals(True)
         self._effect_list.clear()
         effects = self._effect_chain.effects if self._effect_chain else ()
+        # CW-A1: Dynamics 单元（panel="dynamics" 三实例）在列表里显示为
+        # 单一 "Dynamics" 行——Da Vinci Fairlight 语义，整体加入/整体移除，
+        # 点击打开完整 Dynamics 面板。
+        dyn_insts = [e for e in effects if getattr(e, "panel", "fx") == "dynamics"]
+        if dyn_insts:
+            group_enabled = all(
+                bool(e.params.get("enabled", True)) if e.params else True
+                for e in dyn_insts
+            )
+            dyn_item = QListWidgetItem(I18N.tr("audio.fx.dynamics", "Dynamics"))
+            dyn_item.setData(Qt.ItemDataRole.UserRole, dyn_insts[0].instance_id)
+            dyn_item.setData(Qt.ItemDataRole.UserRole + 1, "dynamics")
+            if not group_enabled:
+                dyn_item.setForeground(QColor("#666670"))
+            self._effect_list.addItem(dyn_item)
         for inst in effects:
-            # 胶囊管理的实例（panel="dynamics"/"eq"）不在 FX 列表显示
+            # EQ 胶囊管理的实例（panel="eq"）不在 FX 列表显示；
+            # dynamics 三实例已聚合为上面的单一行。
             if getattr(inst, "panel", "fx") != "fx":
                 continue
             short = EFFECT_SHORT_NAMES.get(inst.effect_type, inst.effect_type)
@@ -948,6 +1063,10 @@ class TrackMixerWidget(QWidget):
         effect_type = item.data(Qt.ItemDataRole.UserRole + 1)
         if instance_id is None or self._effect_chain is None:
             return
+        if effect_type == "dynamics":
+            # Dynamics 单元行：打开完整 Dynamics 面板（三实例整体管理）
+            self._open_dynamics_panel()
+            return
         # 找到对应的 TrackEffectInstance
         inst = next((e for e in self._effect_chain.effects if e.instance_id == instance_id), None)
         if inst is None:
@@ -964,8 +1083,8 @@ class TrackMixerWidget(QWidget):
             self._open_saturation_editor(inst)
         elif effect_type == "imager":
             self._open_imager_editor(inst)
-        elif effect_type == "noise_gate":
-            self._open_noise_gate_editor(inst)
+        elif effect_type in ("expander", "noise_gate"):
+            self._open_expander_editor(inst)
         elif effect_type == "strip_eq":
             self._open_strip_eq_editor(inst)
 
@@ -988,6 +1107,24 @@ class TrackMixerWidget(QWidget):
         if item is not None:
             # 点在项上：项操作
             instance_id = item.data(Qt.ItemDataRole.UserRole)
+            item_effect_type = item.data(Qt.ItemDataRole.UserRole + 1)
+            if item_effect_type == "dynamics":
+                # Dynamics 单元行：整体旁路/删除（三实例一个整体）
+                dyn = self._dynamics_instances()
+                group_on = all(
+                    bool(e.params.get("enabled", True)) if e.params else True
+                    for e in dyn
+                )
+                bypass_dyn = menu.addAction(
+                    I18N.tr("audio.fx.bypass", "Bypass") if group_on
+                    else I18N.tr("audio.fx.enable", "Enable"))
+                bypass_dyn.triggered.connect(
+                    lambda checked=False: self._effect_bypass_dynamics())
+                menu.addSeparator()
+                del_dyn = menu.addAction("✕ " + I18N.tr("audio.fx.delete", "Delete"))
+                del_dyn.triggered.connect(
+                    lambda checked=False: self._effect_remove_dynamics())
+                menu.addSeparator()
             inst = None
             if self._effect_chain is not None:
                 inst = next((e for e in self._effect_chain.effects if e.instance_id == instance_id), None)
@@ -1020,10 +1157,24 @@ class TrackMixerWidget(QWidget):
         menu.exec(self._effect_list.mapToGlobal(pos))
 
     def _populate_add_effect_menu(self, menu: QMenu) -> None:
-        """向 menu 填充「添加效果器」子项（8 种效果器，含 Graphic EQ，均支持多实例）。"""
+        """向 menu 填充「添加效果器」子项。
+
+        Dynamics（Expander/Gate → Compressor → Limiter）是 Da Vinci Fairlight
+        式的单一完整单元——一次添加三个实例（panel="dynamics"），由完整
+        Dynamics 面板统一管理，不再拆分为独立条目。
+        """
+        dyn_display = I18N.tr("audio.fx.dynamics", "Dynamics")
+        dyn_action = menu.addAction(dyn_display)
+        dyn_action.triggered.connect(
+            lambda checked=False: self._effect_add("dynamics"))
+        # Spatial Panner：轨级声像器（不走效果链）。Add 即启用默认参数并
+        # 提交命令栈（固定到本轨），随后打开完整声像器对话框微调。
+        pan_display = I18N.tr("audio.fx.spatial_panner", "Spatial Panner")
+        pan_action = menu.addAction(pan_display)
+        pan_action.triggered.connect(
+            lambda checked=False: self._add_spatial_panner())
         for effect_type in (
-            "compressor", "reverb", "delay", "saturation",
-            "imager", "noise_gate", "limiter", "strip_eq",
+            "strip_eq", "reverb", "delay", "saturation", "imager",
         ):
             display = _effect_display_name(effect_type)
             action = menu.addAction(display)
@@ -1044,8 +1195,139 @@ class TrackMixerWidget(QWidget):
 
     # ─── 效果器链操作（add/remove/move/bypass）───
 
+    def _dynamics_instances(self) -> list:
+        """当前链中 Dynamics 单元的全部实例（panel="dynamics"）。"""
+        if self._effect_chain is None:
+            return []
+        return [
+            e for e in self._effect_chain.effects
+            if getattr(e, "panel", "fx") == "dynamics"
+        ]
+
+    def _effect_bypass_dynamics(self) -> None:
+        """整体旁路/启用 Dynamics 单元（三实例同步）。"""
+        dyn = self._dynamics_instances()
+        if not dyn:
+            return
+        target_enabled = not all(
+            bool(e.params.get("enabled", True)) if e.params else True
+            for e in dyn
+        )
+        from src.features.edit.core.timeline_v2 import (
+            TrackEffectInstance, EffectChainParams,
+        )
+        effects = tuple(
+            TrackEffectInstance(
+                effect_type=e.effect_type,
+                params={**(e.params or {}), "enabled": target_enabled},
+                enabled=e.enabled, order=e.order,
+                instance_id=e.instance_id,
+                panel=getattr(e, "panel", "fx"),
+            ) if getattr(e, "panel", "fx") == "dynamics" else e
+            for e in self._effect_chain.effects
+        )
+        self._effect_chain = EffectChainParams(effects=effects)
+        self._refresh_effect_list()
+        self._update_badges_style()
+        self.track_effects_committed.emit(self._track_id, self._effect_chain)
+
+    def _effect_remove_dynamics(self) -> None:
+        """整体移除 Dynamics 单元（关闭面板 + 删除三实例）。"""
+        if self._dynamics_dialog is not None:
+            try:
+                self._dynamics_dialog.close()
+            except RuntimeError:
+                pass
+            self._dynamics_dialog = None
+        if self._effect_chain is None:
+            return
+        effects = tuple(
+            e for e in self._effect_chain.effects
+            if getattr(e, "panel", "fx") != "dynamics"
+        )
+        self._effect_chain = EffectChainParams(effects=effects) if effects else None
+        self._refresh_effect_list()
+        self._update_badges_style()
+        self.track_effects_committed.emit(self._track_id, self._effect_chain)
+
+    def _add_spatial_panner(self) -> None:
+        """添加空间声像器（轨级固定，Da Vinci Fairlight 语义）。
+
+        以默认参数启用本轨声像器并提交命令栈（panner_committed →
+        controller 聚合 MacroCommand 持久化），随后打开完整声像器对话框
+        供微调。已启用时不重复提交，直接打开面板。
+        """
+        from src.features.edit.core.timeline_v2 import SpatialPannerParams
+        already = bool(self._panner) and bool(self._panner.get("enabled", True))
+        if not already:
+            payload = {
+                "pan": float(self._pan),
+                "panner": SpatialPannerParams.default().to_dict(),
+            }
+            # 复用统一提交路径：本地记录 + panner_committed → 命令栈
+            self._on_panner_edited(payload, commit=True)
+        self._update_panner_indicator()
+        self._open_panner_dialog()
+
+    def _update_panner_indicator(self) -> None:
+        """声像器启用状态在 strip 上的可见指示（⤢ 按钮高亮）。"""
+        btn = getattr(self, "_panner_expand_btn", None)
+        if btn is None:
+            return
+        active = bool(self._panner) and bool(self._panner.get("enabled", True))
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {'#13242C' if active else '#22252E'};
+                color: {'#28D8F0' if active else '#9AA0B0'};
+                border: 1px solid {'#28D8F0' if active else '#303440'};
+                border-radius: 4px;
+                padding: 0px 2px;
+                font-size: 10px;
+            }}
+            QPushButton:hover {{ color: #FFFFFF; border-color: #424858; }}
+        """)
+
+    def _add_dynamics_unit(self) -> None:
+        """添加完整 Dynamics 单元（Da Vinci Fairlight 语义）。
+
+        Expander/Gate、Compressor、Limiter 三个实例作为一个整体加入
+        （panel="dynamics"，FX 列表不单独显示），随后打开完整 Dynamics
+        面板。已存在任一 dynamics 实例时不重复添加，直接打开面板。
+        """
+        from src.features.edit.core.timeline_v2 import (
+            TrackEffectInstance, EffectChainParams,
+        )
+        existing = list(self._effect_chain.effects) if self._effect_chain else []
+        has_dynamics = any(
+            getattr(e, "panel", "fx") == "dynamics"
+            and e.effect_type in ("expander", "compressor", "limiter")
+            for e in existing
+        )
+        if not has_dynamics:
+            new_order = max((e.order for e in existing), default=-1) + 1
+            for et in ("expander", "compressor", "limiter"):
+                existing.append(TrackEffectInstance(
+                    effect_type=et,
+                    params=_effect_default_params(et),
+                    enabled=True,
+                    order=new_order,
+                    panel="dynamics",
+                ))
+            self._effect_chain = EffectChainParams(effects=tuple(existing))
+            self.track_effects_committed.emit(self._track_id, self._effect_chain)
+        self._refresh_effect_list()
+        self._update_badges_style()
+        self._open_dynamics_panel()
+
     def _effect_add(self, effect_type: str) -> None:
-        """添加一个效果器到链尾（支持多实例，同类型可重复添加）。"""
+        """添加一个效果器到链尾（支持多实例，同类型可重复添加）。
+
+        effect_type == "dynamics" 时一次性加入完整 Dynamics 单元
+        （expander + compressor + limiter，panel="dynamics"）并打开面板。
+        """
+        if effect_type == "dynamics":
+            self._add_dynamics_unit()
+            return
         existing = self._effect_chain.effects if self._effect_chain else ()
         from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
         new_order = max((e.order for e in existing), default=-1) + 1
@@ -1087,7 +1369,7 @@ class TrackMixerWidget(QWidget):
     _EFFECT_DIALOG_ATTRS = (
         '_limiter_dialogs', '_compressor_dialogs', '_reverb_dialogs',
         '_delay_dialogs', '_saturation_dialogs', '_imager_dialogs',
-        '_noise_gate_dialogs', '_strip_eq_dialogs',
+        '_expander_dialogs', '_strip_eq_dialogs',
     )
 
     def _close_dialogs_for_instance(self, instance_id: str) -> None:
@@ -1535,45 +1817,44 @@ class TrackMixerWidget(QWidget):
         else:
             self.track_effects_preview.emit(self._track_id, self._effect_chain)
 
-    def _open_noise_gate_editor(self, inst: Any) -> None:
-        """打开 Noise Gate 参数对话框。"""
-        from src.shared.ui.audio_mixer.noise_gate_dialog import NoiseGateDialog
-        from src.features.edit.core.timeline_v2 import NoiseGateParams
-        existing = getattr(self, '_noise_gate_dialogs', {})
+    def _open_expander_editor(self, inst: Any) -> None:
+        """打开 Expander/Gate 编辑器（CW-A1；旧 noise_gate 实例同入口）。"""
+        from src.shared.ui.audio_mixer.expander_dialog import ExpanderDialog
+        from src.features.edit.core.timeline_v2 import ExpanderParams
+        existing = getattr(self, '_expander_dialogs', {})
         dlg = existing.get(inst.instance_id)
         if dlg is not None and dlg.isVisible():
             dlg.raise_()
             dlg.activateWindow()
             return
-        params = NoiseGateParams.from_dict(inst.params) if inst.params else NoiseGateParams.default()
-        dlg = NoiseGateDialog(
+        params = ExpanderParams.from_dict(inst.params) if inst.params else ExpanderParams.default()
+        dlg = ExpanderDialog(
             track_id=self._track_id,
             track_name=self._track_name,
             instance_id=inst.instance_id,
             initial_params=params,
             parent=self.window(),
         )
-        dlg.noise_gate_preview.connect(
-            lambda tid, p: self._on_noise_gate_edited(inst, p, commit=False)
+        dlg.expander_preview.connect(
+            lambda tid, p: self._on_expander_edited(inst, p, commit=False)
         )
-        dlg.noise_gate_committed.connect(
-            lambda tid, p: self._on_noise_gate_edited(inst, p, commit=True)
+        dlg.expander_committed.connect(
+            lambda tid, p: self._on_expander_edited(inst, p, commit=True)
         )
-        if not hasattr(self, '_noise_gate_dialogs'):
-            self._noise_gate_dialogs = {}
-        self._noise_gate_dialogs[inst.instance_id] = dlg
+        if not hasattr(self, '_expander_dialogs'):
+            self._expander_dialogs = {}
+        self._expander_dialogs[inst.instance_id] = dlg
         dlg.show()
 
-    def _on_noise_gate_edited(self, inst: Any, ng_params: Any, commit: bool = True) -> None:
-        """Noise Gate 对话框提交/预览：更新机架中对应条目。"""
+    def _on_expander_edited(self, inst: Any, exp_params: Any, commit: bool = True) -> None:
+        """Expander/Gate 对话框提交/预览：更新机架中对应条目（保留原类型键）。"""
         if self._effect_chain is None:
             return
-        # AUD-37902: 实例已被删除（对话框在删除前打开）—— 丢弃编辑，
-        # 避免重建出无变化链并向命令栈发出重复提交。
+        # AUD-37902: 实例已被删除（对话框在删除前打开）—— 丢弃编辑
         if not self._instance_in_chain(inst.instance_id):
             return
         from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
-        new_params = ng_params.to_dict()
+        new_params = exp_params.to_dict()
         effects = tuple(
             TrackEffectInstance(
                 effect_type=e.effect_type,
@@ -1584,19 +1865,19 @@ class TrackMixerWidget(QWidget):
         )
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
-            # enabled 通过 params 流转（开关/右键旁路），刷新列表 [name]/灰色显示
             self._refresh_effect_list()
             self.track_effects_committed.emit(self._track_id, self._effect_chain)
         else:
             self.track_effects_preview.emit(self._track_id, self._effect_chain)
 
     def _open_strip_eq_editor(self, inst: Any) -> None:
-        """从 FX 列表打开 Graphic EQ 编辑器（多实例，按 instance_id 区分）。
+        """从 FX 列表打开 Parametric EQ 编辑器（多实例，按 instance_id 区分）。
 
         与 EQ 胶囊的单例 _eq_dialog 区分：列表入口支持多实例叠加，
         每个实例独立编辑，互不影响。两者共享同一个 effect_chain 存储。
+        CW-A1: 参数化 EQ，preview 路径接活（拖动期实时可听）。
         """
-        from src.shared.ui.audio_mixer.strip_eq_dialog import StripEQDialog
+        from src.shared.ui.audio_mixer.strip_eq_dialog import ParametricEQDialog
         from src.features.edit.core.timeline_v2 import StripEQParams
         # 若该 strip_eq 的对话框已打开则不重复（用 instance_id 区分多个 EQ）
         existing = getattr(self, '_strip_eq_dialogs', {})
@@ -1606,20 +1887,36 @@ class TrackMixerWidget(QWidget):
             dlg.activateWindow()
             return
         eq_params = StripEQParams.from_dict(inst.params) if inst.params else StripEQParams.default()
-        dlg = StripEQDialog(
+        dlg = ParametricEQDialog(
             track_id=self._track_id,
             track_name=self._track_name,
+            instance_id=inst.instance_id,
             initial_params=eq_params,
             parent=self.window(),
         )
         # EQ 列表实例提交：按 instance_id 精确替换 chain 中对应实例
+        dlg.strip_eq_preview.connect(
+            lambda tid, p: self._on_strip_eq_edited(inst, p, commit=False)
+        )
         dlg.strip_eq_committed.connect(
             lambda tid, p: self._on_strip_eq_edited(inst, p, commit=True)
         )
+        dlg.destroyed.connect(self._safe_spectrum_gating)
+        # 同上：hide 关闭也要重算门控 + 清理多实例字典，避免滞留死引用
+        dlg.finished.connect(
+            lambda _r=0, iid=inst.instance_id: self._on_eq_instance_closed(iid))
         if not hasattr(self, '_strip_eq_dialogs'):
             self._strip_eq_dialogs = {}
         self._strip_eq_dialogs[inst.instance_id] = dlg
         dlg.show()
+        self._update_spectrum_gating()
+
+    def _on_eq_instance_closed(self, instance_id: str) -> None:
+        """FX 列表 EQ 对话框关闭（hide）：清理字典引用并重算频谱门控。"""
+        dlgs = getattr(self, '_strip_eq_dialogs', None)
+        if dlgs is not None:
+            dlgs.pop(instance_id, None)
+        self._safe_spectrum_gating()
 
     def _on_strip_eq_edited(self, inst: Any, eq_params: Any, commit: bool = True) -> None:
         """FX 列表 strip_eq 实例提交：按 instance_id 更新 chain 中对应实例。"""
@@ -1654,6 +1951,184 @@ class TrackMixerWidget(QWidget):
     def reset_meter(self) -> None:
         """重置电平表"""
         self._meter.reset()
+
+    # ─── CW-A1: 空间声像器 ───────────────────────────────────
+
+    def _open_panner_dialog(self) -> None:
+        """打开空间声像器对话框（单例）。pan=本轨 balance 真源。"""
+        from src.shared.ui.audio_mixer.panner_dialog import SpatialPannerDialog
+        if self._panner_dialog is not None and self._panner_dialog.isVisible():
+            self._panner_dialog.raise_()
+            self._panner_dialog.activateWindow()
+            return
+        self._panner_dialog = SpatialPannerDialog(
+            track_id=self._track_id,
+            track_name=self._track_name,
+            initial_pan=self._pan,
+            initial_panner=self._panner or None,
+            parent=self.window(),
+        )
+        self._panner_dialog.panner_preview.connect(
+            lambda tid, payload: self._on_panner_edited(payload, commit=False))
+        self._panner_dialog.panner_committed.connect(
+            lambda tid, payload: self._on_panner_edited(payload, commit=True))
+        self._panner_dialog.show()
+
+    def _on_panner_edited(self, payload: dict, commit: bool) -> None:
+        """声像器对话框提交/预览：本地记录 + 上抛信号。"""
+        self._pan = float(payload.get("pan", 0.0))
+        self._panner = dict(payload.get("panner") or {})
+        # balance 推子视觉同步（不发信号）+ ⤢ 启用指示
+        self._sync_balance_from_pan()
+        self._update_panner_indicator()
+        if commit:
+            self.panner_committed.emit(self._track_id, payload)
+        else:
+            self.panner_preview.emit(self._track_id, payload)
+
+    def _sync_balance_from_pan(self) -> None:
+        """声像器 lr 变化 → balance 推子/spinbox 静默同步（不发信号）。"""
+        balance = int(round(self._pan * BALANCE_MAX))
+        if hasattr(self, '_balance_fader') and self._balance_fader is not None:
+            self._balance_fader.blockSignals(True)
+            self._balance_fader.setValue(balance)
+            self._balance_fader.blockSignals(False)
+        if hasattr(self, '_balance_spin') and self._balance_spin is not None:
+            self._balance_spin.blockSignals(True)
+            self._balance_spin.setValue(balance)
+            self._balance_spin.blockSignals(False)
+
+    def set_pan_and_panner(self, pan: float, panner: Optional[dict]) -> None:
+        """外部静默回填 pan + 空间声像器（timeline 变化后同步，blockSignals）。"""
+        self._pan = max(-1.0, min(1.0, float(pan)))
+        self._panner = dict(panner) if panner else {}
+        self.set_pan_linear(self._pan)
+        self._update_panner_indicator()
+        if self._panner_dialog is not None:
+            try:
+                self._panner_dialog.set_state(self._pan, self._panner or None)
+            except RuntimeError:
+                # 对话框 C++ 对象已销毁（引用滞留）
+                self._panner_dialog = None
+
+    # ─── CW-A1: 遥测分发（引擎 33Hz payload → 已打开对话框）────
+
+    def update_track_telemetry(self, payload: dict) -> None:
+        """把引擎表计 payload（含 pre/gr/sc/spectrum 新键）分发给已打开对话框。
+
+        Args:
+            payload: audio_track_levels 单轨载荷 {"peak","rms","lufs","pre",
+                "gr": {instance_id: dB}, "sc": {instance_id: dB},
+                "spectrum": {"freqs", "db"}}
+        """
+        gr = payload.get("gr") or {}
+        sc = payload.get("sc") or {}
+        pre_db = payload.get("pre", -100.0)
+        peak = payload.get("peak", [-100.0, -100.0])
+        out_db = max(peak[0], peak[1]) if isinstance(peak, (list, tuple)) else -100.0
+
+        # EQ 对话框：频谱 + Master 输出表
+        spectrum = payload.get("spectrum")
+        for dlg in self._iter_eq_dialogs():
+            if spectrum:
+                dlg.update_spectrum(spectrum.get("freqs", []),
+                                    spectrum.get("db", []))
+            dlg.update_output_meter(out_db)
+
+        # Dynamics 面板：Input/GR×3/Output/Sidechain（按 panel="dynamics" 实例 id）
+        if self._dynamics_dialog is not None:
+            try:
+                iids = self._dynamics_instance_ids()
+                self._dynamics_dialog.update_meters(
+                    input_db=pre_db,
+                    gr_eg_db=gr.get(iids.get("expander", ""), 0.0),
+                    gr_comp_db=gr.get(iids.get("compressor", ""), 0.0),
+                    gr_lim_db=gr.get(iids.get("limiter", ""), 0.0),
+                    output_db=out_db,
+                    sidechain_db=sc.get(iids.get("compressor", ""), -60.0),
+                )
+            except RuntimeError:
+                self._dynamics_dialog = None
+
+        # 独立压缩器对话框：检源表
+        for dlg in list(getattr(self, '_compressor_dialogs', {}).values()):
+            try:
+                iid = getattr(dlg, "_instance_id", "")
+                if iid in sc:
+                    dlg.set_sidechain_level(sc[iid])
+            except (RuntimeError, AttributeError):
+                continue
+
+        # Reverb / Delay 输出表
+        for dlg in list(getattr(self, '_reverb_dialogs', {}).values()):
+            try:
+                dlg.update_output_meter(out_db)
+            except RuntimeError:
+                continue
+        for dlg in list(getattr(self, '_delay_dialogs', {}).values()):
+            try:
+                dlg.update_output_meters(peak[0], peak[1])
+            except RuntimeError:
+                continue
+
+    def _iter_eq_dialogs(self) -> list:
+        """当前可见的 EQ 对话框（胶囊单例 + FX 列表多实例）。"""
+        dlgs = []
+        if self._eq_dialog is not None:
+            try:
+                if self._eq_dialog.isVisible():
+                    dlgs.append(self._eq_dialog)
+            except RuntimeError:
+                # C++ 对象已销毁而引用滞留（destroyed 未清属性）
+                self._eq_dialog = None
+        for dlg in list(getattr(self, '_strip_eq_dialogs', {}).values()):
+            try:
+                if dlg.isVisible():
+                    dlgs.append(dlg)
+            except RuntimeError:
+                continue
+        return dlgs
+
+    def _dynamics_instance_ids(self) -> dict:
+        """DY 面板管理的三个实例 id（按 effect_type）。"""
+        iids: dict = {}
+        if self._effect_chain is None:
+            return iids
+        for e in self._effect_chain.effects:
+            if getattr(e, "panel", "fx") != "dynamics":
+                continue
+            if e.effect_type in ("expander", "compressor", "limiter"):
+                iids[e.effect_type] = e.instance_id
+        return iids
+
+    def _update_spectrum_gating(self) -> None:
+        """任一 EQ 对话框可见 → 请求引擎频谱计算；全部关闭 → 停止。"""
+        self.spectrum_metering_changed.emit(bool(self._iter_eq_dialogs()))
+
+    def _safe_spectrum_gating(self, *_args) -> None:
+        """destroyed/finished 信号回调：宿主 widget 可能已销毁（应用关闭期）。
+
+        接受任意位置参数（destroyed 传 QObject、finished 传 int）。
+        """
+        try:
+            self._update_spectrum_gating()
+        except RuntimeError:
+            pass
+
+    def set_sidechain_sources(self, sources: list) -> None:
+        """下发侧链源列表 [(track_id, name), ...] 给已打开的动态对话框。"""
+        # 排除本轨（自键控无意义，引擎侧已忽略同轨引用）
+        filtered = [(tid, name) for tid, name in sources if tid != self._track_id]
+        if self._dynamics_dialog is not None:
+            try:
+                self._dynamics_dialog.set_sidechain_sources(filtered)
+            except RuntimeError:
+                self._dynamics_dialog = None
+        for dlg in list(getattr(self, '_compressor_dialogs', {}).values()):
+            try:
+                dlg.set_sidechain_sources(filtered)
+            except RuntimeError:
+                continue
 
     # ========== 事件处理 ==========
 

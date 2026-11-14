@@ -489,7 +489,8 @@ class TestAud16807RegistrySingletonLock:
         first = er._get_audio_default_params()
         second = er._get_audio_default_params()
         assert first is second, "lazy cache must be reused"
-        assert len(first) == 8
+        # CW-A1: expander 新增（noise_gate 别名键保留）→ 9 个键
+        assert len(first) == 9
 
 
 # ---------------------------------------------------------------------------
