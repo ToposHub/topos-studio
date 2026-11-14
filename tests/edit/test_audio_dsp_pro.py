@@ -236,8 +236,11 @@ class TestAcousticReverb:
         w = rv.process(imp).sum(axis=0)
         nz = np.flatnonzero(np.abs(w) > 1e-5)
         first_ms = nz[0] / SR * 1000.0
-        # 42ms predelay + 10/343≈29.2ms 距离延迟 ≈ 71ms（±容差）
-        assert 65.0 <= first_ms <= 85.0
+        # RV-02 image-source 契约：首反射 = 有效传播（42ms predelay +
+        # 10/343≈29.2ms 距离）+ 最短镜像附加行程（默认房 30×40×10 的
+        # 天花/地镜附加 ≈5.66m ≈ 16.5ms）≈ 88ms（±容差覆盖 ±2% 去相关
+        # 抖动与脉冲位置 2ms；旧 span 模型 ~76ms 已被 image-source 取代）
+        assert 82.0 <= first_ms <= 95.0
 
     def test_tail_decays(self) -> None:
         rv = ReverbEffect(SR)
