@@ -3153,6 +3153,8 @@ class EffectChain:
         self._instance_ids: list = []  # list[str]
         # 缓存最后传入的 entries，供 set_sample_rate 等场景重新应用
         self._last_entries: Optional[list] = None
+        # MX-02: 本块按实例 tap（process 时采样；tap_levels() 读取）
+        self._tap_levels: dict = {}
 
     def set_params(self, entries: Optional[list], sample_rate: Optional[float] = None) -> None:
         """更新效果器链。
@@ -3232,25 +3234,62 @@ class EffectChain:
                 sidechain_by_id: Optional[dict] = None) -> np.ndarray:
         """依次应用链中每个启用的效果器。
 
+        MX-02: 每个实例处理前后真实采样 in/out 峰值（dBFS），与 GR/检源
+        遥测一起按 instance_id 存入 self._tap_levels（tap_levels() 读取）。
+        旁路/未启用实例记录 out=in（直通语义），不残留上一块读数。
+
         Args:
             samples: (channels, n) 样本块
             sidechain_by_id: {instance_id: (channels, n) 检源缓冲}，
                 仅压缩器（外部侧链开启时）消费。
         """
+        self._tap_levels = {}
         if not self._effects:
             return samples
         out = samples
         for i, (inst, enabled) in enumerate(zip(self._effects, self._enabled_flags)):
+            iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
+            etype = getattr(inst, "effect_type", "")
             if not (enabled and inst.is_active):
+                if iid:
+                    # MX-02: 旁路实例直通语义（无过期 GR，UI 表归零）
+                    self._tap_levels[iid] = {
+                        "effect_type": etype, "in_db": -100.0,
+                        "out_db": -100.0, "gr_db": 0.0, "sc_db": -100.0,
+                        "bypassed": True,
+                    }
                 continue
+            in_peak = float(np.max(np.abs(out))) if out.size else 0.0
+            in_db = max(-100.0, 20.0 * float(np.log10(max(in_peak, 1e-9))))
+            sc_buf = None
             # DynamicsEffect 内部含压缩器：侧链缓冲透传给其内部 comp
             if isinstance(inst, (CompressorEffect, DynamicsEffect)) and sidechain_by_id:
-                iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
                 sc = sidechain_by_id.get(iid) if iid else None
+                if sc is not None and isinstance(sc, np.ndarray) and sc.size:
+                    sc_buf = sc
                 out = inst.process(out, sidechain=sc)
             else:
                 out = inst.process(out)
+            out_peak = float(np.max(np.abs(out))) if out.size else 0.0
+            out_db = max(-100.0, 20.0 * float(np.log10(max(out_peak, 1e-9))))
+            if iid:
+                self._tap_levels[iid] = {
+                    "effect_type": etype,
+                    "in_db": in_db, "out_db": out_db,
+                    "gr_db": float(getattr(inst, "last_gr_db", 0.0) or 0.0),
+                    "sc_db": float(getattr(inst, "last_detector_db", -100.0)
+                                   if sc_buf is not None else -100.0),
+                    "bypassed": False,
+                }
         return out
+
+    def tap_levels(self) -> dict:
+        """MX-02: 最近一次 process 的按实例 tap（{instance_id: {...}}）。
+
+        未启用/旁路实例也在列（直通语义 + bypassed 标记），消费者可区分
+        "真实读数" 与 "旁路归零"。process 未运行过时为空 dict。
+        """
+        return self._tap_levels
 
     def collect_gain_reduction(self) -> dict:
         """收集链内各实例的块内最大增益衰减（正 dB）。

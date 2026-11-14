@@ -305,6 +305,12 @@ class AudioMixerPanel(QWidget):
             return
 
         mixer = self._track_mixers[track_id]
+        # MX-12: 先关闭该 strip 的全部效果器对话框（孤儿窗/订阅泄漏防护），
+        # 再拆除 widget 本体。
+        try:
+            mixer.close_all_dialogs()
+        except (AttributeError, RuntimeError):
+            pass
         self._tracks_layout.removeWidget(mixer)
         mixer.deleteLater()
 
