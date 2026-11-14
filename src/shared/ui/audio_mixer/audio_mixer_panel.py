@@ -526,6 +526,14 @@ class AudioMixerPanel(QWidget):
         if self._master_mixer is not None:
             self._master_mixer.reset_meter()
 
+    def on_engine_sample_rate(self, sample_rate: float) -> None:
+        """MX-09: 引擎采样率下发（设备/工程切换）——推送到全部 strip。"""
+        for mixer in self._track_mixers.values():
+            try:
+                mixer.set_engine_sample_rate(float(sample_rate))
+            except (AttributeError, RuntimeError):
+                continue
+
     def set_master_volume_linear(self, volume: float) -> None:
         """W12: 用线性增益(0.0-1.0)静默回填 Master 推子（不发信号）。"""
         if self._master_mixer:

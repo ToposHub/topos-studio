@@ -1368,8 +1368,11 @@ class ParametricEQDialog(QDialog):
         instance_id: str = "",
         initial_params: Optional[StripEQParams] = None,
         parent: Optional[QWidget] = None,
+        sample_rate: float = 48000.0,
     ) -> None:
         super().__init__(parent)
+        # MX-09: 采样率由引擎下发（构造注入 + update_sample_rate 运行更新）
+        self._sample_rate = float(sample_rate)
         self._track_id = track_id
         self._instance_id = instance_id
         self._current: StripEQParams = initial_params or StripEQParams.default()
@@ -1811,6 +1814,8 @@ class ParametricEQDialog(QDialog):
         self.master_strip.setMeterLevel(level_db)
 
     def update_sample_rate(self, sample_rate: float) -> None:
+        """MX-09: 引擎采样率下发（曲线求值与频谱轴同一真源）。"""
+        self._sample_rate = float(sample_rate)
         self.eq_graph._sample_rate = float(sample_rate)
         self.eq_graph.update()
 

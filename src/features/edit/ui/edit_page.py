@@ -869,6 +869,10 @@ class EditPage(QWidget):
             self._audio_manager.audio_telemetry_reset.connect(
                 mixer_panel.on_telemetry_reset
             )
+            # MX-09: 采样率下发（EQ 曲线/频谱轴同一真源）
+            self._audio_manager.sample_rate_changed.connect(
+                mixer_panel.on_engine_sample_rate
+            )
             self._mixer_signals_connected = True
             # W11: LUFS 按需计算——表模式驱动（无 LUFS 表时省掉 K-weighting，
             # 占混音热路径近一半耗时）。先同步当前状态再监听变化。

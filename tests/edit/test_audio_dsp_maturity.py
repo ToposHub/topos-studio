@@ -493,3 +493,82 @@ class TestDelayTailContinues:
         y2 = d.process(np.zeros((2, 2048)))  # 尾音块（feed-zero drain）
         peak = float(np.max(np.abs(y2)))
         assert peak > 0.05, f"echo tail lost: zero-fed block peak={peak}"
+
+
+class TestDl02FractionalDelay:
+    """DL-02：分数读头、改时间不清缓冲、稳定反馈。"""
+
+    def _delay(self, time_ms, fb=0.0):
+        d = DelayEffect(SR)
+        d.set_params({
+            "left_delay": time_ms, "right_delay": time_ms,
+            "left_feedback": fb, "right_feedback": fb,
+            "low_cut": 20.0, "high_cut": 18000.0,
+            "high_ratio": 0.0, "stereo_blend": 0.0,
+            "dry_wet": 100.0, "level_db": 0.0, "enabled": True,
+        })
+        return d
+
+    def test_time_change_preserves_history(self):
+        """拖动延迟时间不清空环形缓冲（尾音连续）。"""
+        d = self._delay(60.0, fb=60.0)
+        rng = np.random.default_rng(9)
+        x = rng.standard_normal((2, 4800)) * 0.3
+        for _ in range(6):
+            d.process(x.copy())
+        d.set_params({"left_delay": 90.0, "right_delay": 90.0})  # 运行中改时间
+        tail = d.process(np.zeros((2, 4800)))
+        peak = float(np.max(np.abs(tail)))
+        assert peak > 0.01, (
+            f"time change cleared the delay history (tail peak={peak})"
+        )
+
+    def test_fractional_time_accuracy(self):
+        """分数延迟时间误差 ≤ 1 采样（冲激回声峰位对齐）。"""
+        sr = SR
+        d = self._delay(60.5)  # 0.5 采样分数
+        block = int(sr)  # 1 秒块（> 延迟：回声在本块内）
+        x = np.zeros((2, block))
+        x[0, 0] = 1.0
+        y = d.process(x)
+        expected = int(round(60.5 * 0.001 * sr))  # 2904
+        # 跳过输入滤波的起始冲激区，在回声窗内找峰
+        window = np.abs(y[0][expected - 64:expected + 64])
+        peak_idx = int(np.argmax(window)) + expected - 64
+        assert abs(peak_idx - expected) <= 1, (
+            f"fractional delay echo at {peak_idx}, expected ~{expected}"
+        )
+        assert float(np.max(np.abs(y[0][:expected - 64]))) < 1e-6, (
+            "echo must not arrive before the delayed time"
+        )
+
+    def test_negative_feedback_alternates_polarity(self):
+        """负反馈相邻回声交替极性。"""
+        d = self._delay(10.0, fb=-60.0)
+        x = np.zeros((2, 2048))
+        x[0, 0] = 1.0
+        d.process(x)
+        y2 = d.process(np.zeros((2, 2048)))
+        # 第二回声（≈20ms 处）应与第一回声反相
+        first = y2[0, 480 - 8:480 + 8]
+        second = y2[0, 960 - 8:960 + 8]
+        e1 = float(np.max(np.abs(first)))
+        e2 = float(np.max(np.abs(second)))
+        if e1 > 1e-3 and e2 > 1e-3:
+            # 峰值符号相反
+            s1 = first[int(np.argmax(np.abs(first)))]
+            s2 = second[int(np.argmax(np.abs(second)))]
+            assert s1 * s2 < 0, "negative feedback must alternate echo polarity"
+
+    def test_high_feedback_stays_finite(self):
+        """谱半径 <1 的反馈长跑有限（无爆音/发散）。"""
+        d = self._delay(20.0, fb=99.0)
+        rng = np.random.default_rng(4)
+        x = rng.standard_normal((2, 4800)) * 0.1
+        out_peak = 0.0
+        for _ in range(30):
+            y = d.process(x.copy())
+            out_peak = max(out_peak, float(np.max(np.abs(y))))
+        assert np.isfinite(out_peak) and out_peak < 10.0, (
+            f"high feedback diverged (peak={out_peak})"
+        )

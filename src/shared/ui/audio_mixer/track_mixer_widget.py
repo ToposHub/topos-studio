@@ -126,9 +126,21 @@ def linear_to_db(v: float) -> float:
     return max(VOLUME_DB_MIN, min(VOLUME_DB_MAX, db))
 
 
+# MX-13: 推子底端契约——VOLUME_DB_MIN 是**硬零端点**（严格静音，-∞ 语义），
+# 连续 dB 有效区为 (VOLUME_DB_MIN, VOLUME_DB_MAX]。旧工程的中间线性值映射
+# 冻结不变（10^(dB/20)）；只有底端从 0.001 改为严格 0.0——volume=0 在
+# 保存/重开/undo 后保持严格 0（模型无 clamp，引擎线性乘 0 = 完全静音）。
 def db_to_linear(db: float) -> float:
-    """dB → 线性增益，结果 clamp 到 [VOLUME_LINEAR_MIN, VOLUME_LINEAR_MAX]。"""
-    v = 10.0 ** (float(db) / 20.0)
+    """dB → 线性增益。
+
+    - db <= VOLUME_DB_MIN（推子底端/数值输入下限）→ 0.0（硬零端点）
+    - (VOLUME_DB_MIN, VOLUME_DB_MAX] → 10^(dB/20)（冻结的连续映射）
+    - 结果 clamp 到 [VOLUME_LINEAR_MIN, VOLUME_LINEAR_MAX]。
+    """
+    db = float(db)
+    if db <= VOLUME_DB_MIN:
+        return 0.0
+    v = 10.0 ** (db / 20.0)
     return max(VOLUME_LINEAR_MIN, min(VOLUME_LINEAR_MAX, v))
 
 
@@ -833,6 +845,7 @@ class TrackMixerWidget(QWidget):
             instance_id=eq_inst.instance_id if eq_inst is not None else "",
             initial_params=eq_params,
             parent=self.window(),
+            sample_rate=float(getattr(self, "_engine_sample_rate", 48000.0)),
         )
         # EQ 提交：更新 chain 中 strip_eq 实例（找不到则创建）
         self._eq_dialog.strip_eq_preview.connect(
@@ -1538,6 +1551,15 @@ class TrackMixerWidget(QWidget):
         except (RuntimeError, AttributeError):
             pass
 
+    def set_engine_sample_rate(self, sample_rate: float) -> None:
+        """MX-09: 引擎采样率下发（记忆 + 推送到已打开的 EQ 曲线/频谱轴）。"""
+        self._engine_sample_rate = float(sample_rate)
+        for dlg in self._iter_eq_dialogs():
+            try:
+                dlg.update_sample_rate(float(sample_rate))
+            except (RuntimeError, AttributeError):
+                continue
+
     def _instance_in_chain(self, instance_id: str) -> bool:
         """AUD-37902: instance_id 是否仍存在于当前效果器链（删除后的编辑守卫）。"""
         if self._effect_chain is None:
@@ -2044,6 +2066,7 @@ class TrackMixerWidget(QWidget):
             instance_id=inst.instance_id,
             initial_params=eq_params,
             parent=self.window(),
+            sample_rate=float(getattr(self, "_engine_sample_rate", 48000.0)),
         )
         # EQ 列表实例提交：按 instance_id 精确替换 chain 中对应实例
         dlg.strip_eq_preview.connect(
@@ -2267,7 +2290,8 @@ class TrackMixerWidget(QWidget):
                     dlgs.append(self._eq_dialog)
             except RuntimeError:
                 # C++ 对象已销毁而引用滞留（destroyed 未清属性）
-                self._eq_dialog = None
+                self._engine_sample_rate: float = 48000.0  # MX-09: 引擎采样率缓存
+        self._eq_dialog = None
         for dlg in list(getattr(self, '_strip_eq_dialogs', {}).values()):
             try:
                 if dlg.isVisible():
