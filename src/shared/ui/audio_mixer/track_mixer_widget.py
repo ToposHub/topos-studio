@@ -200,6 +200,8 @@ class TrackMixerWidget(QWidget):
         is_master: bool = False
     ) -> None:
         super().__init__(parent)
+        # MX-09: 引擎采样率缓存（set_engine_sample_rate 更新；对话框构造注入）
+        self._engine_sample_rate: float = 48000.0
         self._track_id = track_id
         self._track_name = track_name
         self._track_tag = track_tag
@@ -962,12 +964,16 @@ class TrackMixerWidget(QWidget):
             lambda tid, c: self._on_dynamics_edited(c, commit=True)
         )
         # MX-12: 生命周期绑定——用户关闭/销毁时清引用（滞留引用会让
-        # 遥测分发与后续编辑打到已销毁的 C++ 对象）
-        self._dynamics_dialog.finished.connect(
-            lambda _r: setattr(self, "_dynamics_dialog", None))
-        self._dynamics_dialog.destroyed.connect(
-            lambda *_: setattr(self, "_dynamics_dialog", None))
+        # 遥测分发与后续编辑打到已销毁的 C++ 对象）。绑定方法连接而非
+        # lambda：destroyed 可能在 strip GC 后触发，lambda 的 self 闭包
+        # 单元此时已清空（free variable NameError）。
+        self._dynamics_dialog.finished.connect(self._on_dynamics_dialog_gone)
+        self._dynamics_dialog.destroyed.connect(self._on_dynamics_dialog_gone)
         self._dynamics_dialog.show()
+
+    def _on_dynamics_dialog_gone(self, *_args) -> None:
+        """MX-12: Dynamics 单例对话框 finished/destroyed 清引用。"""
+        self._dynamics_dialog = None
 
     def _on_dynamics_edited(self, chain: Any, commit: bool) -> None:
         """Dynamics 面板提交/预览：更新本地 chain + emit 信号。"""
@@ -2290,8 +2296,7 @@ class TrackMixerWidget(QWidget):
                     dlgs.append(self._eq_dialog)
             except RuntimeError:
                 # C++ 对象已销毁而引用滞留（destroyed 未清属性）
-                self._engine_sample_rate: float = 48000.0  # MX-09: 引擎采样率缓存
-        self._eq_dialog = None
+                self._eq_dialog = None
         for dlg in list(getattr(self, '_strip_eq_dialogs', {}).values()):
             try:
                 if dlg.isVisible():
