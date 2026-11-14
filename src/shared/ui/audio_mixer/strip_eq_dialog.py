@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import math
 from typing import Any, Callable, Optional
 
@@ -71,6 +72,8 @@ from src.shared.ui.audio_mixer.pro_widgets import (
     parse_freq_hz,
 )
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+
+logger = logging.getLogger(__name__)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 声学常量
@@ -1394,8 +1397,14 @@ class ParametricEQDialog(QDialog):
             "A": self._current,
             "B": StripEQParams(bands=tuple(default_eq_bands_flat())),
         }
-        # 预设（含 "+" 保存的自定义项）
+        # 预设（内置 + 用户库；ST-01 跨会话持久化）
         self._presets: list[dict[str, Any]] = copy.deepcopy(PARAMETRIC_EQ_PRESETS)
+        self._effect_type = "strip_eq"
+        try:
+            from src.features.edit.core.effect_preset import load_user_presets
+            self._presets.extend(load_user_presets(self._effect_type))
+        except Exception as exc:  # noqa: BLE001 — 预设库不可读不阻断对话框
+            logger.warning("strip_eq dialog: user presets unavailable: %r", exc)
 
         self._setup_ui(track_name)
         self._refresh_all_views()
@@ -1780,8 +1789,15 @@ class ParametricEQDialog(QDialog):
             I18N.tr("audio.fx.preset_name_prompt", "输入预设名称:"))
         if ok and name.strip():
             clean = name.strip()
-            self._presets.append({"name": clean, "params": self._st().to_dict()})
+            data = self._st().to_dict()
+            self._presets.append({"name": clean, "params": data})
             self.preset_combo.addItem(clean)
+            # ST-01: 原子落盘到用户库（关窗口/重启/新工程均可加载）
+            try:
+                from src.features.edit.core.effect_preset import save_user_preset
+                save_user_preset(self._effect_type, clean, data)
+            except Exception as exc:  # noqa: BLE001 — 落盘失败不阻断内存视图
+                logger.warning("strip_eq dialog: persist preset failed: %r", exc)
 
     # ── 公开 API ─────────────────────────────────────────────
 
