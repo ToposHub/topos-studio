@@ -663,9 +663,11 @@ class DelayDialog(QDialog):
         fmt_lbl.setStyleSheet("color: #8E94A4; font-size: 11px; font-weight: 600;")
         tb_lay.addWidget(fmt_lbl)
 
+        # DL-01：输入选择矩阵与 DSP 同源（Stereo/Mono/Left/Right）；
+        # 旧 LCR/Quad/5.x 菜单项从未有真实多声道实现，已迁移为 Stereo
         self.format_combo = ChevronComboBox()
         self.format_combo.setFixedWidth(78)
-        self.format_combo.addItems(["Mono", "Stereo", "LCR", "Quad", "5.0", "5.1", "7.1"])
+        self.format_combo.addItems(["Stereo", "Mono", "Left", "Right"])
         self.format_combo.activated.connect(self._on_format_changed)
         tb_lay.addWidget(self.format_combo)
 
@@ -908,8 +910,8 @@ class DelayDialog(QDialog):
             data["right_delay"] = st.left_delay
             data["right_feedback"] = st.left_feedback
         self._banks[self._active_bank] = DelayParams.from_dict(data)
-        if linked:
-            self.delay_committed.emit(self._track_id, self._st())
+        # DL-01：一个离散手势最多一次工程提交（旧实现 linked 分支先 emit
+        # 一次 committed，随后的 _emit(commit=True) 再发一次 = 双提交）。
         self._refresh_all_views()
         self._emit(commit=True)
 

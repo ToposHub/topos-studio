@@ -198,12 +198,13 @@ class TestCompressorPro:
         assert cp.last_detector_db > -10.0
 
     def test_sidechain_listen_broadcasts_detector(self) -> None:
+        """DY-04: sc_listen 透传检源原始音频（保留极性，无整流 DC）。"""
         cp = CompressorEffect(SR)
         cp.set_params({"threshold_db": -20.0, "sc_listen": True, "enabled": True})
         quiet = _noise(amp=0.02)
         det = _noise(amp=0.6)
         out = cp.process(quiet, sidechain=det)
-        assert np.allclose(out[0], np.max(np.abs(det), axis=0))
+        assert np.allclose(out, det)
 
 
 class TestLimiterPro:

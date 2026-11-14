@@ -47,6 +47,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.features.edit.core import audio_dsp as _audio_dsp_common
+from src.features.edit.core.audio_dsp import (
+    VOICING_Q_SCALE,
+    strip_eq_band_response_db,
+)
 from src.features.edit.core.timeline_v2 import (
     StripEQParams,
     auto_range_key,
@@ -91,13 +96,9 @@ RANGE_PRESETS = {
     "H":  (1400.0, 22000.0, "1.4K", "22.0K"),
 }
 
-# 调音台滤波染色特性（Q 缩放；DSP 侧 audio_dsp.VOICING_Q_SCALE 同源）
-VOICING_Q_SCALE = {
-    "Clean":   1.00,
-    "British": 1.18,
-    "Warm":    0.92,
-    "Punch":   0.85,
-}
+# 调音台滤波染色特性（EQ-01：唯一真源在 audio_dsp，此处仅别名引用，
+# 不得在 UI 侧复制系数表——响应曲线与 DSP 传输必须同源）
+VOICING_Q_SCALE = _audio_dsp_common.VOICING_Q_SCALE
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
@@ -385,77 +386,13 @@ class ProEQGraphWidget(QWidget):
     # ── Biquad 频响（客户端曲线求值）────────────────────────
 
     def _band_magnitude_db(self, band: dict, freq: float) -> float:
-        if not band["enabled"]:
-            return 0.0
+        """EQ-01：曲线求值委托 audio_dsp 共享服务（与 DSP 传输严格同源）。
 
-        ftype = band["filter_type"]
-        f0 = max(10.0, float(band["freq"]))
-        gain = float(band["gain"])
-        q_scale = VOICING_Q_SCALE.get(self._eq_voicing, 1.0)
-        q = max(0.1, float(band["q"]) * q_scale)
-
-        if ftype == "HPF":
-            order = max(1, int(band.get("slope", 12)) // 6)
-            ratio = f0 / max(1.0, freq)
-            mag_sq = 1.0 / (1.0 + (ratio ** (2 * order)))
-            return 10.0 * math.log10(max(1e-12, mag_sq))
-
-        if ftype == "LPF":
-            order = max(1, int(band.get("slope", 12)) // 6)
-            ratio = freq / f0
-            mag_sq = 1.0 / (1.0 + (ratio ** (2 * order)))
-            return 10.0 * math.log10(max(1e-12, mag_sq))
-
-        fs = self._sample_rate
-        w0 = 2.0 * math.pi * f0 / fs
-        cos_w0 = math.cos(w0)
-        sin_w0 = math.sin(w0)
-        alpha = sin_w0 / (2.0 * q)
-        A = 10.0 ** (gain / 40.0)
-
-        if ftype == "Bell":
-            if abs(gain) < 1e-4:
-                return 0.0
-            b0, b1, b2 = 1.0 + alpha * A, -2.0 * cos_w0, 1.0 - alpha * A
-            a0, a1, a2 = 1.0 + alpha / A, -2.0 * cos_w0, 1.0 - alpha / A
-        elif ftype == "Low Shelf":
-            if abs(gain) < 1e-4:
-                return 0.0
-            beta = 2.0 * math.sqrt(A) * alpha
-            b0 = A * ((A + 1.0) - (A - 1.0) * cos_w0 + beta)
-            b1 = 2.0 * A * ((A - 1.0) - (A + 1.0) * cos_w0)
-            b2 = A * ((A + 1.0) - (A - 1.0) * cos_w0 - beta)
-            a0 = (A + 1.0) + (A - 1.0) * cos_w0 + beta
-            a1 = -2.0 * ((A - 1.0) + (A + 1.0) * cos_w0)
-            a2 = (A + 1.0) + (A - 1.0) * cos_w0 - beta
-        elif ftype == "High Shelf":
-            if abs(gain) < 1e-4:
-                return 0.0
-            beta = 2.0 * math.sqrt(A) * alpha
-            b0 = A * ((A + 1.0) + (A - 1.0) * cos_w0 + beta)
-            b1 = -2.0 * A * ((A - 1.0) + (A + 1.0) * cos_w0)
-            b2 = A * ((A + 1.0) + (A - 1.0) * cos_w0 - beta)
-            a0 = (A + 1.0) - (A - 1.0) * cos_w0 + beta
-            a1 = 2.0 * ((A - 1.0) - (A + 1.0) * cos_w0)
-            a2 = (A + 1.0) - (A - 1.0) * cos_w0 - beta
-        elif ftype == "Notch":
-            b0, b1, b2 = 1.0, -2.0 * cos_w0, 1.0
-            a0, a1, a2 = 1.0 + alpha, -2.0 * cos_w0, 1.0 - alpha
-        else:
-            return 0.0
-
-        w = 2.0 * math.pi * min(freq, fs * 0.495) / fs
-        cos_w, sin_w = math.cos(w), math.sin(w)
-        cos_2w, sin_2w = math.cos(2.0 * w), math.sin(2.0 * w)
-
-        num_re = b0 + b1 * cos_w + b2 * cos_2w
-        num_im = -b1 * sin_w - b2 * sin_2w
-        den_re = a0 + a1 * cos_w + a2 * cos_2w
-        den_im = -a1 * sin_w - a2 * sin_2w
-
-        num_sq = num_re * num_re + num_im * num_im
-        den_sq = max(1e-24, den_re * den_re + den_im * den_im)
-        return 10.0 * math.log10(max(1e-12, num_sq / den_sq))
+        旧实现在此重复了一套系数公式（Shelf Q 与 DSP 不同源、HPF/LPF 用
+        解析式而 DSP 是错误级联），导致"图上画的"与"耳朵听到的"不一致。
+        """
+        return strip_eq_band_response_db(
+            band, float(freq), self._sample_rate, self._eq_voicing)
 
     def _total_db_at(self, freq: float) -> float:
         if not self._eq_enabled:

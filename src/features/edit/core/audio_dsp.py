@@ -30,8 +30,9 @@ from src.features.edit.core.audio_capabilities import is_scipy_available_for_dsp
 logger = logging.getLogger(__name__)
 
 try:
-    from scipy.signal import lfilter, sosfilt
+    from scipy.signal import butter, lfilter, sosfilt
 except ImportError:  # pragma: no cover
+    butter = None  # type: ignore[assignment]
     lfilter = None  # type: ignore[assignment]
     sosfilt = None  # type: ignore[assignment]
 
@@ -51,13 +52,17 @@ from src.features.edit.core.timeline_v2 import StripEQParams
 # RBJ Audio EQ Cookbook 系数公式
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _biquad_lowshelf(freq_hz: float, gain_db: float, sample_rate: float) -> Tuple[np.ndarray, np.ndarray]:
+def _biquad_lowshelf(freq_hz: float, gain_db: float, sample_rate: float,
+                     q: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
     """LowShelf 滤波器系数（b, a）。
 
     Args:
         freq_hz: 中心/转折频率（Hz）
         gain_db: 增益（dB），正值提升、负值衰减
         sample_rate: 采样率（Hz）
+        q: EQ 频段 Q 值。None（Reverb 音色等内部调用）保持 legacy S=1 shelf；
+            传入时使用 Q 缩放变体 alpha = sin(w0)/(2q)（与 EQ 曲线 UI 同源，
+            EQ-01：Shelf Q 必须实际控制滤波器）。q=0.7071 与 legacy S=1 等价。
 
     Returns:
         (b, a) IIR 系数，长度均为 3，scipy.signal.lfilter 格式。
@@ -66,17 +71,20 @@ def _biquad_lowshelf(freq_hz: float, gain_db: float, sample_rate: float) -> Tupl
     w0 = 2.0 * np.pi * freq_hz / sample_rate
     cos_w0 = np.cos(w0)
     sin_w0 = np.sin(w0)
-    # shelf slope factor S=1（标准 12dB/oct）
-    alpha = sin_w0 / 2.0 * np.sqrt((A + 1.0 / A) * (1.0 / 1.0 - 1.0) + 2.0)
-    # 上式 sqrt 内 (1/S - 1) + 2，S=1 时简化为 sqrt(2)
-    alpha = sin_w0 / 2.0 * np.sqrt(2.0)
+    if q is not None:
+        # Q 缩放 shelf（EQ-01）：过渡带宽随 Q 收窄，Q 越大越陡。
+        alpha = sin_w0 / (2.0 * max(0.05, float(q)))
+    else:
+        # shelf slope factor S=1（legacy，Reverb tone 语义不变）
+        alpha = sin_w0 / 2.0 * np.sqrt(2.0)
+    beta = 2.0 * np.sqrt(A) * alpha
 
-    b0 = A * ((A + 1) - (A - 1) * cos_w0 + 2.0 * np.sqrt(A) * alpha)
+    b0 = A * ((A + 1) - (A - 1) * cos_w0 + beta)
     b1 = 2.0 * A * ((A - 1) - (A + 1) * cos_w0)
-    b2 = A * ((A + 1) - (A - 1) * cos_w0 - 2.0 * np.sqrt(A) * alpha)
-    a0 = (A + 1) + (A - 1) * cos_w0 + 2.0 * np.sqrt(A) * alpha
+    b2 = A * ((A + 1) - (A - 1) * cos_w0 - beta)
+    a0 = (A + 1) + (A - 1) * cos_w0 + beta
     a1 = -2.0 * ((A - 1) + (A + 1) * cos_w0)
-    a2 = (A + 1) + (A - 1) * cos_w0 - 2.0 * np.sqrt(A) * alpha
+    a2 = (A + 1) + (A - 1) * cos_w0 - beta
 
     b = np.array([b0 / a0, b1 / a0, b2 / a0], dtype=np.float64)
     a = np.array([1.0, a1 / a0, a2 / a0], dtype=np.float64)
@@ -110,20 +118,25 @@ def _biquad_peaking(freq_hz: float, gain_db: float, q: float, sample_rate: float
     return b, a
 
 
-def _biquad_highshelf(freq_hz: float, gain_db: float, sample_rate: float) -> Tuple[np.ndarray, np.ndarray]:
-    """HighShelf 滤波器系数（b, a）。"""
+def _biquad_highshelf(freq_hz: float, gain_db: float, sample_rate: float,
+                      q: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
+    """HighShelf 滤波器系数（b, a）。q 语义同 :func:`_biquad_lowshelf`。"""
     A = 10.0 ** (gain_db / 40.0)
     w0 = 2.0 * np.pi * freq_hz / sample_rate
     cos_w0 = np.cos(w0)
     sin_w0 = np.sin(w0)
-    alpha = sin_w0 / 2.0 * np.sqrt(2.0)  # S=1
+    if q is not None:
+        alpha = sin_w0 / (2.0 * max(0.05, float(q)))
+    else:
+        alpha = sin_w0 / 2.0 * np.sqrt(2.0)  # legacy S=1
+    beta = 2.0 * np.sqrt(A) * alpha
 
-    b0 = A * ((A + 1) + (A - 1) * cos_w0 + 2.0 * np.sqrt(A) * alpha)
+    b0 = A * ((A + 1) + (A - 1) * cos_w0 + beta)
     b1 = -2.0 * A * ((A - 1) + (A + 1) * cos_w0)
-    b2 = A * ((A + 1) + (A - 1) * cos_w0 - 2.0 * np.sqrt(A) * alpha)
-    a0 = (A + 1) - (A - 1) * cos_w0 + 2.0 * np.sqrt(A) * alpha
+    b2 = A * ((A + 1) + (A - 1) * cos_w0 - beta)
+    a0 = (A + 1) - (A - 1) * cos_w0 + beta
     a1 = 2.0 * ((A - 1) - (A + 1) * cos_w0)
-    a2 = (A + 1) - (A - 1) * cos_w0 - 2.0 * np.sqrt(A) * alpha
+    a2 = (A + 1) - (A - 1) * cos_w0 - beta
 
     b = np.array([b0 / a0, b1 / a0, b2 / a0], dtype=np.float64)
     a = np.array([1.0, a1 / a0, a2 / a0], dtype=np.float64)
@@ -193,6 +206,162 @@ def _biquad_notch(freq_hz: float, q: float, sample_rate: float) -> Tuple[np.ndar
     b = np.array([b0 / a0, b1 / a0, b2 / a0], dtype=np.float64)
     a = np.array([1.0, a1 / a0, a2 / a0], dtype=np.float64)
     return b, a
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# StripEQ 共享系数/响应服务（EQ-01：DSP 与 UI 同一来源）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _butter_cut_sos(kind: str, cutoff_hz: float, slope_db_oct: int,
+                    sample_rate: float) -> Optional[np.ndarray]:
+    """HPF/LPF 标称斜率 → 真 N 阶 Butterworth SOS（N = slope/6）。
+
+    EQ-01：旧实现级联 `slope//6` 个相同 Q=0.7071 的二阶 biquad，实际斜率
+    是标称的 2 倍（12/24/36/48 dB/oct）且截止处 -3/-6/-9/-12 dB。
+    scipy.signal.butter 输出的 SOS 含正确的每段 Q 分布与一阶段
+    （6/18 dB/oct 选项不丢失）。scipy 不可用时返回 None（调用方回退 legacy）。
+    """
+    if slope_db_oct not in (6, 12, 18, 24) or butter is None:
+        return None
+    order = slope_db_oct // 6
+    if not 0.0 < cutoff_hz < sample_rate * 0.5:
+        return None
+    return butter(order, cutoff_hz, btype=kind, fs=sample_rate, output="sos")
+
+
+def _sos_row_mag_db(row: np.ndarray, w: float) -> float:
+    """单个 SOS 行 [b0,b1,b2,1,a1,a2] 在数字角频率 w 处的幅度（dB）。"""
+    b0, b1, b2, _a0, a1, a2 = row
+    cos_w = np.cos(w)
+    sin_w = np.sin(w)
+    cos_2w = np.cos(2.0 * w)
+    sin_2w = np.sin(2.0 * w)
+    num_re = b0 + b1 * cos_w + b2 * cos_2w
+    num_im = -(b1 * sin_w + b2 * sin_2w)
+    den_re = 1.0 + a1 * cos_w + a2 * cos_2w
+    den_im = -(a1 * sin_w + a2 * sin_2w)
+    num_sq = num_re * num_re + num_im * num_im
+    den_sq = max(1e-24, den_re * den_re + den_im * den_im)
+    return 10.0 * float(np.log10(max(num_sq / den_sq, 1e-12)))
+
+
+def strip_eq_band_sections(band: dict, sample_rate: float,
+                           voicing: str = "Clean") -> list:
+    """单个 EQ 频段 dict → SOS 行列表（DSP 滤波与 UI 响应的唯一来源）。
+
+    HPF/LPF 走 :func:`_butter_cut_sos`（真 N 阶 Butterworth）；Shelf/Bell/
+    Notch 走 RBJ 系数（Shelf 消费 Q）。scipy 不可用时 HPF/LPF 回退 legacy
+    级联（降级可解释，不静默改变斜率语义——响应服务用同一函数求值）。
+
+    系数按频段内容 LRU 缓存（UI 曲线每次重绘 ~2000 次求值，缓存后只做
+    三角函数求值；DSP 在 set_params 时调用，缓存命中无开销）。
+
+    Returns:
+        list[[b0, b1, b2, 1.0, a1, a2], ...]（可能为空 = 该段中性）。
+    """
+    ftype = band.get("filter_type", "Bell")
+    freq = min(max(10.0, float(band.get("freq", 1000.0))), sample_rate * 0.45)
+    gain = float(band.get("gain", 0.0))
+    q = max(0.1, float(band.get("q", 1.1))) * VOICING_Q_SCALE.get(voicing, 1.0)
+    slope = int(band.get("slope", 12))
+
+    cache_key = (ftype, round(freq, 6), round(gain, 6), round(q, 6),
+                 slope, round(sample_rate, 3))
+    cached = _EQ_SECTION_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _row(b: np.ndarray, a: np.ndarray) -> list:
+        return [b[0], b[1], b[2], 1.0, a[1], a[2]]
+
+    if ftype == "HPF":
+        sos = _butter_cut_sos("highpass", freq, slope, sample_rate)
+        if sos is not None:
+            rows = [list(r) for r in sos]
+        else:
+            order = max(1, min(4, slope // 6))
+            rows = [_row(*_biquad_highpass(freq, _BUTTERWORTH_Q, sample_rate))
+                    for _ in range(order)]
+    elif ftype == "LPF":
+        sos = _butter_cut_sos("lowpass", freq, slope, sample_rate)
+        if sos is not None:
+            rows = [list(r) for r in sos]
+        else:
+            order = max(1, min(4, slope // 6))
+            rows = [_row(*_biquad_lowpass(freq, _BUTTERWORTH_Q, sample_rate))
+                    for _ in range(order)]
+    elif ftype == "Low Shelf":
+        rows = [] if abs(gain) < 0.05 else [
+            _row(*_biquad_lowshelf(freq, gain, sample_rate, q=q))]
+    elif ftype == "High Shelf":
+        rows = [] if abs(gain) < 0.05 else [
+            _row(*_biquad_highshelf(freq, gain, sample_rate, q=q))]
+    elif ftype == "Notch":
+        rows = [_row(*_biquad_notch(freq, q, sample_rate))]
+    else:  # Bell
+        rows = [] if abs(gain) < 0.05 else [
+            _row(*_biquad_peaking(freq, gain, q, sample_rate))]
+
+    if len(_EQ_SECTION_CACHE) >= _EQ_SECTION_CACHE_MAX:
+        _EQ_SECTION_CACHE.popitem(last=False)
+    _EQ_SECTION_CACHE[cache_key] = rows
+    return rows
+
+
+# EQ 段系数 LRU 缓存（butter/RBJ 求值较贵；频段内容不变时零重算）
+_EQ_SECTION_CACHE: "OrderedDict[tuple, list]" = OrderedDict()
+_EQ_SECTION_CACHE_MAX = 512
+
+
+def strip_eq_band_response_db(band: dict, freq_hz: float, sample_rate: float,
+                              voicing: str = "Clean") -> float:
+    """单个频段在 freq_hz 处的响应（dB），与其 SOS 级联传输严格一致。"""
+    if not band.get("enabled", True):
+        return 0.0
+    rows = strip_eq_band_sections(band, sample_rate, voicing)
+    if not rows:
+        return 0.0
+    f = min(max(freq_hz, 1e-3), sample_rate * 0.495)
+    w = 2.0 * np.pi * f / sample_rate
+    total = 0.0
+    for row in rows:
+        total += _sos_row_mag_db(np.asarray(row, dtype=np.float64), w)
+    return total
+
+
+def strip_eq_total_response_db(bands, voicing: str, sample_rate: float,
+                               freqs, master_gain_db: float = 0.0) -> list:
+    """整条 EQ 链在给定频率点上的响应（dB 列表，UI 曲线唯一来源）。
+
+    Solo 语义与 DSP 一致：任一 enabled 频段 Solo 时只应用 Solo 频段。
+    """
+    enabled = [b for b in bands if b.get("enabled", True)]
+    if any(b.get("solo", False) for b in enabled):
+        enabled = [b for b in enabled if b.get("solo", False)]
+    out = []
+    for f in freqs:
+        total = float(master_gain_db)
+        for b in enabled:
+            total += strip_eq_band_response_db(b, float(f), sample_rate, voicing)
+        out.append(total)
+    return out
+
+
+def strip_eq_band_response_curve_db(band: dict, freqs, sample_rate: float,
+                                    voicing: str = "Clean") -> list:
+    """单个频段在多个频率点上的响应曲线（系数只算一次，UI 绘图用）。"""
+    if not band.get("enabled", True):
+        return [0.0 for _ in freqs]
+    rows = strip_eq_band_sections(band, sample_rate, voicing)
+    if not rows:
+        return [0.0 for _ in freqs]
+    rows_arr = [np.asarray(r, dtype=np.float64) for r in rows]
+    out = []
+    for f in freqs:
+        ff = min(max(float(f), 1e-3), sample_rate * 0.495)
+        w = 2.0 * np.pi * ff / sample_rate
+        out.append(sum(_sos_row_mag_db(r, w) for r in rows_arr))
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -882,37 +1051,9 @@ class StripEQFilter(AudioEffect):
         self._recompute_coefficients()
 
     def _band_sections(self, band: dict, sr: float) -> list:
-        """把单个频段 dict 展开为 SOS 行列表（HPF/LPF 按斜率级联多段）。"""
-        ftype = band.get("filter_type", "Bell")
-        freq = min(max(10.0, float(band.get("freq", 1000.0))), sr * 0.45)
-        gain = float(band.get("gain", 0.0))
-        q = max(0.1, float(band.get("q", 1.1))) * VOICING_Q_SCALE.get(
-            self._params.voicing if self._params else "Clean", 1.0)
-        slope = int(band.get("slope", 12))
-
-        def _row(b: np.ndarray, a: np.ndarray) -> list:
-            return [b[0], b[1], b[2], 1.0, a[1], a[2]]
-
-        if ftype == "HPF":
-            order = max(1, min(4, slope // 6))
-            return [_row(*_biquad_highpass(freq, _BUTTERWORTH_Q, sr)) for _ in range(order)]
-        if ftype == "LPF":
-            order = max(1, min(4, slope // 6))
-            return [_row(*_biquad_lowpass(freq, _BUTTERWORTH_Q, sr)) for _ in range(order)]
-        if ftype == "Low Shelf":
-            if abs(gain) < 0.05:
-                return []
-            return [_row(*_biquad_lowshelf(freq, gain, sr))]
-        if ftype == "High Shelf":
-            if abs(gain) < 0.05:
-                return []
-            return [_row(*_biquad_highshelf(freq, gain, sr))]
-        if ftype == "Notch":
-            return [_row(*_biquad_notch(freq, q, sr))]
-        # Bell
-        if abs(gain) < 0.05:
-            return []
-        return [_row(*_biquad_peaking(freq, gain, q, sr))]
+        """把单个频段 dict 展开为 SOS 行列表（EQ-01：与 UI 共享同一服务）。"""
+        voicing = self._params.voicing if self._params else "Clean"
+        return strip_eq_band_sections(band, sr, voicing=voicing)
 
     def _recompute_coefficients(self) -> None:
         """根据当前 params 和 sample_rate 重算所有系数（SOS 矩阵）。"""
@@ -1254,9 +1395,9 @@ class CompressorEffect(AudioEffect):
         self._sc_listen: bool = False
         self._sc_source: str = "internal"
         self._enabled: bool = False
-        # 包络（dB 域，跨块连续）。声道联动，故只需一个值。
-        # 用 -200 dB 作为静默下限（避免 -inf 在平滑公式中传播）
-        self._env_db: float = -200.0
+        # 包络（线性域峰值跟随，跨块连续）。声道联动，故只需一个值。
+        # 初值 0（静默起点）；增益计算前转 dB（避免 -inf 在 dB 平滑中传播）。
+        self._env_lin: float = 0.0
         # hold 剩余样本计数（跨块）
         self._hold_remaining: int = 0
         self._attack_coeff: float = self._time_to_coeff(self._attack_ms)
@@ -1287,7 +1428,7 @@ class CompressorEffect(AudioEffect):
         """
         if sample_rate is not None and sample_rate != self._sample_rate:
             self._sample_rate = float(sample_rate)
-            self._env_db = -200.0  # 采样率变化重置状态
+            self._env_lin = 0.0  # 采样率变化重置状态
 
         if params is None:
             self._enabled = False
@@ -1370,36 +1511,42 @@ class CompressorEffect(AudioEffect):
 
         return gain_db
 
-    def _smooth_env(self, input_db: np.ndarray) -> np.ndarray:
-        """包络平滑（attack/release），hold>0 时用包络冻结逐样本路径。"""
+    def _smooth_env(self, detector_linear: np.ndarray) -> np.ndarray:
+        """包络平滑（DY-02/DY-03：线性域峰值跟随 → dB，检测域固定唯一）。
+
+        attack/release 分支平滑作用于线性幅度；返回 dB 域包络数组。
+        hold>0 时用线性域冻结逐样本路径（超 knee 下界刷新 hold 计数）。
+        """
         if self._hold_ms <= 0.0:
-            env, self._env_db = _smooth_attack_release(
-                input_db, self._env_db, self._attack_coeff, self._release_coeff)
-            return env
+            env_lin, self._env_lin = _smooth_attack_release(
+                detector_linear, self._env_lin,
+                self._attack_coeff, self._release_coeff)
+            return 20.0 * np.log10(np.maximum(env_lin, 1e-9))
         # hold 路径：包络上升 attack 平滑；进入开放态刷新 hold 计数，
         # hold 期内冻结；随后 release 平滑下降（无恢复跳变）。
-        n = input_db.shape[0]
+        n = detector_linear.shape[0]
         env_arr = np.empty(n, dtype=np.float64)
-        env = self._env_db
+        env = self._env_lin
         hold_left = self._hold_remaining
         att_c = self._attack_coeff
         rel_c = self._release_coeff
         hold_samples = int(round(self._hold_ms * 0.001 * self._sample_rate))
-        knee_lower = self._threshold_db - self.knee_db * _KNEE_HALF_WIDTH_FACTOR
+        knee_lower_lin = 10.0 ** (
+            (self._threshold_db - self.knee_db * _KNEE_HALF_WIDTH_FACTOR) / 20.0)
         for i in range(n):
-            x = input_db[i]
+            x = detector_linear[i]
             if x > env:
                 env = x + (env - x) * att_c
-                if x > knee_lower:
+                if x > knee_lower_lin:
                     hold_left = hold_samples
             elif hold_left > 0:
                 hold_left -= 1  # 冻结
             else:
                 env = x + (env - x) * rel_c
             env_arr[i] = env
-        self._env_db = env
+        self._env_lin = env
         self._hold_remaining = hold_left
-        return env_arr
+        return 20.0 * np.log10(np.maximum(env_arr, 1e-9))
 
     def process(self, samples: np.ndarray, sidechain: Optional[np.ndarray] = None) -> np.ndarray:
         """对一块样本应用压缩。
@@ -1419,26 +1566,28 @@ class CompressorEffect(AudioEffect):
         channels, n = out.shape
 
         # 探测信号：外部侧链（sc_on + 引擎提供检源）或本链（声道联动峰值）
+        sc_buf = None
         if sidechain is not None and isinstance(sidechain, np.ndarray) \
                 and sidechain.ndim == 2 and sidechain.shape[1] == n:
-            detector = np.max(np.abs(sidechain.astype(np.float64, copy=False)), axis=0)
-        else:
-            detector = np.max(np.abs(out), axis=0)
+            sc_buf = sidechain
+        detector = np.max(np.abs((sc_buf if sc_buf is not None else out)
+                                 .astype(np.float64, copy=False)), axis=0)
         # 探测电平遥测（dBFS）
         det_peak = float(np.max(detector)) if detector.size else 0.0
         self.last_detector_db = max(-100.0, 20.0 * float(np.log10(max(det_peak, 1e-10))))
 
-        # 侧链监听：输出 = 检源信号广播（audition），不施加压缩
+        # 侧链监听（DY-04）：输出 = 检源**原始音频**（保留波形极性），
+        # 不播放整流后的检测量（旧实现把 abs 检测量广播出去，±0.5 信号
+        # 变成全正 DC）。内部检源监听 = 本链输入原样直通。
         if self._sc_listen:
-            mono = detector
-            for ch in range(channels):
-                out[ch] = mono
-            return out.astype(samples.dtype, copy=False)
+            if sc_buf is not None:
+                for ch in range(channels):
+                    out[ch] = sc_buf[ch % sc_buf.shape[0]]
+                return out.astype(samples.dtype, copy=False)
+            return samples
 
-        input_db = 20.0 * np.log10(np.maximum(detector, 1e-9))
-
-        # 包络平滑（attack/release 分支平滑 / hold 冻结路径）
-        env_smoothed = self._smooth_env(input_db)
+        # 包络平滑（DY-02：线性域峰值跟随，检测域唯一），返回 dB 域
+        env_smoothed = self._smooth_env(detector)
 
         # 快路径：包络全程低于 knee 下界 → 增益恰为 0dB（无压缩）。
         # 状态已照常推进，数学上与完整计算逐点等价。
@@ -1472,7 +1621,7 @@ class CompressorEffect(AudioEffect):
 
     def reset_state(self) -> None:
         """重置包络状态（seek/暂停后调用）。"""
-        self._env_db = -200.0
+        self._env_lin = 0.0
         self._hold_remaining = 0
         self.last_gr_db = 0.0
         self.last_detector_db = -100.0
@@ -1613,15 +1762,24 @@ class ReverbEffect(AudioEffect):
         geometry_changed = sr_changed or any(
             abs(p[k] - old.get(k, p[k])) > 1e-6
             for k in ("height", "length", "width", "pre_delay", "distance", "reverb_time"))
+        # RV-01：brightness 消费于 comb 反馈阻尼（_apply_fdn_params），
+        # 必须与 shelf 音色分离——运行中改变时**就地更新阻尼**，不清空网络
+        # 状态（旧实现把 brightness 归入 tone_changed 只重建 shelf，
+        # 阻尼纹丝不动：50→100 输出差 0）。
+        brightness_changed = abs(p["brightness"] - old.get("brightness", p["brightness"])) > 1e-6
         tone_changed = any(
             abs(p[k] - old.get(k, p[k])) > 1e-6
             for k in ("er_lo_freq", "er_hi_freq", "er_lo_gain", "er_hi_gain",
-                      "rev_lo_freq", "rev_hi_freq", "rev_lo_gain", "rev_hi_gain",
-                      "brightness"))
+                      "rev_lo_freq", "rev_hi_freq", "rev_lo_gain", "rev_hi_gain"))
         self._params = p
         self._enabled = p["enabled"]
         if geometry_changed:
             self._rebuild(p)
+        elif brightness_changed:
+            # 就地更新 RT60/阻尼（comb 缓冲与 allpass 状态全部保留）
+            self._apply_fdn_params(p)
+            if tone_changed:
+                self._rebuild_tone(p)
         elif tone_changed:
             self._rebuild_tone(p)
 
@@ -2199,7 +2357,11 @@ class DelayEffect(AudioEffect):
                                       0.0, 100.0, _DELAY_DEFAULT_DRY_WET)
         self._level_db = _clamp_finite(params.get("level_db", _DELAY_DEFAULT_LEVEL_DB),
                                        -24.0, 6.0, _DELAY_DEFAULT_LEVEL_DB)
-        self._mono_input = str(params.get("input_format", "Stereo")) == "Mono"
+        # DL-01：输入选择矩阵。Mono=(L+R)/2 平均（相关内容电平恒定）；
+        # Left/Right=单声道内容驱动双线（另一声道内容不进延迟网络）。
+        fmt = str(params.get("input_format", "Stereo") or "Stereo")
+        self._mono_input = fmt == "Mono"
+        self._input_mode: str = fmt if fmt in ("Stereo", "Mono", "Left", "Right") else "Stereo"
         self._enabled = bool(params.get("enabled", True))
 
     def _apply_input_filters(self, out: np.ndarray) -> np.ndarray:
@@ -2232,7 +2394,8 @@ class DelayEffect(AudioEffect):
         out = samples.astype(np.float64, copy=True)
         channels, n = out.shape
 
-        # 声道规整：取 L/R 两路（Mono 格式先求和复制），其余声道用 L 湿声
+        # 声道规整：取 L/R 两路（Mono 求平均、Left/Right 单声道驱动双线），
+        # 其余声道用 L 湿声
         if channels == 1:
             in_l = out[0]
             in_r = out[0]
@@ -2240,8 +2403,13 @@ class DelayEffect(AudioEffect):
             in_l = out[0]
             in_r = out[1]
         if self._mono_input:
-            in_l = 0.5 * (in_l + in_r)
+            mono = 0.5 * (in_l + in_r)
+            in_l = mono
+            in_r = mono
+        elif self._input_mode == "Left":
             in_r = in_l
+        elif self._input_mode == "Right":
+            in_l = in_r
 
         # 输入滤波
         st = np.stack((in_l, in_r))
@@ -2567,16 +2735,18 @@ _EXP_DEFAULT_ATTACK_MS = 1.4
 _EXP_DEFAULT_HOLD_MS = 0.0
 _EXP_DEFAULT_RELEASE_MS = 93.0
 
-# Gate 模式的等效高扩展比（陡降门限）
-_GATE_EQUIV_RATIO = 8.0
+# Gate 迟滞：关门阈值低于开门阈值的固定偏移（dB），防止门限附近反复抖动
+_GATE_HYSTERESIS_DB = 3.0
 
 
 class ExpanderEffect(AudioEffect):
     """向下扩展器 / 噪声门（Expander / Gate 双模式）。
 
-    低于阈值的信号按 1:ratio 下扩（每低于阈值 1 dB 输出再降 (1-1/ratio) dB），
-    range_db 封顶最大衰减。mode="Gate" 用高等效比率 + range 作为门深实现
-    陡降门。包络 dB 域 attack（开门）/release（关门）平滑，hold 冻结包络。
+    Expander：低于阈值的信号按标准下扩斜率衰减——每低于阈值 1 dB 额外
+    衰减 (ratio-1) dB（DY-02：1:2 → 20dB/20dB），range_db 封顶最大衰减。
+    mode="Gate" 使用独立状态机（DY-02）：env ≥ threshold 开门，
+    env < threshold-3dB（固定迟滞）关门，关门目标 = -range_db；
+    attack 开门 / release 关门 / hold 冻结。包络线性域跟随峰值。
 
     遥测：``last_gr_db``（块内最大衰减，正 dB）供 GR 表。
 
@@ -2600,6 +2770,10 @@ class ExpanderEffect(AudioEffect):
         # 的 _gate_gain=1.0 语义一致——避免块首 attack 期误衰减）。
         self._env_lin: float = 1.0
         self._hold_remaining: int = 0
+        # DY-02: Gate 状态机（True=开门；hold 由状态机独占管理）
+        self._gate_open: bool = True
+        # Gate 增益平滑状态（dB，0=开门；attack 开门 / release 关门）
+        self._gate_gain_db: float = 0.0
         self._attack_coeff: float = self._time_to_coeff(self._attack_ms)
         self._release_coeff: float = self._time_to_coeff(self._release_ms)
         # GR 遥测
@@ -2651,23 +2825,50 @@ class ExpanderEffect(AudioEffect):
         self._attack_coeff = self._time_to_coeff(self._attack_ms, self._sample_rate)
         self._release_coeff = self._time_to_coeff(self._release_ms, self._sample_rate)
 
-    @property
-    def _effective_ratio(self) -> float:
-        """Gate 模式 → 高等效比率（陡降）。"""
-        return _GATE_EQUIV_RATIO if self._mode == "Gate" else self._ratio
+    def _gate_target_gain_db(self, env_db: np.ndarray) -> np.ndarray:
+        """Gate 状态机目标增益（DY-02：迟滞 + hold，关门到达 range）。
+
+        开门条件 env ≥ threshold；关门条件 env < threshold-hysteresis；
+        迟滞区间保持原状态；hold 期内不关门。attack/release 平滑在
+        process() 用 _smooth_attack_release 对目标序列统一施加。
+        """
+        threshold = self._threshold_db
+        close_thr = threshold - _GATE_HYSTERESIS_DB
+        hold_samples = int(round(self._hold_ms * 0.001 * self._sample_rate))
+        gate_open = bool(getattr(self, "_gate_open", True))
+        hold_left = int(self._hold_remaining)
+        n = env_db.shape[0]
+        target = np.empty(n, dtype=np.float64)
+        env_list = env_db.tolist()
+        for i in range(n):
+            x = env_list[i]
+            if x >= threshold:
+                gate_open = True
+                hold_left = hold_samples
+            elif x < close_thr and hold_left <= 0:
+                gate_open = False
+            elif hold_left > 0:
+                hold_left -= 1
+            target[i] = 0.0 if gate_open else -self._range_db
+        self._gate_open = gate_open
+        self._hold_remaining = hold_left
+        return target
 
     def _compute_gain_db(self, env_db: np.ndarray) -> np.ndarray:
         """扩展增益曲线（负增益 dB，向下扩展）。
 
-        env < threshold 时：atten = (threshold - env) × (1 - 1/ratio)，
-        封顶 range_db；高于阈值不衰减。
+        Expander：env < threshold 时 atten = (threshold - env) × (ratio - 1)
+        （DY-02 标准下扩斜率：1:2 → 每低于 1dB 额外衰减 1dB），
+        封顶 range_db；高于阈值不衰减。Gate 走独立状态机。
         """
+        if self._mode == "Gate":
+            return self._gate_target_gain_db(env_db)
         threshold = self._threshold_db
-        ratio = self._effective_ratio
+        ratio = self._ratio
         below = env_db < threshold
         atten = np.zeros_like(env_db)
         atten[below] = -np.minimum(
-            (threshold - env_db[below]) * (1.0 - 1.0 / ratio), self._range_db)
+            (threshold - env_db[below]) * (ratio - 1.0), self._range_db)
         return atten
 
     def process(self, samples: np.ndarray) -> np.ndarray:
@@ -2693,7 +2894,11 @@ class ExpanderEffect(AudioEffect):
         # 声道联动：线性域峰值包络
         peak_input = np.max(np.abs(out), axis=0)
 
-        if self._hold_ms <= 0.0:
+        # Gate 模式 hold 由状态机独占（_gate_target_gain_db），包络路径不消费
+        # hold_remaining，避免双重冻结/刷新。
+        use_env_hold = self._hold_ms > 0.0 and self._mode != "Gate"
+
+        if not use_env_hold:
             env_lin, self._env_lin = _smooth_attack_release(
                 peak_input, self._env_lin, self._attack_coeff, self._release_coeff)
             env = 20.0 * np.log10(np.maximum(env_lin, 1e-9))
@@ -2721,11 +2926,18 @@ class ExpanderEffect(AudioEffect):
             self._hold_remaining = hold_left
             env = 20.0 * np.log10(np.maximum(env_lin, 1e-9))
 
-        # 快路径：包络全程高于阈值 → 无衰减
-        if not bool((env < self._threshold_db).any()):
+        # 快路径：Expander 包络全程高于阈值 → 无衰减（Gate 不能走此快路径：
+        # 状态机可能处于关门态，迟滞/hold 需要逐样本推进）
+        if self._mode != "Gate" and not bool((env < self._threshold_db).any()):
             return samples
 
         gain_db = self._compute_gain_db(env)
+        if self._mode == "Gate":
+            # DY-02: 门开关增益按 attack/release 平滑（目标 0 ↔ -range 跳变
+            # 不能直连，否则产生 click）。开门 rise=attack，关门 fall=release。
+            gain_db, self._gate_gain_db = _smooth_attack_release(
+                gain_db, self._gate_gain_db, self._attack_coeff,
+                self._release_coeff)
         gain_linear = 10.0 ** (gain_db / 20.0)
 
         # GR 遥测（正 dB）
@@ -2740,6 +2952,8 @@ class ExpanderEffect(AudioEffect):
         """重置包络状态（seek/暂停后调用）。"""
         self._env_lin = 1.0
         self._hold_remaining = 0
+        self._gate_open = True
+        self._gate_gain_db = 0.0
         self.last_gr_db = 0.0
 
     @property
@@ -2750,15 +2964,18 @@ class ExpanderEffect(AudioEffect):
 class DynamicsEffect(AudioEffect):
     """Dynamics 完整单元（Da Vinci Fairlight 语义，CW-A1）。
 
-    单一 DSP 实例内串联 Expander → Compressor（含 Make Up）→ Limiter，
-    与 DynamicsDialog 的传输曲线链序一致。clip 级 Dynamics 是一条
+    单一 DSP 实例内串联 Expander → Compressor → Limiter → Make Up，
+    与 DynamicsDialog 的传输曲线链序一致。Make Up 是 **post-dynamics**
+    节点（DY-01）：挂在 Limiter 之后而非内部附着 Comp——Comp 被旁路时
+    Make Up 仍按定义生效。clip 级 Dynamics 是一条
     EffectInstance（effect_type="dynamics"，不在属性面板拆分为三张卡片）；
-    轨级 Dynamics 仍以 panel="dynamics" 三实例存储（按实例的 GR/检源遥测），
+    轨级 Dynamics 仍以 panel="dynamics" 三实例存储（按实例的 GR/检源遥测；
+    该形态下 makeup 随 comp 实例存储，位置约束在 MX-05 统一图阶段处理），
     两种形态共享同一子模块实现与同一面板 UI。
 
     参数（DynamicsParams dict）：
       - enabled: 总电源（False=整体旁路直通）
-      - makeup:  全局 Make Up 增益（dB，0..24），写入 comp.makeup_gain
+      - makeup:  全局 Make Up 增益（dB，0..24）；存储沿用 comp.makeup_gain
       - eg/comp/lim: Expander/Compressor/LimiterParams.to_dict() 子状态
 
     线程安全：实例不共享（每链一个），EffectChain 在 _mutex 下访问。
@@ -2773,6 +2990,7 @@ class DynamicsEffect(AudioEffect):
         self._lim = LimiterEffect(sample_rate)
         self._enabled = False
         self._makeup = 0.0
+        self._makeup_linear: float = 1.0
         self.last_gr_db = 0.0
 
     def set_params(self, params: Optional[dict], sample_rate: Optional[float] = None) -> None:
@@ -2784,17 +3002,22 @@ class DynamicsEffect(AudioEffect):
             return
 
         self._enabled = bool(params.get("enabled", True))
-        self._makeup = _clamp_finite(params.get("makeup", 0.0), 0.0, 24.0, 0.0)
-        comp = dict(params.get("comp") or {})
-        comp["makeup_gain"] = self._makeup  # 单一真源同步（与 DynamicsParams 一致）
+        comp_src = dict(params.get("comp") or {})
+        # DY-01: makeup 存储沿用 comp.makeup_gain（工程兼容），但消费移到
+        # post-dynamics——不再注入 comp 子效果器（Comp 旁路时 makeup 仍生效）。
+        self._makeup = _clamp_finite(
+            params.get("makeup", comp_src.get("makeup_gain", 0.0)),
+            0.0, 24.0, 0.0)
+        self._makeup_linear = float(10.0 ** (self._makeup / 20.0))
+        comp_src.pop("makeup_gain", None)
         # 子效果器按块向量化且跨块状态连续——set_params 只更新系数不丢状态
         self._eg.set_params(dict(params.get("eg") or {}), sample_rate=self._sample_rate)
-        self._comp.set_params(comp, sample_rate=self._sample_rate)
+        self._comp.set_params(comp_src, sample_rate=self._sample_rate)
         self._lim.set_params(dict(params.get("lim") or {}), sample_rate=self._sample_rate)
 
     def process(self, samples: np.ndarray,
                 sidechain: Optional[np.ndarray] = None) -> np.ndarray:
-        """EG → Comp（外部侧链可选）→ Lim 串联处理。
+        """EG → Comp（外部侧链可选）→ Lim → Make Up 串联处理。
 
         Args:
             samples: (channels, n) 样本块
@@ -2808,6 +3031,9 @@ class DynamicsEffect(AudioEffect):
         out = self._eg.process(samples)
         out = self._comp.process(out, sidechain=sidechain)
         out = self._lim.process(out)
+        # DY-01: Make Up = post-dynamics 节点（Lim 之后，Comp 旁路不失效）
+        if abs(self._makeup_linear - 1.0) > 1e-9:
+            out = out * self._makeup_linear
         # 聚合 GR 遥测（供统一 GR 表；子模块遥测详见各自 last_gr_db）
         grs = [
             getattr(self._eg, "last_gr_db", 0.0),
@@ -2915,7 +3141,9 @@ class EffectChain:
         new_effects: list = []
         new_flags: list = []
         new_ids: list = []
-        # 复用已有实例（按 effect_type 匹配，保持 DSP 状态连续），避免拖动参数时重建
+        # MX-06：实例身份池——优先按 (类型, instance_id) 精确匹配复用旧实例
+        # （调序/删除/替换不串状态）；legacy 无 id 条目回退按类型匹配（旧工程
+        # 语义：拖动参数不重建）。两类匹配都要求类型一致。
         old_pool = list(zip(self._effects, self._enabled_flags, self._instance_ids))
         used = [False] * len(old_pool)
 
@@ -2935,19 +3163,29 @@ class EffectChain:
                     effect_type,
                 )
                 continue
-            # 尝试复用同类型且未使用的旧实例
+            instance_id = str(instance_id)
             instance = None
-            for j, (old_inst, _old_en, _old_id) in enumerate(old_pool):
-                if not used[j] and type(old_inst) is cls:
-                    instance = old_inst
-                    used[j] = True
-                    break
+            if instance_id:
+                # 精确身份匹配：同类型 + 同 instance_id
+                for j, (old_inst, _old_en, old_id) in enumerate(old_pool):
+                    if not used[j] and type(old_inst) is cls and old_id == instance_id:
+                        instance = old_inst
+                        used[j] = True
+                        break
+            if instance is None and not instance_id:
+                # legacy（无 id）：按类型匹配未使用的旧实例（保持拖动参数
+                # 不重建的旧行为）
+                for j, (old_inst, _old_en, _old_id) in enumerate(old_pool):
+                    if not used[j] and type(old_inst) is cls:
+                        instance = old_inst
+                        used[j] = True
+                        break
             if instance is None:
                 instance = cls(self._sample_rate)
             instance.set_params(params, sample_rate=self._sample_rate)
             new_effects.append(instance)
             new_flags.append(bool(enabled))
-            new_ids.append(str(instance_id))
+            new_ids.append(instance_id)
 
         self._effects = new_effects
         self._enabled_flags = new_flags
@@ -2980,29 +3218,37 @@ class EffectChain:
     def collect_gain_reduction(self) -> dict:
         """收集链内各实例的块内最大增益衰减（正 dB）。
 
-        Returns:
-            {instance_id: gr_db}，仅含有 last_gr_db 遥测的效果器。
+        MX-06：旁路实例不再暴露上一块的过期 GR——统一回报 0.0（UI 清表），
+        非 float / 缺失遥测的实例不出现在结果中。
         """
         result: dict = {}
         for i, inst in enumerate(self._effects):
-            gr = getattr(inst, "last_gr_db", None)
-            if gr is None or not isinstance(gr, float):
-                continue
             iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
-            if iid:
-                result[iid] = gr
+            if not iid:
+                continue
+            if not self._enabled_flags[i]:
+                result[iid] = 0.0  # 旁路读数清零，不暴露上一块 GR
+                continue
+            gr = getattr(inst, "last_gr_db", None)
+            if gr is None or not isinstance(gr, float) or not np.isfinite(gr):
+                continue
+            result[iid] = gr
         return result
 
     def collect_detector_levels(self) -> dict:
-        """收集压缩器实例的检源电平（dBFS）。"""
+        """收集压缩器实例的检源电平（dBFS）。旁路实例同样清零。"""
         result: dict = {}
         for i, inst in enumerate(self._effects):
-            det = getattr(inst, "last_detector_db", None)
-            if det is None or not isinstance(det, float):
-                continue
             iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
-            if iid:
-                result[iid] = det
+            if not iid:
+                continue
+            if not self._enabled_flags[i]:
+                result[iid] = -100.0
+                continue
+            det = getattr(inst, "last_detector_db", None)
+            if det is None or not isinstance(det, float) or not np.isfinite(det):
+                continue
+            result[iid] = det
         return result
 
     def sidechain_sources(self) -> set:
@@ -3205,8 +3451,12 @@ class SpatialPanner:
         m = spatial_panner_matrix(pan, self._panner)
         l = out[0]
         r = out[1]
-        out[0] = m[0, 0] * l + m[0, 1] * r
-        out[1] = m[1, 0] * l + m[1, 1] * r
+        # PAN-01：两行输出都读取未污染的原输入（out[0] 先覆写会让 out[1]
+        # 读到已混合的 L，产生 0.1465 量级的矩阵偏差）。
+        new_l = m[0, 0] * l + m[0, 1] * r
+        new_r = m[1, 0] * l + m[1, 1] * r
+        out[0] = new_l
+        out[1] = new_r
 
         if pre_bass is not None:
             out[0] += pre_bass
