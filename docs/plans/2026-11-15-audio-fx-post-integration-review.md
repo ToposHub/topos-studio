@@ -304,3 +304,55 @@ P0：错误声音、交付不一致、数据／版本丢失；P1：核心能力�
 | `final-test-files.txt`、`final-regression.log/xml` | 最终确切回归范围、通过／跳过及耗时 |
 
 每批实施先冻结失败基线，再小步实现、Review、focused回归和对应三路径／状态测试；保留独立oracle。不得把参数字典变化、不抛异常、同一函数自比或空切片断言当成声音实现。最终测试日志、产品能力和本文任务状态需一起更新。
+
+
+---
+
+## 7. H01–H13 实施进度（2026-11-16 第二工作批次）
+
+输入提交：`51b3c8ee`（本计划 + L01–L16 已入工作区后提交）。每完成一项
+独立提交；回归全绿后写状态。**没有把未达项改写成完成。**
+
+| ID | 状态 | 交付要点（对应 §5 验收） | 提交 |
+|---|---|---|---|
+| H01 | ✅ | 三分桶 EQ（v≤1 legacy / v2=302b88b6 精确 / v3+ 现行）对齐冻结历史 PCM（真历史模块渲染基线，audit/h01/）；Delay v≤3 直接切读头；未标注→0 入诊断；future→degraded+reason、导出 preflight 无授权阻断/`allow_algorithm_degraded` 放行；10 类参数 dataclass 保留未知键；`UpgradeTrackEffectAlgorithmCommand` 可撤销升级 | 0459ddf0 |
+| H02 | ✅ | Bus/Master 逐帧块内自动化（变化曲线 f20=0.050233≈理论值）；非零选区确定性预卷（选区==从头裁剪，峰值逐位一致）；分数 fps 精确长度 | cef420bb |
+| H03 | ✅ | include_fx_tail 全路径预算（轨+沿途 Bus+Master 串联累计）；轨/clip 尾音 drain 延入扩展区；Stem 长度同预算；实时已结束 clip 链喂零——clip tail 三路径 export/stem/live 全 0.3440148；Voice/Mangler tail 报告真实 flush 需求 | 639c7bff |
+| H04 | ✅ | WOLA 输入前导 win−hop + 周期 hann：首样本脉冲重构 0.99995@latency、中性恒等 5e-16、flush() 尾边界、逐 hop 相位能量守恒；包络改峰值连线（±6st 位移误差 21%→6%） | 333528d5 |
+| H05 | ✅ | Pitch 有界环（容量契约化，2.6GiB/h 增长消除）；读头中心初始化 + 单读头绕点淡化：0st×mix0/50/100×link0/100 恰一脉冲于报告 latency（含 0st）；4 级预滤波 20k+12st 折叠 0.257→0.038；Glide 绝对时间；Link=−st·(1−link) 契约修正（谱矩心方向验证） | 8240e782 |
+| H06 | ✅ | 三个死参数全消费（glide/tracking/vocoder_formant_st 合成轴独立缩放）；F0 局部极大+最短强 lag（八度保护）、vocal/wide 范围、参考声道按能量、confidence=检测置信度；unvoiced 按高频占比门控（浊音注入 ~1e-3） | dec388eb |
+| H07 | ✅ | Dist 全状态逐声道（静音 R 严格 0）；有状态 2× 过采样 FIFO 群延迟对齐（无块尾空洞，1/255/257/1920/随机块逐位一致）；bitcrush hold 绝对流索引；拓扑 dry/并联直通对齐（mix=0=对齐 dry） | 9763e3ad |
+| H08 | ✅ | 子块交错触发/渲染（1s 块丢 16→0）；读龄覆盖容量+粒跨度（Reverse seed19 零丢弃，容量 8s）；feedback=固定 D=size_n 样本延迟环；Cloud/Scatter 契约分化；同 seed 重放一致 | 1b282dfa |
+| H09 | ✅ | Freeze 捕获资产：`FreezeCaptureStore` sidecar（.f32+.json 原子写，raw PCM 不进参数 JSON）；freeze_capture_id 元数据引用（never lane）；保存→重开 PCM 一致（float32 资产精度）；双捕获各自重放；注册表接导出/实时 | 131c301d/bfb8773b |
+| H10 | ✅ | MiniLimiter 逐采样包络（min-decay log 域向量化）：1s 恢复所有块长=1.0、×4→0.25→0.25·e 精确；拓扑时延对齐随 H07；1 采样块/路由切换/reset+换率+Freeze 不崩溃 | c4729079 |
+| H11 | ✅（见下） | 滑条按住停顿不提交、松手单次提交；预设 ±/删除接 effect_pret 持久库（稳定 id 幂等，打开合并显示）；Audition 明确禁用+说明；Mangler 画布真实波形/颗粒分支（演示模拟仅回退） | 2e29edc3 |
+| H12 | ✅ | from_dict 非有限值→默认（NaN 增益不再穿透 DSP）；seed 宽容解析；`automation_param_kind`（never/event/continuous）+采样端 never 强制跳过；`validate_effect_params` 统一校验+诊断 | aa16dd64 |
+| H13 | ✅（见下） | cProfile 定位：pitch 逐样本 Catmull-Rom 42%、F0 O(n²)。段向量化 gather + FFT 自相关后：两新 FX p50 71.97→~7–12ms、p99<20ms、时钟比 0.460x→>3x（audit/h13/ 前后基准）；p99<40ms 预算守卫测试 | 5adb6424 |
+
+### 最终回归
+
+- 复审 102 文件清单：**1796 passed, 1 skipped**（既有 WAV 资产缺失项，与复审基线相同）。
+- 新增 H01–H13 回归 12 文件 **141 项**全绿；state-export 探针全部指标转绿
+  （bus/master f20、三路径 clip tail、非零选区==从头裁剪、全路径尾音）。
+
+### 剩余问题诚实清单（未宣称完成）
+
+1. **VC-01 精度**：Doppler 法 ±12st 的音高精度仍受绕点淡化边带影响
+   （~±25 cents 量级，原目标 5 cents 需 WSOLA/锁相声码器路线）；绕点窗
+   内能量以 ±66Hz 边带扩散（RMS 守恒，谱峰锐度下降）。已按计划要求
+   明示为质量限制而非改写验收。
+2. **H11 未尽项**：完整 begin/preview/release/cancel 手势 token 化（当前
+   为按住冻结+松手单提交）、A/B 与 Copy 契约、clip 级 `(clip_id, effect_id)`
+   独立遥测 tap（当前 clip 分析复用轨 tap）、Audition transport 接入
+   （按钮已明确禁用）。
+3. **H09 未尽项**：Freeze 捕获的工程 JSON 侧 id 清单持久化字段
+   （`freeze_capture_ids`）由宿主在工程保存时写入；undo/redo 事件历史
+   与资产 GC 的 command 化；Stem 路径的注册表参数传递。
+4. **H12 未尽项**：registry schema 的完整范围/单位元数据表（当前
+   kind 三类 + DSP np.clip 兜底）；打包后端加载矩阵（目标平台安装包
+   实测）。
+5. **H13 未尽项**：本机单机基准（不外推）；R10 arm/record/monitor 分离
+   与自然退出收尾、真机热拔插；R12 真实多声道图；R13（VCA/True Peak/
+   事件自动化）按产品排期。1–16 轨/多 FX/多采样率矩阵报告待做。
+6. **全链路图级 PDC**：模块时延已如实报告并 dry 对齐（H05/H07/H10），
+   但全局 PDC 补偿器（跨轨相位对齐）未实施。
