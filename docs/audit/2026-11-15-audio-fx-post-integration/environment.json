@@ -1,0 +1,19 @@
+{
+  "date": "2026-11-15",
+  "baseline_commit": "22e6e1c85baa6715b995704f87d2268b4a08e0d4",
+  "platform": "macOS-15.3.1-x86_64-i386-64bit",
+  "machine": "x86_64",
+  "python": "3.12.14 (main, Aug 12 2026, 13:57:54) [Clang 17.0.0 (clang-1700.6.4.2)]",
+  "numpy": "2.5.2",
+  "scipy": "1.18.1",
+  "pyqt": "6.11.0",
+  "qt_compiled": "6.11.0",
+  "qt_runtime": "6.11.2",
+  "regression_environment": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "QT_QPA_PLATFORM": "offscreen"
+  },
+  "baseline_files": 96,
+  "final_files": 102,
+  "new_focused_cases": 77
+}

@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 58 items
+
+tests/shared/test_audio_post_integration_metadata.py ................... [ 32%]
+............                                                             [ 53%]
+tests/shared/test_audio_dy01_dl01_contracts.py ...........               [ 72%]
+tests/shared/test_audio_r06_dialog_backfill.py .........                 [ 87%]
+tests/edit/test_audio_r09_makeup_unification.py .......                  [100%]
+
+============================== 58 passed in 4.86s ==============================

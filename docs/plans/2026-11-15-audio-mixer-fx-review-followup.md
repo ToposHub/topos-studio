@@ -1,5 +1,7 @@
 # Audio Mixer 与效果器：实施后复审及新增效果器接入计划
 
+> 2026-11-15 接入后第二轮复审已完成：[新的复审与修复计划](2026-11-15-audio-fx-post-integration-review.md)。本页 §11 保留实施批次记录；其“完成”状态需结合新报告的实测反例和本轮小修阅读。
+
 - 复审日期：2026-11-15。
 - 输入基线：`06d670a9`；对照 [原 38 项计划](2026-11-14-audio-mixer-fx-maturity-plan.md) 与 [原实施证据](2026-11-14-audio-mixer-fx-maturity-evidence.md)。本次局部修复位于工作区。
 - 范围：EQ、Dynamics、Panner、Delay、Reverb；普通轨、Bus、Master；实时播放、成片导出、Stem、自动化、预设／快照、工程兼容、UI 生命周期。

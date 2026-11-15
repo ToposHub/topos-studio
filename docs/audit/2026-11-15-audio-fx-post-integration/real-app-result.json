@@ -1,0 +1,52 @@
+{
+  "temporary_folder": "/var/folders/j2/m4dcthbx3h5086ywnnplqwmc0000gn/T/topos-fx-post-integration-zw32qxaa",
+  "source_video": "/Users/heng/Documents/vscode/topos-studio/tests/test_videos/2K_h264.mp4",
+  "opened_editors": [
+    "voice",
+    "mangler"
+  ],
+  "emissions": 43,
+  "first": {
+    "track": "76a362ca-1bb7-445f-abc2-dc01d483f3da",
+    "voice_out_db": -35.4347144066853,
+    "mangler_out_db": -22.857182953442383,
+    "voice_f0": 294.47852760736197
+  },
+  "last": {
+    "track": "76a362ca-1bb7-445f-abc2-dc01d483f3da",
+    "voice_out_db": -22.4980228636154,
+    "mangler_out_db": -18.46377376100666,
+    "voice_f0": null
+  },
+  "level_ranges": {
+    "voice_out_db": [
+      -35.4347144066853,
+      -16.62374318182946
+    ],
+    "mangler_out_db": [
+      -23.67450235836766,
+      -9.634236386646972
+    ]
+  },
+  "mix_ms": {
+    "p50": 71.96687200121232,
+    "p99": 153.2165757984328,
+    "max": 189.46464100008598,
+    "n": 91
+  },
+  "ring_stats": {
+    "channels": 2,
+    "capacity": 24000,
+    "filled": 5760,
+    "available": 18240,
+    "total_written": 180480,
+    "total_read": 168960,
+    "total_dropped": 0,
+    "underruns": 0,
+    "overflows": 0
+  },
+  "paused_meters": {
+    "voice": -55.0,
+    "mangler": -60.0
+  }
+}

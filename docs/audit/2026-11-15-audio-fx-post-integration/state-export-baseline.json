@@ -1,0 +1,63 @@
+{
+  "tail_track": {
+    "length_ms": 160.0,
+    "first_echo_ms": null,
+    "peak": 0.0
+  },
+  "tail_master": {
+    "length_ms": 400.0,
+    "first_echo_ms": 200.0,
+    "peak": 0.3440147936344147
+  },
+  "tail_bus-master": {
+    "length_ms": 400.0,
+    "first_echo_ms": null,
+    "peak": 0.0
+  },
+  "clip_tail_peaks": {
+    "export": 0.3440147936344147,
+    "stem": 0.0,
+    "live": 0.0
+  },
+  "automation_track": {
+    "export_f0": 0.199981689453125,
+    "export_f20": 0.050233129411935806,
+    "stem_f20": 0.05023773014545441,
+    "expected_f20": 0.0502377286301916
+  },
+  "automation_bus": {
+    "export_f0": 0.199981689453125,
+    "export_f20": 0.199981689453125,
+    "stem_f20": 0.20000000298023224,
+    "expected_f20": 0.0502377286301916
+  },
+  "automation_master": {
+    "export_f0": 0.199981689453125,
+    "export_f20": 0.199981689453125,
+    "stem_f20": 0.20000000298023224,
+    "expected_f20": 0.0502377286301916
+  },
+  "future_diagnostic": [
+    {
+      "instance_id": "e0d4a245-078a-472a-9910-5c92b3215405",
+      "effect_type": "delay",
+      "algorithm_version": 777,
+      "compat_bucket": "future",
+      "status": "supported",
+      "reason": ""
+    }
+  ],
+  "nonzero_selection": {
+    "start_frame": 4,
+    "end_frame": 10,
+    "expected_peak_from_full_crop": 0.3440147936344147,
+    "selected_peak": 0.0
+  },
+  "v2_compatibility": {
+    "historical_source_commit": "302b88b6",
+    "historical_algorithm_version": 2,
+    "historical_rms_dbfs": -27.132820321811092,
+    "current_version2_rms_dbfs": -51.2553613756555
+  },
+  "probe_git_head": "22e6e1c85baa6715b995704f87d2268b4a08e0d4"
+}

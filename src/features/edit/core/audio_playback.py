@@ -3027,7 +3027,10 @@ class AudioMixer:
                     samples = eq_filter.process(samples)
 
                 # W26: FX 机架效果器链（post-EQ；CW-A1 外部侧链检源透传）
-                if track_chain is not None and track_chain.is_active:
+                # Sample automation even while the chain is neutral/bypassed:
+                # the current block can activate it. process() skips inactive
+                # nodes and refreshes their bypass telemetry after sampling.
+                if track_chain is not None:
                     # MX-10: fx 参数自动化——块边界按当前帧重设链参数
                     # （与 clip FX 的 animated_sampler 同型；失败不阻断混音）
                     fx_sampler = self._track_effect_samplers.get(track_id)
@@ -3282,7 +3285,7 @@ class AudioMixer:
                 # 此前只有导出（render_bus_stage sidechain_taps）接检源，
                 # 实时 Bus 链的压缩器外部检源被无声忽略（MX-08 残留缺口）。
                 bus_chain = self._effect_chains.get(bus_id)
-                if bus_chain is not None and bus_chain.is_active:
+                if bus_chain is not None:
                     # R05: Bus fx 参数自动化——块边界按当前帧重设链参数
                     # （set_track_effect_chain 对 Bus 同样注册 sampler，
                     # 此前实时 Bus 阶段建而不消费）
@@ -3442,7 +3445,7 @@ class AudioMixer:
             if master_eq is not None and master_eq.is_active:
                 output = master_eq.process(output)
             master_chain = self._effect_chains.get(MASTER_BUS_KEY)
-            if master_chain is not None and master_chain.is_active:
+            if master_chain is not None:
                 # R05: Master fx 参数自动化——与轨/Bus 同型，块边界消费
                 master_sampler = self._track_effect_samplers.get(MASTER_BUS_KEY)
                 if master_sampler is not None:
