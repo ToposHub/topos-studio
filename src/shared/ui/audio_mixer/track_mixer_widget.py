@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QToolButton, QSpinBox, QDoubleSpinBox,
     QMenu, QInputDialog, QColorDialog, QPushButton,
-    QListWidget, QListWidgetItem,
+    QListWidget, QListWidgetItem, QDialog,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize
 from PyQt6.QtGui import QColor, QAction, QIcon, QPainter, QPixmap, QResizeEvent
@@ -859,7 +859,7 @@ class TrackMixerWidget(QWidget):
         # 重算门控，否则引擎频谱计算带着无消费者常开。
         self._eq_dialog.destroyed.connect(self._safe_spectrum_gating)
         self._eq_dialog.finished.connect(self._safe_spectrum_gating)
-        self._eq_dialog.show()
+        self._show_effect_dialog(self._eq_dialog)
         self._update_spectrum_gating()
 
     def _on_eq_preview_from_badge(self, eq_params: Any) -> None:
@@ -963,17 +963,27 @@ class TrackMixerWidget(QWidget):
         self._dynamics_dialog.dynamics_committed.connect(
             lambda tid, c: self._on_dynamics_edited(c, commit=True)
         )
-        # MX-12: 生命周期绑定——用户关闭/销毁时清引用（滞留引用会让
-        # 遥测分发与后续编辑打到已销毁的 C++ 对象）。绑定方法连接而非
-        # lambda：destroyed 可能在 strip GC 后触发，lambda 的 self 闭包
-        # 单元此时已清空（free variable NameError）。
-        self._dynamics_dialog.finished.connect(self._on_dynamics_dialog_gone)
-        self._dynamics_dialog.destroyed.connect(self._on_dynamics_dialog_gone)
-        self._dynamics_dialog.show()
+        self._show_effect_dialog(self._dynamics_dialog)
 
-    def _on_dynamics_dialog_gone(self, *_args) -> None:
-        """MX-12: Dynamics 单例对话框 finished/destroyed 清引用。"""
-        self._dynamics_dialog = None
+    def _show_effect_dialog(self, dialog: QDialog) -> None:
+        """关闭时释放效果窗，并在 deferred delete 前清理注册引用。"""
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.finished.connect(self._on_effect_dialog_finished)
+        dialog.show()
+
+    def _on_effect_dialog_finished(self, _result: int) -> None:
+        """只移除本次关闭的窗口，避免旧窗延迟销毁清掉新窗引用。"""
+        dialog = self.sender()
+        for attr in ("_eq_dialog", "_dynamics_dialog", "_panner_dialog"):
+            if getattr(self, attr, None) is dialog:
+                setattr(self, attr, None)
+        for attr in self._EFFECT_DIALOG_ATTRS:
+            dialogs = getattr(self, attr, None)
+            if dialogs:
+                for instance_id, registered in list(dialogs.items()):
+                    if registered is dialog:
+                        dialogs.pop(instance_id, None)
+        self._safe_spectrum_gating()
 
     def _on_dynamics_edited(self, chain: Any, commit: bool) -> None:
         """Dynamics 面板提交/预览：更新本地 chain + emit 信号。"""
@@ -1046,10 +1056,7 @@ class TrackMixerWidget(QWidget):
         # 点击打开完整 Dynamics 面板。
         dyn_insts = [e for e in effects if getattr(e, "panel", "fx") == "dynamics"]
         if dyn_insts:
-            group_enabled = all(
-                bool(e.params.get("enabled", True)) if e.params else True
-                for e in dyn_insts
-            )
+            group_enabled = any(bool(e.enabled) for e in dyn_insts)
             dyn_item = QListWidgetItem(I18N.tr("audio.fx.dynamics", "Dynamics"))
             dyn_item.setData(Qt.ItemDataRole.UserRole, dyn_insts[0].instance_id)
             dyn_item.setData(Qt.ItemDataRole.UserRole + 1, "dynamics")
@@ -1250,10 +1257,7 @@ class TrackMixerWidget(QWidget):
             if item_effect_type == "dynamics":
                 # Dynamics 单元行：整体旁路/删除（三实例一个整体）
                 dyn = self._dynamics_instances()
-                group_on = all(
-                    bool(e.params.get("enabled", True)) if e.params else True
-                    for e in dyn
-                )
+                group_on = any(bool(e.enabled) for e in dyn)
                 bypass_dyn = menu.addAction(
                     I18N.tr("audio.fx.bypass", "Bypass") if group_on
                     else I18N.tr("audio.fx.enable", "Enable"))
@@ -1265,7 +1269,7 @@ class TrackMixerWidget(QWidget):
                     lambda checked=False: self._effect_remove_dynamics())
                 menu.addSeparator()
             inst = None
-            if self._effect_chain is not None:
+            if item_effect_type != "dynamics" and self._effect_chain is not None:
                 inst = next((e for e in self._effect_chain.effects if e.instance_id == instance_id), None)
             if inst is not None:
                 idx = self._effect_chain.effects.index(inst)
@@ -1348,24 +1352,23 @@ class TrackMixerWidget(QWidget):
         dyn = self._dynamics_instances()
         if not dyn:
             return
-        target_enabled = not all(
-            bool(e.params.get("enabled", True)) if e.params else True
-            for e in dyn
-        )
+        target_enabled = not any(bool(e.enabled) for e in dyn)
         from src.features.edit.core.timeline_v2 import (
             TrackEffectInstance, EffectChainParams,
         )
         effects = tuple(
             TrackEffectInstance(
                 effect_type=e.effect_type,
-                params={**(e.params or {}), "enabled": target_enabled},
-                enabled=e.enabled, order=e.order,
+                params=e.params,
+                enabled=target_enabled, order=e.order,
                 instance_id=e.instance_id,
                 panel=getattr(e, "panel", "fx"),
             ) if getattr(e, "panel", "fx") == "dynamics" else e
             for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
+        if self._dynamics_dialog is not None:
+            self._dynamics_dialog.update_chain(self._effect_chain)
         self._refresh_effect_list()
         self._update_badges_style()
         self.track_effects_committed.emit(self._track_id, self._effect_chain)
@@ -1691,7 +1694,7 @@ class TrackMixerWidget(QWidget):
         if not hasattr(self, '_limiter_dialogs'):
             self._limiter_dialogs = {}
         self._limiter_dialogs[inst.instance_id] = dlg
-        dlg.show()
+        self._show_effect_dialog(dlg)
 
     def _on_limiter_edited(self, inst: Any, limiter_params: Any, commit: bool = True) -> None:
         """Limiter 对话框提交/预览：更新机架中对应条目。"""
@@ -1748,7 +1751,7 @@ class TrackMixerWidget(QWidget):
         if not hasattr(self, '_compressor_dialogs'):
             self._compressor_dialogs = {}
         self._compressor_dialogs[inst.instance_id] = dlg
-        dlg.show()
+        self._show_effect_dialog(dlg)
 
     def _on_compressor_edited(self, inst: Any, comp_params: Any, commit: bool = True) -> None:
         """Compressor 对话框提交/预览：更新机架中对应条目。"""
@@ -1803,7 +1806,7 @@ class TrackMixerWidget(QWidget):
         if not hasattr(self, '_reverb_dialogs'):
             self._reverb_dialogs = {}
         self._reverb_dialogs[inst.instance_id] = dlg
-        dlg.show()
+        self._show_effect_dialog(dlg)
 
     def _on_reverb_edited(self, inst: Any, reverb_params: Any, commit: bool = True) -> None:
         """Reverb 对话框提交/预览：更新机架中对应条目。"""
@@ -1858,7 +1861,7 @@ class TrackMixerWidget(QWidget):
         if not hasattr(self, '_delay_dialogs'):
             self._delay_dialogs = {}
         self._delay_dialogs[inst.instance_id] = dlg
-        dlg.show()
+        self._show_effect_dialog(dlg)
 
     def _on_delay_edited(self, inst: Any, delay_params: Any, commit: bool = True) -> None:
         """Delay 对话框提交/预览：更新机架中对应条目。"""
@@ -1913,7 +1916,7 @@ class TrackMixerWidget(QWidget):
         if not hasattr(self, '_saturation_dialogs'):
             self._saturation_dialogs = {}
         self._saturation_dialogs[inst.instance_id] = dlg
-        dlg.show()
+        self._show_effect_dialog(dlg)
 
     def _on_saturation_edited(self, inst: Any, sat_params: Any, commit: bool = True) -> None:
         """Saturation 对话框提交/预览：更新机架中对应条目。"""
@@ -1968,7 +1971,7 @@ class TrackMixerWidget(QWidget):
         if not hasattr(self, '_imager_dialogs'):
             self._imager_dialogs = {}
         self._imager_dialogs[inst.instance_id] = dlg
-        dlg.show()
+        self._show_effect_dialog(dlg)
 
     def _on_imager_edited(self, inst: Any, imager_params: Any, commit: bool = True) -> None:
         """Imager 对话框提交/预览：更新机架中对应条目。"""
@@ -2023,7 +2026,7 @@ class TrackMixerWidget(QWidget):
         if not hasattr(self, '_expander_dialogs'):
             self._expander_dialogs = {}
         self._expander_dialogs[inst.instance_id] = dlg
-        dlg.show()
+        self._show_effect_dialog(dlg)
 
     def _on_expander_edited(self, inst: Any, exp_params: Any, commit: bool = True) -> None:
         """Expander/Gate 对话框提交/预览：更新机架中对应条目（保留原类型键）。"""
@@ -2088,7 +2091,7 @@ class TrackMixerWidget(QWidget):
         if not hasattr(self, '_strip_eq_dialogs'):
             self._strip_eq_dialogs = {}
         self._strip_eq_dialogs[inst.instance_id] = dlg
-        dlg.show()
+        self._show_effect_dialog(dlg)
         self._update_spectrum_gating()
 
     def _on_eq_instance_closed(self, instance_id: str) -> None:
@@ -2152,7 +2155,7 @@ class TrackMixerWidget(QWidget):
             lambda tid, payload: self._on_panner_edited(payload, commit=False))
         self._panner_dialog.panner_committed.connect(
             lambda tid, payload: self._on_panner_edited(payload, commit=True))
-        self._panner_dialog.show()
+        self._show_effect_dialog(self._panner_dialog)
 
     def _on_panner_edited(self, payload: dict, commit: bool) -> None:
         """声像器对话框提交/预览：本地记录 + 上抛信号。"""
@@ -2528,7 +2531,8 @@ class TrackMixerWidget(QWidget):
         chain_effects = self._effect_chain.effects if self._effect_chain is not None else ()
 
         def _enabled(e: Any) -> bool:
-            return bool(e.params.get("enabled", True)) if e.params else True
+            return bool(e.enabled) and (
+                bool(e.params.get("enabled", True)) if e.params else True)
 
         def _panel(e: Any) -> str:
             return getattr(e, "panel", "fx")
@@ -2538,7 +2542,7 @@ class TrackMixerWidget(QWidget):
             for e in chain_effects
         )
         dy_active = any(
-            e.effect_type in ("compressor", "noise_gate", "limiter")
+            e.effect_type in ("expander", "compressor", "noise_gate", "limiter")
             and _enabled(e) and _panel(e) == "dynamics"
             for e in chain_effects
         )

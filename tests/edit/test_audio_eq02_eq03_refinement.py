@@ -156,7 +156,8 @@ class TestEq03AnalyzerSemantics:
         assert "t1" in spectra
         freqs, dbs = spectra["t1"]
         peak_bin = int(np.argmax(dbs))
-        assert abs(freqs[peak_bin] - 1000.0) <= freqs[1] / freqs[0] * 1000.0, \
+        expected_bin = int(np.argmin(np.abs(np.asarray(freqs) - 1000.0)))
+        assert abs(peak_bin - expected_bin) <= 1, \
             f"1kHz tone peak located at {freqs[peak_bin]:.0f} Hz"
         assert dbs[peak_bin] > -40.0  # 0.5 正弦（-6dBFS）应显著可见
 

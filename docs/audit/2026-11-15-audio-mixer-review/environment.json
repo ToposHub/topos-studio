@@ -1,0 +1,16 @@
+{
+  "review_input_commit": "06d670a91d21e36900a0c002bf9fab85fe351780",
+  "platform": "macOS-15.3.1-x86_64-i386-64bit",
+  "machine": "x86_64",
+  "python": "3.12.14 (main, Aug 12 2026, 13:57:54) [Clang 17.0.0 (clang-1700.6.4.2)]",
+  "numpy": "2.5.2",
+  "scipy": "1.18.1",
+  "pyqt": "6.11.0",
+  "qt_compiled": "6.11.0",
+  "qt_runtime": "6.11.2",
+  "test_environment": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "QT_QPA_PLATFORM": "offscreen"
+  },
+  "regression_files": 82
+}

@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 
 from src.shared.media.metadata import Rational
 from src.shared.extra_fields import preserves_extras, split_extras
+# R01：FX schema 版本常量（fx_versioning 只在本模块内 lazy import，无环）
+from src.features.edit.core.fx_versioning import AUDIO_FX_SCHEMA_VERSION
 from src.features.edit.core.clip_params import (
     ClipBlendMode,
     CropParams,
@@ -3268,6 +3270,7 @@ def _deep_copy_automation(automation: dict) -> dict:
 
 
 @dataclass(frozen=True)
+@preserves_extras
 class TrackEffectInstance:
     """FX 机架链中的单个效果器条目。
 
@@ -3280,6 +3283,9 @@ class TrackEffectInstance:
         panel: 由哪个 UI 面板管理（"fx"=FX 列表多实例；"dynamics"=DY 胶囊单例）。
             仅 UI 层使用，DSP（to_dsp_entries）不读此字段，所有实例照常处理。
             默认 "fx"，旧项目无此字段时回填 "fx"（向后兼容）。
+        algorithm_version: 实例创建/最后编辑时的 DSP 算法版本（R01）。
+            0 = 未标注（历史工程）→ 按 legacy 兼容桶渲染；原样存回不覆写。
+            未来版本（> audio_dsp.ALGORITHM_VERSION）同样原样保留。
     """
     effect_type: str
     params: dict
@@ -3287,34 +3293,69 @@ class TrackEffectInstance:
     order: int = 0
     instance_id: str = ""
     panel: str = "fx"
+    algorithm_version: int = 0
+    # R01：未知顶层键 opaque 保留（DESK-04A 模式，load→save→reload 无损）
+    _extra_fields: dict = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.effect_type:
             raise ValueError("effect_type cannot be empty")
-        # 校验 effect_type 是否已注册
+        # R01：未知 effect_type 不再抛错（单实例不得清整条链 / 阻断工程加载）。
+        # 数据以 opaque payload 保留；DSP 侧 EffectChain.set_params 跳过并告警，
+        # 能力判定见 fx_versioning.effect_type_support（预览/导出 preflight 共用）。
         registry = _ensure_effect_param_registry()
         if self.effect_type not in registry:
-            raise ValueError(f"Unknown effect_type: {self.effect_type}")
+            logger.warning(
+                "TrackEffectInstance: unknown effect_type %r preserved as "
+                "opaque payload (rendering will skip it with a diagnostic)",
+                self.effect_type,
+            )
         # AUD-19104：构造即复制 params dict——frozen 模型不得内嵌调用方
         # 持有的可变引用（否则对 params 的原位编辑会穿透所有快照）。
         object.__setattr__(self, "params", dict(self.params))
+        try:
+            av = max(0, int(self.algorithm_version or 0))
+        except (TypeError, ValueError):
+            av = 0
+        if av == 0:
+            # 0 = 本构建新建实例（UI/命令构造走默认值）→ 标记当前算法版本。
+            # 旧工程加载由 from_dict 显式给 LEGACY_ALGORITHM_VERSION，
+            # 不会进入本分支——两类"未标注"语义由此区分（R01）。
+            from src.features.edit.core.audio_dsp import ALGORITHM_VERSION
+            av = int(ALGORITHM_VERSION)
+        object.__setattr__(self, "algorithm_version", av)
         # instance_id 为空时自动生成（frozen dataclass 用 object.__setattr__）
         if not self.instance_id:
             import uuid as _uuid
             object.__setattr__(self, "instance_id", str(_uuid.uuid4()))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "effect_type": self.effect_type,
             "params": dict(self.params),
             "enabled": self.enabled,
             "order": self.order,
             "instance_id": self.instance_id,
             "panel": self.panel,
+            "algorithm_version": self.algorithm_version,
         }
+        result.update(self._extra_fields)
+        return result
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "TrackEffectInstance":
+        known = frozenset({
+            "effect_type", "params", "enabled", "order",
+            "instance_id", "panel", "algorithm_version",
+        })
+        # R01：旧数据（无版本键）映射为明确的 legacy 版本，不解释成最新版；
+        # 未标注的 EQ 实例由此继续按 v3 之前的系数设计渲染。
+        from src.features.edit.core.fx_versioning import LEGACY_ALGORITHM_MAX
+        try:
+            raw_av = int(data.get("algorithm_version", LEGACY_ALGORITHM_MAX)
+                         or LEGACY_ALGORITHM_MAX)
+        except (TypeError, ValueError):
+            raw_av = LEGACY_ALGORITHM_MAX
         return TrackEffectInstance(
             effect_type=str(data.get("effect_type", "")),
             params=dict(data.get("params", {}) or {}),
@@ -3322,6 +3363,8 @@ class TrackEffectInstance:
             order=int(data.get("order", 0)),
             instance_id=str(data.get("instance_id", "")),
             panel=str(data.get("panel", "fx")),
+            algorithm_version=max(0, raw_av),
+            _extra_fields=split_extras(data, known),
         )
 
 
@@ -3342,8 +3385,18 @@ class EffectChainParams:
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "EffectChainParams":
         effects_data = data.get("effects", []) if data else []
-        effects = tuple(TrackEffectInstance.from_dict(e) for e in effects_data)
-        return EffectChainParams(effects=effects)
+        effects: list[TrackEffectInstance] = []
+        # R01：逐条容错——未知 effect_type 已在 TrackEffectInstance 内保留为
+        # opaque payload；此处只跳过结构性损坏（非 dict）条目并记录，
+        # 单条脏数据不再让整个 EditTrack / TimelineSequence 反序列化失败。
+        for e in effects_data:
+            if not isinstance(e, dict):
+                logger.warning(
+                    "EffectChainParams.from_dict: skip corrupted (non-dict) "
+                    "effect entry %r", e)
+                continue
+            effects.append(TrackEffectInstance.from_dict(e))
+        return EffectChainParams(effects=tuple(effects))
 
     @staticmethod
     def from_strip_eq(eq_params: "StripEQParams") -> "EffectChainParams":
@@ -3358,14 +3411,17 @@ class EffectChainParams:
         ))
 
     def to_dsp_entries(self) -> list:
-        """转成 EffectChain.set_params 的条目列表（CW-A1: 含 instance_id 4 元组）。
+        """转成 EffectChain.set_params 的条目列表（CW-A1/R01: 5 元组）。
 
         Returns:
-            [(effect_type, params dict, enabled, instance_id), ...] 按 order 排序。
-            instance_id 供 GR 遥测 / 侧链检源按实例定位。
+            [(effect_type, params dict, enabled, instance_id, algorithm_version),
+             ...] 按 order 排序。instance_id 供 GR 遥测 / 侧链检源按实例定位；
+            algorithm_version（R01）供 DSP 选择 legacy/current 兼容路径。
+            未知 effect_type 的实例照常返回——DSP 侧跳过并告警（不静默清链）。
         """
         return [
-            (e.effect_type, dict(e.params) if e.params else None, e.enabled, e.instance_id)
+            (e.effect_type, dict(e.params) if e.params else None, e.enabled,
+             e.instance_id, e.algorithm_version)
             for e in sorted(self.effects, key=lambda x: x.order)
         ]
 
@@ -4122,7 +4178,9 @@ def build_track_fx_sampler(track: Any) -> Optional[Any]:
 
     def _sampler(frame: int) -> list:
         entries = []
-        for etype, params, enabled, iid in base_entries:
+        for entry in base_entries:
+            etype, params, enabled, iid = entry[0], entry[1], entry[2], entry[3]
+            av = entry[4] if len(entry) > 4 else 0
             p = dict(params) if params else {}
             for (eid, pkey), kt in fx_tracks.items():
                 if eid == iid and pkey in p:
@@ -4130,7 +4188,7 @@ def build_track_fx_sampler(track: Any) -> Optional[Any]:
                         p[pkey] = kt.get_value(int(frame), p[pkey])
                     except (TypeError, ValueError, KeyError):
                         pass
-            entries.append((etype, p, enabled, iid))
+            entries.append((etype, p, enabled, iid, av))
         return entries
 
     return _sampler
@@ -4327,7 +4385,7 @@ class TimelineSequence:
         "caption_graphics", "markers", "range_start", "range_end",
         "master_volume", "master_muted", "master_automation",
         "master_automation_mode", "master_strip_eq", "master_effect_chain",
-        "revision",
+        "revision", "audio_fx_schema_version",
     })
 
     def __post_init__(self) -> None:
@@ -4832,6 +4890,8 @@ class TimelineSequence:
             "master_strip_eq": self.master_strip_eq.to_dict() if self.master_strip_eq else None,
             "master_effect_chain": self.master_effect_chain.to_dict() if self.master_effect_chain else None,
             "revision": self.revision,
+            # R01：FX 序列化 schema 版本（缺失 = legacy v1；from_dict 不回填改写）
+            "audio_fx_schema_version": AUDIO_FX_SCHEMA_VERSION,
             # R28/F-R09：未知字段保留
             **self._extra_fields}
 

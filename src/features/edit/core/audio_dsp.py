@@ -273,12 +273,20 @@ def _sos_row_mag_db(row: np.ndarray, w: float) -> float:
 
 
 def strip_eq_band_sections(band: dict, sample_rate: float,
-                           voicing: str = "Clean") -> list:
+                           voicing: str = "Clean",
+                           algorithm_version: Optional[int] = None) -> list:
     """单个 EQ 频段 dict → SOS 行列表（DSP 滤波与 UI 响应的唯一来源）。
 
     HPF/LPF 走 :func:`_butter_cut_sos`（真 N 阶 Butterworth）；Shelf/Bell/
     Notch 走 RBJ 系数（Shelf 消费 Q）。scipy 不可用时 HPF/LPF 回退 legacy
     级联（降级可解释，不静默改变斜率语义——响应服务用同一函数求值）。
+
+    R01 兼容处理器：``algorithm_version ≤ 2`` 时走 v3 之前的 legacy 系数
+    设计——HPF/LPF 级联 ``slope//6`` 个相同 Q=0.7071 biquad、Shelf 固定
+    S=1（不消费 Q）、无 EQ-02 增益-Q 耦合。旧工程（df749759 时代）的
+    HPF 稳态响应由此在容差内重现，不随本地版本升级漂移。
+    ``None``（默认）= 无版本上下文的直用（测试/UI 新建实例）→ current 桶；
+    legacy 判定只认模型层显式传入的整数版本。
 
     系数按频段内容 LRU 缓存（UI 曲线每次重绘 ~2000 次求值，缓存后只做
     三角函数求值；DSP 在 set_params 时调用，缓存命中无开销）。
@@ -290,12 +298,14 @@ def strip_eq_band_sections(band: dict, sample_rate: float,
     freq = min(max(10.0, float(band.get("freq", 1000.0))), sample_rate * 0.45)
     gain = float(band.get("gain", 0.0))
     q = max(0.1, float(band.get("q", 1.1))) * VOICING_Q_SCALE.get(voicing, 1.0)
-    # EQ-02: 带宽/增益耦合（非 Clean voicing；带增益形状；0dB/无耦合直通）
-    q = _effective_band_q(q, gain, voicing, ftype)
+    legacy = algorithm_version is not None and int(algorithm_version) <= 2
+    if not legacy:
+        # EQ-02: 带宽/增益耦合（非 Clean voicing；带增益形状；0dB/无耦合直通）
+        q = _effective_band_q(q, gain, voicing, ftype)
     slope = int(band.get("slope", 12))
 
     cache_key = (ftype, round(freq, 6), round(gain, 6), round(q, 6),
-                 slope, round(sample_rate, 3), voicing)
+                 slope, round(sample_rate, 3), voicing, legacy)
     cached = _EQ_SECTION_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -304,7 +314,7 @@ def strip_eq_band_sections(band: dict, sample_rate: float,
         return [b[0], b[1], b[2], 1.0, a[1], a[2]]
 
     if ftype == "HPF":
-        sos = _butter_cut_sos("highpass", freq, slope, sample_rate)
+        sos = None if legacy else _butter_cut_sos("highpass", freq, slope, sample_rate)
         if sos is not None:
             rows = [list(r) for r in sos]
         else:
@@ -312,7 +322,7 @@ def strip_eq_band_sections(band: dict, sample_rate: float,
             rows = [_row(*_biquad_highpass(freq, _BUTTERWORTH_Q, sample_rate))
                     for _ in range(order)]
     elif ftype == "LPF":
-        sos = _butter_cut_sos("lowpass", freq, slope, sample_rate)
+        sos = None if legacy else _butter_cut_sos("lowpass", freq, slope, sample_rate)
         if sos is not None:
             rows = [list(r) for r in sos]
         else:
@@ -320,11 +330,19 @@ def strip_eq_band_sections(band: dict, sample_rate: float,
             rows = [_row(*_biquad_lowpass(freq, _BUTTERWORTH_Q, sample_rate))
                     for _ in range(order)]
     elif ftype == "Low Shelf":
-        rows = [] if abs(gain) < 0.05 else [
-            _row(*_biquad_lowshelf(freq, gain, sample_rate, q=q))]
+        if abs(gain) < 0.05:
+            rows = []
+        elif legacy:
+            rows = [_row(*_biquad_lowshelf(freq, gain, sample_rate))]
+        else:
+            rows = [_row(*_biquad_lowshelf(freq, gain, sample_rate, q=q))]
     elif ftype == "High Shelf":
-        rows = [] if abs(gain) < 0.05 else [
-            _row(*_biquad_highshelf(freq, gain, sample_rate, q=q))]
+        if abs(gain) < 0.05:
+            rows = []
+        elif legacy:
+            rows = [_row(*_biquad_highshelf(freq, gain, sample_rate))]
+        else:
+            rows = [_row(*_biquad_highshelf(freq, gain, sample_rate, q=q))]
     elif ftype == "Notch":
         rows = [_row(*_biquad_notch(freq, q, sample_rate))]
     else:  # Bell
@@ -343,11 +361,17 @@ _EQ_SECTION_CACHE_MAX = 512
 
 
 def strip_eq_band_response_db(band: dict, freq_hz: float, sample_rate: float,
-                              voicing: str = "Clean") -> float:
-    """单个频段在 freq_hz 处的响应（dB），与其 SOS 级联传输严格一致。"""
+                              voicing: str = "Clean",
+                              algorithm_version: Optional[int] = None) -> float:
+    """单个频段在 freq_hz 处的响应（dB），与其 SOS 级联传输严格一致。
+
+    ``algorithm_version`` 语义同 :func:`strip_eq_band_sections`（R01：旧
+    实例的 UI 曲线与 legacy DSP 路径同源）。
+    """
     if not band.get("enabled", True):
         return 0.0
-    rows = strip_eq_band_sections(band, sample_rate, voicing)
+    rows = strip_eq_band_sections(band, sample_rate, voicing,
+                                  algorithm_version=algorithm_version)
     if not rows:
         return 0.0
     f = min(max(freq_hz, 1e-3), sample_rate * 0.495)
@@ -967,6 +991,41 @@ class AudioEffect:
         raise NotImplementedError
 
 
+#: R01：缓存"某效果类的 set_params 是否接受 algorithm_version kwarg"
+_ACCEPTS_ALGORITHM_VERSION: dict[type, bool] = {}
+
+
+def _set_params_accepts_version(effect: AudioEffect) -> bool:
+    import inspect
+    cls = type(effect)
+    cached = _ACCEPTS_ALGORITHM_VERSION.get(cls)
+    if cached is None:
+        try:
+            sig = inspect.signature(effect.set_params)
+            cached = "algorithm_version" in sig.parameters
+        except (TypeError, ValueError):  # pragma: no cover - 极端替身
+            cached = False
+        _ACCEPTS_ALGORITHM_VERSION[cls] = cached
+    return cached
+
+
+def _apply_params_with_version(effect: AudioEffect, params: object,
+                               sample_rate: float,
+                               algorithm_version: int) -> None:
+    """EffectChain.set_params 的统一调用点（R01）。
+
+    声明了 ``algorithm_version`` 形参的效果（StripEQFilter 等）收到版本，
+    用于选择 legacy/current 兼容路径；未声明的旧效果器照旧调用（版本仅
+    记录在模型层，不影响其行为——v3 对它们的声音语义未变的部分由各
+    自的兼容实现负责）。
+    """
+    if _set_params_accepts_version(effect):
+        effect.set_params(params, sample_rate=sample_rate,
+                           algorithm_version=int(algorithm_version or 0))
+    else:
+        effect.set_params(params, sample_rate=sample_rate)
+
+
 def _clamp_finite(value: Any, lo: float, hi: float, fallback: float) -> float:
     """FX dict 参数范围钳位 + NaN 防护（AUD-15304）。
 
@@ -1091,6 +1150,9 @@ class StripEQFilter(AudioEffect):
     def __init__(self, sample_rate: float = 48000.0) -> None:
         self._sample_rate = float(sample_rate)
         self._params: Optional[StripEQParams] = None
+        # R01：实例算法版本（None=直用无版本上下文→current 桶；整数按桶
+        # 判定，legacy ≤2 走兼容系数；未来版本按 current 渲染，数据层不覆写）
+        self._algorithm_version: Optional[int] = None
         # SOS 级联矩阵：(sections, 6)，行序 = 频段链
         self._sos: Optional[np.ndarray] = None
         # 每行的段身份（参数变化时按身份对位保留 zi）
@@ -1100,16 +1162,26 @@ class StripEQFilter(AudioEffect):
         # 整体增益（linear）
         self._gain_linear: float = 1.0
 
-    def set_params(self, params: object, sample_rate: Optional[float] = None) -> None:
+    def set_params(self, params: object, sample_rate: Optional[float] = None,
+                   algorithm_version: Optional[int] = None) -> None:
         """更新 EQ 参数（触发系数重算）。
 
         Args:
             params: StripEQParams 或其 to_dict() 形式的 dict，None 表示旁路（直通）。
             sample_rate: 可选新采样率
+            algorithm_version: R01 兼容处理器选择——整数 v ≤ 2 走 legacy
+                系数设计（级联 Q=0.7071 HPF/LPF、S=1 Shelf、无增益-Q 耦合），
+                使旧工程 HPF 响应不随本地 ALGORITHM_VERSION 升级漂移；
+                None 保持现状（直用默认 current 桶）。
         """
         if sample_rate is not None and sample_rate != self._sample_rate:
             self._sample_rate = float(sample_rate)
             self._zi_by_key = {}
+        if algorithm_version is not None:
+            try:
+                self._algorithm_version = max(0, int(algorithm_version))
+            except (TypeError, ValueError):
+                self._algorithm_version = None
         # dict 形式（来自 EffectChain / 序列化）转换为 StripEQParams
         if isinstance(params, dict):
             params = StripEQParams.from_dict(params)
@@ -1119,7 +1191,9 @@ class StripEQFilter(AudioEffect):
     def _band_sections(self, band: dict, sr: float) -> list:
         """把单个频段 dict 展开为 SOS 行列表（EQ-01：与 UI 共享同一服务）。"""
         voicing = self._params.voicing if self._params else "Clean"
-        return strip_eq_band_sections(band, sr, voicing=voicing)
+        return strip_eq_band_sections(
+            band, sr, voicing=voicing,
+            algorithm_version=self._algorithm_version)
 
     def _recompute_coefficients(self) -> None:
         """根据当前 params 和 sample_rate 重算所有系数（SOS 矩阵）。"""
@@ -1768,6 +1842,7 @@ class ReverbEffect(AudioEffect):
         self._ring: Optional[np.ndarray] = None
         self._ring_size: int = 0
         self._ring_write: int = 0
+        self._ring_history_samples: int = 0
         # L/R FDN（每声道独立 comb + allpass——共享 allpass 会让 R 声道
         # 继承 L 的扩散状态，产生块首泄漏与跨块交错差异）
         self._combs_l: list = []
@@ -1888,18 +1963,44 @@ class ReverbEffect(AudioEffect):
         (self._er_taps_l, self._er_taps_r,
          self._er_weights_l, self._er_weights_r,
          self._late_offset_l, self._late_offset_r) = self._compute_taps(p)
-        # 环形缓冲：覆盖最大延迟（predelay 200 + 距离 87 + ER 跨距 ~300 + 调制余量）
-        room_mean = (p["height"] + p["length"] + p["width"]) / 3.0
-        max_ms = 200.0 + (p["distance"] / _SPEED_OF_SOUND) * 1000.0 + \
-            max(45.0, room_mean * 3.8) + 100.0
-        needed = max(int(round(max_ms * 0.001 * sr)) + 8, 4096)
-        if self._ring is None or self._ring_size < needed:
-            self._ring_size = needed
-            self._ring = np.zeros(self._ring_size, dtype=np.float64)
-            self._ring_write = 0
-            self._mod_phase = 0.0
+        # Image-source paths can exceed the old room-mean estimate. Size the
+        # history from the actual taps, including fractional-read interpolation
+        # and the full modulation range (modulation may change without rebuild).
+        er_max = max(int(self._er_taps_l.max()), int(self._er_taps_r.max()))
+        late_max = int(np.ceil(max(self._late_offset_l, self._late_offset_r)
+                               + _MOD_MAX_DEPTH_SAMPLES)) + 2
+        self._ring_history_samples = max(er_max, late_max)
+        self._ensure_ring_capacity(self._ring_history_samples + 8,
+                                   reset_history=reset_network)
         self._apply_fdn_params(p)
         self._rebuild_tone(p)
+
+    def _ensure_ring_capacity(self, required: int,
+                              reset_history: bool = False) -> None:
+        """Grow without discarding chronological history; reset on rate changes.
+
+        The whole input block is written before taps are read, so capacity must
+        cover both the oldest requested sample and the entire incoming block.
+        On growth, place old history at the end of the new ring and resume at
+        zero; older, previously unavailable history remains zero-filled.
+        """
+        if (not reset_history and self._ring is not None
+                and self._ring_size >= required):
+            return
+        size = max(int(required), 4096)
+        ring = np.zeros(size, dtype=np.float64)
+        if self._ring is not None and not reset_history:
+            old_size = self._ring_size
+            write = self._ring_write
+            first = old_size - write
+            start = size - old_size
+            ring[start:start + first] = self._ring[write:]
+            ring[start + first:] = self._ring[:write]
+        self._ring = ring
+        self._ring_size = size
+        self._ring_write = 0
+        if reset_history:
+            self._mod_phase = 0.0
 
     def _compute_taps(self, p: dict) -> tuple:
         """RV-02：矩形房间 image-source ER + 正负 Pre Delay 传播模型。
@@ -2064,11 +2165,9 @@ class ReverbEffect(AudioEffect):
         out = samples.astype(np.float64, copy=True)
         channels, n = out.shape
 
-        # 超大块保护：块长接近环形缓冲会自覆盖，扩容重建
-        if n >= self._ring_size // 2:
-            self._ring_size = n * 2 + 4096
-            self._ring = np.zeros(self._ring_size, dtype=np.float64)
-            self._ring_write = 0
+        # Preserve all requested past samples while writing this complete block.
+        # Growing also preserves history when playback/export block sizes differ.
+        self._ensure_ring_capacity(self._ring_history_samples + n + 8)
 
         wet_w = p["dry_wet"] / 100.0
         dry_w = 1.0 - wet_w
@@ -3361,9 +3460,10 @@ class DynamicsEffect(AudioEffect):
 
     @property
     def is_active(self) -> bool:
-        """总电源开启且任一子模块生效（scipy 可用性由子模块判定）。"""
+        """总电源开启且子模块或独立 post-dynamics Make Up 生效。"""
         return self._enabled and (
             self._eg.is_active or self._comp.is_active or self._lim.is_active
+            or abs(self._makeup_linear - 1.0) > 1e-9
         )
 
 
@@ -3456,6 +3556,8 @@ class EffectChain:
             else:
                 effect_type, params, enabled = entry[0], entry[1], entry[2]
                 instance_id = ""
+            # R01：5 元组携带 algorithm_version（0=未标注→legacy 桶）
+            algorithm_version = int(entry[4]) if len(entry) >= 5 else 0
             cls = registry.get(effect_type)
             if cls is None:
                 # 审计修复：未知效果类型不再静默跳过（预览/导出会无声
@@ -3485,7 +3587,8 @@ class EffectChain:
                         break
             if instance is None:
                 instance = cls(self._sample_rate)
-            instance.set_params(params, sample_rate=self._sample_rate)
+            _apply_params_with_version(instance, params, self._sample_rate,
+                                       algorithm_version)
             new_effects.append(instance)
             new_flags.append(bool(enabled))
             new_ids.append(instance_id)
@@ -3571,7 +3674,7 @@ class EffectChain:
             iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
             if not iid:
                 continue
-            if not self._enabled_flags[i]:
+            if not (self._enabled_flags[i] and inst.is_active):
                 result[iid] = 0.0  # 旁路读数清零，不暴露上一块 GR
                 continue
             gr = getattr(inst, "last_gr_db", None)
@@ -3587,7 +3690,7 @@ class EffectChain:
             iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
             if not iid:
                 continue
-            if not self._enabled_flags[i]:
+            if not (self._enabled_flags[i] and inst.is_active):
                 result[iid] = -100.0
                 continue
             det = getattr(inst, "last_detector_db", None)
@@ -3634,15 +3737,22 @@ class EffectChain:
             inst.reset_state()
 
     def tail_estimate_samples(self) -> int:
-        """MX-07：链尾音估计 = 启用实例的最大尾音（调度 feed-zero 时长）。"""
+        """Conservatively compose serial tails for feed-zero scheduling.
+
+        A downstream delay starts its tail when the upstream tail reaches it;
+        taking only the maximum can stop the chain before its first echo.
+        Ignore invalid estimates rather than corrupting the scheduler budget.
+        """
         est = 0
         for inst, enabled in zip(self._effects, self._enabled_flags):
             if not enabled:
                 continue
             try:
-                est = max(est, int(inst.tail_estimate_samples()))
-            except (AttributeError, TypeError, ValueError):
+                tail = float(inst.tail_estimate_samples())
+            except (AttributeError, TypeError, ValueError, OverflowError):
                 continue
+            if np.isfinite(tail) and tail > 0.0:
+                est += int(np.ceil(tail))
         return est
 
     @property

@@ -1,5 +1,7 @@
 # 音频 Mixer 与五款效果器成熟化 — 实施证据与交付边界
 
+> 2026-11-15 实施后复审：部分“已实现”条目仍未达到原验收。新增局部修复、38 项逐项复核及结构性待办以 [后续复审计划](2026-11-15-audio-mixer-fx-review-followup.md) 和 [本轮验证证据](../audit/2026-11-15-audio-mixer-review/README.md) 为准；下文保留原批次交付记录。
+
 - 日期：2026-11-14（首轮，阶段 A–E/G 部分）；2026-11-15（续批，阶段 F/G/H 全量）。
 - 对应计划：[2026-11-14-audio-mixer-fx-maturity-plan.md](./2026-11-14-audio-mixer-fx-maturity-plan.md)。
 - 代码基线：df749759 起（提交清单见 §1）。

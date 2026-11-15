@@ -22,6 +22,12 @@ import uuid
 logger = logging.getLogger(__name__)
 
 
+def _current_algorithm_version() -> int:
+    """捕获时标记当前 DSP 算法版本（延迟 import 避免循环）。"""
+    from src.features.edit.core.audio_dsp import ALGORITHM_VERSION
+    return int(ALGORITHM_VERSION)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 通道预设（单条 strip 状态）
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,6 +70,10 @@ class ChannelStripPreset:
     sends: tuple = ()  # tuple[Send, ...]
     is_bus: bool = False
     created_at: str = ""
+    # R01：捕获时的 DSP 算法版本。0 = 未标注（legacy，或旧版本 to_dict 总写
+    # 当前值造成的数据——无法区分，按 legacy 兼容渲染）。存盘原样写回存储
+    # 值，不再无脑写当前 ALGORITHM_VERSION（777 → 3 的无损往返破坏）。
+    algorithm_version: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         # strip_eq / effect_chain 延迟序列化（避免 import 循环）
@@ -73,10 +83,9 @@ class ChannelStripPreset:
         ec = None
         if self.effect_chain is not None and hasattr(self.effect_chain, 'to_dict'):
             ec = self.effect_chain.to_dict()
-        from src.features.edit.core.audio_dsp import ALGORITHM_VERSION
         return {
             "preset_id": self.preset_id,
-            "algorithm_version": ALGORITHM_VERSION,
+            "algorithm_version": self.algorithm_version,
             "name": self.name,
             "volume": self.volume,
             "pan": self.pan,
@@ -123,6 +132,11 @@ class ChannelStripPreset:
             except Exception:
                 sends = ()
         panner_data = data.get("panner")
+        # R01：读回存储的 algorithm_version（缺失 → 0=legacy）；存盘原样写回
+        try:
+            algorithm_version = max(0, int(data.get("algorithm_version", 0) or 0))
+        except (TypeError, ValueError):
+            algorithm_version = 0
         return ChannelStripPreset(
             preset_id=data.get("preset_id", str(uuid.uuid4())),
             name=data.get("name", "Untitled Preset"),
@@ -137,6 +151,7 @@ class ChannelStripPreset:
             sends=sends,
             is_bus=bool(data.get("is_bus", False)),
             created_at=data.get("created_at", ""),
+            algorithm_version=algorithm_version,
         )
 
     @staticmethod
@@ -159,6 +174,8 @@ class ChannelStripPreset:
             sends=tuple(getattr(track, 'sends', ()) or ()),
             is_bus=bool(getattr(track, 'is_bus', False)),
             created_at=datetime.now().isoformat(),
+            # R01：新捕获标记当前算法版本（区分"捕获时就地未标注"的旧预设）
+            algorithm_version=_current_algorithm_version(),
         )
 
 
