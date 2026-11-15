@@ -2472,12 +2472,14 @@ class AudioMixer:
                 self._eq_filters[MASTER_BUS_KEY] = eqf
             eqf.set_params(params, sample_rate=self._sample_rate)
 
-    def set_master_effect_chain(self, chain_params: Optional[EffectChainParams]) -> None:
+    def set_master_effect_chain(self, chain_params: Optional[EffectChainParams],
+                                animated_sampler: Any = None) -> None:
         """MX-03: 设置 Master FX 机架链。线程安全。
 
         在 master EQ 后、限幅器前应用；外部侧链检源与普通轨同一 tap 池
         （Bus 检源天然一个块延迟，与被控轨消费 Bus tap 的语义一致）。
-        None 表示清空链。
+        None 表示清空链。R05: animated_sampler 为 Master fx 参数自动化
+        采样器（master_automation 的 fx/* 键；块边界消费，与轨级同型）。
         """
         entries = chain_params.to_dsp_entries() if chain_params is not None else None
         with QMutexLocker(self._mutex):
@@ -2486,6 +2488,10 @@ class AudioMixer:
                 chain = EffectChain(self._sample_rate)
                 self._effect_chains[MASTER_BUS_KEY] = chain
             chain.set_params(entries, sample_rate=self._sample_rate)
+            if animated_sampler is not None:
+                self._track_effect_samplers[MASTER_BUS_KEY] = animated_sampler
+            else:
+                self._track_effect_samplers.pop(MASTER_BUS_KEY, None)
             self._sc_order_cache = None
 
     def set_clip_effects(
@@ -3277,6 +3283,20 @@ class AudioMixer:
                 # 实时 Bus 链的压缩器外部检源被无声忽略（MX-08 残留缺口）。
                 bus_chain = self._effect_chains.get(bus_id)
                 if bus_chain is not None and bus_chain.is_active:
+                    # R05: Bus fx 参数自动化——块边界按当前帧重设链参数
+                    # （set_track_effect_chain 对 Bus 同样注册 sampler，
+                    # 此前实时 Bus 阶段建而不消费）
+                    bus_sampler = self._track_effect_samplers.get(bus_id)
+                    if bus_sampler is not None:
+                        try:
+                            bus_chain.set_params(
+                                bus_sampler(int(current_frame)),
+                                sample_rate=self._sample_rate)
+                        except Exception:  # noqa: BLE001 — 求值失败回退静态
+                            logger.warning(
+                                "AudioMixer: bus fx automation sampler "
+                                "failed for %s", bus_id, exc_info=True)
+                            self._track_effect_samplers[bus_id] = None
                     bus_sc_map = None
                     if sidechain_taps:
                         raw_map = bus_chain.sidechain_map(sidechain_taps)
@@ -3423,6 +3443,18 @@ class AudioMixer:
                 output = master_eq.process(output)
             master_chain = self._effect_chains.get(MASTER_BUS_KEY)
             if master_chain is not None and master_chain.is_active:
+                # R05: Master fx 参数自动化——与轨/Bus 同型，块边界消费
+                master_sampler = self._track_effect_samplers.get(MASTER_BUS_KEY)
+                if master_sampler is not None:
+                    try:
+                        master_chain.set_params(
+                            master_sampler(int(current_frame)),
+                            sample_rate=self._sample_rate)
+                    except Exception:  # noqa: BLE001 — 求值失败回退静态
+                        logger.warning(
+                            "AudioMixer: master fx automation sampler failed",
+                            exc_info=True)
+                        self._track_effect_samplers[MASTER_BUS_KEY] = None
                 master_sc_map = None
                 if sidechain_taps:
                     raw_map = master_chain.sidechain_map(sidechain_taps)

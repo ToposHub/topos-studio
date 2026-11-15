@@ -92,6 +92,31 @@ def _snapshot_automation(automation: Any) -> dict:
     }
 
 
+class _MasterFxShim:
+    """R05：让 build_track_fx_sampler 复用于 Master 链的最小属性面。"""
+
+    __slots__ = ("automation_mode", "effect_chain", "automation")
+
+    def __init__(self, mode: str, chain: Any, automation: dict) -> None:
+        self.automation_mode = mode
+        self.effect_chain = chain
+        self.automation = automation
+
+
+def _build_master_fx_sampler(has_chain: bool, mode: str,
+                             automation: dict, chain_params: Any) -> Any:
+    """R05：从 master_automation 的 fx/* 键构建 Master 链采样器（可 None）。
+
+    Master 与轨级共用 ``fx/{instance_id}/{param}`` 命名空间——同一实例
+    id 在轨链与 Master 链中本就互斥（id 由创建处生成），不引入独立前缀。
+    """
+    if not has_chain:
+        return None
+    from src.features.edit.core.timeline_v2 import build_track_fx_sampler
+    return build_track_fx_sampler(
+        _MasterFxShim(mode, chain_params, automation or {}))
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 节点配置：从 EditTrack 投影的不可变描述
 # ─────────────────────────────────────────────────────────────────────────────
@@ -186,6 +211,8 @@ class AudioGraphRenderer:
         # MX-03: Master 条带（EQ/FX；音量后、限幅器前，与 mix_samples 同构）
         self._master_eq: Optional[StripEQFilter] = None
         self._master_chain: Optional[EffectChain] = None
+        # R05: Master fx 参数自动化采样器（configure_from_sequence 构建）
+        self._master_fx_sampler = None
         # AM-09: 连续状态 Master 限幅器（与 mix_samples 一致）
         from src.features.edit.core.audio_dsp import MasterLimiter
         self._master_limiter = MasterLimiter(self._sample_rate, threshold=1.0)
@@ -259,6 +286,14 @@ class AudioGraphRenderer:
                 sample_rate=self._sample_rate)
         else:
             self._master_chain = None
+        # R05: Master fx 参数自动化——与轨级 fx/{instance_id}/{param} 同一
+        # 命名空间（master_automation dict），apply_master 块边界消费。
+        self._master_fx_sampler = _build_master_fx_sampler(
+            self._master_chain is not None,
+            str(getattr(sequence, "master_automation_mode", "off") or "off"),
+            self._master_automation,
+            master_chain_params,
+        )
 
     def master_sidechain_sources(self) -> set:
         """MX-03: Master 链引用的外部侧链检源 track_id 集合（导出拼 tap 用）。"""
@@ -758,6 +793,19 @@ class AudioGraphRenderer:
                 bus_samples = node.eq_filter.process(bus_samples)
             # FX（MX-08: 外部侧链检源透传，与普通轨同构）
             if node.effect_chain is not None and node.effect_chain.is_active:
+                # R05: Bus fx 参数自动化——块边界按起始帧重设链参数
+                # （fx_sampler 在 _TrackNode 构建时就已存在，此前离线 Bus
+                # 阶段建而不消费；与普通轨 render_track_block 同型）
+                if node.fx_sampler is not None:
+                    try:
+                        node.effect_chain.set_params(
+                            node.fx_sampler(int(start_frame)),
+                            sample_rate=self._sample_rate)
+                    except Exception:  # noqa: BLE001 — 曲线求值失败回退静态
+                        logger.warning(
+                            "AudioGraphRenderer: fx automation sampler "
+                            "failed for bus %s", bus_id, exc_info=True)
+                        node.fx_sampler = None
                 sc_map = None
                 if sidechain_taps:
                     raw_map = node.effect_chain.sidechain_map(sidechain_taps)
@@ -866,6 +914,19 @@ class AudioGraphRenderer:
         if self._master_eq is not None and self._master_eq.is_active:
             output = self._master_eq.process(output)
         if self._master_chain is not None and self._master_chain.is_active:
+            # R05: Master fx 参数自动化——块边界按起始帧重设链参数
+            # （master_automation 的 fx/{instance_id}/{param} 键；
+            # 与轨级 render_track_block 的 fx_sampler 消费同型）
+            if self._master_fx_sampler is not None:
+                try:
+                    self._master_chain.set_params(
+                        self._master_fx_sampler(int(start_frame)),
+                        sample_rate=self._sample_rate)
+                except Exception:  # noqa: BLE001 — 曲线求值失败回退静态
+                    logger.warning(
+                        "AudioGraphRenderer: master fx automation sampler "
+                        "failed", exc_info=True)
+                    self._master_fx_sampler = None
             sc_map = None
             if sidechain_taps:
                 raw_map = self._master_chain.sidechain_map(sidechain_taps)
